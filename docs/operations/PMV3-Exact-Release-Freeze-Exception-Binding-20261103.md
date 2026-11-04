@@ -55,3 +55,7 @@ older pinned production candidate or to rewrite frozen production records.
 If open PRs or parallel development change the current scope digest after the
 Owner named it, the new SHA/digest must be reviewed and explicitly approved;
 no prior approval may be silently rebound.
+
+### Concurrent code-review coordination
+
+Before integrating this correction, compare the separate release-manager PRs #2279 (approval-only reconciliation), #2158 and #2153 (deployment and host-unit verification), and #2156 (production freeze, root admission, and rollback). Their current patches do not touch the new `owner_unfreeze_release` decision branch directly, but their shared release-manager surfaces require fresh integration and frozen-production regression checks. Recording this coordination does not approve or merge those PRs.
