@@ -2057,6 +2057,7 @@ def build_mcp_candidate(
     candidate_sha: str,
 ) -> tuple[str, str, str]:
     path = worktree(repo, state_root, candidate_sha)
+    # Match runtime build isolation so MCP retries cannot retag accepted evidence.
     tag = f"jason-mcp:release-{candidate_sha[:12]}-{secrets.token_hex(6)}"
     # Stable governed base prevents stale source files from inheriting from live production.
     base = "jason-mcp:generic-governed-8f1e864947a2"
