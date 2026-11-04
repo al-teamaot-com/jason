@@ -27,8 +27,12 @@ def legacy(path):
 def test_migrates_actual_legacy_schema_and_keeps_all_evidence(tmp_path):
     path = tmp_path / "operational.sqlite3"
     original = legacy(path)
+    with sqlite3.connect(path) as seed:
+        seed.execute("CREATE TABLE unrelated_operational_evidence (id INTEGER, detail TEXT)")
+        seed.execute("INSERT INTO unrelated_operational_evidence VALUES (7,'preserve evidence')")
     store = SQLiteOperationalWorkStore(path)
     connection = sqlite3.connect(path)
+    assert connection.execute("SELECT * FROM unrelated_operational_evidence").fetchone() == (7, 'preserve evidence')
     assert connection.execute(
         "SELECT * FROM autonomy_ticket_worker_heartbeat_legacy_v1"
     ).fetchone() == original
