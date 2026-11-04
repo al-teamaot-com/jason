@@ -93,3 +93,29 @@ must still be separately admitted and merged via protected PMV3 integration,
 validated at an immutable new source SHA, authorized for that exact revision
 and scope, deployed and verified. Do not execute a worktree controller script
 against the existing production freeze or ticket runtime.
+
+### 2026-11-04: retire the expired source declaration; retain the actual freeze
+
+The prior incident-specific `config/production-deployment-freeze-exception.json`
+expired at 2026-11-04T13:00:00Z. The native `prepare` gate correctly refuses
+an expired `status=requested` declaration, even though a separate exact Owner
+one-transaction unfreeze mechanism is now implemented. Carrying that expired
+source into every new candidate prevents immutable release preparation.
+
+This focused recovery removes **only that expired source declaration** from the
+next immutable Git candidate. It does **not** remove or alter
+`/var/lib/jason/openclaw/release-manager/production-deployment-freeze`,
+create a replacement freeze exception, extend any authorization lifetime,
+modify release-control verification code, or enable unattended promotion.
+The native candidate parser treats an absent source declaration as **no
+freeze exception**, so normal production promotion remains blocked while the
+Owner freeze is active. A distinct exact-SHA Owner unfreeze receipt—when
+freshly authorized for the correct scope and rollback—must be consumed only
+inside the guarded one-transaction deployment and restored by native finally
+and crash recovery.
+
+The change is source-only until protected integration and full provider/ticket
+acceptance. Any new PMV3.1 production release still requires its own exact
+SHA, recorded scope digest, rollback SHA, verified CI/preproduction, and
+separate Owner deployment authorization. Removing stale Git authorization
+evidence is not an authorization decision.
