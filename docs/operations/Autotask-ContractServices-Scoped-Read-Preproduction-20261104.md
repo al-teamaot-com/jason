@@ -34,6 +34,16 @@ For an explicitly authorized company and contract:
 
 Isolated source base: `97b4ec71a3e0ec5805b91eec42ca32905ea18c85` (latest remote main observed on 2026-11-04). Existing unrelated `procurement_teams_flow.py` changes on the user's separate working branch were left untouched.
 
-Offline fake-transport-focused `pytest` on the new scope guard and existing read/mutation foundation: **82 passed**. Tests cover positive exact-contract scoping, parent-company mismatch, denial of `None`/`Mine`/unknown, page bounds, field metadata, partial mixed-contract injection, duplicate IDs, bad row types, optional company mismatch, and no provider/secret execution surface. **No live ContractServices read attempted.**
+Offline fake-transport-focused `pytest` on the new scope guard, dormant read connector and existing read/mutation foundation: **108 passed**. Tests cover positive exact-contract scoping, parent-company mismatch, denial of `None`/`Mine`/unknown, page bounds, field metadata, partial mixed-contract injection, duplicate IDs, bad row types, optional company mismatch, and no provider/secret execution surface. **No live ContractServices read attempted.**
 
 **No production change, direct provider bypass, credential change, or financial mutation.**
+
+## Dormant provider connector candidate
+
+`implementation/connectors/autotask/contract_service_connector.py` adds a **source-only**, non-registered `DormantScopedContractServicesReadConnector`. It requires an injected **trusted** `ContractCompanyAuthorizer` and does not expose an MCP or runtime capability. This helper currently runs only with fake provider transport in tests.
+
+When wired by a future reviewed governed adapter, the candidate uses the existing `autotask.write` logical credential, compiles the parent contract GET with the existing canonical Autotask operation compiler, then requires an exact requester/company authorization *before* any ContractServices metadata or child read. The candidate currently rejects all `context.client_id` values other than `None` (AOT-internal-only review); a future authenticated client-context resolver is required before any customer-scoped access can be activated. It retrieves same-credential provider schema, compiles only an exact contractID query, validates every child row against the parent, and rejects provider pagination that it cannot certify. All network operation shapes in this candidate are GET-only. It makes no direct public API available and introduces no impersonation shortcut or runtime permission grant.
+
+The response distinguishes `boundedPageValidated=True` from `fullContractCoverageVerified=False` to avoid claiming complete recurring billing coverage based on a single bounded page.
+
+The source is **not safe to register in production yet**: it lacks the wired canonical requester/company authorization backend, verified disclosure policy, full contract pagination, exact provider-backed ContractServices proof, cross-client negative acceptance, and all financial release gates.
