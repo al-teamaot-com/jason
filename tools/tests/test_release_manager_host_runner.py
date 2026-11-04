@@ -1128,6 +1128,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 patch.object(runner, "require_current_manual_scope_review"),
                 patch.object(runner, "require_current_protected_release_source"),
                 patch.object(runner, "require_host_reconciler_ready"),
+                patch.object(runner, "ensure_managed_host_source_revision"),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(runner, "worktree", side_effect=runner.ReleaseManagerError("repo unavailable")),
                 patch.object(runner, "save_record") as save_record,
@@ -2522,6 +2523,17 @@ class ManagedHostSourceMirrorContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, "source not synchronized"):
                     runner.request_host_reconcile(root, SHA_A)
             self.assertFalse(list((root / "host-reconcile" / "requests").iterdir()))
+
+
+def test_root_source_sync_is_before_any_live_production_mutation():
+    import inspect
+    source = inspect.getsource(runner._deploy_production_locked)
+    preflight = source.index("ensure_managed_host_source_revision(candidate_sha)")
+    production = source.index('gate_transition(repo, state_root, record, "production")')
+    runtime = source.index("runtime_attempted = True")
+    mcp = source.index("mcp_attempted = True")
+    host = source.index("host_result = request_host_reconcile(")
+    assert preflight < production < runtime < mcp < host
 
 
 class HostReconciliationTimeoutContractTests(unittest.TestCase):

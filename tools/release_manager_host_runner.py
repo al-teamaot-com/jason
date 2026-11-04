@@ -4581,8 +4581,11 @@ def _deploy_production_locked(
         raise ReleaseManagerError("candidate MCP image changed after pre-production")
 
     # Do not begin a disruptive production transaction unless the privileged
-    # host boundary is already installed and the rollback baseline is aligned.
+    # host boundary is already installed and the exact candidate is present in
+    # the root-managed source mirror. This can fetch once while still fully
+    # frozen, BEFORE runtime/MCP or other live production modifications.
     require_host_reconciler_ready(state_root)
+    ensure_managed_host_source_revision(candidate_sha)
     rollback_sha = str(record["rollback_sha"])
     if recovery_context is None:
         live_production_alignment(rollback_sha)
