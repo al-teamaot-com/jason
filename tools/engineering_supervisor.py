@@ -137,6 +137,24 @@ def build_snapshot(spool: Path, prior: Mapping[str, Any] | None = None) -> dict[
                 "progress_sha256": progress_digest,
             })
 
+    conflicts = intake.get("identity_conflicts") or {}
+    if not isinstance(conflicts, Mapping):
+        raise ValueError("invalid TODO identity-conflict evidence")
+    for identifier, conflict in sorted(conflicts.items()):
+        if (not re.fullmatch(r"TODO-[A-Z]+-[0-9]+", str(identifier))
+                or not isinstance(conflict, Mapping)
+                or conflict.get("status") != "quarantined"
+                or conflict.get("new_work_authorized") is not False
+                or len(conflict.get("issue_numbers") or []) < 2):
+            raise ValueError("invalid quarantined TODO identity evidence")
+        objects.append({
+            "id": str(identifier),
+            "lane": "todo_identity",
+            "phase": "conflicting_sources",
+            "category": "human_authority",
+            "next_action": "reconcile_exact_issue_scope_and_owner_authority",
+        })
+
     items = (intake.get("downstream_commitments") or {}).get("items") or []
     if not isinstance(items, list):
         raise ValueError("invalid approved commitment inventory")
@@ -173,10 +191,11 @@ def build_snapshot(spool: Path, prior: Mapping[str, Any] | None = None) -> dict[
     internal = sum(counts.get(name, 0) for name in (
         "recoverable_source", "recoverable_transport", "recoverable_validation", "needs_triage"))
     blocker = ("internal_recovery_needed" if stalled and internal
-               else "external_or_governed_gate" if stalled else None)
+               else "external_or_governed_gate" if stalled or conflicts else None)
     return {
         "schema_version": "1.0", "observed_at": now(),
-        "status": "degraded" if stalled else "healthy",
+        "status": "degraded" if stalled or conflicts else "healthy",
+        "identity_conflict_count": len(conflicts),
         "reason": blocker,
         "active": active, "engineering_capacity": capacity, "approved_outstanding": outstanding,
         "unchanged_cycles": no_progress,
