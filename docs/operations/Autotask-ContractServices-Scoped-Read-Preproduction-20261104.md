@@ -47,3 +47,10 @@ When wired by a future reviewed governed adapter, the candidate uses the existin
 The response distinguishes `boundedPageValidated=True` from `fullContractCoverageVerified=False` to avoid claiming complete recurring billing coverage based on a single bounded page.
 
 The source is **not safe to register in production yet**: it lacks the wired canonical requester/company authorization backend, verified disclosure policy, full contract pagination, exact provider-backed ContractServices proof, cross-client negative acceptance, and all financial release gates.
+
+## Engineering validation detail
+
+- New scope guard and dormant connector tests are pure offline fake-transport tests. The combined targeted suite with Autotask dynamic schema, mutation connector and readiness foundation has **108 passing tests**.
+- All `implementation/connectors/tests/test_autotask*.py` modules pass locally on the isolated branch. No live provider I/O was invoked by these test commands.
+- A broad connector suite attempt surfaced **unrelated** Microsoft Graph collection blockers (missing `msal` in the host's Python environment and a reserved pytest parameter named `request`) and three existing Datto PowerShell-classification assertions. Those source files are unchanged by this PR, and the failures are not to be represented as ContractServices acceptance failures or ignored in any eventual full-release certification.
+- Every source change in this PR is isolated to the new ContractServices guard/connector/tests plus this documentation. Production registration and activation are intentionally untouched. Protected `main` and the unrelated pre-existing procurement working copy are unchanged.
