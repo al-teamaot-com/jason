@@ -164,8 +164,9 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         repo = Path("/tmp/jason-source")
         state = Path("/tmp/jason-preproduction")
         checkout = state / "private-git-worktree"
-        tag = "jason-runtime:release-" + SHA_A[:12]
-        with (patch.object(runner, "worktree", return_value=checkout) as worktree,
+        tag = "jason-runtime:release-" + SHA_A[:12] + "-a1b2c3d4e5f6"
+        with (patch.object(runner.secrets, "token_hex", return_value="a1b2c3d4e5f6"),
+              patch.object(runner, "worktree", return_value=checkout) as worktree,
               patch.object(runner, "run") as invoke,
               patch.object(runner, "image_id", return_value="sha256:verified") as image,
               patch.object(runner, "remove_worktree") as cleanup):
@@ -192,6 +193,25 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertIn("import jason_runtime.main", smoke[-1])
         self.assertEqual(smoke[-2], "-c")
         self.assertEqual(smoke[-3], tag)
+
+    def test_separate_build_attempts_cannot_overwrite_prior_runtime_or_mcp_tags(self):
+        repo = Path("/tmp/jason-source")
+        state = Path("/tmp/jason-preproduction")
+        checkout = state / "private-git-worktree"
+        with (patch.object(runner.secrets, "token_hex", side_effect=[
+                  "111111111111", "222222222222", "333333333333", "444444444444"]),
+              patch.object(runner, "worktree", return_value=checkout),
+              patch.object(runner, "run"),
+              patch.object(runner, "image_id", return_value="sha256:verified"),
+              patch.object(runner, "remove_worktree")):
+            runtime1, _ = runner.build_candidate(repo, state, SHA_A)
+            runtime2, _ = runner.build_candidate(repo, state, SHA_A)
+            mcp1, _, _ = runner.build_mcp_candidate(repo, state, SHA_A)
+            mcp2, _, _ = runner.build_mcp_candidate(repo, state, SHA_A)
+        self.assertNotEqual(runtime1, runtime2)
+        self.assertNotEqual(mcp1, mcp2)
+        self.assertTrue(runtime1.startswith("jason-runtime:release-" + SHA_A[:12] + "-"))
+        self.assertTrue(mcp1.startswith("jason-mcp:release-" + SHA_A[:12] + "-"))
 
     def test_failed_runtime_import_smoke_cannot_admit_candidate(self):
         repo = Path("/tmp/jason-source")
