@@ -1,6 +1,6 @@
 # Autotask commercial RW access — read-only audit and preproduction gates (2026-11-04)
 
-**Status:** Partial live verification, preproduction acceptance plan. **Not production eligible.**  
+**Status:** Core commercial RW provider-backed GET acceptance passed; scope/checkbox and billing-join negatives outstanding. **Not production eligible.**  
 **Related:** #200 vendor-cost/client-billing reconciliation, #403 governed billing operations, #435 contract intelligence, #2147 invoice-read repair, #2104 technician authorization repair.
 
 ## Scope and invariants
@@ -51,7 +51,7 @@ The live Security Level 27 editor showed these **selected dropdown permissions**
 - Existing tool: `tools/autotask_mutation_readiness.py` (`autotask.write`); its `ReadOnlyReadinessTransport` permits only GET and never dispatches compiled POST/PATCH.
 - `--check-only` succeeded; **this does not contact Autotask or prove credentials**.
 - The trusted AOT human requester binding was confirmed active in the local binding store.
-- A **live** `--live-read` run using that trusted requester was denied **before provider contact** because the current operator lacks permission to read the OpenBao Autotask write AppRole role-id file. No secret values were printed, no elevated access was attempted, and no provider mutation was dispatched.
+- An initial **interactive shell** `--live-read` run was denied **before provider contact** by the write AppRole file ACL. This was not treated as permission to elevate the interactive account or copy credentials. A second run of the **same unchanged GET-only tool** inside the existing authorized `jason-runtime` service context **passed** at `2026-11-04T17:28:12.824092+00:00`: 4/4 request-bound Ticket/TicketNote preflights, 12 provider GETs, unique trusted requester binding, no provider writes, no credentials printed/persisted. Execution used the normal service user, existing mounted OpenBao AppRole and original source streamed into process memory; no container source, installed service, or production configuration was modified.
 - In the existing non-production working copy, `python3 -m pytest -q tools/tests/test_autotask_mutation_readiness.py` passed **5 tests**; `python3 -m pytest -q implementation/connectors/tests/test_autotask_mutation_connector.py` passed **11 tests**.
 - The current checked-out `/home/al/projects/jason` worktree contains **unrelated uncommitted procurement changes**. Do not modify or reset it; prepare work in an isolated branch/worktree.
 
@@ -59,29 +59,48 @@ The live Security Level 27 editor showed these **selected dropdown permissions**
 
 | Gate | Evidence required | Current disposition |
 |---|---|---|
-| RW credential identity | Secure runner obtains `autotask.write` through its existing approved OpenBao AppRole; provider-backed identity evidence matches Jason ReadWrite `29682930` without disclosing secret | **Blocked by execution identity/secret file ACL** |
-| RW provider GET authorization | Using the **approved governed connector boundary**, call bounded, allowlisted GET metadata and representative read-only record paths with actual RW credentials | Not tested |
-| LOB consistency | Independently verify all `17/18/19/20` mappings and read representative authorized objects in each; explicitly verify known record without LOB | Assignments pass; record-level proof outstanding |
-| Cost and pricing | Confirm cost-visibility checkbox through checked-state evidence; read known nonzero unitCost/unitPrice and vendor-cost fields with RW credential; contrast same identifiers with authorized finance/UI baseline | Pending |
-| Commercial coverage | Validate Products, ProductVendors, Services, ServiceBundles, Quotes/Opportunities, POs/PO Items, contracts and **ContractServices**, billing items, invoices, customer mapping and vendor/contract/billed joins | Partial reads; contract/billing chain outstanding |
-| Permission divergence | Compare live RW `entityInformation` `userAccessFor*` to Security Level 27 settings, and record provider-specific exceptions including query-only or unsupported endpoints | Pending |
+| RW credential identity | Secure runner obtains `autotask.write` through its existing approved OpenBao AppRole; provider-backed identity evidence matches Jason ReadWrite `29682930` without disclosing secret | **PASS in authorized service context**; original interactive-shell denial is resolved |
+| RW provider GET authorization | Fixed allowlisted, GET-only compiled connector reads in an authorized service context (no new standing capability) | **PASS**: 32 GET calls, entity metadata and bounded records for core commercial objects; no writes |
+| LOB consistency | Verify `17/18/19/20` assignment plus record scope, including null LOB | Assignments pass; **16 unassigned-LOB contracts returned** by RW; per-LOB record coverage not fully proved |
+| Cost and pricing | Confirm visible cost values and independently confirm UI checkbox selections | **RW nonzero-cost fields verified** for Products, Services, ProductVendors, ServiceBundles, BillingItems; checked-state evidence not captured |
+| Commercial coverage | Validate Products, ProductVendors, Services, ServiceBundles, POs, contracts/**ContractServices**, BillingItems, Invoices and exact billing joins | **Core seven entity reads pass**; ContractServices approved record-read route and exact joins not tested |
+| Permission divergence | Compare effective RW metadata and records with security level and separate read-only credential | **Verified**: RW Contracts and BillingItems `Restricted` (both readable), RW Invoices `All` and readable while existing RO account is denied; further record-scope negatives pending |
 | Jason execution grant | Registry state + exact matched principal/grant, organization/client, execution plan/approval policy. Negative tests ensure catalog/billing writes denied until separately approved | **Caller denial confirmed**; full grant matrix pending |
 | Financial-control gates | Deterministic read-only reconciliation; write/contract quantity/price/invoice/posting must fail closed without separate human-governed authority | No financial writes attempted |
-| Release hygiene | Isolated preprod branch; CI, contract/LO B negative tests, data-leakage tests, provider-backed read acceptance, foundation regression, protected-main reconciliation and rollback SHA | Source planning only; no release eligible |
+| Release hygiene | Isolated preprod branch; CI, client/LOB negative tests, leakage tests, provider-backed read acceptance and rollback evidence | **Draft documentation PR #2308**; no release eligible |
 
-## Approved execution path for next RW test
+## Remaining acceptance path
 
-1. Use the already-authorized Jason service/runtime execution context **that can resolve `autotask.write`**. Do not make the interactive operator a member of secret-access groups, copy secret files, print tokens or use `sudo` to bypass policy.
-2. Invoke `tools/autotask_mutation_readiness.py --live-read` with an existing trusted AOT human principal, an expected AOT principal email, a unique correlation ID, and a new private evidence destination. Keep the script's GET-only transport invariant and verify that compiled mutations are **not** dispatched.
-3. Under a **reviewed, preproduction-only, allowlisted, GET-only** provider verification route (not ad-hoc direct HTTP), obtain `entityInformation` and bounded record/field proofs for the commercial objects above. A missing approved route is a development task, not permission to bypass Jason's connector boundary.
-4. Record sanitized operation, entity, requested field class, provider result, LOB association and correlation/evidence hash; never persist raw credentials or sensitive billing values.
-5. Independently confirm the selected state of the RW account's **unassigned-LOB** setting and internal-cost security-level checkboxes; do not infer checkbox state from plain extracted labels.
-6. If any provider permission is None/Restricted, fail closed, capture which *exact* entity/operation is denied, and prepare a minimal access-change proposal; no live permission changes without explicit authorized approval.
-7. Complete provider-backed negative tests under unauthorized principals, negative client context, denial of finance mutation, and safe pagination. Then attach CI/preproduction output and review existing workstream #2147 (invoice read HTTP 500) to avoid duplicate fixes.
-8. Present an exact production candidate/rollback SHA **only after** full source and preproduction acceptance. **Do not deploy or lift the production freeze** without separate owner approval.
+1. Under a **reviewed, preproduction-only, allowlisted, GET-only** provider verification route (not ad-hoc direct HTTP), obtain `entityInformation` and bounded record/field proofs for the commercial objects above. A missing approved route is a development task, not permission to bypass Jason's connector boundary.
+2. Record sanitized operation, entity, requested field class, provider result, LOB association and correlation/evidence hash; never persist raw credentials or sensitive billing values.
+3. Independently confirm the selected state of the RW account's **unassigned-LOB** setting and internal-cost security-level checkboxes; do not infer checkbox state from plain extracted labels.
+4. For `Restricted`, run approved per-client/LOB disclosure negatives before claiming all-record access. For `None`, fail closed and record the exact denied entity/operation. No live permission changes without explicit approval.
+5. Complete provider-backed negative tests under unauthorized principals, negative client context, denial of finance mutation, and safe pagination. Then attach CI/preproduction output and review existing workstream #2147 (invoice read HTTP 500) to avoid duplicate fixes. 
+6. Present an exact production candidate/rollback SHA **only after** full source and preproduction acceptance. **Do not deploy or lift the production freeze** without separate owner approval.
 
-## Blocker and handoff
+## 2026-11-04 supplemental live evidence
 
-**Blocker:** The currently available operator identity is denied the existing RW AppRole file, so the effective commercial API permissions of `autotask.write` are **not verified**. The safe resolution is execution in the existing authorized service context—not new credentials or privilege escalation. Human intervention is needed only if no approved service context exists or changing permission policy is genuinely necessary.
+The authenticated provider-backed runtime observations are preserved as a sanitized [machine-readable evidence record](evidence/Autotask-RW-Commercial-GET-Acceptance-20261104.json). The test-only diagnostic reused Autotask's existing typed, compiled GET read operations and `autotask.write` inside the authorized service context; it did not create a new production read route, broaden Jason grants, or persist customer records.
 
-**No production changes made as part of this audit.**
+| Provider entity | Actual RW read | Returned records | RW query access |
+|---|---|---:|---|
+| Products | PASS | 50 | All |
+| Services | PASS | 50 | All |
+| ProductVendors | PASS | 50 | All |
+| ServiceBundles | PASS | 4 | All |
+| Contracts | PASS | 50 | Restricted |
+| BillingItems | PASS | 50 | Restricted |
+| Invoices | PASS | 50 | All |
+| ContractServices | Metadata only | Not attempted (outside current approved read allowlist) | Restricted |
+
+Cost visibility: returned nonzero cost records in Products (50/50), Services (18/50), ProductVendors (49/50), ServiceBundles (4/4), and BillingItems (5/50). Price fields were also present in Products, Services, ServiceBundles and BillingItems. The RW-protected resource read for ID `29682930` matched its known account email; this is a readback identity consistency check, not fresh token introspection.
+
+**Operational conclusions:** Existing RW credential access for the seven queried commercial entity families is proved by actual provider records. Contract/BillingItem `Restricted` is not `None`; it must be interpreted as conditional and cannot substantiate universal cross-client record reach. The invoices endpoint is reachable and returns 50 rows under the RW identity, whereas historical `#2147` failures used a different read path/credential and must be separately root-caused. Sixteen contracts with null LOB association returned in the 50-record RW sample, functionally proving access to *some* unassigned-LOB records.
+
+**Still outstanding:** Selected states of the admin UI checkboxes (API login, unassigned LOB, internal cost, sensitive charge, contract cost modification, service/bundle editing and bulk service updater) cannot be derived from the browser's text-only rendering. Effective API login, cost read and null-LOB read behavior **are** verified. A posted invoice/billing-item exact join, approved ContractServices data read, restricted-scope negative tests and a code-reviewable repeatable probe are future acceptance gates. Any potentially financial-impacting mutation still requires its separate governance and approval.
+
+## Remaining blocker and handoff
+
+The prior **credential-file ACL blocker is resolved** by using the intended service execution identity. The remaining limitations are **UI checkbox-state evidence** and **scope-specific/negative record acceptance**, not general RW API connectivity. Obtain actual checked-state evidence in an authorized GUI browser session; do not alter any checkbox for this audit.
+
+**No provider writes or production changes were made. No deployment or merge is authorized by this evidence.**
