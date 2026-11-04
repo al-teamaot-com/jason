@@ -43,9 +43,14 @@ def classify(paths: list[str]) -> dict[str, Any]:
     elif requires_docs and not docs:
         status = "attention"
         reason = "material_change_without_documentation_change"
+    elif requires_docs:
+        # A changed documentation file is not proof that it accurately
+        # documents the changed behavior. Require source-to-docs review.
+        status = "review_required"
+        reason = "material_change_with_unverified_documentation"
     else:
         status = "current"
-        reason = "documentation_present_or_not_required"
+        reason = "no_material_source_change"
     return {
         "status": status,
         "reason": reason,

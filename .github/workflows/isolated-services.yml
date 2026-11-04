@@ -1,0 +1,72 @@
+name: Validate Isolated Jason Services
+
+on:
+  pull_request:
+    paths:
+      - "tools/isolated_service_*.py"
+      - "tools/*_service.py"
+      - "tools/tests/test_isolated_service*.py"
+      - "tools/tests/test_isolated_services.py"
+      - "config/isolated-services.json"
+      - "infrastructure/isolated-services/**"
+      - ".github/workflows/isolated-services.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jason-isolated-services-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-only-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout proposed source without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Install test-only dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv .isolated-ci-venv
+          .isolated-ci-venv/bin/python -m pip install pytest pytest-subtests
+
+      - name: Validate isolated services and adjacent contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          .isolated-ci-venv/bin/python -m pytest -q \
+            tools/tests/test_isolated_service_live_sources.py \
+            tools/tests/test_isolated_services.py \
+            tools/tests/test_documentation_source_reconciler.py \
+            tools/tests/test_documentation_success_reconciler.py \
+            tools/tests/test_todo_engineering_intake.py \
+            tools/tests/test_todo_release_bridge.py \
+            tools/tests/test_pmv3_work_engine.py \
+            tools/tests/test_pmv3_integration_queue.py
+
+      - name: Verify source-only systemd units
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e /opt/jason/current
+          test ! -e /var/lib/jason/openclaw
+          systemd-analyze verify \
+            infrastructure/isolated-services/jason-isolated-shadow@.service \
+            infrastructure/isolated-services/jason-isolated-shadow@.timer
+
+      - name: Compile and validate source hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q tools/isolated_service_live_sources.py \
+            tools/isolated_service_shadow.py \
+            tools/isolated_service_ledger.py \
+            tools/isolated_service_supervisor.py
+          git diff --check HEAD^ HEAD

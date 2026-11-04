@@ -1,0 +1,29 @@
+[Unit]
+Description=Jason isolated read-only shadow worker (%i)
+Documentation=https://github.com/al-teamaot-com/jason
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/usr/local/lib/jason/isolated_service_shadow.py
+
+[Service]
+Type=oneshot
+User=al
+Group=al
+WorkingDirectory=/home/al/projects/jason
+StateDirectory=jason-isolated-services
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+TimeoutStartSec=120
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 /usr/local/lib/jason/isolated_service_shadow.py --service %i --repo /home/al/projects/jason --state-root /var/lib/jason-isolated-services --provider-source /var/lib/jason/provider-health-canaries.json --todo-source /var/lib/jason/openclaw/support-repair/todo-release-state.json
+
+# Source-only artifact. Do not install or enable until admitted through the
+# existing exact-SHA Production Manager release process.

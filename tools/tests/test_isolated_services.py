@@ -31,9 +31,9 @@ def test_documentation_flags_material_change_without_docs():
     assert result["requires_documentation_review"] is True
 
 
-def test_documentation_accepts_material_change_with_docs():
+def test_documentation_requires_content_review_even_with_docs():
     result = docs.classify(["implementation/runtime_service/src/app.py", "docs/operations/runtime.md"])
-    assert result["status"] == "current"
+    assert result["status"] == "review_required"
 
 
 def test_provider_monitor_separates_stale_and_unhealthy():
@@ -130,3 +130,29 @@ def test_supervisor_does_not_turn_optional_service_failure_into_global_block():
 def test_supervisor_blocks_only_required_missing_or_stale_service():
     result=supervisor.classify({"entries":[{"name":"critical","required":True,"freshness":"stale","service_status":"healthy"}]})
     assert result["status"]=="blocked"
+
+
+def test_ledger_rejects_path_traversal_and_duplicate_names(tmp_path):
+    import pytest
+    with pytest.raises(ValueError):
+        ledger.build({"services":[{"name":"docs","state_file":"../secret.json","max_age_seconds":60,"required":False}]},tmp_path,now=NOW)
+    with pytest.raises(ValueError):
+        ledger.build({"services":[{"name":"docs","state_file":"docs.json","max_age_seconds":60,"required":False},{"name":"docs","state_file":"second.json","max_age_seconds":60,"required":False}]},tmp_path,now=NOW)
+
+
+def test_ledger_rejects_mislabeled_or_future_service_state(tmp_path):
+    from datetime import timedelta
+    p=tmp_path/"docs.json"
+    cfg={"services":[{"name":"documentation_assurance","state_file":"docs.json","max_age_seconds":60,"required":False}]}
+    p.write_text(__import__('json').dumps({"schema_version":"1.0","service":"wrong_service","status":"current","observed_at":NOW.isoformat()}))
+    assert ledger.build(cfg,tmp_path,now=NOW)["entries"][0]["freshness"]=="invalid"
+    p.write_text(__import__('json').dumps({"schema_version":"1.0","service":"documentation_assurance","status":"current","observed_at":(NOW+timedelta(hours=1)).isoformat()}))
+    assert ledger.build(cfg,tmp_path,now=NOW)["entries"][0]["freshness"]=="stale"
+
+
+def test_ledger_cannot_consume_symlink_as_evidence(tmp_path):
+    target=tmp_path/"real.json"
+    target.write_text(__import__('json').dumps({"schema_version":"1.0","service":"documentation_assurance","status":"current","observed_at":NOW.isoformat()}))
+    (tmp_path/"docs.json").symlink_to(target)
+    cfg={"services":[{"name":"documentation_assurance","state_file":"docs.json","max_age_seconds":60,"required":False}]}
+    assert ledger.build(cfg,tmp_path,now=NOW)["entries"][0]["freshness"]=="invalid"
