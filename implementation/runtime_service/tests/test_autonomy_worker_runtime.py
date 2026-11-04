@@ -6669,6 +6669,8 @@ def test_vulscan_invalid_exact_kb_selector_recovers_via_governed_endpoint_collec
     final = store.get(141183)
     assert final is not None
     assert final.phase == "complete"
+    assert [x["kb"] for x in reads.patch_queries if "kb" in x] == ["KB5124008", "KB5126052"]
+    assert all(x["resource_id"] == "vul-device-1" for x in reads.patch_queries)
     assert len([x for x in reads.patch_queries if "kb" in x]) == 2
     assert len([x for x in reads.patch_queries if "kb" not in x]) == 2
     updates = [args["payload"] for _, cap, args in actions.calls if cap == "service.ticket.update"]
