@@ -25,3 +25,22 @@ def test_source_only_unit_inventory_and_admission_gate():
         assert 'ProtectSystem=strict' in body
         assert 'jason-support-repair-worker.service' not in body
     assert 'ExecStart=/usr/bin/python3 /usr/local/lib/jason/isolated_service_shadow.py' in (UNITS/'jason-isolated-shadow@.service').read_text()
+
+
+def test_ticket_processing_continuity_is_a_release_no_go_requirement():
+    manifest=json.loads((UNITS/'installation-manifest.json').read_text())
+    rules=manifest['ticket_continuity_release_gate']
+    assert rules['required_before_any_new_worker_activation'] is True
+    assert rules['require_baseline_and_post_change_readback'] is True
+    assert rules['require_controlled_test_ticket_mutation_evidence'] is True
+    assert rules['require_zero_duplicate_ticket_actions_or_claims'] is True
+    assert rules['require_explicit_no_go_on_unknown_or_failed_receipts'] is True
+    assert rules['require_two_distinct_post_migration_observations'] is True
+    assert manifest['production_deployment_authorized'] is False
+    assert manifest['default_enable_all_new_units'] is False
+    for unit_name in manifest['unit_sources']:
+        source=(ROOT/unit_name).read_text()
+        assert 'ExecStop=' not in source
+        assert 'Conflicts=jason-runtime' not in source
+        assert 'systemctl stop jason-runtime' not in source
+        assert 'jason-autotask-ticket' not in source

@@ -179,3 +179,66 @@ only as a nonauthorizing observation. The native Release Manager continues to
 own rollback readiness, exact-source admission, deployment, and final
 operational acceptance. No output of these shadow services may mint owner
 approval or close an Autotask/production work item independently.
+
+
+## Mandatory ticket-processing continuity: NO-GO release invariant
+
+The Owner explicitly requires that PMV3 separation **must not interrupt or
+regress live service-ticket processing**. This is a hard release and cutover
+boundary, not merely an advisory dashboard metric. The current ticket runtime
+(`jason-runtime` / Autotask governed capabilities) and the separate PMV3
+engineering-support queue must not be conflated. The old engineering pipeline
+includes `support_repair` and `todo_intake`; disabling it is not proof that
+runtime ticket autonomy is safely unchanged. The new replacement engineering
+lanes remain uninstalled until source admission and ticket continuity pass.
+
+Before any worker activation or migration of PMV3 responsibility:
+
+1. **Prechange live baseline:** Use existing governed read capabilities to
+   verify at least one known active controlled ticket, notes, queue, current
+   state, relevant device association, and the functioning runtime/MCP worker
+   health/status. Preserve exact readback correlation and timestamp without
+   committing customer data or secrets to GitHub. Record waiting/blocked work
+   separately from healthy work; a read-only success alone is not proof of
+   ticket-processing functionality.
+2. **Controlled transactional proof:** Use a preapproved test ticket (XYZ Test
+   Company), verify its current reversible field, perform exactly one
+   governed, authorized update/note through the active release's tool/approval
+   path, and verify post-write readback. No customer production ticket should
+   be modified just to certify this redesign. Validate queue movement,
+   status, priority, notes/customer visibility, device association, and
+   notification/alert routing as applicable, without due-date assumptions.
+3. **Ticket worker correctness:** Run existing ticket create/update/internal
+   note and autonomy worker claims/retry/recovery tests. Verify no duplicate
+   ticket actions, ownership claims, provider writes, or closures from shadow
+   services. Include real workflow receipts for customer-updated reactive
+   tickets, Jason-queue tickets, Datto EDR/AV, BackupIQ, VulScan, and DRMM
+   alerts where the capability is in the release's actual scope.
+4. **Safe cutover:** Do not disable the existing ticket intake or runtime
+   processing path. Do not activate independent support/development lanes
+   until replacement scheduling and claims are proven in isolation and the
+   production ticket runtime is healthy. Migrate one responsibility at a time
+   using shadow comparison rather than two competing writers.
+5. **Postchange acceptance:** Require at least two independently timestamped
+   observation cycles, the same governed ticket-read/note/queue tests,
+   expected worker scheduling, no unexpected stalled ticket backlog, and no
+   duplicate actions. Missing, stale, unknown or failed evidence is **NO-GO**,
+   not an assumed PASS. Retain the original ticket controller until the new
+   route is verified; on regression stop new workers and use the authorized
+   exact-release rollback process. No unapproved production changes.
+
+Pre-release test evidence should include the existing suites under
+`implementation/runtime_service/tests/test_autotask_ticket_update.py`,
+`test_autotask_internal_note.py`, `test_autonomy_worker_supervisor.py`,
+`test_autonomy_indeterminate_recovery.py`, `test_autonomy_targeted_wake_runtime.py`,
+`implementation/mcp_service/tests/test_ticket_work_claim_store.py`, and the
+canonical ticket-read/queue parity tests. The existing `SEC-007` workflow also
+covers Autotask mutation authority regressions. These checks are additive to,
+not substitutes for, provider-backed operational acceptance.
+
+As of the 2026-11-04 live read-only inspection: `jason-runtime` was healthy;
+the governed `service.ticket.search` for an existing ticket and
+`service.ticket.notes.search` both succeeded, and the separate autonomy status
+showed waiting/blocked tickets. This **does not prove end-to-end ticket
+processing or closure**, so the release remains ineligible for ticket-runtime
+cutover pending controlled transaction and independent post-change evidence.
