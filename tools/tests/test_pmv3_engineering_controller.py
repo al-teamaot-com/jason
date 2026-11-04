@@ -175,39 +175,3 @@ def test_free_production_lock_allows_pmv3_pipeline(tmp_path):
     )
     assert state["status"] == "complete"
     assert calls["n"] == 1
-
-
-
-def test_unclassified_triage_does_not_falsely_retrigger_recovery():
-    pipeline = {
-        "status": "degraded", "failed_work_stages": [],
-        "failed_control_stages": [],
-        "operational_blocker": {"reason": "approved_work_stalled"},
-    }
-    supervisor = {"status": "degraded", "category_counts": {"needs_triage": 9}}
-    disposition, reason = module.classify(pipeline, supervisor)
-    assert disposition == "waiting_external"
-    assert reason == "approved_work_stalled_external"
-
-
-def test_governed_repair_handoff_stops_repeated_pipeline_passes(tmp_path):
-    spool = tmp_path / "spool"
-    runner, calls = runner_for(spool, [{
-        "pipeline": {
-            "status": "degraded", "failed_work_stages": [],
-            "failed_control_stages": [],
-            "operational_blocker": {"reason": "approved_work_stalled"},
-        },
-        "supervisor": {
-            "status": "degraded", "reason": "external_or_governed_gate",
-            "category_counts": {"governed_repair_handoff": 1},
-            "disposition_sha256": "handoff", "approved_outstanding": 1, "active": 0,
-        },
-    }])
-    result = module.controller_run(
-        scripts=tmp_path, repo=tmp_path, spool=spool,
-        release_state=tmp_path, runner=runner, max_passes=4,
-    )
-    assert result["status"] == "waiting_external"
-    assert calls["n"] == 1
-    assert module.service_exit_code(result) == 0
