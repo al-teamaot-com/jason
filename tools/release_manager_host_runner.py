@@ -2019,7 +2019,8 @@ def remove_worktree(repo: Path, path: Path) -> None:
 
 def build_candidate(repo: Path, state_root: Path, candidate_sha: str) -> tuple[str, str]:
     path = worktree(repo, state_root, candidate_sha)
-    tag = f"jason-runtime:release-{candidate_sha[:12]}"
+    # A concurrent retry must not retag an immutable recorded image.
+    tag = f"jason-runtime:release-{candidate_sha[:12]}-{secrets.token_hex(6)}"
     try:
         run(
             [
@@ -2056,7 +2057,7 @@ def build_mcp_candidate(
     candidate_sha: str,
 ) -> tuple[str, str, str]:
     path = worktree(repo, state_root, candidate_sha)
-    tag = f"jason-mcp:release-{candidate_sha[:12]}"
+    tag = f"jason-mcp:release-{candidate_sha[:12]}-{secrets.token_hex(6)}"
     # Stable governed base prevents stale source files from inheriting from live production.
     base = "jason-mcp:generic-governed-8f1e864947a2"
     base_id = image_id(base)
