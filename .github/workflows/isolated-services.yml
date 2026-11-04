@@ -42,6 +42,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Native worker tests spawn python3 from disposable worktrees.
+          export PATH="$PWD/.isolated-ci-venv/bin:$PATH"
           .isolated-ci-venv/bin/python -m pytest -q \
             tools/tests/test_isolated_service_live_sources.py \
             tools/tests/test_isolated_service_github_sources.py \
