@@ -186,6 +186,10 @@ from .aot_routine_write_authority import (
     configured_aot_routine_autotask_write,
     ensure_aot_routine_autotask_write_authority,
 )
+from .aot_staff_internal_note_authority import (
+    configured_aot_staff_internal_note_write,
+    ensure_aot_staff_internal_note_authority,
+)
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
@@ -1571,6 +1575,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
 
     identity_repository = SQLiteIdentityRepository(authority_store)
     routine_autotask_write_enabled = configured_aot_routine_autotask_write()
+    staff_internal_note_enabled = configured_aot_staff_internal_note_write()
     identity_authority = IdentityAuthorityService(
         identities=identity_repository,
         grants=SQLiteAuthorityGrantRepository(authority_store),
@@ -1581,6 +1586,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             capabilities=capabilities, providers=providers,
             identities=identity_repository,
             routine_write_enabled=routine_autotask_write_enabled,
+            internal_note_write_enabled=staff_internal_note_enabled,
         ),
     )
     # Mandatory standing observe policy. Authenticated AOT human staff receive
@@ -1589,6 +1595,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     ensure_aot_technician_read_authority(identity_authority)
     ensure_aot_routine_autotask_write_authority(
         identity_authority, enabled=routine_autotask_write_enabled,
+    )
+    ensure_aot_staff_internal_note_authority(
+        identity_authority, enabled=staff_internal_note_enabled,
     )
     ensure_teams_message_send_authority(
         identity_authority, enabled=configured_teams_message_send(),
