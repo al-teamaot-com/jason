@@ -105,9 +105,22 @@
     "production_freeze_unchanged": true
   },
   "gaps": [
-    "Checkbox display state of unassigned-LOB access, internal-cost visibility, sensitive charge data, modify contract cost, contract charge, bulk service updater and API login not independently captured",
+    "Standalone general internal-cost, sensitive charge, Web Services API login and unassigned-LOB account checkbox states still not visually captured; the six Contracts checkbox states and HR Resource cost checkbox are verified separately.",
     "Restricted query may limit available Contracts and BillingItems records; do not infer universe coverage from 50 returned rows",
     "ContractServices approved data GET path not tested",
     "Provider-backed billing-item to invoice exact join and negative client scoping not tested"
-  ]
+  ],
+  "ui_checkbox_confirmation": {
+    "visual_evidence_file": "Autotask-RW-Security-Level-Checkbox-Visual-20261104.json",
+    "contracts_all_six_checked": true,
+    "contracts_visibility": "Full",
+    "approve_and_post": "All",
+    "can_invoice": "All",
+    "other_resource_cost_section_checked": true,
+    "other_resource_scope_limiter_unchecked": true,
+    "standalone_general_internal_cost_checked_state": "not_shown",
+    "sensitive_charge_checked_state": "not_shown",
+    "web_services_api_login_checked_state": "not_shown",
+    "unassigned_lob_checked_state": "not_shown"
+  }
 }
