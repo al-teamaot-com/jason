@@ -26,7 +26,7 @@ def provider_output(text: str, *, truncated: bool = False):
 
 
 def test_reconstruct_large_diagnostic_json_from_read_only_pages():
-    payload = "AOT_DIAGNOSTIC_JSON_BEGIN\n" + '{"long":"' + ("a" * 9800) + '"}' + "\nAOT_DIAGNOSTIC_JSON_END"
+    payload = "AOT DIAGNOSTIC | fixture | PC\nAOT_DIAGNOSTIC_JSON_BEGIN\n" + '{"long":"' + ("a" * 9800) + '"}' + "\nAOT_DIAGNOSTIC_JSON_END"
     pages = []
     for start in range(0, len(payload), 1600):
         result = server._project_datto_job_output_window(provider_output(payload), offset=start,
@@ -43,7 +43,9 @@ def test_reconstruct_large_diagnostic_json_from_read_only_pages():
 
 
 def test_datto_bounded_record_is_never_claimed_complete():
-    result = server._project_datto_job_output_window(provider_output("x" * 65536, truncated=True),
+    prefix = "AOT DIAGNOSTIC | fixture | PC\nAOT_DIAGNOSTIC_JSON_BEGIN\n"
+    truncated_output = prefix + ("x" * (65536 - len(prefix)))
+    result = server._project_datto_job_output_window(provider_output(truncated_output, truncated=True),
                                                      offset=65000, maximum_chars=800, selectors=SELECTORS)
     window = result["data"]["window"]
     assert window["returned_chars"] == 536
@@ -91,12 +93,14 @@ def test_invalid_window_rejected_before_provider(monkeypatch, offset, size):
 
 def test_exact_selectors_forwarded_and_window_not_sent_to_provider(monkeypatch):
     monkeypatch.setenv("JASON_DATTO_JOB_OUTPUT_PAGING_ENABLED", "true")
+    monkeypatch.setenv("JASON_DATTO_JOB_OUTPUT_PAGING_COMPONENT_UIDS", COMPONENT)
     monkeypatch.setattr(server, "_dynamic_read_capability_allowed", lambda capability: True)
     captured = []
 
     def fake_governed_read(**kwargs):
         captured.append(kwargs)
-        window = server._project_datto_job_output_window(provider_output("a" * 4000), offset=1234,
+        window = server._project_datto_job_output_window(
+            provider_output("AOT DIAGNOSTIC | fixture | PC\nAOT_DIAGNOSTIC_JSON_BEGIN\n" + "a" * 4000), offset=1234,
                                                           maximum_chars=1600, selectors=SELECTORS)
         return {"status":"succeeded", "evidence": window}
 
@@ -109,3 +113,44 @@ def test_exact_selectors_forwarded_and_window_not_sent_to_provider(monkeypatch):
     assert result["status"] == "succeeded"
     assert result["evidence"]["data"]["window"]["returned_chars"] == 1600
     assert result["evidence"]["data"]["outputs"][0]["text"] == "a" * 1600
+
+
+def test_not_enrolled_component_rejected_before_provider(monkeypatch):
+    monkeypatch.setenv("JASON_DATTO_JOB_OUTPUT_PAGING_ENABLED", "true")
+    monkeypatch.delenv("JASON_DATTO_JOB_OUTPUT_PAGING_COMPONENT_UIDS", raising=False)
+    monkeypatch.setattr(server, "_dynamic_read_capability_allowed", lambda capability: True)
+    calls = []
+    monkeypatch.setattr(server, "_governed_read", lambda **kwargs: calls.append(kwargs))
+    result = server.execute_read_capability(
+        capability="automation.job.output.read",
+        arguments={**SELECTORS, "output_offset": 0, "output_chars": 1600},
+    )
+    assert result["error_code"] == "AUTOMATION_JOB_OUTPUT_COMPONENT_NOT_ENROLLED"
+    assert result["provider_called"] is False
+    assert calls == []
+
+
+def test_unrecognized_diagnostic_envelope_refused():
+    with pytest.raises(ValueError, match="DIAGNOSTIC_CONTRACT_REQUIRED"):
+        server._project_datto_job_output_window(
+            provider_output("arbitrary stdout may contain a password"),
+            offset=0, maximum_chars=1400, selectors=SELECTORS,
+        )
+
+
+def test_projection_error_not_returned_as_success(monkeypatch):
+    monkeypatch.setenv("JASON_DATTO_JOB_OUTPUT_PAGING_ENABLED", "true")
+    monkeypatch.setenv("JASON_DATTO_JOB_OUTPUT_PAGING_COMPONENT_UIDS", COMPONENT)
+    monkeypatch.setattr(server, "_dynamic_read_capability_allowed", lambda capability: True)
+
+    def governed(**kwargs):
+        raise ValueError("AUTOMATION_JOB_OUTPUT_DIAGNOSTIC_CONTRACT_REQUIRED")
+
+    monkeypatch.setattr(server, "_governed_read", governed)
+    response = server.execute_read_capability(
+        capability="automation.job.output.read",
+        arguments={**SELECTORS, "output_offset": 0, "output_chars": 1500},
+    )
+    assert response["status"] == "rejected"
+    assert response["error_code"] == "AUTOMATION_JOB_OUTPUT_DIAGNOSTIC_CONTRACT_REQUIRED"
+    assert response["do_not_redispatch"] is True

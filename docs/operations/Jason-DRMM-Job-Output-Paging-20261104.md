@@ -23,7 +23,10 @@ These arguments are never forwarded to the Datto provider; the provider receives
 ## Security and feature control
 
 - New feature gate: JASON_DATTO_JOB_OUTPUT_PAGING_ENABLED defaults to false.
-- Invalid inputs or disabled feature reject BEFORE any provider read.
+- Even when the feature gate is enabled, JASON_DATTO_JOB_OUTPUT_PAGING_COMPONENT_UIDS must independently enroll each reviewed component by its exact existing Datto UID. Empty/mismatched enrollment rejects before any provider read.
+- The provider output must begin with the AOT DIAGNOSTIC header and contain the AOT_DIAGNOSTIC_JSON_BEGIN marker. Unexpected/unreviewed output is rejected at the evidence projection boundary; no fallback to raw stdout.
+- Paged stderr is also enrollment-gated, and provider output remains subject to existing authorized exact job/device/component/stream bindings.
+- Invalid inputs, disabled feature or unenrolled component reject BEFORE any provider read.
 - Aggregate information release expands for authorized readers even though each page is shorter than the former 2000-character display bound. **Classify as high risk** until security acceptance approves the information-release contract and secret-handling policy.
 - Existing authentication, exact observe grants, Central Orchestrator, client/tenant boundary, provider bound and audit remain mandatory; never bypass this read surface through direct provider APIs or remote shell.
 - No production flag, permissions, service, endpoint, job, component, policy or site variables are changed by the source PR.
@@ -39,3 +42,11 @@ These arguments are never forwarded to the Datto provider; the provider receives
 ## Documentation impact
 
 Capability read-output contract: additive guarded display pagination; operations: this guide; architecture: no change to governance boundary; System Registry: no operational state change until approved activation; validation evidence must be attached to the PR.
+
+## Security review addendum (2026-11-04)
+
+Review found broad paged access to arbitrary automation jobs would be an avoidable disclosure expansion. The source was hardened before merging: default-disabled feature flag, separately configured exact component UID enrollment (empty by default), output envelope validation, canonical provider selector match, and fail-closed projection errors. Standard unpaged disclosure limits remain unchanged. No pagination setting has been enabled in production, and no arbitrary log-disclosure exception has been granted.
+
+The dedicated CI workflow includes positive bounded reconstruction, upstream truncation honesty, invalid window inputs, no-provider-call feature-off / no-enrollment refusal, missing diagnostic envelope refusal, failure-mode handling, and existing governed-read/component authorization regression cases.
+
+Remaining security boundary before any feature activation: prove that the enrolled component UID currently resolves to the reviewed approved script metadata, that returned diagnostic text does not contain operational secrets or other disallowed client content, and that preproduction grants/tenant isolation and audit are intact. Do not label that independent provider-backed validation complete based on mocked fixtures.

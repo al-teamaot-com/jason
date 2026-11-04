@@ -776,6 +776,15 @@ def _project_datto_job_output_window(
             raise ValueError("AUTOMATION_JOB_OUTPUT_WINDOW_STREAM_MISMATCH")
         verified.append(item)
 
+    # The reviewed output must carry the AOT diagnostic envelope. A replaced
+    # or unrelated component cannot use this extended disclosure path.
+    combined = "".join(str(item.get("text") or "") for item in verified)
+    if (
+        "AOT_DIAGNOSTIC_JSON_BEGIN" not in combined
+        or not combined.startswith("AOT DIAGNOSTIC | ")
+    ):
+        raise ValueError("AUTOMATION_JOB_OUTPUT_DIAGNOSTIC_CONTRACT_REQUIRED")
+
     total = sum(len(str(item.get("text") or "")) for item in verified)
     remaining = maximum_chars
     skip = offset
@@ -7262,6 +7271,27 @@ def execute_read_capability(
                 "do_not_redispatch": True,
             }
 
+        if job_output_window is not None:
+            # A reviewed component must be explicitly enrolled by the
+            # operator. Paging is not available for arbitrary job stdout.
+            allowed_components = {
+                item.strip().casefold()
+                for item in os.environ.get(
+                    "JASON_DATTO_JOB_OUTPUT_PAGING_COMPONENT_UIDS", ""
+                ).split(",") if item.strip()
+            }
+            if (
+                stream not in {"stdout", "stderr"}
+                or component_uid.casefold() not in allowed_components
+            ):
+                return {
+                    "status": "rejected",
+                    "capability": capability_name,
+                    "error_code": "AUTOMATION_JOB_OUTPUT_COMPONENT_NOT_ENROLLED",
+                    "provider_called": False,
+                    "do_not_redispatch": True,
+                }
+
         # Only the exact provider-neutral selectors required by the governed
         # Datto read path are forwarded.
         read_arguments = {
@@ -7297,11 +7327,25 @@ def execute_read_capability(
         {"job_output_window": job_output_window}
         if job_output_window is not None else {}
     )
-    result = _governed_read(
-        capability_name=capability_name,
-        arguments=read_arguments,
-        **optional_window,
-    )
+    try:
+        result = _governed_read(
+            capability_name=capability_name,
+            arguments=read_arguments,
+            **optional_window,
+        )
+    except ValueError as exc:
+        if job_output_window is None:
+            raise
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": str(exc)
+            if str(exc).startswith("AUTOMATION_JOB_OUTPUT_")
+            else "AUTOMATION_JOB_OUTPUT_PROJECTION_REJECTED",
+            "failure_domain": "evidence_validation",
+            "provider_called": True,
+            "do_not_redispatch": True,
+        }
 
     if result.get("status") != "succeeded":
         # These are classifications, not authorization shortcuts. Never
