@@ -21,7 +21,8 @@
     "tools/source_baseline_monitor_service.py",
     "tools/rollback_readiness_service.py",
     "tools/operational_acceptance_service.py",
-    "tools/pmv3_worker_release_gate.py"
+    "tools/pmv3_worker_release_gate.py",
+    "tools/ticket_continuity_evidence_review.py"
   ],
   "unit_sources": [
     "infrastructure/isolated-services/jason-isolated-shadow@.service",
@@ -62,6 +63,10 @@
       "datto_edr_backupiq_vulscan_alert_ticket_routing",
       "ticket_idempotency_and_bounded_retry",
       "user_and_technician_notification_delivery"
-    ]
+    ],
+    "evidence_preflight_source": "tools/ticket_continuity_evidence_review.py",
+    "preflight_positive_result": "evidence_review_required (not approval)",
+    "native_provider_reverification_mandatory": true,
+    "automation_can_mint_approval": false
   }
 }

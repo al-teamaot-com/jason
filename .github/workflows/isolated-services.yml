@@ -10,6 +10,8 @@ on:
       - "config/isolated-services.json"
       - "infrastructure/isolated-services/**"
       - "tools/ci/isolated_service_preproduction_lab.py"
+      - "tools/ticket_continuity_evidence_review.py"
+      - "tools/tests/test_ticket_continuity_evidence_review.py"
       - ".github/workflows/isolated-services.yml"
   workflow_dispatch:
 
@@ -59,7 +61,8 @@ jobs:
             tools/tests/test_owner_approved_development_worker.py \
             tools/tests/test_support_repair_host_worker.py \
             tools/tests/test_install_support_repair_host_worker.py \
-            tools/tests/test_isolated_service_units.py
+            tools/tests/test_isolated_service_units.py \
+            tools/tests/test_ticket_continuity_evidence_review.py
 
       - name: Two-cycle disposable isolated-services preproduction proof
         shell: bash

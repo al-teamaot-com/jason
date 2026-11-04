@@ -44,3 +44,13 @@ def test_ticket_processing_continuity_is_a_release_no_go_requirement():
         assert 'Conflicts=jason-runtime' not in source
         assert 'systemctl stop jason-runtime' not in source
         assert 'jason-autotask-ticket' not in source
+
+
+def test_ticket_continuity_preflight_cannot_mint_native_approval():
+    manifest=json.loads((UNITS/'installation-manifest.json').read_text())
+    rules=manifest['ticket_continuity_release_gate']
+    assert rules['evidence_preflight_source']=='tools/ticket_continuity_evidence_review.py'
+    assert rules['preflight_positive_result']=='evidence_review_required (not approval)'
+    assert rules['native_provider_reverification_mandatory'] is True
+    assert rules['automation_can_mint_approval'] is False
+    assert (ROOT/rules['evidence_preflight_source']).is_file()

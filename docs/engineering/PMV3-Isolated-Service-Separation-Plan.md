@@ -242,3 +242,22 @@ the governed `service.ticket.search` for an existing ticket and
 showed waiting/blocked tickets. This **does not prove end-to-end ticket
 processing or closure**, so the release remains ineligible for ticket-runtime
 cutover pending controlled transaction and independent post-change evidence.
+
+### Ticket continuity evidence preflight (non-authorizing)
+
+`tools/ticket_continuity_evidence_review.py` is a bounded source-only reviewer
+for the pre/post ticket evidence package. It requires a controlled XYZ Test
+Company ticket identity, exact candidate/rollback revision, governed
+before/update/after receipts with digest references, and at least two distinct
+postchange observations with complete intake, queue, ticket-read, note,
+controlled-write, claim-idempotency, alert-routing and notification surfaces.
+A malformed, missing, duplicated-claim, lost-intake, stale, or partial receipt
+returns `blocked`. The strongest permitted result is
+`evidence_review_required`: the native Release Manager must still
+independently verify the authenticated provider evidence, exact owner approval,
+no duplicate provider actions, and actual production ticket processing. Source
+fixture data, self-asserted booleans or hashes alone do NOT confer authority.
+The tool never writes tickets or providers, moves queues, or changes production
+release state. There is no synthetic acceptance or installation path in this
+branch; ticket cutover remains prohibited until the native authority approves
+its exact SHA and validates the ticket continuity proof.
