@@ -129,3 +129,66 @@ Canonical queue states are:
 `IDLE -> INTEGRATING -> RELEASE_LOCKED -> (production verified/LKG) -> IDLE`
 
 Development continues in every queue state. Queue-control failure is fail-closed for merges and must not stop development.
+
+
+## 2026-11-04 PMV3 recovery lock and autonomous-intake integration acceptance
+
+This checkpoint is source-integration evidence, **not** operational PMV3
+acceptance or permission to modify production.
+
+- Protected `main` was `b905ea197f7b268828c75c01ea4407d4378d0d74`
+  when queue PR #2280 was reconciled. The original queue head
+  `2371b44f92cd22a2536b8b6b08f9b948bcbae4d2` incorporated that exact
+  source in a clean, ordinary engineering-branch merge. It did not merge
+  the queue into protected `main`. The resulting pre-documentation feature
+  head was `d42d0fbd7d9c78dd31c6a86dbf028ef192b5565a`.
+- This merge preserved the merged root-host proof-execution correction
+  (#2295) and PMV3 worker quiescence fix (#2293). Reconciled source
+  tests: **342 passed + 5 subtests**. No deployed root-helper, image,
+  protected-control, user endpoint, or provider state was changed.
+- The queue's implementation overlap with autonomous-intake PR #2296
+  (exact preproduction head
+  `c30ce45f712c6cdc06675b9d42abdd21c35bc3b0`) was explicitly reviewed.
+  The changes touch the same `pmv3_engineering_controller.py` but preserve
+  both queue mutex admission and bounded stall classification. The two
+  PRs merge cleanly with zero unresolved files in a disposable scratch
+  worktree. Their exact combined scratch source passed **524 tests and 12
+  subtests**. Scratch merge SHA
+  `b1b8cfc674f60c1353cf10d2be786bd4fa4c8ea4` was not published as a
+  protected release or production candidate.
+- Current production remains independently locked to
+  `b905ea197f7b268828c75c01ea4407d4378d0d74` while runtime and MCP
+  run at LKG `1b28ddc9863aee563755cb57599cf211ee82ac19`,
+  `/opt/jason/current` remains on failed
+  `3e06627de85ace598f959cda12e257000668864d`, and the owner freeze
+  and circuit breaker remain active. The queue cannot be deployed or
+  considered functionally active under this host mismatch.
+- Current installed PMV3 does not contain the new integration-queue
+  reconciler: a GitHub `pmv3-integration-ready` label is not evidence of
+  current autonomous merge execution. The corrected TODO/triage logic of
+  PR #2296 is likewise still only source-tested.
+- An external GitGuardian check also flagged one finding on PR #2280's
+  **pre-reconciliation** head. Independent remediation/review is required;
+  new passing local pytest runs do not cancel a failing security check.
+  The finding must not be printed, ignored, or treated as an approval.
+
+### Required live acceptance after separately authorized release
+
+1. Verify complete protected-host/runtime/MCP alignment at one exact
+   authenticated production SHA, after root-helper proof recovery, fresh
+   full-integrity PASS, and required independent Release Manager/CCC gates.
+2. Confirm the release-lock queue can admit a bounded, approved train
+   without crossing the active production transaction lock, omitting
+   required GitHub checks, or granting approval to conflicting TODO IDs.
+3. Observe **two consecutive complete scheduled production cycles**.
+   Intake must not traceback on duplicate `TODO-OPS-013`; blocked
+   identities remain quarantined; exhausted repair handoffs are accurately
+   classified; unrelated approved work actually changes durable state.
+4. Preserve failure receipts, provider health, no-collateral-regression
+   evidence, rollback readiness, Owner freeze restoration, and a
+   verifiable outstanding-to-complete work count. A running service, zero
+   worker exit code, scheduled timer, or CI green check alone is **not**
+   operational acceptance.
+
+No unit, provider, permission, root policy, production hold, or release
+authorization is altered by this source-only documentation checkpoint.
