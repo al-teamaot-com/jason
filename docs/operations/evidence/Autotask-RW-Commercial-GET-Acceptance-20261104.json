@@ -108,7 +108,7 @@
     "Standalone general internal-cost, sensitive charge, Web Services API login and unassigned-LOB account checkbox states still not visually captured; the six Contracts checkbox states and HR Resource cost checkbox are verified separately.",
     "Restricted query may limit available Contracts and BillingItems records; do not infer universe coverage from 50 returned rows",
     "ContractServices approved data GET path not tested",
-    "Provider-backed billing-item to invoice exact join and negative client scoping not tested"
+    "BillingItem-to-Invoice positive join verified for 3 records; complete invoiced charge-to-line proof across all clients, pricing/quantity reconciliation and negative scope tests remain outstanding"
   ],
   "ui_checkbox_confirmation": {
     "visual_evidence_file": "Autotask-RW-Security-Level-Checkbox-Visual-20261104.json",
@@ -122,5 +122,30 @@
     "sensitive_charge_checked_state": "not_shown",
     "web_services_api_login_checked_state": "not_shown",
     "unassigned_lob_checked_state": "not_shown"
+  },
+  "live_billing_item_invoice_join": {
+    "observed_date": "2026-11-04",
+    "credential_logical_name": "autotask.write",
+    "method": "Existing approved typed Autotask GET query/get operations from authorized Jason runtime; no new standing Jason mutation or read capability",
+    "first_probe": {
+      "billing_items_returned": 50,
+      "items_with_positive_invoiceID": 3,
+      "invoice_gets_tested": 1,
+      "invoice_id_matches": 1,
+      "company_id_matches": 1,
+      "provider_get_calls": 4,
+      "provider_writes": 0
+    },
+    "followup_probe": {
+      "billing_items_returned": 100,
+      "items_with_positive_invoiceID": 3,
+      "invoice_gets_tested": 3,
+      "invoice_id_matches": 3,
+      "company_id_matches": 3,
+      "invoice_get_failures": 0,
+      "provider_get_calls": 8,
+      "provider_writes": 0
+    },
+    "conclusion": "Three sampled billed BillingItem records resolved to corresponding Invoices by invoiceID and companyID under the RW credential. This is a limited positive join test, not full billing pagination or global invoice coverage."
   }
 }
