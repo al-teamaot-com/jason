@@ -65,6 +65,36 @@ def test_provider_output_selector_mismatch_fails_closed():
         server._project_datto_job_output_window(evil, offset=0, maximum_chars=1000, selectors=SELECTORS)
 
 
+
+def test_job_and_device_selector_identity_cannot_be_substituted():
+    for key in ("resource_id", "device_uid"):
+        source = provider_output("AOT DIAGNOSTIC | fixture | PC\\nAOT_DIAGNOSTIC_JSON_BEGIN\\n{}")
+        source["data"][key] = "different-" + key
+        with pytest.raises(ValueError, match="SELECTOR_MISMATCH"):
+            server._project_datto_job_output_window(
+                source, offset=0, maximum_chars=500, selectors=SELECTORS,
+            )
+
+
+def test_window_crosses_record_boundary_without_leaking_other_components():
+    a = "AOT DIAGNOSTIC | fixture | PC\\nAOT_DIAGNOSTIC_JSON_BEGIN\\n"
+    b = '{"a":1}\\nAOT_DIAGNOSTIC_JSON_END'
+    source = provider_output(a)
+    source["data"]["outputs"].append({
+        "component_uid": COMPONENT, "stream": "stdout",
+        "component_name": "Windows Diagnostic Snapshot - AOT",
+        "text": b, "truncated": False,
+    })
+    start = len(a) - 8
+    page = server._project_datto_job_output_window(
+        source, offset=start, maximum_chars=30, selectors=SELECTORS,
+    )
+    combined = "".join(item["text"] for item in page["data"]["outputs"])
+    assert combined == (a + b)[start:start + 30]
+    assert page["data"]["window"]["returned_chars"] == 30
+    assert page["data"]["window"]["has_more"] == (start + 30 < len(a + b))
+
+
 def test_disabled_flag_rejects_before_governed_or_provider_read(monkeypatch):
     monkeypatch.delenv("JASON_DATTO_JOB_OUTPUT_PAGING_ENABLED", raising=False)
     monkeypatch.setattr(server, "_dynamic_read_capability_allowed", lambda capability: True)
