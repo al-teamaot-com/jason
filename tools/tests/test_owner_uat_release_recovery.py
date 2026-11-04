@@ -32,6 +32,18 @@ def _deployment_harness(tmp_path: Path, *, actual_image_rev: str) -> tuple[Path,
     script.write_text(DEPLOY.read_text(encoding="utf-8"), encoding="utf-8")
     script.chmod(0o755)
 
+    # The real immutable runtime deploy now checks both provider-read and
+    # release-approval policies BEFORE it reaches the rollback image proof.
+    # Preserve those checks in the disposable harness; never change the
+    # production deploy script just to make a stale mock pass.
+    config = root / "config"
+    config.mkdir()
+    for name in (
+        "autotask-entity-read-profile.json",
+        "mobile-release-approval-policy.json",
+    ):
+        shutil.copy2(REPO / "config" / name, config / name)
+
     tools = root / "tools"
     tools.mkdir()
     _bin(tools, "deploy_live_container.py", """#!/usr/bin/env python3
@@ -54,6 +66,9 @@ exit 99
         "FAKE_IMAGE_REVISION": actual_image_rev,
         # Prevent touching installed QuickBooks/profile state in the fake deploy.
         "JASON_QUICKBOOKS_READ_PROFILE": "",
+        # Keep inherited live-service reads out of the isolated harness.
+        # Empty is the already-reviewed rollback preflight mode.
+        "JASON_PM_V2_CONTROL_PROFILE": "",
         "JASON_SOURCE_REVISION_OVERRIDE": LKG,
         "JASON_RUNTIME_PRODUCTION_IMAGE": "jason-runtime:rollback-current",
     })
@@ -94,6 +109,30 @@ def test_rollback_refuses_other_image_revision_and_never_invokes_deploy(tmp_path
     )
     assert completed.returncode == 2
     assert "rollback image/source revision mismatch" in completed.stderr
+    assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
+
+
+def test_rollback_denies_missing_immutable_provider_read_policy(tmp_path):
+    script, env = _deployment_harness(tmp_path, actual_image_rev=LKG)
+    (script.parents[2] / "config" / "autotask-entity-read-profile.json").unlink()
+    completed = subprocess.run(
+        ["bash", str(script), "--preflight"],
+        env=env, capture_output=True, text=True,
+    )
+    assert completed.returncode == 2
+    assert "immutable Autotask read/rollback profile absent" in completed.stderr
+    assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
+
+
+def test_rollback_denies_missing_immutable_release_approval_policy(tmp_path):
+    script, env = _deployment_harness(tmp_path, actual_image_rev=LKG)
+    (script.parents[2] / "config" / "mobile-release-approval-policy.json").unlink()
+    completed = subprocess.run(
+        ["bash", str(script), "--preflight"],
+        env=env, capture_output=True, text=True,
+    )
+    assert completed.returncode == 2
+    assert "immutable mobile release approval policy absent" in completed.stderr
     assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
 
 
@@ -171,7 +210,10 @@ def test_missing_prometheus_gauges_still_fail_closed_after_bounded_rechecks(tmp_
     result, counter = _grafana_harness(tmp_path, succeed_after=99)
     assert result.returncode == 9
     assert "real Grafana assurance remains failed" in result.stderr
-    assert counter.read_text().strip() == "3"
+    # The reviewed scrape-interval recovery now permits up to 12 real
+    # rechecks inside the bounded 150-second window, not the historical 3.
+    # Our mocked sleep makes all 12 attempts complete immediately.
+    assert counter.read_text().strip() == "12"
 
 
 def test_optional_assurance_not_installed_is_identified(tmp_path):
