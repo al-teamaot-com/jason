@@ -185,7 +185,10 @@ Invoke-AotSection $report 'adapters_ip_dns' {
         $gw = @(Get-NetRoute -InterfaceIndex $a.ifIndex -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Select-Object -First 3 | ForEach-Object NextHop)
         [ordered]@{ name = $a.Name; description = Limit-AotText $a.InterfaceDescription 100
             state = [string]$a.Status; link_speed = [string]$a.LinkSpeed
-            mac_last6 = if ($a.MacAddress) { ([string]$a.MacAddress) -replace '^.*(?=.{6}$)', '' } else { '' }
+            mac_last6 = if ($a.MacAddress) {
+                $hexOnly = ([string]$a.MacAddress) -replace '[^a-fA-F0-9]', ''
+                if ($hexOnly.Length -ge 6) { $hexOnly.Substring($hexOnly.Length - 6) } else { '' }
+            } else { '' }
             ipv4_ipv6 = $ip; dns_servers = $dns; gateways = $gw; interface_index = $a.ifIndex }
     })
     $warnings = @()

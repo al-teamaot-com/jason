@@ -1,6 +1,6 @@
 # AOT — DRMM first-pass Windows diagnostic components
 
-**Status:** Source implementation for preproduction review; not imported, activated, or accepted on Datto RMM.
+**Status:** The Owner imported the first source revision into Datto RMM on 2026-11-04. Six governed test jobs on AL and AL-SAMSUNG reached terminal completed status. The updated source revision in this PR is not yet imported or operationally accepted because evidence output was capped and disk folder sampling was incomplete. No monitoring policy or scheduled execution was activated.
 **Scope:** Three independent Windows PowerShell 5.1 Datto RMM scripts intended for NT AUTHORITY\SYSTEM noninteractive execution.
 **Operational owner:** Atlantic Office Technologies.
 **Authority:** Project Jason Governance Handbook, JES-001–004, Jason Platform Integrity / governed component execution, and production freeze.
@@ -22,7 +22,7 @@ They are independent collections so a single case-specific component gives broad
 - Manifest: scripts/drmm-diagnostics/manifest.json, SHA256 of each artifact
 - Tests: python3 -m unittest discover -s scripts/drmm-diagnostics/tests -v
 
-Datto RMM Component Library integration **has not been executed**; no governed Jason automation.component.create capability has been observed. No direct Datto API, browser UI, or credential bypass is approved in place of the governed path. Manual technician import through the authorized Datto RMM UI is an optional separate operator step only after technical acceptance and explicit scope choice.
+Datto RMM Component Library import of the initial script revision **was performed by the Owner**; no governed Jason automation.component.create/update capability has been observed. No direct Datto API, browser UI, or credential bypass is approved in place of the governed path. Manual technician import through the authorized Datto RMM UI is an optional separate operator step only after technical acceptance and explicit scope choice.
 
 ## Contract
 
@@ -76,3 +76,15 @@ DRMM script exit 0 means the component collected at least one complete or partia
 - System Registry: no operational entities registered because nothing is deployed.
 - Operations and proof: this runbook and manifest; provider-backed acceptance remains outstanding.
 - Current resume point: PR/runbook is the durable handoff; no claim of production readiness or DRMM presence.
+
+## 2026-11-04 initial provider-backed acceptance findings
+
+All six jobs reached terminal completed via governed automation.component.execute on exactly AL (69571572-83f7-1e33-9cdf-01717d4e74a4) and AL-SAMSUNG (710e63d6-caca-d830-697a-81250b0a8321). No reboot, network reset, file cleanup, or other mutation was requested. Evidence:
+
+- Windows Snapshot: AL job e523dd87-c050-4528-9e95-2fcc3addeff8: 9 sections complete, 13.826 seconds, pending-file-rename reboot indicator. AL-SAMSUNG job a985382a-aab7-4365-9954-cb01715f08e4: 9 sections complete, 21.313 seconds, no reboot indicator.
+- Disk Space: AL job 4f6d08d5-49ba-4ba6-8472-35ab61878a19: 6 sections reported, partial root traversal and source output truncated at 65,536 chars. AL-SAMSUNG job 72e65dc9-e64c-400b-9ced-a59e1ec6ac40: 6 sections, partial root and Sysmon measurements; at least 15.373 GB measured in Sysmon, no files removed. Both jobs report 40 sampled events; these must be attributed by provider rather than assumed storage failures.
+- Network and DNS: AL job 44ab2810-bb68-42bb-8f2c-23dbf28c96a2 and AL-SAMSUNG job 3f53df88-e389-4e86-8bd4-d3574c9670ce: 6 sections complete each, zero reported findings.
+
+Separate MCP presentation truncates every returned text field after 2,000 chars, including these job output records. The full raw JSON cannot be accepted through the current governed read projection; separate output paging is being prepared. The disk component also exceeded the Datto connector's 65,536-character upstream source cap. Fixes in this source update address oversized CIM reference serialization, starvation of other folders by the first large folder, storage-provider event false positives, and MAC suffix display. Acceptance requires Owner re-import of revised component text, fresh governed read-only runs, full output retrieval through an approved governed mechanism, and evidence-sensitive review. No automatic standing approval has been requested or claimed.
+
+**Operational next step:** Import the revised source artifacts only after technical review, then execute and verify exactly one job of each revised component on an approved test endpoint. The precise updated SHA256 values live in the generated manifest. Do not re-run the same DRMM job merely because its output was truncated at presentation time.

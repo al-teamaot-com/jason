@@ -251,8 +251,12 @@ Invoke-AotSection $report 'top_level_folder_usage' {
         $inspected = @()
         $usedFiles = 0
         foreach ($directory in $rootDirectories) {
+            $remainingFolders = [Math]::Max(1, ($rootDirectories.Count - $inspected.Count))
             $remainingSeconds = [Math]::Min(($maxSecondsPerVolume - [int]$time.Elapsed.TotalSeconds), ($maxTotalScanSeconds - [int]$globalScan.Elapsed.TotalSeconds))
             $remainingFiles = $maxFiles - $usedFiles
+            # Fair-share limits prevent the first large folder from consuming
+            # the entire scan budget before other top-level directories are seen.
+            $folderFileBudget = [Math]::Min($remainingFiles, [Math]::Min(6000, [Math]::Max(300, [int][Math]::Floor($remainingFiles / $remainingFolders))))
             if ($remainingSeconds -le 0 -or $remainingFiles -le 0) {
                 $warnings += ($drive + ' traversal reached budget; remaining folders unmeasured')
                 break
@@ -260,7 +264,7 @@ Invoke-AotSection $report 'top_level_folder_usage' {
             $a = Get-Item -LiteralPath $directory -Force -ErrorAction SilentlyContinue
             if ($null -eq $a) { continue }
             if (($a.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
-            $usage = Measure-AotFolderTree -Root $directory -FileBudget $remainingFiles -SecondsBudget $remainingSeconds
+            $usage = Measure-AotFolderTree -Root $directory -FileBudget $folderFileBudget -SecondsBudget $remainingSeconds
             $usedFiles += $usage.counted_files
             if (!$usage.complete) { $warnings += ('Partial measurement: ' + (Limit-AotText $directory 90)) }
             $inspected += [ordered]@{ folder = (Limit-AotText $directory 180); usage = $usage }
@@ -308,7 +312,17 @@ Invoke-AotSection $report 'pagefile_shadow_and_vss' {
         })
     } catch { $warnings += 'Pagefile read unavailable' }
     try {
-        $data.shadowstorage = @(Get-CimInstance Win32_ShadowStorage -ErrorAction Stop | Select-Object Volume,AllocatedSpace,UsedSpace,MaxSpace)
+        $data.shadowstorage = @(Get-CimInstance Win32_ShadowStorage -ErrorAction Stop | Select-Object -First 16 | ForEach-Object {
+            # CIM reference objects can serialize into large recursive trees.
+            # Retain scalar evidence only, to preserve bounded JSON output.
+            [ordered]@{
+                volume_reference = Limit-AotText ([string]$_.Volume) 100
+                diff_volume_reference = Limit-AotText ([string]$_.DiffVolume) 100
+                allocated_gb = [Math]::Round([double]$_.AllocatedSpace / 1GB, 3)
+                used_gb = [Math]::Round([double]$_.UsedSpace / 1GB, 3)
+                max_gb = [Math]::Round([double]$_.MaxSpace / 1GB, 3)
+            }
+        })
     } catch { $warnings += 'Shadow storage unavailable: ' + (Limit-AotText $_.Exception.Message 110) }
     try {
         $data.vss_writers_excerpt = Limit-AotText ((& "$env:SystemRoot\System32\vssadmin.exe" 'list' 'writers' 2>&1) -join ' ') 1000
@@ -317,9 +331,14 @@ Invoke-AotSection $report 'pagefile_shadow_and_vss' {
 }
 Invoke-AotSection $report 'storage_events' {
     $events = Get-AotEvents -LogName 'System' -EventIds @(7,11,15,51,55,57,129,153,157) -Days 7 -Limit 40
-    if (@($events.data).Count -gt 0) {
-        Add-AotFinding $report 'warning' 'STORAGE_EVENTS' ([string]@($events.data).Count + ' relevant storage events in sampled window')
+    # Event IDs alone are not unique to storage providers. Exclude unrelated
+    # providers before labeling these events as disk/storage failures.
+    $storage = @($events.data | Where-Object { $_.provider -match '(?i)(disk|stor|ntfs|volsnap|partmgr|volmgr|iastor|scsi)' } | Select-Object -First 20)
+    if ($storage.Count -gt 0) {
+        Add-AotFinding $report 'warning' 'STORAGE_EVENTS' ([string]$storage.Count + ' storage-provider events in sampled window; review individual sources and severity')
     }
-    return @{ data = $events.data; warnings = $events.warnings }
+    $warnings = @($events.warnings)
+    if (@($events.data).Count -ge 40) { $warnings += 'Initial event sample capped at 40; provider-filtered results may be incomplete' }
+    return @{ data = @{ storage_provider_events = $storage; examined_event_count = @($events.data).Count; provider_filter = 'disk|stor|ntfs|volsnap|partmgr|volmgr|iastor|scsi' }; warnings = $warnings }
 }
 Write-AotReport $report

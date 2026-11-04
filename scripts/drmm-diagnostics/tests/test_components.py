@@ -71,6 +71,16 @@ class TestComponents(unittest.TestCase):
                        "Select-Object -First", "DiagTargetHost"):
             self.assertIn(needle, network)
 
+    def test_provider_acceptance_regressions_are_guarded(self):
+        disk = (SOURCES / "disk-space-analysis.ps1").read_text()
+        network = (SOURCES / "network-dns.ps1").read_text()
+        for marker in ("$folderFileBudget", "$remainingFolders", "Select-Object -First 16",
+                       "allocated_gb", "used_gb", "provider_filter", "storage_provider_events"):
+            self.assertIn(marker, disk)
+        self.assertNotIn("Select-Object Volume,AllocatedSpace,UsedSpace,MaxSpace", disk)
+        self.assertIn("mac_last6", network)
+        self.assertIn("Substring($hexOnly.Length - 6)", network)
+
     def test_build_is_repeatable(self):
         before = [(OUTPUT / (x + ".ps1")).read_bytes() for x in COMPONENTS]
         subprocess.run(["python3", str(ROOT / "build.py")], check=True, capture_output=True)
