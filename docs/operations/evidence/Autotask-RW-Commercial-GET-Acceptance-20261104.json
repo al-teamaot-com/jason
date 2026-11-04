@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0",
+  "observed_date": "2026-11-04",
+  "purpose": "Autotask RW existing credential commercial GET-only validation",
+  "credential_logical_name": "autotask.write",
+  "existing_rw_resource_id": 29682930,
+  "security_level_id": 27,
+  "execution_context": "Existing authorized Jason runtime service account, no role/elevation/secret changes",
+  "probe": "Preproduction diagnostic using existing approved compiled GET read operations, in-memory RW logical credential override only, not production capability activation",
+  "control": {
+    "http_methods_allowed": [
+      "GET"
+    ],
+    "provider_mutations": 0,
+    "persisted_credentials": false,
+    "persisted_provider_records": false,
+    "provider_get_calls": 32
+  },
+  "existing_readiness_tool": {
+    "name": "tools/autotask_mutation_readiness.py",
+    "provider_backed": true,
+    "all_four_ticket_and_note_preflights_permitted": true,
+    "provider_get_calls": 12,
+    "mutation_requests_compiled_but_not_dispatched": true,
+    "trusted_binding_unique": true,
+    "status": "pass",
+    "observed_at": "2026-11-04T17:28:12.824092+00:00"
+  },
+  "rw_self_resource_read": {
+    "status": "success",
+    "expected_resource_id_matches": true,
+    "expected_account_email_matches": true
+  },
+  "entity_results": {
+    "Products": {
+      "metadata_query": "All",
+      "metadata_create": "All",
+      "metadata_update": "All",
+      "query_status": "success",
+      "sample_records": 50,
+      "nonzero_cost_records": 50,
+      "nonzero_price_records": 50
+    },
+    "Services": {
+      "metadata_query": "All",
+      "metadata_create": "All",
+      "metadata_update": "All",
+      "query_status": "success",
+      "sample_records": 50,
+      "nonzero_cost_records": 18,
+      "nonzero_price_records": 31
+    },
+    "ProductVendors": {
+      "metadata_query": "All",
+      "metadata_create": "All",
+      "metadata_update": "All",
+      "query_status": "success",
+      "sample_records": 50,
+      "nonzero_cost_records": 49
+    },
+    "ServiceBundles": {
+      "metadata_query": "All",
+      "metadata_create": "All",
+      "metadata_update": "All",
+      "query_status": "success",
+      "sample_records": 4,
+      "nonzero_cost_records": 4,
+      "nonzero_price_records": 4
+    },
+    "Contracts": {
+      "metadata_query": "Restricted",
+      "metadata_create": "All",
+      "metadata_update": "Restricted",
+      "query_status": "success",
+      "sample_records": 50,
+      "records_without_lob": 16
+    },
+    "ContractServices": {
+      "metadata_query": "Restricted",
+      "metadata_create": "Restricted",
+      "metadata_update": "Restricted",
+      "query_status": "not_attempted",
+      "reason": "data-read entity not in currently approved provider allowlist"
+    },
+    "BillingItems": {
+      "metadata_query": "Restricted",
+      "metadata_create": "None",
+      "metadata_update": "Restricted",
+      "query_status": "success",
+      "sample_records": 50,
+      "nonzero_cost_records": 5,
+      "nonzero_price_records": 12
+    },
+    "Invoices": {
+      "metadata_query": "All",
+      "metadata_create": "None",
+      "metadata_update": "All",
+      "query_status": "success",
+      "sample_records": 50
+    }
+  },
+  "authorization": {
+    "provider_permission_does_not_grant_jason_execution": true,
+    "client_requester_catalog_writes_currently_denied": true,
+    "production_freeze_unchanged": true
+  },
+  "gaps": [
+    "Checkbox display state of unassigned-LOB access, internal-cost visibility, sensitive charge data, modify contract cost, contract charge, bulk service updater and API login not independently captured",
+    "Restricted query may limit available Contracts and BillingItems records; do not infer universe coverage from 50 returned rows",
+    "ContractServices approved data GET path not tested",
+    "Provider-backed billing-item to invoice exact join and negative client scoping not tested"
+  ]
+}
