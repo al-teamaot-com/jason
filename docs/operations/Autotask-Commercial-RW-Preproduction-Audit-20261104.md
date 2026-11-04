@@ -1,6 +1,6 @@
 # Autotask commercial RW access — read-only audit and preproduction gates (2026-11-04)
 
-**Status:** Core commercial RW provider-backed GET acceptance passed; scope/checkbox and billing-join negatives outstanding. **Not production eligible.**  
+**Status:** Core commercial RW provider-backed GET acceptance passed; scope/checkbox and billing-join negatives outstanding. **Not production eligible.**
 **Related:** #200 vendor-cost/client-billing reconciliation, #403 governed billing operations, #435 contract intelligence, #2147 invoice-read repair, #2104 technician authorization repair.
 
 ## Scope and invariants
@@ -75,7 +75,7 @@ The live Security Level 27 editor showed these **selected dropdown permissions**
 2. Record sanitized operation, entity, requested field class, provider result, LOB association and correlation/evidence hash; never persist raw credentials or sensitive billing values.
 3. Independently confirm the selected state of the RW account's **unassigned-LOB** setting and internal-cost security-level checkboxes; do not infer checkbox state from plain extracted labels.
 4. For `Restricted`, run approved per-client/LOB disclosure negatives before claiming all-record access. For `None`, fail closed and record the exact denied entity/operation. No live permission changes without explicit approval.
-5. Complete provider-backed negative tests under unauthorized principals, negative client context, denial of finance mutation, and safe pagination. Then attach CI/preproduction output and review existing workstream #2147 (invoice read HTTP 500) to avoid duplicate fixes. 
+5. Complete provider-backed negative tests under unauthorized principals, negative client context, denial of finance mutation, and safe pagination. Then attach CI/preproduction output and review existing workstream #2147 (invoice read HTTP 500) to avoid duplicate fixes.
 6. Present an exact production candidate/rollback SHA **only after** full source and preproduction acceptance. **Do not deploy or lift the production freeze** without separate owner approval.
 
 ## 2026-11-04 supplemental live evidence
