@@ -2493,6 +2493,24 @@ class ManagedHostSourceMirrorContractTests(unittest.TestCase):
                 ):
                     runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
 
+    def test_network_timeout_never_allows_root_source_request(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._repo(Path(td))
+            def git(argv, **kwargs):
+                op = argv[5:]
+                if op[:1] == ["remote"]:
+                    return subprocess.CompletedProcess(
+                        argv, 0, stdout="https://github.com/al-teamaot-com/jason.git"
+                    )
+                if op[:1] == ["fetch"]:
+                    raise subprocess.TimeoutExpired(argv, timeout=120)
+                return subprocess.CompletedProcess(argv, 1)
+            with patch.object(runner.subprocess, "run", side_effect=git):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "mirror refresh unavailable"
+                ):
+                    runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
+
     def test_missing_after_fetch_fails_closed(self):
         with tempfile.TemporaryDirectory() as td:
             repo = self._repo(Path(td))
