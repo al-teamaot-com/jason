@@ -5044,6 +5044,8 @@ def owner_unfreeze_release(
     *,
     release_id: str,
     candidate_sha: str,
+    explicit_unfreeze_scope_sha256: str | None = None,
+    explicit_unfreeze_rollback_sha: str | None = None,
 ) -> dict[str, Any]:
     """Lift the blanket production freeze for one exact reviewed Owner-approved release."""
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
@@ -5057,12 +5059,31 @@ def owner_unfreeze_release(
         raise ReleaseManagerError("unfreeze candidate SHA does not match release record")
     verify_candidate_on_main(repo, candidate_sha)
     owner = record.get("owner_approval") or {}
+    owner_source = str(owner.get("source") or "")
     if (owner.get("approved") is not True
-            or owner.get("candidate_sha") != candidate_sha
-            or owner.get("source") != "explicit_owner_instruction"):
+            or owner.get("candidate_sha") != candidate_sha):
         raise ReleaseManagerError("exact-SHA explicit Owner approval is required to unfreeze")
+    # An existing signed Teams *deployment* approval remains immutable. A
+    # later exact-release *unfreeze* is a separate Owner decision, never a
+    # reason to relabel that signed approval as an explicit shell instruction.
+    explicit_source = owner_source == "explicit_owner_instruction"
+    signed_source = re.fullmatch(
+        r"authenticated_mobile_teams_owner:relapproval-[0-9a-f]{32}", owner_source,
+    ) is not None
+    if not explicit_source and not signed_source:
+        raise ReleaseManagerError("owner approval source is not trusted for exact unfreeze")
     require_current_manual_scope_review(repo, state_root, record)
     rollback_sha = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+    scope = record["manual_scope_review"]
+    if not explicit_source:
+        # The native CLI must be called only after a new explicit Owner
+        # instruction naming these *current* identities. A signed Teams card
+        # cannot double as the distinct global-unfreeze authorization.
+        if (explicit_unfreeze_scope_sha256 != scope.get("scope_sha256")
+                or explicit_unfreeze_rollback_sha != rollback_sha):
+            raise ReleaseManagerError(
+                "distinct exact-SHA Owner unfreeze instruction must bind current scope and rollback"
+            )
     live_production_alignment(rollback_sha)
     marker = state_root / PRODUCTION_FREEZE_MARKER
     if not marker.exists() or marker.is_symlink():
@@ -5076,7 +5097,6 @@ def owner_unfreeze_release(
             or marker_doc.get("scope") != "manual-and-automatic-production-promotions"
             or "exact-SHA owner unfreeze decision" not in str(marker_doc.get("remove_only_after") or "")):
         raise ReleaseManagerError("production deployment freeze marker policy does not permit exact-release unfreeze")
-    scope = record["manual_scope_review"]
     receipts = state_root / "owner-explicit-unfreeze-receipts"
     receipts.mkdir(mode=0o700, parents=True, exist_ok=True)
     if receipts.is_symlink() or stat.S_IMODE(receipts.stat().st_mode) != 0o700:
@@ -5090,6 +5110,8 @@ def owner_unfreeze_release(
         "rollback_sha": rollback_sha,
         "scope_sha256": str(scope["scope_sha256"]),
         "owner_approval_source": "explicit_owner_instruction",
+        "prior_release_approval_source": owner_source,
+        "separate_exact_owner_unfreeze": not explicit_source,
         "freeze_sha256_before": snapshot["sha256"],
         "standing_authority": False,
         "automatic_publish_authority": False,
@@ -6719,6 +6741,8 @@ def main() -> int:
     unfreeze = sub.add_parser("unfreeze-release")
     unfreeze.add_argument("--release-id", required=True)
     unfreeze.add_argument("--candidate-sha", required=True)
+    unfreeze.add_argument("--explicit-unfreeze-scope-sha256")
+    unfreeze.add_argument("--explicit-unfreeze-rollback-sha")
 
     approve = sub.add_parser("approve")
     approve.add_argument("--release-id", required=True)
@@ -6808,6 +6832,8 @@ def main() -> int:
         receipt = owner_unfreeze_release(
             repo=repo, state_root=state_root, release_id=args.release_id,
             candidate_sha=args.candidate_sha,
+            explicit_unfreeze_scope_sha256=args.explicit_unfreeze_scope_sha256,
+            explicit_unfreeze_rollback_sha=args.explicit_unfreeze_rollback_sha,
         )
         print(json.dumps(receipt, indent=2))
         return 0

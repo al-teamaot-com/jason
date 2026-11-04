@@ -5645,3 +5645,93 @@ def test_pmv3_quiescence_accepts_inactive_and_rejects_activating():
     ):
         with pytest.raises(runner.ReleaseManagerBusy, match="deferred before mutation"):
             runner.require_pmv3_engineering_quiescent()
+
+
+def test_distinct_owner_unfreeze_preserves_existing_signed_teams_approval(tmp_path):
+    """An explicit later unfreeze must not rewrite authenticated Teams provenance."""
+    from unittest.mock import patch
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / "records").mkdir()
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    marker.write_text(
+        '{"reason":"owner freeze","remove_only_after":"new explicit exact-SHA owner unfreeze decision",'
+        '"schema_version":"1.0","scope":"manual-and-automatic-production-promotions",'
+        '"status":"active"}\n'
+    )
+    marker.chmod(0o600)
+    original_source = "authenticated_mobile_teams_owner:relapproval-" + "a" * 32
+    record = {
+        "release_id": release_id,
+        "state": "production_eligible",
+        "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "owner_approval": {
+            "approved": True, "candidate_sha": SHA_A,
+            "source": original_source, "recorded_at": "earlier-signed-decision",
+        },
+        "manual_scope_review": {
+            "schema_version": "1.0", "candidate_sha": SHA_A,
+            "baseline_sha": SHA_B, "scope_sha256": "d" * 64,
+        },
+        "history": [],
+    }
+    runner.atomic_json(tmp_path / "records" / (release_id + ".json"), record)
+    with patch.object(runner, "verify_candidate_on_main"), \
+         patch.object(runner, "require_current_manual_scope_review"), \
+         patch.object(runner, "live_production_alignment"):
+        with __import__("pytest").raises(runner.ReleaseManagerError, match="distinct exact-SHA Owner unfreeze"):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+            )
+        assert marker.exists()
+        with __import__("pytest").raises(runner.ReleaseManagerError, match="current scope and rollback"):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+                explicit_unfreeze_scope_sha256="e" * 64,
+                explicit_unfreeze_rollback_sha=SHA_B,
+            )
+        assert marker.exists()
+        with __import__("pytest").raises(runner.ReleaseManagerError, match="current scope and rollback"):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+                explicit_unfreeze_scope_sha256="d" * 64,
+                explicit_unfreeze_rollback_sha=SHA_A,
+            )
+        assert marker.exists()
+        receipt = runner.owner_unfreeze_release(
+            ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+            explicit_unfreeze_scope_sha256="d" * 64,
+            explicit_unfreeze_rollback_sha=SHA_B,
+        )
+    assert receipt["status"] == "unfrozen"
+    assert receipt["owner_approval_source"] == "explicit_owner_instruction"
+    assert receipt["prior_release_approval_source"] == original_source
+    assert receipt["separate_exact_owner_unfreeze"] is True
+    assert receipt["scope_sha256"] == "d" * 64
+    assert not marker.exists()
+    saved = __import__("json").loads((tmp_path / "records" / (release_id + ".json")).read_text())
+    assert saved["owner_approval"] == record["owner_approval"]
+    assert saved["owner_approval"]["source"] == original_source
+    assert saved["manual_scope_review"] == record["manual_scope_review"]
+
+
+def test_unfreeze_rejects_untrusted_approval_source_even_with_exact_explicit_decision(tmp_path):
+    from unittest.mock import patch
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / "records").mkdir()
+    record = {
+        "release_id": release_id, "state": "production_eligible", "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "owner_approval": {"approved": True, "candidate_sha": SHA_A, "source": "imported_untrusted"},
+        "manual_scope_review": {"schema_version": "1.0", "candidate_sha": SHA_A,
+                                "baseline_sha": SHA_B, "scope_sha256": "d" * 64},
+    }
+    runner.atomic_json(tmp_path / "records" / (release_id + ".json"), record)
+    with patch.object(runner, "verify_candidate_on_main"):
+        with __import__("pytest").raises(runner.ReleaseManagerError, match="source is not trusted"):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+                explicit_unfreeze_scope_sha256="d" * 64,
+                explicit_unfreeze_rollback_sha=SHA_B,
+            )
+    assert not (tmp_path / "owner-explicit-unfreeze-receipts").exists()
