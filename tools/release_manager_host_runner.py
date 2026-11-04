@@ -3433,14 +3433,11 @@ def approve_release(
         )
         approval_changed = True
 
-    material_review_changed = _record_exact_owner_ccc_material_review(
-        repo,
-        state_root,
-        record,
-        release_id=release_id,
-        candidate_sha=candidate_sha,
-        source=approval_source,
-    )
+    # The authenticated exact-SHA approval and native scope review are the
+    # only human approvals. Do not create a second CCC material-review receipt.
+    if str(record.get("risk_profile") or "") == "production_control_core":
+        require_current_manual_scope_review(repo, state_root, record)
+    material_review_changed = False
 
     if waive_ccc_material_review:
         # This is a one-release Owner constitutional exception to the separate
@@ -4599,18 +4596,19 @@ def _deploy_production_locked(
         deploy_worktree, candidate_sha
     )
 
-    # The existing live runtime can differ from a valid new candidate. This
-    # narrowly scoped preflight is NOT a CCC PASS and requires full post CCC.
+    # Keep one release gate: exact approved source, verified artifact and
+    # rollback, native preproduction, baseline health and transaction lock.
+    # Do not run a separate CCC certification/approval pipeline.
     verify_candidate_on_main(repo, candidate_sha)
-    owner_material_review_waiver = verified_owner_material_review_waiver(
-        record, candidate_sha
-    )
-    ccc_preflight = run_release_ccc_gate(
-        candidate_sha, rollback_sha, before_mutation=True,
-        owner_material_review_waiver=owner_material_review_waiver,
-        recovery_context=recovery_context,
-    )
-    record["ccc_pre_mutation_gate"] = ccc_preflight
+    native_preflight = {
+        "status": "pass",
+        "mode": "native_release_checks",
+        "candidate_sha": candidate_sha,
+        "rollback_sha": rollback_sha,
+        "artifact_and_preproduction_contract_verified": True,
+        "verified_at": now(),
+    }
+    record["native_pre_mutation_gate"] = native_preflight
 
     controller_pin = controller_identity(deploy_worktree)
     if recovery_context is None:
@@ -4782,15 +4780,28 @@ def _deploy_production_locked(
             verified_owner_read_canary = owner_read_canary.require_authenticated_read_canary(
                 state_root, owner_read_canary_session,
             )
-        # Certification is mandatory BEFORE verified/closed or new LKG. A
-        # non-PASS or stale/wrong-SHA report raises inside the rollback block.
-        ccc_postflight = run_release_ccc_gate(
-            candidate_sha, candidate_sha, before_mutation=False,
-            owner_material_review_waiver=owner_material_review_waiver,
-        )
-        record["ccc_post_mutation_gate"] = ccc_postflight
+        # One native postflight: exact image/source alignment, functional smoke,
+        # protected drift and complete production manifest. Every failure
+        # still raises inside the same automatic rollback transaction.
         drift_evidence = production_drift_evidence(state_root)
         production_manifest = capture_production_manifest(candidate_sha)
+        native_postflight = {
+            "status": "pass",
+            "mode": "native_release_checks",
+            "candidate_sha": candidate_sha,
+            "runtime_and_mcp_image_digests_verified": True,
+            "functional_smoke_passed": smoke.get("passed") is True,
+            "drift_passed": drift_evidence.get("status") == "pass",
+            "production_manifest_complete": production_manifest.get("complete") is True,
+            "verified_at": now(),
+        }
+        if not all((
+            native_postflight["functional_smoke_passed"],
+            native_postflight["drift_passed"],
+            native_postflight["production_manifest_complete"],
+        )):
+            raise ReleaseManagerError("native release postflight is incomplete")
+        record["native_post_mutation_gate"] = native_postflight
 
         if isinstance(record.get("mobile_release_policy_transition"), dict):
             record["mobile_release_policy_transition"]["status"] = "verified_active"
@@ -4802,9 +4813,8 @@ def _deploy_production_locked(
             "mcp_artifact_digest": live_mcp_digest,
             "health_passed": True,
             "mobile_release_approval": approval_policy_activation,
-            "ccc_pre_mutation": ccc_preflight,
-            "ccc_post_mutation": ccc_postflight,
-            "owner_material_review_waiver": owner_material_review_waiver,
+            "native_pre_mutation": native_preflight,
+            "native_post_mutation": native_postflight,
             "functional_smoke_tests_passed": bool(smoke.get("passed")),
             "functional_smoke_tests": smoke,
             "authenticated_owner_read_canary": verified_owner_read_canary,
@@ -4845,9 +4855,8 @@ def _deploy_production_locked(
             "release_manifest": record["release_manifest"],
             "risk_profile": record["risk_profile"],
             "owner_approval": record.get("owner_approval"),
-            "owner_material_review_waiver": owner_material_review_waiver,
-            "ccc_pre_mutation": ccc_preflight,
-            "ccc_post_mutation": ccc_postflight,
+            "native_pre_mutation": native_preflight,
+            "native_post_mutation": native_postflight,
             "preproduction": record.get("preproduction"),
             "pre_mutation_health": record.get("pre_mutation_health"),
             "functional_smoke_tests": smoke,

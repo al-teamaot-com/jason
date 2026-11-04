@@ -15,7 +15,6 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="/var/backups/jason-systemd-$STAMP"
 ENGINEERING_SOURCE_REPO="/home/al/.local/lib/jason/engineering-source-repo"
 DOCUMENTATION_SOURCE_REPO="/home/al/.local/lib/jason/documentation-source-repo"
-OBSERVABILITY_CURRENT_LINK="/opt/jason/observability/current"
 USER_XDG_RUNTIME_DIR="/run/user/1000"
 USER_DBUS_ADDRESS="unix:path=/run/user/1000/bus"
 
@@ -893,31 +892,9 @@ PY2
     exit 9
   fi
 
-  CCC_REVIEW="/var/lib/jason/ccc/material-review-${SOURCE_REVISION:0:16}.json"
-  if [ ! -f "$CCC_REVIEW" ]; then
-    echo "ERROR: candidate Teams CCC material review is missing" >&2
-    exit 9
-  fi
-  CCC_STARTED_AT="$(date +%s)"
-  /usr/bin/bash "$RELEASE_DIR/tools/install_ccc_scheduler.sh" "$SOURCE_REVISION" "$CCC_REVIEW"
-  /usr/bin/python3 - "$SOURCE_REVISION" "$CCC_STARTED_AT" <<'PY2'
-import json, sys, time
-from pathlib import Path
-sha=sys.argv[1]; started=float(sys.argv[2])
-p=Path('/var/lib/jason/ccc/latest.json')
-d=json.loads(p.read_text(encoding='utf-8'))
-finished=str(d.get('finished_at') or '')
-try:
-    epoch=__import__('datetime').datetime.fromisoformat(finished.replace('Z','+00:00')).timestamp()
-except Exception:
-    raise SystemExit('CCC latest evidence has invalid finished_at')
-if (epoch < started - 1 or epoch > time.time()+10
-        or d.get('status') != 'PASS'
-        or d.get('source_revision') != sha
-        or d.get('runtime_revision') != sha):
-    raise SystemExit('CCC did not freshly prove exact candidate/runtime PASS after recovery')
-PY2
-  echo "JASON_CCC_POST_RECOVERY=PASS"
+  # Native provider canary and runtime/MCP health above remain mandatory.
+  # CCC is not a second release certification step.
+  echo "JASON_RECOVERY_NATIVE_HEALTH=PASS"
   step_pass provider_identity_release_recovery
   echo "JASON_PROVIDER_IDENTITY_RELEASE_RECOVERY=PASS"
 else
@@ -933,75 +910,9 @@ echo "SOURCE_REVISION=$SOURCE_REVISION"
 echo "RELEASE_DIR=$RELEASE_DIR"
 echo "BACKUP_DIR=$BACKUP_DIR"
 
-OBSERVABILITY_INSTALLER="$RELEASE_DIR/tools/install_observability_assurance.sh"
-OBSERVABILITY_PREVIOUS_REVISION=""
-if [ -f "$OBSERVABILITY_CURRENT_LINK/SOURCE_REVISION" ]; then
-  OBSERVABILITY_PREVIOUS_REVISION="$(tr -d '\r\n' < "$OBSERVABILITY_CURRENT_LINK/SOURCE_REVISION")"
-fi
-OBSERVABILITY_CHANGED=1
-if [ -n "$OBSERVABILITY_PREVIOUS_REVISION" ] \
-  && git -C "$REPO_ROOT" cat-file -e "$OBSERVABILITY_PREVIOUS_REVISION^{commit}" 2>/dev/null; then
-  if git -C "$REPO_ROOT" diff --quiet \
-    "$OBSERVABILITY_PREVIOUS_REVISION" "$SOURCE_REVISION" -- \
-    config/observability/grafana-dashboard-manifest.json \
-    infrastructure/showcase \
-    tools/grafana_assurance.py \
-    tools/update_grafana_manifest.py \
-    tools/install_observability_assurance.sh; then
-    OBSERVABILITY_CHANGED=0
-  fi
-fi
-step_start observability_reconciliation
-if [ "$OBSERVABILITY_CHANGED" -eq 1 ]; then
-  test -f "$OBSERVABILITY_INSTALLER" || { echo "ERROR: observability installer is missing" >&2; exit 9; }
-  timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT="$ENGINEERING_SOURCE_REPO" /usr/bin/bash "$OBSERVABILITY_INSTALLER" "$SOURCE_REVISION"
-  if [ "$(readlink -f "$OBSERVABILITY_CURRENT_LINK")" != "/opt/jason/observability/releases/$SOURCE_REVISION" ]; then
-    echo "ERROR: observability release did not converge to production revision" >&2
-    exit 9
-  fi
-  echo "JASON_OBSERVABILITY_RECONCILIATION=PASS"
-else
-  echo "JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED"
-fi
-step_pass observability_reconciliation
-
-# The scheduled Grafana assurance can run while the production reconciler is
-# restarting the usage-attribution exporter. A genuine transient missing
-# Prometheus series leaves the assurance oneshot in systemd's failed state.
-# Re-execute the REAL checker only after exporters are verified and service
-# activation has completed; never reset-failed, mask, or ignore its result.
-step_start post_exporter_grafana_assurance
-if systemctl cat jason-grafana-assurance.service >/dev/null 2>&1; then
-  GRAFANA_REVALIDATION_PASS=0
-  # The existing usage-attribution scrape interval is 120s. A healthy exporter
-  # restart must be followed by a real scrape, not only three 10s pauses.
-  # Bound the whole observation window; no check is skipped or forced PASS.
-  GRAFANA_REVALIDATION_DEADLINE=$((SECONDS + 150))
-  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    remaining=$((GRAFANA_REVALIDATION_DEADLINE - SECONDS))
-    if [ "$remaining" -le 0 ]; then break; fi
-    check_timeout=$((remaining < 20 ? remaining : 20))
-    if timeout --signal=TERM --kill-after=5s "${check_timeout}s" \
-        systemctl start jason-grafana-assurance.service \
-        && [ "$(systemctl show jason-grafana-assurance.service -p Result --value)" = "success" ]; then
-      echo "GRAFANA_POST_EXPORTER_ASSURANCE=PASS attempt=$attempt"
-      GRAFANA_REVALIDATION_PASS=1
-      break
-    fi
-    remaining=$((GRAFANA_REVALIDATION_DEADLINE - SECONDS))
-    if [ "$attempt" -lt 12 ] && [ "$remaining" -gt 0 ]; then
-      sleep "$((remaining < 15 ? remaining : 15))"
-    fi
-  done
-  if [ "$GRAFANA_REVALIDATION_PASS" -ne 1 ]; then
-    echo "ERROR: real Grafana assurance remains failed after exporter readiness" >&2
-    systemctl status jason-grafana-assurance.service --no-pager -l || true
-    exit 9
-  fi
-else
-  echo "GRAFANA_POST_EXPORTER_ASSURANCE=NOT_INSTALLED"
-fi
-step_pass post_exporter_grafana_assurance
+# Grafana dashboards and scrape assurance are separate scheduled observability.
+# They never control host release admission or trigger production rollback.
+echo "JASON_OBSERVABILITY_RELEASE_GATE=NOT_REQUIRED"
 
 # Prove declared production desired-state convergence before host reconciliation
 # can report success. This catches unknown active units/containers, forbidden

@@ -499,20 +499,20 @@ def _authenticated_rollback_evidence(
                 or meta.get("release_id") != "release-" + candidate[:16]
                 or meta.get("manifest_sha256") != manifest_digest):
             return False
-        path = CCC_MATERIAL_REVIEW_ROOT / (
-            'material-review-' + candidate[:16] + '.json'
-        )
-        info = path.lstat()
-        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
-                or info.st_uid not in {0, _host_operator_uid()}
-                or info.st_mode & 0o002):
-            return False
-        review = json.loads(path.read_text(encoding='utf-8'))
+        # The separately signed Teams approval above is authoritative.
+        # The governed native scope review replaces a second CCC human
+        # material-review artifact. The production transaction independently
+        # requires the exact scope digest and protected freeze receipt.
+        scope = record.get("manual_scope_review") or {}
         return (
-            review.get('status') == 'approved'
-            and review.get('source_revision') == candidate
-            and review.get('mobile_approval_id') == receipt_id
-            and review.get('release_manifest_sha256') == manifest_digest
+            isinstance(scope, dict)
+            and scope.get("schema_version") == "1.0"
+            and scope.get("candidate_sha") == candidate
+            and scope.get("baseline_sha") == rollback
+            and re.fullmatch(r"[0-9a-f]{64}", str(scope.get("scope_sha256") or ""))
+                is not None
+            and isinstance(scope.get("included_prs"), list)
+            and isinstance(scope.get("included_commits"), list)
         )
     except (OSError, ValueError, TypeError, sqlite3.Error):
         return False
