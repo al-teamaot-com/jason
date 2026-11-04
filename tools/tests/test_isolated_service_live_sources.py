@@ -115,3 +115,46 @@ def test_dependency_shadow_reports_actual_declared_overlap(tmp_path):
     result=shadow.run_one("dependency_conflict",repo=repo,state_root=out,input_path=p,now=NOW)
     assert result["status"]=="conflict"
     assert result["conflicts"][0]["reasons"]==["components"]
+
+
+def test_independent_real_processes_preserve_failure_isolation(tmp_path):
+    import subprocess
+    import sys
+    repo=tmp_path/"repo";repo.mkdir()
+    state=tmp_path/"state"
+    provider=tmp_path/"canary.json"
+    provider.write_text(json.dumps({"generated_at":datetime.now(timezone.utc).isoformat(),
+        "results":[{"provider":"it_glue","healthy":False}]}))
+    todo=tmp_path/"todo.json"
+    todo.write_text(json.dumps({"updated_at":datetime.now(timezone.utc).isoformat(),
+        "items":{"TODO-1":{"phase":"waiting_operational_acceptance","reason":"verify"}}}))
+    entry=Path(__file__).resolve().parents[1]/"isolated_service_shadow.py"
+    base=[sys.executable,str(entry),"--repo",str(repo),"--state-root",str(state)]
+    broken=subprocess.run(base+["--service","provider_health_monitor","--provider-source",str(provider)],capture_output=True,text=True,timeout=10,check=False)
+    good=subprocess.run(base+["--service","work_reconciliation","--todo-source",str(todo)],capture_output=True,text=True,timeout=10,check=False)
+    assert broken.returncode==0  # Unhealthy observation is still a completed, honest read.
+    assert good.returncode==0
+    assert json.loads((state/"provider-health.json").read_text())["status"]=="unhealthy"
+    assert json.loads((state/"work-reconciliation.json").read_text())["status"]=="work_available"
+    assert provider.read_text()==json.dumps({"generated_at":json.loads(provider.read_text())["generated_at"],"results":[{"provider":"it_glue","healthy":False}]})
+    assert len(list(state.glob("*.json")))==2
+
+
+def test_independent_worker_runs_are_idempotent_and_do_not_claim_todos(tmp_path):
+    import subprocess
+    import sys
+    repo=tmp_path/"repo";repo.mkdir();state=tmp_path/"state"
+    todo=tmp_path/"todo.json"
+    todo.write_text(json.dumps({"updated_at":datetime.now(timezone.utc).isoformat(),
+        "items":{"TODO-X":{"phase":"waiting_development_start","reason":"worker record missing"}}}))
+    entry=Path(__file__).resolve().parents[1]/"isolated_service_shadow.py"
+    command=[sys.executable,str(entry),"--service","work_reconciliation","--repo",str(repo),"--state-root",str(state),"--todo-source",str(todo)]
+    outputs=[]
+    for _ in range(2):
+        assert subprocess.run(command,capture_output=True,timeout=10,check=False).returncode==0
+        outputs.append(json.loads((state/"work-reconciliation.json").read_text()))
+    assert outputs[0]["counts"]==outputs[1]["counts"]
+    assert outputs[0]["source_sha256"]==outputs[1]["source_sha256"]
+    assert todo.read_text()==json.dumps({"updated_at":json.loads(todo.read_text())["updated_at"],
+        "items":{"TODO-X":{"phase":"waiting_development_start","reason":"worker record missing"}}})
+    assert len(list(state.glob("*.json")))==1

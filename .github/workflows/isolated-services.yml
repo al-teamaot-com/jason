@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m venv .isolated-ci-venv
-          .isolated-ci-venv/bin/python -m pip install pytest pytest-subtests
+          .isolated-ci-venv/bin/python -m pip install pytest pytest-subtests cryptography
 
       - name: Validate isolated services and adjacent contracts
         shell: bash
