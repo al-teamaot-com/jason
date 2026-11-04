@@ -17,6 +17,15 @@ APPROVED_IDENTITIES = (
 FINGERPRINT = "b" * 64
 
 
+@pytest.fixture(autouse=True)
+def isolated_governed_ledger(monkeypatch, tmp_path):
+    # The CI runner must never use the host's protected production ledger.
+    monkeypatch.setenv("JASON_GOVERNED_EXECUTION_DB", str(tmp_path / "governed-exec.sqlite3"))
+    server._governed_execution_ledger.cache_clear()
+    yield
+    server._governed_execution_ledger.cache_clear()
+
+
 def setup_reviewed(monkeypatch, uid, name, **overrides):
     set_scope(monkeypatch)
     component = server.DattoApprovedComponent(
