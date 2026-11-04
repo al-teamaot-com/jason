@@ -282,3 +282,172 @@ def test_unknown_lkg_fails_closed_and_does_not_start_train(tmp_path):
     assert state['status'] == 'release_locked'
     assert state['release_lock']['reason'] == 'verified_production_revision_unknown'
     assert api.merges == []
+
+
+def test_protected_main_changed_during_active_train_quarantines_source(tmp_path):
+    """An unrelated merge cannot silently join a previously selected train."""
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    write_approved(spool, 2)
+    write_lkg(release, '0' * 40)
+    spool.mkdir(parents=True, exist_ok=True)
+    state_path = spool / 'pmv3-integration-queue-state.json'
+    state_path.write_text(json.dumps({
+        **queue.empty_state(),
+        'status': 'integrating',
+        'train': {
+            'train_id': 'train-from-verified-main',
+            'base_main_sha': '0' * 40,
+            'prs': [
+                {'pr_number': 1, 'state': 'merged', 'merge_sha': '1' * 40},
+                {'pr_number': 2, 'state': 'queued', 'head_sha': 'b' * 40},
+            ],
+            'merged': [1], 'skipped': [],
+        },
+    }))
+    api = FakeApi(main_sha='7' * 40, prs=[pr(2, 'b' * 40)])
+    state = queue.reconcile(api=api, spool=spool, release_state=release)
+    assert api.merges == []
+    assert state['train'] is None
+    assert state['status'] == 'release_locked'
+    assert state['release_lock']['reason'] == 'unattributed_protected_main_movement'
+    assert state['release_lock']['candidate_sha'] == '7' * 40
+    assert state['last_action']['expected_main_sha'] == '1' * 40
+    assert queue.load_state(state_path)['release_lock'] == state['release_lock']
+    assert any(status == 'pending' for _, status, _ in api.gates)
+
+
+def test_recovery_pr_cannot_hide_change_to_locked_source_baseline(tmp_path):
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    write_approved(spool, 9)
+    write_lkg(release, '1' * 40)
+    state_path = spool / 'pmv3-integration-queue-state.json'
+    spool.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps({
+        **queue.empty_state(),
+        'release_lock': {'active': True, 'candidate_sha': '2' * 40},
+    }))
+    recovery = pr(9, '9' * 40, labels=[queue.RECOVERY_LABEL])
+    api = FakeApi(main_sha='7' * 40, prs=[recovery])
+    first = queue.reconcile(
+        api=api, spool=spool, release_state=release, state_path=state_path,
+    )
+    assert first['release_lock']['reason'] == 'unattributed_protected_main_movement'
+    assert first['last_action']['expected_main_sha'] == '2' * 40
+    assert api.merges == []
+    second = queue.reconcile(
+        api=api, spool=spool, release_state=release, state_path=state_path,
+    )
+    assert second['status'] == 'release_locked'
+    assert second['last_action']['action'] == 'awaiting_exact_source_reconciliation'
+    assert api.merges == []
+
+
+def test_selected_pr_does_not_merge_when_main_moves_during_cycle(tmp_path):
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    write_approved(spool, 1)
+    base = '0' * 40
+    write_lkg(release, base)
+
+    class MovingMain(FakeApi):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.lookups = 0
+
+        def main_sha(self):
+            self.lookups += 1
+            if self.lookups == 2:
+                self._main = '7' * 40
+            return self._main
+
+    api = MovingMain(main_sha=base, prs=[pr(1, 'a' * 40)])
+    state = queue.reconcile(api=api, spool=spool, release_state=release)
+    assert state['status'] == 'release_locked'
+    assert state['release_lock']['reason'] == 'unattributed_protected_main_movement'
+    assert state['last_action']['expected_main_sha'] == base
+    assert api.merges == []
+    assert not any(status == 'success' for _, status, _ in api.gates)
+
+
+def test_recovery_pr_does_not_merge_when_main_moves_during_cycle(tmp_path):
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    write_approved(spool, 9)
+    write_lkg(release, '1' * 40)
+    spool.mkdir(parents=True, exist_ok=True)
+    state_path = spool / 'pmv3-integration-queue-state.json'
+    state_path.write_text(json.dumps({
+        **queue.empty_state(),
+        'release_lock': {'active': True, 'candidate_sha': '2' * 40},
+    }))
+
+    class MovingMain(FakeApi):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.lookups = 0
+
+        def main_sha(self):
+            self.lookups += 1
+            if self.lookups == 2:
+                self._main = '7' * 40
+            return self._main
+
+    api = MovingMain(
+        main_sha='2' * 40,
+        prs=[pr(9, '9' * 40, labels=[queue.RECOVERY_LABEL])],
+    )
+    state = queue.reconcile(
+        api=api, spool=spool, release_state=release, state_path=state_path,
+    )
+    assert state['status'] == 'release_locked'
+    assert state['last_action']['expected_main_sha'] == '2' * 40
+    assert api.merges == []
+    assert not any(status == 'success' for _, status, _ in api.gates)
+
+
+def test_unattributed_main_hold_is_durable_even_if_status_api_fails(tmp_path):
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    write_approved(spool, 1)
+    write_lkg(release, '1' * 40)
+    spool.mkdir(parents=True, exist_ok=True)
+    state_path = spool / 'pmv3-integration-queue-state.json'
+    state_path.write_text(json.dumps({
+        **queue.empty_state(),
+        'release_lock': {'active': True, 'candidate_sha': '2' * 40},
+    }))
+
+    class FailingStatus(FakeApi):
+        def set_gate(self, sha, state, description):
+            raise RuntimeError('simulated GitHub status write failure')
+
+    api = FailingStatus(main_sha='7' * 40, prs=[pr(1, 'a' * 40)])
+    with pytest.raises(RuntimeError, match='status write failure'):
+        queue.reconcile(
+            api=api, spool=spool, release_state=release, state_path=state_path,
+        )
+    checkpoint = queue.load_state(state_path)
+    assert checkpoint['status'] == 'release_locked'
+    assert checkpoint['release_lock']['candidate_sha'] == '7' * 40
+    assert checkpoint['release_lock']['reason'] == 'unattributed_protected_main_movement'
+    assert checkpoint['last_action']['expected_main_sha'] == '2' * 40
+    assert api.merges == []
+
+
+def test_corrupt_release_train_merged_receipt_fails_closed(tmp_path):
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    write_lkg(release, '0' * 40)
+    spool.mkdir(parents=True, exist_ok=True)
+    state_path = spool / 'pmv3-integration-queue-state.json'
+    state_path.write_text(json.dumps({
+        **queue.empty_state(),
+        'train': {
+            'train_id': 'invalid-pr-receipt',
+            'base_main_sha': '0' * 40,
+            'prs': [{'pr_number': 1, 'state': 'merged', 'merge_sha': ''}],
+            'merged': [1], 'skipped': [],
+        },
+    }))
+    api = FakeApi(main_sha='0' * 40, prs=[])
+    with pytest.raises(ValueError, match='exact commit receipt'):
+        queue.reconcile(
+            api=api, spool=spool, release_state=release, state_path=state_path,
+        )
+    assert api.merges == []
