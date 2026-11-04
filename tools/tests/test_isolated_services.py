@@ -87,3 +87,24 @@ def test_work_reconciler_surfaces_merge_and_acceptance_as_actionable():
     ]}
     result = work.reconcile(source)
     assert result["counts"]["actionable"] == 2
+
+dependency = load("dependency_conflict_service")
+baseline = load("source_baseline_monitor_service")
+rollback = load("rollback_readiness_service")
+acceptance = load("operational_acceptance_service")
+
+def test_dependency_conflict_detects_shared_component():
+    result=dependency.analyze([{"id":"A","components":["release"]},{"id":"B","components":["release"]}])
+    assert result["status"]=="conflict"
+
+def test_dependency_conflict_allows_independent_work():
+    result=dependency.analyze([{"id":"A","components":["docs"]},{"id":"B","components":["kfs"]}])
+    assert result["status"]=="clear"
+
+def test_rollback_readiness_requires_complete_verified_manifest():
+    assert rollback.evaluate({"rollback_sha":"a","runtime_image":"r","mcp_image":"m","host_release":"h","verified":True})["status"]=="ready"
+    assert rollback.evaluate({"rollback_sha":"a","verified":True})["status"]=="not_ready"
+
+def test_operational_acceptance_requires_all_checks():
+    assert acceptance.evaluate([{"name":"smoke","status":"pass"},{"name":"health","status":"healthy"}])["status"]=="accepted"
+    assert acceptance.evaluate([{"name":"smoke","status":"fail"}])["status"]=="failed"

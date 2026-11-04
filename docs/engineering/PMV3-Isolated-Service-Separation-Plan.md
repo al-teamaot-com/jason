@@ -35,3 +35,25 @@ A later separately reviewed change may allow PMV3 to consume only these service 
 - work reconciliation next-action classification.
 
 PMV3 must never infer production approval from any service record. Exact-SHA owner authorization, production transaction locking, rollback identity, drift detection, and post-deployment acceptance remain PMV3 controls.
+
+## Second service slice
+
+| Service | Owns | Does not own |
+|---|---|---|
+| Dependency/Conflict Analysis | Detect file/component/contract/provider/schema/deployment overlap and explicit dependencies | Serialize releases, approve work, merge |
+| Source Baseline Monitor | Compare an expected immutable source SHA with an observed protected ref | Change refs, lock GitHub, merge |
+| Rollback Readiness | Validate that a complete, already-verified rollback manifest is present | Construct or execute rollback, weaken rollback requirements |
+| Operational Acceptance | Aggregate explicit post-change checks into accepted/pending/failed | Deploy, authorize production, manufacture missing evidence |
+
+These services further shrink the intended PMV3 core without changing it yet. They are deterministic classifiers/aggregators, not controllers. They cannot turn missing evidence into authority and cannot perform a provider or production mutation.
+
+## Current migration direction
+
+1. Preserve current PMV3 production-safety controls while service separation is proven.
+2. Pause new PMV3 controller/gate/lock complexity unless required to protect an existing production safety boundary.
+3. Build and test isolated services against fixtures and existing state formats.
+4. Add real read-only adapters and independent service supervision.
+5. Introduce one shared authoritative ledger contract.
+6. Migrate one responsibility at a time out of PMV3 with comparison/shadow evidence.
+7. Remove superseded PMV3 logic only after equivalent service behavior is verified.
+8. Keep exact-SHA owner approval, single production transaction, verified rollback, drift detection, deployment, and post-deployment verification in the PMV3 core.
