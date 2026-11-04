@@ -22,7 +22,8 @@
     "tools/rollback_readiness_service.py",
     "tools/operational_acceptance_service.py",
     "tools/pmv3_worker_release_gate.py",
-    "tools/ticket_continuity_evidence_review.py"
+    "tools/ticket_continuity_evidence_review.py",
+    "tools/independent_governed_lane.py"
   ],
   "unit_sources": [
     "infrastructure/isolated-services/jason-isolated-shadow@.service",
@@ -84,5 +85,25 @@
     "does_not_modify_existing_workers": true,
     "native_invocation": "reconcile_production_host_services.sh isolated_provider_shadow_disabled_stage",
     "rollback_planner_compatible_with_lkg": true
+  },
+  "independent_engineering_lane_guard": {
+    "status": "source_only_not_installed",
+    "helper": "tools/independent_governed_lane.py",
+    "serialized_lanes": [
+      "support",
+      "todo-intake",
+      "development"
+    ],
+    "independent_read_only_lane": [
+      "supervisor"
+    ],
+    "support_receipt_max_age_seconds": 600,
+    "holds_production_transaction_shared_lock_for_full_worker_run": true,
+    "worker_runtime_sources_remain_native_and_governed": true,
+    "does_not_grant_provider_or_ticket_write_authority": true,
+    "requires_ticket_continuity_release_gate": true,
+    "does_not_enable_or_replace_existing_workers": true,
+    "requires_loaded_legacy_systemd_inactive_condition": true,
+    "old_controller_guard_path": "/home/al/.config/systemd/user/jason-support-repair-worker.service.d/owner-pause.conf"
   }
 }

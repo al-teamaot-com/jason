@@ -282,3 +282,27 @@ No production staging has occurred by merely merging this source; deployment
 still requires the full protected-main release-scope review, explicit Owner
 exact-SHA authorization, native rollback checks and ticket-continuity
 verification. Enabling timers is explicitly outside Stage A.
+
+### Source-only engineering-lane admission safety
+
+`tools/independent_governed_lane.py` protects the future support, TODO-intake,
+development, and supervisor services against the earlier monolithic pipeline's
+support-first dependency and single production-transaction requirements.
+The three write-capable engineering lanes use one local nonblocking lock and
+fresh exact-source support receipt, avoiding duplicate concurrent claims while
+preserving each timer's own failure domain. The independent supervisor remains
+unblocked by unrelated worker work. The actual native worker binaries must
+match the pinned managed source, and the wrapper holds the existing
+production-transaction shared lock for the **entire** worker execution.
+Source-only tests exercise missing support, stale/failed support, source drift,
+existing production transactions, concurrent lane locks, and identity
+checks. The helper is not installed; it is not a production workaround for
+unresolved `BLOCKED_SCOPE`, and it does not confer new ticket or provider
+write permission.
+
+A later gated start also requires the **loaded legacy controller systemd
+state** `ActiveState=inactive` and `ConditionResult=no` and the exact persisted
+Owner pause drop-in directive. The presence of a pause receipt alone is not
+sufficient: if native reconciliation removes the drop-in, if systemd sees the
+old controller as active, or if either proof is unavailable, every proposed
+new engineering lane fails closed before executing a native worker.

@@ -69,3 +69,18 @@ def test_native_provider_shadow_stage_is_allowlisted_and_dormant():
         assert filename not in native['required_system_units']
         assert (ROOT/'infrastructure/openclaw-operations/systemd'/filename).is_file()
     assert (ROOT/'tools/stage_isolated_provider_shadow_units.py').is_file()
+
+
+def test_source_only_independent_lanes_use_bounded_guard_not_direct_runners():
+    manifest=json.loads((UNITS/'installation-manifest.json').read_text())
+    guard=manifest['independent_engineering_lane_guard']
+    assert guard['status']=='source_only_not_installed'
+    assert guard['holds_production_transaction_shared_lock_for_full_worker_run'] is True
+    assert guard['requires_ticket_continuity_release_gate'] is True
+    assert guard['requires_loaded_legacy_systemd_inactive_condition'] is True
+    for lane in ('support','todo-intake','development','supervisor'):
+        unit=(UNITS/f'jason-independent-{lane}.service').read_text()
+        assert 'ConditionPathExists=/home/al/.local/lib/jason/independent_governed_lane.py' in unit
+        assert f'ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/independent_governed_lane.py --lane {lane}' in unit
+        assert 'ExecCondition=/usr/bin/python3 /home/al/.local/lib/jason/pmv3_worker_release_gate.py' in unit
+        assert 'ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/support_repair_host_worker.py' not in unit

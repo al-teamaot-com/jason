@@ -12,6 +12,8 @@ on:
       - "tools/ci/isolated_service_preproduction_lab.py"
       - "tools/ticket_continuity_evidence_review.py"
       - "tools/stage_isolated_provider_shadow_units.py"
+      - "tools/independent_governed_lane.py"
+      - "tools/tests/test_independent_governed_lane.py"
       - "tools/tests/test_stage_isolated_provider_shadow_units.py"
       - "infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.service"
       - "infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.timer"
@@ -67,9 +69,9 @@ jobs:
             tools/tests/test_owner_approved_development_worker.py \
             tools/tests/test_support_repair_host_worker.py \
             tools/tests/test_install_support_repair_host_worker.py \
-            tools/tests/test_isolated_service_units.py \
             tools/tests/test_ticket_continuity_evidence_review.py \
             tools/tests/test_stage_isolated_provider_shadow_units.py \
+            tools/tests/test_independent_governed_lane.py \
             tools/tests/test_reconcile_managed_unit_delta.py \
             tools/tests/test_reconcile_production_host_services.py \
             tools/tests/test_release_host_reconciler_contract.py
@@ -98,7 +100,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m compileall -q tools/stage_isolated_provider_shadow_units.py \
+          python3 -m compileall -q tools/independent_governed_lane.py \
+            tools/stage_isolated_provider_shadow_units.py \
             tools/isolated_service_live_sources.py \
             tools/isolated_service_shadow.py \
             tools/isolated_service_ledger.py \

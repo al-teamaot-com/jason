@@ -83,3 +83,38 @@ No source-only commit installs these units; they can only be staged upon
 independently approved exact-SHA production release and do not self-activate.
 Future service activation or native engineering-worker cutover is a separate,
 explicitly authorized release phase and must pass the ticket-continuity gate.
+
+## Independent engineering lanes — governed support-first handoff
+
+The four source-only engineering-lane timer definitions now invoke
+`tools/independent_governed_lane.py`, a small admission/worker wrapper rather
+than calling the native write-capable worker scripts directly. The wrapper
+**does not** create a new work queue, approval mechanism, or provider API.
+Support, TODO intake, and development share a nonblocking local engineering
+lease, so they cannot concurrently claim the same approved work while moving
+out of the old sequential pipeline. TODO intake and development require a
+recent successful support-worker receipt **from the same exact source SHA**;
+missing, failed, future or stale receipts defer those lanes and are recorded.
+The independent, read-only supervisor is not serialized behind support work.
+
+Each native worker execution also retains a shared lock on the existing
+production transaction file for its full duration, preventing the old
+release/worker race that a one-time `ExecCondition` check alone could miss.
+This guard reuses the installed managed source and checks exact bytes against
+the currently managed native worker before invocation. Worker failures are
+recorded as local degraded outcomes, not silently reported as successful work.
+The existing native worker still owns approved claims and all provider
+permission checks; no extra ticket or provider writes are granted.
+
+The wrapper and all independent engineering units remain **source-only**.
+No new engineering timer is installed/enabled by Stage A. Any later cutover
+requires complete source installation under the native release, exact-SHA
+Owner authorization, ticket-continuity proof and independently verified
+rollback. Do not replace or resume the old engineering loop merely because
+this guard passes unit tests.
+
+The admission wrapper double-checks that the old PMV3 engineering service has
+an Owner-approved systemd no-start drop-in **and** that systemd's actually
+loaded `ActiveState=inactive` / `ConditionResult=no` is observed before any
+new engineering worker is admitted. A stale pause file alone is insufficient;
+this prevents hidden duplicate controllers after native reconciliation.
