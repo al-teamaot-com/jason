@@ -55,3 +55,32 @@ Notable ticket processing/authorization overlaps requiring explicit source-level
 Branch-target concerns include #778, #804, #806, #811, #1555, #2122, #2129 and #2138: their bases differ from protected `main`, so their changes must not be silently reinterpreted as already integrated or approved. Draft status and `mergeable=true` are not substitutes for required reviews and release acceptance.
 
 A status/metadata review does **not** resolve the four dirty worktrees. In particular, `todo-607-approval-resume` has an unresolved merge in the ticket autonomy runtime. No automatic stash, abort, reset, prune, merge, or acknowledgment was performed. Native `BLOCKED_SCOPE` remains authoritative until complete source-level reconciliation and explicit review receipts exist.
+
+## Native host-installer cutover dependency (verified read-only)
+
+The current native `tools/reconcile_production_host_services.sh` calls
+`install_support_repair_host_worker.py --activate`, requires the
+`jason-support-repair-worker.timer` to be active, and verifies exact worker
+source equality against the managed production revision. The current
+`config/production-desired-state.json` permits/requires the monolithic
+support-worker units, not the proposed independent lanes.
+`tools/reconcile_managed_unit_delta.py` recognizes canonical user unit sources
+under `infrastructure/openclaw-operations/systemd/user` and
+`infrastructure/showcase/systemd/user`, not yet
+`infrastructure/isolated-services`; its automatic removal bound is eight
+units. Therefore **source-only unit definitions do not imply that the native
+release can install or roll them back**. Installing new timers manually or
+replacing the monolithic worker without a reviewed native host-manifest
+migration risks competing job claims, source drift and ticket/support
+processing interruption.
+
+A required separately reviewed staged design must first prove the native
+source-policy/installer contract for new units with **all new timers disabled**,
+without reactivating the old monolithic engineering loop during the Owner
+pause. Then prove a nonmutating shadow/readback stage and rollback coverage
+for each added unit. Only after an independent ticket-continuity gate and
+one-writer handoff may any support/development lane be activated. Unit
+rollback cardinality must remain within the native eight-unit bound or be
+split into sequential, individually reversible releases. The protected-main
+scope lock, owner exact-SHA authorization and root desired-state protections
+are not waived by this architecture note.
