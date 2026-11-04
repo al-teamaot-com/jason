@@ -76,3 +76,23 @@ These authorized native changes are separate from Jason runtime deployment. PMv3
 ## Branch reconciliation — 2026-11-04
 
 The candidate at `3a58c57211625aa7e51f306dc2532b6ab6bd6cfa` passed the authority/runtime/security tests but failed the concurrent integration check because it was behind current main. Reconcile the branch with main `d4e15a01f7a2ac996948f220c738244bb5a6ae14`, preserving all intervening PMv3.1 changes exactly. No PM files belong to the note-authority diff. Re-run CI on the resulting exact branch revision; prior passing results are not acceptance of the reconciled revision.
+
+## Controlled native acceptance evidence — 2026-11-04
+
+Native Autotask workflow tests were executed as the authenticated Al Davis administrator on **XYZ Test Company**, ticket **T20261030.0042** (ID `143421`), using its established owner-controlled test contact. The ticket had a populated contact, issue/subissue and work type; it was temporarily reopened from Complete to In Progress in Help Desk I (queue `29682833`), with empty CW_TicketID and Email source. The older T20260925.0051 fixture was inspected but not modified because it was closed in Jason queue and did not meet the rule scope.
+
+| Case | Provider evidence | Result |
+|---|---|---|
+| Internal note | `30537361`, title `JASON-NOTIFY-20261104-INTERNAL`, `noteType=3`, `publish=2`, created 20:54:05.143Z | No workflow notification followed the internal note. Independent notification history had no new sent record during the internal-only observation window before the public note at 20:55:06.047Z. Later readback also showed no internal-note notification. |
+| Public note | `30537364`, title `JASON-NOTIFY-20261104-PUBLIC`, `publish=1`, created 20:55:06.047Z; rule-fired note `30537366` and notification note `30537367` | Rule 59 fired at 20:55:25.870Z; notification history recorded Ticket - Update ticket notification 12082024 sent to the owner-controlled test contact at 20:55:33.470Z. |
+| Time entry | Time entry `15309`, summary marker `JASON-NOTIFY-20261104-TIME`; rule-fired note `30537369`, notification note `30537370` | Rule 17 fired at 20:56:17.537Z; notification history recorded the expected test-contact notification at 20:56:20.567Z, linked to time entry 15309. UI readback confirmed 0.0833 hours (five minutes of actual verification), **Non-Billable**, not posted, with Show on invoice unchecked. |
+
+Reopening generated a public reason note `30537357` and its own expected rule-59 notification at 20:52:29.307Z; that pre-baseline event is not evidence of an internal-note failure. The final notification-history read showed only the reopen/public/time-entry records for the acceptance period. Do not interpret a notification-history sent timestamp as proof of delivery into the recipient's mailbox.
+
+Notification history now works with `company_id=1158`, `ticket_id=143421`, and bounded `page_size`; this supersedes the earlier invocation-failure blocker for these exact reads. Time-entry search returned `CAPABILITY_INVOCATION_FAILED` (correlation `corr_mcp_7ab7b99d0c284e3883d4cfacf9b9436e`), so time-entry state was verified through the authenticated native UI and independent notification history, without redispatching the entry.
+
+**Fixture restoration verified:** ticket readback returned `status=5` (Complete), original queue `29682833`, and original resolution `Acknowledged, closing`. No real customer ticket or endpoint was modified. Test notes and the non-billable test time entry remain as audit evidence.
+
+**Remaining release boundary:** these are native Autotask workflow tests, not Jason end-to-end authorization acceptance. Live discovery still reports `service.ticket.note.create` denied for the authenticated Jason caller. No production profile/grant was enabled, no provider permissions were expanded, and no Jason release was deployed. Governed staging activation, two real staff identity/provider-mapping tests, audit/idempotency acceptance, current production-health evidence and a verified immutable rollback target are still required before presenting an exact-revision production authorization package. The unavailable public-note Teams destination remains a separate unresolved integration dependency.
+
+Reconciled engineering revision `f081bf600726836368a5df64e22ed27da82bd2c8` was mergeable and passed all eight GitHub Actions workflows. This evidence-only documentation commit requires its own current checks; it does not alter the four code/test blobs. PMv3.1 files and runtime were not changed by this work.
