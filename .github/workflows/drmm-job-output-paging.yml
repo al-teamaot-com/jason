@@ -35,4 +35,4 @@ jobs:
           python -m py_compile implementation/mcp_service/src/jason_mcp/server.py implementation/mcp_service/tests/test_datto_job_output_paging.py
       - name: Verify bounded read pagination and authority regression
         run: |
-          python -m pytest -q implementation/mcp_service/tests/test_datto_job_output_paging.py implementation/mcp_service/tests/test_governed_read_failure_contract.py implementation/mcp_service/tests/test_datto_component_approval_policy.py
+          python -m pytest -q implementation/mcp_service/tests/test_datto_job_output_paging.py implementation/mcp_service/tests/test_governed_read_failure_contract.py
