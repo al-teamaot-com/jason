@@ -54,3 +54,18 @@ def test_ticket_continuity_preflight_cannot_mint_native_approval():
     assert rules['native_provider_reverification_mandatory'] is True
     assert rules['automation_can_mint_approval'] is False
     assert (ROOT/rules['evidence_preflight_source']).is_file()
+
+
+def test_native_provider_shadow_stage_is_allowlisted_and_dormant():
+    native=json.loads((ROOT/'config/production-desired-state.json').read_text())
+    manifest=json.loads((UNITS/'installation-manifest.json').read_text())
+    stage=manifest['staged_native_provider_shadow']
+    assert stage['deployment_phase']=='stage_disabled_only'
+    assert stage['allows_service_or_timer_activation'] is False
+    assert stage['rollback_planner_compatible_with_lkg'] is True
+    assert stage['rollback_bound_increment']==2
+    for filename in ('jason-isolated-provider-health.service','jason-isolated-provider-health.timer'):
+        assert filename in native['allowed_system_units']
+        assert filename not in native['required_system_units']
+        assert (ROOT/'infrastructure/openclaw-operations/systemd'/filename).is_file()
+    assert (ROOT/'tools/stage_isolated_provider_shadow_units.py').is_file()

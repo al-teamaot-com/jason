@@ -718,6 +718,16 @@ run_as_al /usr/bin/python3 "$RELEASE_DIR/tools/install_release_manager.py" \
   --approval-units-only --activate
 step_pass held_approval_user_unit_install
 
+# Stage one isolated read-only provider-health worker and its timer as
+# release-owned, DISABLED system units. They are allowed (not required) by the
+# exact candidate desired state. Never activate, restart, or replace ticket
+# processing here. The existing LKG unit-delta planner can remove the exact
+# two candidate-only unit files on rollback.
+step_start isolated_provider_shadow_disabled_stage
+/usr/bin/python3 "$RELEASE_DIR/tools/stage_isolated_provider_shadow_units.py" \
+  --release-dir "$RELEASE_DIR" --expected-sha "$SOURCE_REVISION"
+step_pass isolated_provider_shadow_disabled_stage
+
 # PM V2 shadow is release-owned and may only be activated when the exact
 # candidate desired-state policy declares it. The first protected-core
 # bootstrap release intentionally defers this unit so the currently installed

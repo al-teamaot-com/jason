@@ -54,3 +54,32 @@ Do not copy these units or gate manually onto the Jason production host.
 ## Ticket-processing continuity is a deployment NO-GO
 
 The independent worker lanes must remain disabled until the release's `ticket_continuity_release_gate` has fresh, governed evidence for ticket intake, Autotask queue routing, notes, device association, claims/retries, alert-ticket handling, and notifications. Require controlled test-ticket read/write verification, no duplicate ticket actions, and two independent post-cutover observations. Do not shut down the existing ticket runtime, bypass existing authorization, or treat read-only success as proof of ticket lifecycle functionality. Any missing, stale, or failed receipt stops the cutover and invokes the authorized rollback path.
+
+## Native Stage A: disabled provider-health shadow (release-owned)
+
+The first deployable preparation slice is two **system** units under the
+previously recognized, LKG-compatible canonical source path:
+
+- `infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.service`
+- `infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.timer`
+
+Both are **allowed but not required** by `config/production-desired-state.json`.
+`tools/reconcile_production_host_services.sh` invokes the fixed-path root
+`tools/stage_isolated_provider_shadow_units.py` inside the exact-SHA native
+release transaction. The stager refuses an enabled, active, modified or
+symlinked unit; validates all companion sources and the explicit disabled
+inventory; copies exactly those two identical files atomically into the
+canonical systemd directory; reloads the daemon; and verifies both remain
+inactive/disabled. It never enables, starts, stops, or restarts a service.
+The new service is read-only, advisory-only, runs as `al` with reduced
+privileges, and reads the existing provider-canary snapshot without calling
+providers or modifying the Autotask ticket processing path.
+
+**Rollback:** The prior LKG `reconcile_managed_unit_delta.py` already
+recognizes this source directory and can remove the two byte-matching
+candidate-only units before rollback; two is below the native eight-unit
+removal limit. The disposable test suite exercises the actual LKG planner.
+No source-only commit installs these units; they can only be staged upon
+independently approved exact-SHA production release and do not self-activate.
+Future service activation or native engineering-worker cutover is a separate,
+explicitly authorized release phase and must pass the ticket-continuity gate.

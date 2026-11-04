@@ -11,6 +11,12 @@ on:
       - "infrastructure/isolated-services/**"
       - "tools/ci/isolated_service_preproduction_lab.py"
       - "tools/ticket_continuity_evidence_review.py"
+      - "tools/stage_isolated_provider_shadow_units.py"
+      - "tools/tests/test_stage_isolated_provider_shadow_units.py"
+      - "infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.service"
+      - "infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.timer"
+      - "config/production-desired-state.json"
+      - "tools/reconcile_production_host_services.sh"
       - "tools/tests/test_ticket_continuity_evidence_review.py"
       - ".github/workflows/isolated-services.yml"
   workflow_dispatch:
@@ -62,7 +68,11 @@ jobs:
             tools/tests/test_support_repair_host_worker.py \
             tools/tests/test_install_support_repair_host_worker.py \
             tools/tests/test_isolated_service_units.py \
-            tools/tests/test_ticket_continuity_evidence_review.py
+            tools/tests/test_ticket_continuity_evidence_review.py \
+            tools/tests/test_stage_isolated_provider_shadow_units.py \
+            tools/tests/test_reconcile_managed_unit_delta.py \
+            tools/tests/test_reconcile_production_host_services.py \
+            tools/tests/test_release_host_reconciler_contract.py
 
       - name: Two-cycle disposable isolated-services preproduction proof
         shell: bash
@@ -78,13 +88,18 @@ jobs:
           set -euo pipefail
           test ! -e /opt/jason/current
           test ! -e /var/lib/jason/openclaw
-          systemd-analyze verify infrastructure/isolated-services/*.service infrastructure/isolated-services/*.timer
+          systemd-analyze verify \
+            infrastructure/isolated-services/*.service \
+            infrastructure/isolated-services/*.timer \
+            infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.service \
+            infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.timer
 
       - name: Compile and validate source hygiene
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m compileall -q tools/isolated_service_live_sources.py \
+          python3 -m compileall -q tools/stage_isolated_provider_shadow_units.py \
+            tools/isolated_service_live_sources.py \
             tools/isolated_service_shadow.py \
             tools/isolated_service_ledger.py \
             tools/isolated_service_supervisor.py

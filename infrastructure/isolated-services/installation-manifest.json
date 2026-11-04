@@ -68,5 +68,21 @@
     "preflight_positive_result": "evidence_review_required (not approval)",
     "native_provider_reverification_mandatory": true,
     "automation_can_mint_approval": false
+  },
+  "staged_native_provider_shadow": {
+    "deployment_phase": "stage_disabled_only",
+    "unit_sources": [
+      "infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.service",
+      "infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.timer"
+    ],
+    "desired_policy": "allowed_system_units_only_not_required",
+    "native_stager": "tools/stage_isolated_provider_shadow_units.py",
+    "requires_production_exact_sha_authorization": true,
+    "allows_service_or_timer_activation": false,
+    "source_code_path": "/opt/jason/current/tools/isolated_service_shadow.py",
+    "rollback_bound_increment": 2,
+    "does_not_modify_existing_workers": true,
+    "native_invocation": "reconcile_production_host_services.sh isolated_provider_shadow_disabled_stage",
+    "rollback_planner_compatible_with_lkg": true
   }
 }

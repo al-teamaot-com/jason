@@ -84,3 +84,16 @@ rollback cardinality must remain within the native eight-unit bound or be
 split into sequential, individually reversible releases. The protected-main
 scope lock, owner exact-SHA authorization and root desired-state protections
 are not waived by this architecture note.
+
+## Stage A root-installer integration prepared, not deployed
+
+The service-separation branch now includes a narrowly scoped root-owned
+staging helper and exact two-unit disabled provider-health service/timer
+under the native LKG-recognized systemd source directory. The desired-state
+policy lists the units only as allowed. The native reconciliation shell
+invokes the helper within the exact-SHA release transaction, never outside it.
+The code contains explicit no-activation and rollback compatibility tests.
+This does **not** satisfy the unresolved 78-commit/40-PR/four-worktree
+production scope gate or constitute a license to activate the service.
+Subsequent independent engineering lanes will need separate admission and
+ticket-continuity acceptance rather than being bulk-enabled.

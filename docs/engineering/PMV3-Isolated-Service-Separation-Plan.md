@@ -261,3 +261,24 @@ The tool never writes tickets or providers, moves queues, or changes production
 release state. There is no synthetic acceptance or installation path in this
 branch; ticket cutover remains prohibited until the native authority approves
 its exact SHA and validates the ticket continuity proof.
+
+### Native Stage A implementation: disabled provider-health only
+
+Source-only staging is now implemented in
+`tools/stage_isolated_provider_shadow_units.py`, called exclusively from the
+native root `reconcile_production_host_services.sh` while processing an
+immutable exact-SHA approved production candidate. Two canonical **system**
+unit files (`jason-isolated-provider-health.service` and `.timer`) are staged
+as disabled, permitted-but-not-required units. This does **not** launch
+provider health probes, touch ticket intake or activate any independent
+engineering lane. The stage fails closed for unexpected existing unit bytes,
+symlinked/active/enabled units, absent sources, invalid policy/manifest or
+source revision mismatch. The LKG-compatible candidate-only unit delta
+planner can remove exactly these two files on rollback. The first-stage
+container/ticket runtime remains unchanged and the original engineering owner
+pause remains in force until a later admitted, verified lane handoff.
+
+No production staging has occurred by merely merging this source; deployment
+still requires the full protected-main release-scope review, explicit Owner
+exact-SHA authorization, native rollback checks and ticket-continuity
+verification. Enabling timers is explicitly outside Stage A.
