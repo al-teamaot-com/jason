@@ -3744,7 +3744,7 @@ def _is_reviewed_aot_passive_diagnostic(
     variables: object,
 ) -> bool:
     return (
-        approval_mode == DATTO_APPROVAL_MODE_STANDING_SAFE
+        approval_mode == "standing_safe"
         and getattr(selected_component, "approval_source", None) == "durable_registry"
         and bool(getattr(selected_component, "metadata_fingerprint", None))
         and (

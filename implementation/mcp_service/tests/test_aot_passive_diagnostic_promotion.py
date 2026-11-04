@@ -3,8 +3,6 @@
 These tests do not reach Datto. The mock authority and orchestrator intentionally
 track whether a request would dispatch without per-run approval.
 """
-from dataclasses import replace
-
 import pytest
 
 from jason_mcp import server
@@ -30,7 +28,7 @@ def setup_reviewed(monkeypatch, uid, name, **overrides):
     )
     monkeypatch.setattr(server, "configured_datto_components", lambda: (component,))
     monkeypatch.setattr(server, "_active_datto_execution_components", lambda: (component,))
-    monkeypatch.setattr(server, "_resolve_live_datto_component_name", lambda requested: (uid, name))
+    monkeypatch.setattr(server, "_resolve_live_datto_component_uid", lambda requested: (uid, name))
     monkeypatch.setattr(server, "_resolve_live_datto_component_record",
                         lambda requested: {"resource_id": uid, "name": name})
     monkeypatch.setattr(server, "component_metadata_fingerprint",
