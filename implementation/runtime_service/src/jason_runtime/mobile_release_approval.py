@@ -588,8 +588,9 @@ class MobileReleaseApprovalFlow:
             "status": "completed", "approval_id": approval_id,
             "approval_status": accepted.status, "executed": False,
             "reply": {"text": (
-                "Approval recorded. Exact release and CCC evidence awaits independent verification; "
-                "Jason has not deployed this change."
+                "Approval recorded. Jason will now perform the required automated independent "
+                "release and CCC verification. No second human verifier is required. "
+                "Deployment remains pending until those governed checks pass."
                 if accepted.status == "approved"
                 else "Denied. Neither production release nor CCC approval was granted."
             )},
