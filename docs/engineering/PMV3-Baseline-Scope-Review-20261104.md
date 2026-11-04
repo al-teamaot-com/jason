@@ -45,3 +45,13 @@ The four unreviewed dirty worktrees:
 ## Authority limits
 
 Project Jason's production freeze, protected-main gate, single production transaction, root readback and breaker, immutable LKG rollback, human exact-SHA authorization, and non-disruptive-endpoint rules remain mandatory. No separate service currently has production authority. No deployment or permission expansion is recorded by this document.
+
+## Follow-up metadata-only review of overlapping open PRs
+
+All 40 PR numbers identified by the native impact scanner were looked up using the live GitHub PR metadata API. They remained **open and unmerged** at that inspection. Some were draft; others had unresolved mergeability. Several target intermediate feature branches instead of `main`; therefore a source list alone does not establish that they are eligible for a protected-main integration. This inspection verifies **identity and status only**, not patch correctness, safe concurrency, or a release-scope acknowledgment.
+
+Notable ticket processing/authorization overlaps requiring explicit source-level review include #775 (autonomous ticket admission and worker reliability), #855/#1022 (VulScan follow-up and customer notification behavior), #1110 (playbook approval resume), #1177/#1311 (notification checkpoint behavior), #2125/#2128 (governed routine Autotask/IT Glue write integration), and #2158 (mandatory Autotask pre/post canary and release safety). Release orchestration overlaps include #1112, #2153, #2156, #2279, and #2299. Other open PRs cover portability, metadata and provider reads, Windows Time pilot, KFS, and engineering TODOs. These are illustrative risk groups; **all 40** must be accounted for by the authoritative native review.
+
+Branch-target concerns include #778, #804, #806, #811, #1555, #2122, #2129 and #2138: their bases differ from protected `main`, so their changes must not be silently reinterpreted as already integrated or approved. Draft status and `mergeable=true` are not substitutes for required reviews and release acceptance.
+
+A status/metadata review does **not** resolve the four dirty worktrees. In particular, `todo-607-approval-resume` has an unresolved merge in the ticket autonomy runtime. No automatic stash, abort, reset, prune, merge, or acknowledgment was performed. Native `BLOCKED_SCOPE` remains authoritative until complete source-level reconciliation and explicit review receipts exist.
