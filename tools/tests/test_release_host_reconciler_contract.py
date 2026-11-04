@@ -835,6 +835,14 @@ def test_current_lkg_rollback_during_signed_inflight_release_is_exact_and_bounde
             'approved': True, 'candidate_sha': candidate,
             'source': 'authenticated_mobile_teams_owner:' + approval_id,
         },
+        'manual_scope_review': {
+            'schema_version': '1.0',
+            'candidate_sha': candidate,
+            'baseline_sha': old,
+            'scope_sha256': '1' * 64,
+            'included_prs': [],
+            'included_commits': [],
+        },
         'last_known_good_manifest': {'revision': old, 'complete': True},
         'pre_mutation_health': {'revision': old, 'passed': True},
     }
@@ -894,19 +902,14 @@ def test_current_lkg_rollback_during_signed_inflight_release_is_exact_and_bounde
             release.write_text(json.dumps(altered))
             assert not w._exact_signed_inflight_lkg_rollback_authorized(old,lkg,breaker)
             release.write_text(json.dumps(record))
-            # Receipt or CCC drift cannot be explained away by a mutable
-            # release record: both are required to match the exact manifest.
-            review.write_text(json.dumps({
-                'status':'approved', 'source_revision':candidate,
-                'mobile_approval_id':approval_id,
-                'release_manifest_sha256':'0' * 64,
-            }))
+            # Native scope drift cannot impersonate the signed Teams approval.
+            altered = dict(record)
+            altered['manual_scope_review'] = dict(
+                record['manual_scope_review'], candidate_sha='b' * 40
+            )
+            release.write_text(json.dumps(altered))
             assert not w._exact_signed_inflight_lkg_rollback_authorized(old,lkg,breaker)
-            review.write_text(json.dumps({
-                'status':'approved', 'source_revision':candidate,
-                'mobile_approval_id':approval_id,
-                'release_manifest_sha256':digest,
-            }))
+            release.write_text(json.dumps(record))
             con = sqlite3.connect(approval_db)
             con.execute('UPDATE approval_requests SET payload=? WHERE approval_id=?',
                         (json.dumps(dict(approved_receipt, status='denied')), approval_id))

@@ -614,26 +614,16 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     release_id=release_id,
                     candidate_sha=SHA_A,
                 )
-            review = json.loads(review_path.read_text(encoding="utf-8"))
-            named = json.loads(
-                (ccc_root / ("material-review-" + SHA_A[:16] + ".json")).read_text(
-                    encoding="utf-8"
-                )
+            # The single Owner approval remains bound to the native reviewed
+            # scope without minting a duplicate CCC human approval.
+            self.assertFalse(review_path.exists())
+            self.assertFalse(
+                (ccc_root / ("material-review-" + SHA_A[:16] + ".json")).exists()
             )
-            self.assertEqual(review["status"], "approved")
-            self.assertEqual(review["source_revision"], SHA_A)
-            self.assertEqual(review["recorded_by"], "person-al")
-            self.assertEqual(review["scope_sha256"], scope_sha)
-            self.assertEqual(review["release_id"], release_id)
-            self.assertEqual(named, review)
-            self.assertEqual(
-                approved["owner_material_review"]["scope_sha256"],
-                scope_sha,
-            )
-            self.assertEqual(
-                approved["history"][-1]["gate"],
-                "owner_approval_materialized_as_ccc_review",
-            )
+            self.assertTrue(approved["owner_approval"]["approved"])
+            self.assertEqual(approved["owner_approval"]["candidate_sha"], SHA_A)
+            self.assertEqual(approved["manual_scope_review"]["scope_sha256"], scope_sha)
+            self.assertEqual(approved["history"][-1]["gate"], "owner_approval_recorded")
             save_record.assert_called_once_with(state_root, record)
 
     def test_protected_core_approval_refuses_to_create_human_authority_without_scope(self):
@@ -664,7 +654,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(
                 runner.ReleaseManagerError,
-                "requires exact recorded scope review",
+                "manual release blocked: full change/parallel-work review is missing",
             ):
                 runner.approve_release(
                     ROOT,
@@ -2780,18 +2770,20 @@ def test_ccc_gate_execution_requires_fresh_report_and_matching_process_result(tm
             runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
 
 
-def test_ccc_precedes_mutation_and_postflight_precedes_closed_release():
+def test_single_native_release_checks_preserve_mutation_rollback_order():
     import inspect
     source = inspect.getsource(runner._deploy_production_locked)
-    assert source.index('ccc_preflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production")')
-    # The current controller marks the attempt *before* invoking the helper so
-    # rollback also covers a helper that partially mutates and then fails.
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('runtime_attempted = True')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('mcp_attempted = True')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('host_result = request_host_reconcile(')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('manager_result = install_release_manager_from_current(')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production_verified")')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
+    assert source.index('record["native_pre_mutation_gate"] = native_preflight') < source.index('gate_transition(repo, state_root, record, "production")')
+    # Native postflight retains the same rollback boundary and validates smoke,
+    # exact runtime/MCP images, protected drift and a complete host manifest.
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('runtime_attempted = True')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('mcp_attempted = True')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('host_result = request_host_reconcile(')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('manager_result = install_release_manager_from_current(')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') < source.index('gate_transition(repo, state_root, record, "production_verified")')
+    assert 'ccc_preflight = run_release_ccc_gate(' not in source
+    assert 'ccc_postflight = run_release_ccc_gate(' not in source
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
 
 
 def test_post_verification_publication_is_not_a_rollback_gate():
