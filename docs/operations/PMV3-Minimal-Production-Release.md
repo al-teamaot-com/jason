@@ -12,7 +12,7 @@ This document replaces the retired duplicate CCC operational instructions. It is
 
 ## Removed complexity
 
-The PMv3.1 release path no longer runs a separate CCC certification preflight/postflight or creates a duplicate CCC material-review approval. It relies on the existing native source, scope, identity, preproduction, production-health, drift, and rollback gates. Historical CCC implementation and documents remain recoverable in Git history.
+The PMv3.1 release path no longer runs separate CCC certification preflight/postflight or creates duplicate CCC material-review approval. Grafana assurance and dashboard installation are independent monitoring operations, not required release admission or rollback decisions. PR documentation-impact declarations and strict site-build warnings are not production gates; essential architecture and release facts remain in canonical Git documentation. Provider identity recovery still verifies runtime/MCP health and actual provider canaries. The native SHA, scope, approval, preproduction, protected drift, and rollback gates remain mandatory. Historical CCC documents and code remain recoverable through Git history.
 
 ## Stop conditions
 

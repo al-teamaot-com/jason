@@ -198,7 +198,7 @@ def atomic_release_sandbox(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "run_functional_smoke_tests",
                         lambda sha: {"passed": True, "verified_at": "2026-10-18T13:50:00+00:00"})
     monkeypatch.setattr(runner, "production_drift_evidence",
-                        lambda *a: {"problems": [], "observed_at": "2026-10-18T13:50:00+00:00"})
+                        lambda *a: {"status": "pass", "problems": [], "observed_at": "2026-10-18T13:50:00+00:00"})
     monkeypatch.setattr(runner, "declared_quickbooks_read_profile", lambda *a: None)
     monkeypatch.setattr(runner, "live_quickbooks_read_profile",
                         lambda *a: sorted(runner.QUICKBOOKS_READ_PROFILES)[0])

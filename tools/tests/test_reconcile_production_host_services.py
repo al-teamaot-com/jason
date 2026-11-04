@@ -176,7 +176,7 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert text.index('AUTHORITY_HANDOFF="$RELEASE_DIR/tools/') < text.index('timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"')
     assert '45s systemctl start "$unit"' not in text
     assert 'HOST_RECONCILE_FAILURE step=' in text
-    assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
+    assert 'JASON_OBSERVABILITY_RELEASE_GATE=NOT_REQUIRED' in text
 
 
 def test_rollback_unit_delta_is_checked_before_immutable_host_revision_switch() -> None:
@@ -299,17 +299,14 @@ def test_control_panel_exporter_is_reconciled_on_dedicated_port() -> None:
     assert "/home/al/projects/jason" not in unit
 
 
-def test_observability_reconciliation_is_conditional_and_managed() -> None:
+def test_observability_is_not_a_release_blocker() -> None:
     text = RECONCILE.read_text(encoding="utf-8")
-    assert 'OBSERVABILITY_CURRENT_LINK="/opt/jason/observability/current"' in text
-    assert 'OBSERVABILITY_PREVIOUS_REVISION' in text
-    assert 'git -C "$REPO_ROOT" diff --quiet' in text
-    assert 'infrastructure/showcase' in text
-    assert 'config/observability/grafana-dashboard-manifest.json' in text
-    assert 'JASON_REPO_ROOT="$ENGINEERING_SOURCE_REPO" /usr/bin/bash "$OBSERVABILITY_INSTALLER" "$SOURCE_REVISION"' in text
-    assert 'JASON_OBSERVABILITY_RECONCILIATION=PASS' in text
-    assert 'JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED' in text
-    assert 'observability release did not converge to production revision' in text
+    assert 'JASON_OBSERVABILITY_RELEASE_GATE=NOT_REQUIRED' in text
+    assert 'systemctl start jason-grafana-assurance.service' not in text
+    assert 'install_observability_assurance.sh' not in text
+    assert 'step_start production_drift_guard' in text
+    assert 'JASON_RECOVERY_NATIVE_HEALTH=PASS' in text
+    assert 'install_ccc_scheduler.sh' not in text
 
 
 def test_unmanaged_toner_exporter_is_removed_during_production_reconciliation() -> None:
