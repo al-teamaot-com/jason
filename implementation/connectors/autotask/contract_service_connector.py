@@ -63,7 +63,7 @@ class DormantScopedContractServicesReadConnector(AutotaskConnector):
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
         context = request.context
         if (context.capability not in self.capabilities
-                or context.mode not in ("observe", "read")
+                or context.mode != "observe"
                 or context.organization_id != "aot"
                 or context.client_id is not None
                 or not str(context.principal_id).strip()):

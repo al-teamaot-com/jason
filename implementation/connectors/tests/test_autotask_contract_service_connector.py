@@ -183,6 +183,7 @@ def test_unrecognized_or_bad_selectors_stop_before_network(args):
 @pytest.mark.parametrize("override", [
     {"organization_id": "another-tenant"},
     {"mode": "execute"},
+    {"mode": "read"},
     {"principal_id": ""},
     {"capability": "autotask.entity.query"},
 ])
