@@ -2125,6 +2125,66 @@ def require_host_reconciler_ready(state_root: Path) -> None:
         )
 
 
+
+def ensure_managed_host_source_revision(
+    source_revision: str,
+    *,
+    managed_repo: Path = Path("/home/al/.local/lib/jason/engineering-source-repo"),
+) -> None:
+    """Make the unprivileged Git mirror ready before the root reconcile request.
+
+    Root host reconciliation is deliberately offline. The managed mirror may
+    lag protected main even though this release has been built and approved.
+    Read first so LKG rollback never depends on network; fetch only when the
+    exact source commit and its origin/main ancestry are absent.
+    """
+    revision = exact_sha(source_revision, "source_revision")
+    if managed_repo.is_symlink() or not managed_repo.is_dir():
+        raise ReleaseManagerError("managed root host source repository is unavailable")
+    prefix = ["git", "-c", f"safe.directory={managed_repo}", "-C", str(managed_repo)]
+
+    def local_ready() -> bool:
+        for argv in (
+            ["cat-file", "-e", f"{revision}^{{commit}}"],
+            ["merge-base", "--is-ancestor", revision, "origin/main"],
+        ):
+            try:
+                check = subprocess.run(
+                    prefix + argv, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, check=False, timeout=20,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return False
+            if check.returncode != 0:
+                return False
+        return True
+
+    if local_ready():
+        return
+    try:
+        remote = subprocess.run(
+            prefix + ["remote", "get-url", "origin"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=15,
+        )
+        if (remote.returncode != 0 or
+                remote.stdout.strip() != "https://github.com/al-teamaot-com/jason.git"):
+            raise ReleaseManagerError("managed host source remote is not authoritative")
+        refreshed = subprocess.run(
+            prefix + ["fetch", "--no-tags", "origin",
+                      "refs/heads/main:refs/remotes/origin/main"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseManagerError("managed host source mirror refresh unavailable") from exc
+    if refreshed.returncode != 0 or not local_ready():
+        raise ReleaseManagerError(
+            "managed host source mirror lacks the exact candidate after refresh"
+        )
+
+
+
 def request_host_reconcile(
     state_root: Path,
     source_revision: str,
@@ -2137,6 +2197,8 @@ def request_host_reconcile(
     # an unbounded wait; never count a late result as an accepted release.
     source_revision = exact_sha(source_revision, "source_revision")
     require_host_reconciler_ready(state_root)
+    # Never enqueue a root request until its immutable source is available.
+    ensure_managed_host_source_revision(source_revision)
     request_id = "release-" + source_revision[:12] + "-" + uuid4().hex[:12]
     root = state_root / "host-reconcile"
     request_path = root / "requests" / f"{request_id}.json"
