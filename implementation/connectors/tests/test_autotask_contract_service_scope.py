@@ -121,3 +121,26 @@ def test_no_provider_or_credential_facilities_in_pure_scope_guard():
         "UrlLibJsonHttpTransport", "OpenBaoSecretResolver", "requests",
         "execute", "api_key", "secret",
     ))
+
+@pytest.mark.parametrize("bad_parent", [
+    {"id": True, "companyID": 32},
+    {"id": 101, "companyID": True},
+])
+def test_parent_type_confusion_must_fail_closed(bad_parent):
+    with pytest.raises(PermissionError):
+        plan(verified_parent_contract=bad_parent)
+    with pytest.raises(PermissionError):
+        page(verified_parent_contract=bad_parent)
+
+
+def test_duplicate_provider_field_definitions_fail_closed():
+    with pytest.raises(PermissionError, match="FIELD_SCHEMA_AMBIGUOUS"):
+        plan(provider_fields=FIELDS + [dict(FIELDS[1])])
+
+@pytest.mark.parametrize("bad_row", [
+    {"id": 1, "contractID": True},
+    {"id": 1, "contractID": 101, "companyID": True},
+])
+def test_bool_type_confusion_in_child_row_rejected(bad_row):
+    with pytest.raises(PermissionError):
+        page(items=[bad_row])

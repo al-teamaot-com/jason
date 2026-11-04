@@ -40,7 +40,9 @@ def scoped_contract_service_query(
         raise PermissionError("AUTOTASK_CONTRACT_SERVICE_PAGE_LIMIT")
     if not isinstance(verified_parent_contract, Mapping):
         raise PermissionError("AUTOTASK_CONTRACT_SERVICE_PARENT_UNVERIFIED")
-    if (verified_parent_contract.get("id") != contract
+    if (type(verified_parent_contract.get("id")) is not int
+            or type(verified_parent_contract.get("companyID")) is not int
+            or verified_parent_contract.get("id") != contract
             or verified_parent_contract.get("companyID") != company):
         raise PermissionError("AUTOTASK_CONTRACT_SERVICE_PARENT_SCOPE_MISMATCH")
     info = provider_info.get("info", provider_info)
@@ -52,6 +54,8 @@ def scoped_contract_service_query(
             or any(not isinstance(f, Mapping) for f in provider_fields)):
         raise PermissionError("AUTOTASK_CONTRACT_SERVICE_FIELDS_UNVERIFIED")
     fields = {str(f.get("name")): f for f in provider_fields}
+    if len(fields) != len(provider_fields):
+        raise PermissionError("AUTOTASK_CONTRACT_SERVICE_FIELD_SCHEMA_AMBIGUOUS")
     if not all(fields.get(n, {}).get("isQueryable") is True
                for n in ("id", "contractID")):
         raise PermissionError("AUTOTASK_CONTRACT_SERVICE_SCOPE_FIELD_UNVERIFIED")
@@ -79,6 +83,8 @@ def verify_contract_service_page(
     contract = _id(exact_contract_id, label="ID")
     company = _id(expected_company_id, label="COMPANY")
     if (not isinstance(verified_parent_contract, Mapping)
+            or type(verified_parent_contract.get("id")) is not int
+            or type(verified_parent_contract.get("companyID")) is not int
             or verified_parent_contract.get("id") != contract
             or verified_parent_contract.get("companyID") != company):
         raise PermissionError("AUTOTASK_CONTRACT_SERVICE_PARENT_SCOPE_MISMATCH")
@@ -92,9 +98,11 @@ def verify_contract_service_page(
     for row in items:
         record_id = row.get("id")
         if (type(record_id) is not int or record_id < 1
-                or record_id in seen or row.get("contractID") != contract):
+                or record_id in seen or type(row.get("contractID")) is not int
+                or row.get("contractID") != contract):
             raise PermissionError("AUTOTASK_CONTRACT_SERVICE_ROW_SCOPE_MISMATCH")
-        if ("companyID" in row and row["companyID"] != company):
+        if ("companyID" in row and
+                (type(row["companyID"]) is not int or row["companyID"] != company)):
             raise PermissionError("AUTOTASK_CONTRACT_SERVICE_ROW_COMPANY_MISMATCH")
         seen.add(record_id)
         verified.append(dict(row))
