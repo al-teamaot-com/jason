@@ -112,6 +112,18 @@ def test_rollback_refuses_other_image_revision_and_never_invokes_deploy(tmp_path
     assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
 
 
+def test_rollback_denies_missing_immutable_provider_read_policy(tmp_path):
+    script, env = _deployment_harness(tmp_path, actual_image_rev=LKG)
+    (script.parents[2] / "config" / "autotask-entity-read-profile.json").unlink()
+    completed = subprocess.run(
+        ["bash", str(script), "--preflight"],
+        env=env, capture_output=True, text=True,
+    )
+    assert completed.returncode == 2
+    assert "immutable Autotask read/rollback profile absent" in completed.stderr
+    assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
+
+
 def test_regular_deployment_cannot_use_rollback_manifest_exception(tmp_path):
     script, env = _deployment_harness(tmp_path, actual_image_rev=LKG)
     env["JASON_RUNTIME_PRODUCTION_IMAGE"] = "jason-runtime:production"
