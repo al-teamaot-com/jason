@@ -57,3 +57,12 @@ These services further shrink the intended PMV3 core without changing it yet. Th
 6. Migrate one responsibility at a time out of PMV3 with comparison/shadow evidence.
 7. Remove superseded PMV3 logic only after equivalent service behavior is verified.
 8. Keep exact-SHA owner approval, single production transaction, verified rollback, drift detection, deployment, and post-deployment verification in the PMV3 core.
+
+## Shared ledger and supervision
+
+The isolated services now have a source-defined ledger contract (`config/isolated-services.json`) and two additional components:
+
+- `isolated_service_ledger.py` produces a digest-bound view of service-owned state files and their freshness. It does not grant authority or execute work.
+- `isolated_service_supervisor.py` classifies service health. Optional service failures are warnings/degradation, not global PMV3 blockers. Only services explicitly marked `required` may create a supervisor-level block due to missing/stale evidence.
+
+All initial services are deliberately configured `required: false` while the architecture is source-only and under shadow validation. Promotion of any service to `required` is a later migration decision tied to the responsibility being removed from PMV3.

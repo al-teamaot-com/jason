@@ -108,3 +108,25 @@ def test_rollback_readiness_requires_complete_verified_manifest():
 def test_operational_acceptance_requires_all_checks():
     assert acceptance.evaluate([{"name":"smoke","status":"pass"},{"name":"health","status":"healthy"}])["status"]=="accepted"
     assert acceptance.evaluate([{"name":"smoke","status":"fail"}])["status"]=="failed"
+
+ledger = load("isolated_service_ledger")
+supervisor = load("isolated_service_supervisor")
+
+def test_ledger_marks_optional_missing_without_blocking(tmp_path):
+    cfg={"services":[{"name":"docs","state_file":"docs.json","max_age_seconds":60,"required":False}]}
+    result=ledger.build(cfg,tmp_path,now=NOW)
+    assert result["status"]=="available"
+    assert result["entries"][0]["freshness"]=="missing"
+
+def test_ledger_required_missing_is_degraded(tmp_path):
+    cfg={"services":[{"name":"critical","state_file":"critical.json","max_age_seconds":60,"required":True}]}
+    assert ledger.build(cfg,tmp_path,now=NOW)["status"]=="degraded"
+
+def test_supervisor_does_not_turn_optional_service_failure_into_global_block():
+    result=supervisor.classify({"entries":[{"name":"docs","required":False,"freshness":"fresh","service_status":"attention"}]})
+    assert result["status"]=="degraded"
+    assert result["problems"]==[]
+
+def test_supervisor_blocks_only_required_missing_or_stale_service():
+    result=supervisor.classify({"entries":[{"name":"critical","required":True,"freshness":"stale","service_status":"healthy"}]})
+    assert result["status"]=="blocked"
