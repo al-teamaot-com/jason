@@ -63,3 +63,17 @@ post-canonicalization passive diagnostic exemption. It must be reconciled and
 retested after any of those PRs merge; the current main baseline is not
 permission to overwrite another workstream. Isolated preproduction CI exercises
 the three no-approval cases and fail-closed scenarios using a temporary ledger.
+
+## Verified preproduction regression evidence
+
+At commit b0174f6ed8c533bf856116c7eaed692e0774c474 the targeted
+standing-safe CI suite passed 12 tests: three distinct approved-component
+execution scenarios plus refusal cases for wrong UID/name, missing/stale
+Owner classification and variable-bearing requests. SEC-007 security regressions,
+MCP capability discovery, gateway, routine runtime and other source checks
+also passed. Full repository hygiene initially refused active shared-file
+overlaps and was addressed using the required plain-text
+`Integration coordination: #2304 #2158 #2125 #2128` PR metadata line.
+This evidence proves behavior on an isolated mock Central Orchestrator only.
+No production deployment, exact merge candidate, or live no-approval
+acceptance is implied.
