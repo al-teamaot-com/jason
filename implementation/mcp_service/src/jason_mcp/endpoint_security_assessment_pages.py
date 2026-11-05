@@ -41,14 +41,26 @@ def project_finding_page(
     if (type(page_index) is not int or page_index < 0 or
         type(page_size) is not int or not 1 <= page_size <= _MAX_PAGE):
         raise FindingPageError("PAGE_BOUND_INVALID")
-    data = output.get("data") if isinstance(output, Mapping) else None
-    if not isinstance(data, Mapping):
+    envelope = output.get("data") if isinstance(output, Mapping) else None
+    if not isinstance(envelope, Mapping):
         raise FindingPageError("DATTO_NORMALIZED_OUTPUT_UNAVAILABLE")
-    if any(data.get(key) != val for key,val in (
-        ("resource_id",job_uid), ("device_uid",device_uid),
-        ("component_uid",component_uid),("stream","stdout"),
-    )):
+    # Central Orchestrator's provider-neutral output is commonly wrapped as
+    # data.provider_data. The governed-read API presents a flattened view.
+    # Support both and reject contradictions if both layers bind selectors.
+    data = envelope.get("provider_data")
+    if not isinstance(data, Mapping):
+        data = envelope
+    selectors = (
+        ("resource_id", job_uid), ("device_uid", device_uid),
+        ("component_uid", component_uid), ("stream", "stdout"),
+    )
+    if any(data.get(key) != val for key, val in selectors):
         raise FindingPageError("DATTO_JOB_OUTPUT_SELECTOR_MISMATCH")
+    if data is not envelope and any(
+        key in envelope and envelope[key] != val
+        for key, val in selectors
+    ):
+        raise FindingPageError("DATTO_OUTPUT_ENVELOPE_SELECTOR_CONFLICT")
     if data.get("output_bounded") is True or data.get("match_count") != 1:
         raise FindingPageError("PROVIDER_OUTPUT_INCOMPLETE")
     outputs = data.get("outputs")

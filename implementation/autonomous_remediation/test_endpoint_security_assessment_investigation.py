@@ -25,27 +25,29 @@ PROBE_JOB = "authoritative-readonly-probe-job"
 
 def probe_output(finding, *, valid=True):
     if finding.name == HUNT.name:
-        record = dict(name=HUNT.name, source="service",
-                      executable=HUNT.path,
-                      service_display_name="Datto EDR Agent",
-                      service_state="Running", service_start_mode="Auto",
-                      service_command=HUNT.path + " --service",
-                      signature_status="Valid" if valid else "NotSigned",
-                      signer_subject='CN="Datto, LLC", O="Datto, LLC"')
+        identity = dict(Name=HUNT.name, DisplayName="Datto EDR Agent",
+                        State="Running", StartMode="Auto",
+                        PathName=HUNT.path + " --service")
+        path = HUNT.path
+        signer = 'CN="Datto, LLC", O="Datto, LLC"'
     elif finding.name in (LENOVO_A.name, LENOVO_B.name):
-        record = dict(name=finding.name, source="scheduled_task",
-                      executable=finding.path,
-                      task_path=r"\Lenovo\Vantage\Schedule\\"
-                      if finding.name == LENOVO_A.name else r"\Lenovo\\",
-                      arguments="" if finding.name == LENOVO_A.name
-                      else f'"{LENOVO_B.name}"',
-                      signature_status="Valid" if valid else "NotSigned",
-                      signer_subject="CN=Lenovo, O=Lenovo, C=US")
+        identity = dict(TaskName=finding.name,
+                        TaskPath=r"\Lenovo\Vantage\Schedule\\"
+                        if finding.name == LENOVO_A.name else r"\Lenovo\\",
+                        executable=finding.path,
+                        arguments="" if finding.name == LENOVO_A.name
+                        else f'"{LENOVO_B.name}"')
+        path = finding.path
+        signer = "CN=Lenovo, O=Lenovo, C=US"
     else:
         raise ValueError("unsupported fixture")
+    signature = dict(Path=path,
+                     signature_status="Valid" if valid else "NotSigned",
+                     signer_subject=signer)
     return ("Run Ad-Hoc PowerShell Command\n"
             "=======================================\n"
-            "AOT_REVIEW_JSON:"+json.dumps(record,separators=(",",":"))+"\n"
+            + json.dumps(identity, separators=(",", ":")) + "\n"
+            + json.dumps(signature, separators=(",", ":")) + "\n"
             "- Command run.\n  The exit code was 0.\n")
 
 
@@ -168,3 +170,27 @@ def test_denied_or_failing_probe_fails_closed_without_retry(tmp_path):
     assert port.probe_dispatches==1
     with pytest.raises(AssessmentGovernanceError):
         inv.poll_probe(req(),device_uid=DEVICE,finding=HUNT)
+
+
+
+@pytest.mark.parametrize("finding", [HUNT, LENOVO_A, LENOVO_B])
+def test_real_datto_readonly_classifier_permits_exact_static_recipes(finding):
+    from connectors.datto_rmm.readonly_powershell import ReadOnlyPowerShellClassifier
+    from .endpoint_security_assessment_investigation import _RECIPES
+    command = _RECIPES[finding.name][1]
+    result = ReadOnlyPowerShellClassifier.classify(command)
+    assert result.allowed_as_read_only, (finding.name, result.reasons)
+    assert not result.active_probe
+    assert not result.sensitive
+    assert "$t=" not in command
+    assert "Write-Output" not in command
+
+
+def test_signature_must_match_exact_task_action_executable():
+    raw = probe_output(LENOVO_A).replace(
+        '"Path":"'+LENOVO_A.path.replace(chr(92), chr(92)*2)+'"',
+        '"Path":"C:\\\\Users\\\\Public\\\\unrelated.exe"'
+    )
+    with pytest.raises(AssessmentProviderError, match="SIGNATURE_TARGET_MISMATCH"):
+        normalize_investigation_output(
+            expected_finding=LENOVO_A, stdout=raw, stderr="", job_uid=PROBE_JOB)

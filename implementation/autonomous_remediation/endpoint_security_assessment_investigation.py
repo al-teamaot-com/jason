@@ -26,6 +26,18 @@ _OUTPUT_COMPONENT = "8a1c153c-feee-41c5-9c9b-58a48e0214fe"
 _MAX_EVIDENCE_SIZE = 5000
 
 
+def _signature_json_pipe() -> str:
+    # Only read-only commands, no variable assignments, Write-Output, method
+    # invocation, scripts-on-disk or dynamic shell. This string is used only
+    # for known signed publisher evidence selected from fixed allowlisted names.
+    return (
+        "Select-Object Path,"
+        "@{Name='signature_status';Expression={[string]$_.Status}},"
+        "@{Name='signer_subject';Expression={[string]$_.SignerCertificate.Subject}}"
+        " | ConvertTo-Json -Compress"
+    )
+
+
 def _build_task_probe(task_name: str) -> str:
     # Called with exact literals from _RECIPES, never user input.
     if task_name not in {
@@ -33,31 +45,36 @@ def _build_task_probe(task_name: str) -> str:
         "LenovoMachineFixUser_OOBE_AUTO_Notification",
     }:
         raise ValueError("TASK_NOT_AN_APPROVED_INVESTIGATION_RECIPE")
-    return (
-        "$t=Get-ScheduledTask -TaskName '" + task_name + "' -ErrorAction Stop;"
-        "$a=$t.Actions|Select-Object -First 1;"
-        "$s=Get-AuthenticodeSignature -LiteralPath $a.Execute -ErrorAction Stop;"
-        "$o=[pscustomobject]@{name=$t.TaskName;source='scheduled_task';"
-        "task_path=$t.TaskPath;executable=$a.Execute;arguments=$a.Arguments;"
-        "signature_status=[string]$s.Status;"
-        "signer_subject=[string]$s.SignerCertificate.Subject};"
-        "Write-Output ('AOT_REVIEW_JSON:'+($o|ConvertTo-Json -Compress))"
+    task = "Get-ScheduledTask -TaskName '" + task_name + "' -ErrorAction Stop"
+    # Two short structured *read* outputs: task identity/action, then the
+    # Authenticode status of that exact action executable. All commands must
+    # pass DattoRmmReadOnlyPowerShellPolicy without changing its classifier.
+    task_json = (
+        task + " | Select-Object TaskName,TaskPath,"
+        "@{Name='executable';Expression={$_.Actions[0].Execute}},"
+        "@{Name='arguments';Expression={$_.Actions[0].Arguments}}"
+        " | ConvertTo-Json -Compress"
     )
+    signature_json = (
+        task + " | ForEach-Object {Get-AuthenticodeSignature "
+        "-FilePath $_.Actions[0].Execute -ErrorAction Stop | "
+        + _signature_json_pipe() + "}"
+    )
+    return task_json + ";" + signature_json
 
 
 def _build_hunt_probe() -> str:
-    return (
-        "$svc=Get-CimInstance Win32_Service -Filter \"Name='HUNTAgent'\" -ErrorAction Stop;"
-        "$expected='C:\\ProgramData\\CentraStage\\AEMAgent\\RMM.AdvancedThreatDetection\\agent.exe';"
-        "$s=Get-AuthenticodeSignature -LiteralPath $expected -ErrorAction Stop;"
-        "$o=[pscustomobject]@{name=$svc.Name;source='service';"
-        "service_display_name=$svc.DisplayName;service_state=$svc.State;"
-        "service_start_mode=$svc.StartMode;"
-        "executable=$expected;service_command=$svc.PathName;"
-        "signature_status=[string]$s.Status;"
-        "signer_subject=[string]$s.SignerCertificate.Subject};"
-        "Write-Output ('AOT_REVIEW_JSON:'+($o|ConvertTo-Json -Compress))"
+    service_json = (
+        "Get-CimInstance Win32_Service -Filter \"Name='HUNTAgent'\" "
+        "-ErrorAction Stop | Select-Object Name,DisplayName,State,StartMode,"
+        "PathName | ConvertTo-Json -Compress"
     )
+    signer_json = (
+        "Get-AuthenticodeSignature -FilePath "
+        "'C:\\ProgramData\\CentraStage\\AEMAgent\\RMM.AdvancedThreatDetection\\agent.exe' "
+        "-ErrorAction Stop | " + _signature_json_pipe()
+    )
+    return service_json + ";" + signer_json
 
 
 _RECIPES = {
@@ -90,46 +107,71 @@ def normalize_investigation_output(*, expected_finding: RawFinding,
         raise AssessmentProviderError("PROBE_OUTPUT_UNTRUSTED_OR_UNBOUNDED")
     if "The exit code was 0" not in stdout or "- Command run." not in stdout:
         raise AssessmentProviderError("PROBE_NOT_VERIFIED_COMPLETED")
-    records = [
-        line[len(_SENTINEL):].strip()
-        for line in stdout.splitlines()
-        if line.strip().startswith(_SENTINEL)
-    ]
-    if len(records) != 1:
+    records = []
+    for line in stdout.splitlines():
+        payload = line.strip()
+        if not payload.startswith("{"):
+            continue
+        if not payload.endswith("}"):
+            raise AssessmentProviderError("PROBE_JSON_TRUNCATED")
+        try:
+            item = json.loads(payload)
+        except (ValueError, TypeError) as exc:
+            raise AssessmentProviderError("EVIDENCE_JSON_INVALID") from exc
+        if not isinstance(item, Mapping):
+            raise AssessmentProviderError("EVIDENCE_NOT_STRUCTURED")
+        records.append(item)
+    if len(records) != 2:
         raise AssessmentProviderError("SIGNED_INVENTORY_EVIDENCE_MISSING_OR_DUPLICATED")
-    try:
-        v = json.loads(records[0])
-    except (ValueError, TypeError) as exc:
-        raise AssessmentProviderError("EVIDENCE_JSON_INVALID") from exc
-    if not isinstance(v, Mapping) or v.get("name") != expected_finding.name:
-        raise AssessmentProviderError("PROBE_IDENTITY_DOES_NOT_MATCH_FINDING")
-    kind = str(v.get("source") or "")
-    path = str(v.get("executable") or "")
-    signature = str(v.get("signature_status") or "")
-    signer = str(v.get("signer_subject") or "")
-    if not path or len(path) > 300 or len(signer) > 350:
+    identity, signed_file = records
+    # First object is the task/service read. Second is the independently
+    # queried signature of the same executable. Do not rely on friendly names.
+    path = str(identity.get("executable") or "")
+    if expected_finding.category.casefold() == "service":
+        kind = "service"
+        if identity.get("Name") != expected_finding.name:
+            raise AssessmentProviderError("PROBE_IDENTITY_DOES_NOT_MATCH_FINDING")
+        path = (
+            "C:\\ProgramData\\CentraStage\\AEMAgent\\"
+            "RMM.AdvancedThreatDetection\\agent.exe"
+        )
+        if not _expected_service_command(str(identity.get("PathName") or ""), path):
+            raise AssessmentProviderError("DATTO_SERVICE_COMMAND_CONFLICT")
+    elif expected_finding.category.casefold() == "scheduledtask":
+        kind = "scheduled_task"
+        if identity.get("TaskName") != expected_finding.name:
+            raise AssessmentProviderError("PROBE_IDENTITY_DOES_NOT_MATCH_FINDING")
+        if not path:
+            raise AssessmentProviderError("TASK_ACTION_PATH_MISSING")
+    else:
+        raise AssessmentProviderError("UNSUPPORTED_EVIDENCE_KIND")
+    signed_path = str(signed_file.get("Path") or "")
+    if not path or len(path) > 300 or (
+        signed_path.replace("/", "\\").casefold() !=
+        path.replace("/", "\\").casefold()
+    ):
+        raise AssessmentProviderError("SIGNATURE_TARGET_MISMATCH")
+    signature = str(signed_file.get("signature_status") or "")
+    signer = str(signed_file.get("signer_subject") or "")
+    if len(signer) > 350:
         raise AssessmentProviderError("PROBE_IDENTITY_OR_SIGNER_INVALID")
     if kind == "service":
-        if not _expected_service_command(str(v.get("service_command") or ""), path):
-            raise AssessmentProviderError("DATTO_SERVICE_COMMAND_CONFLICT")
         return EvidenceReview(
             name=expected_finding.name, source=kind, executable=path,
             signature_status=signature, signer_subject=signer,
-            service_display_name=str(v.get("service_display_name") or ""),
-            service_state=str(v.get("service_state") or ""),
-            service_start_mode=str(v.get("service_start_mode") or ""),
+            service_display_name=str(identity.get("DisplayName") or ""),
+            service_state=str(identity.get("State") or ""),
+            service_start_mode=str(identity.get("StartMode") or ""),
             arguments="--service",
             evidence_refs=(f"datto-rmm:job:{job_uid}",),
         )
-    if kind == "scheduled_task":
-        return EvidenceReview(
-            name=expected_finding.name, source=kind, executable=path,
-            signature_status=signature, signer_subject=signer,
-            task_path=str(v.get("task_path") or ""),
-            arguments=str(v.get("arguments") or ""),
-            evidence_refs=(f"datto-rmm:job:{job_uid}",),
-        )
-    raise AssessmentProviderError("UNSUPPORTED_EVIDENCE_KIND")
+    return EvidenceReview(
+        name=expected_finding.name, source=kind, executable=path,
+        signature_status=signature, signer_subject=signer,
+        task_path=str(identity.get("TaskPath") or ""),
+        arguments=str(identity.get("arguments") or ""),
+        evidence_refs=(f"datto-rmm:job:{job_uid}",),
+    )
 
 
 class ReadOnlyInvestigator:

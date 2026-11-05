@@ -61,6 +61,18 @@ def test_invalid_or_partial_provider_output_fails_closed(mod):
         page(x)
 
 
+def test_central_orchestrator_nested_provider_data_has_same_bound_findings():
+    inner = payload([HUNT, MAPS])["data"]
+    outer = {"data": {"provider_data": inner}}
+    result = page(outer)
+    assert result["total_findings"] == 2
+    assert [f["name"] for f in result["findings"]] == ["HUNTAgent", "MapS.bat"]
+    # A forged outer selector must never override the provider evidence.
+    outer["data"]["resource_id"] = "unrelated-job"
+    with pytest.raises(FindingPageError, match="ENVELOPE_SELECTOR_CONFLICT"):
+        page(outer)
+
+
 def test_omitted_finding_blocks_complete_report():
     x=payload([])
     x["data"]["outputs"][0]["text"]=output([],omitted=1)

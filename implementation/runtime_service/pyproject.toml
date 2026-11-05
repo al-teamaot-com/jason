@@ -12,7 +12,6 @@ dependencies = [
   "jason-openclaw-connector==0.1.0",
   "psycopg[binary]==3.1.17",
   "cryptography>=43,<47",
-  "reportlab>=4.2,<5",
 ]
 
 [project.scripts]
