@@ -418,6 +418,70 @@ def _release_lock(candidate_sha: str, train: Mapping[str, Any] | None, *, reason
     }
 
 
+def _expected_train_main(train: Mapping[str, Any]) -> str:
+    """Exact protected-main ancestry represented by durable, selected PRs.
+
+    A source merge outside the train must never silently join the production
+    candidate. This only accepts already-recorded merged PRs in train order;
+    an incomplete/corrupt receipt fails closed rather than guessing.
+    """
+    sha = str(train.get("base_main_sha") or "")
+    if len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
+        raise ValueError("invalid pinned PMV3 train base SHA")
+    for row in train.get("prs") or []:
+        if not isinstance(row, Mapping):
+            raise ValueError("invalid PMV3 release-train PR receipt")
+        if row.get("state") == "merged":
+            candidate = str(row.get("merge_sha") or "")
+            if len(candidate) != 40 or any(c not in "0123456789abcdef" for c in candidate):
+                raise ValueError("PMV3 merged PR missing exact commit receipt")
+            sha = candidate
+    return sha
+
+
+def _hold_unattributed_main(
+    *,
+    api: IntegrationApi,
+    state: dict[str, Any],
+    state_path: Path,
+    prs: list[dict[str, Any]],
+    observed_sha: str,
+    expected_sha: str,
+) -> dict[str, Any]:
+    """Persist the protected source hold BEFORE issuing any provider statuses.
+
+    No automatic recovery-label admission is possible after an unexplained
+    mainline change. Exact-SHA source reconciliation must independently
+    establish what was merged before a new release train can be accepted.
+    """
+    if (len(observed_sha) != 40 or len(expected_sha) != 40
+            or any(c not in "0123456789abcdef" for c in observed_sha + expected_sha)):
+        raise ValueError("invalid protected main movement evidence")
+    state["main_sha"] = observed_sha
+    state["train"] = None
+    state["release_lock"] = _release_lock(
+        observed_sha, None, reason="unattributed_protected_main_movement",
+    )
+    state["status"] = "release_locked"
+    state["last_action"] = {
+        "action": "blocked_unattributed_main_movement",
+        "expected_main_sha": expected_sha,
+        "observed_main_sha": observed_sha,
+        "at": now(),
+    }
+    state["metrics"] = {
+        "admitted_open": len(state.get("queue") or []),
+        "queued": len(state.get("queue") or []),
+        "train_size": 0,
+        "merged_in_train": 0,
+        "release_locked": True,
+    }
+    state["updated_at"] = now()
+    atomic_json(state_path, state)
+    _set_all_pending(api, prs, "PMV3 unexpected main change; review exact source history")
+    return state
+
+
 def _recovery_candidate(prs: list[dict[str, Any]], durable: set[int]) -> dict[str, Any] | None:
     candidates = [
         pr for pr in prs
@@ -453,6 +517,24 @@ def reconcile(
     lock = state.get("release_lock") if isinstance(state.get("release_lock"), dict) else None
     train = state.get("train") if isinstance(state.get("train"), dict) else None
 
+    # An external mainline change during an active train or release lock is a
+    # genuine source-integrity hold, not a reason to silently absorb unrelated
+    # commits into the protected candidate.
+    if train is not None:
+        expected_main = _expected_train_main(train)
+        if main_sha != expected_main:
+            return _hold_unattributed_main(
+                api=api, state=state, state_path=state_path, prs=prs,
+                observed_sha=main_sha, expected_sha=expected_main,
+            )
+    if lock is not None:
+        expected_main = str(lock.get("candidate_sha") or "")
+        if main_sha != expected_main:
+            return _hold_unattributed_main(
+                api=api, state=state, state_path=state_path, prs=prs,
+                observed_sha=main_sha, expected_sha=expected_main,
+            )
+
     # A completed and accepted release unlocks integration automatically.
     if lock and lkg_sha and lkg_sha == str(lock.get("candidate_sha") or ""):
         state["release_lock"] = None
@@ -475,6 +557,26 @@ def reconcile(
             lock = state["release_lock"]
 
     if lock:
+        # A source-baseline violation must be reviewed and explicitly
+        # reconciled. A recovery label is not sufficient to restart merging.
+        if lock.get("reason") == "unattributed_protected_main_movement":
+            _set_all_pending(
+                api, prs,
+                "PMV3 unaccounted protected-main changes require exact-source review",
+            )
+            state["status"] = "release_locked"
+            state["last_action"] = {
+                "action": "awaiting_exact_source_reconciliation", "at": now(),
+            }
+            state["train"] = None
+            state["metrics"] = {
+                "admitted_open": len(admitted_open),
+                "queued": len(state.get("queue") or []),
+                "train_size": 0, "merged_in_train": 0, "release_locked": True,
+            }
+            state["updated_at"] = now()
+            atomic_json(state_path, state)
+            return state
         # Recovery PRs are the only integration allowed while a release lock is
         # active, and only with explicit PMV3 recovery labeling plus normal
         # durable admission and all existing required checks.
@@ -483,6 +585,13 @@ def reconcile(
             rsha = str(recovery.get("headRefOid") or "")
             ready, missing = checks_ready(api, rsha)
             if ready:
+                live_main = api.main_sha()
+                if live_main != str(lock.get("candidate_sha") or ""):
+                    return _hold_unattributed_main(
+                        api=api, state=state, state_path=state_path, prs=prs,
+                        observed_sha=live_main,
+                        expected_sha=str(lock.get("candidate_sha") or ""),
+                    )
                 api.set_gate(rsha, "success", "PMV3 selected bounded release-recovery PR")
                 merged_sha = api.merge_pull_request(int(recovery["number"]), rsha)
                 # GitHub's merge is already durable. Checkpoint the NEW protected
@@ -549,6 +658,12 @@ def reconcile(
             current = _current_train_pr(train)
             if current is None:
                 final_sha = api.main_sha()
+                expected_main = _expected_train_main(train)
+                if final_sha != expected_main:
+                    return _hold_unattributed_main(
+                        api=api, state=state, state_path=state_path, prs=prs,
+                        observed_sha=final_sha, expected_sha=expected_main,
+                    )
                 state["release_lock"] = _release_lock(
                     final_sha, train, reason="release_train_complete_awaiting_production"
                 )
@@ -602,6 +717,14 @@ def reconcile(
                                 "missing": missing[:12], "at": now(),
                             }
                         else:
+                            expected_main = _expected_train_main(train)
+                            live_main = api.main_sha()
+                            if live_main != expected_main:
+                                return _hold_unattributed_main(
+                                    api=api, state=state, state_path=state_path,
+                                    prs=prs, observed_sha=live_main,
+                                    expected_sha=expected_main,
+                                )
                             api.set_gate(sha, "success", f"PMV3 selected in {train['train_id']}")
                             merged_sha = api.merge_pull_request(number, sha)
                             api.set_gate(
@@ -617,6 +740,12 @@ def reconcile(
                             }
                 if _current_train_pr(train) is None:
                     final_sha = api.main_sha()
+                    expected_main = _expected_train_main(train)
+                    if final_sha != expected_main:
+                        return _hold_unattributed_main(
+                            api=api, state=state, state_path=state_path,
+                            prs=prs, observed_sha=final_sha, expected_sha=expected_main,
+                        )
                     state["release_lock"] = _release_lock(
                         final_sha, train, reason="release_train_complete_awaiting_production"
                     )

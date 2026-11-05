@@ -128,6 +128,39 @@ Canonical queue states are:
 
 `IDLE -> INTEGRATING -> RELEASE_LOCKED -> (production verified/LKG) -> IDLE`
 
+### Protected source-baseline drift during PMV3 bootstrap
+
+PMV3's source baseline must remain predictable while production recovery is
+pending. Approved development may continue on independent branches, but an
+unexpected commit on protected `main` must never silently become a member
+of an approved release train or a pinned release-recovery candidate.
+
+The existing integration queue now pins the exact `base_main_sha` in its
+durable train and the resulting merge SHA of each selected PR. It verifies
+the expected current `main` both when resuming a train and immediately
+before any normal or release-recovery merge. It verifies the final source
+again before locking a release candidate. A mismatched current SHA:
+
+- preserves the observed and expected SHA in a durable
+  `blocked_unattributed_main_movement` receipt;
+- locks the observed `main` in `unattributed_protected_main_movement`
+  state and places all open integration gate statuses in pending;
+- prevents new PR merges, including specially labeled recovery PRs,
+  until exact source history and the intended release scope are reviewed;
+- checkpoints the fail-closed source lock before attempting GitHub status
+  updates, so a provider error cannot erase the protected movement record.
+
+This is **not** authorization to reset source, roll back another contributor's
+work, modify a production hold, or silently re-admit anything. A checked-in
+GitHub PR head, exact protected-parent history and a governed integration
+decision are still needed to reconcile the observed commit.
+
+GitHub's normal PR merge API binds the PR head SHA but does not atomically
+bind the expected target-branch parent. The extra pre-merge and post-merge
+checks *detect and hold* unexpected movement; they do not supersede GitHub
+branch-protection rules, the required PMV3 integration status context, or
+an independent source/CCC verification after the merge.
+
 Development continues in every queue state. Queue-control failure is fail-closed for merges and must not stop development.
 
 
