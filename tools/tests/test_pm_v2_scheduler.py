@@ -9,6 +9,19 @@ from pm_v2.scheduler import Scheduler
 from pm_v2.store import PMV2Store
 
 
+def _wait_for_reaped_workers(scheduler: Scheduler, expected: int, timeout_seconds: float = 5.0):
+    """Wait for actual subprocess completion, not an assumed 100-ms CI runtime."""
+    deadline = time.monotonic() + timeout_seconds
+    results = []
+    while len(results) < expected and time.monotonic() < deadline:
+        results.extend(scheduler.reap())
+        if len(results) < expected:
+            time.sleep(0.02)
+    if len(results) != expected:
+        raise AssertionError(f"expected {expected} completed workers, got {len(results)}")
+    return results
+
+
 class PMV2SchedulerTests(unittest.TestCase):
     def _config(self, root: Path, command=None):
         (root / "roadmap.md").write_text("", encoding="utf-8")
@@ -95,8 +108,7 @@ class PMV2SchedulerTests(unittest.TestCase):
             scheduler = Scheduler(config=config, store=store, repo=root)
             try:
                 self.assertEqual(scheduler.dispatch_available(), 1)
-                time.sleep(0.1)
-                scheduler.reap()
+                _wait_for_reaped_workers(scheduler, 1)
                 row = store.list_assignments()[0]
                 self.assertEqual(row.state, "validation_ready")
                 self.assertEqual(row.completion_percent, 50)
@@ -160,14 +172,12 @@ class PMV2BoundedRetryTests(unittest.TestCase):
             scheduler = Scheduler(config=config, store=store, repo=root)
             try:
                 self.assertEqual(scheduler.dispatch_available(), 2)
-                time.sleep(0.1)
-                scheduler.reap()
+                _wait_for_reaped_workers(scheduler, 2)
                 self.assertEqual({r.state for r in store.list_assignments()},
                                  {"retry_ready"})
                 time.sleep(1.1)
                 self.assertEqual(scheduler.dispatch_available(), 2)
-                time.sleep(0.1)
-                scheduler.reap()
+                _wait_for_reaped_workers(scheduler, 2)
                 rows = store.list_assignments()
                 self.assertTrue(all(r.state == "blocked" for r in rows))
                 self.assertTrue(all(r.attempt_count == 2 for r in rows))
