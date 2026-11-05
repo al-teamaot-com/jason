@@ -74,15 +74,15 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
     doc = json.loads(raw)
     shared = {"schema_version", "organization_id", "policy_mode", "owner_identity_ids",
               "allowed_risk_profiles", "ttl_seconds", "capability"}
-    # V1 remains *exactly* the approved normal-risk pilot. V2 is opt-in through
-    # a separate 0600 Owner-reviewed policy and an explicit runtime mode.
-    # A mere source deployment or updated allowed_risk_profiles cannot turn
-    # the already-running V1 pilot into protected release authority.
+    # V1 is normal-risk only; V2 is the immutable original reviewed contract.
+    # V3 is a distinct opt-in, owner-reviewed channel for production_repair.
+    # Code deployment alone does NOT change an existing V1/V2 0600 policy.
+    # Each release still requires signed exact-SHA and manifest-bound approval.
     version = doc.get("schema_version") if isinstance(doc, dict) else None
     if version == "1.0":
         expected = shared
         mode = "owner_only_pilot"
-    elif version == "2.0":
+    elif version in {"2.0", "3.0"}:
         expected = shared | {"high_impact_review"}
         mode = "owner_reviewed"
     else:
@@ -104,17 +104,20 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
             raise PermissionError("owner-only mobile pilot is limited to normal-risk releases")
     else:
         review = doc["high_impact_review"]
+        required_risks = (
+            {"normal", "production_control_core"} if version == "2.0"
+            else {"normal", "production_control_core", "production_repair"}
+        )
         if (not isinstance(review, dict)
                 or review != {
                     "owner_exact_sha_required": True,
                     "signed_teams_identity_required": True,
                     "independent_ccc_required": True,
                     "protected_release_gates_unchanged": True,
-                } or "normal" not in risks):
-            raise PermissionError("high-impact Teams release policy requires explicit reviewed controls")
-        # A V2 policy authorizes *the channel*, never a class-wide standing
-        # release grant. Each approval remains a one-time, signed owner vote
-        # for a single immutable release and manifest; root gates still run.
+                } or set(risks) != required_risks):
+            raise PermissionError("high-impact Teams release policy requires exact reviewed controls")
+        # Even V3 only authorizes the Teams review *channel*, never a standing
+        # class-wide release grant or a production unfreeze. Root gates remain.
     return MobileReleasePolicy(
         "aot", ("person-al",), frozenset(risks), ttl, digest(doc), version,
     )
@@ -164,7 +167,7 @@ def read_eligible_release(
     # This cannot mint another release approval or make the old V1 pilot
     # accept protected-control changes.
     if review_only and (
-        not allow_existing_owner_approval or policy.schema_version != "2.0"
+        not allow_existing_owner_approval or policy.schema_version not in {"2.0", "3.0"}
         or owner_approval.get("candidate_sha") != (candidate or {}).get("candidate_sha")
     ):
         raise PermissionError("existing release approval requires a reviewed exact CCC-only card")
@@ -217,7 +220,7 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
     # private persisted request. Signed callback/host consumer BOTH verify it
     # before accepting owner or CCC authority. A manufactured activity.value
     # containing only approval_id and decision cannot satisfy this contract.
-    if policy.schema_version == "2.0":
+    if policy.schema_version in {"2.0", "3.0"}:
         challenge = card_challenge if card_challenge is not None else secrets.token_hex(24)
         if type(challenge) is not str or re.fullmatch(r"[0-9a-f]{48}", challenge) is None:
             raise PermissionError("reviewed release requires a valid card-instance challenge")
@@ -243,8 +246,8 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         "owner_policy_sha256": policy.policy_sha256,
     }
     if evidence.review_only:
-        if policy.schema_version != "2.0":
-            raise PermissionError("CCC-only Teams material review requires owner-reviewed V2 mode")
+        if policy.schema_version not in {"2.0", "3.0"}:
+            raise PermissionError("CCC-only Teams material review requires owner-reviewed mode")
         intent["review_only"] = True
     if renewal_nonce is not None:
         intent["renewed_from_approval_id"] = renewed_from
@@ -525,7 +528,7 @@ class MobileReleaseApprovalFlow:
             )
             if previous_id != renewed_from:
                 raise PermissionError("owner renewal predecessor does not match")
-        if policy.schema_version == "2.0":
+        if policy.schema_version in {"2.0", "3.0"}:
             proof = request.metadata.get("card_instance_challenge")
             if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
                     or hashlib.sha256(proof.encode("ascii")).hexdigest()
