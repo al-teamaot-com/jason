@@ -26,6 +26,7 @@ COMPONENT_UID = "8ff72744-cb29-4cad-a11b-7a1c2a199f06"
 COMPONENT_NAME = "Check RATs and Malicious Tools - AOT Ver 11042026"
 _TERMINAL_JOBS = frozenset({"completed", "failed", "cancelled"})
 _MAX_RECHECKS = 35
+_MAX_JOB_AGE_SECONDS = 15 * 60
 
 
 class GovernedCapabilityPort(Protocol):
@@ -89,10 +90,18 @@ class SqliteAssessmentState:
                 device_uid TEXT,
                 component_uid TEXT,
                 job_uid TEXT,
+                dispatched_at TEXT,
                 recheck_count INTEGER NOT NULL DEFAULT 0,
                 observed_json TEXT NOT NULL DEFAULT '{}',
                 updated_at TEXT NOT NULL
             )""")
+            # Source-only migration for previously persisted preproduction
+            # records; never drop or silently reset prior job identity.
+            columns = {column[1] for column in db.execute(
+                "PRAGMA table_info(endpoint_security_assessment)"
+            )}
+            if "dispatched_at" not in columns:
+                db.execute("ALTER TABLE endpoint_security_assessment ADD COLUMN dispatched_at TEXT")
             db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS
               one_active_security_assessment_per_requester_and_device
               ON endpoint_security_assessment (
@@ -145,9 +154,10 @@ class SqliteAssessmentState:
             db.execute("BEGIN IMMEDIATE")
             updated = db.execute("""
                 UPDATE endpoint_security_assessment
-                SET state='dispatched',component_uid=?,updated_at=?
+                SET state='dispatched',component_uid=?,dispatched_at=?,updated_at=?
                 WHERE request_id=? AND state='waiting_approval' AND job_uid IS NULL
-            """, (COMPONENT_UID, datetime.now(timezone.utc).isoformat(), request_id))
+            """, (COMPONENT_UID, datetime.now(timezone.utc).isoformat(),
+                  datetime.now(timezone.utc).isoformat(), request_id))
             reserved = updated.rowcount == 1
         return reserved
 
@@ -313,6 +323,22 @@ class GovernedAssessmentCoordinator:
         if status not in _TERMINAL_JOBS:
             if status != "active":
                 raise AssessmentProviderError("UNRECOGNIZED_JOB_STATE")
+            # The playbook's 15-minute stale threshold is a wall-clock
+            # deadline, not merely a poll-count limit. Never relaunch a
+            # possibly running job when its original request becomes stale.
+            try:
+                started = datetime.fromisoformat(str(row.get("dispatched_at") or ""))
+                if started.tzinfo is None:
+                    raise ValueError("dispatch timestamp is not timezone-aware")
+                job_age = (datetime.now(timezone.utc) - started).total_seconds()
+            except (ValueError, TypeError) as exc:
+                self.store.update(req.request_id, state="blocked")
+                raise AssessmentProviderError(
+                    "JOB_DISPATCH_TIMESTAMP_UNVERIFIABLE_NO_REDISPATCH"
+                ) from exc
+            if job_age > _MAX_JOB_AGE_SECONDS:
+                self.store.update(req.request_id, state="blocked")
+                raise AssessmentProviderError("JOB_STALE_NO_REDISPATCH")
             count = int(row["recheck_count"]) + 1
             if count > _MAX_RECHECKS:
                 self.store.update(req.request_id, state="blocked", recheck_count=count)

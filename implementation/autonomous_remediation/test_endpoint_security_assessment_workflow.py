@@ -253,6 +253,27 @@ def test_wait_bound_is_not_an_endless_loop(tmp_path):
     assert provider.actions == 1
 
 
+def test_stale_active_job_expires_at_fifteen_minutes_without_redispatch(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    flow, provider, path = setup(tmp_path)
+    flow.prepare(req())
+    flow.dispatch(req(), approval_bound_arguments=approval())
+    old = (datetime.now(timezone.utc) - timedelta(minutes=16)).isoformat()
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "UPDATE endpoint_security_assessment SET dispatched_at=? WHERE request_id=?",
+            (old, req().request_id),
+        )
+    with pytest.raises(AssessmentProviderError, match="JOB_STALE_NO_REDISPATCH"):
+        flow.collect(req())
+    with sqlite3.connect(path) as db:
+        assert db.execute(
+            "SELECT state FROM endpoint_security_assessment WHERE request_id=?",
+            (req().request_id,),
+        ).fetchone()[0] == "blocked"
+    assert provider.actions == 1
+
+
 def test_all_actions_are_governed_and_bounded(tmp_path):
     flow, provider, _ = setup(tmp_path)
     flow.prepare(req())
