@@ -30,7 +30,7 @@ Verified, read-only tests on **Al** and **Al-Samsung** completed on November 4, 
 - V1 2026-11-04 governed DRMM runs: 2/2 completed; zero High after prior null-path correction; `DefenderPreference` incomplete as above.
 - V2 source: SHA-256 **`2f4c43360a04cc69dea47d9bbfe89e8456114f476660f192105d1817459476d8`**; copied to Al's Downloads and isolated Jason worktree with exact SHA parity; Windows PowerShell 5.1.26100.9711 AST parse passed with **zero errors**.
 - On Al, local Windows script-file execution is restricted by its effective PowerShell execution policy. Do **not** bypass this restriction simply for testing; provider-backed acceptance must use the authorized Datto component runner after normal component-library import.
-- Targeted CI: `.github/workflows/aot-rat-sweep-security.yml` runs a Windows PowerShell 5.1 parser/AST and synthetic read-only classification + Defender sensor coverage suite. Passing CI does not replace live SYSTEM acceptance.
+- Targeted CI: `.github/workflows/aot-rat-sweep-security.yml` runs a Windows PowerShell 5.1 parser/AST, synthetic classification/Defender sensor suite, and a **report-only live collector** on an isolated GitHub-hosted Windows runner. This proves the output contract without touching AOT clients. Passing CI does not replace live SYSTEM acceptance.
 - **No provider component update, component reassignment, production merge/release or customer endpoint action is authorized merely by this PR.** Production freeze and exact-SHA rules remain in place.
 
 ## Planned live acceptance after approved import

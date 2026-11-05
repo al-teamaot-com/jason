@@ -22,3 +22,8 @@ jobs:
         shell: cmd
         run: |
           powershell.exe -NoProfile -NonInteractive -File "scripts\drmm-security\test-rat-sweep.ps1" -SourcePath "scripts\drmm-security\rat-sweep.ps1"
+      - name: Run bounded report-only collector on isolated Windows CI runner
+        shell: cmd
+        timeout-minutes: 5
+        run: |
+          powershell.exe -NoProfile -NonInteractive -File "scripts\drmm-security\test-rat-sweep-runtime.ps1" -SourcePath "scripts\drmm-security\rat-sweep.ps1"
