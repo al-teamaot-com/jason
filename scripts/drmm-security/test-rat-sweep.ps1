@@ -89,7 +89,7 @@ function Get-MpComputerStatus {
 function Get-MpThreatDetection { @() }
 function Get-MpPreference {
     $script:PrefCallCount++
-    if ($script:PrefShouldThrow) { throw 'Access denied, synthetic non-0x800106ba test failure' }
+    if ($script:PrefShouldThrow) { throw 'Access denied, synthetic independent preference failure' }
     [pscustomobject]@{ExclusionPath=@()}
 }
 function Add-Finding { param([string]$Severity,[string]$Category,[string]$Title,[string]$Name,[string]$Path) }
