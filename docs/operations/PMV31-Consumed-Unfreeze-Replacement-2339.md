@@ -26,3 +26,9 @@ Candidate `54f4d2cdc048d8058393d7ee43efd5303042d646` passed preproduction, but t
 - Production acceptance for the technician-authority feature uses existing AOT Autotask Resources (including Lindsey and Adam where eligible), native impersonation/permissions, exact approval, `noteType=3`, `publish=2`, independent note readback, and confirmed absence of client notifications.
 
 The current regression test records safe fail-closed behavior but **does not** implement the signed replacement approval producer/consumer or authorize production deployment.
+
+## Isolated predecessor attestation implemented
+
+`attest_consumed_pre_mutation_unfreeze_for_replacement` is **read-only**. It checks both immutable predecessor receipts, production-eligible release state without recorded production mutation, exact SHA/scope/rollback, byte-identical freeze digests, non-standing authority flags and live production alignment. It returns digest-bound lineage for a *future* independent signed Teams approval consumer. It neither accepts an approval nor creates a replacement receipt. On 2026-11-05, this attestation was evaluated read-only against the real consumed `release-54f4d2cdc048d805` and returned PASS; no mutation or freeze change occurred.
+
+Do not wire this helper directly to a plain CLI `--retry` switch. A second signed Owner authorization and a unique non-replayed native release transaction identity are still required.

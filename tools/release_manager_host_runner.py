@@ -5193,6 +5193,99 @@ def _deploy_production_locked(
 
 
 
+
+def attest_consumed_pre_mutation_unfreeze_for_replacement(
+    state_root: Path, record: Mapping[str, Any],
+) -> dict[str, str]:
+    """Attest a consumed old attempt WITHOUT granting replacement authority.
+
+    This may be used only by a separate signed, exact-bound Owner decision
+    consumer. It never creates or edits receipts, releases, or freeze markers.
+    A post-mutation failure/rollback needs a fresh release instead.
+    """
+    release_id = str(record.get("release_id") or "")
+    candidate = exact_sha(
+        str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
+        "candidate_sha",
+    )
+    if release_id != record_id(candidate):
+        raise ReleaseManagerError("replacement candidate/release identity mismatch")
+    rollback = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+    scope = str((record.get("manual_scope_review") or {}).get("scope_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", scope):
+        raise ReleaseManagerError("replacement scope review missing")
+    if (record.get("state") != "production_eligible"
+            or record.get("production") is not None
+            or record.get("native_pre_mutation_gate") is not None
+            or record.get("failure") is not None):
+        raise ReleaseManagerError("replacement requires proved pre-mutation failure")
+    marker = _freeze_marker_snapshot(state_root)
+    source_path = (state_root / "owner-explicit-unfreeze-receipts"
+                   / (release_id + ".json"))
+    transaction_path = _freeze_receipt_path(state_root, release_id)
+
+    def immutable_receipt(path: Path) -> tuple[dict[str, Any], str]:
+        try:
+            info = path.lstat()
+            if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_uid != os.geteuid()
+                    or info.st_gid != os.getegid()
+                    or not 1 <= info.st_size <= 8192):
+                raise ReleaseManagerError("replacement predecessor receipt is unsafe")
+            raw = path.read_bytes()
+            if len(raw) != info.st_size:
+                raise ReleaseManagerError("replacement predecessor receipt changed")
+            doc = json.loads(raw)
+            if not isinstance(doc, dict):
+                raise ReleaseManagerError("replacement predecessor receipt invalid")
+            return doc, "sha256:" + hashlib.sha256(raw).hexdigest()
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise ReleaseManagerError("replacement predecessor receipt inaccessible") from exc
+
+    source, source_digest = immutable_receipt(source_path)
+    transaction, transaction_digest = immutable_receipt(transaction_path)
+    owner = record.get("owner_approval") or {}
+    expected = {
+        "release_id": release_id,
+        "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": scope,
+    }
+    if (source.get("schema_version") != "1.0"
+            or source.get("authorization") != "explicit_exact_sha_owner_unfreeze"
+            or source.get("status") != "consumed"
+            or source.get("freeze_restored") is not True
+            or source.get("standing_authority") is not False
+            or source.get("automatic_publish_authority") is not False
+            or source.get("prior_release_approval_source") != owner.get("source")
+            or transaction.get("schema_version") != "2.0"
+            or transaction.get("authorization") != "explicit_owner_one_transaction_unfreeze"
+            or transaction.get("status") != "deployment_returned"
+            or transaction.get("freeze_restored") is not True
+            or transaction.get("release_state_after") != "production_eligible"
+            or transaction.get("explicit_unfreeze_receipt_sha256") is None
+            or any(source.get(key) != value or transaction.get(key) != value
+                   for key, value in expected.items())):
+        raise ReleaseManagerError("replacement predecessor is not a verified pre-mutation attempt")
+    if (source.get("freeze_sha256_before") != marker["sha256"]
+            or source.get("freeze_sha256_after") != marker["sha256"]
+            or transaction.get("freeze_sha256_before") != marker["sha256"]
+            or transaction.get("freeze_sha256_after") != marker["sha256"]):
+        raise ReleaseManagerError("replacement predecessor freeze was not exactly restored")
+    # Independent provider/runtime/host alignment; never infer no mutation from
+    # a receipt alone. A failed alignment check is a hard stop.
+    live_production_alignment(rollback)
+    return {
+        "candidate_sha": candidate,
+        "scope_sha256": scope,
+        "rollback_sha": rollback,
+        "predecessor_source_receipt_sha256": source_digest,
+        "predecessor_transaction_receipt_sha256": transaction_digest,
+        "freeze_sha256": marker["sha256"],
+    }
+
+
 def owner_unfreeze_release(
     repo: Path,
     state_root: Path,

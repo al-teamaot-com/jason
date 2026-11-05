@@ -6127,6 +6127,32 @@ def test_issue_2339_consumed_unfreeze_cannot_be_silently_reused(tmp_path):
     previous = tmp_path / 'owner-explicit-unfreeze-receipts' / (release_id + '.json')
     prior_bytes = previous.read_bytes()
     assert json.loads(prior_bytes)['status'] == 'consumed'
+    # The new read-only predecessor attestation proves a fresh signed Owner
+    # decision could be evaluated later, but creates no executable grant.
+    with patch.object(runner, 'live_production_alignment') as verify_live:
+        proof = runner.attest_consumed_pre_mutation_unfreeze_for_replacement(
+            tmp_path, loaded)
+    verify_live.assert_called_once_with(SHA_B)
+    assert proof['candidate_sha'] == SHA_A
+    assert proof['rollback_sha'] == SHA_B
+    assert proof['scope_sha256'] == 'd' * 64
+    assert proof['freeze_sha256'] == __import__('hashlib').sha256(original).hexdigest()
+    assert proof['predecessor_source_receipt_sha256'].startswith('sha256:')
+    assert proof['predecessor_transaction_receipt_sha256'].startswith('sha256:')
+    assert previous.read_bytes() == prior_bytes
+    # A post-mutation record must never be eligible for same-SHA replacement.
+    mutating = dict(loaded, native_pre_mutation_gate={'status': 'pass'})
+    with pytest.raises(runner.ReleaseManagerError, match='pre-mutation'):
+        runner.attest_consumed_pre_mutation_unfreeze_for_replacement(
+            tmp_path, mutating)
+    # An altered historical receipt must fail independent predecessor proof.
+    tx_doc = json.loads(opened['receipt_path'].read_text())
+    tx_doc['freeze_sha256_after'] = '0' * 64
+    with patch.object(runner, 'live_production_alignment'):
+        runner.atomic_json(opened['receipt_path'], tx_doc)
+        with pytest.raises(runner.ReleaseManagerError, match='freeze was not exactly restored'):
+            runner.attest_consumed_pre_mutation_unfreeze_for_replacement(
+                tmp_path, loaded)
     with patch.object(runner, 'verify_candidate_on_main'), \
          patch.object(runner, 'require_current_manual_scope_review'), \
          patch.object(runner, 'live_production_alignment'):
