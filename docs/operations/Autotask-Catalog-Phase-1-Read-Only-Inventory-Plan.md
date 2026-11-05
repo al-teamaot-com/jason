@@ -85,9 +85,9 @@ ContractServices is the **known relationship-coverage gap**: readonly credential
 
 **Controls before any approved IT Product or Service correction plan:**
 
-1. Verify AOT's actual QuickBooks edition, tenant/company and integration path. Treat published maximums as field-specific reference limits, **not** proof of effective connector/import constraints; where another field or connector is stricter, apply the shortest **verified** effective limit to its mapped export value.
+1. AOT uses **QuickBooks Online**, with previous governed proof identifying **QuickBooks Online Plus**. A fresh governed company read succeeded for the live AOT company on 2026-11-05, although the current response did not expose the subscription-plan field. Confirm AOT's configured Autotask-to-QBO integration and mappings before concluding which connector/import limits apply. Published field maximums are references, not proof of the effective connector limit; apply the shortest **verified** limit to each mapped export value.
 2. Define separately: a stable short name / accounting item key, the complete human-readable description, manufacturer part number, preferred vendor part number or SKU, product category, billing unit, and source/target durable IDs. Do not concatenate every specification into the short name.
-3. Use a provisional **31-character portable item-name target** while the actual accounting integration remains unverified; it is not a final universal limit for every Autotask field. Preserve full descriptions and identifiers in their authoritative fields.
+3. Prefer concise, client-readable Product and Service names while preserving full descriptions and identifiers in their authoritative fields. **Do not impose QuickBooks Desktop's 31-character item-name limit on AOT's QuickBooks Online integration as a verified requirement.** QBO's published 100-character Item Name limit is the relevant starting reference, subject to the actual Smart Accounting Hub mapping and any narrower downstream constraint. A shorter human-readability style guideline may be proposed without mandatory mass renaming.
 4. Before importing or syncing, check field lengths, required values, character-encoding or unsupported character restrictions, uniqueness/case rules, mappings, effective accounting line description and any third-party integration constraints.
 5. **No silent truncation**, invented part numbers, loss of leading zeroes, conversion of long identifiers to scientific notation, or collisions between different Products/Services. Any necessary alias/crosswalk must be deterministic, reversible, uniquely mapped and explicitly approved as part of the applicable correction plan.
 6. Test a representative pilot through the actual authorized target-system integration with readback or safe import-preview evidence and no unintended accounting modifications. Where target write/import testing itself can affect accounting records, require a separate exact authorization before doing it.
@@ -95,7 +95,38 @@ ContractServices is the **known relationship-coverage gap**: readonly credential
 
 **Acceptance gate:** No proposed Product/Service naming standard is considered production-ready until the relevant mapped fields have verified target-system limits and a passing functional mapping test, or the unverified integration is disclosed as a blocking exception for the affected sync.
 
-## 7. Immediate next authorized work
+## 7. Client-friendly invoices and monthly device/subscription quantities (Owner requirement, 2026-11-05)
+
+**Owner intent:** The customer invoice should explain, without overwhelming detail, what was supplied, what it covers, the month or service period, quantity and pricing. Each month, use authoritative device and subscription data and existing native capabilities of Autotask PSA, QuickBooks Online (QBO), and the source platforms. This is a design/acceptance constraint for Product/Service standardization and downstream Phase 6 reconciliation, **not approval for catalog changes, contract amendments, invoice creation/posting, account mapping changes, or production deployment**. Approved Agreement Version 1.4 remains unchanged.
+
+### Client-facing invoice design (proposed; one approved pilot before expansion)
+
+- Use plain-English Product and Service names, not internal codes or unexplained acronyms. Make each line clearly identify coverage, billing month, quantity/unit and agreed price; use concise descriptions rather than long feature lists.
+- Group appropriately under a recognizable service or contract bundle where native Autotask invoicing supports it and the grouped presentation matches customer terms. Do not combine items in a way that obscures different rates, taxes, units, billing commitments or price adjustments.
+- Keep the invoice short. Do **not** print every device hostname, serial number, account name or subscription user on it by default. Make a separate access-controlled device/license detail schedule or portal report available to the authorized client contact for transparency.
+- Separate an internal stable catalog name/identifier and manufacturer part number/SKU from the **invoice-facing description**. Validate the actually rendered QBO invoice for line grouping, text clarity, mapping uniqueness and absence of truncation.
+- Illustrative, not real charges: "Managed IT Support - Workstations | Nov 2026 | 25 devices"; "Microsoft 365 Business Premium | Nov 2026 | 18 users"; "Managed Endpoint Backup | Nov 2026 | 7 devices". Actual prices, units, discounts, minimums and proration must come from approved client terms.
+
+### Monthly evidence, authority and reconciliation
+
+1. **Autotask Contracts and Services** (plus applicable agreements) govern the customer's billable products/services, approved rates, billing terms, minimums and quantity methodology. **QBO** is AOT's accounting/invoicing platform. Endpoint/vendor telemetry is observation, not independent authority to increase billing.
+2. For each client/service each month, obtain covered device counts from the appropriate authorized sources (e.g., Datto RMM for covered managed devices and the appropriate backup/security product for protection-specific coverage). Corroborate with Autotask configuration/asset information as applicable; exclude inactive, duplicate, retired and noncovered units according to separately agreed eligibility rules.
+3. Retrieve license/subscription information from the authoritative vendor tenant, vendor portal or reseller source. Distinguish purchased/subscribed, assigned/active, contracted/billable and actually billed units. Do not assume these counts are interchangeable.
+4. Record a dated internal monthly snapshot per client/product: source, retrieval time, coverage rule, count, contract baseline, billing period, additions/removals, minimum/commitment, proration, evidence, discrepancies and exception owner.
+5. Compare each source observation with the Autotask contract/recurring-service quantity, posted billing items and QBO invoice. Detect missing/duplicate charges, quantity drift, unexpected rates and ambiguous source identity. Do not silently modify billable quantities or financial data; unresolved discrepancies route for governed review.
+6. **Native first:** evaluate Autotask Recurring Service Contracts, ContractServiceUnit effective-date quantities, invoice templates, approve/post flow, and native platform integrations; then use the documented Smart Accounting Hub Autotask-to-QBO invoice sync and billing-code-to-QBO-Item mappings where AOT has them enabled and approved. Jason should correlate/summarize evidence and propose exceptions, not replace existing accurate billing engines.
+7. Test one specifically approved client scenario with a safe preview or controlled sync, checking client-visible invoice text, quantity/rate/total, proration/taxes, item ID mappings, duplicate prevention and actual QBO readback. Any action that could create, post, send or change an accounting record requires separate exact authorization.
+
+### Platform documentation and current limitation
+
+- Autotask 2026.6 describes Smart Accounting Hub billing-code-to-QBO item mapping and event-driven invoice synchronization after invoice descriptions, taxes and IDs are complete. This is a **documented platform capability, not proof that AOT has configured or accepted it**: https://psa.datto.com/releasenotes/Content/ENGLISH/2026.6ReleaseNotes.htm
+- Autotask ContractServiceUnits document per-period effective-dated service quantities: https://psa.datto.com/help/DeveloperHelp/Content/APIs/REST/Entities/RecurringSerContractEntityRelation.htm
+- QBO supports customer-visible item descriptions, quantities/rates, invoice layout customization and attachments: https://quickbooks.intuit.com/learn-support/en-us/help-article/invoicing/create-invoices-quickbooks-online/L7gSzvCld_US_en_US
+- Jason currently offers governed read-only Autotask billing/invoice and QBO invoice search capabilities; **this does not establish operational synchronization, source reconciliation, or approval for invoice mutations**.
+
+**Acceptance gate:** A controlled authorized pilot must yield a short, understandable client invoice and separately traceable monthly reconciliation record; quantities, rates, tax and final QBO entries agree with the approved source of truth; data or privacy exceptions block the affected automatic progression. No bulk action until the Owner approves the process after pilot verification.
+
+## 8. Immediate next authorized work
 
 - Preserve the approved agreement and this plan in repository review without touching production.
 - Validate the precise governed search argument and pagination schema through allowed metadata/read operations.
