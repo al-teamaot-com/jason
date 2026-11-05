@@ -230,3 +230,54 @@ def test_provider_lifecycle_and_identity_fails_closed():
     providers.provider_id = "autotask_internal_note"
     providers.approval_status = ProviderApproval.BLOCKED
     assert decide(service).outcome is AuthorityOutcome.DENIED
+
+
+def test_real_denial_code_then_two_distinct_technicians_require_own_approval():
+    """Regression for the observed production NO_MATCHING_AUTHORITY_GRANT.
+
+    These named personas are deterministic stand-ins for two separately signed-in
+    staff members. This is source validation, never evidence of live sign-ins.
+    """
+    service, caps, providers, approvals = make_service(enabled=False)
+    for principal in ("tech", "frontdesk"):
+        denied = decide(service, principal=principal)
+        assert denied.outcome is AuthorityOutcome.DENIED
+        assert denied.reason_codes == ("NO_MATCHING_AUTHORITY_GRANT",)
+
+    service.capability_matcher = GovernedProviderReadAuthorityMatcher(
+        caps, providers, service.identities,
+        routine_write_enabled=False,
+        internal_note_write_enabled=True,
+    )
+    expires = datetime.now(timezone.utc) + timedelta(minutes=5)
+    for principal, approval_id in (("tech", "approval-tech"),
+                                   ("frontdesk", "approval-frontdesk")):
+        assert decide(service, principal=principal).outcome is AuthorityOutcome.APPROVAL_REQUIRED
+        approvals.put(ApprovalRecord(
+            approval_id, "req-note", NOTE, "aot", None, principal,
+            "approved", principal, datetime.now(timezone.utc), expires,
+        ))
+        own = decide(service, principal=principal, approval_id=approval_id)
+        assert own.outcome is AuthorityOutcome.ALLOWED
+        assert own.execution_context.principal_id == principal
+        assert own.execution_context.approval_required is True
+
+    # A real human's approval must not authorize a different signed-in human.
+    for principal, other in (("tech", "approval-frontdesk"),
+                             ("frontdesk", "approval-tech")):
+        cross = decide(service, principal=principal, approval_id=other)
+        assert cross.outcome is AuthorityOutcome.DENIED
+        assert cross.reason_codes == ("APPROVAL_INVALID",)
+
+    # The opt-in flag remains a second independent kill switch even if the
+    # durable approval and organization-level grant still exist.
+    service.capability_matcher = GovernedProviderReadAuthorityMatcher(
+        caps, providers, service.identities,
+        routine_write_enabled=False,
+        internal_note_write_enabled=False,
+    )
+    for principal, approval_id in (("tech", "approval-tech"),
+                                   ("frontdesk", "approval-frontdesk")):
+        denied = decide(service, principal=principal, approval_id=approval_id)
+        assert denied.outcome is AuthorityOutcome.DENIED
+        assert denied.reason_codes == ("NO_MATCHING_AUTHORITY_GRANT",)
