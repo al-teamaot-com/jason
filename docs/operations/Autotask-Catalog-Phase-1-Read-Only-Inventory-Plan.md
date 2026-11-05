@@ -199,11 +199,11 @@ Examples observed:
 
 **One Owner decision requested:** Adopt **`IT-MSA` as an intentional family/search prefix, with plain-language functional names and native record-type/category differentiation** for the eventual limited IT Product/Service naming pilot?
 
-## 11. Controlled catalog inactivation and historical preservation — draft review gate (2026-11-05)
+## 11. Controlled catalog inactivation and historical preservation — Owner-approved method (2026-11-05)
 
 **Owner direction:** Some legacy IT-MSA Products and Services may be inappropriate, redundant, incorrectly classified or obsolete because their original setup preceded a settled catalog standard. Jason should help identify candidates and recommend safe corrections, **one reviewed record or tightly bound pair at a time** until the Owner approves an exact larger correction plan. The approved agreement already requires preferred-record selection, relationship preservation, no unsafe deletion and human approval of exact changes.
 
-### Review dispositions (proposed, not yet adopted)
+### Approved four-class disposition model
 
 1. **Keep active:** The record represents an approved, currently needed offering or is required by an active downstream workflow.
 2. **Standardize:** The record is legitimately used but has incomplete, ambiguous or nonportable catalog data. Propose correction only after validating its dependencies and the exact fields.
@@ -227,7 +227,9 @@ The two Product IDs returned **zero matches** from bounded TicketCharges, Purcha
 
 **Initial disposition: All four records are HOLD / INVESTIGATE for inactivation purposes.** The two Product records are reasonable *candidates for detailed classification*, not approved inactivations. Product and Service entity types are different and identical names do not prove they are redundant.
 
-**Approval boundary:** Owner discussion of the disposition model does not authorize changing `isActive` or any other field. Perform the next read-only check on a single bounded case; present exact safe correction plan and obtain separate authorization before any live change.
+**Approval boundary:** The Owner has approved the review classifications and the preferred retirement principle, **not** any specific record's disposition or inactivation. No change to `isActive` or any other field is authorized. Perform the next bounded read-only check one record at a time; present an exact safe correction plan and obtain separate approval before any live change.
+
+**Approval record (2026-11-05):** The Project Owner explicitly confirmed that **inactivation, not deletion, is the preferred way to retire an unnecessary catalog record after dependency verification and identification of the forward-use record**, and approved these four classifications: **Keep, Standardize, Inactivate Candidate, Investigate**. This approval does not waive the existing exact-plan authorization or production controls.
 
 ## 12. Immediate next authorized work
 
