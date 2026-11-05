@@ -30,14 +30,23 @@ RID = "release-" + SHA[:16]
 
 
 def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=None,
-            review_only=False, renewed=False, canonical_owner=False):
+            review_only=False, renewed=False, canonical_owner=False,
+            reviewed_version="2.0", release_risk=None):
     from implementation.runtime_service.tests.test_mobile_release_approval import (
         policy_file, reviewed_policy_file, mark_release_high_impact, release_record,
     )
-    policy_path = reviewed_policy_file(tmp_path) if reviewed else policy_file(tmp_path)
+    if reviewed and reviewed_version == "3.0":
+        policy_path = reviewed_policy_file(
+            tmp_path, schema_version="3.0",
+            allowed_risk_profiles=[
+                "normal", "production_control_core", "production_repair",
+            ],
+        )
+    else:
+        policy_path = reviewed_policy_file(tmp_path) if reviewed else policy_file(tmp_path)
     root, release_path = release_record(tmp_path)
     if reviewed:
-        mark_release_high_impact(root)
+        mark_release_high_impact(root, risk=release_risk or "production_control_core")
     if review_only:
         assert reviewed
         record = json.loads(release_path.read_text(encoding="utf-8"))
@@ -129,7 +138,7 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
     store = MobileReleaseSignedEvidenceStore(path)
     flow = MobileReleaseApprovalFlow(
         svc, repo, policy_path, root, bindings, identities, verifier, store,
-        required_policy_version="2.0" if reviewed else "1.0",
+        required_policy_version=reviewed_version if reviewed else "1.0",
         owner_identity_email_fallbacks=(
             {"person-al": "al@teamaot.com"} if canonical_owner else None
         ),
@@ -1050,3 +1059,121 @@ def test_processed_decision_does_not_reconstruct_changed_manifest(tmp_path):
     )
     assert consume_mobile_release_decisions(**opts) == 0
     assert json.loads(release_path.read_text())["owner_approval"]["approved"] is False
+
+
+def test_v3_production_repair_signed_owner_exact_release_nonexecuting(tmp_path):
+    """Full signed Teams callback + independent host attestation; no deploy."""
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, reviewed_version="3.0", release_risk="production_repair",
+    )
+    assert "production_repair" in repr(request.presentation.facts)
+    assert request.metadata["candidate_sha"] == SHA
+    assert request.metadata["rollback_sha"] == ROLLBACK
+    original = release_path.read_bytes()
+    clicked = flow.handle(**args)
+    assert clicked["approval_status"] == "approved" and clicked["executed"] is False
+    assert release_path.read_bytes() == original
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+    calls = []
+    opts["approve_release"] = lambda _r, _s, *, release_id, candidate_sha, source: (
+        calls.append((release_id, candidate_sha, source))
+    )
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert calls == [(RID, SHA, "authenticated_mobile_teams_owner:" + request.approval_id)]
+    review = json.loads((opts["ccc_root"] / "material-review.json").read_text())
+    assert review["source_revision"] == SHA
+    assert review["status"] == "approved"
+    assert review["mobile_approval_id"] == request.approval_id
+    assert consume_mobile_release_decisions(**opts) == 0
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("reason,options", [
+    ("missing_nonce", {"card_selection_override": {}}),
+    ("wrong_nonce", {"card_selection_override": {"card_challenge": "0" * 48}}),
+    ("deny", {"approve": False}),
+])
+def test_v3_signed_repair_does_not_accept_forged_or_denied_click(
+    tmp_path, reason, options,
+):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, reviewed_version="3.0",
+        release_risk="production_repair", **options,
+    )
+    if reason == "deny":
+        assert flow.handle(**args)["approval_status"] == "denied"
+        opts["approve_release"] = lambda *_a, **_k: pytest.fail(
+            "denied repair release cannot receive owner grant"
+        )
+        assert consume_mobile_release_decisions(**opts) == 0
+    else:
+        with pytest.raises(PermissionError, match="card instance"):
+            flow.handle(**args)
+        assert repo.accepted_decision(request.approval_id) is None
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+    assert json.loads(release_path.read_text())["owner_approval"]["approved"] is False
+
+
+def test_v3_repair_signed_policy_drift_and_manifest_tamper_fail_closed(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, reviewed_version="3.0", release_risk="production_repair",
+    )
+    flow.handle(**args)
+    record = json.loads(release_path.read_text())
+    record["release_manifest"]["rollback_sha"] = "a" * 40
+    release_path.write_text(json.dumps(record))
+    opts["approve_release"] = lambda *_a, **_k: pytest.fail("tamper cannot authorize")
+    with pytest.raises(PermissionError):
+        consume_mobile_release_decisions(**opts)
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+def test_v3_repair_wrong_owner_binding_fails_closed(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, reviewed_version="3.0", release_risk="production_repair",
+    )
+    flow.handle(**args)
+    binding = bindings.find(microsoft_tenant_id="tenant-a", microsoft_object_id="object-al")
+    from dataclasses import replace
+    bindings.put(replace(binding, status="revoked"))
+    opts["approve_release"] = lambda *_a, **_k: pytest.fail("revoked owner cannot approve")
+    with pytest.raises(PermissionError):
+        consume_mobile_release_decisions(**opts)
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+@pytest.mark.parametrize("tamper", ["wrong_rollback_sha", "wrong_candidate_sha"])
+def test_v3_repair_signed_wrong_subject_fails_before_owner_authority(tmp_path, tamper):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, reviewed_version="3.0", release_risk="production_repair",
+    )
+    flow.handle(**args)
+    record = json.loads(release_path.read_text())
+    if tamper == "wrong_rollback_sha":
+        record["rollback_sha"] = "a" * 40
+        record["release_manifest"]["rollback_sha"] = "a" * 40
+    else:
+        record["release_candidate"]["candidate_sha"] = "a" * 40
+        record["release_manifest"]["candidate_sha"] = "a" * 40
+    release_path.write_text(json.dumps(record))
+    opts["approve_release"] = lambda *_a, **_k: pytest.fail(
+        "modified immutable subject cannot produce Owner authority"
+    )
+    with pytest.raises(PermissionError):
+        consume_mobile_release_decisions(**opts)
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+def test_v3_repair_pending_click_is_invalidated_by_private_policy_change(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, reviewed_version="3.0", release_risk="production_repair",
+    )
+    signed = args["signed_envelope"]
+    original = opts["policy_file"].read_bytes()
+    doc = json.loads(original)
+    doc["ttl_seconds"] -= 1
+    opts["policy_file"].write_text(json.dumps(doc))
+    with pytest.raises(PermissionError):
+        flow.handle(**args)
+    assert repo.accepted_decision(request.approval_id) is None
+    assert not (opts["ccc_root"] / "material-review.json").exists()

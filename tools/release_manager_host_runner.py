@@ -841,13 +841,13 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
     if version == "1.0":
         expected = shared
         mode = "owner_only_pilot"
-    elif version == "2.0":
+    elif version in {"2.0", "3.0"}:
         expected = shared | {"high_impact_review"}
         mode = "owner_reviewed"
     else:
         raise ReleaseManagerError("mobile release approval policy version is unsupported")
-    if source_v2_required and version != "2.0":
-        raise ReleaseManagerError("candidate source must declare owner-reviewed release policy V2")
+    if source_v2_required and version not in {"2.0", "3.0"}:
+        raise ReleaseManagerError("candidate source must declare an owner-reviewed release policy")
     risks = doc.get("allowed_risk_profiles")
     ttl = doc.get("ttl_seconds")
     if (set(doc) != expected or doc.get("organization_id") != "aot"
@@ -861,7 +861,11 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
         if set(risks) != {"normal"} or not 300 <= ttl <= 1800:
             raise ReleaseManagerError("V1 release approval policy must remain normal-risk only")
     else:
-        if (set(risks) != {"normal", "production_control_core"}
+        exact_risks = (
+            {"normal", "production_control_core"} if version == "2.0"
+            else {"normal", "production_control_core", "production_repair"}
+        )
+        if (set(risks) != exact_risks
                 or not 300 <= ttl <= 900
                 or doc.get("high_impact_review") != {
                     "owner_exact_sha_required": True,
@@ -6257,7 +6261,7 @@ def signed_owner_offer_purpose(
     owner = record.get("owner_approval") or {}
     if owner.get("approved") is not True:
         return "release_and_ccc"
-    if (reviewed_policy.schema_version != "2.0"
+    if (reviewed_policy.schema_version not in {"2.0", "3.0"}
             or owner.get("candidate_sha") != candidate_sha):
         return None
     named = ccc_root / ("material-review-" + candidate_sha[:16] + ".json")
