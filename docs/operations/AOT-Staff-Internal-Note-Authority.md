@@ -117,3 +117,41 @@ The controlled fixture ticket `T20260914.0026` is already Complete. Do not chang
 - Positive live acceptance **must** be demonstrated using Al Davis and Lindsey Collins in separately authenticated existing Microsoft/Jason sessions and their existing active, licensed Autotask Resource identities, not with a new paid account. Read-only provider queries confirmed both existing human identities are active in their respective systems. Neither technician's successful Entra mapping is by itself evidence of TicketNote provider create permission. That permission remains enforced by Autotask native `ImpersonationResourceId` and `TicketNotes/entityInformation` preflight. An earlier impersonation HTTP 500 affecting some Autotask reads means the specific TicketNote write operation must be tested; do not assert provider acceptance before a real signed-in write/readback.
 - If authorization is allowed, create **one** internal-only note (`noteType=3`, `publish=2`) on the controlled XYZ Test Company ticket, verify exact content/note ID and native human attribution, zero client notification, no unrelated ticket mutations, and no replay; repeat with the other technician using a distinct note and approval. Requester/Resource mismatch, wrong client, unapproved/replayed/expired action, provider inability, and service/nonhuman principal must fail closed.
 - **The P0 technician Request-to-Execution Gap is broader than this first internal-note slice.** It only closes on evidence of dynamic discovery, policy-constrained action selection, governed execution with continuation/readback, documentation, and unfamiliar ordinary technician tasks without adding a task-specific script. Do not label source merge or an isolated note trial as overall completion.
+
+
+## General AOT technician request-to-execution acceptance
+
+**This note-write capability is an initial safety canary, not the project objective.**
+The P0 technician Request-to-Execution Gap (#2104) must work with AOT's existing
+licensed technician accounts, including future authorized staff not known when
+this source was written. Never use a hardcoded Al/Lindsey allowlist, a per-user
+script, an extra paid Autotask seat, a new approval engine, or a provider API
+bypass to satisfy an operator request. Existing registered provider-neutral
+capabilities, discoverable argument contracts, signed human identity, provider
+resource permissions, exact-argument approval, asynchronous job handling,
+independent readback and auditable ticket evidence are the reusable mechanism.
+
+The note-policy source test uses **five different simulated active AOT humans**
+against one organization-scoped standing grant. Each requires their own approval;
+approvals cannot be reused by another human. Service principals, disabled and
+foreign humans are denied, while unknown identity yields an indeterminate
+fail-closed decision. These are source tests only, not Autotask provider-backed
+human permission proof.
+
+The wider acceptance suite for #2104 must include unfamiliar requests involving
+at least Autotask evidence plus an existing governed endpoint or Microsoft 365
+read, and a technician-authorized action where the provider supports it. Jason
+must select existing capabilities dynamically instead of adding one-off code,
+continue after routine read/diagnostic failures using permitted alternatives,
+monitor any async provider job to a terminal state, perform post-action provider
+readback, and record exact findings in the original ticket. Wrong user, client,
+approval, arguments, replay, unsupported operations or potentially disruptive
+actions without technician-specific consent must remain fail-closed.
+
+**Release sequencing:** merge and preproduce the source only after all required
+checks are green; obtain an independently authenticated, exact-SHA Owner release
+authorization for any production activation; verify one controlled XYZ Test
+Company ticket with Al and Lindsey separately; then verify the general reusable
+path and negative cases before claiming the larger objective complete. Any
+newly discovered issue must be resolved through the existing generic layer,
+not an account-name exception or new collection of scripts.
