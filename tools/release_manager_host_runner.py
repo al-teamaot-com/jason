@@ -461,8 +461,15 @@ def _freeze_marker_snapshot(state_root: Path) -> dict[str, Any]:
     }
 
 
-def _freeze_receipt_path(state_root: Path, release_id: str) -> Path:
-    return state_root / "owner-unfreeze-receipts" / (release_id + ".json")
+def _freeze_receipt_path(
+    state_root: Path, release_id: str, *, replacement_approval_id: str | None = None,
+) -> Path:
+    suffix = ""
+    if replacement_approval_id is not None:
+        if re.fullmatch(r"relapproval-[0-9a-f]{32}", replacement_approval_id) is None:
+            raise ReleaseManagerError("replacement transaction approval identity invalid")
+        suffix = "--" + replacement_approval_id
+    return state_root / "owner-unfreeze-receipts" / (release_id + suffix + ".json")
 
 
 def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None:
@@ -481,6 +488,7 @@ def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None
                 and doc.get("authorization") in {
                     "signed_teams_one_transaction_unfreeze",
                     "explicit_owner_one_transaction_unfreeze",
+                    "signed_teams_replacement_unfreeze",
                 }
                 and doc.get("freeze_restored") is False
                 and doc.get("status") in {"authorized_pending", "unfrozen_active"}):
@@ -514,6 +522,24 @@ def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None
     receipt["status"] = "stranded_transaction_restored"
     receipt["completed_at"] = now()
     atomic_json(receipt_path, receipt)
+    if receipt.get("authorization") == "signed_teams_replacement_unfreeze":
+        approval_id = str(receipt.get("approval_id") or "")
+        if re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None:
+            raise ReleaseManagerError("replacement crash recovery approval identity invalid")
+        source_path = state_root / "owner-replacement-unfreeze-receipts" / (
+            str(receipt["release_id"]) + "--" + approval_id + ".json")
+        raw_source = source_path.read_bytes()
+        if ("sha256:" + hashlib.sha256(raw_source).hexdigest()
+                != receipt.get("explicit_unfreeze_receipt_sha256")):
+            raise ReleaseManagerError("replacement crash recovery source receipt changed")
+        source = json.loads(raw_source)
+        if source.get("status") != "authorized_pending":
+            raise ReleaseManagerError("replacement crash recovery receipt already consumed")
+        source["status"] = "consumed"
+        source["completed_at"] = now()
+        source["freeze_restored"] = True
+        source["freeze_sha256_after"] = restored["sha256"]
+        atomic_json(source_path, source)
     raise ReleaseManagerError(
         "restored production freeze left open by an interrupted one-release transaction; retry promotion"
     )
@@ -523,12 +549,20 @@ def begin_one_transaction_freeze_exception(
     state_root: Path, context: Mapping[str, Any],
 ) -> dict[str, Any]:
     snapshot = _freeze_marker_snapshot(state_root)
-    if context.get("authorization") == "explicit_owner_one_transaction_unfreeze":
+    is_replacement = context.get("authorization") == "signed_teams_replacement_unfreeze"
+    if context.get("authorization") == "explicit_owner_one_transaction_unfreeze" or is_replacement:
         # Revalidate the precise preauthorized receipt while the native
         # production transaction lock is held; do not permit a changed source
         # or freeze marker between context construction and marker removal.
-        proof = state_root / "owner-explicit-unfreeze-receipts" / (
-            str(context["release_id"]) + ".json")
+        if is_replacement:
+            replacement_id = str(context.get("replacement_approval_id") or "")
+            if re.fullmatch(r"relapproval-[0-9a-f]{32}", replacement_id) is None:
+                raise ReleaseManagerError("replacement approval identity invalid")
+            proof = state_root / "owner-replacement-unfreeze-receipts" / (
+                str(context["release_id"]) + "--" + replacement_id + ".json")
+        else:
+            proof = state_root / "owner-explicit-unfreeze-receipts" / (
+                str(context["release_id"]) + ".json")
         info = proof.lstat()
         raw = proof.read_bytes()
         if (proof.is_symlink() or not stat.S_ISREG(info.st_mode)
@@ -545,6 +579,16 @@ def begin_one_transaction_freeze_exception(
                 or source.get("rollback_sha") != context.get("rollback_sha")
                 or source.get("scope_sha256") != context.get("scope_sha256")):
             raise ReleaseManagerError("explicit Owner unfreeze authorization mismatch")
+        if is_replacement:
+            try:
+                expires = datetime.fromisoformat(str(source.get("expires_at")))
+            except (ValueError, TypeError) as exc:
+                raise ReleaseManagerError("replacement approval has no valid expiry") from exc
+            if (source.get("authorization") != "signed_teams_replacement_unfreeze"
+                    or source.get("approval_id") != replacement_id
+                    or expires.tzinfo is None
+                    or datetime.now(timezone.utc) >= expires):
+                raise ReleaseManagerError("replacement signed Owner decision invalid or expired")
     marker = state_root / PRODUCTION_FREEZE_MARKER
     backup = state_root / PRODUCTION_FREEZE_BACKUP
     if backup.exists() or backup.is_symlink():
@@ -558,19 +602,26 @@ def begin_one_transaction_freeze_exception(
     else:
         _atomic_private_bytes(backup, snapshot["raw"])
         os.chmod(backup, snapshot["mode"])
-    receipt_path = _freeze_receipt_path(state_root, str(context["release_id"]))
+    receipt_path = _freeze_receipt_path(
+        state_root, str(context["release_id"]),
+        replacement_approval_id=(str(context["replacement_approval_id"])
+                                 if is_replacement else None),
+    )
     if receipt_path.exists() or receipt_path.is_symlink():
         raise ReleaseManagerError("one-release freeze exception receipt already exists")
-    approval_id = str(context["owner_approval_source"]).split(":", 1)[-1]
+    approval_id = (str(context["replacement_approval_id"]) if is_replacement else
+                   str(context["owner_approval_source"]).split(":", 1)[-1])
     authorization = str(context.get("authorization") or "signed_teams_one_transaction_unfreeze")
     if authorization not in {"signed_teams_one_transaction_unfreeze",
-                             "explicit_owner_one_transaction_unfreeze"}:
+                             "explicit_owner_one_transaction_unfreeze",
+                             "signed_teams_replacement_unfreeze"}:
         raise ReleaseManagerError("unsupported one-transaction freeze authorization")
     receipt = {
         "schema_version": "2.0",
         "authorization": authorization,
         **({"explicit_unfreeze_receipt_sha256": context["explicit_unfreeze_receipt_sha256"]}
-           if authorization == "explicit_owner_one_transaction_unfreeze" else {}),
+           if authorization in {"explicit_owner_one_transaction_unfreeze",
+                                "signed_teams_replacement_unfreeze"} else {}),
         "approval_id": approval_id,
         "release_id": str(context["release_id"]),
         "candidate_sha": str(context["candidate_sha"]),
@@ -700,9 +751,15 @@ def restore_one_transaction_freeze_exception(
     receipt["status"] = "deployment_returned"
     receipt["completed_at"] = now()
     atomic_json(receipt_path, receipt)
-    if receipt.get("authorization") == "explicit_owner_one_transaction_unfreeze":
-        source_receipt = state_root / "owner-explicit-unfreeze-receipts" / (
-            str(receipt["release_id"]) + ".json")
+    if receipt.get("authorization") in {
+        "explicit_owner_one_transaction_unfreeze", "signed_teams_replacement_unfreeze",
+    }:
+        if receipt.get("authorization") == "signed_teams_replacement_unfreeze":
+            source_receipt = state_root / "owner-replacement-unfreeze-receipts" / (
+                str(receipt["release_id"]) + "--" + str(receipt["approval_id"]) + ".json")
+        else:
+            source_receipt = state_root / "owner-explicit-unfreeze-receipts" / (
+                str(receipt["release_id"]) + ".json")
         raw_source = source_receipt.read_bytes()
         if ("sha256:" + hashlib.sha256(raw_source).hexdigest()
                 != receipt.get("explicit_unfreeze_receipt_sha256")):
@@ -5193,6 +5250,247 @@ def _deploy_production_locked(
 
 
 
+
+def attest_consumed_pre_mutation_unfreeze_for_replacement(
+    state_root: Path, record: Mapping[str, Any],
+) -> dict[str, str]:
+    """Attest a consumed old attempt WITHOUT granting replacement authority.
+
+    This may be used only by a separate signed, exact-bound Owner decision
+    consumer. It never creates or edits receipts, releases, or freeze markers.
+    A post-mutation failure/rollback needs a fresh release instead.
+    """
+    release_id = str(record.get("release_id") or "")
+    candidate = exact_sha(
+        str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
+        "candidate_sha",
+    )
+    if release_id != record_id(candidate):
+        raise ReleaseManagerError("replacement candidate/release identity mismatch")
+    rollback = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+    scope = str((record.get("manual_scope_review") or {}).get("scope_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", scope):
+        raise ReleaseManagerError("replacement scope review missing")
+    if (record.get("state") != "production_eligible"
+            or record.get("production") is not None
+            or record.get("native_pre_mutation_gate") is not None
+            or record.get("failure") is not None):
+        raise ReleaseManagerError("replacement requires proved pre-mutation failure")
+    marker = _freeze_marker_snapshot(state_root)
+    source_path = (state_root / "owner-explicit-unfreeze-receipts"
+                   / (release_id + ".json"))
+    transaction_path = _freeze_receipt_path(state_root, release_id)
+
+    def immutable_receipt(path: Path) -> tuple[dict[str, Any], str]:
+        try:
+            info = path.lstat()
+            if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_uid != os.geteuid()
+                    or info.st_gid != os.getegid()
+                    or not 1 <= info.st_size <= 8192):
+                raise ReleaseManagerError("replacement predecessor receipt is unsafe")
+            raw = path.read_bytes()
+            if len(raw) != info.st_size:
+                raise ReleaseManagerError("replacement predecessor receipt changed")
+            doc = json.loads(raw)
+            if not isinstance(doc, dict):
+                raise ReleaseManagerError("replacement predecessor receipt invalid")
+            return doc, "sha256:" + hashlib.sha256(raw).hexdigest()
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise ReleaseManagerError("replacement predecessor receipt inaccessible") from exc
+
+    source, source_digest = immutable_receipt(source_path)
+    transaction, transaction_digest = immutable_receipt(transaction_path)
+    owner = record.get("owner_approval") or {}
+    expected = {
+        "release_id": release_id,
+        "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": scope,
+    }
+    if (source.get("schema_version") != "1.0"
+            or source.get("authorization") != "explicit_exact_sha_owner_unfreeze"
+            or source.get("status") != "consumed"
+            or source.get("freeze_restored") is not True
+            or source.get("standing_authority") is not False
+            or source.get("automatic_publish_authority") is not False
+            or source.get("prior_release_approval_source") != owner.get("source")
+            or transaction.get("schema_version") != "2.0"
+            or transaction.get("authorization") != "explicit_owner_one_transaction_unfreeze"
+            or transaction.get("status") != "deployment_returned"
+            or transaction.get("freeze_restored") is not True
+            or transaction.get("release_state_after") != "production_eligible"
+            or transaction.get("explicit_unfreeze_receipt_sha256") is None
+            or any(source.get(key) != value or transaction.get(key) != value
+                   for key, value in expected.items())):
+        raise ReleaseManagerError("replacement predecessor is not a verified pre-mutation attempt")
+    if (source.get("freeze_sha256_before") != marker["sha256"]
+            or source.get("freeze_sha256_after") != marker["sha256"]
+            or transaction.get("freeze_sha256_before") != marker["sha256"]
+            or transaction.get("freeze_sha256_after") != marker["sha256"]):
+        raise ReleaseManagerError("replacement predecessor freeze was not exactly restored")
+    # Independent provider/runtime/host alignment; never infer no mutation from
+    # a receipt alone. A failed alignment check is a hard stop.
+    live_production_alignment(rollback)
+    return {
+        "candidate_sha": candidate,
+        "scope_sha256": scope,
+        "rollback_sha": rollback,
+        "predecessor_source_receipt_sha256": source_digest,
+        "predecessor_transaction_receipt_sha256": transaction_digest,
+        "freeze_sha256": marker["sha256"],
+    }
+
+
+
+def record_signed_replacement_unfreeze(
+    repo: Path, state_root: Path, *, release_id: str,
+    candidate_sha: str, approval_id: str, signed_evidence_sha256: str,
+    request_metadata: Mapping[str, Any], decided_at: datetime,
+    expires_at: datetime,
+) -> dict[str, Any]:
+    """Persist a once-only replacement grant ONLY after signed Teams validation.
+
+    Caller: the independent signed Teams evidence consumer under the native
+    release lock. No release, provider action or freeze mutation occurs here.
+    """
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    if (release_id != record_id(candidate_sha)
+            or re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", signed_evidence_sha256) is None
+            or decided_at.tzinfo is None or expires_at.tzinfo is None
+            or not decided_at < expires_at
+            or not 0 < (expires_at - decided_at).total_seconds() <= 900
+            or datetime.now(timezone.utc) >= expires_at):
+        raise ReleaseManagerError("replacement signed approval identity or TTL invalid")
+    record = load_record(state_root, release_id)
+    proof = attest_consumed_pre_mutation_unfreeze_for_replacement(state_root, record)
+    lineage = {
+        key: value.removeprefix("sha256:") if key.endswith("_receipt_sha256") else value
+        for key, value in proof.items()
+    }
+    if (request_metadata.get("replacement_unfreeze_only") is not True
+            or request_metadata.get("review_only") is True
+            or request_metadata.get("replacement_lineage") != lineage
+            or request_metadata.get("candidate_sha") != candidate_sha
+            or request_metadata.get("rollback_sha") != record["rollback_sha"]
+            or request_metadata.get("release_id") != release_id
+            or request_metadata.get("manifest_sha256") != hashlib.sha256(json.dumps(
+                record.get("release_manifest") or {}, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False).encode("utf-8")).hexdigest()):
+        raise ReleaseManagerError("replacement signed decision differs from exact release")
+    verify_candidate_on_main(repo, candidate_sha)
+    require_current_manual_scope_review(repo, state_root, record)
+    if record.get("replacement_unfreeze_authorization") is not None:
+        prior = record["replacement_unfreeze_authorization"]
+        if prior.get("approval_id") != approval_id:
+            raise ReleaseManagerError("replacement already authorized by another approval")
+    target = state_root / "owner-replacement-unfreeze-receipts" / (
+        release_id + "--" + approval_id + ".json")
+    doc = {
+        "schema_version": "1.0",
+        "authorization": "signed_teams_replacement_unfreeze",
+        "release_id": release_id,
+        "candidate_sha": candidate_sha,
+        "rollback_sha": record["rollback_sha"],
+        "scope_sha256": proof["scope_sha256"],
+        "freeze_sha256_before": proof["freeze_sha256"],
+        "predecessor_source_receipt_sha256": proof["predecessor_source_receipt_sha256"],
+        "predecessor_transaction_receipt_sha256": proof["predecessor_transaction_receipt_sha256"],
+        "approval_id": approval_id,
+        "signed_evidence_sha256": signed_evidence_sha256,
+        "prior_release_approval_source": (record.get("owner_approval") or {}).get("source"),
+        "decided_at": decided_at.isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "standing_authority": False,
+        "automatic_publish_authority": False,
+        "status": "authorized_pending",
+    }
+    if target.exists() or target.is_symlink():
+        if target.is_symlink() or json.loads(target.read_text(encoding="utf-8")) != doc:
+            raise ReleaseManagerError("replacement grant already exists with different evidence")
+    else:
+        atomic_json(target, doc)
+    record["replacement_unfreeze_authorization"] = {
+        "approval_id": approval_id,
+        "signed_evidence_sha256": signed_evidence_sha256,
+        "receipt_sha256": "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest(),
+    }
+    record.setdefault("history", []).append({
+        "at": now(), "state": "production_eligible",
+        "gate": "signed_teams_replacement_unfreeze_pending_transaction",
+        "approval_id": approval_id,
+    })
+    save_record(state_root, record)
+    return doc
+
+
+def signed_replacement_unfreeze_context(
+    state_root: Path, record: Mapping[str, Any], *, max_age_seconds: int = 900,
+) -> dict[str, Any] | None:
+    pointer = record.get("replacement_unfreeze_authorization")
+    if not isinstance(pointer, Mapping):
+        return None
+    approval_id = str(pointer.get("approval_id") or "")
+    release_id = str(record.get("release_id") or "")
+    if (re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None
+            or not release_id.startswith("release-")):
+        return None
+    path = state_root / "owner-replacement-unfreeze-receipts" / (
+        release_id + "--" + approval_id + ".json")
+    try:
+        info = path.lstat()
+        raw = path.read_bytes()
+        doc = json.loads(raw)
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.geteuid() or info.st_gid != os.getegid()
+                or len(raw) != info.st_size or not 1 <= len(raw) <= 8192
+                or not isinstance(doc, dict)
+                or "sha256:" + hashlib.sha256(raw).hexdigest() != pointer.get("receipt_sha256")
+                or doc.get("signed_evidence_sha256") != pointer.get("signed_evidence_sha256")):
+            return None
+        expiry = datetime.fromisoformat(str(doc.get("expires_at")))
+        decision = datetime.fromisoformat(str(doc.get("decided_at")))
+        if (expiry.tzinfo is None or decision.tzinfo is None
+                or not decision <= datetime.now(timezone.utc) < expiry
+                or (expiry - decision).total_seconds() > max_age_seconds):
+            return None
+        proof = attest_consumed_pre_mutation_unfreeze_for_replacement(state_root, record)
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError, ReleaseManagerError):
+        return None
+    if (doc.get("authorization") != "signed_teams_replacement_unfreeze"
+            or doc.get("schema_version") != "1.0"
+            or doc.get("status") != "authorized_pending"
+            or doc.get("approval_id") != approval_id
+            or doc.get("release_id") != release_id
+            or doc.get("candidate_sha") != proof["candidate_sha"]
+            or doc.get("rollback_sha") != proof["rollback_sha"]
+            or doc.get("scope_sha256") != proof["scope_sha256"]
+            or doc.get("freeze_sha256_before") != proof["freeze_sha256"]
+            or doc.get("predecessor_source_receipt_sha256") != proof["predecessor_source_receipt_sha256"]
+            or doc.get("predecessor_transaction_receipt_sha256") != proof["predecessor_transaction_receipt_sha256"]
+            or doc.get("prior_release_approval_source") != (record.get("owner_approval") or {}).get("source")
+            or doc.get("standing_authority") is not False
+            or doc.get("automatic_publish_authority") is not False):
+        return None
+    return {
+        "authorization": "signed_teams_replacement_unfreeze",
+        "release_id": release_id,
+        "candidate_sha": proof["candidate_sha"],
+        "rollback_sha": proof["rollback_sha"],
+        "scope_sha256": proof["scope_sha256"],
+        "owner_approval_source": (record.get("owner_approval") or {}).get("source"),
+        "recovery_profile_id": "explicit_exact_sha_owner_unfreeze_replacement",
+        "declaration_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        "explicit_unfreeze_receipt_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        "replacement_approval_id": approval_id,
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+    }
+
+
 def owner_unfreeze_release(
     repo: Path,
     state_root: Path,
@@ -5304,6 +5602,8 @@ def explicit_owner_one_transaction_freeze_context(
     """
     if str(record.get("state") or "") != "production_eligible":
         return None
+    if record.get("replacement_unfreeze_authorization") is not None:
+        return signed_replacement_unfreeze_context(state_root, record)
     candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
     rollback = str(record.get("rollback_sha") or "")
     scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
@@ -6273,6 +6573,7 @@ def governed_open_breaker_recovery_context(
 def signed_owner_offer_purpose(
     record: dict[str, Any], candidate_sha: str, reviewed_policy: Any,
     live_mode: str, *, ccc_root: Path,
+    state_root: Path | None = None,
 ) -> str | None:
     """Return narrow actionable Teams purpose or None. No authority mutation.
 
@@ -6299,6 +6600,19 @@ def signed_owner_offer_purpose(
         if (prior.get("source_revision") == candidate_sha
                 and prior.get("recorded_by") == "person-al"
                 and prior.get("status") == "approved"):
+            # The already-authorized release/CCC card is not reused. A
+            # consumed pre-mutation freeze may instead need a distinct,
+            # authenticated one-transaction replacement card.
+            if (state_root is not None
+                    and record.get("replacement_unfreeze_authorization") is None
+                    and (state_root / "owner-explicit-unfreeze-receipts"
+                         / (str(record.get("release_id")) + ".json")).is_file()):
+                try:
+                    attest_consumed_pre_mutation_unfreeze_for_replacement(
+                        state_root, record)
+                except (ReleaseManagerError, OSError, ValueError):
+                    return None
+                return "replacement_unfreeze_only"
             return None
         # A conflicting stored review is an authority problem, not an
         # invitation to issue a new card that would overwrite audit evidence.
@@ -6495,6 +6809,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
     try:
         consume_mobile_release_decisions(
             repo=repo, state_root=state_root, approve_release=approve_release,
+            record_replacement_unfreeze=record_signed_replacement_unfreeze,
         )
     except MobileReleaseEvidenceBusy:
         print("RELEASE_APPROVAL_ONLY=SIGNED_OWNER_EVIDENCE_BUSY", flush=True)
@@ -6516,7 +6831,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
 
     purpose = signed_owner_offer_purpose(
         record, main_sha, reviewed_policy, mode,
-        ccc_root=Path("/var/lib/jason/ccc"),
+        ccc_root=Path("/var/lib/jason/ccc"), state_root=state_root,
     )
     if purpose is None:
         print("RELEASE_APPROVAL_ONLY=NO_OWNER_ACTION_REQUIRED", flush=True)
@@ -6537,6 +6852,13 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         ensure_ascii=False,
     ).encode("utf-8")).hexdigest()
     review_only_offer = purpose == "ccc_material_review_only"
+    replacement_offer = purpose == "replacement_unfreeze_only"
+    replacement_lineage = (
+        {k: v.removeprefix("sha256:") if k.endswith("_receipt_sha256") else v
+         for k, v in attest_consumed_pre_mutation_unfreeze_for_replacement(
+             state_root, record).items()}
+        if replacement_offer else None
+    )
     replacing_stale_offer = False
     if offer.exists():
         existing = json.loads(offer.read_text(encoding="utf-8"))
@@ -6549,6 +6871,8 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         exact_subject = (
             existing.get("manifest_sha256") == manifest_digest
             and (existing.get("review_only") is True) == review_only_offer
+            and (existing.get("replacement_unfreeze_only") is True) == replacement_offer
+            and existing.get("replacement_lineage") == replacement_lineage
         )
         if exact_subject:
             print("RELEASE_APPROVAL_ONLY=EXISTING_OFFER_PRESERVED", flush=True)
@@ -6567,6 +6891,8 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         "protected_main_sha": main_sha,
         "live_rollback_sha": live_sha,
         **({"review_only": True} if review_only_offer else {}),
+        **({"replacement_unfreeze_only": True,
+            "replacement_lineage": replacement_lineage} if replacement_offer else {}),
         **({
             "recovery_profile_id": recovery_context["profile_id"],
             "recovery_policy_sha256": recovery_context["policy_sha256"],
@@ -6749,6 +7075,7 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
         try:
             consume_mobile_release_decisions(
                 repo=repo, state_root=state_root, approve_release=approve_release,
+            record_replacement_unfreeze=record_signed_replacement_unfreeze,
             )
         except MobileReleaseEvidenceBusy:
             # Only an independently typed SQLITE_BUSY/LOCKED condition permits
@@ -6833,10 +7160,17 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             requested_risk = str(record.get("risk_profile") or "unknown")
             purpose = signed_owner_offer_purpose(
                 record, candidate_sha, reviewed_policy, live_mode,
-                ccc_root=Path("/var/lib/jason/ccc"),
+                ccc_root=Path("/var/lib/jason/ccc"), state_root=state_root,
             )
             owner_teams_eligible = purpose is not None
             review_only = purpose == "ccc_material_review_only"
+            replacement_only = purpose == "replacement_unfreeze_only"
+            replacement_lineage = (
+                {k: v.removeprefix("sha256:") if k.endswith("_receipt_sha256") else v
+                 for k, v in attest_consumed_pre_mutation_unfreeze_for_replacement(
+                     state_root, record).items()}
+                if replacement_only else None
+            )
             if live_mode != expected_mode:
                 print("RELEASE_TEAMS_APPROVAL_UNAVAILABLE=runtime_mode_mismatch"
                       + f" expected={expected_mode} active={live_mode}", flush=True)
@@ -6855,6 +7189,9 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
                 ).encode("utf-8")).hexdigest(),
                 "protected_main_sha": main_sha, "live_rollback_sha": current_sha,
                 **({"review_only": True} if review_only else {}),
+                **({"replacement_unfreeze_only": True,
+                    "replacement_lineage": replacement_lineage}
+                   if replacement_only else {}),
                 "published_at": now(),
             })
         result = production_gate_result(repo, record)

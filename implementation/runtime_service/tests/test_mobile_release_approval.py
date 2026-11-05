@@ -960,3 +960,65 @@ def test_v3_policy_owner_mode_and_source_digest_remain_bound(tmp_path):
     assert old.authorized_approver_ids == ("person-al",)
     with pytest.raises(PermissionError):
         read_mobile_release_policy(policy_file(tmp_path, schema_version="3.0"))
+
+
+def test_issue_2339_replacement_owner_card_has_new_exact_signed_subject(tmp_path):
+    import hashlib
+    root, record_path = release_record(tmp_path)
+    record = json.loads(record_path.read_text())
+    record['owner_approval'] = {
+        'approved': True, 'candidate_sha': SHA,
+        'source': 'authenticated_mobile_teams_owner:relapproval-' + 'a'*32,
+    }
+    record['manual_scope_review'] = {'scope_sha256': 'd'*64}
+    record_path.write_text(json.dumps(record))
+    record_path.chmod(0o600)
+    policy = read_mobile_release_policy(reviewed_policy_file(tmp_path))
+    marker=root/'production-deployment-freeze'
+    marker.write_text('{"scope":"manual-and-automatic-production-promotions","status":"active"}\n')
+    marker.chmod(0o600)
+    freeze_hash=hashlib.sha256(marker.read_bytes()).hexdigest()
+    source=root/'owner-explicit-unfreeze-receipts'/(RELEASE+'.json')
+    tx=root/'owner-unfreeze-receipts'/(RELEASE+'.json')
+    source.parent.mkdir();tx.parent.mkdir()
+    common={'release_id':RELEASE,'candidate_sha':SHA,'rollback_sha':ROLLBACK,
+            'scope_sha256':'d'*64,'freeze_sha256_before':freeze_hash,
+            'freeze_sha256_after':freeze_hash,'freeze_restored':True}
+    source.write_text(json.dumps({**common,'schema_version':'1.0',
+        'authorization':'explicit_exact_sha_owner_unfreeze','status':'consumed',
+        'standing_authority':False,'automatic_publish_authority':False}))
+    source.chmod(0o600)
+    tx.write_text(json.dumps({**common,'schema_version':'2.0',
+        'authorization':'explicit_owner_one_transaction_unfreeze',
+        'status':'deployment_returned','release_state_after':'production_eligible'}))
+    tx.chmod(0o600)
+    # A previously approved release cannot issue a second ordinary release card.
+    with pytest.raises(PermissionError, match='existing release approval'):
+        read_eligible_release(root, RELEASE, policy)
+    replacement = read_eligible_release(
+        root, RELEASE, policy, allow_existing_owner_approval=True,
+        replacement_unfreeze_only=True)
+    assert replacement.review_only is True
+    assert replacement.replacement_lineage is not None
+    card=create_mobile_release_request(replacement, policy, now=NOW,
+        card_challenge='b'*48)
+    assert card.metadata['replacement_unfreeze_only'] is True
+    assert card.metadata['replacement_lineage']['freeze_sha256']==freeze_hash
+    assert card.metadata['replacement_lineage']['scope_sha256']=='d'*64
+    assert 'review_only' not in card.metadata
+    assert 'unfreeze-replacement:' in card.request_id
+    assert card.presentation.title.startswith('Replacement unfreeze ONLY:')
+    assert 'standing authority' in card.presentation.summary
+    # Same card from same immutable evidence reconstructs exactly, apart from
+    # the intentionally fresh approval ID used for one signed Teams click.
+    repeated=create_mobile_release_request(replacement,policy,now=NOW,
+        card_challenge='b'*48)
+    assert card.metadata==repeated.metadata
+    assert card.presentation==repeated.presentation
+    # A changed predecessor or already-authorized replacement cannot be
+    # reinterpreted as an ordinary CCC review or a fresh retry.
+    tampered=json.loads(tx.read_text());tampered['freeze_sha256_after']='0'*64
+    tx.write_text(json.dumps(tampered))
+    with pytest.raises(PermissionError, match='predecessor'):
+        read_eligible_release(root, RELEASE,policy,
+            allow_existing_owner_approval=True,replacement_unfreeze_only=True)
