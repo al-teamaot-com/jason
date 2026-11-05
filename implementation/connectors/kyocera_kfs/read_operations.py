@@ -162,8 +162,15 @@ def device_search(
 
     matched = [device for device in devices if matches(device, arguments)]
     limit = max(1, min(int(arguments.get("limit") or 100), 1000))
+    offset = max(0, int(arguments.get("offset") or 0))
+    page = matched[offset:offset + limit]
+    next_offset = offset + len(page) if offset + len(page) < len(matched) else None
     return {
-        "devices": matched[:limit],
+        "devices": page,
+        "offset": offset,
+        "limit": limit,
+        "next_offset": next_offset,
+        "complete": next_offset is None,
         "matched_count": len(matched),
         "searched_count": len(devices),
         "status": {
@@ -186,6 +193,18 @@ def matches(
             continue
         actual = str(attributes.get(attribute_name) or "").strip()
         if actual.casefold() != expected.casefold():
+            return False
+
+    # `name` is the provider-neutral conversational selector. KFS has no
+    # single canonical name field, so apply it as a bounded text match across
+    # device identity fields rather than silently ignoring it.
+    name_query = str(arguments.get("name") or "").strip().casefold()
+    if name_query:
+        name_haystack = [
+            str(device.get("deviceId") or ""),
+            *[str(attributes.get(name) or "") for name in SEARCH_TEXT_FIELDS],
+        ]
+        if not any(name_query in value.casefold() for value in name_haystack):
             return False
 
     query = str(arguments.get("search") or "").strip().casefold()
