@@ -29,6 +29,22 @@ def reap_until_states(scheduler, store, expected_states, timeout_seconds=5.0):
         time.sleep(0.025)
 
 
+def dispatch_until_count(scheduler, expected_count, timeout_seconds=5.0):
+    """Wait for independently timed retry delays without changing scheduler semantics."""
+    deadline = time.monotonic() + timeout_seconds
+    total = 0
+    while total < expected_count:
+        total += scheduler.dispatch_available()
+        if total >= expected_count:
+            return total
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"dispatch timeout: expected={expected_count}, actual={total}"
+            )
+        time.sleep(0.025)
+    return total
+
+
 class PMV2SchedulerTests(unittest.TestCase):
     def _config(self, root: Path, command=None):
         (root / "roadmap.md").write_text("", encoding="utf-8")
@@ -179,8 +195,7 @@ class PMV2BoundedRetryTests(unittest.TestCase):
             try:
                 self.assertEqual(scheduler.dispatch_available(), 2)
                 reap_until_states(scheduler, store, {"retry_ready"})
-                time.sleep(1.1)
-                self.assertEqual(scheduler.dispatch_available(), 2)
+                self.assertEqual(dispatch_until_count(scheduler, 2), 2)
                 rows = reap_until_states(scheduler, store, {"blocked"})
                 self.assertTrue(all(r.attempt_count == 2 for r in rows))
             finally:
