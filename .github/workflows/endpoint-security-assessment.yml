@@ -9,7 +9,7 @@ on:
       - 'implementation/mcp_service/src/jason_mcp/endpoint_security_assessment*.py'
       - 'implementation/mcp_service/src/jason_mcp/server.py'
       - 'implementation/mcp_service/tests/test_endpoint_security_assessment*.py'
-      - 'implementation/runtime_service/pyproject.toml'
+      - 'implementation/mcp_service/pyproject.toml'
       - 'docs/playbooks/Jason-Endpoint-Security-Assessment.md'
       - 'docs/playbooks/json/endpoint_security_assessment-0.1.0.json'
       - '.github/workflows/endpoint-security-assessment.yml'
@@ -21,7 +21,7 @@ on:
       - 'implementation/mcp_service/src/jason_mcp/endpoint_security_assessment*.py'
       - 'implementation/mcp_service/src/jason_mcp/server.py'
       - 'implementation/mcp_service/tests/test_endpoint_security_assessment*.py'
-      - 'implementation/runtime_service/pyproject.toml'
+      - 'implementation/mcp_service/pyproject.toml'
       - 'docs/playbooks/Jason-Endpoint-Security-Assessment.md'
       - 'docs/playbooks/json/endpoint_security_assessment-0.1.0.json'
       - '.github/workflows/endpoint-security-assessment.yml'
@@ -86,3 +86,45 @@ jobs:
             implementation/autonomous_remediation/test_datto_edr_av_security.py \
             implementation/autonomous_remediation/test_json_playbook_document.py \
             implementation/autonomous_remediation/test_playbook_catalog.py -q
+
+
+  flagged-mcp-registration:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src:implementation/mcp_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install actual MCP service dependency closure
+        run: |
+          python -m pip install \
+            ./implementation \
+            ./implementation/connectors/openclaw \
+            ./implementation/runtime_service \
+            ./implementation/mcp_service
+      - name: Verify assessment tools register only when explicitly enabled
+        run: |
+          JASON_ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED=true python - <<'PY'
+          from jason_mcp import server
+          assert server._ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED is True
+          for name in (
+              "request_endpoint_security_assessment",
+              "continue_endpoint_security_assessment",
+              "view_endpoint_security_assessment_pdf",
+          ):
+              assert callable(getattr(server, name)), name
+          print("MCP_ASSESSMENT_EXPLICIT_REGISTRATION=PASS")
+          PY
+          JASON_ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED=false python - <<'PY'
+          from jason_mcp import server
+          assert server._ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED is False
+          for name in (
+              "request_endpoint_security_assessment",
+              "continue_endpoint_security_assessment",
+              "view_endpoint_security_assessment_pdf",
+          ):
+              assert not hasattr(server, name), name
+          print("MCP_ASSESSMENT_DEFAULT_DISABLED=PASS")
+          PY
