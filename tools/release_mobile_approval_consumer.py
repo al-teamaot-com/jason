@@ -363,7 +363,7 @@ def consume_mobile_release_decisions(
             authenticator=key_auth, allowed_machine_identities=frozenset({"svc-openclaw-gateway"}),
             allowed_approval_prefixes=(REQUEST_PREFIX,), clock=lambda: timestamp,
             allowed_selection_keys=(frozenset({"card_challenge"})
-                                    if policy.schema_version == "2.0" else frozenset()),
+                                    if policy.schema_version in {"2.0", "3.0"} else frozenset()),
         )
         token = json.dumps(signed, separators=(",", ":"), ensure_ascii=False)
         _, original = verifier.parse(token)
@@ -375,7 +375,7 @@ def consume_mobile_release_decisions(
                 or original.documents
                 or principal.authentication_evidence_hash != evidence_sha):
             raise PermissionError("original signed Teams evidence does not match decision receipt")
-        if policy.schema_version == "2.0":
+        if policy.schema_version in {"2.0", "3.0"}:
             proof = request.metadata.get("card_instance_challenge")
             if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
                     or hashlib.sha256(proof.encode("ascii")).hexdigest()
@@ -412,7 +412,7 @@ def consume_mobile_release_decisions(
         )
         review_only = request.metadata.get("review_only") is True
         if review_only:
-            if (policy.schema_version != "2.0"
+            if (policy.schema_version not in {"2.0", "3.0"}
                     or prior_approval.get("approved") is not True
                     or prior_approval.get("candidate_sha") != request.metadata.get("candidate_sha")
                     or digest(raw_release.get("release_manifest") or {})
@@ -502,7 +502,7 @@ def consume_mobile_release_decisions(
         expected = create_mobile_release_request(
             candidate, policy, now=request.requested_at,
             card_challenge=(request.metadata.get("card_instance_challenge")
-                            if policy.schema_version == "2.0" else None),
+                            if policy.schema_version in {"2.0", "3.0"} else None),
             renewed_from=renewed_from, renewal_nonce=renewal_nonce,
         )
         if (request.metadata != {**expected.metadata, **{

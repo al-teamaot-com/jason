@@ -262,7 +262,7 @@ Do not delete or edit a decided review record to obtain another approval prompt.
 ## Mobile release/CCC owner pilot
 
 A separate, **disabled-by-default** owner-only release/CCC mobile approval
-adapter is described in [Mobile Teams Release and CCC Approval](Mobile-Teams-Release-and-CCC-Approval.md).
+adapter is described in [PMv3.1 Minimal Production Release](PMV3-Minimal-Production-Release.md).
 It reuses the authenticated Teams ingress and durable Jason decision ledger,
 requires fresh independent host verification before converting one decision
 into exact-SHA owner review records, and retains every release/CCC deployment

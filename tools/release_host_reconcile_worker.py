@@ -499,23 +499,74 @@ def _authenticated_rollback_evidence(
                 or meta.get("release_id") != "release-" + candidate[:16]
                 or meta.get("manifest_sha256") != manifest_digest):
             return False
-        path = CCC_MATERIAL_REVIEW_ROOT / (
-            'material-review-' + candidate[:16] + '.json'
-        )
-        info = path.lstat()
-        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
-                or info.st_uid not in {0, _host_operator_uid()}
-                or info.st_mode & 0o002):
-            return False
-        review = json.loads(path.read_text(encoding='utf-8'))
+        # The separately signed Teams approval above is authoritative.
+        # The governed native scope review replaces a second CCC human
+        # material-review artifact. The production transaction independently
+        # requires the exact scope digest and protected freeze receipt.
+        scope = record.get("manual_scope_review") or {}
         return (
-            review.get('status') == 'approved'
-            and review.get('source_revision') == candidate
-            and review.get('mobile_approval_id') == receipt_id
-            and review.get('release_manifest_sha256') == manifest_digest
+            isinstance(scope, dict)
+            and scope.get("schema_version") == "1.0"
+            and scope.get("candidate_sha") == candidate
+            and scope.get("baseline_sha") == rollback
+            and re.fullmatch(r"[0-9a-f]{64}", str(scope.get("scope_sha256") or ""))
+                is not None
+            and isinstance(scope.get("included_prs"), list)
+            and isinstance(scope.get("included_commits"), list)
         )
     except (OSError, ValueError, TypeError, sqlite3.Error):
         return False
+
+
+def _distinct_owner_unfreeze_rollback_authorized(
+    candidate: str, rollback: str, record: dict[str, object]
+) -> bool:
+    """Accept only the exact bounded unfreeze receipt for the active release.
+
+    This is a rollback *only* admission; caller additionally requires a
+    verified signed Teams approval, CCC receipt, protected LKG, a held
+    production transaction, and the freeze removed inside that transaction.
+    """
+    scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
+    owner_source = (record.get("owner_approval") or {}).get("source")
+    if not isinstance(scope, str) or not re.fullmatch(r"[0-9a-f]{64}", scope):
+        return False
+    path = (RELEASE_STATE / "owner-explicit-unfreeze-receipts"
+            / ("release-" + candidate[:16] + ".json"))
+    backup = RELEASE_STATE / "production-deployment-freeze.pmv3-one-release-backup"
+    try:
+        info = path.lstat()
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != _host_operator_uid()
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or not 1 <= info.st_size <= 8192):
+            return False
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        backup_info = backup.lstat()
+        if (backup.is_symlink() or not stat.S_ISREG(backup_info.st_mode)
+                or backup_info.st_uid != _host_operator_uid()
+                or backup_info.st_mode & 0o022):
+            return False
+        freeze_digest = hashlib.sha256(backup.read_bytes()).hexdigest()
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+    return (
+        receipt.get("schema_version") == "1.0"
+        and receipt.get("authorization") == "explicit_exact_sha_owner_unfreeze"
+        and receipt.get("status") == "authorized_pending"
+        and receipt.get("release_id") == "release-" + candidate[:16]
+        and receipt.get("candidate_sha") == candidate
+        and receipt.get("rollback_sha") == rollback
+        and receipt.get("scope_sha256") == scope
+        and receipt.get("prior_release_approval_source") == owner_source
+        and receipt.get("owner_approval_source") == "explicit_owner_instruction"
+        and receipt.get("separate_exact_owner_unfreeze") is True
+        and receipt.get("freeze_remains_active") is True
+        and receipt.get("restore_freeze_after_transaction") is True
+        and receipt.get("standing_authority") is False
+        and receipt.get("automatic_publish_authority") is False
+        and receipt.get("freeze_sha256_before") == freeze_digest
+    )
 
 
 def _exact_signed_inflight_lkg_rollback_authorized(
@@ -564,7 +615,6 @@ def _exact_signed_inflight_lkg_rollback_authorized(
             or record.get("rollback_sha") != source_revision
             or manifest.get("candidate_sha") != candidate
             or manifest.get("rollback_sha") != source_revision
-            or manifest.get("one_transaction_freeze_exception") != exception
             or owner.get("approved") is not True
             or owner.get("candidate_sha") != candidate
             or not str(owner.get("source") or "").startswith(
@@ -574,19 +624,32 @@ def _exact_signed_inflight_lkg_rollback_authorized(
             or previous.get("revision") != source_revision
             or pre_mutation.get("passed") is not True
             or pre_mutation.get("revision") != source_revision
-            or exception.get("rollback_sha") != source_revision
-            or exception.get("required_recovery_profile_id")
-                != "provider_identity_and_authority_recovery"
-            or exception.get("standing_authority") is not False
-            or exception.get("signed_teams_release_approval_required") is not True
-            or exception.get("restore_freeze_after_transaction") is not True
             or not _authenticated_rollback_evidence(
                 candidate, source_revision, record
             )
         ):
             return False
-        # The auto-restored one-transaction freeze exception must actually be
-        # active, rather than just advertised in an unprivileged release record.
+        # Two independent Owner paths exist: the older source-declared
+        # one-transaction exception, or a later distinct exact-scope unfreeze
+        # receipt issued after signed Teams deployment approval. Neither a
+        # mutable release boolean nor an expired approval alone is sufficient.
+        legacy_exception = (
+            manifest.get("one_transaction_freeze_exception") == exception
+            and exception.get("rollback_sha") == source_revision
+            and exception.get("required_recovery_profile_id")
+                == "provider_identity_and_authority_recovery"
+            and exception.get("standing_authority") is False
+            and exception.get("signed_teams_release_approval_required") is True
+            and exception.get("restore_freeze_after_transaction") is True
+        )
+        explicit_unfreeze = _distinct_owner_unfreeze_rollback_authorized(
+            candidate, source_revision, record
+        )
+        if not (legacy_exception or explicit_unfreeze):
+            return False
+        # The one-time freeze backup must actually be present, with the freeze
+        # removed by the native locked transaction, not merely claimed in a
+        # mutable release record.
         backup = RELEASE_STATE / "production-deployment-freeze.pmv3-one-release-backup"
         meta = backup.lstat()
         if (backup.is_symlink() or not stat.S_ISREG(meta.st_mode)

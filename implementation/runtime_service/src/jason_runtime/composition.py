@@ -2563,10 +2563,12 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         )
         from .universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
         owner_policy = read_mobile_release_policy(settings.release_mobile_approval_policy)
-        expected_version = ("1.0" if settings.release_mobile_approval_mode == "owner_only_pilot"
-                            else "2.0")
-        if owner_policy.schema_version != expected_version:
+        if settings.release_mobile_approval_mode == "owner_only_pilot":
+            if owner_policy.schema_version != "1.0":
+                raise PermissionError("active release approval mode and reviewed policy version do not match")
+        elif owner_policy.schema_version not in {"2.0", "3.0"}:
             raise PermissionError("active release approval mode and reviewed policy version do not match")
+        expected_version = owner_policy.schema_version
         release_repo = SQLiteApprovalRequestRepository(settings.release_mobile_approval_db)
         release_approval_service = ApprovalRequestService(
             release_repo, MobileReleaseOwnerAuthority(settings.release_mobile_approval_policy),
@@ -2582,7 +2584,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                 authenticator=teams_authenticator,
                 allowed_machine_identities=settings.allowed_machine_identities,
                 allowed_approval_prefixes=("relapproval-",),
-                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version == "2.0"
+                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0"}
                                         else frozenset()),
             ),
             signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),

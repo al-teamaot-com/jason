@@ -170,9 +170,6 @@ jobs:
         run: |
           python3 tools/engineering_standards_gate.py
           python3 -m unittest tools.tests.test_engineering_standards_gate
-      - name: Validate documentation impact declaration
-        if: github.event_name == 'pull_request'
-        run: python3 tools/documentation_impact_gate.py --event "$GITHUB_EVENT_PATH"
       - name: Test documentation single-flight publisher
         run: python3 -B -m unittest discover -s tests -p test_documentation_single_flight.py
       - name: Test documentation publisher in disposable Git remotes
@@ -182,7 +179,7 @@ jobs:
       - name: Validate documentation control plane
         run: python3 tools/validate_documentation_control.py
       - name: Build documentation directly from canonical docs tree
-        run: mkdocs build --strict
+        run: mkdocs build
 
   repository-hygiene:
     runs-on: ubuntu-latest

@@ -892,3 +892,71 @@ def test_pending_or_approved_card_blocks_new_renewal(tmp_path):
     case.maintenance._next_due = NOW
     assert case.maintenance.tick() is False
     assert len(case.sender.sent) == 1
+
+
+def test_v3_requires_explicit_exact_reviewed_opt_in_without_changing_v2(tmp_path):
+    v2 = read_mobile_release_policy(reviewed_policy_file(tmp_path))
+    assert v2.schema_version == "2.0"
+    assert "production_repair" not in v2.allowed_risk_profiles
+    root, _ = release_record(tmp_path)
+    mark_release_high_impact(root, risk="production_repair")
+    with pytest.raises(PermissionError, match="risk profile"):
+        read_eligible_release(root, RELEASE, v2)
+    v3 = read_mobile_release_policy(reviewed_policy_file(
+        tmp_path, schema_version="3.0",
+        allowed_risk_profiles=["normal", "production_control_core", "production_repair"],
+    ))
+    assert v3.schema_version == "3.0"
+    evidence = read_eligible_release(root, RELEASE, v3)
+    req = create_mobile_release_request(evidence, v3, now=NOW)
+    assert req.metadata["owner_policy_sha256"] == v3.policy_sha256
+    assert req.metadata["manifest_sha256"] == digest(json.loads(
+        (root / "records" / f"{RELEASE}.json").read_text()
+    )["release_manifest"])
+    assert req.metadata["candidate_sha"] == SHA
+    assert req.metadata["rollback_sha"] == ROLLBACK
+    assert "card_instance_challenge" in req.metadata
+    assert "production_repair" in repr(req.presentation.facts)
+
+
+@pytest.mark.parametrize("change", [
+    {"schema_version": "2.0"},
+    {"allowed_risk_profiles": ["normal", "production_control_core"]},
+    {"allowed_risk_profiles": ["normal", "production_repair"]},
+    {"allowed_risk_profiles": ["normal", "production_control_core", "schema_or_contract"]},
+    {"allowed_risk_profiles": ["normal", "production_control_core", "production_repair", "schema_or_contract"]},
+    {"allowed_risk_profiles": ["normal", "production_control_core", "production_repair", "production_repair"]},
+    {"owner_identity_ids": ["person-other"]},
+    {"ttl_seconds": 9999},
+    {"high_impact_review": {**HIGH_IMPACT_REVIEW, "independent_ccc_required": False}},
+    {"high_impact_review": {**HIGH_IMPACT_REVIEW, "protected_release_gates_unchanged": False}},
+])
+def test_v3_rejects_unreviewed_risks_identity_and_weakening(tmp_path, change):
+    doc = {
+        "schema_version": "3.0",
+        "allowed_risk_profiles": ["normal", "production_control_core", "production_repair"],
+    }
+    doc.update(change)
+    with pytest.raises((PermissionError, ValueError)):
+        read_mobile_release_policy(reviewed_policy_file(tmp_path, **doc))
+
+
+def test_v3_policy_owner_mode_and_source_digest_remain_bound(tmp_path):
+    v3 = reviewed_policy_file(
+        tmp_path, schema_version="3.0",
+        allowed_risk_profiles=["normal", "production_control_core", "production_repair"],
+    )
+    policy = read_mobile_release_policy(v3)
+    root, _ = release_record(tmp_path)
+    mark_release_high_impact(root, risk="production_repair")
+    e = read_eligible_release(root, RELEASE, policy)
+    old = create_mobile_release_request(e, policy, now=NOW)
+    changed = json.loads(v3.read_text())
+    changed["ttl_seconds"] = 899
+    v3.write_text(json.dumps(changed))
+    new_policy = read_mobile_release_policy(v3)
+    assert new_policy.policy_sha256 != old.metadata["owner_policy_sha256"]
+    assert old.expires_at == NOW + timedelta(seconds=policy.ttl_seconds)
+    assert old.authorized_approver_ids == ("person-al",)
+    with pytest.raises(PermissionError):
+        read_mobile_release_policy(policy_file(tmp_path, schema_version="3.0"))
