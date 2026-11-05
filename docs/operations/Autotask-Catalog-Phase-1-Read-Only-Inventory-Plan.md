@@ -235,7 +235,42 @@ The two Product IDs returned **zero matches** from bounded TicketCharges, Purcha
 
 **Approval record (2026-11-05):** The Project Owner explicitly confirmed that **inactivation, not deletion, is the preferred way to retire an unnecessary catalog record after dependency verification and identification of the forward-use record**, and approved these four classifications: **Keep, Standardize, Inactivate Candidate, Investigate**. This approval does not waive the existing exact-plan authorization or production controls.
 
-## 12. Immediate next authorized work
+## 12. Catalog-wide inventory misclassification — bounded governed reads (2026-11-05)
+
+**Owner direction:** Inspect the *entire accessible catalog* for service/subscription offerings mistakenly maintained as physical Warehouse inventory. This is a **read-only discovery and exception-classification activity**, not authorization to change any inventory quantity, stocked-item history, Product or Service, contract, subscription, or billing record.
+
+**Observed enumeration:** Jason `service.product.search`, `service.service.search` and `service.entity.search` were called with ID-based cursor pagination. Requested page sizes of 200 were rejected for completeness reporting because returned arrays were capped at 100 while metadata claimed more; smaller 80-record pages were checked for consistent item counts, unique monotonically increasing IDs and a final underfilled page. A temporary connector availability failure interrupted Product scans and they were resumed from the verified last ID. These counts are **governed-readable observed populations, not independent Autotask source counts**, and do not establish Phase 1 full acceptance.
+
+| Observed source / cross-check | Count | Interpretation |
+| --- | ---: | --- |
+| Autotask Products | 3,636 | Complete cursor traversal of currently accessible Product search pages; no independent provider-total count proof |
+| Autotask Services | 120 | Complete cursor traversal of currently accessible Service search pages; no independent provider-total count proof |
+| `InventoryItems` aggregates | 1,557 | All observed entries reference Inventory Location 1 (`Warehouse`); 1,471 report exactly 1 on hand |
+| `InventoryStockedItems` transaction/stock-detail records | 1,683 | Distinct child ledger, **not one-to-one comparable** to 1,557 aggregate `InventoryItems` |
+| Stock-detail records with exactly 1 on hand | 1,651 | Pattern requires provenance review, not automatic adjustment |
+| Stock-detail records dated 2024-10-23 | 1,572 | Strong *cluster* suggesting a possible common setup/import event; mechanism not proven |
+| Stock-detail records with no linked `purchaseOrderItemReceivingID` | 1,575 | Includes many records with 1 on hand; missing receipt link alone does not prove fictitious stock |
+| Product names beginning `IT-MSA` | 118 | 30 active; 88 inactive |
+| Service names beginning `IT-MSA` | 63 | 58 active; 5 inactive |
+| IT-MSA Products with InventoryProducts stock aggregates | 93 | 92 positive balances; 1 nonpositive/zero |
+| Inactive IT-MSA Products with positive stock | 78 | Retirement state alone did not clear inventory |
+| Active IT-MSA Products with positive stock | 14 | Require classification and actual-use validation |
+| IT-MSA Products with a normalized exact-name Service match | 53 | Candidate parallel Product/Service entries, **not** proof of duplicates or error |
+
+**Illustrative evidence:** `IT-MSA-BSNBPP` Product 29683080, inventory aggregate 178, stocked detail 199; `IT-MSA-BSNBPP (OPTIONAL)` Product 29683081, inventory aggregate 179, stocked detail 200. Both showed one unit at Warehouse, and neither of those stock-detail records carried a PO, receiving, quote, ticket charge, serial or client link in the retrieved fields. Representative tests for `IT-MSA-Datto EDR`, `IT-MSA-DNS Filter`, `IT-MSA-RocketCyber`, Microsoft 365 and User Support similarly returned one-unit stock-detail rows without PO/receiving links, created on 2024-10-23. At least one genuine stocked hardware example (Switch) **did** carry a receiving/PO link, supporting the need to distinguish origins rather than treating every stock entry alike.
+
+**Risks and acceptance boundaries:**
+
+1. High-priority **Investigate** exception: apparently nonphysical Products/Services, including subscriptions and labor, with positive warehouse balances. No item is auto-designated for retirement merely from its name or `quantityOnHand=1`.
+2. Scope of review includes **currently active and inactive** Products. Existing inactivation has not resolved many historical stock balances; do not assume changing `isActive` will remove/restore inventory automatically.
+3. Link child stock rows to aggregate `InventoryProducts` and Product ID before proposing any adjustments. Verify the creation/import origin and actual stock ledger meaning using native capabilities and representative supported source evidence.
+4. Check live procurement/receiving dependencies and client-bound Contract/Service links before any change; `ContractServices` remains provider-restricted on the current governed readonly identity, so financial or contract safety cannot yet be declared verified.
+5. Proposed solution, if justified: keep legitimate stocked hardware intact; manage recurring subscriptions/services through the correct approved native Autotask model; prepare **exact scoped correction plans** with before/after, dependency safety, rollback, and Owner approval. Do not alter historical posted transactions, delete legacy records, change invoices, or bulk-edit quantities as a shortcut.
+6. These counts are **not** a data-quality defect count, invoice error count, or accepted coverage denominator until classifications and independent source totals are corroborated.
+
+**Current disposition:** A **systemic issue candidate** is verified; its exact cause and safe per-record remediation are **not** yet established. No Autotask provider writes or production changes were performed.
+
+## 13. Immediate next authorized work
 
 - Preserve the approved agreement and this plan in repository review without touching production.
 - Validate the precise governed search argument and pagination schema through allowed metadata/read operations.
@@ -243,4 +278,4 @@ The two Product IDs returned **zero matches** from bounded TicketCharges, Purcha
 - Report confirmed counts, relationship gaps, and proposed correction-plan boundaries; do **not** claim the six-phase workstream or Phase 1 complete prematurely.
 - Reserve catalog mutations, contract/billing adjustments, new capability activation and deployment for their separate approvals.
 
-**Current status:** Phase 1 remains **in discovery; not inventoried or accepted**. The bounded IT-MSA reads above are examples, not a verified full-population count or complete dependency audit.
+**Current status:** Phase 1 remains **in discovery; not accepted**. Accessible Product, Service and two inventory entity cursor traversals were performed for this specific warehouse issue. Independent source population totals, vendor/subscription entitlement coverage, bundle/Contract relationships and complete dependency validation remain unverified. This is **not** end-to-end Phase 1 completion.
