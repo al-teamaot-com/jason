@@ -1,6 +1,7 @@
 """Release admission regressions: no stale/manual promotion may drop recent work."""
 
 import subprocess
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -89,40 +90,84 @@ def test_owner_release_freeze_fails_closed_for_any_existing_marker(tmp_path, kin
         runner.require_owner_production_deployment_unfrozen(tmp_path)
 
 
-def test_owner_release_freeze_denies_before_acquiring_production_lock(monkeypatch, tmp_path):
-    (tmp_path / "production-deployment-freeze").touch()
-    acquire = Mock(side_effect=AssertionError("production lock must not be acquired"))
-    source = Mock(side_effect=AssertionError("no network/source reads permitted"))
-    mutation = Mock(side_effect=AssertionError("no production state may change"))
-    monkeypatch.setattr(runner, "acquire_production_transaction_lock", acquire)
-    monkeypatch.setattr(runner, "require_current_protected_release_source", source)
+def _isolate_valid_pre_freeze_checks(monkeypatch):
+    """Reach the real freeze decision without invoking host/provider side effects."""
+    monkeypatch.setattr(runner, "temporary_worker_admission_gate", nullcontext)
+    monkeypatch.setattr(runner, "require_pmv3_engineering_quiescent", lambda: None)
+    monkeypatch.setattr(runner, "restore_stranded_one_transaction_freeze_under_lock",
+                        lambda root: None)
+    monkeypatch.setattr(runner, "require_current_manual_scope_review",
+                        lambda repo, root, item: None)
+    monkeypatch.setattr(runner, "require_current_protected_release_source",
+                        lambda repo, item: None)
+    monkeypatch.setattr(runner, "require_host_reconciler_ready", lambda root: None)
+    monkeypatch.setattr(runner, "_read_protected_snapshot", lambda root, name: {})
+    monkeypatch.setattr(runner, "governed_open_breaker_recovery_context",
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "revalidate_circuit_breaker", lambda root: None)
+    monkeypatch.setattr(runner, "explicit_owner_one_transaction_freeze_context",
+                        lambda root, item: None)
+
+
+def test_owner_release_freeze_denies_under_production_lock_without_mutation(
+    monkeypatch, tmp_path,
+):
+    marker = tmp_path / "production-deployment-freeze"
+    marker.touch()
+    acquired = []
+    sentinel = object()
+    _isolate_valid_pre_freeze_checks(monkeypatch)
+
+    monkeypatch.setattr(runner, "acquire_production_transaction_lock",
+                        lambda repo, root, item: (acquired.append("lock"), sentinel)[1])
+
+    def release(lock):
+        assert lock is sentinel
+        acquired.append("unlock")
+
+    monkeypatch.setattr(runner, "release_production_transaction_lock", release)
+    mutation = Mock(side_effect=AssertionError("no production mutation is permitted"))
     monkeypatch.setattr(runner, "reconcile_stopped_rollback_retention", mutation)
-    with pytest.raises(runner.ReleaseManagerError, match="owner production deployment freeze"):
+    monkeypatch.setattr(runner, "begin_one_transaction_freeze_exception", mutation)
+    monkeypatch.setattr(runner, "_deploy_production_locked", mutation)
+
+    with pytest.raises(runner.ReleaseManagerError,
+                       match="owner production deployment freeze is active"):
         runner.deploy_production(tmp_path, tmp_path, record())
-    acquire.assert_not_called()
-    source.assert_not_called()
+    assert acquired == ["lock", "unlock"]
+    assert marker.is_file()
     mutation.assert_not_called()
 
 
 def test_freeze_created_while_waiting_for_lock_still_denies(monkeypatch, tmp_path):
     acquired = []
     sentinel = object()
+    marker = tmp_path / "production-deployment-freeze"
+    _isolate_valid_pre_freeze_checks(monkeypatch)
 
     def acquire(repo, state_root, item):
         acquired.append("lock")
-        (state_root / "production-deployment-freeze").touch()
+        marker.touch()
         return sentinel
 
     monkeypatch.setattr(runner, "acquire_production_transaction_lock", acquire)
-    monkeypatch.setattr(runner, "release_production_transaction_lock",
-                        lambda lock: acquired.append("unlock"))
-    side = Mock(side_effect=AssertionError("must not attempt source or mutation"))
-    monkeypatch.setattr(runner, "require_current_protected_release_source", side)
-    monkeypatch.setattr(runner, "reconcile_stopped_rollback_retention", side)
-    with pytest.raises(runner.ReleaseManagerError, match="freeze is active"):
+
+    def release(lock):
+        assert lock is sentinel
+        acquired.append("unlock")
+
+    monkeypatch.setattr(runner, "release_production_transaction_lock", release)
+    mutation = Mock(side_effect=AssertionError("no production mutation is permitted"))
+    monkeypatch.setattr(runner, "reconcile_stopped_rollback_retention", mutation)
+    monkeypatch.setattr(runner, "begin_one_transaction_freeze_exception", mutation)
+    monkeypatch.setattr(runner, "_deploy_production_locked", mutation)
+
+    with pytest.raises(runner.ReleaseManagerError,
+                       match="owner production deployment freeze is active"):
         runner.deploy_production(tmp_path, tmp_path, record())
     assert acquired == ["lock", "unlock"]
-    side.assert_not_called()
+    assert marker.is_file()
+    mutation.assert_not_called()
 
 
 def test_manual_mode_incident_hold_is_distinct_from_global_owner_freeze(tmp_path):
