@@ -270,7 +270,46 @@ The two Product IDs returned **zero matches** from bounded TicketCharges, Purcha
 
 **Current disposition:** A **systemic issue candidate** is verified; its exact cause and safe per-record remediation are **not** yet established. No Autotask provider writes or production changes were performed.
 
-## 13. Immediate next authorized work
+## 13. IT-MSA reuse-first catalog decision (Owner direction 2026-11-05)
+
+**Scope:** The Owner clarified that the IT-MSA family consists **mostly, perhaps entirely, of subscriptions and managed services** (e.g., Datto RMM, EDR, DNSFilter, related platform offerings) and has explicitly prioritized deciding **which existing IT-MSA records to reuse versus where a genuinely new offering is needed**. Do **not** expend effort attributing blame or establishing the full mechanism of the historic import before progressing with catalog classification. Retain the 2024-10-23 Warehouse-stock cluster as a documented risk, not a reason to delay catalog standards. No Product, Service, inventory, contract, billing or production mutation is authorized.
+
+### Current verified IT-MSA source baseline
+
+The governed read-only, cursor-complete name-prefix searches returned **63 Services** (58 active, 5 inactive), **118 Products** (30 active, 88 inactive), and zero ServiceBundles whose **name begins IT-MSA** (this does not prove absence of bundles under different names). These are **not proof of current contract use or customer pricing correctness**.
+
+The entire live `Services` entity's `periodType` is 2 (Monthly) for the 63 IT-MSA Services. Each has an Autotask `billingCodeID`, and many already carry descriptions, unit costs/prices and invoice description fields. The `Products` entity also supports recurring `periodType=2` (Monthly), so **some Product records may be legitimately reusable for quotes or other native business workflows even if the final recurring customer contract should use a Service.** A matching name is not proof of an erroneous duplicate.
+
+### Bounded representative verification
+
+| Offering | Existing entity | Native ID | Evidence | Initial disposition |
+| --- | --- | ---: | --- | --- |
+| Datto RMM | Service | 133 | Active; monthly; substantial service description; unit price/cost currently 0; invoiceDescription already populated | **Standardize candidate**, reuse after price/contract/usage checks |
+| Datto EDR | Service | 48 | Active; monthly; description; configured unitPrice 25 and unitCost 3.99; separate inactive Product 29683219 has Warehouse stock | **Reuse / standardize candidate** for Service; Product remains Investigate |
+| DNS Filter | Service | 50 | Active; monthly; separate inactive Product 29683280 has Warehouse stock | **Reuse candidate** pending complete use check |
+| BSNBPP (BreachSecure Now) | Service | 31 | Active; monthly; description; unitPrice 110 / unitCost 80; corresponding active Product 29683080 lacks descriptive/financial metadata and has Warehouse stock | **Service reuse candidate**; Product Investigate |
+| AOT365 Endpoint Express | Service | 104 | Active; monthly; description of coverage; configured unitPrice 69 and unitCost 2 | **Reuse / standardize candidate**; validate product/tier alignment |
+| AOT365 Endpoint Pro | Service | 115 | Active; monthly; substantive coverage description; configured unitPrice 119 and unitCost 10.75 | **Reuse / standardize candidate**; validate bundle/tier definition |
+| Endpoint-PerUser | Product | 29686277 | Active; monthly; describes remote monitoring, patching, EDR, AV, DNS, remote support, explicitly excludes backup and sets max 2 devices/user; `isSerialized=false`, `doesNotRequireProcurement=true`; unitPrice 59 | **Investigate workflow**: may be intentional quote/package Product |
+| Endpoint Plus-PerUser | Product | 29686278 | Active; monthly; additional support and endpoint backup, max 2 devices/user; `isSerialized=false`, `doesNotRequireProcurement=true`; unitPrice 79 | **Investigate workflow**, potential reuse after billing unit verification |
+| Endpoint Plus-PerDevice | Product | 29686322 | Active; monthly; endpoint backup included; `isSerialized=false`, `doesNotRequireProcurement=true`; unitPrice 79 | **Investigate workflow**, distinguish per-user vs per-device |
+| BSNBPP | Product | 29683080 | Active; blank description, absent prices, not flagged `doesNotRequireProcurement`; legacy one-unit Warehouse stock | **Investigate / possible future retirement candidate**, not approved |
+
+The above amounts are observed **catalog metadata only**, not validated vendor cost, approved selling price, signed contract rate or billing authorization. Never treat this as a price update request.
+
+### Proposed reuse-first classification, one family at a time
+
+1. **Identify actual offering:** Is this a standalone recurring Service, contracted bundle component, vendor license/subscription, quote-only Product, one-time labor, tangible hardware, or placeholder? Establish its *present use* from supported native evidence, not name alone.
+2. **Prefer reusing the correct existing record:** Keep ID/history and references where semantics are already accurate. Propose small, safe field corrections for unclear name/description/provider/part number/category only after field compatibility review.
+3. **Distinguish sale from delivery:** A quote Product and recurring contract Service might both be legitimate for the same solution. Verify how AOT quotes, contracts and renews it before consolidating; never assume `Products` means physical stock or `Services` means no licensing.
+4. **Create a new record only when necessary:** E.g., incompatible billing unit (per-user vs per-device), materially different tier/inclusions or commitment, the wrong native entity, or unavoidable identifier constraints with no safe approved reuse path. New records must receive separate exact Owner approval.
+5. **Handle Warehouse anomalies separately:** Do not inactivate or change stock merely because there is a duplicate Service; retire/adjust only after history and current dependency/physical stock checks and separate approval. Owner does not need an investigation into blame/import author if it does not affect safe remediation.
+6. **Confirm user-facing discoverability:** Keep `IT-MSA` as the family prefix for applicable offerings; use plain-English names, vendor/provider data and correct native field mappings. Avoid indiscriminate mass rename, forced item-name shortening and invoice work.
+7. **Gate corrections:** The existing owner-approved classes are Keep / Standardize / Inactivate Candidate / Investigate. For each selected record propose exact fields, what changes, proof of no dependency or contract impact, rollback and governed readback before seeking record-specific approval.
+
+**Recommended next bounded unit of work:** Build a **reuse decision matrix for the endpoint protection/monitoring family** (Datto RMM, Datto EDR, AOT365 Endpoint packages, and associated quote Products); verify whether each is sold/contracted independently, within a bundle, or both, and identify the preferred existing entity for that workflow. The current restricted `ContractServices` caller cannot establish all customer contract ties; disclose that gap and avoid any mutations.
+
+## 14. Immediate next authorized work
 
 - Preserve the approved agreement and this plan in repository review without touching production.
 - Validate the precise governed search argument and pagination schema through allowed metadata/read operations.
