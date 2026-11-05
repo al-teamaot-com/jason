@@ -54,6 +54,6 @@ Automated acceptance also proves the same raw `print_usage` resource can answer 
 
 ## Production boundary
 
-The existing `JASON_UNIVERSAL_QUERY_ENABLED` rollout gate remains authoritative. The runtime compose file now passes that variable through with a default of `false`; this change does not activate the open-world conversation path by itself. A controlled production deployment must explicitly set `JASON_UNIVERSAL_QUERY_ENABLED=true` for AOT internal rollout and verify the resulting conversation path end to end.
+The existing `JASON_UNIVERSAL_QUERY_ENABLED` rollout gate remains authoritative. Runtime compose passes that variable through with a default of `false`. Production activation is source-bound by `config/universal-query-activation.json`: the reviewed `aot-internal-read-v1` profile makes the canonical runtime deploy inject `JASON_UNIVERSAL_QUERY_ENABLED=true`; `off` injects `false`; rollback always injects `false`. There is no host-only enable override. The controlled production rollout must verify the resulting AOT internal conversation path end to end.
 
 Production deployment requires normal PMV3 exact-revision authorization, rollback verification, provider-backed acceptance, and post-deployment health validation.

@@ -29,6 +29,9 @@ def lab(tmp_path):
     (root / "config" / "autotask-entity-read-profile.json").write_text(
         json.dumps({"schema_version": "1.0", "read_profile": V11, "rollback_read_profile": V10})
     )
+    (root / "config" / "universal-query-activation.json").write_text(
+        json.dumps({"schema_version": "1.0", "profile": "off"})
+    )
     bins = tmp_path / "fake-bin"
     bins.mkdir()
     fake = bins / "docker"
@@ -259,3 +262,72 @@ def test_staff_note_source_activation_preflight(lab,path,_,__):
     rollback=_staff_note_source_preflight(lab,path,rollback=True)
     assert rollback.returncode==0,rollback.stderr
     assert 'STAFF_NOTE_RESULT=internal-note-v1' not in rollback.stdout
+
+
+
+def _universal_query_source_preflight(lab, *, declared="aot-internal-read-v1",
+                                      rollback=False, malformed=False, missing=False):
+    """Execute the real runtime deployment preflight only; never deploy."""
+    root, bins = lab
+    path = "infrastructure/jason-runtime/production-deploy.sh"
+    source = (ROOT / path).read_text()
+    marker = '\nif [ -z "$REVISION" ]; then'
+    assert marker in source
+    dry = source.split(marker, 1)[0] + '\nprintf "UNIVERSAL_QUERY_RESULT=%s\\n" "$UNIVERSAL_QUERY_ENABLED"\n'
+    script = root / path
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(dry)
+    script.chmod(0o700)
+    profile = root / "config/universal-query-activation.json"
+    if missing:
+        profile.unlink(missing_ok=True)
+    else:
+        profile.write_text(
+            "not-json" if malformed else json.dumps({"schema_version": "1.0", "profile": declared})
+        )
+    env = {
+        **os.environ,
+        "PATH": str(bins) + os.pathsep + os.environ["PATH"],
+        "FAKE_LIVE_PROFILE": V10,
+        "JASON_PROVIDER_READ_ACTIVATION_PROFILE": V11,
+        "JASON_PROVIDER_READ_ROLLBACK_PROFILE": V10,
+        "JASON_SOURCE_REVISION_OVERRIDE": "a" * 40,
+        "JASON_RUNTIME_PRODUCTION_IMAGE": "candidate",
+        "JASON_QUICKBOOKS_READ_PROFILE": "quickbooks-sandbox-read-v1",
+    }
+    if rollback:
+        env["JASON_RUNTIME_PRODUCTION_IMAGE"] = "jason-runtime:rollback-current"
+    return subprocess.run(
+        ["bash", str(script)], cwd=root, env=env, text=True,
+        capture_output=True, check=False, timeout=12,
+    )
+
+
+def test_universal_query_activation_is_exact_source_bound_and_rollback_safe(lab):
+    enabled = _universal_query_source_preflight(lab)
+    assert enabled.returncode == 0, enabled.stderr
+    assert "UNIVERSAL_QUERY_RESULT=true" in enabled.stdout
+
+    off = _universal_query_source_preflight(lab, declared="off")
+    assert off.returncode == 0, off.stderr
+    assert "UNIVERSAL_QUERY_RESULT=false" in off.stdout
+
+    rollback = _universal_query_source_preflight(lab, rollback=True)
+    assert rollback.returncode == 0, rollback.stderr
+    assert "UNIVERSAL_QUERY_RESULT=false" in rollback.stdout
+
+
+def test_universal_query_activation_profile_fails_closed(lab):
+    for kwargs in (
+        {"declared": "unreviewed-global-enable"},
+        {"malformed": True},
+        {"missing": True},
+    ):
+        response = _universal_query_source_preflight(lab, **kwargs)
+        assert response.returncode != 0
+        assert "UNIVERSAL_QUERY_RESULT=" not in response.stdout
+
+
+def test_runtime_deploy_injects_reviewed_universal_query_state():
+    source = (ROOT / "infrastructure/jason-runtime/production-deploy.sh").read_text()
+    assert '--set-env "JASON_UNIVERSAL_QUERY_ENABLED=$UNIVERSAL_QUERY_ENABLED"' in source
