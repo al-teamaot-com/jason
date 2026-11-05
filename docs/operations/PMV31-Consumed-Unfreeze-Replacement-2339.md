@@ -47,3 +47,13 @@ The following are verified with isolated fixtures: a prior consumed authorizatio
 - PR #2269 changes the owner-facing signed approval confirmation text to clarify automated independent verification (not a second human reviewer). This candidate changes the typed replacement decision/issuer branch, not the original callback success message; both intents can be preserved.
 
 Do not merge this draft until changes are reconciled against the actual protected main and all required checks pass. Keep the engineering Owner pause and automatic-promotion hold intact.
+
+## Gate verification after signed replacement implementation
+
+- Exact PR implementation revision `9306f756046935474b4a91e26d86d1fad3d7b28b` and documentation follow-up `418da097d6bc1fb6569977b5d1a67ae2df2e70a8` were checked in an isolated worktree.
+- Full combined Release Manager, signed mobile approval consumer and mobile-card tests returned exit code `0` on 2026-11-05; no production targets were used.
+- All 42 PM V2 regression corpus tests passed locally. The earlier GitHub PM V2 failure was not reproduced; it remains subject to fresh CI.
+- The read-only native offer selector against `release-54f4d2cdc048d805` selected `replacement_unfreeze_only` with the active freeze intact. This is not evidence of a signed Owner click or a successful deployment.
+- GitHub integration acknowledgments for #2279 and #2269 are recorded in PR #2340 body. The change integration parser locally returns the exact acknowledged set `{2269, 2279}`. The previous job used a pull_request event snapshot from before the body edit and is not current acceptance.
+
+This is bounded engineering evidence, not authorization to resume Owner-paused engineering workers, merge a draft PR, unfreeze production, or enable Autotask writes.
