@@ -309,7 +309,32 @@ The above amounts are observed **catalog metadata only**, not validated vendor c
 
 **Recommended next bounded unit of work:** Build a **reuse decision matrix for the endpoint protection/monitoring family** (Datto RMM, Datto EDR, AOT365 Endpoint packages, and associated quote Products); verify whether each is sold/contracted independently, within a bundle, or both, and identify the preferred existing entity for that workflow. The current restricted `ContractServices` caller cannot establish all customer contract ties; disclose that gap and avoid any mutations.
 
-## 14. Immediate next authorized work
+## 14. Vendor-neutral quantity-source design; native-platform-first (Owner requirement, 2026-11-05)
+
+**Owner requirement:** For every IT-MSA Service, subscription, license or bundle whose quantity is based on an external source, plan for authoritative source-derived quantities. Sources may be **Datto RMM, Datto EDR, Datto Endpoint Backup, Ingram Micro, Microsoft, DNSFilter, and other current/future providers**. The canonical IT-MSA offering must remain portable between providers. The technical rule is **native-platform-first, not vendor-exclusive**: prefer the supported, built-in Autotask/Kaseya/Datto integration *when that source and metric are supported*; for other providers, prefer existing vendor and Autotask integration capabilities, approved supported APIs/connectors, and only then a narrowly scoped new integration where objectively necessary. No custom billing engine, inventory quantity proxy, or duplicate native functionality.
+
+**This is design and read-only evaluation, not authorization to activate an integration, modify customer quantities, contracts, invoices, subscriptions, catalog records or production.** The governance handbook and approved Inventory Cleanup Agreement v1.4 continue to control.
+
+### Canonical offering versus source implementation
+
+- **Offering identity:** stable Autotask Service/Service Bundle or appropriate native Product and/or Subscription record, short human-readable `IT-MSA` name, exact unit, scope/coverage/tier, contract and sales usage. Reuse existing IDs where possible.
+- **Quantity-source binding (a *logical mapping*, not an instruction to create a new database):** authoritative provider and account/tenant/reseller customer key; native provider product/plan key; source metric; permitted unit and eligibility/exclusion rules; retrieval or synchronization mechanism; effective-date/snapshot timing; deduplication rule; contract minimum/commitment; evidence reference; update authority; exception owner.
+- **Per-offering source preferences (examples, not verified AOT configurations):**
+  - Managed endpoint monitoring: Datto RMM native managed-device/site count and existing Autotask native integration or Integrated Customer Billing (ICB), where supported.
+  - Endpoint security: supported Datto EDR module usage/seat metric via an approved native integration **if it actually exposes the required metric**; otherwise official vendor consumption/assignment source.
+  - Microsoft 365 subscription: authorized Microsoft tenant license/assignment evidence and/or Ingram Micro reseller subscription/commitment record **according to AOT's commercial agreement**; distinguish purchased, committed, assigned and billable quantities.
+  - DNSFilter: authorized DNSFilter tenant/site/agent/license evidence according to the actual licensed unit, if there is no suitable native integration.
+  - Backup: Datto Endpoint Backup/BackupIQ native usage/billing integration if available for the exact product; otherwise supported official source data.
+- **Native platform evaluation:** investigate Kaseya Integrated Customer Billing and Autotask recurring Service Contracts, effective-dated ContractServiceUnits, ServiceBundles, and Contract Billing Rules; use them rather than reimplementing provider sync or billing. Source-specific supported integration and current AOT configuration must be verified, not assumed from a vendor feature page.
+- **Conflict handling:** source usage is not automatically the authorized billable quantity. Establish contract precedence, identity mapping, client isolation, excluded/inactive devices or seats, proration, effective period, grace periods, minimums, reconciliation thresholds and human review. Never silently overwrite contract/billing records based on observed device counts.
+- **Portability:** changing the upstream vendor/connector should not require renaming every IT-MSA Service or losing historic line-item IDs. Keep vendor SKU and plan in separate verified fields; allow explicitly approved per-provider bindings and preserve effective-dated history. Do not invent a bespoke central integration framework while native APIs or established adapters suffice.
+- **Proof before execution:** for each family, document official supported feature, exact authoritative unit, permitted read scope, sample native readback, accessible contract mapping, lifecycle/rollback and source availability. Any missing permission, unsupported metric or inaccessible ContractServices relation is an explicit exception and blocks affected write/sync work.
+
+### Outcome and immediate bounded next step
+
+**Initial step:** inventory each *existing* IT-MSA recurring Service and relevant quote Product in a concise **reuse matrix** with: preferred current record ID, business function, source platform(s), exact intended quantity unit, native connector candidate, verified versus unverified support, and proposed Keep/Standardize/Inactivate Candidate/Investigate classification. Start with **Datto RMM/EDR/Endpoint Backup, Microsoft 365 and DNSFilter** to cover native and cross-vendor examples. Perform **read-only** verification first. No renames, record creates, warehouse cleanups, invoices, bulk actions or production changes.
+
+## 15. Immediate next authorized work
 
 - Preserve the approved agreement and this plan in repository review without touching production.
 - Validate the precise governed search argument and pagination schema through allowed metadata/read operations.
