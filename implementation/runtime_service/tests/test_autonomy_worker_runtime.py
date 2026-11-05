@@ -79,6 +79,7 @@ class Reads:
         self.job_status = "completed"
         self.ticket_notes = []
         self.notification_history_reads = 0
+        self.notification_history_arguments = []
         self.resource_license_types = {
             29682899: 1,
             29682888: 7,
@@ -93,6 +94,9 @@ class Reads:
                 "evidence": {"data": {"items": list(self.ticket_notes)}},
             }
         if capability == "service.notification.history.search":
+            self.notification_history_arguments.append(dict(arguments))
+            if arguments.get("company_id") != 597 or arguments.get("ticket_id") != 141183:
+                return {"status": "failed", "error_code": "INVALID_CAPABILITY_ARGUMENTS"}
             self.notification_history_reads += 1
             items = []
             if self.notification_history_reads > 1:
@@ -3662,6 +3666,9 @@ def test_vulscan_client_disposition_waits_then_resumes_on_exact_v11_promotion(
     final = store.get(141183)
     assert final is not None
     assert final.phase == "complete"
+    assert reads.notification_history_arguments
+    assert all(args == {"company_id": 597, "ticket_id": 141183, "page_size": 100}
+               for args in reads.notification_history_arguments)
 
     client_calls = [
         args
