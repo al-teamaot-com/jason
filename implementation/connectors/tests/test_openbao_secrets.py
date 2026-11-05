@@ -285,3 +285,17 @@ def test_missing_correlation_id_is_denied_before_provider_access() -> None:
             )
 
     assert provider_called is False
+
+
+def test_sharepoint_write_secret_has_separate_approved_mapping_and_field_contract() -> None:
+    from connectors.core.openbao_secrets import DEFAULT_FIELDS, DEFAULT_MAPPINGS
+
+    assert DEFAULT_MAPPINGS["microsoft_graph.sharepoint_write"] == (
+        "secret/data/connectors/microsoft-graph/production/sharepoint-write"
+    )
+    assert DEFAULT_FIELDS["microsoft_graph.sharepoint_write"] == frozenset(
+        {"private_key_pem", "certificate_pem", "certificate_thumbprint", "generation"}
+    )
+    assert DEFAULT_MAPPINGS["microsoft_graph.sharepoint_write"] != DEFAULT_MAPPINGS[
+        "microsoft_graph.directory_read"
+    ]
