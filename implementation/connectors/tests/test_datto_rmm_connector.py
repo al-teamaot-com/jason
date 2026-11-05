@@ -968,6 +968,16 @@ def test_site_only_device_search_enumerates_complete_account_before_filtering(mo
     assert all(c["params"]["max"] == connector.fallback_discovery_page_size for c in transport.calls)
 
 
+def test_device_patch_policy_read_uses_device_patch_management_endpoint() -> None:
+    path, params = DattoRmmConnector._resolve_operation(
+        "datto_rmm.device.patch_policies.list",
+        {"resource_id": "device-1"},
+    )
+
+    assert path == "/api/v2/device/device-1/site/patch-management"
+    assert params is None
+
+
 def test_device_patch_read_uses_bounded_full_device_collection() -> None:
     path, params = DattoRmmConnector._resolve_operation(
         "datto_rmm.device.patches.list",

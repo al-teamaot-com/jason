@@ -8,6 +8,7 @@ from kernel.execution_providers import ExecutionProviderRegistryService, InMemor
 from orchestrator.resource_capability_catalog import (
     DATTO_RMM_PROVIDER,
     ENDPOINT_PATCH_SEARCH,
+    ENDPOINT_PATCH_POLICY_READ,
     register_endpoint_resource_foundation,
 )
 
@@ -53,3 +54,27 @@ def test_datto_manifest_exposes_endpoint_patch_search() -> None:
         "patch_identity",
         "install_status",
     }
+
+
+def test_endpoint_patch_policy_capability_is_active_read_only_and_provider_bound() -> None:
+    capabilities, providers = _services()
+    definition = capabilities.get_current(capability_name=ENDPOINT_PATCH_POLICY_READ)
+    provider = providers.get(DATTO_RMM_PROVIDER)
+
+    assert definition.metadata["read_only"] == "true"
+    assert definition.metadata["operation"] == "read"
+    assert definition.metadata["selector_keys"] == "resource_id"
+    assert "assigned patch management policies" in definition.metadata["canonical_facts"]
+    assert ENDPOINT_PATCH_POLICY_READ in provider.capabilities
+
+
+def test_datto_manifest_exposes_endpoint_patch_policy_read() -> None:
+    operations = {
+        operation.capability_name: operation
+        for resource in build_datto_rmm_manifest().resources
+        for operation in resource.operations
+    }
+
+    policy = operations[ENDPOINT_PATCH_POLICY_READ]
+    assert policy.read_only is True
+    assert set(policy.selector_names) == {"resource_id"}

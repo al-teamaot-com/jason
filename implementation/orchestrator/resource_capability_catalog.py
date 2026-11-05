@@ -32,6 +32,7 @@ ENDPOINT_ALERT_HISTORY_SEARCH = "endpoint.alert.history.search"
 ENDPOINT_AUDIT_READ = "endpoint.audit.read"
 ENDPOINT_SOFTWARE_SEARCH = "endpoint.software.search"
 ENDPOINT_PATCH_SEARCH = "endpoint.patch.search"
+ENDPOINT_PATCH_POLICY_READ = "endpoint.patch.policy.read"
 MANAGEMENT_ALERT_SEARCH = "management.alert.search"
 MANAGEMENT_SITE_SEARCH = "management.site.search"
 SITE_VARIABLE_LIST = "management.site.variable.list"
@@ -517,6 +518,30 @@ def endpoint_patch_search(now: datetime) -> CapabilityDefinition:
     )
 
 
+def endpoint_patch_policy_read(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=ENDPOINT_PATCH_POLICY_READ,
+        display_name="Read Endpoint Patch Policies",
+        business_purpose=(
+            "Read Patch Management policies assigned to one managed endpoint so "
+            "effective patch approval state can be explained from provider evidence."
+        ),
+        resource_types="endpoint_patch_policy,patch_policy,endpoint",
+        operation="read",
+        selector_keys="resource_id",
+        fact_hints=(
+            "patch policy,patch policies,patch management policy,assigned patch policy,"
+            "policy membership,patch approval policy"
+        ),
+        canonical_facts="assigned patch management policies",
+        planning_guidance=(
+            "Use when diagnosing why an endpoint patch is approved, not approved, or "
+            "otherwise differs from expected Patch Management policy state."
+        ),
+    )
+
+
 def management_alert_search(now: datetime) -> CapabilityDefinition:
     return _read_resource_capability(
         now=now,
@@ -887,6 +912,7 @@ def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
                 ENDPOINT_AUDIT_READ,
                 ENDPOINT_SOFTWARE_SEARCH,
                 ENDPOINT_PATCH_SEARCH,
+                ENDPOINT_PATCH_POLICY_READ,
                 MANAGEMENT_ALERT_SEARCH,
                 MANAGEMENT_SITE_SEARCH,
                 SITE_VARIABLE_LIST,
@@ -943,6 +969,7 @@ def register_endpoint_resource_foundation(
     capabilities.register(endpoint_audit_read(now))
     capabilities.register(endpoint_software_search(now))
     capabilities.register(endpoint_patch_search(now))
+    capabilities.register(endpoint_patch_policy_read(now))
     capabilities.register(management_alert_search(now))
     capabilities.register(management_site_search(now))
     capabilities.register(site_variable_list(now))
