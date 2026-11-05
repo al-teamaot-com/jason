@@ -6072,3 +6072,69 @@ def test_staff_note_profile_in_native_preprod_and_source_bound_release_contract(
         monkeypatch.setenv("JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE","admin-unreviewed")
         with pytest.raises(runner.ReleaseManagerError,match="immutable source"):
             runner.native_deploy_environment(tmp_path,"runtime","mcp",SHA_A)
+
+
+def test_issue_2339_consumed_unfreeze_cannot_be_silently_reused(tmp_path):
+    """Regression baseline: a failed pre-mutation attempt preserves receipts.
+
+    Future replacement authorization must be recorded as a new independent,
+    authenticated attempt. The old consumed receipt is never rewritten.
+    """
+    import json
+    import pytest
+    from unittest.mock import patch
+
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / "records").mkdir()
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    original = ('{"reason":"owner freeze",'
+                '"remove_only_after":"new explicit exact-SHA owner unfreeze decision",'
+                '"schema_version":"1.0",'
+                '"scope":"manual-and-automatic-production-promotions",'
+                '"status":"active"}\n').encode()
+    marker.write_bytes(original)
+    marker.chmod(0o600)
+    source = 'authenticated_mobile_teams_owner:relapproval-' + 'a' * 32
+    record = {
+        'release_id': release_id,
+        'state': 'production_eligible',
+        'rollback_sha': SHA_B,
+        'release_candidate': {'candidate_sha': SHA_A},
+        'owner_approval': {'approved': True, 'candidate_sha': SHA_A,
+                           'source': source},
+        'manual_scope_review': {'schema_version': '1.0',
+                                'candidate_sha': SHA_A,
+                                'baseline_sha': SHA_B,
+                                'scope_sha256': 'd' * 64},
+        'history': [],
+    }
+    runner.atomic_json(tmp_path / 'records' / (release_id + '.json'), record)
+    with patch.object(runner, 'verify_candidate_on_main'), \
+         patch.object(runner, 'require_current_manual_scope_review'), \
+         patch.object(runner, 'live_production_alignment'):
+        runner.owner_unfreeze_release(
+            ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+            explicit_unfreeze_scope_sha256='d' * 64,
+            explicit_unfreeze_rollback_sha=SHA_B)
+    loaded = json.loads((tmp_path / 'records' / (release_id + '.json')).read_text())
+    context = runner.explicit_owner_one_transaction_freeze_context(tmp_path, loaded)
+    assert context is not None
+    opened = runner.begin_one_transaction_freeze_exception(tmp_path, context)
+    # Reproduce the historical pre-mutation failure: release state unchanged.
+    runner.restore_one_transaction_freeze_exception(
+        tmp_path, opened, release_state='production_eligible')
+    assert marker.read_bytes() == original
+    previous = tmp_path / 'owner-explicit-unfreeze-receipts' / (release_id + '.json')
+    prior_bytes = previous.read_bytes()
+    assert json.loads(prior_bytes)['status'] == 'consumed'
+    with patch.object(runner, 'verify_candidate_on_main'), \
+         patch.object(runner, 'require_current_manual_scope_review'), \
+         patch.object(runner, 'live_production_alignment'):
+        with pytest.raises(runner.ReleaseManagerError, match='not a safely pending'):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+                explicit_unfreeze_scope_sha256='d' * 64,
+                explicit_unfreeze_rollback_sha=SHA_B)
+    assert previous.read_bytes() == prior_bytes
+    assert marker.read_bytes() == original
+    assert runner.explicit_owner_one_transaction_freeze_context(tmp_path, loaded) is None
