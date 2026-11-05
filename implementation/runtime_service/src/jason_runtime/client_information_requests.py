@@ -414,9 +414,10 @@ class ClientQuestionWorkflow:
             raise ClientQuestionError("CLIENT_QUESTION_NOTES_PAGINATION_UNVERIFIED")
         return [dict(item) for item in items]
 
-    def _history(self, ticket_id: int) -> list[dict[str, Any]]:
+    def _history(self, *, ticket_id: int, company_id: int) -> list[dict[str, Any]]:
         data = self._read("service.notification.history.search",
-                          {"ticket_id": ticket_id, "page_size": 100})
+                          {"company_id": company_id, "ticket_id": ticket_id,
+                           "page_size": 100})
         items = data.get("items")
         if not isinstance(items, list) or not all(isinstance(i, Mapping) for i in items):
             raise ClientQuestionError("CLIENT_QUESTION_HISTORY_INCOMPLETE")
@@ -487,7 +488,7 @@ class ClientQuestionWorkflow:
                 and str(note.get("title") or "") == question.title)
                for note in notes):
             return "already_present"
-        history_id = self._max_id(self._history(ticket_id))
+        history_id = self._max_id(self._history(ticket_id=ticket_id, company_id=company_id))
         # Contact email is verified only by the actual connector. This field is
         # intentionally empty until a verified delivery receipt is observed.
         if not self.ledger.reserve(
@@ -555,7 +556,7 @@ class ClientQuestionWorkflow:
                     )
                     row = self.ledger.find(row.ticket_id, row.question_id, row.evidence_hash)
                 if row.state == "delivery_pending":
-                    history = self._history(row.ticket_id)
+                    history = self._history(ticket_id=row.ticket_id, company_id=row.company_id)
                     matching = [
                         h for h in history
                         if int(h.get("ticketID") or 0) == row.ticket_id
