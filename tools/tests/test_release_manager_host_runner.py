@@ -6032,3 +6032,43 @@ def test_explicit_transaction_rechecks_owner_receipt_before_any_freeze_mutation(
     assert marker.read_bytes()==raw
     assert not (tmp_path/runner.PRODUCTION_FREEZE_BACKUP).exists()
     assert not (tmp_path/'owner-unfreeze-receipts').exists()
+
+
+def test_staff_note_source_activation_profile_contract(tmp_path):
+    import json
+    import pytest
+    path = tmp_path / "config" / "aot-staff-internal-note-profile.json"
+    path.parent.mkdir()
+    assert runner.declared_aot_staff_note_profile(tmp_path) == ""
+    path.write_text(json.dumps({"schema_version":"1.0","profile":"off"}))
+    assert runner.declared_aot_staff_note_profile(tmp_path) == ""
+    path.write_text(json.dumps({"schema_version":"1.0","profile":"internal-note-v1"}))
+    assert runner.declared_aot_staff_note_profile(tmp_path) == "internal-note-v1"
+    for malformed in ({"schema_version":"1.0","profile":"all-writes"},
+                      {"schema_version":"1.0","profile":"internal-note-v1","extra":1}):
+        path.write_text(json.dumps(malformed))
+        with pytest.raises(runner.ReleaseManagerError, match="declaration invalid"):
+            runner.declared_aot_staff_note_profile(tmp_path)
+    path.unlink()
+    path.symlink_to(tmp_path / "outside")
+    with pytest.raises(runner.ReleaseManagerError, match="symlink"):
+        runner.declared_aot_staff_note_profile(tmp_path)
+
+
+def test_staff_note_profile_in_native_preprod_and_source_bound_release_contract(tmp_path,monkeypatch):
+    import json,pytest
+    from unittest.mock import patch
+    path=tmp_path / "config" / "aot-staff-internal-note-profile.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"schema_version":"1.0","profile":"internal-note-v1"}))
+    monkeypatch.delenv("JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE",raising=False)
+    with (patch.object(runner, "declared_autotask_read_profiles",return_value=None),
+          patch.object(runner,"declared_quickbooks_read_profile",return_value=None),
+          patch.object(runner,"declared_mobile_release_approval_policy",return_value={"mode":"owner_reviewed"})):
+        env=runner.native_deploy_environment(tmp_path,"runtime","mcp",SHA_A)
+        assert env["JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE"]=="internal-note-v1"
+        assert runner.MUTATION_ENV_OVERRIDES["JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE"]==""
+        assert runner.native_deploy_contract_digest({**env,"JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE":""})!=runner.native_deploy_contract_digest(env)
+        monkeypatch.setenv("JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE","admin-unreviewed")
+        with pytest.raises(runner.ReleaseManagerError,match="immutable source"):
+            runner.native_deploy_environment(tmp_path,"runtime","mcp",SHA_A)
