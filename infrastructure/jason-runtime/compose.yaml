@@ -35,6 +35,8 @@ services:
       JASON_SES_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/aws-ses/secret_id
       JASON_MICROSOFT_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/microsoft-graph/role_id
       JASON_MICROSOFT_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/microsoft-graph/secret_id
+      JASON_SHAREPOINT_WRITE_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/microsoft-sharepoint-write/role_id
+      JASON_SHAREPOINT_WRITE_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/microsoft-sharepoint-write/secret_id
       JASON_MICROSOFT_MAIL_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/microsoft-mail/role_id
       JASON_MICROSOFT_MAIL_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/microsoft-mail/secret_id
       JASON_MICROSOFT_MAIL_APPROVED_MAILBOXES: ${JASON_MICROSOFT_MAIL_APPROVED_MAILBOXES:-}
@@ -76,6 +78,13 @@ services:
       JASON_DRMM_RECENT_ALERT_RECONCILIATION_DB: /var/lib/jason/openclaw/drmm-recent-alert-reconciliation.sqlite3
       JASON_DRMM_RECENT_ALERT_RECONCILIATION_LOOKBACK_HOURS: ${JASON_DRMM_RECENT_ALERT_RECONCILIATION_LOOKBACK_HOURS:-24}
       JASON_DRMM_RECENT_ALERT_RECONCILIATION_CADENCE_HOURS: ${JASON_DRMM_RECENT_ALERT_RECONCILIATION_CADENCE_HOURS:-24}
+      JASON_FINANCIAL_STATEMENT_MAINTENANCE_ENABLED: ${JASON_FINANCIAL_STATEMENT_MAINTENANCE_ENABLED:-false}
+      JASON_FINANCIAL_STATEMENT_STATE_DB: /var/lib/jason/openclaw/financial-statement-maintenance.sqlite3
+      JASON_FINANCIAL_STATEMENT_TENANT_ID: ${JASON_FINANCIAL_STATEMENT_TENANT_ID:-}
+      JASON_FINANCIAL_STATEMENT_DRIVE_ID: ${JASON_FINANCIAL_STATEMENT_DRIVE_ID:-}
+      JASON_FINANCIAL_STATEMENT_ROOT_PATH: ${JASON_FINANCIAL_STATEMENT_ROOT_PATH:-Bank Checking Accounts Register}
+      JASON_FINANCIAL_STATEMENT_TIMEZONE: ${JASON_FINANCIAL_STATEMENT_TIMEZONE:-America/New_York}
+      JASON_FINANCIAL_STATEMENT_RUN_HOUR: ${JASON_FINANCIAL_STATEMENT_RUN_HOUR:-5}
       JASON_WINDOWS_TIME_SOURCE_SHADOW_ENABLED: ${JASON_WINDOWS_TIME_SOURCE_SHADOW_ENABLED:-true}
       JASON_WINDOWS_TIME_SOURCE_SHADOW_DB: /var/lib/jason/openclaw/windows-time-source-shadow.sqlite3
       JASON_WINDOWS_TIME_SOURCE_SHADOW_CADENCE_MINUTES: ${JASON_WINDOWS_TIME_SOURCE_SHADOW_CADENCE_MINUTES:-15}
@@ -131,6 +140,8 @@ services:
       - ${JASON_SES_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_SES_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/secret_id:ro
       - ${JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/microsoft-graph/role_id:ro
       - ${JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/microsoft-graph/secret_id:ro
+      - ${JASON_SHAREPOINT_WRITE_OPENBAO_ROLE_ID_HOST_PATH:-/dev/null}:/run/jason-secrets/openbao/microsoft-sharepoint-write/role_id:ro
+      - ${JASON_SHAREPOINT_WRITE_OPENBAO_SECRET_ID_HOST_PATH:-/dev/null}:/run/jason-secrets/openbao/microsoft-sharepoint-write/secret_id:ro
       - ${JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/openai/role_id:ro
       - ${JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/openai/secret_id:ro
       - ${JASON_QUICKBOOKS_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/quickbooks-development-oauth-client-approle/role-id}:/run/jason-secrets/openbao/quickbooks/role_id:ro
