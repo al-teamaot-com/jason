@@ -199,7 +199,37 @@ Examples observed:
 
 **One Owner decision requested:** Adopt **`IT-MSA` as an intentional family/search prefix, with plain-language functional names and native record-type/category differentiation** for the eventual limited IT Product/Service naming pilot?
 
-## 11. Immediate next authorized work
+## 11. Controlled catalog inactivation and historical preservation — draft review gate (2026-11-05)
+
+**Owner direction:** Some legacy IT-MSA Products and Services may be inappropriate, redundant, incorrectly classified or obsolete because their original setup preceded a settled catalog standard. Jason should help identify candidates and recommend safe corrections, **one reviewed record or tightly bound pair at a time** until the Owner approves an exact larger correction plan. The approved agreement already requires preferred-record selection, relationship preservation, no unsafe deletion and human approval of exact changes.
+
+### Review dispositions (proposed, not yet adopted)
+
+1. **Keep active:** The record represents an approved, currently needed offering or is required by an active downstream workflow.
+2. **Standardize:** The record is legitimately used but has incomplete, ambiguous or nonportable catalog data. Propose correction only after validating its dependencies and the exact fields.
+3. **Inactivate candidate:** The record appears duplicate/obsolete/misclassified; select a validated preferred alternative and demonstrate it is not needed for current contracts, recurring billing, quote pipelines, open orders, inventory movement, existing integrations or technician/sales workflows. Historical references must remain intact and native platform behavior must be checked before any inactivation.
+4. **Hold / investigate:** Evidence is conflicting, a relationship is inaccessible, or stock/financial/contract impact is uncertain. No inactivation while uncertainty affects safe operation.
+
+**Gates before an inactivation may be authorized:** exact Product or Service ID, current state, evidence-based reason, correct record type, complete relevant current dependency audit, validated preferred replacement, observed native inactivation effects, a documented rollback/reactivation path, separate exact Owner approval, governed execution, and provider readback verification. No deletion, billing/contract modifications or bulk action is implied by a candidate classification. Vendor costs and customer-specific financial terms are preserved.
+
+### First bounded case: IT-MSA-BSNBPP versus IT-MSA-BSNBPP (OPTIONAL)
+
+On 2026-11-05, Jason used authorized governed `service.product.read`, `service.service.read`, `service.ticket.charge.search`, `service.purchase.order.item.search`, `service.entity.search`, and `service.entity.read` operations. The observations were:
+
+| Record | ID | Current state | Observed fact |
+| --- | ---: | --- | --- |
+| Product `IT-MSA-BSNBPP` | 29683080 | Active | Description and prices unset. One InventoryItem reference ID 178, location 1, `quantityOnHand=1`, zero picked/reserved/on order. |
+| Service `IT-MSA-BSNBPP` | 31 | Active | Has a substantive service description and configured unit cost/price; no complete active contract usage check performed. |
+| Product `IT-MSA-BSNBPP (OPTIONAL)` | 29683081 | Active | Description and prices unset. One InventoryItem reference ID 179, location 1, `quantityOnHand=1`, zero picked/reserved/on order. |
+| Service `IT-MSA-BSNBPP (OPTIONAL)` | 32 | Inactive | Service description present; existing inactive state is not evidence the corresponding Product can safely be retired. |
+
+The two Product IDs returned **zero matches** from bounded TicketCharges, PurchaseOrderItems and QuoteItems searches; this is *only absence of matches in those queried surfaces*, not proof of no complete historical or current references. Both Products have stock entries with quantity 1, which may be an inventory placeholder or a real balance; determine this before any inactivation. Also verify open inventory/quote/procurement dependencies, workflow references, integrations, current Contract/Service assignments and revenue impact under the separately authorized client-scope rules. ContractServices governed-read coverage remains a known gap and must not be bypassed.
+
+**Initial disposition: All four records are HOLD / INVESTIGATE for inactivation purposes.** The two Product records are reasonable *candidates for detailed classification*, not approved inactivations. Product and Service entity types are different and identical names do not prove they are redundant.
+
+**Approval boundary:** Owner discussion of the disposition model does not authorize changing `isActive` or any other field. Perform the next read-only check on a single bounded case; present exact safe correction plan and obtain separate authorization before any live change.
+
+## 12. Immediate next authorized work
 
 - Preserve the approved agreement and this plan in repository review without touching production.
 - Validate the precise governed search argument and pagination schema through allowed metadata/read operations.
@@ -207,4 +237,4 @@ Examples observed:
 - Report confirmed counts, relationship gaps, and proposed correction-plan boundaries; do **not** claim the six-phase workstream or Phase 1 complete prematurely.
 - Reserve catalog mutations, contract/billing adjustments, new capability activation and deployment for their separate approvals.
 
-**Current status:** Phase 1 is **planned, not inventoried or accepted**. This document contains no observed live record-count or full-population result.
+**Current status:** Phase 1 remains **in discovery; not inventoried or accepted**. The bounded IT-MSA reads above are examples, not a verified full-population count or complete dependency audit.
