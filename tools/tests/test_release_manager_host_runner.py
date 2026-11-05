@@ -101,6 +101,17 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     "production_control_core",
                 )
 
+    def test_integration_queue_controller_is_production_control_core(self):
+        import fnmatch
+        import json
+        policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
+        path = "tools/pmv3_integration_queue.py"
+        for change_class in ("feature", "support", "todo", "release_blocker"):
+            self.assertEqual(runner.classify_change_risk(change_class, [path]),
+                             "production_control_core")
+        self.assertTrue(any(fnmatch.fnmatch(path, pattern)
+                            for pattern in policy["protected_core_globs"]))
+
     def test_runtime_image_and_build_context_are_protected_core(self):
         import fnmatch
         import json
@@ -614,26 +625,16 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     release_id=release_id,
                     candidate_sha=SHA_A,
                 )
-            review = json.loads(review_path.read_text(encoding="utf-8"))
-            named = json.loads(
-                (ccc_root / ("material-review-" + SHA_A[:16] + ".json")).read_text(
-                    encoding="utf-8"
-                )
+            # The single Owner approval remains bound to the native reviewed
+            # scope without minting a duplicate CCC human approval.
+            self.assertFalse(review_path.exists())
+            self.assertFalse(
+                (ccc_root / ("material-review-" + SHA_A[:16] + ".json")).exists()
             )
-            self.assertEqual(review["status"], "approved")
-            self.assertEqual(review["source_revision"], SHA_A)
-            self.assertEqual(review["recorded_by"], "person-al")
-            self.assertEqual(review["scope_sha256"], scope_sha)
-            self.assertEqual(review["release_id"], release_id)
-            self.assertEqual(named, review)
-            self.assertEqual(
-                approved["owner_material_review"]["scope_sha256"],
-                scope_sha,
-            )
-            self.assertEqual(
-                approved["history"][-1]["gate"],
-                "owner_approval_materialized_as_ccc_review",
-            )
+            self.assertTrue(approved["owner_approval"]["approved"])
+            self.assertEqual(approved["owner_approval"]["candidate_sha"], SHA_A)
+            self.assertEqual(approved["manual_scope_review"]["scope_sha256"], scope_sha)
+            self.assertEqual(approved["history"][-1]["gate"], "owner_approval_recorded")
             save_record.assert_called_once_with(state_root, record)
 
     def test_protected_core_approval_refuses_to_create_human_authority_without_scope(self):
@@ -664,7 +665,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(
                 runner.ReleaseManagerError,
-                "requires exact recorded scope review",
+                "manual release blocked: full change/parallel-work review is missing",
             ):
                 runner.approve_release(
                     ROOT,
@@ -1138,6 +1139,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 patch.object(runner, "require_current_manual_scope_review"),
                 patch.object(runner, "require_current_protected_release_source"),
                 patch.object(runner, "require_host_reconciler_ready"),
+                patch.object(runner, "ensure_managed_host_source_revision"),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(runner, "worktree", side_effect=runner.ReleaseManagerError("repo unavailable")),
                 patch.object(runner, "save_record") as save_record,
@@ -2430,6 +2432,139 @@ def test_governed_reissue_rejects_concurrent_pending_attempt():
                 runner.prepare_release(ROOT, root, SHA_A, 'release_blocker', reissue_rolled_back=True)
 
 
+
+class ManagedHostSourceMirrorContractTests(unittest.TestCase):
+    """A missing candidate is fetched BEFORE the root reconciliation spool."""
+
+    def _repo(self, root: Path) -> Path:
+        p = root / "managed-git-source"
+        p.mkdir()
+        return p
+
+    def test_lkg_local_source_uses_no_remote_network(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._repo(Path(td))
+            calls = []
+            def git(argv, **kwargs):
+                operation = argv[5:]
+                calls.append(operation)
+                if operation[:1] in (["remote"], ["fetch"]):
+                    self.fail("known local LKG must not depend on network")
+                return subprocess.CompletedProcess(argv, 0)
+            with patch.object(runner.subprocess, "run", side_effect=git):
+                runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
+            self.assertEqual(
+                [c[0] for c in calls], ["cat-file", "merge-base"]
+            )
+
+    def test_missing_exact_source_refreshes_only_managed_protected_main(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._repo(Path(td))
+            present = [False]
+            calls = []
+            def git(argv, **kwargs):
+                op = argv[5:]
+                calls.append(op)
+                if op[:2] == ["cat-file", "-e"]:
+                    return subprocess.CompletedProcess(argv, 0 if present[0] else 1)
+                if op[:1] == ["merge-base"]:
+                    return subprocess.CompletedProcess(argv, 0 if present[0] else 1)
+                if op[:3] == ["remote", "get-url", "origin"]:
+                    return subprocess.CompletedProcess(
+                        argv, 0, stdout="https://github.com/al-teamaot-com/jason.git\n"
+                    )
+                if op[:1] == ["fetch"]:
+                    present[0] = True
+                    return subprocess.CompletedProcess(argv, 0)
+                self.fail(f"unexpected git action: {op}")
+            with patch.object(runner.subprocess, "run", side_effect=git):
+                runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
+            fetches = [c for c in calls if c[0] == "fetch"]
+            self.assertEqual(fetches, [
+                ["fetch", "--no-tags", "origin",
+                 "refs/heads/main:refs/remotes/origin/main"]
+            ])
+            self.assertEqual(calls[-1][:1], ["merge-base"])
+
+    def test_unknown_remote_cannot_satisfy_release_root(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._repo(Path(td))
+            def git(argv, **kwargs):
+                op = argv[5:]
+                if op[:1] == ["fetch"]:
+                    self.fail("untrusted origin cannot be fetched")
+                if op[:1] == ["remote"]:
+                    return subprocess.CompletedProcess(
+                        argv, 0, stdout="https://example.invalid/not-authoritative.git\n"
+                    )
+                return subprocess.CompletedProcess(argv, 1)
+            with patch.object(runner.subprocess, "run", side_effect=git):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "not authoritative"
+                ):
+                    runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
+
+    def test_network_timeout_never_allows_root_source_request(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._repo(Path(td))
+            def git(argv, **kwargs):
+                op = argv[5:]
+                if op[:1] == ["remote"]:
+                    return subprocess.CompletedProcess(
+                        argv, 0, stdout="https://github.com/al-teamaot-com/jason.git"
+                    )
+                if op[:1] == ["fetch"]:
+                    raise subprocess.TimeoutExpired(argv, timeout=120)
+                return subprocess.CompletedProcess(argv, 1)
+            with patch.object(runner.subprocess, "run", side_effect=git):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "mirror refresh unavailable"
+                ):
+                    runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
+
+    def test_missing_after_fetch_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._repo(Path(td))
+            def git(argv, **kwargs):
+                op = argv[5:]
+                if op[:1] == ["remote"]:
+                    return subprocess.CompletedProcess(
+                        argv, 0, stdout="https://github.com/al-teamaot-com/jason.git\n"
+                    )
+                if op[:1] == ["fetch"]:
+                    return subprocess.CompletedProcess(argv, 0)
+                return subprocess.CompletedProcess(argv, 1)
+            with patch.object(runner.subprocess, "run", side_effect=git):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "lacks the exact candidate"
+                ):
+                    runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
+
+    def test_no_spool_request_when_source_preflight_fails(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "host-reconcile" / "requests").mkdir(parents=True)
+            (root / "host-reconcile" / "results").mkdir(parents=True)
+            with patch.object(runner, "require_host_reconciler_ready"), patch.object(
+                runner, "ensure_managed_host_source_revision",
+                side_effect=runner.ReleaseManagerError("source not synchronized"),
+            ):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "source not synchronized"):
+                    runner.request_host_reconcile(root, SHA_A)
+            self.assertFalse(list((root / "host-reconcile" / "requests").iterdir()))
+
+
+def test_root_source_sync_is_before_any_live_production_mutation():
+    import inspect
+    source = inspect.getsource(runner._deploy_production_locked)
+    preflight = source.index("ensure_managed_host_source_revision(candidate_sha)")
+    production = source.index('gate_transition(repo, state_root, record, "production")')
+    runtime = source.index("runtime_attempted = True")
+    mcp = source.index("mcp_attempted = True")
+    host = source.index("host_result = request_host_reconcile(")
+    assert preflight < production < runtime < mcp < host
+
+
 class HostReconciliationTimeoutContractTests(unittest.TestCase):
     def test_bound_covers_observed_service_activation_and_exporter(self):
         import inspect
@@ -2443,7 +2578,7 @@ class HostReconciliationTimeoutContractTests(unittest.TestCase):
             root = Path(td)
             (root / 'host-reconcile' / 'requests').mkdir(parents=True)
             (root / 'host-reconcile' / 'results').mkdir(parents=True)
-            with patch.object(runner, 'require_host_reconciler_ready'), patch.object(runner.time, 'monotonic', side_effect=[0.0, 2.0]):
+            with patch.object(runner, 'require_host_reconciler_ready'), patch.object(runner, 'ensure_managed_host_source_revision'), patch.object(runner.time, 'monotonic', side_effect=[0.0, 2.0]):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, 'host reconciliation result timed out'):
                     runner.request_host_reconcile(root, SHA_A, timeout_seconds=1.0)
 
@@ -2780,18 +2915,20 @@ def test_ccc_gate_execution_requires_fresh_report_and_matching_process_result(tm
             runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
 
 
-def test_ccc_precedes_mutation_and_postflight_precedes_closed_release():
+def test_single_native_release_checks_preserve_mutation_rollback_order():
     import inspect
     source = inspect.getsource(runner._deploy_production_locked)
-    assert source.index('ccc_preflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production")')
-    # The current controller marks the attempt *before* invoking the helper so
-    # rollback also covers a helper that partially mutates and then fails.
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('runtime_attempted = True')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('mcp_attempted = True')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('host_result = request_host_reconcile(')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('manager_result = install_release_manager_from_current(')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production_verified")')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
+    assert source.index('record["native_pre_mutation_gate"] = native_preflight') < source.index('gate_transition(repo, state_root, record, "production")')
+    # Native postflight retains the same rollback boundary and validates smoke,
+    # exact runtime/MCP images, protected drift and a complete host manifest.
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('runtime_attempted = True')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('mcp_attempted = True')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('host_result = request_host_reconcile(')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('manager_result = install_release_manager_from_current(')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') < source.index('gate_transition(repo, state_root, record, "production_verified")')
+    assert 'ccc_preflight = run_release_ccc_gate(' not in source
+    assert 'ccc_postflight = run_release_ccc_gate(' not in source
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
 
 
 def test_post_verification_publication_is_not_a_rollback_gate():

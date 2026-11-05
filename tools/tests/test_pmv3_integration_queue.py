@@ -195,6 +195,9 @@ def test_train_completion_locks_exact_final_main(tmp_path):
     assert state['train'] is None
     assert state['release_lock']['candidate_sha'] == api._main
     assert state['release_lock']['reason'] == 'release_train_complete_awaiting_production'
+    # Source status must reflect the actual protected merge, not pre-merge main.
+    assert state['main_sha'] == api._main
+    assert state['production_lkg_sha'] == base
 
 
 def test_selected_behind_pr_updates_branch_instead_of_merging(tmp_path):
@@ -282,3 +285,108 @@ def test_unknown_lkg_fails_closed_and_does_not_start_train(tmp_path):
     assert state['status'] == 'release_locked'
     assert state['release_lock']['reason'] == 'verified_production_revision_unknown'
     assert api.merges == []
+
+
+def test_read_only_status_refreshes_live_revision_without_mutating_queue(tmp_path):
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    spool.mkdir()
+    merged = 'a' * 40
+    prior = '0' * 40
+    stored = {
+        **queue.empty_state(),
+        'status': 'release_locked',
+        'main_sha': prior,
+        'production_lkg_sha': prior,
+        'release_lock': queue._release_lock(
+            merged, None, reason='release_train_complete_awaiting_production',
+        ),
+    }
+    path = spool / 'pmv3-integration-queue-state.json'
+    path.write_text(json.dumps(stored))
+    original = path.read_bytes()
+    write_lkg(release, merged)
+    api = FakeApi(main_sha=merged, prs=[])
+
+    result = queue.current_status(api=api, spool=spool, release_state=release)
+    assert result['main_sha'] == merged
+    assert result['production_lkg_sha'] == merged
+    assert result['stored_main_sha'] == prior
+    assert result['stored_production_lkg_sha'] == prior
+    assert result['queue_state_stale'] is True
+    assert result['status'] == 'release_complete_pending_queue_refresh'
+    assert result['release_lock_reconciliation_pending'] is True
+    assert result['release_lock_active'] is True  # Stored lock remains enforceable.
+    assert result['release_candidate_sha'] == merged
+    assert path.read_bytes() == original
+    assert not api.merges and not api.gates and not api.gate_required
+
+
+def test_read_only_status_keeps_main_ahead_of_production_locked(tmp_path):
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    spool.mkdir()
+    candidate, prior = 'b' * 40, 'a' * 40
+    stored = {**queue.empty_state(), 'status': 'idle',
+              'main_sha': prior, 'production_lkg_sha': prior}
+    path = spool / 'pmv3-integration-queue-state.json'
+    path.write_text(json.dumps(stored))
+    original = path.read_bytes()
+    write_lkg(release, prior)
+    api = FakeApi(main_sha=candidate, prs=[])
+
+    result = queue.current_status(api=api, spool=spool, release_state=release)
+    assert result['main_sha'] == candidate
+    assert result['production_lkg_sha'] == prior
+    assert result['status'] == 'release_locked'
+    assert result['release_lock_reconciliation_pending'] is False
+    assert result['queue_state_stale'] is True
+    assert path.read_bytes() == original
+    assert not api.merges and not api.gates and not api.gate_required
+
+
+def test_read_only_status_unknown_production_is_fail_closed(tmp_path):
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    spool.mkdir()
+    api = FakeApi(main_sha='c' * 40, prs=[])
+    result = queue.current_status(api=api, spool=spool, release_state=release)
+    assert result['status'] == 'release_locked'
+    assert result['production_lkg_sha'] == ''
+    assert result['release_lock_reconciliation_pending'] is False
+    assert not (spool / 'pmv3-integration-queue-state.json').exists()
+    assert not api.merges and not api.gates and not api.gate_required
+
+
+def test_read_only_status_rejects_unverifiable_protected_main(tmp_path):
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    spool.mkdir()
+    write_lkg(release, 'a' * 40)
+    ledger = spool / 'pmv3-integration-queue-state.json'
+    ledger.write_text(json.dumps(queue.empty_state()))
+    before = ledger.read_bytes()
+    api = FakeApi(main_sha='unavailable', prs=[])
+    with pytest.raises(ValueError, match='protected main SHA is unavailable'):
+        queue.current_status(api=api, spool=spool, release_state=release)
+    assert ledger.read_bytes() == before
+    assert not api.gates and not api.merges and not api.gate_required
+
+
+def test_read_only_status_does_not_clear_unrelated_release_lock(tmp_path):
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    spool.mkdir()
+    accepted, unrelated = 'a' * 40, 'b' * 40
+    write_lkg(release, accepted)
+    ledger = spool / 'pmv3-integration-queue-state.json'
+    ledger.write_text(json.dumps({
+        **queue.empty_state(), 'status': 'release_locked',
+        'release_lock': queue._release_lock(
+            unrelated, None, reason='release_train_complete_awaiting_production',
+        ),
+    }))
+    before = ledger.read_bytes()
+    api = FakeApi(main_sha=accepted, prs=[])
+    result = queue.current_status(api=api, spool=spool, release_state=release)
+    assert result['status'] == 'release_locked'
+    assert result['release_lock_active'] is True
+    assert result['release_lock_reconciliation_pending'] is False
+    assert result['release_candidate_sha'] == unrelated
+    assert ledger.read_bytes() == before
+    assert not api.gates and not api.merges and not api.gate_required

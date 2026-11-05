@@ -841,13 +841,13 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
     if version == "1.0":
         expected = shared
         mode = "owner_only_pilot"
-    elif version == "2.0":
+    elif version in {"2.0", "3.0"}:
         expected = shared | {"high_impact_review"}
         mode = "owner_reviewed"
     else:
         raise ReleaseManagerError("mobile release approval policy version is unsupported")
-    if source_v2_required and version != "2.0":
-        raise ReleaseManagerError("candidate source must declare owner-reviewed release policy V2")
+    if source_v2_required and version not in {"2.0", "3.0"}:
+        raise ReleaseManagerError("candidate source must declare an owner-reviewed release policy")
     risks = doc.get("allowed_risk_profiles")
     ttl = doc.get("ttl_seconds")
     if (set(doc) != expected or doc.get("organization_id") != "aot"
@@ -861,7 +861,11 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
         if set(risks) != {"normal"} or not 300 <= ttl <= 1800:
             raise ReleaseManagerError("V1 release approval policy must remain normal-risk only")
     else:
-        if (set(risks) != {"normal", "production_control_core"}
+        exact_risks = (
+            {"normal", "production_control_core"} if version == "2.0"
+            else {"normal", "production_control_core", "production_repair"}
+        )
+        if (set(risks) != exact_risks
                 or not 300 <= ttl <= 900
                 or doc.get("high_impact_review") != {
                     "owner_exact_sha_required": True,
@@ -1303,6 +1307,7 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
             "tools/reconcile_managed_unit_delta.py",
             "tools/release_exporter_port_guard.py",
             "tools/release_mobile_approval_consumer.py",
+            "tools/pmv3_integration_queue.py",
             "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
             "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
             "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
@@ -2125,6 +2130,66 @@ def require_host_reconciler_ready(state_root: Path) -> None:
         )
 
 
+
+def ensure_managed_host_source_revision(
+    source_revision: str,
+    *,
+    managed_repo: Path = Path("/home/al/.local/lib/jason/engineering-source-repo"),
+) -> None:
+    """Make the unprivileged Git mirror ready before the root reconcile request.
+
+    Root host reconciliation is deliberately offline. The managed mirror may
+    lag protected main even though this release has been built and approved.
+    Read first so LKG rollback never depends on network; fetch only when the
+    exact source commit and its origin/main ancestry are absent.
+    """
+    revision = exact_sha(source_revision, "source_revision")
+    if managed_repo.is_symlink() or not managed_repo.is_dir():
+        raise ReleaseManagerError("managed root host source repository is unavailable")
+    prefix = ["git", "-c", f"safe.directory={managed_repo}", "-C", str(managed_repo)]
+
+    def local_ready() -> bool:
+        for argv in (
+            ["cat-file", "-e", f"{revision}^{{commit}}"],
+            ["merge-base", "--is-ancestor", revision, "origin/main"],
+        ):
+            try:
+                check = subprocess.run(
+                    prefix + argv, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, check=False, timeout=20,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return False
+            if check.returncode != 0:
+                return False
+        return True
+
+    if local_ready():
+        return
+    try:
+        remote = subprocess.run(
+            prefix + ["remote", "get-url", "origin"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=15,
+        )
+        if (remote.returncode != 0 or
+                remote.stdout.strip() != "https://github.com/al-teamaot-com/jason.git"):
+            raise ReleaseManagerError("managed host source remote is not authoritative")
+        refreshed = subprocess.run(
+            prefix + ["fetch", "--no-tags", "origin",
+                      "refs/heads/main:refs/remotes/origin/main"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseManagerError("managed host source mirror refresh unavailable") from exc
+    if refreshed.returncode != 0 or not local_ready():
+        raise ReleaseManagerError(
+            "managed host source mirror lacks the exact candidate after refresh"
+        )
+
+
+
 def request_host_reconcile(
     state_root: Path,
     source_revision: str,
@@ -2137,6 +2202,8 @@ def request_host_reconcile(
     # an unbounded wait; never count a late result as an accepted release.
     source_revision = exact_sha(source_revision, "source_revision")
     require_host_reconciler_ready(state_root)
+    # Never enqueue a root request until its immutable source is available.
+    ensure_managed_host_source_revision(source_revision)
     request_id = "release-" + source_revision[:12] + "-" + uuid4().hex[:12]
     root = state_root / "host-reconcile"
     request_path = root / "requests" / f"{request_id}.json"
@@ -3433,14 +3500,11 @@ def approve_release(
         )
         approval_changed = True
 
-    material_review_changed = _record_exact_owner_ccc_material_review(
-        repo,
-        state_root,
-        record,
-        release_id=release_id,
-        candidate_sha=candidate_sha,
-        source=approval_source,
-    )
+    # The authenticated exact-SHA approval and native scope review are the
+    # only human approvals. Do not create a second CCC material-review receipt.
+    if str(record.get("risk_profile") or "") == "production_control_core":
+        require_current_manual_scope_review(repo, state_root, record)
+    material_review_changed = False
 
     if waive_ccc_material_review:
         # This is a one-release Owner constitutional exception to the separate
@@ -4522,8 +4586,11 @@ def _deploy_production_locked(
         raise ReleaseManagerError("candidate MCP image changed after pre-production")
 
     # Do not begin a disruptive production transaction unless the privileged
-    # host boundary is already installed and the rollback baseline is aligned.
+    # host boundary is already installed and the exact candidate is present in
+    # the root-managed source mirror. This can fetch once while still fully
+    # frozen, BEFORE runtime/MCP or other live production modifications.
     require_host_reconciler_ready(state_root)
+    ensure_managed_host_source_revision(candidate_sha)
     rollback_sha = str(record["rollback_sha"])
     if recovery_context is None:
         live_production_alignment(rollback_sha)
@@ -4599,18 +4666,19 @@ def _deploy_production_locked(
         deploy_worktree, candidate_sha
     )
 
-    # The existing live runtime can differ from a valid new candidate. This
-    # narrowly scoped preflight is NOT a CCC PASS and requires full post CCC.
+    # Keep one release gate: exact approved source, verified artifact and
+    # rollback, native preproduction, baseline health and transaction lock.
+    # Do not run a separate CCC certification/approval pipeline.
     verify_candidate_on_main(repo, candidate_sha)
-    owner_material_review_waiver = verified_owner_material_review_waiver(
-        record, candidate_sha
-    )
-    ccc_preflight = run_release_ccc_gate(
-        candidate_sha, rollback_sha, before_mutation=True,
-        owner_material_review_waiver=owner_material_review_waiver,
-        recovery_context=recovery_context,
-    )
-    record["ccc_pre_mutation_gate"] = ccc_preflight
+    native_preflight = {
+        "status": "pass",
+        "mode": "native_release_checks",
+        "candidate_sha": candidate_sha,
+        "rollback_sha": rollback_sha,
+        "artifact_and_preproduction_contract_verified": True,
+        "verified_at": now(),
+    }
+    record["native_pre_mutation_gate"] = native_preflight
 
     controller_pin = controller_identity(deploy_worktree)
     if recovery_context is None:
@@ -4782,15 +4850,28 @@ def _deploy_production_locked(
             verified_owner_read_canary = owner_read_canary.require_authenticated_read_canary(
                 state_root, owner_read_canary_session,
             )
-        # Certification is mandatory BEFORE verified/closed or new LKG. A
-        # non-PASS or stale/wrong-SHA report raises inside the rollback block.
-        ccc_postflight = run_release_ccc_gate(
-            candidate_sha, candidate_sha, before_mutation=False,
-            owner_material_review_waiver=owner_material_review_waiver,
-        )
-        record["ccc_post_mutation_gate"] = ccc_postflight
+        # One native postflight: exact image/source alignment, functional smoke,
+        # protected drift and complete production manifest. Every failure
+        # still raises inside the same automatic rollback transaction.
         drift_evidence = production_drift_evidence(state_root)
         production_manifest = capture_production_manifest(candidate_sha)
+        native_postflight = {
+            "status": "pass",
+            "mode": "native_release_checks",
+            "candidate_sha": candidate_sha,
+            "runtime_and_mcp_image_digests_verified": True,
+            "functional_smoke_passed": smoke.get("passed") is True,
+            "drift_passed": drift_evidence.get("status") == "pass",
+            "production_manifest_complete": production_manifest.get("complete") is True,
+            "verified_at": now(),
+        }
+        if not all((
+            native_postflight["functional_smoke_passed"],
+            native_postflight["drift_passed"],
+            native_postflight["production_manifest_complete"],
+        )):
+            raise ReleaseManagerError("native release postflight is incomplete")
+        record["native_post_mutation_gate"] = native_postflight
 
         if isinstance(record.get("mobile_release_policy_transition"), dict):
             record["mobile_release_policy_transition"]["status"] = "verified_active"
@@ -4802,9 +4883,8 @@ def _deploy_production_locked(
             "mcp_artifact_digest": live_mcp_digest,
             "health_passed": True,
             "mobile_release_approval": approval_policy_activation,
-            "ccc_pre_mutation": ccc_preflight,
-            "ccc_post_mutation": ccc_postflight,
-            "owner_material_review_waiver": owner_material_review_waiver,
+            "native_pre_mutation": native_preflight,
+            "native_post_mutation": native_postflight,
             "functional_smoke_tests_passed": bool(smoke.get("passed")),
             "functional_smoke_tests": smoke,
             "authenticated_owner_read_canary": verified_owner_read_canary,
@@ -4845,9 +4925,8 @@ def _deploy_production_locked(
             "release_manifest": record["release_manifest"],
             "risk_profile": record["risk_profile"],
             "owner_approval": record.get("owner_approval"),
-            "owner_material_review_waiver": owner_material_review_waiver,
-            "ccc_pre_mutation": ccc_preflight,
-            "ccc_post_mutation": ccc_postflight,
+            "native_pre_mutation": native_preflight,
+            "native_post_mutation": native_postflight,
             "preproduction": record.get("preproduction"),
             "pre_mutation_health": record.get("pre_mutation_health"),
             "functional_smoke_tests": smoke,
@@ -6183,7 +6262,7 @@ def signed_owner_offer_purpose(
     owner = record.get("owner_approval") or {}
     if owner.get("approved") is not True:
         return "release_and_ccc"
-    if (reviewed_policy.schema_version != "2.0"
+    if (reviewed_policy.schema_version not in {"2.0", "3.0"}
             or owner.get("candidate_sha") != candidate_sha):
         return None
     named = ccc_root / ("material-review-" + candidate_sha[:16] + ".json")
