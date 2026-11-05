@@ -656,6 +656,62 @@ def begin_one_transaction_freeze_exception(
     return {"receipt_path": receipt_path, "receipt": receipt, "raw": snapshot["raw"]}
 
 
+
+def begin_postacceptance_rollback_freeze_exception(
+    state_root: Path,
+    receipt_path: Path,
+) -> dict[str, Any]:
+    """Open one exact rollback transaction using an already-bound rollback receipt."""
+    snapshot = _freeze_marker_snapshot(state_root)
+    backup = state_root / PRODUCTION_FREEZE_BACKUP
+    if not backup.is_file() or backup.is_symlink():
+        raise ReleaseManagerError("post-acceptance rollback requires the original freeze backup")
+    backup_info = backup.lstat()
+    backup_raw = backup.read_bytes()
+    if (
+        not stat.S_ISREG(backup_info.st_mode)
+        or stat.S_IMODE(backup_info.st_mode) != snapshot["mode"]
+        or backup_info.st_uid != snapshot["uid"]
+        or backup_info.st_gid != snapshot["gid"]
+        or backup_raw != snapshot["raw"]
+    ):
+        raise ReleaseManagerError("post-acceptance rollback freeze backup differs from active marker")
+    if not receipt_path.is_file() or receipt_path.is_symlink():
+        raise ReleaseManagerError("post-acceptance rollback authorization receipt is unavailable")
+    info = receipt_path.lstat()
+    raw = receipt_path.read_bytes()
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_uid != os.geteuid()
+        or info.st_gid != os.getegid()
+        or len(raw) > 8192
+    ):
+        raise ReleaseManagerError("post-acceptance rollback receipt metadata is unsafe")
+    receipt = json.loads(raw)
+    if (
+        receipt.get("schema_version") != "1.0"
+        or receipt.get("authorization")
+            != "explicit_exact_sha_owner_postacceptance_rollback"
+        or receipt.get("status") != "authorized_pending"
+        or receipt.get("standing_authority") is not False
+        or receipt.get("freeze_sha256_before") != snapshot["sha256"]
+    ):
+        raise ReleaseManagerError("post-acceptance rollback authorization changed before transaction")
+    receipt.update({
+        "freeze_mode_before": snapshot["mode"],
+        "freeze_uid_before": snapshot["uid"],
+        "freeze_gid_before": snapshot["gid"],
+        "freeze_restored": False,
+        "status": "unfrozen_active",
+        "unfrozen_at": now(),
+    })
+    atomic_json(receipt_path, receipt)
+    marker = state_root / PRODUCTION_FREEZE_MARKER
+    marker.unlink()
+    return {"receipt_path": receipt_path, "receipt": receipt, "raw": snapshot["raw"]}
+
+
 def restored_failed_freeze_receipt_allows_reissue(
     state_root: Path, record: Mapping[str, Any], candidate_sha: str,
 ) -> bool:
@@ -5987,6 +6043,238 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         release_production_transaction_lock(lock)
 
 
+
+def rollback_closed_release(
+    repo: Path,
+    state_root: Path,
+    *,
+    release_id: str,
+    candidate_sha: str,
+    scope_sha256: str,
+    rollback_sha: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Rollback one closed release to its exact recorded pre-release LKG.
+
+    This is a bounded post-acceptance recovery path. It requires the original
+    exact-SHA Owner approval/unfreeze receipt, the same reviewed scope digest,
+    the exact recorded rollback SHA, an active production freeze, and a
+    complete prior LKG manifest. It grants no standing rollback authority.
+    """
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    rollback_sha = exact_sha(rollback_sha, "rollback_sha")
+    if re.fullmatch(r"[0-9a-f]{64}", scope_sha256 or "") is None:
+        raise ReleaseManagerError("exact reviewed scope SHA-256 is required")
+    if not reason.strip():
+        raise ReleaseManagerError("post-acceptance rollback reason is required")
+
+    record = load_record(state_root, release_id)
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    scope = record.get("manual_scope_review") or {}
+    owner = record.get("owner_approval") or {}
+    production = record.get("production") or {}
+    baseline = dict(record.get("last_known_good_manifest") or {})
+    if record.get("state") != "closed":
+        raise ReleaseManagerError("post-acceptance rollback requires a closed release")
+    if candidate != candidate_sha or record.get("rollback_sha") != rollback_sha:
+        raise ReleaseManagerError("rollback arguments differ from the closed release")
+    if scope.get("candidate_sha") != candidate_sha or scope.get("baseline_sha") != rollback_sha or scope.get("scope_sha256") != scope_sha256:
+        raise ReleaseManagerError("rollback scope differs from the reviewed release scope")
+    if owner.get("approved") is not True or owner.get("candidate_sha") != candidate_sha:
+        raise ReleaseManagerError("exact candidate Owner approval is missing")
+    if production.get("live_sha") != candidate_sha or not production.get("verified_at"):
+        raise ReleaseManagerError("closed release lacks verified production evidence")
+    if baseline.get("complete") is not True or baseline.get("revision") != rollback_sha:
+        raise ReleaseManagerError("recorded pre-release LKG is incomplete or mismatched")
+
+    explicit_path = state_root / "owner-explicit-unfreeze-receipts" / (release_id + ".json")
+    explicit = json.loads(explicit_path.read_text(encoding="utf-8")) if explicit_path.is_file() else {}
+    if (
+        explicit.get("authorization") != "explicit_exact_sha_owner_unfreeze"
+        or explicit.get("status") != "consumed"
+        or explicit.get("candidate_sha") != candidate_sha
+        or explicit.get("rollback_sha") != rollback_sha
+        or explicit.get("scope_sha256") != scope_sha256
+        or explicit.get("freeze_restored") is not True
+        or explicit.get("standing_authority") is not False
+    ):
+        raise ReleaseManagerError("consumed exact Owner unfreeze receipt does not authorize this rollback")
+    try:
+        freeze = _freeze_marker_snapshot(state_root)
+    except (OSError, ReleaseManagerError) as exc:
+        raise ReleaseManagerError(
+            "production freeze is not restored to the authorized bytes"
+        ) from exc
+    if freeze.get("sha256") != explicit.get("freeze_sha256_after"):
+        raise ReleaseManagerError("production freeze is not restored to the authorized bytes")
+
+    receipt_path = state_root / "owner-postacceptance-rollback-receipts" / (release_id + ".json")
+    receipt_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    receipt = {
+        "schema_version": "1.0",
+        "authorization": "explicit_exact_sha_owner_postacceptance_rollback",
+        "release_id": release_id,
+        "candidate_sha": candidate_sha,
+        "rollback_sha": rollback_sha,
+        "scope_sha256": scope_sha256,
+        "reason": reason.strip()[:700],
+        "source_unfreeze_receipt_sha256": (
+            "sha256:" + hashlib.sha256(explicit_path.read_bytes()).hexdigest()
+        ),
+        "freeze_sha256_before": freeze["sha256"],
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+        "authorized_at": now(),
+        "status": "authorized_pending",
+    }
+    atomic_json(receipt_path, receipt)
+
+    lock = acquire_production_transaction_lock(repo, state_root, record)
+    candidate_tree = None
+    rollback_tree = None
+    opened_freeze: dict[str, Any] | None = None
+    recovery_steps: dict[str, Any] = {}
+    result: dict[str, Any] | None = None
+    rollback_error: Exception | None = None
+    try:
+        with temporary_worker_admission_gate():
+            require_pmv3_engineering_quiescent()
+            live_production_alignment(candidate_sha)
+            opened_freeze = begin_postacceptance_rollback_freeze_exception(
+                state_root, receipt_path
+            )
+            require_owner_production_deployment_unfrozen(state_root)
+            candidate_tree = worktree(repo, state_root, candidate_sha)
+            rollback_tree = worktree(repo, state_root, rollback_sha)
+            runtime_script = candidate_tree / "infrastructure" / "jason-runtime" / "production-deploy.sh"
+            mcp_script = candidate_tree / "infrastructure" / "jason-mcp" / "production-deploy.sh"
+            if not runtime_script.is_file() or not mcp_script.is_file():
+                raise ReleaseManagerError("candidate rollback scripts are unavailable")
+
+            prior_qbo = declared_quickbooks_read_profile(rollback_tree)
+            prior_at = declared_autotask_read_profile(rollback_tree)
+            if prior_qbo is None:
+                raise ReleaseManagerError("rollback QuickBooks profile is unavailable")
+            previous_uid = worker_enrollment.approved_diagnostic_uid(rollback_tree)
+            prior_release_mode = str(baseline.get("mobile_release_approval_mode") or "")
+            if prior_release_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
+                raise ReleaseManagerError("rollback release approval mode is invalid")
+
+            rollback_env = quickbooks_rollback_environment(
+                os.environ, rollback_sha=rollback_sha, prior_profile=prior_qbo
+            )
+            if prior_at is not None:
+                rollback_env = autotask_rollback_environment(
+                    rollback_env, prior_autotask_profile=prior_at
+                )
+            rollback_env[worker_enrollment.ENV_NAME] = previous_uid
+            rollback_env["JASON_RELEASE_MOBILE_APPROVAL_ROLLBACK_MODE"] = prior_release_mode
+
+            # Open the breaker before host rollback. The root reconciler already
+            # recognizes only the exact previous_last_known_good while open.
+            open_circuit_breaker(
+                state_root, record,
+                reason="post_acceptance_rollback: " + reason.strip()[:600],
+                rollback_verified=False,
+            )
+
+            pin_exact_rollback_image("mcp", baseline)
+            run([str(mcp_script)], cwd=candidate_tree, env=rollback_env)
+            if not rollback_surface_is_verified("mcp", rollback_sha, baseline):
+                raise ReleaseManagerError("MCP post-acceptance rollback is not verified")
+            recovery_steps["mcp"] = "restored_and_verified"
+
+            host_result = request_host_reconcile(state_root, rollback_sha)
+            verify_host_reconciliation_evidence(host_result, rollback_sha)
+            recovery_steps["host"] = "restored_and_verified"
+
+            manager = install_release_manager_from_current(rollback_sha)
+            recovery_steps["release_manager"] = manager
+
+            restored_policy = restore_mobile_release_approval_policy(state_root, record)
+            recovery_steps["approval_policy"] = restored_policy
+
+            pin_exact_rollback_image("runtime", baseline)
+            run([str(runtime_script)], cwd=candidate_tree, env=rollback_env)
+            wait_live_runtime()
+            if not rollback_surface_is_verified("runtime", rollback_sha, baseline):
+                raise ReleaseManagerError("runtime post-acceptance rollback is not verified")
+            recovery_steps["runtime"] = "restored_and_verified"
+
+            alignment = live_production_alignment(rollback_sha)
+            verified = capture_production_manifest(rollback_sha)
+            if verified.get("complete") is not True:
+                raise ReleaseManagerError("post-acceptance rollback manifest is incomplete")
+            for surface in ("runtime", "mcp"):
+                if verified.get(surface + "_image_id") != baseline.get(surface + "_image_id"):
+                    raise ReleaseManagerError("post-acceptance rollback image differs from recorded LKG")
+
+            set_last_known_good(
+                state_root, verified, release_id="release-" + rollback_sha[:16]
+            )
+            record["failure"] = {
+                "at": now(),
+                "error": "PostDeploymentAcceptanceFailure",
+                "message": reason.strip()[:700],
+                "rollback_verified": True,
+                "rollback_errors": [],
+                "rollback_actions": recovery_steps,
+            }
+            record["state"] = "rolled_back"
+            record.setdefault("history", []).append({
+                "at": now(), "state": "rolled_back",
+                "gate": "post_deployment_acceptance_failure",
+            })
+            save_record(state_root, record)
+            open_circuit_breaker(
+                state_root, record,
+                reason="post_acceptance_failure_rolled_back: " + reason.strip()[:560],
+                rollback_verified=True,
+            )
+            result = {
+                "status": "rolled_back",
+                "release_id": release_id,
+                "candidate_sha": candidate_sha,
+                "rollback_sha": rollback_sha,
+                "rollback_verified": True,
+                "alignment": alignment,
+                "manifest": verified,
+                "recovery_steps": recovery_steps,
+            }
+    except Exception as exc:
+        rollback_error = exc
+    finally:
+        release_state = "rolled_back" if result is not None else "rollback_failed"
+        if opened_freeze is not None:
+            restore_one_transaction_freeze_exception(
+                state_root, opened_freeze, release_state=release_state
+            )
+        if candidate_tree is not None:
+            remove_worktree(repo, candidate_tree)
+        if rollback_tree is not None:
+            remove_worktree(repo, rollback_tree)
+        release_production_transaction_lock(lock)
+
+    current_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if rollback_error is not None:
+        current_receipt.update({
+            "status": "failed",
+            "failed_at": now(),
+            "error": type(rollback_error).__name__,
+            "message": str(rollback_error)[:700],
+        })
+        atomic_json(receipt_path, current_receipt)
+        raise rollback_error
+    if result is None:
+        raise ReleaseManagerError("post-acceptance rollback returned without a verified result")
+    current_receipt.update({
+        "status": "consumed",
+        "completed_at": now(),
+        "rollback_verified": True,
+    })
+    atomic_json(receipt_path, current_receipt)
+    return result
+
 def prepare_release(
     repo: Path,
     state_root: Path,
@@ -7322,6 +7610,12 @@ def main() -> int:
 
     promote = sub.add_parser("promote")
     promote.add_argument("--release-id", required=True)
+    rollback_release = sub.add_parser("rollback-release")
+    rollback_release.add_argument("--release-id", required=True)
+    rollback_release.add_argument("--candidate-sha", required=True)
+    rollback_release.add_argument("--scope-sha256", required=True)
+    rollback_release.add_argument("--rollback-sha", required=True)
+    rollback_release.add_argument("--reason", required=True)
     closeout_retry = sub.add_parser("retry-closeout")
     closeout_retry.add_argument("--release-id", required=True)
 
@@ -7421,6 +7715,14 @@ def main() -> int:
     if args.command == "promote":
         record = deploy_production(repo, state_root, load_record(state_root, args.release_id))
         print(json.dumps(record, indent=2))
+        return 0
+    if args.command == "rollback-release":
+        result = rollback_closed_release(
+            repo, state_root, release_id=args.release_id,
+            candidate_sha=args.candidate_sha, scope_sha256=args.scope_sha256,
+            rollback_sha=args.rollback_sha, reason=args.reason,
+        )
+        print(json.dumps(result, indent=2))
         return 0
     if args.command == "retry-closeout":
         record = retry_administrative_closeout(repo, state_root, args.release_id)

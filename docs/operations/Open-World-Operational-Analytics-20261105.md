@@ -57,3 +57,21 @@ Automated acceptance also proves the same raw `print_usage` resource can answer 
 The existing `JASON_UNIVERSAL_QUERY_ENABLED` rollout gate remains authoritative. Runtime compose passes that variable through with a default of `false`. Production activation is source-bound by `config/universal-query-activation.json`: the reviewed `aot-internal-read-v1` profile makes the canonical runtime deploy inject `JASON_UNIVERSAL_QUERY_ENABLED=true`; `off` injects `false`; rollback always injects `false`. There is no host-only enable override. The controlled production rollout must verify the resulting AOT internal conversation path end to end.
 
 Production deployment requires normal PMV3 exact-revision authorization, rollback verification, provider-backed acceptance, and post-deployment health validation.
+
+## Post-deployment acceptance recovery
+
+Production deployment of the open-world candidate passed native PMV3 health, drift, artifact, runtime/MCP/host alignment, and freeze-restoration checks. The subsequent provider-backed functional acceptance exposed a distinct operational failure: `print.meter.usage.search` reported a reconciled 436-device inventory and 436 selected devices but materialized only 100 usage records to the governed reasoning surface. A fleet-wide top-N answer therefore remained incomplete and the release must not be accepted as operational for the stated objective.
+
+The release authorization explicitly bound rollback to the pre-release LKG if required production validation failed. PMV3 previously had automatic rollback only inside the initial deployment exception path; a release that had already reached `closed` had no public, governed exact-LKG rollback verb. Direct deployment-script execution is not an acceptable substitute.
+
+`rollback-release` adds a bounded post-acceptance recovery control. It may act only on a closed production-verified release and requires all of the following to match the existing release evidence exactly:
+
+- candidate SHA;
+- reviewed scope SHA-256;
+- recorded rollback/LKG SHA;
+- exact Owner approval;
+- consumed one-transaction Owner unfreeze receipt;
+- complete pre-release LKG manifest; and
+- restored production-freeze bytes.
+
+The rollback itself executes under the serialized production transaction lock. It creates a single-use rollback receipt, temporarily removes the restored freeze only for that exact rollback transaction, restores MCP first, then host/release-manager source, approval policy, and runtime, verifies exact immutable LKG image IDs and full production alignment, restores the protected LKG, records the failed candidate as `rolled_back`, opens the circuit breaker against the failed candidate, and restores the original freeze bytes in `finally`. Ambiguous or mismatched evidence fails before production mutation. The control grants no standing rollback authority.

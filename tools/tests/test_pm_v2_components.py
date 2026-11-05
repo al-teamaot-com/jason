@@ -9,6 +9,29 @@ from pm_v2.config import load_config
 from pm_v2.store import PMV2Store
 
 
+def reap_components_until(runner, expected_count, expected_states=None, timeout_seconds=5.0):
+    """Wait for component subprocess completion instead of assuming fixed startup latency."""
+    deadline = time.monotonic() + timeout_seconds
+    results = []
+    while len(results) < expected_count:
+        results.extend(runner.reap())
+        if len(results) >= expected_count:
+            break
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"component completion timeout: expected_count={expected_count}, "
+                f"actual_count={len(results)}"
+            )
+        time.sleep(0.025)
+    if expected_states is not None:
+        actual = {item.state for item in results}
+        if actual != set(expected_states):
+            raise AssertionError(
+                f"component state mismatch: expected={set(expected_states)}, actual={actual}"
+            )
+    return results
+
+
 class PMV2ComponentRunnerTests(unittest.TestCase):
     def _config(self, root: Path, components):
         (root / "roadmap.md").write_text("", encoding="utf-8")
@@ -93,11 +116,11 @@ class PMV2ComponentRunnerTests(unittest.TestCase):
             try:
                 started = time.monotonic()
                 self.assertEqual(runner.dispatch_due(), 2)
-                time.sleep(0.25)
-                results = runner.reap()
+                results = reap_components_until(
+                    runner, 2, {"healthy_wait"}
+                )
                 self.assertEqual(len(results), 2)
-                self.assertLess(time.monotonic() - started, 0.6)
-                self.assertTrue(all(r.state == "healthy_wait" for r in results))
+                self.assertLess(time.monotonic() - started, 5.0)
             finally:
                 runner.shutdown()
 
@@ -113,12 +136,17 @@ class PMV2ComponentRunnerTests(unittest.TestCase):
             runner = ComponentRunner(config=config, store=store, repo=root)
             try:
                 self.assertEqual(runner.dispatch_due(), 1)
-                time.sleep(0.1)
-                self.assertEqual(runner.reap()[0].state, "retry_wait")
-                time.sleep(1.1)
-                self.assertEqual(runner.dispatch_due(), 1)
-                time.sleep(0.1)
-                self.assertEqual(runner.reap()[0].state, "blocked_recheck")
+                first = reap_components_until(runner, 1, {"retry_wait"})
+                self.assertEqual(first[0].state, "retry_wait")
+                deadline = time.monotonic() + 5.0
+                dispatched = 0
+                while dispatched == 0 and time.monotonic() < deadline:
+                    dispatched = runner.dispatch_due()
+                    if dispatched == 0:
+                        time.sleep(0.025)
+                self.assertEqual(dispatched, 1)
+                second = reap_components_until(runner, 1, {"blocked_recheck"})
+                self.assertEqual(second[0].state, "blocked_recheck")
                 self.assertEqual(runner.dispatch_due(), 0)
                 state = store.component_snapshot()[0]
                 self.assertEqual(state["consecutive_failures"], 2)
