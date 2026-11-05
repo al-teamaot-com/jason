@@ -1,7 +1,7 @@
-# Autotask catalog standardization — Phase 1 read-only inventory and audit preparation
+# Autotask Inventory Cleanup — Phase 1 read-only inventory and audit preparation
 
 **State:** Prepared for review; **not executed**. No inventory extraction or catalog mutation is asserted.
-**Agreement:** [Approved Version 1.4 — Goal, Scope, and Definition of Success](Autotask-Catalog-and-Contract-Standardization-Goal-Scope-and-Success-Agreement.md), Owner approval 2026-11-05.
+**Agreement:** [Approved Version 1.4 — Goal, Scope, and Definition of Success](Autotask-Inventory-Cleanup-Agreement.md), Owner approval 2026-11-05.
 **Workstream priority:** Independent; does not supersede production reliability, tickets, or existing approved engineering.
 **Authority:** Preparation and authorized governed read-only discovery. **No** catalog modification, financial changes, provider permission changes, new API identity, contract mutation, production release or service restart.
 
