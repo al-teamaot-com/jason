@@ -75,3 +75,9 @@ The release authorization explicitly bound rollback to the pre-release LKG if re
 - restored production-freeze bytes.
 
 The rollback itself executes under the serialized production transaction lock. It creates a single-use rollback receipt, temporarily removes the restored freeze only for that exact rollback transaction, restores MCP first, then host/release-manager source, approval policy, and runtime, verifies exact immutable LKG image IDs and full production alignment, restores the protected LKG, records the failed candidate as `rolled_back`, opens the circuit breaker against the failed candidate, and restores the original freeze bytes in `finally`. Ambiguous or mismatched evidence fails before production mutation. The control grants no standing rollback authority.
+
+## Cross-channel fleet projection correction
+
+The 2026-11-05 provider-backed post-deployment acceptance found that KFS itself selected and reconciled all 436 managed fleet devices, but the external Jason MCP evidence projector applied its generic 100-item list bound after the governed read. That made ChatGPT/Jason MCP consumers see only the first 100 usage records even though the KFS source and internal open-world runtime held the full selected fleet. The production candidate was rolled back rather than treating that partial projection as a trustworthy fleet-wide answer.
+
+The corrective design preserves the existing global 100-item MCP safety bound for unrelated capabilities and adds a capability-specific projection for `print.meter.usage.search`. That projection may expose at most 1,000 records, matching the already-governed source contract, while applying the normal recursive secret-key redaction to every record. Fleet analytics therefore receive the complete bounded selected dataset without weakening the generic MCP evidence boundary.
