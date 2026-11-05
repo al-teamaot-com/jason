@@ -95,36 +95,17 @@ ContractServices is the **known relationship-coverage gap**: readonly credential
 
 **Acceptance gate:** No proposed Product/Service naming standard is considered production-ready until the relevant mapped fields have verified target-system limits and a passing functional mapping test, or the unverified integration is disclosed as a blocking exception for the affected sync.
 
-## 7. Client-friendly invoices and monthly device/subscription quantities (Owner requirement, 2026-11-05)
+## 7. Future-system compatibility — design constraint only (Owner clarification, 2026-11-05)
 
-**Owner intent:** The customer invoice should explain, without overwhelming detail, what was supplied, what it covers, the month or service period, quantity and pricing. Each month, use authoritative device and subscription data and existing native capabilities of Autotask PSA, QuickBooks Online (QBO), and the source platforms. This is a design/acceptance constraint for Product/Service standardization and downstream Phase 6 reconciliation, **not approval for catalog changes, contract amendments, invoice creation/posting, account mapping changes, or production deployment**. Approved Agreement Version 1.4 remains unchanged.
+**Scope boundary:** The Owner raised client-readable downstream documents solely to ensure that **IT Product and Service standardization is compatible with the fields and capacities of existing platforms**, particularly Autotask and QuickBooks Online. **AOT is not starting any invoice, billing reconciliation, monthly device/license collection, invoice template, or integration-configuration work under this step.** These remain later-phase subjects requiring their own agreed scope and applicable approvals.
 
-### Client-facing invoice design (proposed; one approved pilot before expansion)
+Before proposing any naming, description, SKU or part-number convention:
 
-- Use plain-English Product and Service names, not internal codes or unexplained acronyms. Make each line clearly identify coverage, billing month, quantity/unit and agreed price; use concise descriptions rather than long feature lists.
-- Group appropriately under a recognizable service or contract bundle where native Autotask invoicing supports it and the grouped presentation matches customer terms. Do not combine items in a way that obscures different rates, taxes, units, billing commitments or price adjustments.
-- Keep the invoice short. Do **not** print every device hostname, serial number, account name or subscription user on it by default. Make a separate access-controlled device/license detail schedule or portal report available to the authorized client contact for transparency.
-- Separate an internal stable catalog name/identifier and manufacturer part number/SKU from the **invoice-facing description**. Validate the actually rendered QBO invoice for line grouping, text clarity, mapping uniqueness and absence of truncation.
-- Illustrative, not real charges: "Managed IT Support - Workstations | Nov 2026 | 25 devices"; "Microsoft 365 Business Premium | Nov 2026 | 18 users"; "Managed Endpoint Backup | Nov 2026 | 7 devices". Actual prices, units, discounts, minimums and proration must come from approved client terms.
-
-### Monthly evidence, authority and reconciliation
-
-1. **Autotask Contracts and Services** (plus applicable agreements) govern the customer's billable products/services, approved rates, billing terms, minimums and quantity methodology. **QBO** is AOT's accounting/invoicing platform. Endpoint/vendor telemetry is observation, not independent authority to increase billing.
-2. For each client/service each month, obtain covered device counts from the appropriate authorized sources (e.g., Datto RMM for covered managed devices and the appropriate backup/security product for protection-specific coverage). Corroborate with Autotask configuration/asset information as applicable; exclude inactive, duplicate, retired and noncovered units according to separately agreed eligibility rules.
-3. Retrieve license/subscription information from the authoritative vendor tenant, vendor portal or reseller source. Distinguish purchased/subscribed, assigned/active, contracted/billable and actually billed units. Do not assume these counts are interchangeable.
-4. Record a dated internal monthly snapshot per client/product: source, retrieval time, coverage rule, count, contract baseline, billing period, additions/removals, minimum/commitment, proration, evidence, discrepancies and exception owner.
-5. Compare each source observation with the Autotask contract/recurring-service quantity, posted billing items and QBO invoice. Detect missing/duplicate charges, quantity drift, unexpected rates and ambiguous source identity. Do not silently modify billable quantities or financial data; unresolved discrepancies route for governed review.
-6. **Native first:** evaluate Autotask Recurring Service Contracts, ContractServiceUnit effective-date quantities, invoice templates, approve/post flow, and native platform integrations; then use the documented Smart Accounting Hub Autotask-to-QBO invoice sync and billing-code-to-QBO-Item mappings where AOT has them enabled and approved. Jason should correlate/summarize evidence and propose exceptions, not replace existing accurate billing engines.
-7. Test one specifically approved client scenario with a safe preview or controlled sync, checking client-visible invoice text, quantity/rate/total, proration/taxes, item ID mappings, duplicate prevention and actual QBO readback. Any action that could create, post, send or change an accounting record requires separate exact authorization.
-
-### Platform documentation and current limitation
-
-- Autotask 2026.6 describes Smart Accounting Hub billing-code-to-QBO item mapping and event-driven invoice synchronization after invoice descriptions, taxes and IDs are complete. This is a **documented platform capability, not proof that AOT has configured or accepted it**: https://psa.datto.com/releasenotes/Content/ENGLISH/2026.6ReleaseNotes.htm
-- Autotask ContractServiceUnits document per-period effective-dated service quantities: https://psa.datto.com/help/DeveloperHelp/Content/APIs/REST/Entities/RecurringSerContractEntityRelation.htm
-- QBO supports customer-visible item descriptions, quantities/rates, invoice layout customization and attachments: https://quickbooks.intuit.com/learn-support/en-us/help-article/invoicing/create-invoices-quickbooks-online/L7gSzvCld_US_en_US
-- Jason currently offers governed read-only Autotask billing/invoice and QBO invoice search capabilities; **this does not establish operational synchronization, source reconciliation, or approval for invoice mutations**.
-
-**Acceptance gate:** A controlled authorized pilot must yield a short, understandable client invoice and separately traceable monthly reconciliation record; quantities, rates, tax and final QBO entries agree with the approved source of truth; data or privacy exceptions block the affected automatic progression. No bulk action until the Owner approves the process after pilot verification.
+- Determine each relevant *source and destination field*, its supported length, accepted characters, uniqueness rules, required values, and the actual native integration/export mapping. Do not assume an Autotask field and a QuickBooks field have the same capacity or function.
+- **Never put a 20-character part number into a 10-character destination field.** Retain the complete manufacturer/vendor identifier in a suitable authoritative field, and propose a separate, validated short display name or deterministic crosswalk only when needed and approved. No arbitrary truncation, loss of leading zeros, scientific-notation conversion, or identifier collisions.
+- Keep short human-readable names distinct from complete product descriptions, manufacturer part numbers and vendor SKUs. Preserve the details in their appropriate fields rather than making any one field do all jobs.
+- Prefer existing native fields and platform capabilities. Propose only field-safe, understandable catalog conventions now; evaluate actual invoice presentation or automated monthly quantity reconciliation **later**, when the Owner explicitly opens that stage.
+- Findings from static provider schema and mapping inspection are advisory. No catalog, invoice, contract, pricing or integration change is authorized by this note.
 
 ## 8. Immediate next authorized work
 
