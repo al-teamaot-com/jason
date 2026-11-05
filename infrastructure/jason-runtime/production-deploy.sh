@@ -116,6 +116,36 @@ else
   fi
 fi
 
+# Source-bound universal/open-world query activation. The candidate source is
+# authoritative; there is no host-only enable override. Rollback always disables
+# the capability because the prior production revision did not carry this profile.
+SOURCE_UNIVERSAL_QUERY_PROFILE="$(python3 - "$REPO_ROOT/config/universal-query-activation.json" <<'PY_UNIVERSAL'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("DENIED: immutable universal-query activation profile absent")
+try:
+    d=json.loads(p.read_text(encoding="utf-8"))
+except (OSError,ValueError):
+    raise SystemExit("DENIED: invalid universal-query activation profile")
+if (not isinstance(d,dict) or set(d)!={"schema_version","profile"}
+        or d.get("schema_version")!="1.0"
+        or d.get("profile") not in ("off","aot-internal-read-v1")):
+    raise SystemExit("DENIED: unreviewed universal-query activation profile declaration")
+print(d["profile"])
+PY_UNIVERSAL
+)" || exit 2
+if [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
+  UNIVERSAL_QUERY_ENABLED="false"
+else
+  case "$SOURCE_UNIVERSAL_QUERY_PROFILE" in
+    off) UNIVERSAL_QUERY_ENABLED="false" ;;
+    aot-internal-read-v1) UNIVERSAL_QUERY_ENABLED="true" ;;
+    *) echo "DENIED: unsupported universal-query activation profile" >&2; exit 2 ;;
+  esac
+fi
+
 if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
 fi
@@ -229,6 +259,7 @@ exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime 
   --set-env "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH=$QBO_MOUNT_BASE/secret_id" \
   --set-env "JASON_QUICKBOOKS_OAUTH_DB=$QBO_DB" \
   --set-env "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE=$STAFF_NOTE_PROFILE" \
+  --set-env "JASON_UNIVERSAL_QUERY_ENABLED=$UNIVERSAL_QUERY_ENABLED" \
   --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \
