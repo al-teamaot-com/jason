@@ -33,6 +33,15 @@ jobs:
           docker info >/dev/null
           echo "LAB_ISOLATION_PREFLIGHT=PASS"
 
+      - name: Verify PMV3 worker admission race under real disposable systemd
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo env GITHUB_ACTIONS=true JASON_PM_LAB=1 \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" GITHUB_SHA="$GITHUB_SHA" \
+            EVIDENCE_PMV3_GATE_OUTPUT="$GITHUB_WORKSPACE/pm-worker-admission-receipt.json" \
+            /usr/bin/python3 tools/ci/pmv3_worker_admission_systemd_lab.py
+
       - name: Execute fail-closed canonical rollback helpers on isolated units
         shell: bash
         run: |
@@ -69,5 +78,6 @@ jobs:
             pm-lab-receipt.json
             pm-root-boundary-receipt.json
             pm-approval-timer-receipt.json
+            pm-worker-admission-receipt.json
           if-no-files-found: warn
           retention-days: 30

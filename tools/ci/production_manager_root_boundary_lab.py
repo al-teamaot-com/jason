@@ -63,6 +63,70 @@ def module_from(path: Path, name: str):
     return mod
 
 
+def prove_lkg_health_group_execution() -> None:
+    """Run real root-written pinned-proof material as al on disposable Ubuntu."""
+    assert_disposable()
+    parent = Path("/usr/local/lib/jason")
+    if parent.exists() or parent.is_symlink():
+        raise RuntimeError("disposable trusted health execution parent already exists")
+    parent.mkdir(mode=0o755)
+    try:
+        worker = module_from(
+            GITHUB / "tools/release_host_reconcile_worker.py",
+            "pmv3_root_health_group_execution_test",
+        )
+        wrapper_body = (
+            "SOURCE_HEALTH_TIMEOUT_SECONDS = 1800\n"
+            "print('PMV3_LKG_UNPRIVILEGED_EXECUTION=PASS')\n"
+        )
+        tool_body = "print('unprivileged tool companion readable')\n"
+        worker.CURRENT_LKG_HEALTH_WRAPPER_SHA256 = hashlib.sha256(
+            wrapper_body.encode()
+        ).hexdigest()
+        worker.CURRENT_LKG_HEALTH_TOOL_SHA256 = hashlib.sha256(
+            tool_body.encode()
+        ).hexdigest()
+        worker.CURRENT_LKG_EXEC_ROOT = parent / (
+            "lkg-health-" + worker.CURRENT_LKG_RECOVERY_SHA
+        )
+        worker._current_lkg_recovery_authorized = lambda _: True
+        worker._trusted_current_lkg_archive_tmp = lambda: None
+
+        def synthetic_pinned_show(command, **kwargs):
+            ref = str(command[-1])
+            if ref.endswith("openclaw_authority_health_snapshot.py"):
+                return wrapper_body
+            if ref.endswith("openclaw_authority_operational_health.py"):
+                return tool_body
+            raise RuntimeError("unrecognized pinned test blob")
+
+        original = subprocess.check_output
+        try:
+            subprocess.check_output = synthetic_pinned_show
+            script = worker._materialize_current_lkg_health_recovery(
+                worker.CURRENT_LKG_RECOVERY_SHA
+            )
+        finally:
+            subprocess.check_output = original
+
+        group = grp.getgrnam("jason").gr_gid
+        assert script.parent.stat().st_uid == 0
+        assert script.parent.stat().st_gid == group
+        assert script.parent.stat().st_mode & 0o777 == 0o750
+        assert script.stat().st_uid == 0 and script.stat().st_gid == group
+        assert script.stat().st_mode & 0o777 == 0o640
+        assert not (script.parent.stat().st_mode & 0o022)
+        assert not (script.stat().st_mode & 0o022)
+        result = run("/usr/sbin/runuser", "-u", "al", "--",
+                     "/usr/bin/python3", script)
+        assert result.returncode == 0, result
+        assert "PMV3_LKG_UNPRIVILEGED_EXECUTION=PASS" in result.stdout
+        print("ROOT_LKG_HEALTH_GROUP_EXECUTION=PASS", flush=True)
+    finally:
+        # This parent is reserved solely for this disposable CI invocation.
+        shutil.rmtree(parent)
+
+
 def write(path: Path, data: str, mode: int = 0o644) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(data, encoding="utf-8")
@@ -313,6 +377,7 @@ def run_acceptance() -> None:
     with tempfile.TemporaryDirectory(prefix="jason-pm-root-lab-") as dirname:
         lab = Path(dirname)
         try:
+            prove_lkg_health_group_execution()
             repo, baseline, candidate, failed = create_commits(lab)
             dirty = repo / "unmerged-engineering-change.txt"
             preserved_hash = hashlib.sha256(dirty.read_bytes()).hexdigest()
@@ -370,8 +435,18 @@ def run_acceptance() -> None:
                 "host_release": "/opt/jason/releases/" + baseline,
                 "release_manager_source_revision": baseline,
                 "desired_state_policy_digest": "sha256:" + ("e" * 64),
+                "mobile_release_approval_policy_digest": "sha256:" + ("f" * 64),
+                "mobile_release_approval_mode": "owner_only_pilot",
                 "scheduled_control_units": [BASE_UNIT],
             }
+            # Keep synthetic LKG evidence synchronized with root policy.
+            root_policy = module_from(
+                GITHUB / "tools/release_control_transition_worker.py",
+                "pm_lab_lkg_policy",
+            )
+            assert set(root_policy.PROTECTED_LKG_FIELDS) <= set(baseline_manifest), (
+                "disposable LKG fixture missing protected fields"
+            )
             control = lab / "control"
             (control / "protected-transitions/requests").mkdir(parents=True)
             (control / "protected-transitions/results").mkdir(parents=True)
@@ -424,6 +499,7 @@ def run_acceptance() -> None:
                 "baseline_sha": baseline, "candidate_sha": candidate,
                 "injected_failure_sha": failed,
                 "results": {
+                    "root_lkg_health_unprivileged_execution": "PASS",
                     "root_systemd_path_one_request_success": "PASS",
                     "root_exact_baseline_restore": "PASS",
                     "root_request_owner_denial": "PASS",

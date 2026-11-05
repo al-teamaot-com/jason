@@ -21,42 +21,6 @@ The implementation must prove the following before production integration:
 - external authority/credential/billing gates remain external and are not invented;
 - completion percentage describes the entire accepted PMV3 workload, not setup steps.
 
-## Elastic role-based worker pool
-
-Canonical Owner requirements for this behavior are tracked in PMV3 #2192 and TODO-OPS-013 #1500.
-
-PMV3 engineering capacity is device-agnostic. The scheduler may use any number
-of exact Owner-enrolled devices that expose an accepted versioned worker role.
-Claw2-PC is the first acceptance target, not a hard-coded secondary host.
-
-The pool contract is:
-
-- role manifests define the reusable component/service behavior;
-- enrollment binds an exact device identity to an exact role/version;
-- independent health/attestation determines whether that role instance supplies
-  scheduling capacity;
-- capacity is the sum of healthy role-instance concurrency, not a fixed number
-  attached to the production host;
-- PMV3 assigns runnable items with a central worker claim before execution;
-- stable action keys, fenced claims and durable checkpoints prevent duplicate
-  execution when a worker restarts, drains, disappears or is replaced;
-- recoverable work may be reassigned to another healthy eligible instance while
-  unrelated work continues;
-- a worker pool member receives no production approval/deployment authority,
-  production secrets, direct provider access or new tenant authority merely by
-  being enrolled.
-
-`config/worker-pools/pmv3-engineering-workers-v1.json` is the reviewed pool
-registry foundation. `tools/pmv3_worker_pool.py` validates membership and
-produces deterministic least-loaded assignment plans. The generic preproduction
-scheduler can consume a worker-pool registry plus an independent health snapshot
-and derives effective capacity from those sources. A member whose enrollment is
-not `active` contributes zero capacity even if health claims it is ready.
-
-Production remote execution remains separately governed under TODO-OPS-013.
-The pool planner does not provision a machine or grant shell authority.
-
-
 ## Isolation
 
 The first PMV3 implementation is intentionally handler-driven. Tests and
@@ -150,3 +114,81 @@ through `jason_mcp_status()`.
 PMV3 must not import, replace, broaden, or weaken the routine-write client scope,
 onboarding attestation, provider credential, or approval semantics from those
 branches. Later integration must preserve both workstreams.
+## Governed integration and release queue
+
+PMV3 separates concurrent development from serialized production integration. Development branches, pull-request updates, and CI may continue while a production candidate is being built or deployed. Protected `main` integration is controlled by the required GitHub status context `pmv3-integration-gate`.
+
+The integration queue admits only pull requests backed by durable Owner-approved development evidence, or an explicitly governed `pmv3-integration-ready` label. It selects a bounded release train (default maximum three PRs), prefers higher-priority work, and batches only PRs whose changed-file sets do not overlap. Only the currently selected PR receives a successful integration-gate status. Other PRs remain queued with a pending gate; this blocks merge without blocking development or CI.
+
+After the train is merged, PMV3 records the exact resulting `main` SHA as the production candidate and closes the integration gate for all unrelated PRs. The lock remains until the exact candidate becomes the verified Last Known Good production revision. A restart or missing queue state fails closed: if protected `main` differs from verified production, PMV3 reconstructs the release lock from observed state.
+
+A release lock does not grant production authority. Release Manager validation, exact-revision Teams approval, deployment, verification, rollback, and production-freeze rules remain unchanged. A bounded release-recovery PR may advance a locked candidate only when it is durably admitted and explicitly labeled `pmv3-release-recovery`; ordinary development cannot bypass the lock.
+
+Canonical queue states are:
+
+`IDLE -> INTEGRATING -> RELEASE_LOCKED -> (production verified/LKG) -> IDLE`
+
+Development continues in every queue state. Queue-control failure is fail-closed for merges and must not stop development.
+
+
+## 2026-11-04 PMV3 recovery lock and autonomous-intake integration acceptance
+
+This checkpoint is source-integration evidence, **not** operational PMV3
+acceptance or permission to modify production.
+
+- Protected `main` was `b905ea197f7b268828c75c01ea4407d4378d0d74`
+  when queue PR #2280 was reconciled. The original queue head
+  `2371b44f92cd22a2536b8b6b08f9b948bcbae4d2` incorporated that exact
+  source in a clean, ordinary engineering-branch merge. It did not merge
+  the queue into protected `main`. The resulting pre-documentation feature
+  head was `d42d0fbd7d9c78dd31c6a86dbf028ef192b5565a`.
+- This merge preserved the merged root-host proof-execution correction
+  (#2295) and PMV3 worker quiescence fix (#2293). Reconciled source
+  tests: **342 passed + 5 subtests**. No deployed root-helper, image,
+  protected-control, user endpoint, or provider state was changed.
+- The queue's implementation overlap with autonomous-intake PR #2296
+  (exact preproduction head
+  `c30ce45f712c6cdc06675b9d42abdd21c35bc3b0`) was explicitly reviewed.
+  The changes touch the same `pmv3_engineering_controller.py` but preserve
+  both queue mutex admission and bounded stall classification. The two
+  PRs merge cleanly with zero unresolved files in a disposable scratch
+  worktree. Their exact combined scratch source passed **524 tests and 12
+  subtests**. Scratch merge SHA
+  `b1b8cfc674f60c1353cf10d2be786bd4fa4c8ea4` was not published as a
+  protected release or production candidate.
+- Current production remains independently locked to
+  `b905ea197f7b268828c75c01ea4407d4378d0d74` while runtime and MCP
+  run at LKG `1b28ddc9863aee563755cb57599cf211ee82ac19`,
+  `/opt/jason/current` remains on failed
+  `3e06627de85ace598f959cda12e257000668864d`, and the owner freeze
+  and circuit breaker remain active. The queue cannot be deployed or
+  considered functionally active under this host mismatch.
+- Current installed PMV3 does not contain the new integration-queue
+  reconciler: a GitHub `pmv3-integration-ready` label is not evidence of
+  current autonomous merge execution. The corrected TODO/triage logic of
+  PR #2296 is likewise still only source-tested.
+- An external GitGuardian check also flagged one finding on PR #2280's
+  **pre-reconciliation** head. Independent remediation/review is required;
+  new passing local pytest runs do not cancel a failing security check.
+  The finding must not be printed, ignored, or treated as an approval.
+
+### Required live acceptance after separately authorized release
+
+1. Verify complete protected-host/runtime/MCP alignment at one exact
+   authenticated production SHA, after root-helper proof recovery, fresh
+   full-integrity PASS, and required independent Release Manager/CCC gates.
+2. Confirm the release-lock queue can admit a bounded, approved train
+   without crossing the active production transaction lock, omitting
+   required GitHub checks, or granting approval to conflicting TODO IDs.
+3. Observe **two consecutive complete scheduled production cycles**.
+   Intake must not traceback on duplicate `TODO-OPS-013`; blocked
+   identities remain quarantined; exhausted repair handoffs are accurately
+   classified; unrelated approved work actually changes durable state.
+4. Preserve failure receipts, provider health, no-collateral-regression
+   evidence, rollback readiness, Owner freeze restoration, and a
+   verifiable outstanding-to-complete work count. A running service, zero
+   worker exit code, scheduled timer, or CI green check alone is **not**
+   operational acceptance.
+
+No unit, provider, permission, root policy, production hold, or release
+authorization is altered by this source-only documentation checkpoint.

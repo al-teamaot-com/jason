@@ -88,13 +88,6 @@ from orchestrator.openai_semantic_intent_translation import (
     OpenAISemanticIntentTranslator,
 )
 from orchestrator.openai_reasoning import OpenAIStructuredJsonClient
-from orchestrator.subscription_reasoning import (
-    ExplicitFallbackStructuredJsonClient,
-    SubscriptionStructuredJsonClient,
-)
-from orchestrator.subscription_semantic_intent_translation import (
-    SubscriptionSemanticIntentTranslator,
-)
 from orchestrator.model_runtime_adapter import (
     ModelRuntimeAdapter,
     openai_structured_output_compatible_schema,
@@ -300,6 +293,8 @@ from .datto_powershell_read import (
 from .teams_message_send import (
     CAPABILITY as TEAMS_MESSAGE_SEND,
     build_invoker as build_teams_message_send_invoker,
+    configured_teams_message_send,
+    ensure_authority as ensure_teams_message_send_authority,
     register_foundation as register_teams_message_send_foundation,
 )
 from .pm_v2_runtime import (
@@ -444,9 +439,6 @@ class RuntimeSettings:
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     hosted_conversation_enabled: bool = False
-    subscription_reasoning_enabled: bool = False
-    subscription_reasoning_url: str = "http://jason-subscription-reasoning:8091"
-    openai_api_fallback_enabled: bool = False
     openai_semantic_model: str = "gpt-5-nano"
     openai_conversation_model: str = "gpt-5-nano"
     openai_pricing_model: str = "gpt-5-nano"
@@ -729,16 +721,6 @@ class RuntimeSettings:
             ).strip().casefold() in {"1", "true", "yes", "on"},
             hosted_conversation_enabled=os.getenv(
                 "JASON_HOSTED_CONVERSATION_ENABLED", "false"
-            ).strip().casefold() in {"1", "true", "yes", "on"},
-            subscription_reasoning_enabled=os.getenv(
-                "JASON_SUBSCRIPTION_REASONING_ENABLED", "false"
-            ).strip().casefold() in {"1", "true", "yes", "on"},
-            subscription_reasoning_url=os.getenv(
-                "JASON_SUBSCRIPTION_REASONING_URL",
-                "http://jason-subscription-reasoning:8091",
-            ).strip(),
-            openai_api_fallback_enabled=os.getenv(
-                "JASON_OPENAI_API_FALLBACK_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
             openai_semantic_model=os.getenv(
                 "JASON_OPENAI_SEMANTIC_MODEL", "gpt-5-nano"
@@ -1608,6 +1590,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     ensure_aot_routine_autotask_write_authority(
         identity_authority, enabled=routine_autotask_write_enabled,
     )
+    ensure_teams_message_send_authority(
+        identity_authority, enabled=configured_teams_message_send(),
+    )
     ensure_meter_history_read_authority(
         identity_authority,
         enabled=settings.kfs_enabled,
@@ -1633,23 +1618,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         base_url=settings.ollama_url,
     )
 
-    subscription_structured_client = None
-    if settings.subscription_reasoning_enabled:
-        if not settings.subscription_reasoning_url:
-            raise ValueError("subscription reasoning URL must not be empty")
-        subscription_structured_client = SubscriptionStructuredJsonClient(
-            transport=http_transport,
-            base_url=settings.subscription_reasoning_url,
-        )
-
     model_usage_ledger = None
     openai_api_key = None
-    api_structured_client = None
-    api_path_required = (
-        (not settings.subscription_reasoning_enabled)
-        and (settings.hosted_semantics_enabled or settings.hosted_conversation_enabled)
-    ) or settings.openai_api_fallback_enabled
-    if api_path_required:
+    if settings.hosted_semantics_enabled or settings.hosted_conversation_enabled:
         model_usage_ledger = SQLiteUsageLedger(settings.model_usage_db)
         semantic_secret_resolver = OpenBaoSecretResolver(
             base_url=settings.openbao_url,
@@ -1675,7 +1646,12 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                 raise ValueError("OpenAI API key resolved empty")
         finally:
             semantic_secret_values.clear()
-        api_structured_client = ModelRuntimeAdapter(
+
+    hosted_conversation_client = None
+    if settings.hosted_conversation_enabled:
+        if openai_api_key is None or model_usage_ledger is None:
+            raise RuntimeError("hosted conversation dependencies were not composed")
+        hosted_conversation_client = ModelRuntimeAdapter(
             client=OpenAIStructuredJsonClient(
                 api_key=openai_api_key,
                 transport=http_transport,
@@ -1688,24 +1664,6 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             schema_adapter=openai_structured_output_compatible_schema,
             result_adapter=openai_structured_output_restore_optional_values,
         )
-
-    hosted_structured_client = subscription_structured_client or api_structured_client
-    if (
-        subscription_structured_client is not None
-        and settings.openai_api_fallback_enabled
-    ):
-        if api_structured_client is None:
-            raise RuntimeError("explicit API fallback dependencies were not composed")
-        hosted_structured_client = ExplicitFallbackStructuredJsonClient(
-            primary=subscription_structured_client,
-            fallback=api_structured_client,
-        )
-
-    hosted_conversation_client = (
-        hosted_structured_client if settings.hosted_conversation_enabled else None
-    )
-    if settings.hosted_conversation_enabled and hosted_conversation_client is None:
-        raise RuntimeError("hosted conversation dependencies were not composed")
 
     intent_resolver = None
     if not settings.dynamic_conversation_enabled:
@@ -1725,24 +1683,17 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
 
         hosted_semantic_translator = None
         if settings.hosted_semantics_enabled:
-            if settings.subscription_reasoning_enabled:
-                if hosted_structured_client is None:
-                    raise RuntimeError("subscription semantic dependencies were not composed")
-                hosted_semantic_translator = SubscriptionSemanticIntentTranslator(
-                    structured_client=hosted_structured_client,
-                )
-            else:
-                if openai_api_key is None or model_usage_ledger is None:
-                    raise RuntimeError("hosted semantic dependencies were not composed")
-                hosted_semantic_translator = OpenAISemanticIntentTranslator(
-                    api_key=openai_api_key,
-                    transport=http_transport,
-                    model=settings.openai_semantic_model,
-                    usage_ledger=model_usage_ledger,
-                    input_cost_per_million_tokens=settings.openai_input_cost_per_million_tokens,
-                    cached_input_cost_per_million_tokens=settings.openai_cached_input_cost_per_million_tokens,
-                    output_cost_per_million_tokens=settings.openai_output_cost_per_million_tokens,
-                )
+            if openai_api_key is None or model_usage_ledger is None:
+                raise RuntimeError("hosted semantic dependencies were not composed")
+            hosted_semantic_translator = OpenAISemanticIntentTranslator(
+                api_key=openai_api_key,
+                transport=http_transport,
+                model=settings.openai_semantic_model,
+                usage_ledger=model_usage_ledger,
+                input_cost_per_million_tokens=settings.openai_input_cost_per_million_tokens,
+                cached_input_cost_per_million_tokens=settings.openai_cached_input_cost_per_million_tokens,
+                output_cost_per_million_tokens=settings.openai_output_cost_per_million_tokens,
+            )
 
         resource_intent_resolver = GovernedResourceConversationIntentResolver(
             interpreter=GroundedSemanticResourceInquiryInterpreter(
@@ -2808,10 +2759,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         enabled=settings.support_repair_autonomy_enabled,
         structured_client=hosted_conversation_client or ollama_client,
         fallback_structured_client=(
-            ollama_client
-            if hosted_conversation_client is not None
-            and not settings.subscription_reasoning_enabled
-            else None
+            ollama_client if hosted_conversation_client is not None else None
         ),
         spool=settings.support_repair_spool,
     )

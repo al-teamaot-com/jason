@@ -30,7 +30,7 @@
       "id": "provider_identity_and_authority_recovery",
       "change_class": "release_blocker",
       "risk_profile": "production_control_core",
-      "max_changed_files": 74,
+      "max_changed_files": 40,
       "drift_problems": [
         {
           "kind": "failed_system_unit",
@@ -53,11 +53,14 @@
         "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service",
         "tools/openclaw_authority_health_snapshot.py",
         "tools/openclaw_authority_operational_health.py",
-        "tools/openbao_identity_lifecycle.py",
-        "tools/openbao_identity_lifecycle_worker.py",
-        "tools/install_openbao_identity_lifecycle.py",
         "tools/reconcile_production_host_services.sh",
-        "tools/release_manager_host_runner.py"
+        "tools/release_manager_host_runner.py",
+        "implementation/orchestrator/governed_execution_ledger.py",
+        "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
+        "implementation/runtime_service/src/jason_runtime/autonomy_worker_supervisor.py",
+        "implementation/runtime_service/src/jason_runtime/composition.py",
+        "implementation/runtime_service/src/jason_runtime/teams_message_send.py",
+        "tools/engineering_pipeline.py"
       ],
       "runtime_health": {
         "mode": "healthy_or_ticket_worker_provider_auth_degraded",

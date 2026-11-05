@@ -5668,7 +5668,14 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
         )
     )
     if not path.exists():
-        return {"status": "unavailable", "items": [], "reason": "work_db_missing"}
+        return {
+            "status": "unavailable",
+            "items": [],
+            "reason": "work_db_missing",
+            "processing_state": "UNKNOWN",
+            "processing_state_reason": "work_db_missing",
+        }
+
     connection = None
     try:
         connection = sqlite3.connect(
@@ -5678,6 +5685,16 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
         )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA query_only = ON")
+
+        work_columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(autonomy_operational_work)"
+            ).fetchall()
+        }
+        if not {"ticket_id", "ticket_number", "playbook_id", "phase", "updated_at"}.issubset(work_columns):
+            raise sqlite3.DatabaseError("operational work schema incomplete")
+
         rows = connection.execute(
             """
             SELECT ticket_id,ticket_number,playbook_id,phase,updated_at
@@ -5704,52 +5721,7 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
             LIMIT 5
             """
         ).fetchall()
-    except (sqlite3.Error, OSError) as error:
-        return {
-            "status": "unavailable",
-            "items": [],
-            "reason": type(error).__name__,
-        }
-    finally:
-        if connection is not None:
-            connection.close()
 
-    items = []
-    for row in rows:
-        phase = str(row["phase"] or "")
-        if (
-            phase.startswith("waiting_device_access:")
-            or phase.startswith("waiting_recheck:")
-            or phase in {
-                "approval_pending",
-                "waiting_patch_approval",
-                "waiting_patch_window",
-                "waiting_client_notification_authority",
-                "blocked",
-            }
-        ):
-            state = "WAITING" if phase != "blocked" else "BLOCKED"
-        else:
-            state = "ACTIVE"
-        items.append(
-            {
-                "ticket_id": int(row["ticket_id"]),
-                "ticket_number": str(row["ticket_number"] or ""),
-                "playbook": str(row["playbook_id"] or ""),
-                "phase": phase,
-                "state": state,
-                "updated_at": str(row["updated_at"] or ""),
-            }
-        )
-    counts = connection = None
-    try:
-        connection = sqlite3.connect(
-            f"file:{path}?mode=ro",
-            uri=True,
-            timeout=2.0,
-        )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA query_only = ON")
         counts = connection.execute(
             """
             SELECT
@@ -5770,25 +5742,326 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
                              'waiting_patch_window','waiting_client_notification_authority'
                          )
                     THEN 1 ELSE 0 END) AS waiting_count,
-                SUM(CASE WHEN phase = 'blocked' THEN 1 ELSE 0 END) AS blocked_count
+                SUM(CASE WHEN phase = 'blocked' THEN 1 ELSE 0 END) AS blocked_count,
+                MAX(updated_at) AS last_work_update_at
             FROM autonomy_operational_work
             WHERE phase NOT IN ('complete','escalated')
             """
         ).fetchone()
-    except (sqlite3.Error, OSError):
-        counts = None
+
+        scan_columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(autonomy_ticket_scan_cycle)"
+            ).fetchall()
+        }
+        required_scan = {"scanned_at", "eligible", "active_slots", "selected"}
+        scan_history: list[dict[str, Any]] = []
+        if required_scan.issubset(scan_columns):
+            optional_scan = [
+                name
+                for name in (
+                    "pages_traversed",
+                    "provider_items",
+                    "duplicate_items",
+                    "evaluated",
+                    "unsupported",
+                    "governance_blocked",
+                    "assigned_elsewhere",
+                    "waiting_device",
+                    "human_review",
+                )
+                if name in scan_columns
+            ]
+            scan_select = [
+                "scanned_at",
+                "eligible",
+                "active_slots",
+                "selected",
+                *optional_scan,
+            ]
+            scan_rows = connection.execute(
+                "SELECT " + ",".join(scan_select)
+                + " FROM autonomy_ticket_scan_cycle "
+                  "ORDER BY scanned_at DESC LIMIT 10"
+            ).fetchall()
+            scan_history = [
+                {name: row[name] for name in scan_select}
+                for row in scan_rows
+            ]
+
+        activity_columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(autonomy_ticket_activity)"
+            ).fetchall()
+        }
+        last_activity_at = ""
+        if "occurred_at" in activity_columns:
+            activity = connection.execute(
+                "SELECT MAX(occurred_at) AS last_activity_at "
+                "FROM autonomy_ticket_activity"
+            ).fetchone()
+            last_activity_at = str(
+                (activity["last_activity_at"] if activity is not None else "") or ""
+            )
+
+        heartbeat_columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(autonomy_ticket_worker_heartbeat)"
+            ).fetchall()
+        }
+        heartbeat = None
+        if {"last_started_at", "last_completed_at", "state"}.issubset(heartbeat_columns):
+            heartbeat = connection.execute(
+                "SELECT last_started_at,last_completed_at,state "
+                "FROM autonomy_ticket_worker_heartbeat "
+                "ORDER BY singleton_id LIMIT 1"
+            ).fetchone()
+    except (sqlite3.Error, OSError) as error:
+        return {
+            "status": "unavailable",
+            "items": [],
+            "reason": type(error).__name__,
+            "processing_state": "UNKNOWN",
+            "processing_state_reason": "ticket_processing_evidence_unavailable",
+        }
     finally:
         if connection is not None:
             connection.close()
+
+    items = []
+    for row in rows:
+        phase = str(row["phase"] or "")
+        if (
+            phase.startswith("waiting_device_access:")
+            or phase.startswith("waiting_recheck:")
+            or phase in {
+                "approval_pending",
+                "waiting_patch_approval",
+                "waiting_patch_window",
+                "waiting_client_notification_authority",
+                "blocked",
+            }
+        ):
+            item_state = "WAITING" if phase != "blocked" else "BLOCKED"
+        else:
+            item_state = "ACTIVE"
+        items.append(
+            {
+                "ticket_id": int(row["ticket_id"]),
+                "ticket_number": str(row["ticket_number"] or ""),
+                "playbook": str(row["playbook_id"] or ""),
+                "phase": phase,
+                "state": item_state,
+                "updated_at": str(row["updated_at"] or ""),
+            }
+        )
+
+    active_count = int((counts["active_count"] if counts is not None else None) or 0)
+    waiting_count = int((counts["waiting_count"] if counts is not None else None) or 0)
+    blocked_count = int((counts["blocked_count"] if counts is not None else None) or 0)
+    last_work_update_at = str(
+        (counts["last_work_update_at"] if counts is not None else "") or ""
+    )
+
+    latest_scan = scan_history[0] if scan_history else None
+    eligible_now = (
+        int((latest_scan or {}).get("eligible") or 0)
+        if latest_scan is not None
+        else None
+    )
+    active_slots = (
+        int((latest_scan or {}).get("active_slots") or 0)
+        if latest_scan is not None
+        else None
+    )
+    selected = (
+        int((latest_scan or {}).get("selected") or 0)
+        if latest_scan is not None
+        else None
+    )
+    last_successful_scan_at = str(
+        (latest_scan or {}).get("scanned_at") or ""
+    )
+    pages_traversed = (
+        int((latest_scan or {}).get("pages_traversed") or 0)
+        if latest_scan is not None
+        else None
+    )
+    provider_items = (
+        int((latest_scan or {}).get("provider_items") or 0)
+        if latest_scan is not None
+        else None
+    )
+    evaluated = (
+        int((latest_scan or {}).get("evaluated") or 0)
+        if latest_scan is not None
+        else None
+    )
+    unsupported = (
+        int((latest_scan or {}).get("unsupported") or 0)
+        if latest_scan is not None
+        else 0
+    )
+    governance_blocked = (
+        int((latest_scan or {}).get("governance_blocked") or 0)
+        if latest_scan is not None
+        else 0
+    )
+    human_required = (
+        int((latest_scan or {}).get("human_review") or 0)
+        if latest_scan is not None
+        else 0
+    )
+    waiting_device = (
+        int((latest_scan or {}).get("waiting_device") or 0)
+        if latest_scan is not None
+        else 0
+    )
+
+    scan_stale = True
+    scan_age_seconds = None
+    if last_successful_scan_at:
+        try:
+            scanned = datetime.fromisoformat(
+                last_successful_scan_at.replace("Z", "+00:00")
+            )
+            now = datetime.now(timezone.utc)
+            scan_age_seconds = max(0, int((now - scanned).total_seconds()))
+            interval = max(
+                1,
+                int(os.getenv("JASON_AUTONOMY_WORKER_INTERVAL_SECONDS", "60")),
+            )
+            max_age = max(
+                120,
+                int(
+                    os.getenv(
+                        "JASON_AUTONOMY_STATUS_MAX_SCAN_AGE_SECONDS",
+                        str(interval * 2),
+                    )
+                ),
+            )
+            scan_stale = scan_age_seconds > max_age
+        except (TypeError, ValueError, OverflowError):
+            scan_stale = True
+
+    meaningful_progress_at = last_activity_at or last_work_update_at
+    consecutive_no_progress_cycles = 0
+    if meaningful_progress_at:
+        try:
+            progress_time = datetime.fromisoformat(
+                meaningful_progress_at.replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError, OverflowError):
+            progress_time = None
+    else:
+        progress_time = None
+
+    for historical in scan_history:
+        if int(historical.get("eligible") or 0) <= 0:
+            break
+        try:
+            scan_time = datetime.fromisoformat(
+                str(historical.get("scanned_at") or "").replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError, OverflowError):
+            break
+        if progress_time is not None and progress_time >= scan_time:
+            break
+        if int(historical.get("selected") or 0) > 0:
+            break
+        consecutive_no_progress_cycles += 1
+
+    heartbeat_state = (
+        str(heartbeat["state"] or "")
+        if heartbeat is not None
+        else ""
+    )
+    heartbeat_last_completed_at = (
+        str(heartbeat["last_completed_at"] or "")
+        if heartbeat is not None
+        else ""
+    )
+
+    if latest_scan is None:
+        processing_state = "UNKNOWN"
+        state_reason = "complete_scan_evidence_unavailable"
+    elif scan_stale:
+        processing_state = "UNKNOWN"
+        state_reason = "latest_complete_scan_is_stale"
+    elif heartbeat is not None and heartbeat_state not in {"idle", "completed", "running"}:
+        processing_state = "DEGRADED"
+        state_reason = "ticket_worker_heartbeat_unhealthy"
+    elif (
+        eligible_now is not None
+        and eligible_now > 0
+        and active_count == 0
+        and active_slots is not None
+        and active_slots > 0
+        and selected == 0
+    ):
+        processing_state = "STALLED"
+        state_reason = "eligible_work_with_free_capacity_but_no_active_or_selected_work"
+    elif eligible_now is not None and eligible_now > 0 and consecutive_no_progress_cycles >= 2:
+        processing_state = "STALLED"
+        state_reason = "actionable_work_has_no_meaningful_progress_for_multiple_cycles"
+    elif active_count > 0:
+        if blocked_count > 0 or governance_blocked > 0 or unsupported > 0:
+            processing_state = "DEGRADED"
+            state_reason = "active_processing_with_blocked_or_unsupported_work"
+        elif eligible_now is not None and eligible_now > active_count:
+            processing_state = "BACKLOGGED"
+            state_reason = "actionable_work_exceeds_current_active_processing"
+        else:
+            processing_state = "PROCESSING"
+            state_reason = "actionable_work_is_actively_processing"
+    elif eligible_now is not None and eligible_now > 0:
+        processing_state = "STALLED"
+        state_reason = "actionable_work_exists_but_none_is_active"
+    elif blocked_count > 0 or governance_blocked > 0:
+        processing_state = "BLOCKED"
+        state_reason = "no_actionable_work_selected_but_blocked_work_remains"
+    elif waiting_count > 0 or waiting_device > 0 or human_required > 0:
+        processing_state = "WAITING_EXPECTED"
+        state_reason = "fresh_complete_scan_reports_zero_actionable_work_with_validated_waiting_work"
+    elif unsupported > 0:
+        processing_state = "DEGRADED"
+        state_reason = "fresh_complete_scan_reports_unsupported_work"
+    else:
+        processing_state = "CAUGHT_UP"
+        state_reason = "fresh_complete_scan_reports_zero_actionable_or_unclassified_work"
 
     return {
         "status": "succeeded",
         "items": items,
         "items_bounded": True,
         "item_limit": 5,
-        "active_count": int((counts["active_count"] if counts is not None else None) or 0),
-        "waiting_count": int((counts["waiting_count"] if counts is not None else None) or 0),
-        "blocked_count": int((counts["blocked_count"] if counts is not None else None) or 0),
+        "processing_state": processing_state,
+        "processing_state_reason": state_reason,
+        "active_count": active_count,
+        "waiting_count": waiting_count,
+        "blocked_count": blocked_count,
+        "eligible_now": eligible_now,
+        "active_slots": active_slots,
+        "selected_last_scan": selected,
+        "last_successful_scan_at": last_successful_scan_at,
+        "scan_age_seconds": scan_age_seconds,
+        "scan_stale": scan_stale,
+        "scan_evidence_present": latest_scan is not None,
+        "scan_complete": latest_scan is not None and not scan_stale,
+        "pages_traversed": pages_traversed,
+        "provider_items": provider_items,
+        "evaluated": evaluated,
+        "unsupported_count": unsupported,
+        "governance_blocked_count": governance_blocked,
+        "human_required_count": human_required,
+        "waiting_device_count": waiting_device,
+        "last_meaningful_progress_at": meaningful_progress_at,
+        "consecutive_no_progress_cycles": consecutive_no_progress_cycles,
+        "worker_heartbeat_state": heartbeat_state,
+        "worker_last_completed_at": heartbeat_last_completed_at,
     }
 
 
@@ -6019,6 +6292,20 @@ def _pmv3_engineering_snapshot() -> dict[str, object]:
     passes = payload.get("passes")
     passes = passes if isinstance(passes, list) else []
     last_pass = passes[-1] if passes and isinstance(passes[-1], Mapping) else {}
+    raw_queue = payload.get("integration_queue")
+    if isinstance(raw_queue, Mapping):
+        integration_queue = {
+            key: raw_queue.get(key)
+            for key in (
+                "status", "gate_context", "main_sha", "production_lkg_sha",
+                "release_lock_active", "release_candidate_sha", "train_id",
+                "train_prs", "queue_depth", "last_action", "updated_at",
+                "error_type", "reason",
+            )
+            if key in raw_queue
+        }
+    else:
+        integration_queue = {"status": "unavailable", "reason": "pmv3_integration_queue_state_missing"}
     return {
         "status": str(payload.get("status") or "unknown"),
         "reason": str(payload.get("reason") or ""),
@@ -6029,6 +6316,7 @@ def _pmv3_engineering_snapshot() -> dict[str, object]:
         "last_progress_sha256": str(last_pass.get("progress_sha256") or ""),
         "unchanged_passes": int(last_pass.get("unchanged_passes") or 0),
         "teams_only_approval": payload.get("teams_only_approval") is True,
+        "integration_queue": integration_queue,
     }
 
 
@@ -6038,6 +6326,31 @@ def jason_mcp_status() -> dict[str, object]:
 
     actions = _active_action_capabilities()
     write_enabled = bool(actions)
+
+    autonomy_work = _autonomous_ticket_work_snapshot()
+    pmv3_engineering = _pmv3_engineering_snapshot()
+    pmv3_engineering["ticket_processing"] = {
+        key: autonomy_work.get(key)
+        for key in (
+            "processing_state",
+            "processing_state_reason",
+            "eligible_now",
+            "active_count",
+            "waiting_count",
+            "blocked_count",
+            "active_slots",
+            "selected_last_scan",
+            "last_successful_scan_at",
+            "scan_age_seconds",
+            "scan_stale",
+            "scan_complete",
+            "unsupported_count",
+            "governance_blocked_count",
+            "human_required_count",
+            "last_meaningful_progress_at",
+            "consecutive_no_progress_cycles",
+        )
+    }
 
     return {
         "status": "ok",
@@ -6067,9 +6380,9 @@ def jason_mcp_status() -> dict[str, object]:
             if "automation.component.execute" in actions
             else None
         ),
-        "autonomy_work": _autonomous_ticket_work_snapshot(),
+        "autonomy_work": autonomy_work,
         "production_commitments": _production_commitment_snapshot(),
-        "pmv3_engineering": _pmv3_engineering_snapshot(),
+        "pmv3_engineering": pmv3_engineering,
     }
 
 

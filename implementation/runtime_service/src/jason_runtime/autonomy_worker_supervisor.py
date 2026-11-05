@@ -21,6 +21,22 @@ def read_worker_heartbeat(path: str | Path) -> Mapping[str, object] | None:
         return None
     connection = sqlite3.connect(str(db_path), timeout=1.0)
     try:
+        heartbeat = None
+        try:
+            heartbeat = connection.execute(
+                "SELECT last_started_at,last_completed_at,state "
+                "FROM autonomy_ticket_worker_heartbeat WHERE singleton_id=1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            # Rolling upgrade compatibility: production databases created by
+            # the prior release do not have the active-scan heartbeat table yet.
+            heartbeat = None
+        if heartbeat is not None:
+            return {
+                "last_started_at": heartbeat[0],
+                "last_completed_at": heartbeat[1],
+                "scan_in_progress": str(heartbeat[2] or "") == "running",
+            }
         row = connection.execute(
             "SELECT scanned_at FROM autonomy_ticket_scan_cycle "
             "ORDER BY scanned_at DESC LIMIT 1"
@@ -58,6 +74,7 @@ class TicketWorkerSupervisor:
         startup_grace_seconds: int | None = None,
         restart_window_seconds: int = 600,
         max_restarts_per_window: int = 3,
+        active_scan_timeout_seconds: int | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         now: Callable[[], datetime] | None = None,
     ) -> None:
@@ -76,6 +93,11 @@ class TicketWorkerSupervisor:
         )
         self.restart_window_seconds = max(60, int(restart_window_seconds))
         self.max_restarts_per_window = max(1, int(max_restarts_per_window))
+        self.active_scan_timeout_seconds = int(
+            active_scan_timeout_seconds
+            if active_scan_timeout_seconds is not None
+            else max(300, self.interval_seconds * 5)
+        )
         self.monotonic = monotonic
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.process: ProcessHandle | None = None
@@ -118,6 +140,15 @@ class TicketWorkerSupervisor:
         if heartbeat is None:
             return self._restart("heartbeat_missing")
 
+        if bool(heartbeat.get("scan_in_progress")):
+            started = _parse_timestamp(heartbeat.get("last_started_at"))
+            if started is None:
+                return self._restart("scan_heartbeat_invalid")
+            scan_age = (self.now().astimezone(timezone.utc) - started).total_seconds()
+            if scan_age <= self.active_scan_timeout_seconds:
+                return True
+            return self._restart("scan_stalled")
+
         completed = _parse_timestamp(heartbeat.get("last_completed_at"))
         if completed is None:
             return self._restart("successful_heartbeat_missing")
@@ -159,6 +190,36 @@ class TicketWorkerSupervisor:
                 "ticket_worker": "heartbeat_missing",
                 "last_restart_reason": self.last_restart_reason,
             }
+        if bool(heartbeat.get("scan_in_progress")):
+            started = _parse_timestamp(heartbeat.get("last_started_at"))
+            if started is None:
+                return {
+                    "status": "degraded",
+                    "ticket_worker": "scan_heartbeat_invalid",
+                    "last_restart_reason": self.last_restart_reason,
+                }
+            scan_age = max(
+                0.0,
+                (self.now().astimezone(timezone.utc) - started).total_seconds(),
+            )
+            if scan_age <= self.active_scan_timeout_seconds:
+                return {
+                    "status": "ok",
+                    "ticket_worker": "scan_in_progress",
+                    "scan_age_seconds": int(scan_age),
+                    "last_started_at": heartbeat.get("last_started_at"),
+                    "last_completed_at": heartbeat.get("last_completed_at"),
+                    "last_restart_reason": self.last_restart_reason,
+                }
+            return {
+                "status": "degraded",
+                "ticket_worker": "scan_stalled",
+                "scan_age_seconds": int(scan_age),
+                "last_started_at": heartbeat.get("last_started_at"),
+                "last_completed_at": heartbeat.get("last_completed_at"),
+                "last_restart_reason": self.last_restart_reason,
+            }
+
         completed = _parse_timestamp(heartbeat.get("last_completed_at"))
         if completed is None:
             return {

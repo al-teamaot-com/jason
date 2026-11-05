@@ -183,9 +183,10 @@ def test_read_expansion_is_gated_in_actual_pm_before_post_certification():
     script = (Path(__file__).resolve().parents[1] / "release_manager_host_runner.py").read_text()
     start = script.index("smoke = run_functional_smoke_tests(candidate_sha)")
     wait = script.index("require_authenticated_read_canary(", start)
-    ccc = script.index("run_release_ccc_gate(", wait)
-    close = script.index("gate_transition(repo, state_root, record, \"closed\")", ccc)
-    assert start < wait < ccc < close
+    native = script.index('record["native_post_mutation_gate"] = native_postflight', wait)
+    close = script.index("gate_transition(repo, state_root, record, \"closed\")", native)
+    assert start < wait < native < close
+    assert "run_release_ccc_gate(" not in script[wait:close]
     assert "candidate_autotask_profile != prior_autotask_profile" in script
 
 

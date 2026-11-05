@@ -22,6 +22,7 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         )
         self.assertTrue((root / "tools/engineering_pipeline.py").is_file())
         self.assertTrue((root / "tools/pmv3_engineering_controller.py").is_file())
+        self.assertTrue((root / "tools/pmv3_integration_queue.py").is_file())
         self.assertTrue((root / "tools/engineering_supervisor.py").is_file())
         self.assertTrue((root / "tools/release_breaker_recovery_manager.py").is_file())
         self.assertTrue((root / "tools/engineering_evidence_tools.py").is_file())
@@ -39,6 +40,7 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertEqual(service.count("ExecStart="), 1)
         self.assertIn("TimeoutStartSec=200min", service)
         self.assertIn("pmv3_engineering_controller.py", service)
+        self.assertIn("JASON_PMV3_INTEGRATION_BATCH_SIZE=3", service)
         self.assertNotIn("ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/engineering_pipeline.py", service)
         self.assertIn("/home/al/jason-worktrees/owner-approved-development", service)
         self.assertIn("/home/al/jason-worktrees/todo-closure", service)
@@ -52,14 +54,15 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         self.assertEqual([stage.name for stage in module.STAGES], [
-            "support_repair", "todo_intake", "development", "release_bridge",
-            "engineering_supervisor", "release_breaker_recovery",
+            "support_repair", "todo_intake", "development", "integration",
+            "release_bridge", "engineering_supervisor", "release_breaker_recovery",
         ])
         self.assertEqual(module.STAGES[1].requires, ("support_repair",))
         self.assertEqual(module.STAGES[2].requires, ("support_repair",))
         self.assertEqual(module.STAGES[3].requires, ())
         self.assertEqual(module.STAGES[4].requires, ())
         self.assertEqual(module.STAGES[5].requires, ())
+        self.assertEqual(module.STAGES[6].requires, ())
 
     def test_engineering_service_uses_immutable_installed_source(self):
         service = (
@@ -75,8 +78,11 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertIn("engineering-worker-source", installer)
         self.assertIn("_copy(pipeline_runner, install_root", installer)
         self.assertIn("_copy(pmv3_controller, install_root", installer)
+        self.assertIn("_copy(pmv3_integration_queue, install_root", installer)
         self.assertIn("_copy(supervisor_runner, install_root", installer)
         self.assertIn("_copy(breaker_recovery_runner, install_root", installer)
+        self.assertIn("_copy(worker_release_gate, install_root", installer)
+        self.assertIn("pmv3_worker_release_gate.py", service)
         self.assertIn("_copy(evidence_module, install_root", installer)
         self.assertIn("_copy(change_integration_gate, install_root", installer)
         self.assertIn("_copy(documentation_impact_gate, install_root", installer)

@@ -15,6 +15,7 @@ The controller stops only when:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -25,6 +26,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
+
+try:
+    import pmv3_integration_queue as integration_queue
+except ModuleNotFoundError:
+    from tools import pmv3_integration_queue as integration_queue
 
 
 def now() -> str:
@@ -54,6 +60,38 @@ def load_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("invalid PMV3 controller evidence")
     return value
+
+
+def reconcile_integration_queue(
+    *,
+    spool: Path,
+    release_state: Path,
+    reconciler: Callable[..., Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Reconcile repository integration without coupling it to development.
+
+    Failure is deliberately fail-closed for merges: the GitHub required status
+    remains pending/missing, while engineering development is allowed to keep
+    running.
+    """
+    try:
+        state = reconciler(
+            api=integration_queue.GhApi(),
+            spool=spool,
+            release_state=release_state,
+            batch_size=max(1, min(10, int(os.environ.get(
+                "JASON_PMV3_INTEGRATION_BATCH_SIZE", "3"
+            )))),
+        )
+        return integration_queue.snapshot(state)
+    except Exception as exc:
+        return {
+            "status": "control_failure",
+            "gate_context": integration_queue.GATE_CONTEXT,
+            "error_type": type(exc).__name__,
+            "reason": str(exc)[:500],
+            "updated_at": now(),
+        }
 
 
 def progress_fingerprint(pipeline: Mapping[str, Any], supervisor: Mapping[str, Any]) -> str:
@@ -94,7 +132,7 @@ def classify(
         counts = supervisor.get("category_counts") if isinstance(supervisor.get("category_counts"), Mapping) else {}
         recoverable = sum(int(counts.get(name) or 0) for name in (
             "recoverable_source", "recoverable_transport",
-            "recoverable_validation", "recoverable_credit", "needs_triage",
+            "recoverable_validation", "needs_triage",
         ))
         if recoverable:
             return "recoverable", "approved_work_stalled_recoverable"
@@ -107,7 +145,7 @@ def classify(
         counts = supervisor.get("category_counts") if isinstance(supervisor.get("category_counts"), Mapping) else {}
         recoverable = sum(int(counts.get(name) or 0) for name in (
             "recoverable_source", "recoverable_transport",
-            "recoverable_validation", "recoverable_credit", "needs_triage",
+            "recoverable_validation", "needs_triage",
         ))
         return (
             ("recoverable", "critical_support_recoverable")
@@ -116,63 +154,6 @@ def classify(
         )
 
     return "waiting_external", "unclassified_governed_gate"
-
-
-CREDIT_PROBE_COOLDOWN_SECONDS = 900
-
-
-def credit_recovery_needed(supervisor: Mapping[str, Any]) -> bool:
-    counts = supervisor.get("category_counts")
-    return isinstance(counts, Mapping) and int(counts.get("recoverable_credit") or 0) > 0
-
-
-def maybe_run_credit_probe(
-    *,
-    spool: Path,
-    runner: Callable[..., Any],
-    cooldown_seconds: int = CREDIT_PROBE_COOLDOWN_SECONDS,
-) -> dict[str, Any]:
-    """Run one tiny hosted-credit diagnostic on a durable bounded cooldown.
-
-    The diagnostic grants no development, provider-write, release, or production
-    authority. A success merely creates the metered receipt already required by
-    the native workers before they may re-admit one blocked reasoning request.
-    """
-    path = spool / "pmv3-credit-recovery-state.json"
-    prior = load_json(path)
-    observed = datetime.now(timezone.utc)
-    last_raw = str(prior.get("last_probe_at") or "")
-    if last_raw:
-        try:
-            last = datetime.fromisoformat(last_raw.replace("Z", "+00:00"))
-            if last.tzinfo is not None and (observed - last).total_seconds() < max(60, int(cooldown_seconds)):
-                return {
-                    "status": "cooldown",
-                    "last_probe_at": last.isoformat(),
-                    "last_return_code": prior.get("last_return_code"),
-                }
-        except ValueError:
-            pass
-    command = [
-        "docker", "exec", "jason-runtime",
-        "python", "-m", "jason_runtime.verify_hosted_credit",
-    ]
-    try:
-        result = runner(command, timeout=60, check=False)
-        rc = int(result.returncode)
-        status = "verified" if rc == 0 else "unavailable"
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        rc = -1
-        status = "probe_failed"
-        prior["last_error_type"] = type(exc).__name__
-    receipt = {
-        "schema_version": "1.0",
-        "last_probe_at": observed.isoformat(timespec="seconds"),
-        "last_return_code": rc,
-        "status": status,
-    }
-    atomic_json(path, receipt)
-    return receipt
 
 
 def run_pipeline(
@@ -195,6 +176,44 @@ def run_pipeline(
     return int(result.returncode)
 
 
+def production_transaction_active(release_state: Path) -> bool:
+    """Return True only while Release Manager holds the production mutex."""
+    path = release_state / "production-transaction.lock"
+    if not path.exists():
+        return False
+    try:
+        handle = path.open("r", encoding="utf-8")
+    except OSError:
+        # A present but unreadable coordination primitive is not safe to ignore.
+        return True
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        finally:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        return False
+    finally:
+        handle.close()
+
+
+def _defer_for_production_transaction(state: dict[str, Any], state_path: Path) -> dict[str, Any]:
+    state["status"] = "deferred"
+    state["reason"] = "production_transaction_active"
+    state.setdefault("integration_queue", {
+        "schema_version": "1.0", "status": "deferred",
+        "reason": "production_transaction_active", "queue": [],
+    })
+    state["finished_at"] = now()
+    state["pass_count"] = len(state["passes"])
+    atomic_json(state_path, state)
+    return state
+
+
 def controller_run(
     *,
     scripts: Path,
@@ -207,6 +226,7 @@ def controller_run(
     pipeline_timeout: int = 3900,
     runner: Callable[..., Any] = subprocess.run,
     sleeper: Callable[[float], None] = time.sleep,
+    integration_reconciler: Callable[..., Mapping[str, Any]] = integration_queue.reconcile,
 ) -> dict[str, Any]:
     state_path = spool / "pmv3-engineering-controller-state.json"
     state = {
@@ -217,12 +237,22 @@ def controller_run(
         "passes": [],
         "teams_only_approval": True,
     }
+    # Check the production lock BEFORE touching the integration queue. Queue
+    # reconciliation can perform governed source integration and must not run
+    # while Release Manager owns the same production transaction mutex.
+    if production_transaction_active(release_state):
+        return _defer_for_production_transaction(state, state_path)
+    state["integration_queue"] = reconcile_integration_queue(
+        spool=spool, release_state=release_state, reconciler=integration_reconciler,
+    )
     atomic_json(state_path, state)
 
     previous_fp = None
     unchanged = 0
 
     for pass_number in range(1, max(1, int(max_passes)) + 1):
+        if production_transaction_active(release_state):
+            return _defer_for_production_transaction(state, state_path)
         try:
             return_code = run_pipeline(
                 scripts=scripts, repo=repo, spool=spool,
@@ -243,14 +273,21 @@ def controller_run(
 
         pipeline = load_json(spool / "engineering-pipeline-state.json")
         supervisor = load_json(spool / "engineering-supervisor-state.json")
+        # A production transaction may begin while an already-started
+        # engineering pass runs. Record that pass, but do not reconcile the
+        # integration queue after the production lock was acquired.
+        if production_transaction_active(release_state):
+            state["passes"].append({
+                "pass": pass_number, "pipeline_return_code": return_code,
+                "disposition": "deferred",
+                "reason": "production_transaction_active",
+                "checked_at": now(),
+            })
+            return _defer_for_production_transaction(state, state_path)
+        state["integration_queue"] = reconcile_integration_queue(
+            spool=spool, release_state=release_state, reconciler=integration_reconciler,
+        )
         disposition, reason = classify(pipeline, supervisor)
-        credit_probe = None
-        if credit_recovery_needed(supervisor):
-            credit_probe = maybe_run_credit_probe(spool=spool, runner=runner)
-            if credit_probe.get("status") == "verified":
-                # The next ordinary pipeline pass consumes the metered receipt
-                # through the existing owner-development/support readmission path.
-                disposition, reason = "recoverable", "hosted_credit_verified"
         fp = progress_fingerprint(pipeline, supervisor)
         if fp == previous_fp:
             unchanged += 1
@@ -267,8 +304,6 @@ def controller_run(
             "unchanged_passes": unchanged,
             "checked_at": now(),
         }
-        if credit_probe is not None:
-            entry["credit_probe"] = credit_probe
         state["passes"].append(entry)
         atomic_json(state_path, state)
 

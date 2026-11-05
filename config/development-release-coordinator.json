@@ -26,20 +26,20 @@
   "production": {
     "serialized_promotion": true,
     "health_evidence_max_age_minutes": 30,
-    "human_approval_required": true,
+    "human_approval_required": false,
     "autonomous_repair": {
       "classification_enabled": true,
-      "human_approval_required_when_eligible": true,
-      "automatic_execution_enabled": false,
+      "human_approval_required_when_eligible": false,
+      "automatic_execution_enabled": true,
       "policy_path": "config/autonomous-repair-release-policy.json",
-      "execution_blocker": "owner_exact_candidate_approval_required"
+      "execution_blocker": "none"
     },
     "protected_core_human_approval_required": true,
     "automatic_window": {
-      "enabled": false,
+      "enabled": true,
       "timezone": "America/New_York",
       "only_production_eligible": true,
-      "mode": "manual_exact_candidate_approval",
+      "mode": "continuous_24x7",
       "reconcile_interval_minutes": 5,
       "max_concurrent_releases": 1
     }

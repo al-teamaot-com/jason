@@ -1,5 +1,6 @@
 import importlib.util
 import json
+from contextlib import nullcontext
 import sys
 import tempfile
 from pathlib import Path
@@ -33,6 +34,22 @@ def existing_retention_preflight_is_independently_tested():
     are covered in test_release_manager_host_runner.py.
     """
     with patch.object(runner, "reconcile_stopped_rollback_retention", return_value=16):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def isolated_user_systemd_admission_guard():
+    """Simulate an idle worker and no real systemd runtime in fault injection.
+
+    Worker-active/quiescence and real gate behavior are independently tested by
+    test_release_manager_host_runner and test_pmv3_worker_release_gate.
+    """
+    with (
+        patch.object(runner, "temporary_worker_admission_gate",
+                     side_effect=lambda: nullcontext()),
+        patch.object(runner, "require_pmv3_engineering_quiescent",
+                     return_value=None),
+    ):
         yield
 
 
@@ -151,6 +168,9 @@ def atomic_release_sandbox(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr(runner, "verify_candidate_on_main", lambda *a: None)
+    # Fault-injection tests use synthetic SHAs and must never fetch Git.
+    # Exact root-source fail-closed behavior is covered in the host runner suite.
+    monkeypatch.setattr(runner, "ensure_managed_host_source_revision", lambda *a: None)
     monkeypatch.setattr(runner, "require_current_protected_release_source", lambda *a: None)
     monkeypatch.setattr(runner, "require_current_manual_scope_review", lambda *a: None)
     monkeypatch.setattr(runner, "run_release_ccc_gate",
@@ -181,7 +201,7 @@ def atomic_release_sandbox(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "run_functional_smoke_tests",
                         lambda sha: {"passed": True, "verified_at": "2026-10-18T13:50:00+00:00"})
     monkeypatch.setattr(runner, "production_drift_evidence",
-                        lambda *a: {"problems": [], "observed_at": "2026-10-18T13:50:00+00:00"})
+                        lambda *a: {"status": "pass", "problems": [], "observed_at": "2026-10-18T13:50:00+00:00"})
     monkeypatch.setattr(runner, "declared_quickbooks_read_profile", lambda *a: None)
     monkeypatch.setattr(runner, "live_quickbooks_read_profile",
                         lambda *a: sorted(runner.QUICKBOOKS_READ_PROFILES)[0])

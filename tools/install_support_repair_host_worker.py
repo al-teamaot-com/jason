@@ -29,6 +29,7 @@ def main() -> int:
     runner = repo / 'tools' / 'support_repair_host_worker.py'
     pipeline_runner = repo / 'tools' / 'engineering_pipeline.py'
     pmv3_controller = repo / 'tools' / 'pmv3_engineering_controller.py'
+    pmv3_integration_queue = repo / 'tools' / 'pmv3_integration_queue.py'
     development_runner = repo / 'tools' / 'owner_approved_development_worker.py'
     supervisor_runner = repo / 'tools' / 'engineering_supervisor.py'
     breaker_recovery_runner = repo / 'tools' / 'release_breaker_recovery_manager.py'
@@ -37,6 +38,7 @@ def main() -> int:
     todo_release_bridge = repo / 'tools' / 'todo_release_bridge.py'
     operational_acceptance_reader = repo / 'tools' / 'operational_acceptance_reader.py'
     release_manager_gate = repo / 'tools' / 'release_manager_gate.py'
+    worker_release_gate = repo / 'tools' / 'pmv3_worker_release_gate.py'
     change_integration_gate = repo / 'tools' / 'change_integration_gate.py'
     documentation_impact_gate = repo / 'tools' / 'documentation_impact_gate.py'
     unit_root = repo / 'infrastructure' / 'openclaw-operations' / 'systemd' / 'user'
@@ -47,6 +49,8 @@ def main() -> int:
         raise SystemExit('engineering pipeline coordinator source is missing')
     if not pmv3_controller.is_file():
         raise SystemExit('PMV3 engineering controller source is missing')
+    if not pmv3_integration_queue.is_file():
+        raise SystemExit('PMV3 integration queue source is missing')
     if not development_runner.is_file():
         raise SystemExit('owner-approved development worker source is missing')
     if not supervisor_runner.is_file() or not evidence_module.is_file():
@@ -64,6 +68,8 @@ def main() -> int:
             raise SystemExit('owner-approved worker dependency is missing: ' + dependency.name)
     if not release_manager_gate.is_file():
         raise SystemExit('release manager gate source is missing')
+    if not worker_release_gate.is_file():
+        raise SystemExit('PMV3 worker release admission gate source is missing')
     for unit in units:
         if not (unit_root / unit).is_file():
             raise SystemExit(f'systemd source unit is missing: {unit}')
@@ -80,6 +86,7 @@ def main() -> int:
     _copy(runner, install_root / 'support_repair_host_worker.py', 0o700)
     _copy(pipeline_runner, install_root / 'engineering_pipeline.py', 0o700)
     _copy(pmv3_controller, install_root / 'pmv3_engineering_controller.py', 0o700)
+    _copy(pmv3_integration_queue, install_root / 'pmv3_integration_queue.py', 0o700)
     _copy(development_runner, install_root / 'owner_approved_development_worker.py', 0o700)
     _copy(supervisor_runner, install_root / 'engineering_supervisor.py', 0o700)
     _copy(breaker_recovery_runner, install_root / 'release_breaker_recovery_manager.py', 0o700)
@@ -88,6 +95,7 @@ def main() -> int:
     _copy(todo_release_bridge, install_root / 'todo_release_bridge.py', 0o700)
     _copy(operational_acceptance_reader, install_root / 'operational_acceptance_reader.py', 0o700)
     _copy(release_manager_gate, install_root / 'release_manager_gate.py', 0o700)
+    _copy(worker_release_gate, install_root / 'pmv3_worker_release_gate.py', 0o700)
     _copy(change_integration_gate, install_root / 'change_integration_gate.py', 0o600)
     _copy(documentation_impact_gate, install_root / 'documentation_impact_gate.py', 0o600)
     for unit in units:
