@@ -7682,9 +7682,11 @@ def _send_procurement_review_to_teams(
 @mcp.tool()
 def process_procurement_invoice(
     vendor_name: str,
-    invoice_number: str,
     source_reference: str,
     lines: list[dict[str, Any]],
+    invoice_number: str = "",
+    document_kind: str = "vendor_invoice",
+    document_number: str = "",
     invoice_total: str = "",
     vendor_order_reference: str = "",
     ship_to: str = "",
@@ -7693,9 +7695,9 @@ def process_procurement_invoice(
     fees: str = "0",
     source_capture_sha256: str = "",
 ) -> dict[str, Any]:
-    """Process a vendor invoice through AOT's fixed Jason procurement workflow.
+    """Process a vendor quote or invoice through AOT's fixed procurement workflow.
 
-    This is the only ChatGPT-Jason invoice intake path. Do not ask the requester
+    This is the only ChatGPT-Jason vendor-document intake path. Do not ask the requester
     which workflow, approval channel, or next step they want. Jason creates the
     canonical governed procurement draft and automatically sends the standard
     procurement review card to the authenticated requester's Microsoft Teams.
@@ -7706,11 +7708,17 @@ def process_procurement_invoice(
     tenant_id, object_id = _authenticated_microsoft_transport_identity()
     reference = str(source_reference or "").strip()
     vendor = str(vendor_name or "").strip()
-    invoice = str(invoice_number or "").strip()
-    if not reference or not vendor or not invoice:
+    kind = str(document_kind or "vendor_invoice").strip().casefold()
+    if kind not in {"vendor_quote", "vendor_invoice"}:
         return {
             "status": "rejected",
-            "error_code": "procurement_invoice_identity_required",
+            "error_code": "procurement_document_kind_invalid",
+        }
+    number = str(document_number or invoice_number or "").strip()
+    if not reference or not vendor or not number:
+        return {
+            "status": "rejected",
+            "error_code": "procurement_document_identity_required",
         }
     if not isinstance(lines, list) or not lines or not all(isinstance(x, Mapping) for x in lines):
         return {
@@ -7718,7 +7726,7 @@ def process_procurement_invoice(
             "error_code": "procurement_invoice_lines_required",
         }
     normalized: dict[str, Any] = {
-        "source_kind": "vendor_invoice",
+        "source_kind": kind,
         "source_reference": reference,
         "source_capture_sha256": str(source_capture_sha256 or "").strip(),
         "source_captured_at": datetime.now(timezone.utc).isoformat(),
@@ -7727,8 +7735,15 @@ def process_procurement_invoice(
         "source_evidence_mode": "chatgpt_attachment_normalized",
         "vendor": {"name": vendor},
         "lines": [dict(x) for x in lines],
-        "invoice_number": invoice,
+        "document_number": number,
     }
+    if kind == "vendor_invoice":
+        normalized["invoice_number"] = number
+    elif not str(vendor_order_reference or "").strip():
+        # The canonical draft/card labels this field as Vendor ref. Preserve
+        # a quote/reference number there without misclassifying it as an
+        # Autotask vendor invoice number.
+        normalized["vendor_order_reference"] = number
     optional = {
         "invoice_total": invoice_total,
         "vendor_order_reference": vendor_order_reference,
