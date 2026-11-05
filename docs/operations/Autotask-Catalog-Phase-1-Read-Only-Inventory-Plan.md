@@ -107,7 +107,40 @@ Before proposing any naming, description, SKU or part-number convention:
 - Prefer existing native fields and platform capabilities. Propose only field-safe, understandable catalog conventions now; evaluate actual invoice presentation or automated monthly quantity reconciliation **later**, when the Owner explicitly opens that stage.
 - Findings from static provider schema and mapping inspection are advisory. No catalog, invoice, contract, pricing or integration change is authorized by this note.
 
-## 8. Immediate next authorized work
+## 8. IT Product field constraints and proposed naming rule — Step 5 (2026-11-05)
+
+**Status:** Verified field-metadata reconnaissance + **draft convention for Owner review** only. No policy, standardization correction plan or bulk operation has been approved; no Product record was modified.
+
+### Verified Autotask Products REST field definitions
+
+A bounded, authorized Jason `service.entity.fields.describe` read for `Products` returned 29 fields and these declared native field limits and validation attributes:
+
+| Native Autotask Products field | Declared characters | Native requirement / intended interpretation |
+| --- | ---: | --- |
+| `name` | 1,000 | Required; catalog display name |
+| `description` | 2,000 | Optional; descriptive specification / narrative |
+| `sku` | 50 | Optional; SKU, **not automatically manufacturer part number** |
+| `vendorProductNumber` | 50 | Optional; vendor-associated product number, **not automatically manufacturer part number** |
+| `manufacturerName` | 100 | Optional; verified manufacturer / brand |
+| `manufacturerProductName` | 50 | Optional; verified manufacturer product/model name |
+| `internalProductID` | 50 | Optional; native identifier field (do not repurpose without schema confirmation) |
+| `externalProductID` | 50 | Optional; native identifier field (do not repurpose without schema confirmation) |
+
+The native field metadata does **not** expose a field explicitly called `manufacturerPartNumber`. Do not silently substitute `vendorProductNumber` or invent a manufacturer part number. Determine AOT's actual part-number source, meaning and appropriate native destination before requiring a field. Other relevant native fields include `productCategory`, `defaultVendorID`, `unitCost`, `unitPrice`, `productBillingCodeID`, and `isActive`; their detailed policy is outside this single naming step.
+
+### QuickBooks Online reference limits — mapping not yet verified
+
+- Intuit QBO Item API: `Name` **100 characters**, unique; `Sku` **100**; `Description` **4,000**. Source: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/Item
+- A newer QBO batch-import help article separately lists **512 characters** for Product/category name, **100** for SKU and **4,000** for descriptions. **Bulk-import UI rules are not proof of the API/Autotask sync rules.** Source: https://quickbooks.intuit.com/learn-support/en-us/help-article/list-management/import-products-services-quickbooks-online/L4o3mXx2u_US_en_US
+- Kaseya's October 26, 2026 Smart Accounting Hub enhancement describes **Autotask billing-code to QBO Item** mapping, not a universal one-to-one Product `name` to QBO Item `Name` link. Verify the specific AOT workflow before enforcing a shared length restriction. Source: https://www.kaseya.com/platform/innovations/smart-accounting-hub-quickbooks-online-enhancements/
+
+### One proposed naming decision (not yet approved)
+
+**For genuine IT Products, prefer a concise, recognizable `Manufacturer Model Product-Type` display name**, for example `Dell OptiPlex 7020 Desktop` *if all components are verified*. Do not include a full specification list or arbitrary part number in the short display name. Place specifications in `description` and confirmed manufacturer/vendor identifiers in verified appropriate fields. Where manufacturer/model is not known, **leave the existing value unchanged and record a verification exception**, rather than fabricate values. No universal shorter numeric target is finalized until AOT's real downstream mapping is known; target human readability and fit within the tightest **verified mapped** field.
+
+Pending Owner decision: whether to accept `Manufacturer Model Product-Type` as the **starting display-name convention** for the IT Product pilot. Approval of the convention would **not** authorize any record updates, invoice activities, billing edits or bulk processing.
+
+## 9. Immediate next authorized work
 
 - Preserve the approved agreement and this plan in repository review without touching production.
 - Validate the precise governed search argument and pagination schema through allowed metadata/read operations.
