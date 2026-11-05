@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
@@ -222,6 +224,10 @@ class MetadataFirstResourceInquiryInterpreter:
         if not normalized_text:
             return None
 
+        ranked_usage = self._interpret_ranked_usage(normalized_text)
+        if ranked_usage is not None:
+            return ranked_usage
+
         named_endpoint = self._interpret_named_endpoint(
             text=text,
             normalized_text=normalized_text,
@@ -285,6 +291,116 @@ class MetadataFirstResourceInquiryInterpreter:
             permission_mode="observe",
             result_intent=result_intent,
             completeness_requirement=completeness_requirement,
+        )
+
+    def _interpret_ranked_usage(self, normalized_text: str) -> ResourceInquiry | None:
+        """Lower governed fleet-usage questions to the reusable fleet report.
+
+        Supports both ranked requests (for example, top 5 in October) and
+        complete fleet copy-count requests (for example, the last 30 days).
+        Conversation text supplies reporting selectors only; provider and
+        authority remain registry-controlled.
+        """
+        if not re.search(r"\b(printers?|copiers?|mfp|print fleet|copy counts?)\b", normalized_text):
+            return None
+        usage_signal = re.search(
+            r"\b(volume|usage|pages?|impressions?|printed|copies|printing|copy counts?|meter counts?)\b",
+            normalized_text,
+        )
+        if not usage_signal:
+            return None
+        ranked_request = bool(
+            re.search(r"\b(top|highest|most|rank|ranking|busiest|largest)\b", normalized_text)
+        )
+        fleet_request = bool(
+            re.search(r"\b(all|list|provide|show|copy counts?|meter counts?|last \d+ days?)\b", normalized_text)
+        )
+        if not ranked_request and not fleet_request:
+            return None
+
+        candidates = [
+            contract
+            for contract in self.contracts
+            if contract.get("query_shape") == "fleet_usage_report"
+            and "print_device" in contract.get("resource_types", ())
+            and not contract.get("selector_required")
+            and {"month", "start", "end", "limit", "timezone", "report_mode"}.issubset(
+                set(contract.get("selector_keys", ()))
+            )
+        ]
+        if len(candidates) != 1:
+            return None
+        contract = candidates[0]
+        timezone_name = str(contract.get("report_timezone") or "America/New_York")
+        now = datetime.now(ZoneInfo(timezone_name))
+        selector: dict[str, str] = {"timezone": timezone_name}
+
+        if ranked_request:
+            match = re.search(r"\btop\s+(\d{1,3})\b", normalized_text)
+            if match:
+                limit = int(match.group(1))
+            else:
+                word_match = re.search(
+                    r"\btop\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b",
+                    normalized_text,
+                )
+                limit = (
+                    {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}[
+                        word_match.group(1)
+                    ]
+                    if word_match else 5
+                )
+            if not 1 <= limit <= 100:
+                raise ValueError("fleet ranking must request between 1 and 100 devices")
+            selector.update({"limit": str(limit), "report_mode": "rank"})
+        else:
+            selector.update({"limit": "1000", "report_mode": "list"})
+
+        months = {
+            "january": 1, "february": 2, "march": 3, "april": 4,
+            "may": 5, "june": 6, "july": 7, "august": 8,
+            "september": 9, "october": 10, "november": 11, "december": 12,
+        }
+        days = re.search(r"\blast\s+(\d{1,3})\s+days?\b", normalized_text)
+        if days:
+            count = int(days.group(1))
+            if not 1 <= count <= 366:
+                raise ValueError("fleet usage day range must be between 1 and 366 days")
+            selector["start"] = (now - timedelta(days=count)).isoformat()
+            selector["end"] = now.isoformat()
+        else:
+            year, month = now.year, now.month
+            iso = re.search(r"\b(20\d{2})\s+(0?[1-9]|1[0-2])\b", normalized_text)
+            if iso:
+                year, month = int(iso.group(1)), int(iso.group(2))
+            else:
+                named = re.search(
+                    r"\b(" + "|".join(months) + r")\b(?:\s+(20\d{2}))?",
+                    normalized_text,
+                )
+                if named:
+                    month = months[named.group(1)]
+                    year = int(named.group(2)) if named.group(2) else now.year
+                elif "last month" in normalized_text:
+                    year, month = (now.year - 1, 12) if now.month == 1 else (now.year, now.month - 1)
+            selector["month"] = f"{year:04d}-{month:02d}"
+
+        facts = tuple(
+            str(item).strip()
+            for item in contract.get("canonical_facts", ())
+            if str(item).strip()
+        )
+        if len(facts) != 1:
+            return None
+        return ResourceInquiry(
+            resource_type="print_device",
+            resource_selector=selector,
+            requested_facts=facts,
+            execution_mode="deterministic",
+            permission_mode="observe",
+            result_intent="summary",
+            completeness_requirement="complete",
         )
 
     def _interpret_named_endpoint(
