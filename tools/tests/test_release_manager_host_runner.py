@@ -101,6 +101,17 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     "production_control_core",
                 )
 
+    def test_integration_queue_controller_is_production_control_core(self):
+        import fnmatch
+        import json
+        policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
+        path = "tools/pmv3_integration_queue.py"
+        for change_class in ("feature", "support", "todo", "release_blocker"):
+            self.assertEqual(runner.classify_change_risk(change_class, [path]),
+                             "production_control_core")
+        self.assertTrue(any(fnmatch.fnmatch(path, pattern)
+                            for pattern in policy["protected_core_globs"]))
+
     def test_runtime_image_and_build_context_are_protected_core(self):
         import fnmatch
         import json
