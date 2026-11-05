@@ -128,3 +128,29 @@ jobs:
               assert not hasattr(server, name), name
           print("MCP_ASSESSMENT_DEFAULT_DISABLED=PASS")
           PY
+
+
+  native-windows-powershell-51:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Parse static investigation commands using Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $payload = & python -c 'import json; from implementation.autonomous_remediation.endpoint_security_assessment_investigation import _RECIPES; print(json.dumps([record[1] for record in _RECIPES.values()]))'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot load exact read-only recipe source' }
+          $commands = ConvertFrom-Json -InputObject $payload
+          $count = 0
+          foreach ($script in $commands) {
+              $tokens = $null
+              $errors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseInput(
+                  [string]$script, [ref]$tokens, [ref]$errors)
+              if (@($errors).Count -ne 0) { throw ('PS51_PARSE_FAILED: ' + $errors[0].Message) }
+              $count++
+          }
+          if ($count -ne 3) { throw 'Expected exactly three narrow static investigation recipes' }
+          Write-Output ('WINDOWS_POWERSHELL_51_RECIPES=PASS Count=' + $count)
