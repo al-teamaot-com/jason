@@ -7233,6 +7233,11 @@ def execute_read_capability(
         "endpoint.alert.search",
         "endpoint.software.search",
         "endpoint.patch.search",
+        # This capability has its own source-contract-bounded projector in
+        # _governed_read_for_identity. Reapplying the generic dynamic evidence
+        # boundary here would silently truncate its already-safe 1000-record
+        # fleet dataset back to 100 and make fleet-wide analytics incomplete.
+        "print.meter.usage.search",
     }
 
     if capability_name not in known_projected:
