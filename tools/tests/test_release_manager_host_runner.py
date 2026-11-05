@@ -6306,3 +6306,220 @@ def test_issue_2339_replacement_crash_restores_freeze_and_consumes_grant(tmp_pat
     assert json.loads(opened['receipt_path'].read_text())['status']=='stranded_transaction_restored'
     with patch.object(runner,'live_production_alignment'):
         assert runner.explicit_owner_one_transaction_freeze_context(tmp_path,loaded) is None
+
+
+def _closed_postacceptance_release_fixture(tmp_path):
+    import hashlib
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / 'records').mkdir(parents=True, exist_ok=True)
+    freeze_raw = b'{"schema_version":"1.0","status":"active","scope":"manual-and-automatic-production-promotions"}\n'
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    marker.write_bytes(freeze_raw)
+    marker.chmod(0o600)
+    backup = tmp_path / runner.PRODUCTION_FREEZE_BACKUP
+    backup.write_bytes(freeze_raw)
+    backup.chmod(0o600)
+    baseline = {
+        'complete': True,
+        'revision': SHA_B,
+        'runtime_image_id': 'sha256:' + '1' * 64,
+        'mcp_image_id': 'sha256:' + '2' * 64,
+        'mobile_release_approval_mode': 'owner_reviewed',
+    }
+    record = {
+        'release_id': release_id,
+        'state': 'closed',
+        'rollback_sha': SHA_B,
+        'release_candidate': {'candidate_sha': SHA_A},
+        'release_manifest': {'candidate_sha': SHA_A, 'rollback_sha': SHA_B},
+        'owner_approval': {
+            'approved': True,
+            'candidate_sha': SHA_A,
+            'source': 'authenticated_mobile_teams_owner:relapproval-' + 'a' * 32,
+        },
+        'manual_scope_review': {
+            'schema_version': '1.0',
+            'candidate_sha': SHA_A,
+            'baseline_sha': SHA_B,
+            'scope_sha256': 'd' * 64,
+        },
+        'last_known_good_manifest': baseline,
+        'production': {'live_sha': SHA_A, 'verified_at': '2026-11-05T21:35:46+00:00'},
+        'history': [],
+    }
+    runner.atomic_json(tmp_path / 'records' / (release_id + '.json'), record)
+    runner.atomic_json(
+        tmp_path / 'owner-explicit-unfreeze-receipts' / (release_id + '.json'),
+        {
+            'schema_version': '1.0',
+            'authorization': 'explicit_exact_sha_owner_unfreeze',
+            'status': 'consumed',
+            'release_id': release_id,
+            'candidate_sha': SHA_A,
+            'rollback_sha': SHA_B,
+            'scope_sha256': 'd' * 64,
+            'freeze_sha256_before': hashlib.sha256(freeze_raw).hexdigest(),
+            'freeze_sha256_after': hashlib.sha256(freeze_raw).hexdigest(),
+            'freeze_restored': True,
+            'standing_authority': False,
+        },
+    )
+    return release_id, record, baseline, marker
+
+
+def test_postacceptance_rollback_restores_exact_recorded_lkg_in_dependency_order(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    release_id, record, baseline, marker = _closed_postacceptance_release_fixture(tmp_path)
+    candidate_tree = tmp_path / 'candidate'
+    rollback_tree = tmp_path / 'rollback'
+    for tree in (candidate_tree, rollback_tree):
+        (tree / 'infrastructure/jason-runtime').mkdir(parents=True)
+        (tree / 'infrastructure/jason-mcp').mkdir(parents=True)
+    (candidate_tree / 'infrastructure/jason-runtime/production-deploy.sh').write_text('#!/bin/sh\n')
+    (candidate_tree / 'infrastructure/jason-mcp/production-deploy.sh').write_text('#!/bin/sh\n')
+
+    calls = []
+    lock = SimpleNamespace()
+    monkeypatch.setattr(runner, 'acquire_production_transaction_lock', lambda *a, **k: (calls.append('lock'), lock)[1])
+    monkeypatch.setattr(runner, 'release_production_transaction_lock', lambda value: calls.append('unlock'))
+    monkeypatch.setattr(runner, 'require_pmv3_engineering_quiescent', lambda: calls.append('quiescent'))
+    monkeypatch.setattr(runner, 'live_production_alignment', lambda sha: (calls.append('align:' + sha), {'runtime_revision': sha, 'mcp_revision': sha, 'host_revision': sha}))
+    monkeypatch.setattr(runner, 'worktree', lambda repo, state, sha: candidate_tree if sha == SHA_A else rollback_tree)
+    monkeypatch.setattr(runner, 'remove_worktree', lambda *a, **k: None)
+    monkeypatch.setattr(runner, 'declared_quickbooks_read_profile', lambda tree: 'quickbooks-production-read-v1')
+    monkeypatch.setattr(runner, 'declared_autotask_read_profile', lambda tree: 'itglue-autotask-entra-dynamic-schema-read-catalog-v13')
+    monkeypatch.setattr(runner.worker_enrollment, 'approved_diagnostic_uid', lambda tree: 'worker-uid')
+    monkeypatch.setattr(runner, 'open_circuit_breaker', lambda *a, **k: calls.append('breaker:' + str(k.get('rollback_verified'))))
+    monkeypatch.setattr(runner, 'pin_exact_rollback_image', lambda surface, manifest: calls.append('pin:' + surface))
+    monkeypatch.setattr(runner, 'run', lambda argv, **kw: (calls.append('run:' + Path(argv[0]).parts[-3]), 'DEPLOYMENT=PASS')[1])
+    monkeypatch.setattr(runner, 'rollback_surface_is_verified', lambda surface, sha, manifest: (calls.append('verify:' + surface), True)[1])
+    monkeypatch.setattr(runner, 'request_host_reconcile', lambda state, sha: (calls.append('host:' + sha), {'success': True})[1])
+    monkeypatch.setattr(runner, 'verify_host_reconciliation_evidence', lambda result, sha: calls.append('host-verified:' + sha))
+    monkeypatch.setattr(runner, 'install_release_manager_from_current', lambda sha: (calls.append('manager:' + sha), {'source_revision': sha, 'timer_active': True})[1])
+    monkeypatch.setattr(runner, 'restore_mobile_release_approval_policy', lambda state, rec: (calls.append('policy'), {'status': 'restored', 'mode': 'owner_reviewed'})[1])
+    monkeypatch.setattr(runner, 'wait_live_runtime', lambda: calls.append('runtime-health'))
+    verified = dict(baseline, observed_at='2026-11-05T21:40:00+00:00')
+    monkeypatch.setattr(runner, 'capture_production_manifest', lambda sha: (calls.append('manifest:' + sha), verified)[1])
+    monkeypatch.setattr(runner, 'set_last_known_good', lambda state, manifest, release_id: calls.append('lkg:' + manifest['revision']))
+
+    result = runner.rollback_closed_release(
+        ROOT, tmp_path,
+        release_id=release_id,
+        candidate_sha=SHA_A,
+        scope_sha256='d' * 64,
+        rollback_sha=SHA_B,
+        reason='fleet-wide acceptance exposed only 100 of 436 selected records',
+    )
+
+    assert result['status'] == 'rolled_back'
+    assert result['rollback_verified'] is True
+    assert result['rollback_sha'] == SHA_B
+    assert marker.is_file()
+    assert calls.index('breaker:False') < calls.index('pin:mcp')
+    assert calls.index('verify:mcp') < calls.index('host:' + SHA_B)
+    assert calls.index('host-verified:' + SHA_B) < calls.index('manager:' + SHA_B)
+    assert calls.index('manager:' + SHA_B) < calls.index('policy')
+    assert calls.index('policy') < calls.index('pin:runtime')
+    assert calls.index('verify:runtime') < calls.index('align:' + SHA_B)
+    assert calls.index('manifest:' + SHA_B) < calls.index('lkg:' + SHA_B)
+    assert calls[-2] == 'breaker:True'
+    assert calls[-1] == 'unlock'
+
+    saved = json.loads((tmp_path / 'records' / (release_id + '.json')).read_text())
+    assert saved['state'] == 'rolled_back'
+    assert saved['failure']['rollback_verified'] is True
+    receipt = json.loads((tmp_path / 'owner-postacceptance-rollback-receipts' / (release_id + '.json')).read_text())
+    assert receipt['status'] == 'consumed'
+    assert receipt['standing_authority'] is False
+    assert receipt['rollback_verified'] is True
+
+
+def test_postacceptance_rollback_rejects_wrong_candidate_scope_or_rollback_before_lock(tmp_path, monkeypatch):
+    import pytest
+    release_id, _record, _baseline, _marker = _closed_postacceptance_release_fixture(tmp_path)
+    touched = []
+    monkeypatch.setattr(runner, 'acquire_production_transaction_lock', lambda *a, **k: touched.append('lock'))
+
+    cases = (
+        (SHA_B, 'd' * 64, SHA_B, 'arguments differ'),
+        (SHA_A, 'e' * 64, SHA_B, 'scope differs'),
+        (SHA_A, 'd' * 64, SHA_A, 'arguments differ'),
+    )
+    for candidate, scope, rollback, message in cases:
+        with pytest.raises(runner.ReleaseManagerError, match=message):
+            runner.rollback_closed_release(
+                ROOT, tmp_path, release_id=release_id,
+                candidate_sha=candidate, scope_sha256=scope,
+                rollback_sha=rollback, reason='acceptance failed',
+            )
+    assert touched == []
+    assert not (tmp_path / 'owner-postacceptance-rollback-receipts').exists()
+
+
+def test_postacceptance_rollback_requires_consumed_exact_unfreeze_and_restored_freeze(tmp_path, monkeypatch):
+    import json, pytest
+    release_id, _record, _baseline, marker = _closed_postacceptance_release_fixture(tmp_path)
+    touched = []
+    monkeypatch.setattr(runner, 'acquire_production_transaction_lock', lambda *a, **k: touched.append('lock'))
+    receipt_path = tmp_path / 'owner-explicit-unfreeze-receipts' / (release_id + '.json')
+
+    receipt = json.loads(receipt_path.read_text())
+    receipt['status'] = 'authorized_pending'
+    runner.atomic_json(receipt_path, receipt)
+    with pytest.raises(runner.ReleaseManagerError, match='does not authorize'):
+        runner.rollback_closed_release(
+            ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+            scope_sha256='d' * 64, rollback_sha=SHA_B, reason='acceptance failed')
+
+    receipt['status'] = 'consumed'
+    runner.atomic_json(receipt_path, receipt)
+    marker.unlink()
+    with pytest.raises((runner.ReleaseManagerError, FileNotFoundError), match='freeze'):
+        runner.rollback_closed_release(
+            ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+            scope_sha256='d' * 64, rollback_sha=SHA_B, reason='acceptance failed')
+    assert touched == []
+
+
+def test_postacceptance_rollback_failure_restores_freeze_and_fails_receipt(tmp_path, monkeypatch):
+    import json, pytest
+    from types import SimpleNamespace
+
+    release_id, _record, _baseline, marker = _closed_postacceptance_release_fixture(tmp_path)
+    original = marker.read_bytes()
+    candidate_tree = tmp_path / 'candidate-fail'
+    rollback_tree = tmp_path / 'rollback-fail'
+    for tree in (candidate_tree, rollback_tree):
+        (tree / 'infrastructure/jason-runtime').mkdir(parents=True)
+        (tree / 'infrastructure/jason-mcp').mkdir(parents=True)
+    (candidate_tree / 'infrastructure/jason-runtime/production-deploy.sh').write_text('#!/bin/sh\n')
+    (candidate_tree / 'infrastructure/jason-mcp/production-deploy.sh').write_text('#!/bin/sh\n')
+
+    monkeypatch.setattr(runner, 'acquire_production_transaction_lock', lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(runner, 'release_production_transaction_lock', lambda value: None)
+    monkeypatch.setattr(runner, 'require_pmv3_engineering_quiescent', lambda: None)
+    monkeypatch.setattr(runner, 'live_production_alignment', lambda sha: {'runtime_revision': sha})
+    monkeypatch.setattr(runner, 'worktree', lambda repo, state, sha: candidate_tree if sha == SHA_A else rollback_tree)
+    monkeypatch.setattr(runner, 'remove_worktree', lambda *a, **k: None)
+    monkeypatch.setattr(runner, 'declared_quickbooks_read_profile', lambda tree: 'quickbooks-production-read-v1')
+    monkeypatch.setattr(runner, 'declared_autotask_read_profile', lambda tree: 'itglue-autotask-entra-dynamic-schema-read-catalog-v13')
+    monkeypatch.setattr(runner.worker_enrollment, 'approved_diagnostic_uid', lambda tree: 'worker-uid')
+    monkeypatch.setattr(runner, 'open_circuit_breaker', lambda *a, **k: None)
+    monkeypatch.setattr(runner, 'pin_exact_rollback_image', lambda surface, manifest: None)
+    monkeypatch.setattr(runner, 'run', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('simulated rollback helper failure')))
+
+    with pytest.raises(RuntimeError, match='simulated rollback helper failure'):
+        runner.rollback_closed_release(
+            ROOT, tmp_path, release_id=release_id,
+            candidate_sha=SHA_A, scope_sha256='d' * 64,
+            rollback_sha=SHA_B, reason='acceptance failed',
+        )
+
+    assert marker.read_bytes() == original
+    receipt = json.loads((tmp_path / 'owner-postacceptance-rollback-receipts' / (release_id + '.json')).read_text())
+    assert receipt['status'] == 'failed'
+    assert receipt['freeze_restored'] is True
+    assert receipt['freeze_sha256_before'] == receipt['freeze_sha256_after']
+    assert receipt['standing_authority'] is False
