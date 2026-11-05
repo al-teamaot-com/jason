@@ -823,6 +823,43 @@ def test_owner_reviewed_teams_release_mode_requires_exact_v2_policy(tmp_path):
     }
 
 
+def test_v3_production_repair_is_a_separately_opted_in_reviewed_runtime(tmp_path):
+    import pytest
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        reviewed_policy_file,
+    )
+    from jason_runtime.mobile_release_approval import MobileReleaseApprovalMaintenance
+
+    v3 = reviewed_policy_file(
+        tmp_path, schema_version="3.0",
+        allowed_risk_profiles=[
+            "normal", "production_control_core", "production_repair",
+        ],
+    )
+    cfg = replace(
+        _settings(tmp_path),
+        release_mobile_approval_mode="owner_reviewed",
+        release_mobile_approval_policy=v3,
+        release_mobile_approval_db=tmp_path / "v3-approval.sqlite3",
+        release_mobile_state_root=tmp_path / "v3-release-root",
+    )
+    cfg.validate()
+    app = build_runtime_application(cfg)
+    services = [
+        m for m in app.maintenance.services
+        if isinstance(m, MobileReleaseApprovalMaintenance)
+    ]
+    assert len(services) == 1
+    assert services[0].required_policy_version == "3.0"
+    assert services[0].sender.owner_identity_ids == ("person-al",)
+    assert cfg.universal_approval_mode == "off"
+    assert not (cfg.release_mobile_state_root / "mobile-release-offers").exists()
+
+    # Even the newly implemented V3 cannot be silently used by a V1 worker.
+    with pytest.raises(PermissionError, match="mode and reviewed policy version"):
+        build_runtime_application(replace(cfg, release_mobile_approval_mode="owner_only_pilot"))
+
+
 def test_legacy_owner_pilot_refuses_silent_v2_risk_policy_upgrade(tmp_path):
     import pytest
     from implementation.runtime_service.tests.test_mobile_release_approval import (

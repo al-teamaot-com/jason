@@ -2565,9 +2565,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         owner_policy = read_mobile_release_policy(settings.release_mobile_approval_policy)
         if settings.release_mobile_approval_mode == "owner_only_pilot":
             if owner_policy.schema_version != "1.0":
-                raise PermissionError("legacy release approval mode requires V1")
+                raise PermissionError("active release approval mode and reviewed policy version do not match")
         elif owner_policy.schema_version not in {"2.0", "3.0"}:
-            raise PermissionError("reviewed release approval requires V2 or explicit V3")
+            raise PermissionError("active release approval mode and reviewed policy version do not match")
         expected_version = owner_policy.schema_version
         release_repo = SQLiteApprovalRequestRepository(settings.release_mobile_approval_db)
         release_approval_service = ApprovalRequestService(
