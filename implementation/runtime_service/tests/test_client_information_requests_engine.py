@@ -52,6 +52,8 @@ class FakeReads:
         elif capability == "service.ticket.notes.search":
             data = {"items": list(self.notes)}
         elif capability == "service.notification.history.search":
+            if arguments.get("company_id") != TICKET["companyID"] or arguments.get("ticket_id") != TICKET["id"]:
+                return {"status": "failed", "error_code": "INVALID_CAPABILITY_ARGUMENTS"}
             data = {"items": list(self.history)}
         else:
             raise AssertionError("Unapproved read capability " + capability)
@@ -242,6 +244,9 @@ def test_request_rejects_cross_company_or_disabled_contact(tmp_path, monkeypatch
 def test_request_and_reply_resume_only_once(tmp_path, monkeypatch):
     worker, reads, actions, ledger = workflow(tmp_path, monkeypatch)
     assert request(worker) == "delivery_pending"
+    history_queries = [args for cap, args in reads.calls
+                       if cap == "service.notification.history.search"]
+    assert history_queries == [{"company_id": 42, "ticket_id": 1001, "page_size": 100}]
     assert request(worker) in {"already_present", "already_reserved"}
     assert len(actions.calls) == 1
     record = ledger.find(1001, "JQ-017", EVIDENCE)
@@ -277,6 +282,12 @@ def test_request_and_reply_resume_only_once(tmp_path, monkeypatch):
     assert observed == [203]
     assert worker.reconcile() == ()
     assert ledger.find(1001, "JQ-017", EVIDENCE).state == "resumed"
+    # Subsequent delivery and reply reconciliation must remain company-bound.
+    history_queries = [args for cap, args in reads.calls
+                       if cap == "service.notification.history.search"]
+    assert len(history_queries) >= 2
+    assert all(args == {"company_id": 42, "ticket_id": 1001, "page_size": 100}
+               for args in history_queries)
 
 
 def test_uncertain_send_never_retries(tmp_path, monkeypatch):
