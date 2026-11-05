@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .financial_statement_maintenance import FinancialStatementMaintenance, SQLiteFinancialStatementState
-from .microsoft_sharepoint import build_microsoft_sharepoint_runtime
+from .microsoft_sharepoint_write import build_microsoft_sharepoint_runtime
 
 
 def build_financial_statement_maintenance(*, enabled: bool, boundary_db: Path,
