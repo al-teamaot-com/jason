@@ -32,3 +32,18 @@ The current regression test records safe fail-closed behavior but **does not** i
 `attest_consumed_pre_mutation_unfreeze_for_replacement` is **read-only**. It checks both immutable predecessor receipts, production-eligible release state without recorded production mutation, exact SHA/scope/rollback, byte-identical freeze digests, non-standing authority flags and live production alignment. It returns digest-bound lineage for a *future* independent signed Teams approval consumer. It neither accepts an approval nor creates a replacement receipt. On 2026-11-05, this attestation was evaluated read-only against the real consumed `release-54f4d2cdc048d805` and returned PASS; no mutation or freeze change occurred.
 
 Do not wire this helper directly to a plain CLI `--retry` switch. A second signed Owner authorization and a unique non-replayed native release transaction identity are still required.
+
+## Implemented isolated engineering candidate — 2026-11-05
+
+The source-only branch now implements an opt-in signed Teams replacement-unfreeze path across the mobile card issuer, signed callback, independent host evidence consumer, Release Manager admission, distinct source/transaction receipt identities, freeze restoration, and interrupted-transaction recovery. A consumed predecessor is attested read-only against original receipts, source/release/rollback identity, and live alignment. A fresh authenticated Owner approval remains required and is recorded with immutable lineage; this is not a shell retry flag or standing production authority. A second approved card cannot replay the old grant. No live approval was published, and no production mutation occurred.
+
+The following are verified with isolated fixtures: a prior consumed authorization cannot be reused, a signed replacement has its own request subject and exact prior fingerprints, the host consumer accepts only the signed replacement purpose, normal completion restores the freeze, and crash recovery restores the freeze and consumes the new grant while leaving both original receipts byte-identical. The new read-only offer selector was also evaluated against the actual release `release-54f4d2cdc048d805` and selected `replacement_unfreeze_only` without recording an approval or changing runtime state.
+
+**Not yet production accepted:** all required GitHub checks and independent governance review, native integration/admission under the existing engineering Owner pause, a new immutable release candidate with exact scope and rollback, a separately authorized exact-SHA production release, and existing-account technician/provider acceptance. Do not reuse the earlier SHA `54f4d2...` or its original approved scope digest after this source fix is merged.
+
+## Reviewed concurrent overlap
+
+- PR #2279 modifies consumer handling of a superseded signed Teams release approval and adds a protected-main comparison in the host approval-only path. This candidate retains its protected-main check for replacement-only decisions and does not alter the historical release approval flow; reconciliation must preserve #2279's separate superseded-disposition behavior when integrated.
+- PR #2269 changes the owner-facing signed approval confirmation text to clarify automated independent verification (not a second human reviewer). This candidate changes the typed replacement decision/issuer branch, not the original callback success message; both intents can be preserved.
+
+Do not merge this draft until changes are reconciled against the actual protected main and all required checks pass. Keep the engineering Owner pause and automatic-promotion hold intact.
