@@ -47,3 +47,57 @@ def test_generic_safe_projection_still_bounds_unrelated_lists_to_100():
     projected = server._safe({"items": list(range(150))})
     assert len(projected["items"]) == 101
     assert projected["items"][-1] == "[collection-bounded]"
+
+
+def test_execute_read_capability_preserves_projected_full_fleet(monkeypatch):
+    evidence = server._project_print_meter_usage_search(_output(436))
+
+    monkeypatch.setattr(server, "_dynamic_read_capability_allowed", lambda name: True)
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: {
+            "status": "succeeded",
+            "stage": "completed",
+            "capability": "print.meter.usage.search",
+            "provider": "kyocera_kfs",
+            "reason_codes": [],
+            "error_code": None,
+            "correlation_id": "corr-test",
+            "evidence": evidence,
+        },
+    )
+
+    result = server.execute_read_capability(
+        capability="print.meter.usage.search",
+        arguments={"limit": 1000},
+    )
+
+    records = result["evidence"]["data"]["records"]
+    assert len(records) == 436
+    assert records[-1]["serial_number"] == "SERIAL-435"
+    assert records[0]["api_key"] == "[redacted]"
+
+
+def test_execute_read_capability_still_rebounds_unrelated_dynamic_lists(monkeypatch):
+    monkeypatch.setattr(server, "_dynamic_read_capability_allowed", lambda name: True)
+    monkeypatch.setattr(
+        server,
+        "_governed_read",
+        lambda **kwargs: {
+            "status": "succeeded",
+            "stage": "completed",
+            "capability": "example.dynamic.search",
+            "provider": "example",
+            "reason_codes": [],
+            "error_code": None,
+            "correlation_id": "corr-test",
+            "evidence": {"data": {"records": list(range(150))}},
+        },
+    )
+
+    result = server.execute_read_capability(
+        capability="example.dynamic.search",
+        arguments={},
+    )
+    assert len(result["evidence"]["data"]["records"]) == 100
