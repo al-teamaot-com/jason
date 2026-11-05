@@ -281,3 +281,37 @@ def test_real_denial_code_then_two_distinct_technicians_require_own_approval():
         denied = decide(service, principal=principal, approval_id=approval_id)
         assert denied.outcome is AuthorityOutcome.DENIED
         assert denied.reason_codes == ("NO_MATCHING_AUTHORITY_GRANT",)
+
+
+def test_policy_is_not_named_user_allowlist_and_preserves_person_approvals():
+    """An organization's approved technician catalog can grow without new code.
+
+    Human resource rights are additionally checked at the native Autotask
+    provider; this unit test intentionally does not claim provider acceptance.
+    """
+    service, caps, providers, approvals = make_service(enabled=True)
+    for principal in ("helpdesk-3", "fieldtech-4", "future-authorized-staff"):
+        service.identities.put(IdentityRecord(principal, "human", "aot", "active"))
+    eligible = ("tech", "frontdesk", "helpdesk-3", "fieldtech-4",
+                "future-authorized-staff")
+    now = datetime.now(timezone.utc)
+    for idx, principal in enumerate(eligible):
+        pending = decide(service, principal=principal)
+        assert pending.outcome is AuthorityOutcome.APPROVAL_REQUIRED
+        approval_id = f"approval-person-{idx}"
+        approvals.put(ApprovalRecord(
+            approval_id, "req-note", NOTE, "aot", None, principal,
+            "approved", principal, now, now + timedelta(minutes=5),
+        ))
+        own = decide(service, principal=principal, approval_id=approval_id)
+        assert own.outcome is AuthorityOutcome.ALLOWED
+        assert own.execution_context.principal_id == principal
+        next_principal = eligible[(idx + 1) % len(eligible)]
+        denied = decide(service, principal=next_principal, approval_id=approval_id)
+        assert denied.outcome is AuthorityOutcome.DENIED
+        assert denied.reason_codes == ("APPROVAL_INVALID",)
+    for principal in ("automation", "disabled", "external"):
+        assert decide(service, principal=principal).outcome is AuthorityOutcome.DENIED
+    unknown = decide(service, principal="unregistered")
+    assert unknown.outcome is AuthorityOutcome.INDETERMINATE
+    assert unknown.reason_codes == ("IDENTITY_NOT_FOUND",)

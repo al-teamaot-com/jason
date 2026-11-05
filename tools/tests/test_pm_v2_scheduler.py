@@ -9,6 +9,26 @@ from pm_v2.scheduler import Scheduler
 from pm_v2.store import PMV2Store
 
 
+def reap_until_states(scheduler, store, expected_states, timeout_seconds=5.0):
+    """Wait for real worker completion instead of assuming 100ms process startup.
+
+    CI executors may queue subprocesses longer than an arbitrary sleep; this
+    helper neither dispatches additional work nor changes scheduler semantics.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        scheduler.reap()
+        rows = store.list_assignments()
+        if rows and {row.state for row in rows} == set(expected_states):
+            return rows
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"worker completion timeout: expected={expected_states}, "
+                f"actual={[(row.assignment_id,row.state) for row in rows]}"
+            )
+        time.sleep(0.025)
+
+
 class PMV2SchedulerTests(unittest.TestCase):
     def _config(self, root: Path, command=None):
         (root / "roadmap.md").write_text("", encoding="utf-8")
@@ -95,11 +115,9 @@ class PMV2SchedulerTests(unittest.TestCase):
             scheduler = Scheduler(config=config, store=store, repo=root)
             try:
                 self.assertEqual(scheduler.dispatch_available(), 1)
-                time.sleep(0.1)
-                scheduler.reap()
-                row = store.list_assignments()[0]
-                self.assertEqual(row.state, "validation_ready")
-                self.assertEqual(row.completion_percent, 50)
+                rows = reap_until_states(scheduler, store, {"validation_ready"})
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0].completion_percent, 50)
             finally:
                 scheduler.shutdown()
 
@@ -160,16 +178,10 @@ class PMV2BoundedRetryTests(unittest.TestCase):
             scheduler = Scheduler(config=config, store=store, repo=root)
             try:
                 self.assertEqual(scheduler.dispatch_available(), 2)
-                time.sleep(0.1)
-                scheduler.reap()
-                self.assertEqual({r.state for r in store.list_assignments()},
-                                 {"retry_ready"})
+                reap_until_states(scheduler, store, {"retry_ready"})
                 time.sleep(1.1)
                 self.assertEqual(scheduler.dispatch_available(), 2)
-                time.sleep(0.1)
-                scheduler.reap()
-                rows = store.list_assignments()
-                self.assertTrue(all(r.state == "blocked" for r in rows))
+                rows = reap_until_states(scheduler, store, {"blocked"})
                 self.assertTrue(all(r.attempt_count == 2 for r in rows))
             finally:
                 scheduler.shutdown()
