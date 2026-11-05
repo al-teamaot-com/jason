@@ -113,7 +113,7 @@ def test_owner_release_freeze_denies_under_production_lock_without_mutation(
     monkeypatch, tmp_path,
 ):
     marker = tmp_path / "production-deployment-freeze"
-    marker.touch()
+    marker.write_text("owner freeze must remain unchanged")
     acquired = []
     sentinel = object()
     _isolate_valid_pre_freeze_checks(monkeypatch)
@@ -135,7 +135,7 @@ def test_owner_release_freeze_denies_under_production_lock_without_mutation(
                        match="owner production deployment freeze is active"):
         runner.deploy_production(tmp_path, tmp_path, record())
     assert acquired == ["lock", "unlock"]
-    assert marker.is_file()
+    assert marker.read_text() == "owner freeze must remain unchanged"
     mutation.assert_not_called()
 
 
@@ -147,7 +147,7 @@ def test_freeze_created_while_waiting_for_lock_still_denies(monkeypatch, tmp_pat
 
     def acquire(repo, state_root, item):
         acquired.append("lock")
-        marker.touch()
+        marker.write_text("owner freeze must remain unchanged")
         return sentinel
 
     monkeypatch.setattr(runner, "acquire_production_transaction_lock", acquire)
@@ -166,7 +166,7 @@ def test_freeze_created_while_waiting_for_lock_still_denies(monkeypatch, tmp_pat
                        match="owner production deployment freeze is active"):
         runner.deploy_production(tmp_path, tmp_path, record())
     assert acquired == ["lock", "unlock"]
-    assert marker.is_file()
+    assert marker.read_text() == "owner freeze must remain unchanged"
     mutation.assert_not_called()
 
 
