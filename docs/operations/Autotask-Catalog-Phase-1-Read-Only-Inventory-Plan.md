@@ -140,7 +140,39 @@ The native field metadata does **not** expose a field explicitly called `manufac
 
 Pending Owner decision: whether to accept `Manufacturer Model Product-Type` as the **starting display-name convention** for the IT Product pilot. Approval of the convention would **not** authorize any record updates, invoice activities, billing edits or bulk processing.
 
-## 9. Immediate next authorized work
+## 9. IT Service naming convention — category-specific draft for Owner review (2026-11-05)
+
+**Scope:** Read-only schema analysis and proposal, not final naming policy, an authorized correction plan, billing configuration or a Service record write. The earlier `Manufacturer Model Product-Type` proposal applies only to physical Products when relevant and verified; **it does not apply to Services by default**.
+
+### Verified live Autotask Services native field schema
+
+A governed Jason `service.entity.fields.describe` read of `Services` succeeded. The relevant native fields are:
+
+| Field | Declared length | Purpose/limitation |
+| --- | ---: | --- |
+| `name` | 150 | Required Service display name |
+| `description` | 400 | Optional service description |
+| `manufacturerServiceProvider` | 100 | Optional provider identity; ensure actual correct source |
+| `manufacturerServiceProviderProductNumber` | 50 | Optional provider-associated part number, not the general short name |
+| `catalogNumberPartNumber` | 50 | Optional catalog/part identifier; semantics must be verified |
+| `sku` | 50 | Optional SKU |
+| `invoiceDescription` | 1,000 | Separate field; **not being edited or analyzed for invoicing now** |
+| `externalID`, `internalID` | 50 each | Optional native identifiers; do not repurpose without verification |
+
+The live schema also includes `vendorCompanyID`, `billingCodeID`, `unitCost`, `unitPrice` and `periodType`. Their accurate billing/contract semantics are **not** established by this name-design step. Search by exact names `RMM` and `EDR` returned no match; **this is not evidence the catalog lacks relevant Services**, because alternative display names and match behavior are not exhaustively established.
+
+### Proposed category-specific display-name rules
+
+1. **Managed IT services delivered by AOT:** `Service Function + Coverage or Tier (only where meaningful)`. Example `Managed Endpoint Monitoring` for an offering delivered using **Datto RMM**; example `Endpoint Detection & Response` for a defined EDR offering using **Datto EDR**. These are illustrations, not proof that the offerings are currently contracted/sold as separate billable Services.
+2. **Resold vendor licenses and subscriptions where the named plan itself matters:** `Vendor + Product + Edition/Plan`, such as `Microsoft 365 Business Premium`; preserve the exact plan tier when needed to distinguish licensing entitlements.
+3. **Underlying vendor/platform versus AOT offering:** Do not automatically rename a managed service every time its monitoring/security tool changes. Record a verified vendor/service provider and identifiers in suitable native fields, and describe coverage in `description`. When a vendor-specific SKU, licensing entitlement or technical dependency makes brand identity material, including it in the Service display name may be justified after review.
+4. **Units are not assumed from a name:** Per-user, per-device, per-license, recurring period, inclusions, coverage and contract applicability require separate authoritative evidence. Do not automatically invent standalone RMM/EDR charges if services are contracted as bundle components.
+5. **Keep it concise and portable:** Never force an arbitrary part number into a short name or truncate data; validate actual mapped destination field lengths before approving corrections. A long narrative is not required in a name when `description` and the proper native vendor/identifier fields exist.
+6. **Preserve legacy records:** No automatic mass rename, deletion, record creation, change to billing, contract, invoice description or production integration. Propose a small pilot of verified IT Services for separate exact-plan approval only after Owner accepts the naming principle.
+
+**Owner decision requested:** Is the dual-category principle acceptable—**function/coverage-first for AOT managed services; vendor/product/plan for specific resold subscriptions**? No mutations or bulk action follow merely from an affirmative naming decision.
+
+## 10. Immediate next authorized work
 
 - Preserve the approved agreement and this plan in repository review without touching production.
 - Validate the precise governed search argument and pagination schema through allowed metadata/read operations.
