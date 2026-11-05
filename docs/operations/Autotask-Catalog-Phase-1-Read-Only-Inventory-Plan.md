@@ -172,7 +172,34 @@ The live schema also includes `vendorCompanyID`, `billingCodeID`, `unitCost`, `u
 
 **Owner decision requested:** Is the dual-category principle acceptable—**function/coverage-first for AOT managed services; vendor/product/plan for specific resold subscriptions**? No mutations or bulk action follow merely from an affirmative naming decision.
 
-## 10. Immediate next authorized work
+## 10. IT-MSA catalog family and nontechnical searchability — proposed Owner decision (2026-11-05)
+
+**Owner context:** `IT-MSA` is AOT's intentional recognizable grouping prefix for offerings belonging to its IT managed service agreement family. Both sales and nontechnical staff must be able to find the intended item and distinguish Products from Services without relying on product-specific technical acronyms. The prefix is a business taxonomy and usability signal, **not** automatically a contract assignment or billing authorization.
+
+### Bounded live read evidence
+
+Through authorized Jason `service.entity.search` with a bounded `beginsWith` name filter, the initial page returned **12 IT-MSA Services** and **12 IT-MSA Products**. Both pages reached the requested limit, so **full IT-MSA population is not established**. One bounded `IT-MSA` ServiceBundles prefix query returned zero matching bundle names, which does not establish that no bundles exist under other names.
+
+Examples observed:
+- **Service** `IT-MSA-Datto EDR` — active, provider/service description present.
+- **Service** `IT-MSA-User Support  8-6 M-F` — active.
+- **Service** `IT-MSA-Block Labor Hours` — active.
+- **Product** `IT-MSA-Block Labor Hours` — inactive.
+- **Product and Service** `IT-MSA-BSNBPP` — both active. Identical/similar names across different Autotask entity types require careful selection and historical-dependency checks; no evidence yet establishes that the underlying entries are erroneous duplicates.
+
+### Draft recommendation for owner review — no rename or change authority
+
+1. **Keep the `IT-MSA` family prefix** for services and genuine products specifically included in the AOT IT managed-service offering; standardize punctuation/spacing progressively on new or separately approved records. Do not blanket-prefix independent licenses or ad hoc hardware simply because it is IT-related.
+2. Prefer short *nontechnical* names after the family prefix that state the purchasable function/coverage, for example: `IT-MSA - Managed Endpoint Monitoring`, `IT-MSA - Endpoint Detection and Response`, `IT-MSA - Endpoint Cloud Backup`, `IT-MSA - User Support 8am-6pm`. These are illustrative future names, not corrections or an assertion of how individual items are contracted. Product vendor/service provider names (e.g. Datto RMM, Datto EDR) should appear in the native provider field/description when accurate, and in the catalog name only when that identity distinguishes the offering.
+3. For vendor subscriptions sold specifically within IT-MSA, use `IT-MSA - Vendor Product Plan` when customers/sales need to distinguish entitlements; subscriptions sold outside IT-MSA should follow their appropriate independent family, not receive a misleading IT-MSA prefix.
+4. **Use native Autotask structure in addition to prefix:** Product Category for applicable Products, governed Service billing codes for Services, and native ServiceBundles only for meaningful packaged Service components sold together (not simply to create a visual folder). Confirm those native category and billing-code values before proposing reclassification. The current Services field schema has `billingCodeID` but no general-purpose `productCategory`.
+5. Define a sales-facing catalog guide or validated filters distinguishing **Product vs Service vs Service Bundle**, with approved descriptive keywords/aliases as permitted by native UX. A text prefix alone does not prove selection safety where similar records exist in multiple entity types.
+6. Validate field portability to mapped downstream systems before approving any name; avoid forcing manufacturer part numbers into names, inventing identifiers, duplicating billing or renaming historical records without exact authorization.
+7. Keep AOT's vendor-specific, nontechnical and bundled offerings clearly separated; do not infer contract/billing meaning from `IT-MSA` alone. **No catalog mutation, invoice work, contract change, bulk cleanup, or production modification** is authorized by this proposal.
+
+**One Owner decision requested:** Adopt **`IT-MSA` as an intentional family/search prefix, with plain-language functional names and native record-type/category differentiation** for the eventual limited IT Product/Service naming pilot?
+
+## 11. Immediate next authorized work
 
 - Preserve the approved agreement and this plan in repository review without touching production.
 - Validate the precise governed search argument and pagination schema through allowed metadata/read operations.
