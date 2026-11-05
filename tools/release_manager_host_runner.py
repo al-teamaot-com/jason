@@ -1307,6 +1307,7 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
             "tools/reconcile_managed_unit_delta.py",
             "tools/release_exporter_port_guard.py",
             "tools/release_mobile_approval_consumer.py",
+            "tools/pmv3_integration_queue.py",
             "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
             "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
             "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
