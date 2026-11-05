@@ -55,3 +55,15 @@ modified manifest/policy, revoked identity, and idempotent replay.
 
 Tracked by #2324 and #2316. This does not change the separate one-click
 freeze-exception UX requested in #2316.
+
+## Concurrent source integration
+
+The following open PRs touch the same *files* but not the V3 approval
+contract hunks: #2306 (staff internal-note authority); #2282 and #2177
+(KFS); #2178 (VulScan); #2125 and #2128 (routine writes); #2158, #2156,
+and #2153 (host rollback/timers/pinning). #2269 changes successful Teams
+release-approval response text to clarify independent verification is
+automated, not a requirement for a second human; V3 preserves that
+message and the independent enforcement path. All remain independently
+reviewable and must be re-tested if integrated first. See PR #2325 for
+the exact hunk inventory. Do not merge around an active release lock.
