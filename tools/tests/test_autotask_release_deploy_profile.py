@@ -214,3 +214,48 @@ def test_v13_rollback_declaration_rejects_old_v10_override(
     )
     assert response.returncode!=0
     assert "SELECTED_PROFILE=" not in response.stdout
+
+
+def _staff_note_source_preflight(lab, path, *, declared="internal-note-v1",
+                                  selected="internal-note-v1", rollback=False,
+                                  malformed=False):
+    """Run only real deployment shell preflight with fake docker, never deploy."""
+    root,bins=lab
+    source=(ROOT/path).read_text()
+    marker='\nif [ -z "$REVISION" ]; then'
+    assert marker in source
+    dry=source.split(marker,1)[0]+'\nprintf "STAFF_NOTE_RESULT=%s\\n" "$STAFF_NOTE_PROFILE"\n'
+    p=root/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(dry);p.chmod(0o700)
+    profile=root/'config/aot-staff-internal-note-profile.json'
+    profile.write_text('not-json' if malformed else json.dumps({"schema_version":"1.0","profile":declared}))
+    env={**os.environ,
+         "PATH":str(bins)+os.pathsep+os.environ["PATH"],
+         "FAKE_LIVE_PROFILE":V10,
+         "JASON_PROVIDER_READ_ACTIVATION_PROFILE":V11,
+         "JASON_PROVIDER_READ_ROLLBACK_PROFILE":V10,
+         "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE":selected,
+         "JASON_SOURCE_REVISION_OVERRIDE":"a"*40}
+    if rollback:
+        env['JASON_RUNTIME_PRODUCTION_IMAGE' if 'jason-runtime' in path else 'JASON_MCP_PRODUCTION_IMAGE']=('jason-runtime' if 'jason-runtime' in path else 'jason-mcp')+':rollback-current'
+    return subprocess.run(['bash',str(p)],cwd=root,env=env,text=True,capture_output=True,check=False,timeout=12)
+
+
+@pytest.mark.parametrize('path,_,__',SCRIPTS)
+def test_staff_note_source_activation_preflight(lab,path,_,__):
+    good=_staff_note_source_preflight(lab,path)
+    assert good.returncode==0,good.stderr
+    assert 'STAFF_NOTE_RESULT=internal-note-v1' in good.stdout
+    mismatch=_staff_note_source_preflight(lab,path,selected='')
+    assert mismatch.returncode!=0
+    assert 'STAFF_NOTE_RESULT=' not in mismatch.stdout
+    invalid=_staff_note_source_preflight(lab,path,declared='all-writes')
+    assert invalid.returncode!=0
+    broken=_staff_note_source_preflight(lab,path,malformed=True)
+    assert broken.returncode!=0
+    off=_staff_note_source_preflight(lab,path,declared='off',selected='')
+    assert off.returncode==0
+    assert 'STAFF_NOTE_RESULT=' in off.stdout
+    assert 'STAFF_NOTE_RESULT=internal-note-v1' not in off.stdout
+    rollback=_staff_note_source_preflight(lab,path,rollback=True)
+    assert rollback.returncode==0,rollback.stderr
+    assert 'STAFF_NOTE_RESULT=internal-note-v1' not in rollback.stdout
