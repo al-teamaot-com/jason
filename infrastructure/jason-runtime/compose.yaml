@@ -95,6 +95,8 @@ services:
       JASON_OPENAI_OUTPUT_COST_PER_MILLION: "4.50"
       JASON_DYNAMIC_CONVERSATION_ENABLED: "true"
       JASON_CONVERSATION_EXPERIENCE_ENABLED: "true"
+      # Existing universal/open-world query rollout authority; remains off unless explicitly enabled.
+      JASON_UNIVERSAL_QUERY_ENABLED: ${JASON_UNIVERSAL_QUERY_ENABLED:-false}
       JASON_KFS_ENABLED: ${JASON_KFS_ENABLED:-false}
       JASON_KFS_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/kyocera-kfs/role_id
       JASON_KFS_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/kyocera-kfs/secret_id
