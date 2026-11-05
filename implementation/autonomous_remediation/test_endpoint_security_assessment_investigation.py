@@ -34,7 +34,7 @@ def probe_output(finding, *, valid=True):
         identity = dict(TaskName=finding.name,
                         TaskPath=r"\Lenovo\Vantage\Schedule\\"
                         if finding.name == LENOVO_A.name else r"\Lenovo\\",
-                        executable=finding.path,
+                        executable=finding.path, action_count=1,
                         arguments="" if finding.name == LENOVO_A.name
                         else f'"{LENOVO_B.name}"')
         path = finding.path
@@ -184,6 +184,15 @@ def test_real_datto_readonly_classifier_permits_exact_static_recipes(finding):
     assert not result.sensitive
     assert "$t=" not in command
     assert "Write-Output" not in command
+
+
+def test_extra_scheduled_task_action_is_never_marked_expected():
+    # An attacker can append a malicious second action to a correctly signed
+    # Lenovo first action. Classify the entire task as unresolved.
+    raw = probe_output(LENOVO_A).replace('"action_count":1', '"action_count":2')
+    with pytest.raises(AssessmentProviderError, match="MULTIPLE_ACTIONS"):
+        normalize_investigation_output(
+            expected_finding=LENOVO_A, stdout=raw, stderr="", job_uid=PROBE_JOB)
 
 
 def test_signature_must_match_exact_task_action_executable():

@@ -52,7 +52,8 @@ def _build_task_probe(task_name: str) -> str:
     task_json = (
         task + " | Select-Object TaskName,TaskPath,"
         "@{Name='executable';Expression={$_.Actions[0].Execute}},"
-        "@{Name='arguments';Expression={$_.Actions[0].Arguments}}"
+        "@{Name='arguments';Expression={$_.Actions[0].Arguments}},"
+        "@{Name='action_count';Expression={$_.Actions.Count}}"
         " | ConvertTo-Json -Compress"
     )
     signature_json = (
@@ -143,6 +144,8 @@ def normalize_investigation_output(*, expected_finding: RawFinding,
             raise AssessmentProviderError("PROBE_IDENTITY_DOES_NOT_MATCH_FINDING")
         if not path:
             raise AssessmentProviderError("TASK_ACTION_PATH_MISSING")
+        if type(identity.get("action_count")) is not int or identity["action_count"] != 1:
+            raise AssessmentProviderError("SCHEDULED_TASK_MULTIPLE_ACTIONS_UNVERIFIED")
     else:
         raise AssessmentProviderError("UNSUPPORTED_EVIDENCE_KIND")
     signed_path = str(signed_file.get("Path") or "")
