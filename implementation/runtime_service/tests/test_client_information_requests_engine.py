@@ -282,6 +282,12 @@ def test_request_and_reply_resume_only_once(tmp_path, monkeypatch):
     assert observed == [203]
     assert worker.reconcile() == ()
     assert ledger.find(1001, "JQ-017", EVIDENCE).state == "resumed"
+    # Subsequent delivery and reply reconciliation must remain company-bound.
+    history_queries = [args for cap, args in reads.calls
+                       if cap == "service.notification.history.search"]
+    assert len(history_queries) >= 2
+    assert all(args == {"company_id": 42, "ticket_id": 1001, "page_size": 100}
+               for args in history_queries)
 
 
 def test_uncertain_send_never_retries(tmp_path, monkeypatch):
