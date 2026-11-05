@@ -734,6 +734,109 @@ def _safe(value: Any, *, depth: int = 0) -> Any:
 
 
 
+
+def _project_datto_job_output_window(
+    output: Mapping[str, Any],
+    *,
+    offset: int,
+    maximum_chars: int,
+    selectors: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return one bounded page of a previously governed exact job output read.
+
+    No extra provider call is made. The page is materialized only after the
+    existing identity/authority, exact job/device/component selector, and
+    provider read boundaries have succeeded.
+    """
+    payload = output.get("data")
+    if not isinstance(payload, Mapping):
+        payload = {}
+    data = payload.get("provider_data")
+    if not isinstance(data, Mapping):
+        data = payload
+
+    for key in ("resource_id", "device_uid", "component_uid"):
+        if str(data.get(key) or "") != str(selectors.get(key) or ""):
+            raise ValueError("AUTOMATION_JOB_OUTPUT_WINDOW_SELECTOR_MISMATCH")
+    if str(data.get("stream") or "").casefold() != str(selectors.get("stream") or "").casefold():
+        raise ValueError("AUTOMATION_JOB_OUTPUT_WINDOW_STREAM_MISMATCH")
+
+    outputs = data.get("outputs")
+    if not isinstance(outputs, (list, tuple)):
+        outputs = []
+    requested_component_uid = str(selectors["component_uid"])
+    requested_stream = str(selectors["stream"]).casefold()
+    verified = []
+    for item in outputs[:20]:
+        if not isinstance(item, Mapping):
+            continue
+        if str(item.get("component_uid") or "") != requested_component_uid:
+            raise ValueError("AUTOMATION_JOB_OUTPUT_WINDOW_COMPONENT_MISMATCH")
+        if str(item.get("stream") or "").casefold() != requested_stream:
+            raise ValueError("AUTOMATION_JOB_OUTPUT_WINDOW_STREAM_MISMATCH")
+        verified.append(item)
+
+    # The reviewed output must carry the AOT diagnostic envelope. A replaced
+    # or unrelated component cannot use this extended disclosure path.
+    combined = "".join(str(item.get("text") or "") for item in verified)
+    if (
+        "AOT_DIAGNOSTIC_JSON_BEGIN" not in combined
+        or not combined.startswith("AOT DIAGNOSTIC | ")
+    ):
+        raise ValueError("AUTOMATION_JOB_OUTPUT_DIAGNOSTIC_CONTRACT_REQUIRED")
+
+    total = sum(len(str(item.get("text") or "")) for item in verified)
+    remaining = maximum_chars
+    skip = offset
+    pages = []
+    for item in verified:
+        source = str(item.get("text") or "")
+        if skip >= len(source):
+            skip -= len(source)
+            continue
+        text = source[skip:skip + remaining]
+        skip = 0
+        if not text:
+            break
+        pages.append({
+            "component_uid": requested_component_uid,
+            "stream": requested_stream,
+            "component_name": _safe(item.get("component_name")),
+            "text": text,
+            "truncated_by_provider": item.get("truncated") is True,
+        })
+        remaining -= len(text)
+        if remaining == 0:
+            break
+    returned = maximum_chars - remaining
+    return {
+        "provider": _safe(output.get("provider")),
+        "provider_capability": _safe(output.get("provider_capability")),
+        "data": {
+            "resource_id": str(selectors["resource_id"]),
+            "device_uid": str(selectors["device_uid"]),
+            "component_uid": requested_component_uid,
+            "stream": requested_stream,
+            "outputs": pages,
+            "match_count": data.get("match_count"),
+            "output_bounded": data.get("output_bounded") is True,
+            "discovery_complete": data.get("discovery_complete") is True,
+            "window": {
+                "offset": offset,
+                "requested_chars": maximum_chars,
+                "returned_chars": returned,
+                "available_chars": total,
+                "has_more": offset + returned < total,
+                "provider_output_truncated": (
+                    data.get("output_bounded") is True
+                    or any(item.get("truncated") is True for item in verified)
+                ),
+            },
+        },
+        "raw_provider_evidence_exposed": False,
+    }
+
+
 def _project_endpoint_search(output: Mapping[str, Any]) -> dict[str, Any]:
     """Return only model-useful endpoint search evidence.
 
@@ -1188,6 +1291,7 @@ def _governed_read(
     *,
     capability_name: str,
     arguments: Mapping[str, Any],
+    job_output_window: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     (
         principal,
@@ -1221,6 +1325,10 @@ def _governed_read(
         capability_name=capability_name,
         arguments=arguments,
     )
+    optional_window = (
+        {"job_output_window": job_output_window}
+        if job_output_window is not None else {}
+    )
     return _governed_read_for_identity(
         principal=principal,
         organization=organization,
@@ -1229,6 +1337,7 @@ def _governed_read(
         capability_name=capability_name,
         arguments=arguments,
         preauthorized_context=derived_context,
+        **optional_window,
     )
 
 
@@ -1563,6 +1672,7 @@ def _governed_read_for_identity(
     capability_name: str,
     arguments: Mapping[str, Any],
     preauthorized_context: ExecutionContext | None = None,
+    job_output_window: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     app = _runtime()
 
@@ -1714,6 +1824,14 @@ def _governed_read_for_identity(
                 result.output,
             )
             if capability_name == "automation.component.search"
+            else _project_datto_job_output_window(
+                result.output,
+                offset=job_output_window[0],
+                maximum_chars=job_output_window[1],
+                selectors=arguments,
+            )
+            if capability_name == "automation.job.output.read"
+            and job_output_window is not None
             else _safe(dict(result.output))
         ),
     }
@@ -6993,8 +7111,42 @@ def execute_read_capability(
         }
 
     read_arguments = dict(arguments or {})
+    job_output_window = None
 
     if capability_name == "automation.job.output.read":
+        window_requested = (
+            "output_offset" in read_arguments
+            or "output_chars" in read_arguments
+        )
+        if window_requested:
+            if os.environ.get(
+                "JASON_DATTO_JOB_OUTPUT_PAGING_ENABLED", "false"
+            ).casefold() != "true":
+                return {
+                    "status": "rejected",
+                    "capability": capability_name,
+                    "error_code": "AUTOMATION_JOB_OUTPUT_PAGING_DISABLED",
+                    "provider_called": False,
+                    "do_not_redispatch": True,
+                }
+            offset = read_arguments.pop("output_offset", 0)
+            size = read_arguments.pop("output_chars", 1600)
+            if (
+                type(offset) is not int
+                or type(size) is not int
+                or offset < 0
+                or offset > 65536
+                or size < 1
+                or size > 1800
+            ):
+                return {
+                    "status": "rejected",
+                    "capability": capability_name,
+                    "error_code": "AUTOMATION_JOB_OUTPUT_WINDOW_INVALID",
+                    "provider_called": False,
+                    "do_not_redispatch": True,
+                }
+            job_output_window = (offset, size)
         selector_bundle = read_arguments.get(
             "output_read_arguments"
         )
@@ -7119,6 +7271,27 @@ def execute_read_capability(
                 "do_not_redispatch": True,
             }
 
+        if job_output_window is not None:
+            # A reviewed component must be explicitly enrolled by the
+            # operator. Paging is not available for arbitrary job stdout.
+            allowed_components = {
+                item.strip().casefold()
+                for item in os.environ.get(
+                    "JASON_DATTO_JOB_OUTPUT_PAGING_COMPONENT_UIDS", ""
+                ).split(",") if item.strip()
+            }
+            if (
+                stream not in {"stdout", "stderr"}
+                or component_uid.casefold() not in allowed_components
+            ):
+                return {
+                    "status": "rejected",
+                    "capability": capability_name,
+                    "error_code": "AUTOMATION_JOB_OUTPUT_COMPONENT_NOT_ENROLLED",
+                    "provider_called": False,
+                    "do_not_redispatch": True,
+                }
+
         # Only the exact provider-neutral selectors required by the governed
         # Datto read path are forwarded.
         read_arguments = {
@@ -7150,10 +7323,29 @@ def execute_read_capability(
                 read_arguments
             )
 
-    result = _governed_read(
-        capability_name=capability_name,
-        arguments=read_arguments,
+    optional_window = (
+        {"job_output_window": job_output_window}
+        if job_output_window is not None else {}
     )
+    try:
+        result = _governed_read(
+            capability_name=capability_name,
+            arguments=read_arguments,
+            **optional_window,
+        )
+    except ValueError as exc:
+        if job_output_window is None:
+            raise
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": str(exc)
+            if str(exc).startswith("AUTOMATION_JOB_OUTPUT_")
+            else "AUTOMATION_JOB_OUTPUT_PROJECTION_REJECTED",
+            "failure_domain": "evidence_validation",
+            "provider_called": True,
+            "do_not_redispatch": True,
+        }
 
     if result.get("status") != "succeeded":
         # These are classifications, not authorization shortcuts. Never
