@@ -74,7 +74,28 @@ ContractServices is the **known relationship-coverage gap**: readonly credential
 | Unrelated ongoing Project Jason engineering | Keep branch/PR isolated and avoid interfering with work or changing priorities |
 | Future production activation of maintenance/validation | Separate code review, provider-backed verification, rollback and exact-SHA Owner approval |
 
-## 6. Immediate next authorized work
+## 6. Cross-system field portability requirement (2026-11-05)
+
+**Owner direction:** When standardizing IT Products and Services, the resulting identifiers, names, descriptions and part numbers must remain usable in downstream systems such as QuickBooks. This is a **design and acceptance constraint**, not authorization to rename or modify records. The governing Version 1.4 agreement remains unchanged.
+
+**Verified published QuickBooks field limits (Intuit):**
+
+- QuickBooks Desktop Item Name/Number: **31 characters**. Desktop Item Part Number: **31 characters**; invoice item description: **3,975 characters**. Source: https://quickbooks.intuit.com/learn-support/en-us/help-article/printing-preferences/character-limitations-fields-quickbooks/L7eIy5gE3_US_en_US
+- QuickBooks Online Item Name: **100 characters**, SKU: **100 characters**, and Item Description: **4,000 characters** according to Intuit's Item property reference. Source: https://static.developer.intuit.com/sdkdocs/qbv3doc/ippdotnetdevkitv3/html/850f7b3b-9e8b-679d-9389-6a487f859b39.htm
+
+**Controls before any approved IT Product or Service correction plan:**
+
+1. Verify AOT's actual QuickBooks edition, tenant/company and integration path. Treat published maximums as field-specific reference limits, **not** proof of effective connector/import constraints; where another field or connector is stricter, apply the shortest **verified** effective limit to its mapped export value.
+2. Define separately: a stable short name / accounting item key, the complete human-readable description, manufacturer part number, preferred vendor part number or SKU, product category, billing unit, and source/target durable IDs. Do not concatenate every specification into the short name.
+3. Use a provisional **31-character portable item-name target** while the actual accounting integration remains unverified; it is not a final universal limit for every Autotask field. Preserve full descriptions and identifiers in their authoritative fields.
+4. Before importing or syncing, check field lengths, required values, character-encoding or unsupported character restrictions, uniqueness/case rules, mappings, effective accounting line description and any third-party integration constraints.
+5. **No silent truncation**, invented part numbers, loss of leading zeroes, conversion of long identifiers to scientific notation, or collisions between different Products/Services. Any necessary alias/crosswalk must be deterministic, reversible, uniquely mapped and explicitly approved as part of the applicable correction plan.
+6. Test a representative pilot through the actual authorized target-system integration with readback or safe import-preview evidence and no unintended accounting modifications. Where target write/import testing itself can affect accounting records, require a separate exact authorization before doing it.
+7. Flag nonportable existing records as standards findings, **not** justification for mass renaming or cross-system mutation.
+
+**Acceptance gate:** No proposed Product/Service naming standard is considered production-ready until the relevant mapped fields have verified target-system limits and a passing functional mapping test, or the unverified integration is disclosed as a blocking exception for the affected sync.
+
+## 7. Immediate next authorized work
 
 - Preserve the approved agreement and this plan in repository review without touching production.
 - Validate the precise governed search argument and pagination schema through allowed metadata/read operations.
