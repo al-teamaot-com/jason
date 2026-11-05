@@ -1,0 +1,24 @@
+name: AOT RAT Sweep Source Security and Windows PowerShell 5.1
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/drmm-security/**'
+      - '.github/workflows/aot-rat-sweep-security.yml'
+  push:
+    paths:
+      - 'scripts/drmm-security/**'
+      - '.github/workflows/aot-rat-sweep-security.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-powershell-51:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify PowerShell 5.1 read-only script, classifier and Defender coverage
+        shell: cmd
+        run: |
+          powershell.exe -NoProfile -NonInteractive -File "scripts\drmm-security\test-rat-sweep.ps1" -SourcePath "scripts\drmm-security\rat-sweep.ps1"
