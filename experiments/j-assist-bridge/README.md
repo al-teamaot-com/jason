@@ -34,3 +34,17 @@ Run: `python3 -m unittest discover -s experiments/j-assist-bridge/tests -v`
 Unit tests use synthetic trusted identities and synthetic provider authorizers.
 They are not live provider-backed acceptance or proof of real identity binding.
 The browser extension remains entirely local-preview only.
+
+## JKD-001 integration (preproduction)
+
+`jkd_authority.make_jkd_datto_authorizer` calls Jason's existing
+`IdentityAuthorityService.evaluate` on every session request and requires an
+explicit `j_assist.session.observe` OBSERVE grant, plus a separately injected
+provider-backed **native Datto device-access** check. Neither an AOT standing
+read grant nor a browser-declared identity is sufficient. Denials and revocations
+fail closed. No new grant, new role or token is provisioned by this code.
+
+The native Datto role/permission query and Microsoft identity attestation are
+still missing production adapters. Tests use real JKD service objects but
+synthetic identities and provider permissions. These tests do not prove an
+actual Datto technician's access.
