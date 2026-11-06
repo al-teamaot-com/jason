@@ -140,3 +140,27 @@ delivery, SSO, native Datto permission production adapter, durable
 shared-session record, accepted screenshot DLP, production promotion or
 tested AOT ChatGPT workspace deployment. Integrate with shared-session
 PR #1465 and verified server identity before exposing the tool.
+
+
+## Development-only loopback HTTP contract — 2026-11-06
+
+`loopback_transport.py` exercises a **real HTTP request and response over
+127.0.0.1** using a **synthetic marker** and an injected trusted-authentication
+callback. It uses the established SessionGate to check explicit consent,
+session credentials, exact device binding, tenant, native-permission callback,
+revocation and expiry. The loopback listener allocates an ephemeral port;
+it has no external network exposure or default start-up entry point.
+
+This is a **transport prototype, not a deployed authenticated browser
+integration**. Unit tests inject a mock identity credential and mock native
+Datto permission. The real Chrome extension does **not** connect to this
+loopback endpoint. No screenshots, credentials from live Datto tabs, raw
+terminal content, OpenAI API calls, ChatGPT plan-sharing, or ticket writes
+are accepted. The HTTP response explicitly says the screen was not analyzed.
+
+Before any external-facing service: integrate independently verified AOT
+technician SSO, native Datto authorization, TLS-protected front door and
+origin protections, audited durable provider-neutral sessions (shared-session
+PR #1465), content security/redaction and governed retention. The intended
+subscription-backed ChatGPT interface remains a custom AOT ChatGPT Business
+MCP app; no separate billable model API fallback is permitted.
