@@ -1714,9 +1714,55 @@ def _governed_read_for_identity(
                 result.output,
             )
             if capability_name == "automation.component.search"
+            else _project_print_meter_usage_search(result.output)
+            if capability_name == "print.meter.usage.search"
             else _safe(dict(result.output))
         ),
     }
+
+
+def _project_print_meter_usage_search(output: Mapping[str, Any]) -> dict[str, Any]:
+    """Preserve the governed fleet dataset without weakening global MCP bounds.
+
+    Generic MCP projection intentionally bounds arbitrary lists to 100 items.
+    ``print.meter.usage.search`` is different: its provider/runtime contract
+    already validates a bounded ``limit`` of at most 1000 and the open-world
+    analytics path requires the complete selected fleet before ranking. Keep
+    that capability-specific collection intact up to the source contract while
+    retaining normal recursive secret redaction for every record and all other
+    fields.
+    """
+    root = dict(output or {})
+    raw_data = root.pop("data", None)
+    projected = _safe(root)
+    if not isinstance(projected, Mapping):
+        projected = {}
+    result = dict(projected)
+
+    if not isinstance(raw_data, Mapping):
+        result["data"] = _safe(raw_data)
+        return result
+
+    data = dict(raw_data)
+    raw_records = data.pop("records", None)
+    safe_data = _safe(data)
+    if not isinstance(safe_data, Mapping):
+        safe_data = {}
+    safe_data = dict(safe_data)
+
+    if isinstance(raw_records, (list, tuple)):
+        maximum = 1000
+        safe_data["records"] = [
+            _safe(item) for item in raw_records[:maximum]
+        ]
+        if len(raw_records) > maximum:
+            safe_data["records_bounded"] = True
+            safe_data["records_available"] = len(raw_records)
+    else:
+        safe_data["records"] = _safe(raw_records)
+
+    result["data"] = safe_data
+    return result
 
 
 def _is_canonical_uuid(value: object) -> bool:
@@ -7187,6 +7233,11 @@ def execute_read_capability(
         "endpoint.alert.search",
         "endpoint.software.search",
         "endpoint.patch.search",
+        # This capability has its own source-contract-bounded projector in
+        # _governed_read_for_identity. Reapplying the generic dynamic evidence
+        # boundary here would silently truncate its already-safe 1000-record
+        # fleet dataset back to 100 and make fleet-wide analytics incomplete.
+        "print.meter.usage.search",
     }
 
     if capability_name not in known_projected:

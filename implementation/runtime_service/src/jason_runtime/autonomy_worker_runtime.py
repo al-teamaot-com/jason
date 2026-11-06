@@ -5721,10 +5721,10 @@ class OperationalAutonomyMaintenance:
             return []
         return [item for item in items if isinstance(item, Mapping)]
 
-    def _notification_history_max_id(self, ticket_id: int) -> int:
+    def _notification_history_max_id(self, *, ticket_id: int, company_id: int) -> int:
         data = self._read_data(
             "service.notification.history.search",
-            {"ticket_id": int(ticket_id), "page_size": 100},
+            {"company_id": int(company_id), "ticket_id": int(ticket_id), "page_size": 100},
         )
         ids: list[int] = []
         for item in self._notification_history_items(data):
@@ -5738,11 +5738,12 @@ class OperationalAutonomyMaintenance:
         self,
         *,
         ticket_id: int,
+        company_id: int,
         baseline_id: int,
     ) -> bool:
         data = self._read_data(
             "service.notification.history.search",
-            {"ticket_id": int(ticket_id), "page_size": 100},
+            {"company_id": int(company_id), "ticket_id": int(ticket_id), "page_size": 100},
         )
         for item in self._notification_history_items(data):
             try:
@@ -5777,6 +5778,7 @@ class OperationalAutonomyMaintenance:
         baseline_id = self._notification_baseline_from_reason(work.last_reason)
         if not self._gromelski_notification_copy_observed(
             ticket_id=work.ticket_id,
+            company_id=work.company_id,
             baseline_id=baseline_id,
         ):
             return
@@ -5882,7 +5884,9 @@ class OperationalAutonomyMaintenance:
             note_key,
         )
 
-        baseline_id = self._notification_history_max_id(work.ticket_id)
+        baseline_id = self._notification_history_max_id(
+            ticket_id=work.ticket_id, company_id=work.company_id,
+        )
         if prior != note_fingerprint:
             self.actions.execute(
                 scope,
@@ -5945,6 +5949,7 @@ class OperationalAutonomyMaintenance:
 
         if self._gromelski_notification_copy_observed(
             ticket_id=work.ticket_id,
+            company_id=work.company_id,
             baseline_id=baseline_id,
         ):
             self.store.put(

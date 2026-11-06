@@ -549,6 +549,7 @@ def reconcile(
             current = _current_train_pr(train)
             if current is None:
                 final_sha = api.main_sha()
+                state["main_sha"] = final_sha
                 state["release_lock"] = _release_lock(
                     final_sha, train, reason="release_train_complete_awaiting_production"
                 )
@@ -604,6 +605,7 @@ def reconcile(
                         else:
                             api.set_gate(sha, "success", f"PMV3 selected in {train['train_id']}")
                             merged_sha = api.merge_pull_request(number, sha)
+                            state["main_sha"] = merged_sha
                             api.set_gate(
                                 merged_sha, "success",
                                 f"PMV3 integrated selected PR in {train['train_id']}",
@@ -617,6 +619,7 @@ def reconcile(
                             }
                 if _current_train_pr(train) is None:
                     final_sha = api.main_sha()
+                    state["main_sha"] = final_sha
                     state["release_lock"] = _release_lock(
                         final_sha, train, reason="release_train_complete_awaiting_production"
                     )
@@ -657,6 +660,40 @@ def snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def current_status(*, api: IntegrationApi, spool: Path, release_state: Path) -> dict[str, Any]:
+    """Read live SHA identities without advancing or mutating the integration queue.
+
+    A paused queue may retain its previous cycle after an accepted deployment.
+    Report it as pending reconciliation, not as a pending deployment. Its
+    durable lock is left intact for the next governed queue cycle.
+    """
+    state = load_state(spool / "pmv3-integration-queue-state.json")
+    main_sha = api.main_sha().strip().casefold()
+    if len(main_sha) != 40 or any(c not in "0123456789abcdef" for c in main_sha):
+        raise ValueError("authoritative protected main SHA is unavailable")
+    lkg_sha = production_lkg_revision(release_state)
+    result = snapshot(state)
+    result["stored_main_sha"] = state.get("main_sha")
+    result["stored_production_lkg_sha"] = state.get("production_lkg_sha")
+    result["main_sha"] = main_sha
+    result["production_lkg_sha"] = lkg_sha
+    result["readback_at"] = now()
+    result["queue_state_stale"] = (
+        state.get("main_sha") != main_sha
+        or state.get("production_lkg_sha") != lkg_sha
+    )
+    lock = state.get("release_lock") if isinstance(state.get("release_lock"), Mapping) else None
+    completed = bool(lock and main_sha == lkg_sha
+                     and str(lock.get("candidate_sha") or "") == main_sha)
+    result["release_lock_reconciliation_pending"] = completed
+    if not lkg_sha or main_sha != lkg_sha:
+        # Missing/older production must never be reported as safely idle.
+        result["status"] = "release_locked"
+    elif completed:
+        result["status"] = "release_complete_pending_queue_refresh"
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, required=True)
@@ -664,7 +701,23 @@ def main() -> int:
     parser.add_argument("--release-state", type=Path, required=True)
     parser.add_argument("--repository", default=DEFAULT_REPOSITORY)
     parser.add_argument("--batch-size", type=int, default=3)
+    parser.add_argument("--status-only", action="store_true",
+                        help="Read current GitHub/production revisions without changing queue state")
     args = parser.parse_args()
+    if args.status_only:
+        try:
+            status = current_status(
+                api=GhApi(args.repository), spool=args.spool.resolve(),
+                release_state=args.release_state.resolve(),
+            )
+        except Exception as exc:
+            print("PMV3_INTEGRATION_QUEUE " + json.dumps({
+                "status": "control_failure", "error_type": type(exc).__name__,
+                "reason": str(exc)[:500],
+            }, sort_keys=True))
+            return 1
+        print("PMV3_INTEGRATION_QUEUE " + json.dumps(status, sort_keys=True))
+        return 0
     try:
         state = reconcile(
             api=GhApi(args.repository), spool=args.spool.resolve(),

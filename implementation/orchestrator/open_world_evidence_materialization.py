@@ -218,6 +218,21 @@ def _records(
                     value
                 )
 
+        structural_collections = []
+        for value in data.values():
+            if (
+                isinstance(value, Sequence)
+                and not isinstance(value, (str, bytes, bytearray))
+                and all(isinstance(item, Mapping) for item in value)
+            ):
+                structural_collections.append(tuple(value))
+
+        # Generic fallback for a governed response that exposes exactly one
+        # collection of record mappings under a provider-specific key. This
+        # preserves the open-world boundary without teaching it domain names.
+        if len(structural_collections) == 1:
+            return structural_collections[0]
+
         return (
             data,
         )

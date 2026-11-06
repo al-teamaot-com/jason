@@ -173,6 +173,7 @@ from orchestrator.print_capability_catalog import (
     PRINT_METER_READ,
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
+    PRINT_METER_USAGE_SEARCH,
     PRINT_SUPPLIES_READ,
     register_print_resource_foundation,
 )
@@ -185,6 +186,10 @@ from .aot_operational_read_authority import ensure_aot_technician_read_authority
 from .aot_routine_write_authority import (
     configured_aot_routine_autotask_write,
     ensure_aot_routine_autotask_write_authority,
+)
+from .aot_staff_internal_note_authority import (
+    configured_aot_staff_internal_note_write,
+    ensure_aot_staff_internal_note_authority,
 )
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
@@ -1571,6 +1576,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
 
     identity_repository = SQLiteIdentityRepository(authority_store)
     routine_autotask_write_enabled = configured_aot_routine_autotask_write()
+    staff_internal_note_enabled = configured_aot_staff_internal_note_write()
     identity_authority = IdentityAuthorityService(
         identities=identity_repository,
         grants=SQLiteAuthorityGrantRepository(authority_store),
@@ -1581,6 +1587,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             capabilities=capabilities, providers=providers,
             identities=identity_repository,
             routine_write_enabled=routine_autotask_write_enabled,
+            internal_note_write_enabled=staff_internal_note_enabled,
         ),
     )
     # Mandatory standing observe policy. Authenticated AOT human staff receive
@@ -1589,6 +1596,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     ensure_aot_technician_read_authority(identity_authority)
     ensure_aot_routine_autotask_write_authority(
         identity_authority, enabled=routine_autotask_write_enabled,
+    )
+    ensure_aot_staff_internal_note_authority(
+        identity_authority, enabled=staff_internal_note_enabled,
     )
     ensure_teams_message_send_authority(
         identity_authority, enabled=configured_teams_message_send(),
@@ -2175,6 +2185,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     invokers.register(PRINT_METER_READ, kfs_invoker)
     invokers.register(PRINT_METER_HISTORY_SEARCH, kfs_history_invoker)
     invokers.register(PRINT_METER_USAGE_READ, kfs_history_invoker)
+    invokers.register(PRINT_METER_USAGE_SEARCH, kfs_history_invoker)
     invokers.register(PRINT_SUPPLIES_READ, kfs_invoker)
     invokers.register(PRINT_ALERT_SEARCH, kfs_invoker)
     invokers.register(BACKUP_ENDPOINT_ASSET_SEARCH, backup_net_invoker)

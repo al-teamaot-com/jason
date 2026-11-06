@@ -9,17 +9,40 @@ from pm_v2.scheduler import Scheduler
 from pm_v2.store import PMV2Store
 
 
-def _wait_for_reaped_workers(scheduler: Scheduler, expected: int, timeout_seconds: float = 5.0):
-    """Wait for actual subprocess completion, not an assumed 100-ms CI runtime."""
+def reap_until_states(scheduler, store, expected_states, timeout_seconds=5.0):
+    """Wait for real worker completion instead of assuming 100ms process startup.
+
+    CI executors may queue subprocesses longer than an arbitrary sleep; this
+    helper neither dispatches additional work nor changes scheduler semantics.
+    """
     deadline = time.monotonic() + timeout_seconds
-    results = []
-    while len(results) < expected and time.monotonic() < deadline:
-        results.extend(scheduler.reap())
-        if len(results) < expected:
-            time.sleep(0.02)
-    if len(results) != expected:
-        raise AssertionError(f"expected {expected} completed workers, got {len(results)}")
-    return results
+    while True:
+        scheduler.reap()
+        rows = store.list_assignments()
+        if rows and {row.state for row in rows} == set(expected_states):
+            return rows
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"worker completion timeout: expected={expected_states}, "
+                f"actual={[(row.assignment_id,row.state) for row in rows]}"
+            )
+        time.sleep(0.025)
+
+
+def dispatch_until_count(scheduler, expected_count, timeout_seconds=5.0):
+    """Wait for independently timed retry delays without changing scheduler semantics."""
+    deadline = time.monotonic() + timeout_seconds
+    total = 0
+    while total < expected_count:
+        total += scheduler.dispatch_available()
+        if total >= expected_count:
+            return total
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"dispatch timeout: expected={expected_count}, actual={total}"
+            )
+        time.sleep(0.025)
+    return total
 
 
 class PMV2SchedulerTests(unittest.TestCase):
@@ -108,10 +131,9 @@ class PMV2SchedulerTests(unittest.TestCase):
             scheduler = Scheduler(config=config, store=store, repo=root)
             try:
                 self.assertEqual(scheduler.dispatch_available(), 1)
-                _wait_for_reaped_workers(scheduler, 1)
-                row = store.list_assignments()[0]
-                self.assertEqual(row.state, "validation_ready")
-                self.assertEqual(row.completion_percent, 50)
+                rows = reap_until_states(scheduler, store, {"validation_ready"})
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0].completion_percent, 50)
             finally:
                 scheduler.shutdown()
 
@@ -172,14 +194,9 @@ class PMV2BoundedRetryTests(unittest.TestCase):
             scheduler = Scheduler(config=config, store=store, repo=root)
             try:
                 self.assertEqual(scheduler.dispatch_available(), 2)
-                _wait_for_reaped_workers(scheduler, 2)
-                self.assertEqual({r.state for r in store.list_assignments()},
-                                 {"retry_ready"})
-                time.sleep(1.1)
-                self.assertEqual(scheduler.dispatch_available(), 2)
-                _wait_for_reaped_workers(scheduler, 2)
-                rows = store.list_assignments()
-                self.assertTrue(all(r.state == "blocked" for r in rows))
+                reap_until_states(scheduler, store, {"retry_ready"})
+                self.assertEqual(dispatch_until_count(scheduler, 2), 2)
+                rows = reap_until_states(scheduler, store, {"blocked"})
                 self.assertTrue(all(r.attempt_count == 2 for r in rows))
             finally:
                 scheduler.shutdown()

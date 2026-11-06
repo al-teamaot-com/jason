@@ -30,6 +30,7 @@ PRINT_DEVICE_READ = "print.device.read"
 PRINT_METER_READ = "print.meter.read"
 PRINT_METER_HISTORY_SEARCH = "print.meter.history.search"
 PRINT_METER_USAGE_READ = "print.meter.usage.read"
+PRINT_METER_USAGE_SEARCH = "print.meter.usage.search"
 PRINT_SUPPLIES_READ = "print.supplies.read"
 PRINT_ALERT_SEARCH = "print.alert.search"
 KYOCERA_KFS_PROVIDER = "kyocera_kfs"
@@ -40,6 +41,7 @@ _PRINT_CAPABILITIES = (
     PRINT_METER_READ,
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
+    PRINT_METER_USAGE_SEARCH,
     PRINT_SUPPLIES_READ,
     PRINT_ALERT_SEARCH,
 )
@@ -55,6 +57,12 @@ def _read_capability(
     operation: str,
     selector_keys: str,
     fact_hints: str,
+    query_shape: str = "",
+    canonical_facts: str = "",
+    selector_required: bool = True,
+    resource_schema: dict | None = None,
+    query_filter_bindings: dict | None = None,
+    field_descriptions: dict | None = None,
 ) -> CapabilityDefinition:
     return CapabilityDefinition(
         capability_name=name,
@@ -108,6 +116,12 @@ def _read_capability(
             "operation": operation,
             "selector_keys": selector_keys,
             "fact_hints": fact_hints,
+            "query_shape": query_shape,
+            "canonical_facts": canonical_facts,
+            "selector_required": "true" if selector_required else "false",
+            "resource_schema": resource_schema or {},
+            "query_filter_bindings": query_filter_bindings or {},
+            "field_descriptions": field_descriptions or {},
             "scope_model": "aot_internal_dealer_fleet",
             "client_scope_status": "not_exposed_until_explicit_kfs_autotask_mapping",
         },
@@ -123,7 +137,7 @@ def print_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Locate managed copier and MFP devices in AOT's internal dealer fleet.",
             resource_types="print_device",
             operation="search",
-            selector_keys="serial_number,device_id,name,hostname,ip_address",
+            selector_keys="serial_number,device_id,name,hostname,ip_address,asset_number,equipment_id,model_name,customer_name,location,search,group_id,limit,offset",
             fact_hints="copier printer MFP Kyocera serial model device customer location",
         ),
         _read_capability(
@@ -165,6 +179,58 @@ def print_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="read",
             selector_keys="resource_id,device_id,serial_number,month,start,end,timezone,counters",
             fact_hints="monthly usage last month meter delta impressions pages copies prints color mono scans period usage",
+        ),
+        _read_capability(
+            now=now,
+            name=PRINT_METER_USAGE_SEARCH,
+            display_name="Search Print Device Period Usage",
+            purpose=(
+                "Return bounded per-device print, copy, color, mono and scan usage "
+                "records for a requested period so Jason can answer novel analytical questions."
+            ),
+            resource_types="print_usage",
+            operation="search",
+            selector_keys="month,start,end,timezone,boundary_hours,device_id,serial_number,limit",
+            fact_hints=(
+                "period usage impressions pages copies prints color mono scans customer "
+                "company device serial equipment historical fleet analytics compare trend"
+            ),
+            selector_required=False,
+            resource_schema={
+                "device_id": "",
+                "serial_number": "",
+                "equipment_id": "",
+                "model_name": "",
+                "customer_name": "",
+                "customer_mapping_status": "",
+                "customer_mapping_source": "",
+                "period_start": "",
+                "period_end": "",
+                "total_impressions": 0,
+                "black_white_impressions": 0,
+                "color_impressions": 0,
+                "printer_impressions": 0,
+                "copier_impressions": 0,
+                "scans": 0,
+                "usage_status": "",
+                "inventory_coverage_verified": False,
+                "inventory_run_id": "",
+                "inventory_reading_at": "",
+            },
+            query_filter_bindings={
+                "period_start": {"gte": "start", "gt": "start", "lte": "end", "lt": "end"},
+                "period_end": {"gte": "start", "gt": "start", "lte": "end", "lt": "end"},
+                "device_id": {"eq": "device_id"},
+                "serial_number": {"eq": "serial_number"},
+            },
+            field_descriptions={
+                "period_start": "lower boundary of the requested usage interval; use for relative-time lower bounds",
+                "period_end": "upper boundary of the requested usage interval; use for relative-time upper bounds",
+                "total_impressions": "total print/copy impressions during the requested interval",
+                "customer_name": "verified customer/company identity when available",
+                "usage_status": "verified when required period meter boundaries reconcile; otherwise exception",
+                "inventory_coverage_verified": "whether the reporting-period fleet inventory reconciled to the successful KFS snapshot",
+            },
         ),
         _read_capability(
             now=now,

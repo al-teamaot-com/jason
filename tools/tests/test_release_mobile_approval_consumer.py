@@ -31,7 +31,7 @@ RID = "release-" + SHA[:16]
 
 def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=None,
             review_only=False, renewed=False, canonical_owner=False,
-            reviewed_version="2.0", release_risk=None):
+            reviewed_version="2.0", release_risk=None, replacement_only=False):
     from implementation.runtime_service.tests.test_mobile_release_approval import (
         policy_file, reviewed_policy_file, mark_release_high_impact, release_record,
     )
@@ -47,6 +47,9 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
     root, release_path = release_record(tmp_path)
     if reviewed:
         mark_release_high_impact(root, risk=release_risk or "production_control_core")
+    if replacement_only:
+        assert reviewed
+        review_only = True
     if review_only:
         assert reviewed
         record = json.loads(release_path.read_text(encoding="utf-8"))
@@ -57,11 +60,36 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
             "recorded_at": NOW.isoformat(),
         }
         release_path.write_text(json.dumps(record), encoding="utf-8")
+    if replacement_only:
+        record = json.loads(release_path.read_text(encoding="utf-8"))
+        record["manual_scope_review"] = {"scope_sha256": "d" * 64}
+        release_path.write_text(json.dumps(record), encoding="utf-8")
+        freeze = root / "production-deployment-freeze"
+        freeze.write_text('{"status":"active","scope":"manual-and-automatic-production-promotions"}\n')
+        freeze.chmod(0o600)
+        freeze_sha = hashlib.sha256(freeze.read_bytes()).hexdigest()
+        source = root / "owner-explicit-unfreeze-receipts" / (RID + ".json")
+        transaction = root / "owner-unfreeze-receipts" / (RID + ".json")
+        source.parent.mkdir(); transaction.parent.mkdir()
+        common = {"release_id": RID, "candidate_sha": SHA,
+                  "rollback_sha": ROLLBACK, "scope_sha256": "d" * 64,
+                  "freeze_sha256_before": freeze_sha,
+                  "freeze_sha256_after": freeze_sha, "freeze_restored": True}
+        source.write_text(json.dumps({**common, "schema_version": "1.0",
+            "authorization": "explicit_exact_sha_owner_unfreeze", "status": "consumed",
+            "standing_authority": False, "automatic_publish_authority": False}))
+        source.chmod(0o600)
+        transaction.write_text(json.dumps({**common, "schema_version": "2.0",
+            "authorization": "explicit_owner_one_transaction_unfreeze",
+            "status": "deployment_returned",
+            "release_state_after": "production_eligible"}))
+        transaction.chmod(0o600)
     ccc = tmp_path / "ccc"
     ccc.mkdir()
     policy = read_mobile_release_policy(policy_path)
     evidence = read_eligible_release(
         root, RID, policy, allow_existing_owner_approval=review_only,
+        replacement_unfreeze_only=replacement_only,
     )
     old_request = (
         create_mobile_release_request(evidence, policy, now=NOW - timedelta(minutes=20))
@@ -1177,3 +1205,44 @@ def test_v3_repair_pending_click_is_invalidated_by_private_policy_change(tmp_pat
         flow.handle(**args)
     assert repo.accepted_decision(request.approval_id) is None
     assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+def test_issue_2339_second_signed_teams_decision_only_records_replacement_grant(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, replacement_only=True,
+    )
+    assert request.metadata['replacement_unfreeze_only'] is True
+    assert 'review_only' not in request.metadata
+    assert flow.handle(**args)['approval_status'] == 'approved'
+    assert json.loads(release_path.read_text())['owner_approval']['approved'] is True
+    seen=[]
+    opts['approve_release'] = lambda *a,**k: pytest.fail(
+        'replacement-only signed approval must never duplicate release approval')
+    opts['record_replacement_unfreeze'] = lambda _repo,_root,**kw: seen.append(kw)
+    assert consume_mobile_release_decisions(**opts)==1
+    assert len(seen)==1
+    assert seen[0]['approval_id']==request.approval_id
+    assert seen[0]['request_metadata']['replacement_lineage']==request.metadata['replacement_lineage']
+    assert seen[0]['candidate_sha']==SHA
+    assert seen[0]['expires_at']==request.expires_at
+    assert seen[0]['signed_evidence_sha256']
+    processed=opts['state_root']/'mobile-release-decisions-processed'/(request.approval_id+'.json')
+    assert json.loads(processed.read_text())['replacement_unfreeze_only'] is True
+    assert consume_mobile_release_decisions(**opts)==0
+    assert len(seen)==1
+
+
+def test_issue_2339_signed_replacement_fails_closed_on_changed_predecessor(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, replacement_only=True,
+    )
+    assert flow.handle(**args)['approval_status']=='approved'
+    tx=opts['state_root']/'owner-unfreeze-receipts'/(RID+'.json')
+    changed=json.loads(tx.read_text());changed['freeze_sha256_after']='0'*64
+    tx.write_text(json.dumps(changed))
+    opts['approve_release']=lambda *a,**kw: pytest.fail('must not create release grant')
+    opts['record_replacement_unfreeze']=lambda *a,**kw: pytest.fail('must not create replacement grant')
+    with pytest.raises(PermissionError,match='predecessor'):
+        consume_mobile_release_decisions(**opts)
+    assert not (opts['state_root']/'mobile-release-decisions-processed'/(
+        request.approval_id+'.json')).exists()
