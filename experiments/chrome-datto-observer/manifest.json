@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AOT Jason Assistant - Datto (Local Prototype)",
-  "version": "0.1.2",
-  "description": "Technician-initiated local preview of a Datto RMM tab; Jason connection is not yet enabled.",
+  "name": "J-Assist - Datto (Local Prototype)",
+  "version": "0.1.3",
+  "description": "Technician-initiated local Datto preview for J-Assist; no remote transmission in this version.",
   "permissions": [
     "activeTab",
     "sidePanel"
@@ -11,7 +11,7 @@
     "service_worker": "worker.js"
   },
   "action": {
-    "default_title": "Open AOT Jason Assistant"
+    "default_title": "Open J-Assist"
   },
   "side_panel": {
     "default_path": "panel.html"

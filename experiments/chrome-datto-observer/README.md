@@ -1,6 +1,10 @@
+# J-Assist — Datto local prototype
+
+**Naming update (v0.1.3):** Staff-facing name **J-Assist**. Action: **Start assisting**. The extension remains technician-controlled and local-preview only; it does not yet send data to Jason.
+
 # Jason Assistant — Datto local prototype
 
-**Naming update (v0.1.2):** The staff-facing product is **Jason Assistant**, with a Datto mode and a **Start assisting** consent action. This version is still only a local preview: Jason does not receive or analyze the screen. The historical branch/PR and filesystem directory retain the earlier development codename for traceability.
+**Previous naming iteration (v0.1.2):** The staff-facing product was briefly called **Jason Assistant**, with a Datto mode and a **Start assisting** consent action. This version is still only a local preview: Jason does not receive or analyze the screen. The historical branch/PR and filesystem directory retain the earlier development codename for traceability.
 
 # Historical implementation notes (formerly Datto Observer)
 
