@@ -72,3 +72,84 @@ To update an installed unpacked extension, replace its files with this version, 
 After **Start assisting**, select **Capture screenshot** to request a **fresh, active Datto tab** frame from the existing authorization-checked worker. Review it in the side panel, then explicitly click **Download reviewed screenshot**. File name carries UTC capture timestamp and no client details. Screenshots are never auto-attached to Autotask, sent to Jason, uploaded or stored in extension storage. The prepared evidence and download link are invalidated on Stop, inactive tab, failed capture, tab navigation/revocation, and panel close. The existing Chrome activeTab capture permission and worker authorization rules are unchanged.
 
 **Visual acceptance required:** With a non-sensitive authorized Datto test tab active, take a screenshot and download it. Confirm the image depicts that test tab, the screenshot link disappears on Stop or tab switch, and no Autotask attachment is created. Manual redaction and ticket attachment remain technician responsibility.
+
+## Version 0.1.7 — copy reviewed screenshot for ChatGPT (manual subscription workflow)
+
+After an authorized Datto session is explicitly started, the technician
+clicks **Capture screenshot**, visually reviews the result, then chooses
+**Copy reviewed screenshot**. The extension converts that selected JPEG
+to a PNG in memory and writes it to the system clipboard, using the added
+`clipboardWrite` permission. The technician must then independently paste
+the image into an approved AOT ChatGPT conversation; no ChatGPT/Datto
+credentials, OpenAI API key or subscription token is requested. The
+extension itself never uploads the image, opens a network connection to
+Jason, or submits the image to ChatGPT. No API inference is used.
+
+Copying is refused before capture, when the selected tab changes, and after
+Stop/closure. The extension clears its download link and internal preview
+on Stop but **cannot erase a screenshot already copied to the operating
+system clipboard**. Technicians must avoid secrets, passwords, protected
+health data or prohibited client information and clear/replace the
+clipboard when finished. Clipboard writes are deliberate user gestures,
+not background capture. Native Chrome permission `clipboardWrite` is
+an additional permission in v0.1.7; do not silently upgrade existing
+staff installations without the technician knowing.
+
+**Not end-to-end automation:** An authorized technician's manual copy/paste
+uses the technician's normal ChatGPT workspace interface and subscription.
+It does not prove custom MCP registration, secure automatic screenshot
+delivery, Datto native-permission evidence, or Jason model analysis via the
+extension. Those remain gated separately.
+
+## Version 0.1.8 — simplified single-action panel (UI shell only)
+
+The panel now prominently displays **Send to Jason** and collapses the
+existing local preview, capture, copy and download controls into **Advanced**.
+Existing v0.1.7 local capabilities remain available. The new primary control
+is **disabled with an explicit disconnected status**, not simulated.
+
+Target approved one-click transaction (future release):
+1. Verify selected active HTTPS Datto tab and exact device UID.
+2. Authenticate technician with verified Entra identity, map to current
+   individually authenticated Datto technician active security-level evidence.
+3. Start or reuse exact device/tenant/technician-scoped authorized session.
+4. Capture a fresh screenshot on explicit click. Prefer actual supported
+   terminal text only when independently authorized and its origin provable;
+   do not scrape arbitrary webpage DOM or infer text from an image.
+5. Perform server-side DLP/content checks, then send over TLS with bounded
+   size, image hash, session nonce and single-use receipt. No silent captures.
+6. Show **Sent to Jason** only after verified server receipt; fail clearly on
+   mismatch, session expiry, closed tab, unauthorized device, or redaction
+   rejection. Make evidence retrievable by the same user's authenticated
+   ChatGPT Business custom Jason MCP connection, with no billable API fallback.
+
+Production blockers: real verified Datto technician permission adapter,
+Entra browser OAuth, securely audited session persistence/recovery,
+TLS image intake and content controls, MCP image retrieval and real
+AOT ChatGPT workspace end-to-end acceptance. Do not enable the button
+until those gates pass. This release is a layout/test prototype only.
+
+## Governed one-click Send to Jason transport contracts (2026-11-06)
+
+`send_once.js` coordinates one explicit click in **testable,
+dependency-injected code**. It demands live trusted technician, Datto
+device, session, image-review and HTTPS readiness before capture. It
+requires the same tab after capture and after receipt and verifies image
+size, JPEG format, hash and the exact server receipt. No success is
+reported for a rejected response or expired/changed session. No
+production sender is registered; the existing v0.1.8 button remains
+disabled so it cannot imply delivery.
+
+`authenticated_transport.js` accepts a pinned, build-time HTTPS Jason
+origin and a separately verified bearer/token adapter, refuses redirects,
+omits cookies and requires an exact accepted receipt. It does NOT
+implement Microsoft OAuth and never obtains tokens from the Datto tab
+or user-provided JavaScript. There is no configured endpoint or
+working runtime auth provider. No new extension distribution was made
+from these contracts.
+
+These contracts are tested against mocked providers. A real AOT
+Chrome Entra SSO client registration, exact trusted Datto active-user
+permission evidence and production Jason endpoint must be completed
+before activation. Server preproduction tests exercise the equivalent
+binary JPEG format and receipt.

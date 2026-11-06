@@ -2,8 +2,8 @@
 const start=document.querySelector("#start"),stop=document.querySelector("#stop"),status=document.querySelector("#status"),stamp=document.querySelector("#stamp"),frame=document.querySelector("#frame");
 let tabId=null,sessionId=null,timer=null,running=false,pending=false;
 const scope=document.querySelector("#scope");
-const screenshot=document.querySelector("#screenshot"),download=document.querySelector("#download"),evidenceFrame=document.querySelector("#evidence-frame"),evidenceStatus=document.querySelector("#evidence-status");
-const clearEvidence=()=>{download.removeAttribute("href");download.hidden=true;evidenceFrame.removeAttribute("src");evidenceFrame.hidden=true;evidenceStatus.textContent="No screenshot prepared";};
+const screenshot=document.querySelector("#screenshot"),copyForChatGPT=document.querySelector("#copy-for-chatgpt"),download=document.querySelector("#download"),evidenceFrame=document.querySelector("#evidence-frame"),evidenceStatus=document.querySelector("#evidence-status");
+const clearEvidence=()=>{copyForChatGPT.disabled=true;download.removeAttribute("href");download.hidden=true;evidenceFrame.removeAttribute("src");evidenceFrame.hidden=true;evidenceStatus.textContent="No screenshot prepared";};
 const clearCapture=()=>{screenshot.disabled=true;clearEvidence();};
 const evidenceFilename=timestamp=>"j-assist-evidence-"+timestamp.replace(/[:.]/g,"-")+".jpg";
 const request=m=>chrome.runtime.sendMessage(m);
@@ -66,10 +66,51 @@ screenshot.addEventListener("click",async()=>{
     download.href=result.image;
     download.download=evidenceFilename(result.capturedAt);
     download.hidden=false;
-    evidenceStatus.textContent="Review image before downloading. Not attached to Autotask.";
+    copyForChatGPT.disabled=false;
+    evidenceStatus.textContent="Review screenshot before copying or downloading. Never paste sensitive data.";
   }catch(error){
     if(running&&currentSession===sessionId){clearEvidence();evidenceStatus.textContent="Screenshot error: "+error.message;}
   }finally{if(running&&currentSession===sessionId&&currentTab===tabId)screenshot.disabled=false;}
+});
+copyForChatGPT.addEventListener("click",async()=>{
+  if(!running||copyForChatGPT.disabled||evidenceFrame.hidden||!evidenceFrame.src)return;
+  const currentSession=sessionId,currentTab=tabId,source=evidenceFrame.src;
+  copyForChatGPT.disabled=true;
+  try{
+    const [active]=await chrome.tabs.query({active:true,currentWindow:true});
+    if(!running||sessionId!==currentSession||active?.id!==currentTab){
+      clearEvidence();evidenceStatus.textContent="Capture no longer belongs to the active tab.";return;
+    }
+    if(!navigator.clipboard?.write||typeof ClipboardItem!=="function"){
+      throw Error("Image clipboard is unavailable in this browser.");
+    }
+    const blobPromise=new Promise((resolve,reject)=>{
+      const image=new Image();
+      image.onerror=()=>reject(Error("Cannot prepare clipboard image."));
+      image.onload=()=>{
+        try{
+          const canvas=document.createElement("canvas");
+          canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+          canvas.getContext("2d").drawImage(image,0,0);
+          canvas.toBlob(blob=>{
+            if(!blob||!running||sessionId!==currentSession||evidenceFrame.src!==source){
+              reject(Error("Session changed or screenshot was cleared."));return;
+            }
+            resolve(blob);
+          },"image/png");
+        }catch(error){reject(error);}
+      };
+      image.src=source;
+    });
+    await navigator.clipboard.write([new ClipboardItem({"image/png":blobPromise})]);
+    if(running&&sessionId===currentSession&&evidenceFrame.src===source){
+      evidenceStatus.textContent="Copied locally. Paste manually into approved AOT ChatGPT; clipboard retains the image until replaced.";
+    }
+  }catch(error){
+    if(running&&sessionId===currentSession) evidenceStatus.textContent="Clipboard copy failed: "+error.message;
+  }finally{
+    if(running&&sessionId===currentSession&&!evidenceFrame.hidden)copyForChatGPT.disabled=false;
+  }
 });
 window.addEventListener("pagehide",()=>{
   clearCapture();clearPreview();

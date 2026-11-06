@@ -250,3 +250,96 @@ cross-service revocation must be engineered and accepted before
 production. No real screenshot upload, live SSO issuance, Datto signed-in
 security-level provider API, ChatGPT workspace connection or model
 analysis was enabled.
+
+## One-click screenshot intake: fail-closed preproduction component (2026-11-06)
+
+`screen_evidence_intake.py` implements an independent **in-memory**
+preproduction screenshot evidence receipt contract. The intended future
+Send-to-Jason HTTP endpoint must supply a verified server-side principal
+and SessionGate credential. This contract enforces exact device/session
+binding, fresh native authorization on receipt and retrieval, bounded image
+bytes (1 MiB), SHA-256 integrity, one-use request nonce, image magic checks,
+a mandatory external content-review callback, a second authorization check
+*after* review, a server-issued receipt and 120-second image expiration.
+The returned receipt explicitly says `analyzed_by_model: false`.
+Missing/rejected DLP/review denies receipt; no default allow-all exists.
+Eight new Python tests cover synthetic accepted evidence, cross-tenant/
+technician/device isolation, replay, permission loss, review failures,
+size/hash errors and expiry.
+
+**Do not expose this class through a production or remote endpoint.**
+Tests use synthetic data and deliberately lightweight image-header
+recognition, NOT full image parsing or malware scanning. In-memory images
+and nonces are NOT durable, encrypted-at-rest, crash recoverable or safe
+for multi-worker production. The class is not wired into the Chrome
+extension, remote HTTPS ingress, or ChatGPT MCP image retrieval.
+Provider-backed technician access, a real data-loss-prevention/redaction
+engine, strict CORS/origin, OAuth, audit/retention and malicious-image
+handling remain acceptance gates. This step does not send or analyze any
+client image.
+
+## Loopback-only HTTP screenshot receipt acceptance (2026-11-06)
+
+The `/v1/test-image` route is present ONLY in the test loopback
+server and only when an isolated test image-intake instance is injected.
+It defaults to **404** without that instance. Four new real HTTP tests
+exercise binary payload transfer, SHA-256 readback, session-device
+authorization and opaque server receipt, missing bearer, wrong checksum,
+wrong device, replay, revoked Datto callback, media-type rejection and
+default route closure. The HTTP response labels itself
+`production_ingress:false` and `analyzed_by_model:false`.
+
+The tests use a synthetic image-header fixture and a deliberately injected
+test reviewer. No live screenshot was transmitted. The server listens only
+on `127.0.0.1`, with no remote port, public TLS termination, OAuth flow,
+origin verification or persistent evidence store. It MUST NOT be used for
+client content. The original one-click J-Assist button remains disabled
+and has no fake success path. Required production work: verified browser
+identity and Datto user permission, encrypted evidence persistence and
+retention, independent content scanning/redaction, audited remote HTTPS
+ingress, ChatGPT MCP image fetch under matching technician authority,
+and actual technician acceptance.
+
+## One-click send orchestration + MCP read-side contract (2026-11-06)
+
+`experiments/chrome-datto-observer/send_once.js` is a new pure
+background-action coordinator. It rejects an incomplete trusted
+authentication/session/Datto-permission contract BEFORE capturing any
+screen, then checks exact tab continuity, size and type, image hash,
+receipt binding and a post-delivery tab recheck. The send reports success
+only with a matching server-issued receipt. Nine tests cover fail-closed
+capture, bad image, revoked tab and forged acknowledgements. This
+coordinator is **not yet connected to a real Chrome OAuth/HTTPS sender**;
+the v0.1.8 Send button stays disabled.
+
+`chatgpt_image_tool.py` is an in-process, read-only connector contract
+for a future registered Jason MCP image tool. It obtains the confidential
+session credential server-side and revalidates the current technician,
+Datto device, receipt and expiration before yielding base64 image
+evidence with MIME type. It does not run or charge a model, does not
+extract PowerShell text, and does not grant an unverified principal any
+access. Four tests cover exact image bytes, authorization isolation,
+revocation and missing credentials. This adapter is **not registered**
+in the production Jason MCP service or in an AOT ChatGPT workspace.
+
+**Release blockers remain:** verified browser-initiated Entra OAuth and
+Datto active-user Web Remote permission, reviewed encrypted audit and
+image storage, real image content scan/redaction, authorized HTTPS
+ingress, cross-process lifecycle persistence, custom MCP registration
+and genuine AOT ChatGPT Business acceptance. Do not enable live upload
+or declare end-to-end success based on the synthetic tests.
+
+## Browser-shaped JPEG receipt: server-held session authorization
+
+The *loopback-only* `/v1/jassist/image` preproduction route exists
+only when BOTH a test image intake service and a server-held session
+credential resolver are explicitly injected. It defaults to HTTP 404
+otherwise and rejects `X-JAssist-Session-Token` from the browser.
+It handles JPEG (Chrome capture format) as well as PNG, obtains the
+session credential privately from its injected resolver, rechecks
+the underlying SessionGate and emits a receipt with `status:accepted`
+and `production_ingress:false`. It is still HTTP on **127.0.0.1 only**
+and does not authenticate real Entra tokens or attest active signed-in
+Datto permissions. These are **test credentials and synthetic marker
+envelopes**, not real screenshot parsing or DLP. Do NOT expose the route
+outside the local test host or deploy the test reviewer.
