@@ -10,7 +10,9 @@ The UX is intended for any authenticated **authorized AOT technician**, not one 
 2. Open an approved test device in a Datto RMM tab matching `https://<region>.rmm.datto.com/...`.
 3. Click the extension action on that tab; **Start observing** in the side panel.
 4. Verify the local image preview changes after a visible, read-only PowerShell diagnostic. The preview is the **whole tab**, not DOM-extracted text. No terminal access is asserted.
-5. Switch tabs: observation must pause; click **Stop**: preview is removed; close or navigate the Datto tab: session must cease.
+5. Switch tabs: observation must pause and clear the preview, then resume upon returning; click **Stop**: preview is removed.
+6. Navigate the observed tab away from Datto, return, and verify the old session stays revoked. The panel should show a stopped state and permit an explicit new Start.
+7. Close the panel and reopen it: observation must remain stopped and show no retained screenshot.
 
 ## Controls and limitations
 - No commands, no Datto API calls, no credentials, no network upload, no persistence and no Jason model connection.
@@ -19,3 +21,9 @@ The UX is intended for any authenticated **authorized AOT technician**, not one 
 - Worker memory is not durable. If the service worker is suspended, observation may stop; do not treat this as a reliable session ledger.
 - For a real staff rollout: verify supported Datto rendering/transport, implement explicit staff SSO + Datto/tenant/device authorization, per-session grants/revocation, server-side redaction and streaming, bounded data retention, multi-tenant evidence isolation, browser disconnect behavior, audit and tests.
 - Loading this prototype locally is a development experiment, not production authorization.
+
+## Version 0.1.1 navigation fix
+- Navigation (including a change between Datto devices) revokes the bound session rather than leaving the panel in a half-running error state.
+- Background messages distinguish paused (inactive tab) from ended (revoked) observation. Pausing clears the stale preview; ending restores the Start control.
+- Each Start receives a fresh session ID, and in-flight frames are rejected if the tab changes or the session is stopped/restarted before capture completes.
+- This patch addresses a code-level defect identified after a technician reported unexpected Test 5 behavior. The cause of the exact observed error has not yet been independently established; interactive retest is required.

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AOT Jason - Datto Observer (Local Prototype)",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Technician-started, local-only read-only observation of an active Datto RMM browser tab.",
   "permissions": [
     "activeTab",
