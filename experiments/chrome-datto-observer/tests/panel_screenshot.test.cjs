@@ -100,3 +100,14 @@ test("changing active tab prevents clipboard copying",async()=>{
  assert.equal(h.written.length,0);
  assert.equal(h.select("copy-for-chatgpt").disabled,true);
 });
+
+test("one primary Send to Jason control is unavailable until authenticated transport exists",()=>{
+ const html=fs.readFileSync(path.join(__dirname,"..","panel.html"),"utf8");
+ assert.match(html,/<button id="send-to-jason" disabled[^>]*>Send to Jason<\/button>/);
+ assert.match(html,/<details id="advanced">/);
+ assert.match(html,/<summary>Advanced/);
+ assert.match(html,/Not connected to Jason/);
+ const sendControls=[...html.matchAll(/id="send-to-jason"/g)];
+ assert.equal(sendControls.length,1);
+ assert.doesNotMatch(panelCode,/send-to-jason.*addEventListener/);
+});

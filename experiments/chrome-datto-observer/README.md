@@ -100,3 +100,31 @@ uses the technician's normal ChatGPT workspace interface and subscription.
 It does not prove custom MCP registration, secure automatic screenshot
 delivery, Datto native-permission evidence, or Jason model analysis via the
 extension. Those remain gated separately.
+
+## Version 0.1.8 — simplified single-action panel (UI shell only)
+
+The panel now prominently displays **Send to Jason** and collapses the
+existing local preview, capture, copy and download controls into **Advanced**.
+Existing v0.1.7 local capabilities remain available. The new primary control
+is **disabled with an explicit disconnected status**, not simulated.
+
+Target approved one-click transaction (future release):
+1. Verify selected active HTTPS Datto tab and exact device UID.
+2. Authenticate technician with verified Entra identity, map to current
+   individually authenticated Datto technician active security-level evidence.
+3. Start or reuse exact device/tenant/technician-scoped authorized session.
+4. Capture a fresh screenshot on explicit click. Prefer actual supported
+   terminal text only when independently authorized and its origin provable;
+   do not scrape arbitrary webpage DOM or infer text from an image.
+5. Perform server-side DLP/content checks, then send over TLS with bounded
+   size, image hash, session nonce and single-use receipt. No silent captures.
+6. Show **Sent to Jason** only after verified server receipt; fail clearly on
+   mismatch, session expiry, closed tab, unauthorized device, or redaction
+   rejection. Make evidence retrievable by the same user's authenticated
+   ChatGPT Business custom Jason MCP connection, with no billable API fallback.
+
+Production blockers: real verified Datto technician permission adapter,
+Entra browser OAuth, securely audited session persistence/recovery,
+TLS image intake and content controls, MCP image retrieval and real
+AOT ChatGPT workspace end-to-end acceptance. Do not enable the button
+until those gates pass. This release is a layout/test prototype only.
