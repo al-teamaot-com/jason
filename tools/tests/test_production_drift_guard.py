@@ -29,6 +29,81 @@ def config():
 
 
 class ProductionDriftGuardTests(unittest.TestCase):
+    def _synthetic_system_failure(self, *, failed, allowed=(), required=(), forbidden_unit=None):
+        policy = config()
+        policy["allowed_system_units"] = list(allowed)
+        policy["required_system_units"] += list(required)
+        system_units = {"jason-core.service"} | set(failed)
+        user_units = {"jason-release-manager.timer", "jason-release-manager.service"}
+
+        def properties(unit, user):
+            if unit == forbidden_unit:
+                return {"ExecStart": "/tmp/untrusted.py", "WorkingDirectory": "/tmp"}
+            return {"ExecStart": "/opt/jason/current/tool.py",
+                    "WorkingDirectory": "/opt/jason/current"}
+
+        with (
+            patch.object(guard, "unit_names", side_effect=[system_units, user_units]),
+            patch.object(guard, "active_state",
+                         side_effect=lambda unit, user: "failed" if unit in failed else "active"),
+            patch.object(guard, "unit_properties", side_effect=properties),
+            patch.object(guard, "running_containers",
+                         return_value={"jason-runtime", "jason-mcp-pilot"}),
+            patch.object(guard, "stopped_rollback_containers", return_value=[]),
+        ):
+            return guard.evaluate(policy)
+
+    def test_declared_optional_documentation_failure_is_visible_advisory(self):
+        docs = "jason-documentation-reconciliation.service"
+        result = self._synthetic_system_failure(failed={docs}, allowed={docs})
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["advisories"], [{
+            "kind": "independent_optional_system_unit_failed", "unit": docs, "state": "failed"
+        }])
+
+    def test_undeclared_documentation_failure_is_still_production_drift(self):
+        docs = "jason-documentation-reconciliation.service"
+        result = self._synthetic_system_failure(failed={docs})
+        self.assertEqual(result["status"], "drift_detected")
+        self.assertEqual(result["advisories"], [])
+        self.assertEqual({p["kind"] for p in result["problems"]}, {
+            "failed_system_unit", "undeclared_installed_system_unit"
+        })
+
+    def test_required_documentation_failure_is_still_production_drift(self):
+        docs = "jason-documentation-reconciliation.service"
+        result = self._synthetic_system_failure(failed={docs}, required={docs})
+        self.assertEqual(result["status"], "drift_detected")
+        self.assertEqual(result["advisories"], [])
+        self.assertEqual({p["kind"] for p in result["problems"]}, {
+            "failed_system_unit", "required_system_unit_not_active"
+        })
+
+    def test_other_allowed_unit_failure_is_still_critical(self):
+        health = "jason-openclaw-authority-health.service"
+        result = self._synthetic_system_failure(failed={health}, allowed={health})
+        self.assertEqual(result["status"], "drift_detected")
+        self.assertTrue(any(p["kind"] == "failed_system_unit" and p["unit"] == health
+                            for p in result["problems"]))
+
+    def test_documentation_advisory_cannot_hide_required_core_failure(self):
+        docs = "jason-documentation-reconciliation.service"
+        result = self._synthetic_system_failure(
+            failed={docs, "jason-core.service"}, allowed={docs})
+        self.assertEqual(result["status"], "drift_detected")
+        self.assertEqual(len(result["advisories"]), 1)
+        self.assertTrue(any(p["kind"] == "required_system_unit_not_active"
+                            and p["unit"] == "jason-core.service"
+                            for p in result["problems"]))
+
+    def test_documentation_advisory_cannot_hide_forbidden_execution_path(self):
+        docs = "jason-documentation-reconciliation.service"
+        result = self._synthetic_system_failure(
+            failed={docs}, allowed={docs}, forbidden_unit=docs)
+        self.assertEqual(result["status"], "drift_detected")
+        self.assertTrue(any(p["kind"] == "forbidden_execution_path"
+                            and p["unit"] == docs for p in result["problems"]))
 
     def test_root_user_systemd_queries_switch_to_al_context(self):
         outputs = [

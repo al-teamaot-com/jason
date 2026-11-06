@@ -23,6 +23,34 @@ watchdog_spec.loader.exec_module(watchdog)
 
 
 class ProductionDriftWatchdogTests(unittest.TestCase):
+    def test_optional_documentation_advisory_is_durable_and_never_opens_breaker(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            control = root / "control.json"
+            evidence = root / "evidence.json"
+            state = root / "watchdog.json"
+            control.write_text(json.dumps({
+                "schema_version": "1.0", "circuit_breaker": {"state": "closed"}
+            }))
+            result = {
+                "schema_version": "1.0",
+                "status": "pass",
+                "problems": [],
+                "advisories": [{
+                    "kind": "independent_optional_system_unit_failed",
+                    "unit": "jason-documentation-reconciliation.service",
+                    "state": "failed",
+                }],
+            }
+            rc = watchdog.apply_result(result, control_state=control,
+                                       evidence=evidence, watchdog_state=state)
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(state.read_text())["advisory_count"], 1)
+            self.assertEqual(json.loads(state.read_text())["circuit_breaker_action"], "none")
+            self.assertEqual(len(json.loads(evidence.read_text())["advisories"]), 1)
+            self.assertEqual(json.loads(control.read_text())["circuit_breaker"]["state"],
+                             "closed")
+
     def test_drift_opens_breaker_and_preserves_last_known_good(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

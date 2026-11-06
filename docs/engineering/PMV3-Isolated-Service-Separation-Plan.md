@@ -306,3 +306,25 @@ Owner pause drop-in directive. The presence of a pause receipt alone is not
 sufficient: if native reconciliation removes the drop-in, if systemd sees the
 old controller as active, or if either proof is unavailable, every proposed
 new engineering lane fails closed before executing a native worker.
+
+## PMv3.2 Stage 1 — Documentation failure isolation (source-only)
+
+The existing root drift guard treats a failed **declared, non-required**
+`jason-documentation-reconciliation.service` as an explicit advisory, not a
+production-control fault. Its evidence remains visible in the protected drift
+report and watchdog advisory count. Unknown/undeclared services, required
+units, other failed services, forbidden execution paths, source alignment,
+rollback identity, and immutable release authorization continue to fail closed.
+This is a one-service criticality exception, not a generic exemption for
+allow-listed units. It does **not** clear an already-open breaker.
+
+The existing documentation publisher remains the sole writer and retains its
+12-hour timer. Its existing oneshot unit gets two bounded on-failure restarts
+with a 120-second interval; persistent GitHub/auth/policy failures remain
+failed and observable instead of being marked successful. Documentation
+Assurance remains independent and cannot authorize production deployment.
+Routine releases do not wait for optional documentation publication.
+
+This source-only change needs protected CI, independent staging and approved
+release integration before it can be considered for the one-click Teams
+production transaction. It does not install or enable any new service.
