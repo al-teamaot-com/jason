@@ -256,3 +256,25 @@ Provider-backed technician access, a real data-loss-prevention/redaction
 engine, strict CORS/origin, OAuth, audit/retention and malicious-image
 handling remain acceptance gates. This step does not send or analyze any
 client image.
+
+## Loopback-only HTTP screenshot receipt acceptance (2026-11-06)
+
+The `/v1/test-image` route is present ONLY in the test loopback
+server and only when an isolated test image-intake instance is injected.
+It defaults to **404** without that instance. Four new real HTTP tests
+exercise binary payload transfer, SHA-256 readback, session-device
+authorization and opaque server receipt, missing bearer, wrong checksum,
+wrong device, replay, revoked Datto callback, media-type rejection and
+default route closure. The HTTP response labels itself
+`production_ingress:false` and `analyzed_by_model:false`.
+
+The tests use a synthetic image-header fixture and a deliberately injected
+test reviewer. No live screenshot was transmitted. The server listens only
+on `127.0.0.1`, with no remote port, public TLS termination, OAuth flow,
+origin verification or persistent evidence store. It MUST NOT be used for
+client content. The original one-click J-Assist button remains disabled
+and has no fake success path. Required production work: verified browser
+identity and Datto user permission, encrypted evidence persistence and
+retention, independent content scanning/redaction, audited remote HTTPS
+ingress, ChatGPT MCP image fetch under matching technician authority,
+and actual technician acceptance.

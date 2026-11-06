@@ -12,6 +12,7 @@ from typing import Callable
 
 from session_gate import Denied
 from synthetic_probe import SyntheticProbe
+from screen_evidence_intake import ScreenEvidenceIntake, MAX_IMAGE_BYTES
 
 MAX_HTTP_BODY = 2048
 
@@ -19,9 +20,13 @@ MAX_HTTP_BODY = 2048
 def make_handler(
     probe: SyntheticProbe,
     authenticate: Callable[[str], object | None],
+    image_intake: ScreenEvidenceIntake | None = None,
 ):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
+            if self.path == "/v1/test-image":
+                self._test_image()
+                return
             if self.path != "/v1/synthetic-probe":
                 self.send_error(404)
                 return
@@ -75,6 +80,60 @@ def make_handler(
             self.end_headers()
             self.wfile.write(payload)
 
+        def _test_image(self):
+            # Explicitly isolated test-only ingress; no default reviewer
+            # and no external listener. Production must use real OAuth/TLS.
+            if image_intake is None:
+                self.send_error(404)
+                return
+            auth = self.headers.get("Authorization", "")
+            if not auth.startswith("Bearer ") or len(auth) > 512:
+                self.send_error(401)
+                return
+            principal = authenticate(auth[7:])
+            if principal is None:
+                self.send_error(401)
+                return
+            if self.headers.get("Content-Type") != "image/png":
+                self.send_error(415)
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "-1"))
+            except ValueError:
+                self.send_error(400)
+                return
+            if length < 1 or length > MAX_IMAGE_BYTES:
+                self.send_error(413)
+                return
+            try:
+                receipt = image_intake.receive(
+                    trusted_technician=principal,
+                    session_id=self.headers.get("X-JAssist-Session", ""),
+                    session_token=self.headers.get("X-JAssist-Session-Token", ""),
+                    device_uid=self.headers.get("X-JAssist-Device", ""),
+                    request_nonce=self.headers.get("X-JAssist-Nonce", ""),
+                    image=self.rfile.read(length),
+                    declared_sha256=self.headers.get("X-JAssist-SHA256", ""),
+                )
+            except (Denied, ValueError, TypeError):
+                self.send_error(403)
+                return
+            body = json.dumps({
+                "status": "accepted-for-test",
+                "receipt_id": receipt.receipt_id,
+                "session_id": receipt.session_id,
+                "device_uid": receipt.device_uid,
+                "image_sha256": receipt.image_sha256,
+                "analyzed_by_model": False,
+                "production_ingress": False,
+            }, separators=(",", ":")).encode()
+            self.send_response(201)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def log_message(self, format, *args):
             # Never log auth headers, tokens, or payloads.
             return
@@ -82,8 +141,8 @@ def make_handler(
     return Handler
 
 
-def create_loopback_server(*, probe: SyntheticProbe, authenticate: Callable[[str], object | None]):
+def create_loopback_server(*, probe: SyntheticProbe, authenticate: Callable[[str], object | None], image_intake: ScreenEvidenceIntake | None = None):
     """No default credential adapter. Refuse all externally reachable hosts."""
-    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(probe, authenticate))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(probe, authenticate, image_intake))
     assert server.server_address[0] == "127.0.0.1"
     return server
