@@ -21,9 +21,16 @@ def make_handler(
     probe: SyntheticProbe,
     authenticate: Callable[[str], object | None],
     image_intake: ScreenEvidenceIntake | None = None,
+    session_credential_for: Callable[[object, str], str | None] | None = None,
 ):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
+            if self.path == "/v1/jassist/image":
+                if session_credential_for is None:
+                    self.send_error(404)
+                    return
+                self._test_image(server_held=True)
+                return
             if self.path == "/v1/test-image":
                 self._test_image()
                 return
@@ -80,7 +87,7 @@ def make_handler(
             self.end_headers()
             self.wfile.write(payload)
 
-        def _test_image(self):
+        def _test_image(self, server_held: bool = False):
             # Explicitly isolated test-only ingress; no default reviewer
             # and no external listener. Production must use real OAuth/TLS.
             if image_intake is None:
@@ -94,7 +101,7 @@ def make_handler(
             if principal is None:
                 self.send_error(401)
                 return
-            if self.headers.get("Content-Type") != "image/png":
+            if self.headers.get("Content-Type") not in {"image/png", "image/jpeg"}:
                 self.send_error(415)
                 return
             try:
@@ -106,10 +113,19 @@ def make_handler(
                 self.send_error(413)
                 return
             try:
+                session_id = self.headers.get("X-JAssist-Session", "")
+                if server_held:
+                    if self.headers.get("X-JAssist-Session-Token"):
+                        raise Denied("browser must not send internal session token")
+                    session_token = session_credential_for(principal, session_id)
+                    if not isinstance(session_token, str) or not session_token:
+                        raise Denied("server session credential unavailable")
+                else:
+                    session_token = self.headers.get("X-JAssist-Session-Token", "")
                 receipt = image_intake.receive(
                     trusted_technician=principal,
-                    session_id=self.headers.get("X-JAssist-Session", ""),
-                    session_token=self.headers.get("X-JAssist-Session-Token", ""),
+                    session_id=session_id,
+                    session_token=session_token,
                     device_uid=self.headers.get("X-JAssist-Device", ""),
                     request_nonce=self.headers.get("X-JAssist-Nonce", ""),
                     image=self.rfile.read(length),
@@ -119,7 +135,7 @@ def make_handler(
                 self.send_error(403)
                 return
             body = json.dumps({
-                "status": "accepted-for-test",
+                "status": "accepted" if server_held else "accepted-for-test",
                 "receipt_id": receipt.receipt_id,
                 "session_id": receipt.session_id,
                 "device_uid": receipt.device_uid,
@@ -141,8 +157,8 @@ def make_handler(
     return Handler
 
 
-def create_loopback_server(*, probe: SyntheticProbe, authenticate: Callable[[str], object | None], image_intake: ScreenEvidenceIntake | None = None):
+def create_loopback_server(*, probe: SyntheticProbe, authenticate: Callable[[str], object | None], image_intake: ScreenEvidenceIntake | None = None, session_credential_for: Callable[[object, str], str | None] | None = None):
     """No default credential adapter. Refuse all externally reachable hosts."""
-    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(probe, authenticate, image_intake))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(probe, authenticate, image_intake, session_credential_for))
     assert server.server_address[0] == "127.0.0.1"
     return server

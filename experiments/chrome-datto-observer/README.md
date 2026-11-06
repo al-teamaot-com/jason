@@ -128,3 +128,28 @@ Entra browser OAuth, securely audited session persistence/recovery,
 TLS image intake and content controls, MCP image retrieval and real
 AOT ChatGPT workspace end-to-end acceptance. Do not enable the button
 until those gates pass. This release is a layout/test prototype only.
+
+## Governed one-click Send to Jason transport contracts (2026-11-06)
+
+`send_once.js` coordinates one explicit click in **testable,
+dependency-injected code**. It demands live trusted technician, Datto
+device, session, image-review and HTTPS readiness before capture. It
+requires the same tab after capture and after receipt and verifies image
+size, JPEG format, hash and the exact server receipt. No success is
+reported for a rejected response or expired/changed session. No
+production sender is registered; the existing v0.1.8 button remains
+disabled so it cannot imply delivery.
+
+`authenticated_transport.js` accepts a pinned, build-time HTTPS Jason
+origin and a separately verified bearer/token adapter, refuses redirects,
+omits cookies and requires an exact accepted receipt. It does NOT
+implement Microsoft OAuth and never obtains tokens from the Datto tab
+or user-provided JavaScript. There is no configured endpoint or
+working runtime auth provider. No new extension distribution was made
+from these contracts.
+
+These contracts are tested against mocked providers. A real AOT
+Chrome Entra SSO client registration, exact trusted Datto active-user
+permission evidence and production Jason endpoint must be completed
+before activation. Server preproduction tests exercise the equivalent
+binary JPEG format and receipt.

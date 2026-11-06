@@ -307,3 +307,18 @@ image storage, real image content scan/redaction, authorized HTTPS
 ingress, cross-process lifecycle persistence, custom MCP registration
 and genuine AOT ChatGPT Business acceptance. Do not enable live upload
 or declare end-to-end success based on the synthetic tests.
+
+## Browser-shaped JPEG receipt: server-held session authorization
+
+The *loopback-only* `/v1/jassist/image` preproduction route exists
+only when BOTH a test image intake service and a server-held session
+credential resolver are explicitly injected. It defaults to HTTP 404
+otherwise and rejects `X-JAssist-Session-Token` from the browser.
+It handles JPEG (Chrome capture format) as well as PNG, obtains the
+session credential privately from its injected resolver, rechecks
+the underlying SessionGate and emits a receipt with `status:accepted`
+and `production_ingress:false`. It is still HTTP on **127.0.0.1 only**
+and does not authenticate real Entra tokens or attest active signed-in
+Datto permissions. These are **test credentials and synthetic marker
+envelopes**, not real screenshot parsing or DLP. Do NOT expose the route
+outside the local test host or deploy the test reviewer.
