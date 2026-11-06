@@ -229,3 +229,24 @@ public HTTPS endpoint or Secure MCP Tunnel and verified OAuth. The
 Chrome extension itself is not a substitute for a subscription-backed
 ChatGPT client. Reference:
 https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt
+
+## J-Assist / shared-session combined integration branch — 2026-11-06
+
+The dedicated isolated integration branch merges draft J-Assist PR #2349
+with draft shared-session PR #1465 **without a production merge**.
+`shared_session_adapter.py` links an explicitly authorized J-Assist
+`SessionGate` to Jason's existing `SessionLifecycle`, using its
+`SqliteSessionEventLedger` for ordered metadata-only opened/closed
+events. The adapter requires a trusted technician, exact Datto device,
+ticket reference, and affirmative consent; inspect revalidates the
+session credential and current provider authorization; close terminates
+both models. Tests prove cross-technician denial, permission revocation,
+expiration and a verifiable shared hash chain.
+
+**Preproduction only:** `SessionLifecycle` itself is still
+process-memory-backed and the SQLite event chain is not signed,
+multi-host durable governance evidence. Restart recovery and transactional
+cross-service revocation must be engineered and accepted before
+production. No real screenshot upload, live SSO issuance, Datto signed-in
+security-level provider API, ChatGPT workspace connection or model
+analysis was enabled.
