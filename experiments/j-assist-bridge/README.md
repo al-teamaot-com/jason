@@ -440,3 +440,38 @@ References:
 
 No browser Send button is enabled, no production source changed, no
 provider identity is inferred, and no production release is authorized.
+
+## Created AOT J-Assist Entra security group and guarded lookup (2026-11-06)
+
+AOT Owner ran the approved Entra provisioning script, entered its exact
+confirmation, and provided a Microsoft Graph `RESULT=VERIFIED` report:
+`AOT-Jason-JAssist-Users`, object ID
+`5273dd8a-1456-4985-b0a3-c00061267e26`, with **3 members**:
+Al Davis, Lindsey Collins and Adam Navrat. QuickBooks was unchanged.
+This is **user-provided live Graph readback evidence** of group creation,
+not a test of the future Jason server application token.
+
+ADR-015 supersedes a proposed temporary person-by-person source
+allowlist. The production eligibility model will use **the pinned Entra
+group object ID**, not hardcoded names or email addresses. The existing
+Datto Administrator security-level approach (ADR-014) remains a
+separate future provider-native permission option.
+
+Preproduction modules, not yet live-wired:
+- `entra_group_screen_authority.py`: fail-closed screen-assistance-only
+  group evidence policy, canonical individual Entra binding and Datto
+  account/device check
+- `entra_group_membership_reader.py`: always re-read enabled user and
+  transitive membership of exact group, strictly validate Graph responses
+- `entra_group_http_transport.py`: use a server-owned tenant application
+  token provider with Jason's existing `HttpTransport` request contract;
+  allow only the two exact Graph v1.0 user/member requests
+
+The read-only server Graph identity requires reviewed app permissions for
+the operations, such as `User.Read.All` plus `GroupMember.Read.All`
+(or `Group.Read.All`). These are not requested by, or granted to, the
+Chrome SPA. Verify existing server app permissions before enabling.
+Entra sign-in alone or group membership alone cannot enable data intake:
+per-device Datto evidence, consent, DLP, encrypted evidence, receipt,
+ChatGPT identity coupling and exact-revision production release gates
+are still required. No runtime registration or external image upload.
