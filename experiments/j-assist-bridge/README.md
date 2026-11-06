@@ -394,10 +394,11 @@ regressions are included in `test_screen_evidence_concurrency.py`.
 This is preproduction memory protection, not durable encrypted storage
 or an approved real DLP implementation.
 
-## Optional AOT J-Assist Administrator-only access policy (2026-11-06)
+## Owner-selected AOT J-Assist Administrator-only access policy (2026-11-06)
 
-The Owner proposed using membership in the Datto RMM Administrators
-group instead of verifying each user's CURRENT active security level.
+The Owner confirmed assignment to Datto RMM's built-in **Administrator**
+security level as the pilot eligibility rule, rather than verifying each
+user's CURRENT active security level.
 Datto's native built-in designation is **Administrator security level**,
 which grants access to every device in that Datto RMM account. It is a
 level assigned to the user; the user's active UI security level can
