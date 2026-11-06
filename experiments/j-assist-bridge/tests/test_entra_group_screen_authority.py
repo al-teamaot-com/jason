@@ -5,11 +5,11 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from entra_group_screen_authority import EntraGroupEvidence, EntraGroupScreenAuthorizer
+from entra_group_screen_authority import (EntraGroupEvidence, EntraGroupScreenAuthorizer, AOT_JASSIST_PILOT_GROUP_ID)
 from entra_send_authority import AOT_ENTRA_TENANT_ID
 from session_gate import VerifiedTechnician
 
-GROUP="12345678-1234-4123-8123-123456789abc" # synthetic only
+GROUP=AOT_JASSIST_PILOT_GROUP_ID # exact owner-approved pilot group
 AL="bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
 
 class GroupScreenTests(unittest.TestCase):

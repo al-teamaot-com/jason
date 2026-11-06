@@ -15,6 +15,10 @@ from typing import Callable
 from entra_send_authority import AOT_ENTRA_TENANT_ID
 from session_gate import VerifiedTechnician
 
+# Exact AOT Entra pilot security group created and verified by Owner 2026-11-06.
+# Never change this to a display-name lookup or a browser-supplied group.
+AOT_JASSIST_PILOT_GROUP_ID = "5273dd8a-1456-4985-b0a3-c00061267e26"
+
 _GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 _DEVICE = re.compile(r"^[0-9]{1,24}$")
 
@@ -40,8 +44,9 @@ class EntraGroupScreenAuthorizer:
         read_live_membership: Callable[[str, str, str], EntraGroupEvidence | None],
         device_in_aot_account: Callable[[str], bool],
     ) -> None:
-        if not isinstance(group_id, str) or not _GUID.fullmatch(group_id):
-            raise ValueError("approved Entra group object ID required")
+        if (not isinstance(group_id, str) or
+                group_id.casefold() != AOT_JASSIST_PILOT_GROUP_ID):
+            raise ValueError("exact approved J-Assist group object ID required")
         if not (callable(resolve_entr_user_oid)
                 and callable(read_live_membership)
                 and callable(device_in_aot_account)):
