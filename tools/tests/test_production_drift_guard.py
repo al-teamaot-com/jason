@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -125,6 +126,43 @@ class ProductionDriftGuardTests(unittest.TestCase):
         ):
             result = guard.evaluate(config())
         self.assertTrue(any(p["kind"] == "failed_user_unit" and p["unit"] == "jason-release-manager.service" for p in result["problems"]))
+
+    def test_openclaw_recovery_bridge_is_allowed_without_global_user_unit_exemption(self):
+        policy = json.loads(
+            (ROOT / "config" / "production-desired-state.json").read_text(encoding="utf-8")
+        )
+        bridge_units = {
+            "jason-openclaw-recovery-source-bridge.service",
+            "jason-openclaw-recovery-source-bridge.timer",
+        }
+        self.assertTrue(bridge_units.issubset(set(policy["allowed_user_units"])))
+        self.assertFalse(bridge_units.intersection(policy["required_user_units"]))
+
+        system_units = set(policy["required_system_units"]) | set(policy["allowed_system_units"])
+        user_units = (
+            set(policy["required_user_units"])
+            | set(policy["allowed_user_units"])
+            | {"jason-unreviewed-worker.service"}
+        )
+        with (
+            patch.object(guard, "unit_names", side_effect=[system_units, user_units]),
+            patch.object(guard, "active_state", return_value="active"),
+            patch.object(guard, "unit_properties", return_value={
+                "ExecStart": "/opt/jason/current/tools/approved.py",
+                "WorkingDirectory": "/opt/jason/current",
+            }),
+            patch.object(guard, "running_containers", return_value=set(policy["required_containers"])),
+            patch.object(guard, "stopped_rollback_containers", return_value=[]),
+        ):
+            report = guard.evaluate(policy)
+        self.assertEqual(report["status"], "drift_detected")
+        unexpected = {
+            item["unit"]
+            for item in report["problems"]
+            if item["kind"] == "undeclared_installed_user_unit"
+        }
+        self.assertEqual(unexpected, {"jason-unreviewed-worker.service"})
+        self.assertFalse(unexpected.intersection(bridge_units))
 
     def test_rollback_retention_excess_fails_closed(self):
         with (

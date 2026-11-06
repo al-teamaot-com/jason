@@ -1,0 +1,915 @@
+"""Owner-only mobile release + CCC approval, disabled until separately activated.
+
+The Teams gateway carries a signed button decision, not release authority.
+The immutable release-manifest fingerprint and local owner policy bind the
+request. A separate host consumer must validate durable decision evidence
+before creating CCC/release approval artifacts; the HTTP handler never deploys.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+import fcntl
+import logging
+import os
+from pathlib import Path
+import re
+import secrets
+import sqlite3
+import stat
+import uuid
+from typing import Any, Mapping
+
+from connectors.src.jason_connectors.approval_requests import (
+    ApprovalDecision, ApprovalPresentation, ApprovalRequest,
+    ApprovalRequestService, ApprovalRequestStatus, ApprovalResponse,
+)
+from jason_runtime.playbook_autonomy_review import TeamsGatewayPlaybookApprovalSender
+from jason_runtime.owner_release_approval_containment import read_release_approval_containment
+
+SHA = re.compile(r"^[0-9a-f]{40}$")
+RELEASE_ID = re.compile(r"^release-[0-9a-f]{16}(?:-retry-[1-9][0-9]{0,2})?$")
+CAPABILITY = "release.production.approve"
+REQUEST_PREFIX = "relapproval-"
+RISK_LEVELS = frozenset({"normal", "production_repair", "production_control_core", "schema_or_contract"})
+_LOG = logging.getLogger(__name__)
+
+
+def canonical_bytes(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def digest(value: Any) -> str:
+    return hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+def release_id_matches_candidate(release_id: str, candidate_sha: str) -> bool:
+    if not SHA.fullmatch(candidate_sha):
+        return False
+    base = "release-" + candidate_sha[:16]
+    return re.fullmatch(re.escape(base) + r"(?:-retry-[1-9][0-9]{0,2})?", release_id) is not None
+
+
+@dataclass(frozen=True, slots=True)
+class MobileReleasePolicy:
+    organization_id: str
+    owner_identity_ids: tuple[str, ...]
+    allowed_risk_profiles: frozenset[str]
+    ttl_seconds: int
+    policy_sha256: str
+    schema_version: str = "1.0"
+
+
+def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
+    """A separately approved, private owner policy; absent/malformed fails closed."""
+    p = Path(path)
+    info = p.lstat()
+    if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid not in (0, os.geteuid())):
+        raise PermissionError("mobile release policy must be owned 0600 regular file")
+    raw = p.read_bytes()
+    if len(raw) > 8192:
+        raise PermissionError("mobile release policy too large")
+    doc = json.loads(raw)
+    shared = {"schema_version", "organization_id", "policy_mode", "owner_identity_ids",
+              "allowed_risk_profiles", "ttl_seconds", "capability"}
+    # V1 is normal-risk only; V2 is the immutable original reviewed contract.
+    # V3 is a distinct opt-in, owner-reviewed channel for production_repair.
+    # Code deployment alone does NOT change an existing V1/V2 0600 policy.
+    # Each release still requires signed exact-SHA and manifest-bound approval.
+    version = doc.get("schema_version") if isinstance(doc, dict) else None
+    if version == "1.0":
+        expected = shared
+        mode = "owner_only_pilot"
+    elif version in {"2.0", "3.0"}:
+        expected = shared | {"high_impact_review"}
+        mode = "owner_reviewed"
+    else:
+        raise PermissionError("unsupported versioned mobile release policy")
+    if (set(doc) != expected
+            or doc["organization_id"] != "aot"
+            or doc["policy_mode"] != mode
+            or doc["capability"] != CAPABILITY
+            or doc["owner_identity_ids"] != ["person-al"]):
+        raise PermissionError("mobile release policy role, version or mode is not authorized")
+    risks = doc["allowed_risk_profiles"]
+    ttl = doc["ttl_seconds"]
+    if (not isinstance(risks, list) or not risks or len(set(risks)) != len(risks)
+            or any(not isinstance(risk, str) or risk not in RISK_LEVELS for risk in risks)
+            or type(ttl) is not int or not 300 <= ttl <= (1800 if version == "1.0" else 900)):
+        raise PermissionError("mobile release policy risk or TTL is invalid")
+    if version == "1.0":
+        if set(risks) != {"normal"}:
+            raise PermissionError("owner-only mobile pilot is limited to normal-risk releases")
+    else:
+        review = doc["high_impact_review"]
+        required_risks = (
+            {"normal", "production_control_core"} if version == "2.0"
+            else {"normal", "production_control_core", "production_repair"}
+        )
+        if (not isinstance(review, dict)
+                or review != {
+                    "owner_exact_sha_required": True,
+                    "signed_teams_identity_required": True,
+                    "independent_ccc_required": True,
+                    "protected_release_gates_unchanged": True,
+                } or set(risks) != required_risks):
+            raise PermissionError("high-impact Teams release policy requires exact reviewed controls")
+        # Even V3 only authorizes the Teams review *channel*, never a standing
+        # class-wide release grant or a production unfreeze. Root gates remain.
+    return MobileReleasePolicy(
+        "aot", ("person-al",), frozenset(risks), ttl, digest(doc), version,
+    )
+
+
+def read_consumed_unfreeze_predecessor(
+    state_root: Path, release_id: str,
+) -> dict[str, str]:
+    """Read immutable failed-attempt lineage; this is NOT Owner authority.
+
+    Full live runtime/MCP/host alignment is independently checked by the
+    Release Manager on the host before any replacement grant/transaction.
+    """
+    if not RELEASE_ID.fullmatch(release_id):
+        raise PermissionError("replacement predecessor release ID invalid")
+    base = Path(state_root)
+    paths = (
+        base / "owner-explicit-unfreeze-receipts" / (release_id + ".json"),
+        base / "owner-unfreeze-receipts" / (release_id + ".json"),
+        base / "production-deployment-freeze",
+    )
+    raw_values = []
+    for path in paths:
+        try:
+            info = path.lstat()
+            if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_uid not in (0, os.geteuid())
+                    or info.st_gid not in (0, os.getegid())
+                    or not 1 <= info.st_size <= 8192):
+                raise PermissionError("replacement predecessor file unsafe")
+            raw = path.read_bytes()
+            if len(raw) != info.st_size:
+                raise PermissionError("replacement predecessor file changed")
+            raw_values.append(raw)
+        except (OSError, ValueError, TypeError) as exc:
+            raise PermissionError("replacement predecessor unavailable") from exc
+    try:
+        source, transaction, freeze = (json.loads(x) for x in raw_values)
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise PermissionError("replacement predecessor invalid JSON") from exc
+    if not all(isinstance(x, dict) for x in (source, transaction, freeze)):
+        raise PermissionError("replacement predecessor schema invalid")
+    freeze_sha = hashlib.sha256(raw_values[2]).hexdigest()
+    if (source.get("schema_version") != "1.0"
+            or source.get("authorization") != "explicit_exact_sha_owner_unfreeze"
+            or source.get("status") != "consumed"
+            or source.get("freeze_restored") is not True
+            or source.get("standing_authority") is not False
+            or source.get("automatic_publish_authority") is not False
+            or transaction.get("schema_version") != "2.0"
+            or transaction.get("authorization") != "explicit_owner_one_transaction_unfreeze"
+            or transaction.get("status") != "deployment_returned"
+            or transaction.get("release_state_after") != "production_eligible"
+            or transaction.get("freeze_restored") is not True
+            or freeze.get("status") != "active"
+            or freeze.get("scope") != "manual-and-automatic-production-promotions"
+            or any(source.get(k) != transaction.get(k)
+                   for k in ("release_id", "candidate_sha", "rollback_sha", "scope_sha256"))
+            or source.get("release_id") != release_id
+            or any(x.get(k) != freeze_sha for x in (source, transaction)
+                   for k in ("freeze_sha256_before", "freeze_sha256_after"))):
+        raise PermissionError("replacement predecessor is not a restored pre-mutation transaction")
+    return {
+        "predecessor_source_receipt_sha256": hashlib.sha256(raw_values[0]).hexdigest(),
+        "predecessor_transaction_receipt_sha256": hashlib.sha256(raw_values[1]).hexdigest(),
+        "freeze_sha256": freeze_sha,
+        "scope_sha256": str(source["scope_sha256"]),
+        "rollback_sha": str(source["rollback_sha"]),
+        "candidate_sha": str(source["candidate_sha"]),
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class ExactRelease:
+    release_id: str
+    candidate_sha: str
+    rollback_sha: str
+    manifest_sha256: str
+    policy_sha256: str
+    desired_state_policy_digest: str
+    risk_profile: str
+    change_class: str
+    purpose: str
+    affected_files: tuple[str, ...]
+    affected_surfaces: tuple[str, ...]
+    review_only: bool = False
+    replacement_lineage: tuple[tuple[str, str], ...] | None = None
+
+
+def read_eligible_release(
+    state_root: Path, release_id: str, policy: MobileReleasePolicy,
+    *, allow_existing_owner_approval: bool = False,
+    replacement_unfreeze_only: bool = False,
+    replacement_approval_id: str | None = None,
+) -> ExactRelease:
+    if not isinstance(release_id, str) or not RELEASE_ID.fullmatch(release_id):
+        raise ValueError("release ID must be exact")
+    p = Path(state_root) / "records" / (release_id + ".json")
+    info = p.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o022:
+        raise PermissionError("release record must not be writable by group/other or a link")
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    candidate = doc.get("release_candidate")
+    manifest = doc.get("release_manifest")
+    preprod = doc.get("preproduction")
+    if (doc.get("release_id") != release_id or doc.get("state") != "production_eligible"
+            or not isinstance(candidate, dict) or not isinstance(manifest, dict)
+            or not isinstance(preprod, dict) or preprod.get("acceptance_passed") is not True
+            or preprod.get("rollback_readiness_passed") is not True
+            or preprod.get("provider_mutations_disabled") is not True
+            ):
+        raise PermissionError("release is not pending owner approval with safe preproduction evidence")
+    owner_approval = doc.get("owner_approval") or {}
+    review_only = owner_approval.get("approved") is True
+    # The reviewed V2 lane alone permits a fresh signed Teams owner click
+    # to attest CCC material review AFTER an earlier exact release grant.
+    # This cannot mint another release approval or make the old V1 pilot
+    # accept protected-control changes.
+    if review_only and (
+        not allow_existing_owner_approval or policy.schema_version not in {"2.0", "3.0"}
+        or owner_approval.get("candidate_sha") != (candidate or {}).get("candidate_sha")
+    ):
+        raise PermissionError("existing release approval requires a reviewed exact CCC-only card")
+    if replacement_unfreeze_only and not review_only:
+        raise PermissionError("replacement unfreeze needs an existing signed release approval")
+    replacement_lineage = None
+    if replacement_unfreeze_only:
+        predecessor = read_consumed_unfreeze_predecessor(state_root, release_id)
+        if (predecessor["candidate_sha"] != candidate.get("candidate_sha")
+                or predecessor["rollback_sha"] != doc.get("rollback_sha")
+                or predecessor["scope_sha256"] != (
+                    (doc.get("manual_scope_review") or {}).get("scope_sha256")
+                ) or doc.get("production") is not None
+                or doc.get("native_pre_mutation_gate") is not None
+                or doc.get("failure") is not None
+                or (doc.get("replacement_unfreeze_authorization") is not None
+                    and (replacement_approval_id is None
+                         or (doc["replacement_unfreeze_authorization"] or {}).get(
+                             "approval_id") != replacement_approval_id))):
+            raise PermissionError("replacement predecessor or release state differs")
+        replacement_lineage = tuple(sorted(predecessor.items()))
+    sha = candidate.get("candidate_sha")
+    rollback = doc.get("rollback_sha")
+    if (not isinstance(sha, str) or not SHA.fullmatch(sha)
+            or not isinstance(rollback, str) or not SHA.fullmatch(rollback)
+            or release_id != "release-" + sha[:16]
+            or manifest.get("candidate_sha") != sha or manifest.get("rollback_sha") != rollback
+            or preprod.get("deployed_sha") != sha
+            or candidate.get("artifact_digest") != preprod.get("artifact_digest")
+            or candidate.get("mcp_artifact_digest") != preprod.get("mcp_artifact_digest")):
+        raise PermissionError("release candidate identity or immutable image digests changed")
+    risk = doc.get("risk_profile")
+    if (risk not in policy.allowed_risk_profiles or manifest.get("risk_profile") != risk
+            or manifest.get("risk_profile") not in RISK_LEVELS):
+        raise PermissionError("release exceeds owner-only mobile approval risk profile")
+    files = manifest.get("changed_files")
+    surfaces = manifest.get("surfaces")
+    if (not isinstance(files, list) or not all(isinstance(f, str) and f for f in files)
+            or not isinstance(surfaces, list) or not all(isinstance(f, str) and f for f in surfaces)):
+        raise PermissionError("release manifest has no reviewable bounded change inventory")
+    purpose = doc.get("description")
+    if not isinstance(purpose, str) or not purpose.strip() or len(purpose) > 500:
+        raise PermissionError("mobile release card must contain a bounded human-readable change purpose")
+    return ExactRelease(release_id, sha, rollback, digest(manifest),
+        str(manifest.get("policy_digest") or ""),
+        str(manifest.get("desired_state_policy_digest") or ""),
+        risk, str(manifest.get("change_class") or ""), purpose.strip(),
+        tuple(files), tuple(surfaces), review_only, replacement_lineage)
+
+
+def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleasePolicy,
+                                  *, now: datetime | None = None,
+                                  card_challenge: str | None = None,
+                                  renewed_from: str | None = None,
+                                  renewal_nonce: str | None = None) -> ApprovalRequest:
+    instant = now or datetime.now(timezone.utc)
+    if instant.tzinfo is None:
+        raise ValueError("mobile approval clock must be timezone-aware")
+    if evidence.risk_profile not in policy.allowed_risk_profiles:
+        raise PermissionError("release risk is not authorized for mobile pilot")
+    if not release_id_matches_candidate(evidence.release_id, evidence.candidate_sha):
+        raise PermissionError("mobile approval release identity does not match exact SHA")
+    shown = ", ".join(evidence.affected_files[:7]) or "(no files)"
+    if len(evidence.affected_files) > 7:
+        shown += f" (+{len(evidence.affected_files) - 7} more)"
+    # Each V2 card includes an unguessable, server-issued instance challenge.
+    # Its exact value is carried only by that card's Action.Submit and the
+    # private persisted request. Signed callback/host consumer BOTH verify it
+    # before accepting owner or CCC authority. A manufactured activity.value
+    # containing only approval_id and decision cannot satisfy this contract.
+    if policy.schema_version in {"2.0", "3.0"}:
+        challenge = card_challenge if card_challenge is not None else secrets.token_hex(24)
+        if type(challenge) is not str or re.fullmatch(r"[0-9a-f]{48}", challenge) is None:
+            raise PermissionError("reviewed release requires a valid card-instance challenge")
+    elif card_challenge is not None:
+        raise PermissionError("legacy release cannot supply a protected card challenge")
+    else:
+        challenge = None
+    if (renewed_from is None) != (renewal_nonce is None):
+        raise PermissionError("incomplete owner renewal lineage")
+    if renewal_nonce is not None and (
+        re.fullmatch(r"[0-9a-f]{32}", renewal_nonce) is None
+        or re.fullmatch(r"relapproval-[0-9a-f]{32}", renewed_from or "") is None
+    ):
+        raise PermissionError("invalid owner renewal lineage")
+    intent = {
+        "release_id": evidence.release_id,
+        "candidate_sha": evidence.candidate_sha,
+        "rollback_sha": evidence.rollback_sha,
+        "manifest_sha256": evidence.manifest_sha256,
+        "purpose_sha256": digest(evidence.purpose),
+        "policy_sha256": evidence.policy_sha256,
+        "desired_state_policy_digest": evidence.desired_state_policy_digest,
+        "owner_policy_sha256": policy.policy_sha256,
+    }
+    replacement = evidence.replacement_lineage is not None
+    if replacement:
+        if not evidence.review_only or policy.schema_version not in {"2.0", "3.0"}:
+            raise PermissionError("replacement Teams unfreeze needs reviewed owner mode")
+        intent["replacement_unfreeze_only"] = True
+        intent["replacement_lineage"] = dict(evidence.replacement_lineage)
+    elif evidence.review_only:
+        if policy.schema_version not in {"2.0", "3.0"}:
+            raise PermissionError("CCC-only Teams material review requires owner-reviewed mode")
+        intent["review_only"] = True
+    if renewal_nonce is not None:
+        intent["renewed_from_approval_id"] = renewed_from
+        intent["renewal_nonce"] = renewal_nonce
+    suffix = ":renewal:" + renewal_nonce if renewal_nonce is not None else ""
+    if replacement:
+        suffix = ":unfreeze-replacement:" + dict(evidence.replacement_lineage)[
+            "predecessor_transaction_receipt_sha256"][:16]
+    return ApprovalRequest(
+        approval_id=REQUEST_PREFIX + secrets.token_hex(16),
+        request_id="mobile-release:" + evidence.release_id + suffix,
+        correlation_id="mobile-release:" + evidence.candidate_sha + suffix,
+        organization_id=policy.organization_id,
+        client_id=None,
+        requested_by="svc-jason-release-manager",
+        capability=CAPABILITY,
+        requested_mode="release:" + evidence.candidate_sha,
+        requested_at=instant,
+        expires_at=instant + timedelta(seconds=policy.ttl_seconds),
+        authorized_approver_ids=policy.owner_identity_ids,
+        presentation=ApprovalPresentation(
+            title=("Replacement unfreeze ONLY: " if replacement else
+                   "CCC Material Review: " if evidence.review_only else
+                   "Production + CCC: ") + evidence.purpose[:90],
+            summary=(
+                "The exact production release was already owner-authorized. "
+                "Approve records ONLY the missing CCC material-change owner review for this SHA. "
+                "Independent CCC, deployment and rollback remain mandatory."
+                if evidence.review_only and not replacement else
+                "This is a NEW one-transaction production unfreeze for an already approved SHA "
+                "whose prior unfreeze was consumed BEFORE mutation. It does not add standing "
+                "authority, modify the earlier approval, or bypass preflight/rollback."
+                if replacement else
+                "Review this exact immutable release. Approve authorizes only this SHA's "
+                "release and CCC material review; independent checks, deployment and rollback remain mandatory."
+            ),
+            facts=(
+                ("Purpose", evidence.purpose),
+                ("Release", evidence.release_id),
+                ("Exact SHA", evidence.candidate_sha),
+                ("Highest risk", evidence.risk_profile),
+                ("Affected services", ", ".join(evidence.affected_surfaces)),
+                ("Changed files", shown),
+                ("Rollback", evidence.rollback_sha),
+                *((("Replaces expired approval", renewed_from),) if renewed_from else ()),
+                *((("Consumed predecessor", dict(evidence.replacement_lineage)["predecessor_transaction_receipt_sha256"]),)
+                    if replacement else ()),
+                ("Preproduction and rollback", "Passed"),
+                ("Release policy", evidence.policy_sha256),
+                ("Manifest fingerprint", evidence.manifest_sha256),
+            ),
+        ),
+        metadata={
+            **intent, "intent_sha256": digest(intent), "owner_policy_sha256": policy.policy_sha256,
+            **({
+                "card_instance_challenge": challenge,
+                "card_instance_challenge_sha256": hashlib.sha256(
+                    challenge.encode("ascii")
+                ).hexdigest(),
+            } if challenge is not None else {}),
+        },
+    )
+
+
+
+RENEWAL_LIMIT = 3
+
+
+def read_explicit_release_renewal(
+    state_root: Path, requests: Any, evidence: ExactRelease,
+    policy: MobileReleasePolicy, nonce: str, *, requested_at: datetime,
+) -> str:
+    """A fresh, owner-console-requested card is not an approval to deploy.
+
+    Old expired requests and signed evidence remain immutable. This checks
+    the recorded manual renewal lineage both during issuance and again when
+    the signed Teams callback and host consumer validate the new card.
+    """
+    if re.fullmatch(r"[0-9a-f]{32}", nonce) is None or requested_at.tzinfo is None:
+        raise PermissionError("release renewal nonce or time invalid")
+    root = Path(state_root)
+    folder = root / "mobile-release-renewals"
+    marker = folder / (evidence.release_id + "-renew-" + nonce + ".json")
+    parent = folder.lstat()
+    info = marker.lstat()
+    if (not stat.S_ISDIR(parent.st_mode) or stat.S_IMODE(parent.st_mode) & 0o077
+            or parent.st_uid != root.stat().st_uid
+            or not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != root.stat().st_uid or info.st_size > 4096):
+        raise PermissionError("release renewal is not private owner-host evidence")
+    doc = json.loads(marker.read_text(encoding="utf-8"))
+    required = {
+        "schema_version", "release_id", "candidate_sha", "rollback_sha",
+        "manifest_sha256", "owner_policy_sha256", "renewal_nonce",
+        "previous_approval_id", "requested_at", "requester_identity",
+        "requester_os_account",
+    }
+    if (not isinstance(doc, dict) or set(doc) != required
+            or doc["schema_version"] != "1.0"
+            or doc["release_id"] != evidence.release_id
+            or doc["candidate_sha"] != evidence.candidate_sha
+            or doc["rollback_sha"] != evidence.rollback_sha
+            or doc["manifest_sha256"] != evidence.manifest_sha256
+            or doc["owner_policy_sha256"] != policy.policy_sha256
+            or doc["renewal_nonce"] != nonce
+            or doc["requester_identity"] != "person-al"
+            or doc["requester_os_account"] != "al"):
+        raise PermissionError("renewal owner intent no longer matches the exact release")
+    initiated_at = datetime.fromisoformat(str(doc["requested_at"]))
+    if (initiated_at.tzinfo is None
+            or not 0 <= (requested_at - initiated_at).total_seconds() <= 900):
+        raise PermissionError("manual renewal owner intent is stale or in future")
+    previous_id = str(doc["previous_approval_id"])
+    if re.fullmatch(r"relapproval-[0-9a-f]{32}", previous_id) is None:
+        raise PermissionError("renewal has no exact predecessor")
+    previous = requests.get(previous_id)
+    if (previous is None or previous.status is not ApprovalRequestStatus.EXPIRED
+            or previous.expires_at > initiated_at
+            or previous.expires_at > requested_at
+            or previous.organization_id != policy.organization_id
+            or previous.capability != CAPABILITY
+            or previous.requested_by != "svc-jason-release-manager"
+            or previous.authorized_approver_ids != policy.owner_identity_ids
+            or previous.metadata.get("release_id") != evidence.release_id
+            or previous.metadata.get("candidate_sha") != evidence.candidate_sha
+            or previous.metadata.get("rollback_sha") != evidence.rollback_sha
+            or previous.metadata.get("manifest_sha256") != evidence.manifest_sha256
+            or previous.metadata.get("owner_policy_sha256") != policy.policy_sha256
+            or requests.accepted_decision(previous_id) is not None):
+        raise PermissionError("renewal predecessor was not an expired undecided card")
+    return previous_id
+
+
+
+
+class MobileReleaseSignedEvidenceStore:
+    """Private immutable signed-gateway payload retained for host revalidation.
+
+    Storing it before atomic decision consumption lets the host reject both
+    forged SQLite receipts and a crashed callback without a signed payload.
+    """
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute("PRAGMA synchronous=FULL")
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS mobile_release_signed_evidence (
+              approval_id TEXT PRIMARY KEY,
+              signed_envelope_json TEXT NOT NULL,
+              evidence_sha256 TEXT NOT NULL
+            )""")
+        os.chmod(self.path, 0o600)
+
+    def save(self, *, approval_id: str, signed_envelope: Mapping[str, Any],
+             evidence_sha256: str) -> None:
+        if not approval_id.startswith(REQUEST_PREFIX):
+            raise ValueError("mobile signed evidence requires exact approval ID")
+        if not re.fullmatch(r"[0-9a-f]{64}", evidence_sha256):
+            raise ValueError("signed Teams evidence digest invalid")
+        body = canonical_bytes(dict(signed_envelope)).decode("utf-8")
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            existing = self.db.execute(
+                "SELECT signed_envelope_json,evidence_sha256 FROM mobile_release_signed_evidence WHERE approval_id=?",
+                (approval_id,),
+            ).fetchone()
+            if existing is not None and existing != (body, evidence_sha256):
+                raise PermissionError("a different Teams decision already owns this approval ID")
+            if existing is None:
+                self.db.execute(
+                    "INSERT INTO mobile_release_signed_evidence VALUES(?,?,?)",
+                    (approval_id, body, evidence_sha256),
+                )
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+
+
+@dataclass
+class MobileReleaseApprovalFlow:
+    """A real signed Teams callback may consume one immutable request, never deploy."""
+    approvals: ApprovalRequestService
+    requests: Any
+    policy_path: Path
+    state_root: Path
+    bindings: Any
+    identities: Any
+    signed_verifier: Any
+    signed_evidence: MobileReleaseSignedEvidenceStore
+    required_policy_version: str = "1.0"
+    owner_identity_email_fallbacks: Mapping[str, str] | None = None
+
+    def _authorized_owner_identity(self, *, binding, identity, policy: MobileReleasePolicy) -> str:
+        if identity.identity_id in policy.owner_identity_ids:
+            return identity.identity_id
+        fallbacks = {
+            str(owner).strip(): str(email).strip().casefold()
+            for owner, email in dict(self.owner_identity_email_fallbacks or {}).items()
+            if str(owner).strip() and str(email).strip()
+        }
+        for owner_identity in policy.owner_identity_ids:
+            email = fallbacks.get(owner_identity)
+            if email is None:
+                continue
+            try:
+                expected_identity = (
+                    "person-entra-" + uuid.UUID(str(binding.microsoft_object_id)).hex
+                )
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise PermissionError(
+                    "mobile release owner fallback binding identity is invalid"
+                ) from exc
+            if (
+                str(getattr(binding, "email_address", "") or "").strip().casefold() == email
+                and str(getattr(binding, "jason_identity_id", "")) == expected_identity
+                and str(getattr(identity, "identity_id", "")) == expected_identity
+                and getattr(binding, "client_id", None) is None
+                and getattr(binding, "status", None) == "active"
+                and getattr(identity, "status", None) == "active"
+                and getattr(identity, "organization_id", None) == policy.organization_id
+            ):
+                return owner_identity
+        raise PermissionError("mobile release actor is not the authorized owner")
+
+    def handle(self, *, approval_id: str, decision: str, microsoft_tenant_id: str,
+               microsoft_object_id: str, conversation_id: str, channel_response_id: str,
+               decided_at: datetime, selections: Mapping[str, str] | None = None,
+               signed_envelope: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        if (not approval_id.startswith(REQUEST_PREFIX) or signed_envelope is None
+                or decision not in {"approve", "deny"}):
+            raise PermissionError("exact signed mobile release decision required")
+        # Bounded emergency hold does not affect Teams chat or other workflows.
+        read_release_approval_containment(self.state_root).require_can_issue()
+        token = json.dumps(dict(signed_envelope), separators=(",", ":"), ensure_ascii=False)
+        machine, parsed = self.signed_verifier.parse(token)
+        submit = parsed.approval_submit
+        if (submit is None or submit.approval_id != approval_id or submit.decision != decision
+                or parsed.microsoft_tenant_id != microsoft_tenant_id
+                or parsed.microsoft_object_id != microsoft_object_id
+                or parsed.conversation_id != conversation_id
+                or submit.channel_response_id != channel_response_id
+                or parsed.issued_at != decided_at
+                or parsed.documents
+                or dict(submit.selections) != dict(selections or {})):
+            raise PermissionError("Teams decision does not match signed immutable approval evidence")
+        principal = self.signed_verifier.verify(token)
+        binding = self.bindings.find(microsoft_tenant_id=principal.tenant_id, microsoft_object_id=principal.object_id)
+        if binding is None or binding.status != "active":
+            raise PermissionError("mobile release approver lacks active Teams identity binding")
+        identity = self.identities.get(binding.jason_identity_id)
+        if identity is None or identity.status != "active" or identity.organization_id != "aot":
+            raise PermissionError("mobile release approver identity not active in AOT")
+        policy = read_mobile_release_policy(self.policy_path)
+        if policy.schema_version != self.required_policy_version:
+            raise PermissionError("Teams owner release policy changed without the reviewed runtime mode")
+        authorized_owner_identity = self._authorized_owner_identity(
+            binding=binding, identity=identity, policy=policy,
+        )
+        request = self.requests.get(approval_id)
+        if request is None or request.status is not ApprovalRequestStatus.PENDING:
+            raise PermissionError("mobile release decision is missing or already terminal")
+        read_release_approval_containment(self.state_root).require_request_eligible(
+            request.requested_at
+        )
+        if (request.organization_id != policy.organization_id or request.client_id is not None
+                or request.requested_by == identity.identity_id or request.requested_by != "svc-jason-release-manager"
+                or request.capability != CAPABILITY or request.authorized_approver_ids != policy.owner_identity_ids
+                or request.metadata.get("owner_policy_sha256") != policy.policy_sha256):
+            raise PermissionError("mobile approval requester, role or policy has changed")
+        release_id = request.metadata.get("release_id", "")
+        replacement = request.metadata.get("replacement_unfreeze_only") is True
+        review = request.metadata.get("review_only") is True
+        if replacement and review:
+            raise PermissionError("replacement unfreeze and CCC-only intents conflict")
+        current = read_eligible_release(
+            self.state_root, release_id, policy,
+            allow_existing_owner_approval=(review or replacement),
+            replacement_unfreeze_only=replacement,
+        )
+        if current.review_only != (review or replacement):
+            raise PermissionError("mobile owner-only request purpose changed after issuance")
+        renewal_nonce = request.metadata.get("renewal_nonce")
+        renewed_from = request.metadata.get("renewed_from_approval_id")
+        if renewal_nonce is not None or renewed_from is not None:
+            if renewal_nonce is None or renewed_from is None:
+                raise PermissionError("incomplete signed owner renewal")
+            previous_id = read_explicit_release_renewal(
+                self.state_root, self.requests, current, policy,
+                renewal_nonce, requested_at=request.requested_at,
+            )
+            if previous_id != renewed_from:
+                raise PermissionError("owner renewal predecessor does not match")
+        if policy.schema_version in {"2.0", "3.0"}:
+            proof = request.metadata.get("card_instance_challenge")
+            if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
+                    or hashlib.sha256(proof.encode("ascii")).hexdigest()
+                        != request.metadata.get("card_instance_challenge_sha256")
+                    or dict(submit.selections) != {"card_challenge": proof}):
+                raise PermissionError("signed Teams decision is not bound to the issued card instance")
+            expected = create_mobile_release_request(
+                current, policy, now=request.requested_at, card_challenge=proof,
+                renewed_from=renewed_from, renewal_nonce=renewal_nonce,
+            )
+        else:
+            if submit.selections:
+                raise PermissionError("legacy release approval cannot change immutable card material")
+            expected = create_mobile_release_request(
+                current, policy, now=request.requested_at,
+                renewed_from=renewed_from, renewal_nonce=renewal_nonce,
+            )
+        # The issuer durably records the *transport receipt* after calling
+        # TeamsGatewayPlaybookApprovalSender.send(). That single field cannot
+        # appear in the immutable reviewed intent reconstructed above. Do not
+        # mistake its presence for a policy/manifest change and reject every
+        # genuine phone click. Accept no other mutable metadata fields.
+        verified_metadata = dict(request.metadata)
+        delivery_receipt = verified_metadata.pop("delivery_message_ids", None)
+        if delivery_receipt is not None and (
+            type(delivery_receipt) is not str
+            or re.fullmatch(r"[!-~]{1,512}", delivery_receipt) is None
+        ):
+            raise PermissionError("mobile Teams delivery receipt is invalid")
+        if (expected.requested_mode != request.requested_mode
+                or expected.request_id != request.request_id
+                or expected.correlation_id != request.correlation_id
+                or expected.metadata != verified_metadata
+                or expected.presentation != request.presentation
+                or expected.expires_at != request.expires_at):
+            raise PermissionError("release contents or approval policy changed after Teams card issuance")
+        # Recheck shared hold immediately before any durable signed decision
+        # artifact. The independent host consumer repeats this control.
+        read_release_approval_containment(self.state_root).require_request_eligible(
+            request.requested_at
+        )
+        self.signed_evidence.save(
+            approval_id=approval_id,
+            signed_envelope=signed_envelope,
+            evidence_sha256=principal.authentication_evidence_hash,
+        )
+        read_release_approval_containment(self.state_root).require_request_eligible(
+            request.requested_at
+        )
+        accepted = self.approvals.accept_response(
+            ApprovalResponse(approval_id=approval_id, organization_id=policy.organization_id,
+                approver_identity_id=authorized_owner_identity, decision=ApprovalDecision(decision),
+                decided_at=decided_at, channel="microsoft_teams",
+                channel_response_id=channel_response_id,
+                authentication_evidence_hash=principal.authentication_evidence_hash))
+        # A durable approved receipt is NOT the release or CCC material review.
+        # A distinct attestation consumer must independently revalidate and
+        # materialize the exact release and CCC records. Never claim deployed.
+        return {
+            "status": "completed", "approval_id": approval_id,
+            "approval_status": accepted.status, "executed": False,
+            "reply": {"text": (
+                "Approval recorded. Exact release and CCC evidence awaits independent verification; "
+                "Jason has not deployed this change."
+                if accepted.status == "approved"
+                else "Denied. Neither production release nor CCC approval was granted."
+            )},
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class MobileReleaseOwnerAuthority:
+    """Policy scoped to an owner and one exact release, not shared Datto roles."""
+    policy_path: Path
+
+    def can_approve(self, *, approver_identity_id: str, organization_id: str,
+                    client_id: str | None, capability: str, requested_mode: str) -> bool:
+        policy = read_mobile_release_policy(self.policy_path)
+        return (
+            approver_identity_id in policy.owner_identity_ids
+            and organization_id == policy.organization_id and client_id is None
+            and capability == CAPABILITY
+            and re.fullmatch(r"release:[0-9a-f]{40}", requested_mode) is not None
+        )
+
+
+@dataclass
+class MobileReleaseApprovalMaintenance:
+    """One actionable owner card per exact eligible release; no reminder spam."""
+    enabled: bool
+    policy_path: Path
+    state_root: Path
+    requests: Any
+    approvals: ApprovalRequestService
+    sender: TeamsGatewayPlaybookApprovalSender
+    interval_seconds: int = 300
+    clock: Any = lambda: datetime.now(timezone.utc)
+    _next_due: datetime | None = None
+    required_policy_version: str = "1.0"
+
+    def tick(self) -> bool:
+        if not self.enabled:
+            return False
+        containment = read_release_approval_containment(self.state_root)
+        if containment.active:
+            # Distinct auditable reason; never interfere with ordinary Teams,
+            # site diagnostics or tickets. The shared host consumer also gates.
+            _LOG.warning('OWNER_RELEASE_APPROVAL_HOLD_ACTIVE=%s', containment.hold_id)
+            return False
+        if self.interval_seconds < 60:
+            raise ValueError("release approval scan cadence must be at least 60 seconds")
+        now = self.clock()
+        if self._next_due is not None and now < self._next_due:
+            return False
+        self._next_due = now + timedelta(seconds=self.interval_seconds)
+        policy = read_mobile_release_policy(self.policy_path)
+        if policy.schema_version != self.required_policy_version:
+            raise PermissionError("Teams release policy changed without the reviewed runtime activation")
+        paths = tuple(sorted((self.state_root / "mobile-release-offers").glob("release-*.json"),
+                             key=lambda p: p.stat().st_mtime, reverse=True))[:20]
+        existing_subjects = {
+            (
+                request.metadata.get("release_id"),
+                request.metadata.get("candidate_sha"),
+                request.metadata.get("rollback_sha"),
+                request.metadata.get("manifest_sha256"),
+                request.metadata.get("owner_policy_sha256"),
+                request.metadata.get("review_only") is True,
+                request.metadata.get("replacement_unfreeze_only") is True,
+                (request.metadata.get("replacement_lineage") or {}).get(
+                    "predecessor_transaction_receipt_sha256"),
+            )
+            for request in self.requests.list_all()
+            if request.capability == CAPABILITY
+        }
+        # The normal offer remains one-shot. A *separate* owner-console
+        # renewal marker permits one NEW card, never replay of an expired one.
+        # Serialize across runtime workers and re-read the ledger while locked.
+        renewal_dir = self.state_root / "mobile-release-renewals"
+        if renewal_dir.is_dir():
+            for marker in sorted(renewal_dir.glob("release-*-renew-*.json"),
+                                 key=lambda item: item.stat().st_mtime, reverse=True)[:30]:
+                matched = re.fullmatch(
+                    r"(release-[0-9a-f]{16})-renew-([0-9a-f]{32})\.json",
+                    marker.name,
+                )
+                if matched is None:
+                    continue
+                release_id, nonce = matched.groups()
+                try:
+                    with marker.open("rb") as handle:
+                        try:
+                            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            continue
+                        related = [
+                            req for req in self.requests.list_all()
+                            if req.capability == CAPABILITY
+                            and req.metadata.get("release_id") == release_id
+                        ]
+                        if (not related or len(related) > RENEWAL_LIMIT
+                                or any(req.status is not ApprovalRequestStatus.EXPIRED
+                                       for req in related)
+                                or any(req.metadata.get("renewal_nonce") == nonce
+                                       for req in related)):
+                            continue
+                        previous = max(related, key=lambda req: req.requested_at)
+                        candidate = read_eligible_release(self.state_root, release_id, policy)
+                        parent_id = read_explicit_release_renewal(
+                            self.state_root, self.requests, candidate, policy,
+                            nonce, requested_at=now,
+                        )
+                        if parent_id != previous.approval_id:
+                            continue
+                        read_release_approval_containment(
+                            self.state_root
+                        ).require_request_eligible(now)
+                        request = create_mobile_release_request(
+                            candidate, policy, now=now,
+                            renewed_from=parent_id, renewal_nonce=nonce,
+                        )
+                        # Create BEFORE network delivery. A crash after this
+                        # point blocks unattended replay or duplicate sends.
+                        self.approvals.create(request, now=now)
+                        read_release_approval_containment(
+                            self.state_root
+                        ).require_request_eligible(request.requested_at)
+                        receipts = self.sender.send(request)
+                        if len(receipts) != len(policy.owner_identity_ids):
+                            raise RuntimeError("renewed Teams card delivery not confirmed")
+                        self.requests.put(replace(
+                            request, metadata={
+                                **request.metadata,
+                                "delivery_message_ids": ",".join(receipts),
+                            },
+                        ))
+                        return True
+                except (OSError, ValueError, TypeError, PermissionError,
+                        json.JSONDecodeError):
+                    continue
+        for path in paths:
+            try:
+                offer = json.loads(path.read_text(encoding="utf-8"))
+                offered = datetime.fromisoformat(str(offer.get("published_at") or ""))
+                if (offer.get("schema_version") != "1.0"
+                        or offer.get("release_id") != path.stem
+                        or not SHA.fullmatch(str(offer.get("candidate_sha") or ""))
+                        or not release_id_matches_candidate(str(offer.get("release_id") or ""), str(offer.get("candidate_sha") or ""))
+                        or offer.get("protected_main_sha") != offer["candidate_sha"]
+                        or offered.tzinfo is None
+                        or not 0 <= (now - offered).total_seconds() <= 900):
+                    continue
+            except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+                continue
+            if (containment.released_at is not None
+                    and offered <= containment.released_at):
+                # An offer created before/during a hold may not be revived.
+                continue
+            offer_subject = (
+                offer.get("release_id"),
+                offer.get("candidate_sha"),
+                offer.get("live_rollback_sha"),
+                offer.get("manifest_sha256"),
+                policy.policy_sha256,
+                offer.get("review_only") is True,
+                offer.get("replacement_unfreeze_only") is True,
+                (offer.get("replacement_lineage") or {}).get(
+                    "predecessor_transaction_receipt_sha256"),
+            )
+            if offer_subject in existing_subjects:
+                # The same immutable approval subject is one-shot even after a
+                # terminal decision. A changed manifest/policy/review mode is a
+                # different subject and receives a distinct approval_id/card.
+                continue
+            try:
+                replacement = offer.get("replacement_unfreeze_only") is True
+                if replacement and offer.get("review_only") is True:
+                    continue
+                evidence = read_eligible_release(
+                    self.state_root, path.stem, policy,
+                    allow_existing_owner_approval=(
+                        offer.get("review_only") is True or replacement),
+                    replacement_unfreeze_only=replacement,
+                )
+            except (ValueError, PermissionError, FileNotFoundError, json.JSONDecodeError):
+                continue
+            if (evidence.candidate_sha != offer["candidate_sha"]
+                    or evidence.rollback_sha != offer.get("live_rollback_sha")
+                    or evidence.manifest_sha256 != offer.get("manifest_sha256")
+                    or evidence.review_only != (
+                        offer.get("review_only") is True or replacement)
+                    or (dict(evidence.replacement_lineage)
+                        if evidence.replacement_lineage is not None else None)
+                        != (offer.get("replacement_lineage") if replacement else None)):
+                continue
+            read_release_approval_containment(self.state_root).require_request_eligible(now)
+            request = create_mobile_release_request(evidence, policy, now=now)
+            self.approvals.create(request, now=now)
+            # A failed delivery leaves one durable pending request, not a loop
+            # that spams new cards or bypasses Teams unavailable failure.
+            read_release_approval_containment(self.state_root).require_request_eligible(
+                request.requested_at
+            )
+            receipts = self.sender.send(request)
+            if len(receipts) != len(policy.owner_identity_ids):
+                raise RuntimeError("mobile Teams approval was not delivered to every bound owner")
+            self.requests.put(replace(
+                request, metadata={
+                    **request.metadata,
+                    "delivery_message_ids": ",".join(receipts),
+                },
+            ))
+            return True
+        return False

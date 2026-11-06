@@ -45,8 +45,18 @@ def load_state(path: Path) -> dict[str, Any]:
     return state
 
 
+def retain_observation_on_replay(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """Keep the original observation timestamp if evidence has not changed."""
+    if previous and previous.get("observed_at"):
+        comparable_previous = {k: v for k, v in previous.items() if k != "observed_at"}
+        comparable_current = {k: v for k, v in current.items() if k != "observed_at"}
+        if comparable_previous == comparable_current:
+            current["observed_at"] = previous["observed_at"]
+    return current
+
+
 def update_source(state: dict[str, Any], *, revision: str, run_id: str, run_url: str) -> None:
-    state["validated_source"] = {
+    evidence = {
         "revision": revision,
         "status": "ci_passed",
         "workflow": "Validate Jason",
@@ -54,6 +64,9 @@ def update_source(state: dict[str, Any], *, revision: str, run_id: str, run_url:
         "workflow_url": run_url,
         "observed_at": now_iso(),
     }
+    state["validated_source"] = retain_observation_on_replay(
+        state.get("validated_source") or {}, evidence
+    )
 
 
 def docker_field(container: str, template: str) -> str:
@@ -229,7 +242,9 @@ def main() -> int:
             run_url=args.workflow_url,
         )
     else:
-        state["production"] = collect_production(args.source_revision)
+        state["production"] = retain_observation_on_replay(
+            state.get("production") or {}, collect_production(args.source_revision)
+        )
     write_state(args.state_json, args.state_md, state)
     print(f"DOCUMENTATION_SUCCESS_RECONCILIATION=PASS mode={args.mode}")
     return 0

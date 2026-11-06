@@ -375,3 +375,26 @@ That standing approval applies only to TODO items already marked Planned or In p
 - authority to execute Proposed/Blocked ideas.
 
 Protected-core production changes continue to require exact owner approval at the Release Manager gate.
+
+## Existing release-bridge identity conflict: quarantine only the affected TODO
+
+The root-owned continuous engineering worker must not fail its entire pipeline
+when an approved TODO has a historical persisted issue binding that differs
+from the currently open GitHub issue (for example TODO-OPS-013 persisted #1459
+versus later open #1500). Such issues can have materially different approval
+scope, so silently rebinding them or inheriting the old release approval is
+prohibited. Instead the native bridge records an explicit per-TODO
+`identity_holds` entry with both issue numbers,
+`requires_governed_identity_reconciliation`, and `release_eligible=false`.
+It preserves the original commitment, phase, immutable development issue ID,
+and approval evidence; no merge, release or closure action is performed on
+that TODO. Other unrelated, identity-correct commitments continue through
+their own existing governed gates. Bridge runs can succeed without suggesting
+the conflicted TODO is complete: the persisted exception remains visible
+until a separately verified, approved reconciliation resolves the history.
+An invalid or unparseable persisted identity remains a hard error.
+
+This operational unblock is not a production release approval and does not
+relax the root breaker, the auto-promotion incident hold, or the prohibition
+on unauthorised/disruptive provider actions. The pipeline success metric means
+its eligible control stages ran, not that every approved TODO was delivered.

@@ -57,6 +57,9 @@ from autonomous_remediation.autonomous_principal import (
     AutonomousPrincipal,
     AutonomousRequestFactory,
 )
+from autonomous_remediation.least_disruptive_policy import (
+    assess_remediation, applies_to_remediation,
+)
 from autonomous_remediation.playbook_autonomy_approval import (
     SQLitePlaybookAutonomyApprovalStore,
 )
@@ -96,6 +99,7 @@ from connectors.datto_edr.threat_correlation import (
 )
 from pydantic import AnyHttpUrl
 from jason_mcp.release_approval_request import queue_release_approval_request
+from jason_mcp.production_read_acceptance import record_authenticated_owner_read
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 
@@ -1021,6 +1025,37 @@ def _project_endpoint_collection(
     result["items"] = _safe(provider_data)
     return result
 
+def _exact_company_evidence_matches(
+    result: Mapping[str, Any],
+    *,
+    requested_company_id: int,
+) -> bool:
+    """Require a real provider record for the exact selected company.
+
+    A successful HTTP/query response can legitimately carry data.item=None
+    for an unknown ID; a successful status alone is not company-existence
+    evidence and cannot authorize deriving a client-specific context.
+    """
+    if result.get("status") != "succeeded":
+        return False
+    evidence = result.get("evidence")
+    if not isinstance(evidence, Mapping):
+        return False
+    data = evidence.get("data")
+    if not isinstance(data, Mapping):
+        return False
+    item = data.get("item")
+    if not isinstance(item, Mapping):
+        return False
+    actual = item.get("id")
+    if isinstance(actual, bool) or not isinstance(actual, (str, int)):
+        return False
+    try:
+        return int(actual) == requested_company_id
+    except (TypeError, ValueError):
+        return False
+
+
 def _contract_client_context_for_identity(
     *,
     principal: str,
@@ -1048,14 +1083,32 @@ def _contract_client_context_for_identity(
         company_id = str(int(raw_company_id))
     except (TypeError, ValueError):
         return bound_client_id, None
-    if int(company_id) < 0:
+    if int(company_id) <= 0:
         return bound_client_id, None
     if bound_client_id is not None:
         return bound_client_id, None
 
-    # Organization-scoped client selection is owner-only. Reuse Jason's existing
-    # authenticated owner allowlist rather than inventing a second owner concept.
-    if principal not in approval_owner_identities():
+    # Contract reads can be selected by a trusted AOT staff identity with an
+    # existing exact observe grant; other sensitive client-scoped read families
+    # retain their Owner-only selection rule.
+    if (
+        capability_name in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}
+        and principal not in approval_owner_identities()
+    ):
+        app = _runtime()
+        bindings = getattr(app, "microsoft_identity_bindings", None)
+        trusted = (
+            bindings.find_active_by_jason_identity(jason_identity_id=principal)
+            if bindings is not None else None
+        )
+        if (
+            organization != "aot"
+            or trusted is None
+            or getattr(trusted, "status", None) != "active"
+            or getattr(trusted, "client_id", None) is not None
+        ):
+            return None, None
+    elif principal not in approval_owner_identities():
         return None, None
 
     # Prove the selected Autotask company exists through the ordinary governed
@@ -1068,7 +1121,9 @@ def _contract_client_context_for_identity(
         capability_name=SERVICE_COMPANY_READ,
         arguments={"resource_id": int(company_id)},
     )
-    if company.get("status") != "succeeded":
+    if not _exact_company_evidence_matches(
+        company, requested_company_id=int(company_id),
+    ):
         return None, None
 
     app = _runtime()
@@ -1140,6 +1195,24 @@ def _governed_read(
         assurance,
         client_id,
     ) = _authenticated_identity()
+    # Reject an explicit cross-client selector before issuing a governed read.
+    # A pre-bound client identity must never use a different company_id,
+    # including when the provider happens to return matching-looking rows.
+    selected_company = arguments.get("company_id")
+    if (
+        client_id is not None
+        and capability_name in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}
+        and selected_company is not None
+        and (
+            isinstance(selected_company, bool)
+            or str(selected_company).strip() != str(client_id)
+        )
+    ):
+        return {
+            "status": "denied",
+            "capability": capability_name,
+            "reason_codes": ["CLIENT_SCOPE_MISMATCH"],
+        }
     client_id, derived_context = _contract_client_context_for_identity(
         principal=principal,
         organization=organization,
@@ -1641,9 +1714,55 @@ def _governed_read_for_identity(
                 result.output,
             )
             if capability_name == "automation.component.search"
+            else _project_print_meter_usage_search(result.output)
+            if capability_name == "print.meter.usage.search"
             else _safe(dict(result.output))
         ),
     }
+
+
+def _project_print_meter_usage_search(output: Mapping[str, Any]) -> dict[str, Any]:
+    """Preserve the governed fleet dataset without weakening global MCP bounds.
+
+    Generic MCP projection intentionally bounds arbitrary lists to 100 items.
+    ``print.meter.usage.search`` is different: its provider/runtime contract
+    already validates a bounded ``limit`` of at most 1000 and the open-world
+    analytics path requires the complete selected fleet before ranking. Keep
+    that capability-specific collection intact up to the source contract while
+    retaining normal recursive secret redaction for every record and all other
+    fields.
+    """
+    root = dict(output or {})
+    raw_data = root.pop("data", None)
+    projected = _safe(root)
+    if not isinstance(projected, Mapping):
+        projected = {}
+    result = dict(projected)
+
+    if not isinstance(raw_data, Mapping):
+        result["data"] = _safe(raw_data)
+        return result
+
+    data = dict(raw_data)
+    raw_records = data.pop("records", None)
+    safe_data = _safe(data)
+    if not isinstance(safe_data, Mapping):
+        safe_data = {}
+    safe_data = dict(safe_data)
+
+    if isinstance(raw_records, (list, tuple)):
+        maximum = 1000
+        safe_data["records"] = [
+            _safe(item) for item in raw_records[:maximum]
+        ]
+        if len(raw_records) > maximum:
+            safe_data["records_bounded"] = True
+            safe_data["records_available"] = len(raw_records)
+    else:
+        safe_data["records"] = _safe(raw_records)
+
+    result["data"] = safe_data
+    return result
 
 
 def _is_canonical_uuid(value: object) -> bool:
@@ -3694,11 +3813,16 @@ def _governed_execute(
             "error_code": "capability_not_mcp_action_enabled",
         }
 
+    # Justification is control-plane material, never a provider argument. The
+    # assessment supplies Jason's affirmative benefit judgment and comparison
+    # to narrower fixes; it is NOT approval or source evidence verification.
+    supplied = dict(arguments)
+    remediation_review = supplied.pop("jason_remediation_review", None)
     try:
         canonical_arguments = (
             _canonicalize_governed_action_arguments(
                 capability_name,
-                arguments,
+                supplied,
             )
         )
     except ValueError as exc:
@@ -3764,6 +3888,50 @@ def _governed_execute(
                 datto_approval_reason_code = (
                     "DATTO_COMPONENT_STANDING_APPROVAL_STALE"
                 )
+
+    remediation_policy_id: str | None = None
+    if applies_to_remediation(capability_name):
+        # The current Datto PowerShell classifier is a bounded passive read;
+        # it retains its existing standing authorization path. All actual
+        # state-changing management commands require an affirmative assessment.
+        passive_diagnostic = (
+            capability_name == "automation.component.execute"
+            and (
+                datto_approval_reason_code == "DATTO_POWERSHELL_READ_ONLY_COMMAND"
+                or (datto_approval_mode == "standing_safe"
+                    and selected_component.name.casefold().startswith((
+                        "check ", "get-", "get status ", "query status ",
+                    )))
+            )
+        )
+        if not passive_diagnostic:
+            component = (selected_component.name if capability_name
+                         == "automation.component.execute" else "")
+            try:
+                judgment = assess_remediation(
+                    capability=capability_name,
+                    arguments=canonical_arguments,
+                    review=remediation_review,
+                    component_name=component,
+                    explicit_technician_approval=explicit_approval,
+                )
+            except (TypeError, ValueError) as exc:
+                return {
+                    "status": "rejected", "capability": capability_name,
+                    "error_code": "REMEDIATION_ASSESSMENT_INVALID",
+                    "reason_codes": [type(exc).__name__],
+                }
+            if not judgment.may_proceed_to_authority:
+                return {
+                    "status": "rejected", "capability": capability_name,
+                    "error_code": "REMEDIATION_ACTION_NOT_JUSTIFIED",
+                    "reason_codes": list(judgment.reasons),
+                    "impact": judgment.impact.value,
+                    "action_fingerprint": judgment.action_fingerprint,
+                }
+            remediation_policy_id = (
+                "least-disruptive-remediation-v1:" + judgment.action_fingerprint
+            )
 
     execution_id = f"exec_mcp_action_{uuid4().hex}"
     correlation_id = f"corr_mcp_action_{uuid4().hex}"
@@ -3994,7 +4162,8 @@ def _governed_execute(
         arguments=canonical_arguments,
         requester_kind="human",
         permission_mode="execute",
-        policy_ids=("mcp-governed-execution-v1",),
+        policy_ids=(("mcp-governed-execution-v1", remediation_policy_id)
+                    if remediation_policy_id else ("mcp-governed-execution-v1",)),
         authority_context_id=context.context_id,
         idempotency_key=idempotency_key,
         approval_id=approval_id,
@@ -5545,7 +5714,14 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
         )
     )
     if not path.exists():
-        return {"status": "unavailable", "items": [], "reason": "work_db_missing"}
+        return {
+            "status": "unavailable",
+            "items": [],
+            "reason": "work_db_missing",
+            "processing_state": "UNKNOWN",
+            "processing_state_reason": "work_db_missing",
+        }
+
     connection = None
     try:
         connection = sqlite3.connect(
@@ -5555,6 +5731,16 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
         )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA query_only = ON")
+
+        work_columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(autonomy_operational_work)"
+            ).fetchall()
+        }
+        if not {"ticket_id", "ticket_number", "playbook_id", "phase", "updated_at"}.issubset(work_columns):
+            raise sqlite3.DatabaseError("operational work schema incomplete")
+
         rows = connection.execute(
             """
             SELECT ticket_id,ticket_number,playbook_id,phase,updated_at
@@ -5581,52 +5767,7 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
             LIMIT 5
             """
         ).fetchall()
-    except (sqlite3.Error, OSError) as error:
-        return {
-            "status": "unavailable",
-            "items": [],
-            "reason": type(error).__name__,
-        }
-    finally:
-        if connection is not None:
-            connection.close()
 
-    items = []
-    for row in rows:
-        phase = str(row["phase"] or "")
-        if (
-            phase.startswith("waiting_device_access:")
-            or phase.startswith("waiting_recheck:")
-            or phase in {
-                "approval_pending",
-                "waiting_patch_approval",
-                "waiting_patch_window",
-                "waiting_client_notification_authority",
-                "blocked",
-            }
-        ):
-            state = "WAITING" if phase != "blocked" else "BLOCKED"
-        else:
-            state = "ACTIVE"
-        items.append(
-            {
-                "ticket_id": int(row["ticket_id"]),
-                "ticket_number": str(row["ticket_number"] or ""),
-                "playbook": str(row["playbook_id"] or ""),
-                "phase": phase,
-                "state": state,
-                "updated_at": str(row["updated_at"] or ""),
-            }
-        )
-    counts = connection = None
-    try:
-        connection = sqlite3.connect(
-            f"file:{path}?mode=ro",
-            uri=True,
-            timeout=2.0,
-        )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA query_only = ON")
         counts = connection.execute(
             """
             SELECT
@@ -5647,25 +5788,326 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
                              'waiting_patch_window','waiting_client_notification_authority'
                          )
                     THEN 1 ELSE 0 END) AS waiting_count,
-                SUM(CASE WHEN phase = 'blocked' THEN 1 ELSE 0 END) AS blocked_count
+                SUM(CASE WHEN phase = 'blocked' THEN 1 ELSE 0 END) AS blocked_count,
+                MAX(updated_at) AS last_work_update_at
             FROM autonomy_operational_work
             WHERE phase NOT IN ('complete','escalated')
             """
         ).fetchone()
-    except (sqlite3.Error, OSError):
-        counts = None
+
+        scan_columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(autonomy_ticket_scan_cycle)"
+            ).fetchall()
+        }
+        required_scan = {"scanned_at", "eligible", "active_slots", "selected"}
+        scan_history: list[dict[str, Any]] = []
+        if required_scan.issubset(scan_columns):
+            optional_scan = [
+                name
+                for name in (
+                    "pages_traversed",
+                    "provider_items",
+                    "duplicate_items",
+                    "evaluated",
+                    "unsupported",
+                    "governance_blocked",
+                    "assigned_elsewhere",
+                    "waiting_device",
+                    "human_review",
+                )
+                if name in scan_columns
+            ]
+            scan_select = [
+                "scanned_at",
+                "eligible",
+                "active_slots",
+                "selected",
+                *optional_scan,
+            ]
+            scan_rows = connection.execute(
+                "SELECT " + ",".join(scan_select)
+                + " FROM autonomy_ticket_scan_cycle "
+                  "ORDER BY scanned_at DESC LIMIT 10"
+            ).fetchall()
+            scan_history = [
+                {name: row[name] for name in scan_select}
+                for row in scan_rows
+            ]
+
+        activity_columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(autonomy_ticket_activity)"
+            ).fetchall()
+        }
+        last_activity_at = ""
+        if "occurred_at" in activity_columns:
+            activity = connection.execute(
+                "SELECT MAX(occurred_at) AS last_activity_at "
+                "FROM autonomy_ticket_activity"
+            ).fetchone()
+            last_activity_at = str(
+                (activity["last_activity_at"] if activity is not None else "") or ""
+            )
+
+        heartbeat_columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(autonomy_ticket_worker_heartbeat)"
+            ).fetchall()
+        }
+        heartbeat = None
+        if {"last_started_at", "last_completed_at", "state"}.issubset(heartbeat_columns):
+            heartbeat = connection.execute(
+                "SELECT last_started_at,last_completed_at,state "
+                "FROM autonomy_ticket_worker_heartbeat "
+                "ORDER BY singleton_id LIMIT 1"
+            ).fetchone()
+    except (sqlite3.Error, OSError) as error:
+        return {
+            "status": "unavailable",
+            "items": [],
+            "reason": type(error).__name__,
+            "processing_state": "UNKNOWN",
+            "processing_state_reason": "ticket_processing_evidence_unavailable",
+        }
     finally:
         if connection is not None:
             connection.close()
+
+    items = []
+    for row in rows:
+        phase = str(row["phase"] or "")
+        if (
+            phase.startswith("waiting_device_access:")
+            or phase.startswith("waiting_recheck:")
+            or phase in {
+                "approval_pending",
+                "waiting_patch_approval",
+                "waiting_patch_window",
+                "waiting_client_notification_authority",
+                "blocked",
+            }
+        ):
+            item_state = "WAITING" if phase != "blocked" else "BLOCKED"
+        else:
+            item_state = "ACTIVE"
+        items.append(
+            {
+                "ticket_id": int(row["ticket_id"]),
+                "ticket_number": str(row["ticket_number"] or ""),
+                "playbook": str(row["playbook_id"] or ""),
+                "phase": phase,
+                "state": item_state,
+                "updated_at": str(row["updated_at"] or ""),
+            }
+        )
+
+    active_count = int((counts["active_count"] if counts is not None else None) or 0)
+    waiting_count = int((counts["waiting_count"] if counts is not None else None) or 0)
+    blocked_count = int((counts["blocked_count"] if counts is not None else None) or 0)
+    last_work_update_at = str(
+        (counts["last_work_update_at"] if counts is not None else "") or ""
+    )
+
+    latest_scan = scan_history[0] if scan_history else None
+    eligible_now = (
+        int((latest_scan or {}).get("eligible") or 0)
+        if latest_scan is not None
+        else None
+    )
+    active_slots = (
+        int((latest_scan or {}).get("active_slots") or 0)
+        if latest_scan is not None
+        else None
+    )
+    selected = (
+        int((latest_scan or {}).get("selected") or 0)
+        if latest_scan is not None
+        else None
+    )
+    last_successful_scan_at = str(
+        (latest_scan or {}).get("scanned_at") or ""
+    )
+    pages_traversed = (
+        int((latest_scan or {}).get("pages_traversed") or 0)
+        if latest_scan is not None
+        else None
+    )
+    provider_items = (
+        int((latest_scan or {}).get("provider_items") or 0)
+        if latest_scan is not None
+        else None
+    )
+    evaluated = (
+        int((latest_scan or {}).get("evaluated") or 0)
+        if latest_scan is not None
+        else None
+    )
+    unsupported = (
+        int((latest_scan or {}).get("unsupported") or 0)
+        if latest_scan is not None
+        else 0
+    )
+    governance_blocked = (
+        int((latest_scan or {}).get("governance_blocked") or 0)
+        if latest_scan is not None
+        else 0
+    )
+    human_required = (
+        int((latest_scan or {}).get("human_review") or 0)
+        if latest_scan is not None
+        else 0
+    )
+    waiting_device = (
+        int((latest_scan or {}).get("waiting_device") or 0)
+        if latest_scan is not None
+        else 0
+    )
+
+    scan_stale = True
+    scan_age_seconds = None
+    if last_successful_scan_at:
+        try:
+            scanned = datetime.fromisoformat(
+                last_successful_scan_at.replace("Z", "+00:00")
+            )
+            now = datetime.now(timezone.utc)
+            scan_age_seconds = max(0, int((now - scanned).total_seconds()))
+            interval = max(
+                1,
+                int(os.getenv("JASON_AUTONOMY_WORKER_INTERVAL_SECONDS", "60")),
+            )
+            max_age = max(
+                120,
+                int(
+                    os.getenv(
+                        "JASON_AUTONOMY_STATUS_MAX_SCAN_AGE_SECONDS",
+                        str(interval * 2),
+                    )
+                ),
+            )
+            scan_stale = scan_age_seconds > max_age
+        except (TypeError, ValueError, OverflowError):
+            scan_stale = True
+
+    meaningful_progress_at = last_activity_at or last_work_update_at
+    consecutive_no_progress_cycles = 0
+    if meaningful_progress_at:
+        try:
+            progress_time = datetime.fromisoformat(
+                meaningful_progress_at.replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError, OverflowError):
+            progress_time = None
+    else:
+        progress_time = None
+
+    for historical in scan_history:
+        if int(historical.get("eligible") or 0) <= 0:
+            break
+        try:
+            scan_time = datetime.fromisoformat(
+                str(historical.get("scanned_at") or "").replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError, OverflowError):
+            break
+        if progress_time is not None and progress_time >= scan_time:
+            break
+        if int(historical.get("selected") or 0) > 0:
+            break
+        consecutive_no_progress_cycles += 1
+
+    heartbeat_state = (
+        str(heartbeat["state"] or "")
+        if heartbeat is not None
+        else ""
+    )
+    heartbeat_last_completed_at = (
+        str(heartbeat["last_completed_at"] or "")
+        if heartbeat is not None
+        else ""
+    )
+
+    if latest_scan is None:
+        processing_state = "UNKNOWN"
+        state_reason = "complete_scan_evidence_unavailable"
+    elif scan_stale:
+        processing_state = "UNKNOWN"
+        state_reason = "latest_complete_scan_is_stale"
+    elif heartbeat is not None and heartbeat_state not in {"idle", "completed", "running"}:
+        processing_state = "DEGRADED"
+        state_reason = "ticket_worker_heartbeat_unhealthy"
+    elif (
+        eligible_now is not None
+        and eligible_now > 0
+        and active_count == 0
+        and active_slots is not None
+        and active_slots > 0
+        and selected == 0
+    ):
+        processing_state = "STALLED"
+        state_reason = "eligible_work_with_free_capacity_but_no_active_or_selected_work"
+    elif eligible_now is not None and eligible_now > 0 and consecutive_no_progress_cycles >= 2:
+        processing_state = "STALLED"
+        state_reason = "actionable_work_has_no_meaningful_progress_for_multiple_cycles"
+    elif active_count > 0:
+        if blocked_count > 0 or governance_blocked > 0 or unsupported > 0:
+            processing_state = "DEGRADED"
+            state_reason = "active_processing_with_blocked_or_unsupported_work"
+        elif eligible_now is not None and eligible_now > active_count:
+            processing_state = "BACKLOGGED"
+            state_reason = "actionable_work_exceeds_current_active_processing"
+        else:
+            processing_state = "PROCESSING"
+            state_reason = "actionable_work_is_actively_processing"
+    elif eligible_now is not None and eligible_now > 0:
+        processing_state = "STALLED"
+        state_reason = "actionable_work_exists_but_none_is_active"
+    elif blocked_count > 0 or governance_blocked > 0:
+        processing_state = "BLOCKED"
+        state_reason = "no_actionable_work_selected_but_blocked_work_remains"
+    elif waiting_count > 0 or waiting_device > 0 or human_required > 0:
+        processing_state = "WAITING_EXPECTED"
+        state_reason = "fresh_complete_scan_reports_zero_actionable_work_with_validated_waiting_work"
+    elif unsupported > 0:
+        processing_state = "DEGRADED"
+        state_reason = "fresh_complete_scan_reports_unsupported_work"
+    else:
+        processing_state = "CAUGHT_UP"
+        state_reason = "fresh_complete_scan_reports_zero_actionable_or_unclassified_work"
 
     return {
         "status": "succeeded",
         "items": items,
         "items_bounded": True,
         "item_limit": 5,
-        "active_count": int((counts["active_count"] if counts is not None else None) or 0),
-        "waiting_count": int((counts["waiting_count"] if counts is not None else None) or 0),
-        "blocked_count": int((counts["blocked_count"] if counts is not None else None) or 0),
+        "processing_state": processing_state,
+        "processing_state_reason": state_reason,
+        "active_count": active_count,
+        "waiting_count": waiting_count,
+        "blocked_count": blocked_count,
+        "eligible_now": eligible_now,
+        "active_slots": active_slots,
+        "selected_last_scan": selected,
+        "last_successful_scan_at": last_successful_scan_at,
+        "scan_age_seconds": scan_age_seconds,
+        "scan_stale": scan_stale,
+        "scan_evidence_present": latest_scan is not None,
+        "scan_complete": latest_scan is not None and not scan_stale,
+        "pages_traversed": pages_traversed,
+        "provider_items": provider_items,
+        "evaluated": evaluated,
+        "unsupported_count": unsupported,
+        "governance_blocked_count": governance_blocked,
+        "human_required_count": human_required,
+        "waiting_device_count": waiting_device,
+        "last_meaningful_progress_at": meaningful_progress_at,
+        "consecutive_no_progress_cycles": consecutive_no_progress_cycles,
+        "worker_heartbeat_state": heartbeat_state,
+        "worker_last_completed_at": heartbeat_last_completed_at,
     }
 
 
@@ -5863,12 +6305,98 @@ def _production_commitment_snapshot() -> dict[str, object]:
     }
 
 
+def _pmv3_engineering_snapshot() -> dict[str, object]:
+    path = Path(
+        os.environ.get(
+            "JASON_PMV3_ENGINEERING_STATE",
+            "/var/lib/jason/openclaw/support-repair/pmv3-engineering-controller-state.json",
+        )
+    )
+    if not path.exists():
+        return {
+            "status": "unavailable",
+            "reason": "pmv3_controller_state_missing",
+            "pass_count": 0,
+            "teams_only_approval": True,
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "status": "unavailable",
+            "reason": f"pmv3_controller_state_invalid:{type(exc).__name__}",
+            "pass_count": 0,
+            "teams_only_approval": True,
+        }
+    if not isinstance(payload, Mapping):
+        return {
+            "status": "unavailable",
+            "reason": "pmv3_controller_state_invalid_shape",
+            "pass_count": 0,
+            "teams_only_approval": True,
+        }
+    passes = payload.get("passes")
+    passes = passes if isinstance(passes, list) else []
+    last_pass = passes[-1] if passes and isinstance(passes[-1], Mapping) else {}
+    raw_queue = payload.get("integration_queue")
+    if isinstance(raw_queue, Mapping):
+        integration_queue = {
+            key: raw_queue.get(key)
+            for key in (
+                "status", "gate_context", "main_sha", "production_lkg_sha",
+                "release_lock_active", "release_candidate_sha", "train_id",
+                "train_prs", "queue_depth", "last_action", "updated_at",
+                "error_type", "reason",
+            )
+            if key in raw_queue
+        }
+    else:
+        integration_queue = {"status": "unavailable", "reason": "pmv3_integration_queue_state_missing"}
+    return {
+        "status": str(payload.get("status") or "unknown"),
+        "reason": str(payload.get("reason") or ""),
+        "started_at": str(payload.get("started_at") or ""),
+        "finished_at": str(payload.get("finished_at") or ""),
+        "pass_count": int(payload.get("pass_count") or len(passes)),
+        "last_disposition": str(last_pass.get("disposition") or ""),
+        "last_progress_sha256": str(last_pass.get("progress_sha256") or ""),
+        "unchanged_passes": int(last_pass.get("unchanged_passes") or 0),
+        "teams_only_approval": payload.get("teams_only_approval") is True,
+        "integration_queue": integration_queue,
+    }
+
+
 @mcp.tool()
 def jason_mcp_status() -> dict[str, object]:
     """Return Jason MCP governed capability state."""
 
     actions = _active_action_capabilities()
     write_enabled = bool(actions)
+
+    autonomy_work = _autonomous_ticket_work_snapshot()
+    pmv3_engineering = _pmv3_engineering_snapshot()
+    pmv3_engineering["ticket_processing"] = {
+        key: autonomy_work.get(key)
+        for key in (
+            "processing_state",
+            "processing_state_reason",
+            "eligible_now",
+            "active_count",
+            "waiting_count",
+            "blocked_count",
+            "active_slots",
+            "selected_last_scan",
+            "last_successful_scan_at",
+            "scan_age_seconds",
+            "scan_stale",
+            "scan_complete",
+            "unsupported_count",
+            "governance_blocked_count",
+            "human_required_count",
+            "last_meaningful_progress_at",
+            "consecutive_no_progress_cycles",
+        )
+    }
 
     return {
         "status": "ok",
@@ -5898,8 +6426,9 @@ def jason_mcp_status() -> dict[str, object]:
             if "automation.component.execute" in actions
             else None
         ),
-        "autonomy_work": _autonomous_ticket_work_snapshot(),
+        "autonomy_work": autonomy_work,
         "production_commitments": _production_commitment_snapshot(),
+        "pmv3_engineering": pmv3_engineering,
     }
 
 
@@ -6383,6 +6912,31 @@ def _filter_discoverable_capabilities(
     if matches:
         if resource_filter:
             result["resource_capability_available"] = True
+            # A named read may require narrower selectors than a generic
+            # schema-proven read. Advertise the alternative for deliberate
+            # selection, never automatic execution or authorization bypass.
+            generic = [
+                item for item in available
+                if item["capability"] in {
+                    "service.entity.search", "service.entity.read"
+                }
+                and resource_filter in {
+                    v.casefold() for v in item["resource_types"]
+                }
+                and item["capability"] not in {
+                    candidate["capability"] for candidate in matches
+                }
+            ]
+            if generic:
+                result["alternatives"] = generic
+                result["alternative_count"] = len(generic)
+                result["selection_guidance"] = (
+                    "Schema-proven generic Autotask reads are candidate "
+                    "alternatives when a named route lacks appropriate "
+                    "selectors. Select explicitly and independently check "
+                    "provider and requester authorization; never retry "
+                    "a denied read as a generic query."
+                )
         return result
 
     if not resource_filter:
@@ -6648,6 +7202,23 @@ def execute_read_capability(
     )
 
     if result.get("status") != "succeeded":
+        # These are classifications, not authorization shortcuts. Never
+        # automatically retry a denied read through a different capability.
+        reason_codes = result.get("reason_codes") or []
+        if "client_context_required" in reason_codes:
+            result["failure_domain"] = "requester_authorization"
+            result["fallback_permitted"] = False
+        elif result.get("error_code") == "INVALID_CAPABILITY_ARGUMENTS":
+            result["failure_domain"] = "request_construction"
+            result["fallback_permitted"] = False
+            result["operator_message"] = (
+                "Correct the selectors against the discovered capability "
+                "schema before retrying. This is not a provider permission "
+                "failure."
+            )
+        elif str(result.get("error_code") or "").startswith("PROVIDER_HTTP_STATUS_"):
+            result["failure_domain"] = "provider_response"
+            result["fallback_permitted"] = False
         return result
 
     evidence = result.get("evidence")
@@ -6662,6 +7233,11 @@ def execute_read_capability(
         "endpoint.alert.search",
         "endpoint.software.search",
         "endpoint.patch.search",
+        # This capability has its own source-contract-bounded projector in
+        # _governed_read_for_identity. Reapplying the generic dynamic evidence
+        # boundary here would silently truncate its already-safe 1000-record
+        # fleet dataset back to 100 and make fleet-wide analytics incomplete.
+        "print.meter.usage.search",
     }
 
     if capability_name not in known_projected:
@@ -6724,7 +7300,223 @@ def execute_read_capability(
                     evidence
                 )
 
+    # The native Production Manager cannot accept a read-surface release
+    # based on HTTP 200 alone. Only a real Entra-authenticated owner request
+    # that passed ordinary requester release authorization may furnish
+    # non-sensitive external functional acceptance evidence. Never mint
+    # evidence from service-only canaries or from failed/denied calls.
+    if capability_name in {
+        "service.ticket.count", "service.ticket.search",
+        "service.ticket.read", "service.entity.search",
+    }:
+        try:
+            owner_principal, owner_org, _, owner_client = _authenticated_identity()
+            record_authenticated_owner_read(
+                capability=capability_name, arguments=read_arguments,
+                result=result, principal_id=owner_principal,
+                organization_id=owner_org, client_id=owner_client,
+                live_profile=os.getenv("JASON_PROVIDER_READ_ACTIVATION_PROFILE", ""),
+            )
+        except (PermissionError, OSError, ValueError):
+            # A missing optional canary must never disrupt the authorized
+            # requester read. It fails the separate deployment gate instead.
+            pass
+
     return result
+
+
+@mcp.tool()
+def verify_release_ticket_read_canary(
+    release_candidate_sha: str,
+    phase: str,
+    created_after: str,
+    created_before: str,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """Verify complete live Autotask reads under this MCP requester's own identity.
+
+    This is a read-only functional probe, NOT a provider-access exception or
+    an authorization to deploy. Every individual count, search and exact read
+    goes through the existing execute_read_capability -> _governed_read path,
+    which independently enforces the connected Microsoft identity, trusted
+    Jason binding, JKD-001 grants and requester information-release rules.
+    No ticket content or raw provider responses are ever returned.
+    """
+    from orchestrator.foundational_ticket_read_acceptance import (
+        TicketReadCanaryError,
+        run_ticket_read_canary,
+    )
+
+    try:
+        # Fail before any provider call for an unbound/non-human requester.
+        _authenticated_identity()
+    except (PermissionError, ValueError, RuntimeError):
+        return {
+            "status": "denied",
+            "error_code": "MCP_AUTHENTICATED_REQUESTER_REQUIRED",
+            "customer_data_included": False,
+        }
+
+    # This revision is injected by the immutable native Docker release path.
+    # Never trust a caller-supplied running revision for after-release proof.
+    running_revision = str(os.environ.get("JASON_SOURCE_REVISION") or "").strip()
+    profile = str(os.environ.get("JASON_PROVIDER_READ_ACTIVATION_PROFILE") or "").strip()
+    v11_post_release = (
+        phase == "after"
+        and profile == "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
+    )
+    v13_post_release = (
+        phase == "after"
+        and profile == "itglue-autotask-entra-dynamic-schema-read-catalog-v13"
+    )
+    expanded_post_release = v11_post_release or v13_post_release
+    if expanded_post_release and page_size != 50:
+        # The independent PM gate requires proof of the actual first 50-page
+        # plus the exact cursor continuation, rather than a synthetic or
+        # separately-shaped paging smoke.
+        return {
+            "status": "failed",
+            "error_code": (
+                "v13_post_release_requires_page_size_50"
+                if v13_post_release else "v11_post_release_requires_page_size_50"
+            ),
+            "provider": "autotask", "customer_data_included": False,
+        }
+    try:
+        summary = run_ticket_read_canary(
+            lambda capability, arguments: execute_read_capability(
+                capability=capability,
+                arguments=dict(arguments),
+            ),
+            release_candidate_sha=release_candidate_sha,
+            running_revision=running_revision,
+            phase=phase,
+            created_after=created_after,
+            created_before=created_before,
+            page_size=page_size,
+            now=datetime.now(timezone.utc),
+        )
+    except TicketReadCanaryError as exc:
+        return {
+            "status": "failed",
+            "error_code": str(exc),
+            "provider": "autotask",
+            "customer_data_included": False,
+        }
+
+    if expanded_post_release:
+        # The new generic read path is also mandatory. It must succeed for
+        # the same already-authenticated requester; no service-level fallback
+        # is permitted. This query emits its independent metadata-only receipt
+        # through the normal execute_read_capability read path.
+        try:
+            project_result = execute_read_capability(
+                capability="service.entity.search",
+                arguments={"entity": "Projects", "page_size": 1},
+            )
+        except Exception:
+            return {
+                "status": "failed",
+                "error_code": "governed_generic_project_read_exception",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        if (
+            not isinstance(project_result, dict)
+            or project_result.get("status") != "succeeded"
+            or project_result.get("provider") != "autotask"
+            or project_result.get("error_code") is not None
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_generic_project_read_not_successful",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        project_evidence = project_result.get("evidence")
+        project_data = (
+            project_evidence.get("data")
+            if isinstance(project_evidence, dict) else None
+        )
+        items = project_data.get("items") if isinstance(project_data, dict) else None
+        if (
+            not isinstance(items, list)
+            or len(items) > 1
+            or any(
+                not isinstance(item, dict)
+                or type(item.get("id")) is not int
+                or item["id"] <= 0
+                for item in items
+            )
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_generic_project_read_malformed",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        summary = {**summary, "generic_project_read_verified": True}
+
+    if v13_post_release:
+        # The v13 activation cannot be declared successful based solely on
+        # v11 tickets/Projects. Use the SAME authenticated human and one
+        # arbitrary ordinary entity outside the former fixed whitelist.
+        # Any source, field permission or connector denial fails the release.
+        try:
+            dynamic_result = execute_read_capability(
+                capability="service.entity.search",
+                arguments={
+                    "entity": "ActionTypes", "page_size": 1,
+                    "select": ["id", "name"],
+                },
+            )
+        except Exception:
+            return {
+                "status": "failed",
+                "error_code": "governed_dynamic_schema_read_exception",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        if (
+            not isinstance(dynamic_result, dict)
+            or dynamic_result.get("status") != "succeeded"
+            or dynamic_result.get("provider") != "autotask"
+            or dynamic_result.get("error_code") is not None
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_dynamic_schema_read_not_successful",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        evidence = dynamic_result.get("evidence")
+        data = evidence.get("data") if isinstance(evidence, dict) else None
+        items = data.get("items") if isinstance(data, dict) else None
+        if (
+            not isinstance(items, list)
+            or len(items) > 1
+            or any(
+                not isinstance(item, dict)
+                or type(item.get("id")) is not int
+                # Autotask ActionTypes ID=0 is a genuine provider row.
+                # This exception does NOT apply to ticket or project IDs.
+                or item["id"] < 0
+                or set(item) != {"id", "name"}
+                or not isinstance(item.get("name"), str)
+                or not item["name"].strip()
+                for item in items
+            )
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_dynamic_schema_read_malformed",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        summary = {**summary, "dynamic_schema_read_verified": True}
+
+    return {
+        "status": "succeeded",
+        "acceptance_status": "PASS",
+        "summary": summary,
+        "customer_data_included": False,
+        "production_release_approval": False,
+        "needs_independent_receipt_binding": True,
+    }
 
 
 @mcp.tool()
@@ -7103,7 +7895,11 @@ def execute_governed_capability(
     approval; callers must carry that same-turn instruction as
     arguments.explicit_approval=true. Autonomous selection of a per-run
     component must not set that flag and must stop for technician instruction.
-    Classification is never accepted from action arguments.
+    Classification is never accepted from action arguments. For a modifying
+    device/client management action, include `jason_remediation_review` with
+    Jason's evidence references, expected improvement, verification and review
+    of less disruptive alternatives. The server classifies impact itself.
+    Missing or negative justification is not overridden by technician approval.
     """
 
     capability_name = str(capability).strip()

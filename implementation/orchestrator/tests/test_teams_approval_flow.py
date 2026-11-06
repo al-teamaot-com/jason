@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
 from connectors.microsoft_graph.teams_approval_ingress import VerifiedMicrosoftPrincipal
-from connectors.src.jason_connectors.approval_requests import AcceptedApproval
+from connectors.src.jason_connectors.approval_requests import AcceptedApproval, ApprovalResponse, ApprovalDecision
 from orchestrator.approval_audit import (
     ApprovalAuditEventType,
     ApprovalAuditRecorder,
@@ -15,6 +15,10 @@ from orchestrator.teams_approval_flow import TeamsApprovalFlow
 
 
 NOW = datetime(2026, 8, 9, 16, 30, tzinfo=timezone.utc)
+
+
+def bound_response(decision=ApprovalDecision.APPROVE):
+    return ApprovalResponse('approval-1','org-1','approver-1',decision,NOW,'teams','response-1')
 
 
 @dataclass
@@ -121,7 +125,7 @@ class TeamsApprovalFlowTests(unittest.TestCase):
 
     def test_approved_response_records_authentication_decision_and_resume(self):
         token = StubTokenVerifier(self.principal())
-        ingress = StubIngress(response=object())
+        ingress = StubIngress(response=bound_response())
         approval = StubApprovalService(self.accepted())
         bridge = StubResumeBridge(resumed=ResumedRequest())
         flow, sink = self.flow(token, ingress, approval, bridge)
@@ -140,9 +144,9 @@ class TeamsApprovalFlowTests(unittest.TestCase):
             [event.event_type for event in sink.events],
             [
                 ApprovalAuditEventType.RESPONSE_AUTHENTICATED,
+                ApprovalAuditEventType.RESPONSE_ACTOR_BOUND,
                 ApprovalAuditEventType.RESPONSE_ACCEPTED,
                 ApprovalAuditEventType.JKD_REAUTHORIZED,
-                ApprovalAuditEventType.ORCHESTRATOR_RESUMED,
             ],
         )
         self.assertTrue(ApprovalAuditRecorder.verify_chain(sink.events))
@@ -152,7 +156,7 @@ class TeamsApprovalFlowTests(unittest.TestCase):
         bridge = StubResumeBridge(resumed=ResumedRequest())
         flow, sink = self.flow(
             StubTokenVerifier(self.principal()),
-            StubIngress(response=object()),
+            StubIngress(response=bound_response()),
             StubApprovalService(self.accepted(status="denied")),
             bridge,
         )
@@ -168,7 +172,7 @@ class TeamsApprovalFlowTests(unittest.TestCase):
         self.assertEqual(sink.events[-1].event_type, ApprovalAuditEventType.RESPONSE_DENIED)
 
     def test_authentication_failure_stops_before_ingress_and_is_audited(self):
-        ingress = StubIngress(response=object())
+        ingress = StubIngress(response=bound_response())
         flow, sink = self.flow(
             StubTokenVerifier(self.principal()),
             ingress,
@@ -215,7 +219,7 @@ class TeamsApprovalFlowTests(unittest.TestCase):
         bridge = StubResumeBridge(resumed=ResumedRequest())
         flow, sink = self.flow(
             StubTokenVerifier(self.principal()),
-            StubIngress(response=object()),
+            StubIngress(response=bound_response()),
             approval,
             bridge,
         )
@@ -235,7 +239,7 @@ class TeamsApprovalFlowTests(unittest.TestCase):
             def record(self, event):
                 raise RuntimeError("audit unavailable")
 
-        ingress = StubIngress(response=object())
+        ingress = StubIngress(response=bound_response())
         approval = StubApprovalService(self.accepted())
         bridge = StubResumeBridge(resumed=ResumedRequest())
         flow = TeamsApprovalFlow(
@@ -267,7 +271,7 @@ def test_request_changes_is_audited_and_never_resumes_execution():
     bridge = StubResumeBridge(resumed=ResumedRequest())
     flow, sink = suite.flow(
         StubTokenVerifier(suite.principal()),
-        StubIngress(response=object()),
+        StubIngress(response=bound_response()),
         StubApprovalService(suite.accepted(status="changes_requested")),
         bridge,
     )
@@ -299,7 +303,7 @@ def test_approved_response_wakes_exact_bound_attention_resource():
     audit_sink = InMemoryApprovalAuditSink()
     flow = TeamsApprovalFlow(
         token_verifier=StubTokenVerifier(suite.principal()),
-        ingress=StubIngress(response=object()),
+        ingress=StubIngress(response=bound_response()),
         approval_service=StubApprovalService(accepted),
         resume_bridge=StubResumeBridge(resumed=ResumedRequest()),
         audit=ApprovalAuditRecorder(audit_sink),
@@ -326,7 +330,7 @@ def test_denied_response_never_wakes_attention_resource():
     audit_sink = InMemoryApprovalAuditSink()
     flow = TeamsApprovalFlow(
         token_verifier=StubTokenVerifier(suite.principal()),
-        ingress=StubIngress(response=object()),
+        ingress=StubIngress(response=bound_response()),
         approval_service=StubApprovalService(accepted),
         resume_bridge=StubResumeBridge(resumed=ResumedRequest()),
         audit=ApprovalAuditRecorder(audit_sink),

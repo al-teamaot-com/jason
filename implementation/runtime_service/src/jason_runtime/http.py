@@ -40,6 +40,8 @@ class RuntimeHttpApplication:
     # Internal composition references for alternate governed ingress adapters.
     # These are never exposed through the Teams HTTP contract.
     governed_orchestrator: Any | None = None
+    # Trusted in-process pilot issuance only; never exposed through HTTP.
+    universal_approval_handler: Any | None = None
     identity_authority: Any | None = None
     capabilities: Any | None = None
     microsoft_identity_bindings: Any | None = None
@@ -47,6 +49,7 @@ class RuntimeHttpApplication:
     # Same-thread bounded maintenance hook. The HTTP layer never invokes it from
     # request dispatch; JasonRuntimeHttpServer.service_actions() owns maintenance.
     maintenance: Any | None = None
+    health_probe: Any | None = None
 
     max_body_bytes: int = 64 * 1024
     conversation_path: str = "/v1/openclaw/teams/conversation"
@@ -63,14 +66,16 @@ class RuntimeHttpApplication:
         request_path = path.split("?", 1)[0]
 
         if verb == "GET" and request_path == "/healthz":
-            return HttpResponse(
-                200,
-                {
-                    "status": "ok",
-                    "component": "jason-runtime",
-                    "authority": "central-orchestrator",
-                },
-            )
+            worker = self.health_probe() if self.health_probe is not None else None
+            status = str(worker.get("status")) if worker else "ok"
+            result = {
+                "status": status,
+                "component": "jason-runtime",
+                "authority": "central-orchestrator",
+            }
+            if worker is not None:
+                result["ticket_worker"] = dict(worker)
+            return HttpResponse(200 if status == "ok" else 503, result)
 
         if request_path != self.conversation_path:
             return HttpResponse(404, {"status": "rejected", "error_code": "not_found"})
@@ -125,12 +130,20 @@ class RuntimeHttpApplication:
         status = str(result.get("status", "")).strip()
         error_code = str(result.get("error_code", "")).strip()
         if status == "completed":
+            if (str(result.get("approval_id", "")).startswith("planapproval-")
+                    and result.get("approval_status") == "approved"
+                    and result.get("plan_status") == "queued" and result.get("executed") is False):
+                return 202
             return 200
         if status == "duplicate":
             return 200
         if status == "clarification_required":
             return 200
         if status == "approval_required":
+            return 202
+        if (status == "approved" and str(result.get("approval_id", "")).startswith("planapproval-")
+                and result.get("executed") is False):
+            # The human decision is durably accepted; execution remains queued.
             return 202
         if status == "denied":
             return 403

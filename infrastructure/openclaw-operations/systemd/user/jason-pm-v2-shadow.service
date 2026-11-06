@@ -1,0 +1,23 @@
+[Unit]
+Description=Project Jason Production Manager V2 shadow controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/al/.local/lib/jason/engineering-worker-source
+Environment=HOME=/home/al
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/home/al/.local/lib/jason/engineering-worker-source/tools
+ExecStart=/usr/bin/python3 -m pm_v2.service --repo /home/al/.local/lib/jason/engineering-worker-source --config /home/al/.local/lib/jason/engineering-worker-source/config/pm-v2.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/jason/pm-v2 /var/lib/jason/openclaw/pm-v2
+UMask=0077
+
+[Install]
+WantedBy=default.target

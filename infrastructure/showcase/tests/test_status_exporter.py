@@ -21,6 +21,7 @@ def test_operational_health_metrics_are_secret_safe_and_bounded(tmp_path, monkey
         json.dumps(
             {
                 "status": "pass",
+                "full_proof_age_seconds": 725,
                 "delegations": {"active": 2, "expired_active_records": 1, "inactive": 3},
                 "trusted_key_registry": {"active_records": 2, "mode": "0o600", "present": True},
                 "backup_restore_proof": {
@@ -45,6 +46,7 @@ def test_operational_health_metrics_are_secret_safe_and_bounded(tmp_path, monkey
     assert 'jason_openclaw_delegations{state="active"} 2' in metrics
     assert 'jason_openclaw_delegations{state="expired_active_records"} 1' in metrics
     assert "jason_authority_backup_restore_proof 1" in metrics
+    assert "jason_authority_full_integrity_proof_age_seconds 725" in metrics
     assert "fingerprint" not in metrics.lower()
     assert "public_key" not in metrics.lower()
 
@@ -60,3 +62,4 @@ def test_missing_snapshot_fails_health_closed(monkeypatch, tmp_path):
     metrics = module.render_metrics()
     assert "jason_openclaw_authority_operational_health 0" in metrics
     assert "jason_openclaw_authority_snapshot_age_seconds -1" in metrics
+    assert "jason_authority_full_integrity_proof_age_seconds -1" in metrics

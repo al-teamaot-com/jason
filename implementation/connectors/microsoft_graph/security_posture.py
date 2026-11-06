@@ -80,25 +80,32 @@ class MicrosoftGraphSecurityPostureReader:
         maximum=int(maximum_records)
         if not 1 <= maximum <= 100:
             raise ValueError("page_size must be between 1 and 100")
-        response=self._get(tenant_id=microsoft_tenant_id,path="/directoryRoles",params={"$top":maximum})
+        # Graph v1.0 /directoryRoles does NOT support $top. Keep transport
+        # query parameter-free and enforce our caller bound on the projection.
+        response=self._get(tenant_id=microsoft_tenant_id,path="/directoryRoles",params={})
         values=response.get("value")
         if not isinstance(values,list): raise ConnectorTransportError("Microsoft directory roles returned an unexpected shape")
-        items=[{"id":x.get("id"),"display_name":x.get("displayName"),"role_template_id":x.get("roleTemplateId")} for x in values if isinstance(x,Mapping)]
-        if len(items)!=len(values): raise ConnectorTransportError("Microsoft directory roles returned an invalid record")
-        return {"items":items,"count":len(items)}
+        if not all(isinstance(x,Mapping) for x in values):
+            raise ConnectorTransportError("Microsoft directory roles returned an invalid record")
+        selected=values[:maximum]
+        items=[{"id":x.get("id"),"display_name":x.get("displayName"),"role_template_id":x.get("roleTemplateId")} for x in selected]
+        return {"items":items,"count":len(items),"truncated":len(values)>maximum or bool(response.get("@odata.nextLink"))}
 
     def role_members(self, *, microsoft_tenant_id: str, role_id: str, maximum_records: int = 100) -> Mapping[str, Any]:
         rid=role_id.strip(); maximum=int(maximum_records)
         if not rid: raise ValueError("role_id is required")
         if not 1 <= maximum <= 100: raise ValueError("page_size must be between 1 and 100")
-        response=self._get(tenant_id=microsoft_tenant_id,path=f"/directoryRoles/{quote(rid,safe='')}/members",params={"$top":maximum})
+        # /directoryRoles/{id}/members also rejects $top. Graph returns a
+        # bounded provider page; do not follow untrusted nextLink URLs.
+        response=self._get(tenant_id=microsoft_tenant_id,path=f"/directoryRoles/{quote(rid,safe='')}/members",params={})
         values=response.get("value")
         if not isinstance(values,list): raise ConnectorTransportError("Microsoft directory role members returned an unexpected shape")
+        if not all(isinstance(x,Mapping) for x in values):
+            raise ConnectorTransportError("Microsoft directory role members returned an invalid record")
         items=[]
-        for x in values:
-            if not isinstance(x,Mapping): raise ConnectorTransportError("Microsoft directory role members returned an invalid record")
+        for x in values[:maximum]:
             items.append({"id":x.get("id"),"display_name":x.get("displayName"),"user_principal_name":x.get("userPrincipalName"),"account_enabled":x.get("accountEnabled"),"object_type":x.get("@odata.type")})
-        return {"items":items,"count":len(items),"role_id":rid}
+        return {"items":items,"count":len(items),"role_id":rid,"truncated":len(values)>maximum or bool(response.get("@odata.nextLink"))}
 
     def _get(self, *, tenant_id: str, path: str, params: Mapping[str, Any]) -> Mapping[str, Any]:
         tenant=tenant_id.strip()

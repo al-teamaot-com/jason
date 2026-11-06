@@ -9,6 +9,7 @@ never grants deployment or provider authority.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
@@ -114,6 +115,14 @@ def production_health_view(
         view["freshness"] = "invalid_timestamp"
         return view
     now = now or datetime.now(timezone.utc)
+    if observed_at.tzinfo is None:
+        view["status"] = "revalidation_required"
+        view["freshness"] = "invalid_timezone"
+        return view
+    if observed_at > now + timedelta(minutes=2):
+        view["status"] = "revalidation_required"
+        view["freshness"] = "future_timestamp"
+        return view
     age_minutes = max(0.0, (now - observed_at).total_seconds() / 60.0)
     view["evidence_age_minutes"] = round(age_minutes, 1)
     if age_minutes > max_age_minutes:
@@ -131,6 +140,17 @@ def release_control_view(state_root: Path | None = None) -> dict[str, Any]:
     if control_path.is_file():
         try:
             control = load_json(control_path)
+        except PermissionError:
+            # Normal documentation publication runs as unprivileged al.
+            # Its canonical root-owned control file is deliberately 0600.
+            # Use only the existing root-published, read-only user snapshot;
+            # it conveys evidence but never grants release authority.
+            try:
+                control = load_json(root / "protected-readback" / control_path.name)
+                if control.get("schema_version") != "1.0":
+                    raise ValueError("invalid protected control snapshot")
+            except (OSError, ValueError, KeyError, TypeError):
+                control = {"circuit_breaker": {"state": "unknown", "reason": "unreadable_control_snapshot"}}
         except Exception:
             control = {"circuit_breaker": {"state": "unknown", "reason": "unreadable_control_state"}}
 
@@ -170,6 +190,13 @@ def release_control_view(state_root: Path | None = None) -> dict[str, Any]:
     if drift_path.is_file():
         try:
             drift = load_json(drift_path)
+        except PermissionError:
+            try:
+                drift = load_json(root / "protected-readback" / drift_path.name)
+                if drift.get("schema_version") != "1.0":
+                    raise ValueError("invalid protected drift snapshot")
+            except (OSError, ValueError, KeyError, TypeError):
+                drift = {"status": "unknown", "problems": [{"kind": "unreadable_drift_snapshot"}]}
         except Exception:
             drift = {"status": "unknown", "problems": [{"kind": "unreadable_drift_evidence"}]}
     lkg = dict(control.get("last_known_good") or {})
@@ -191,6 +218,112 @@ def release_control_view(state_root: Path | None = None) -> dict[str, Any]:
         "desired_state_drift_problem_count": len(drift.get("problems") or []) if drift else None,
         "desired_state_drift_observed_at": drift.get("observed_at"),
     }
+
+
+# Evidence-only: the canonical production closeout publisher records a host
+# observation in issue #526 before its documentation PR can merge. The GitHub
+# schedule uses older main-branch docs; it must not replace a newer observation
+# with an older one. This marker is NOT release authority or an attestation.
+HOST_PRODUCTION_REPORT_MARKER = "<!-- jason-host-production-report:v1 -->"
+PRODUCTION_HEADER_FIELDS = (
+    "Production revision",
+    "Production health",
+    "Production evidence observed",
+    "Production evidence freshness",
+    "Production circuit breaker",
+    "Production lock owner",
+    "Active production transaction",
+    "Queued production candidates",
+    "Last-known-good release",
+    "Last-known-good revision",
+    "Current complete production manifest",
+    "Desired-state drift",
+)
+
+
+def _board_header_field(body: str, field: str) -> str:
+    # Only inspect the header, never a similarly named field in issue comments
+    # or below release-attention (which contains arbitrary PR descriptions).
+    header = body.split("## Release attention", 1)[0]
+    match = re.search(
+        rf"(?m)^\*\*{re.escape(field)}:\*\* (.*?)\s*$", header
+    )
+    return match.group(1).strip() if match else ""
+
+
+def _observation_time(value: str) -> datetime | None:
+    try:
+        observed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if observed.tzinfo is None:
+        return None
+    return observed.astimezone(timezone.utc)
+
+
+def preserve_newer_host_board_observation(
+    new_body: str,
+    previous_body: str,
+    *,
+    now: datetime | None = None,
+    max_age_minutes: int = 30,
+) -> str:
+    """Preserve a later HOST-PUBLISHED observation when scheduled GitHub
+    publication is built from older documentation on main.
+
+    Always recalculate its freshness. After TTL, fail closed and display
+    UNKNOWN breaker/drift/transaction states rather than recycling green.
+    The GH issue remains *advisory* and cannot influence release decisions.
+    """
+    if HOST_PRODUCTION_REPORT_MARKER not in previous_body:
+        return new_body
+    prior_sha = _board_header_field(previous_body, "Production revision").strip("`")
+    if not re.fullmatch(r"[0-9a-f]{40}", prior_sha):
+        return new_body
+    prior = _observation_time(_board_header_field(previous_body, "Production evidence observed"))
+    current = _observation_time(_board_header_field(new_body, "Production evidence observed"))
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    if prior is None or prior > now + timedelta(minutes=2):
+        return new_body
+    if current is not None and prior <= current:
+        return new_body
+
+    age_minutes = max(0.0, (now - prior).total_seconds() / 60.0)
+    stale = age_minutes > max_age_minutes
+    replacement = {
+        field: _board_header_field(previous_body, field)
+        for field in PRODUCTION_HEADER_FIELDS
+    }
+    if any(not replacement[field] for field in (
+        "Production revision", "Production health", "Production evidence observed",
+    )):
+        return new_body
+    if stale:
+        replacement["Production health"] = "revalidation_required"
+        replacement["Production evidence freshness"] = (
+            f"stale ({age_minutes:.1f} minutes old; no new host verification)"
+        )
+        for field in (
+            "Production circuit breaker", "Production lock owner",
+            "Active production transaction", "Queued production candidates",
+            "Desired-state drift",
+        ):
+            replacement[field] = "unknown (host evidence stale)"
+    else:
+        # Host publication is an observation, never continuously live state.
+        replacement["Production evidence freshness"] = (
+            f"fresh host observation ({age_minutes:.1f} minutes old)"
+        )
+
+    def update_line(match: re.Match[str]) -> str:
+        field = match.group(1)
+        return f"**{field}:** {replacement[field]}  "
+
+    pattern = r"(?m)^\*\*(" + "|".join(re.escape(x) for x in PRODUCTION_HEADER_FIELDS) + r"):\*\* .*?$"
+    header, separator, remainder = new_body.partition("## Release attention")
+    header = re.sub(pattern, update_line, header)
+    new_body = header + separator + remainder
+    return new_body.rstrip() + "\n\n" + HOST_PRODUCTION_REPORT_MARKER + "\n"
 
 
 def latest_checks(check_runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -375,45 +508,70 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
     pr_states: list[dict[str, Any]] = []
     active_files: dict[int, set[str]] = {}
 
-    for pr in pulls:
+    # The control board displays only recently updated PRs, and overlap
+    # detection is explicitly limited by active_overlap_days. Exhaustively
+    # comparing/checking every historical open PR is unnecessary, grows
+    # without bound (123 open PRs in production), and can fail the *entire*
+    # production release during documentation publication. Preserve every
+    # open PR in the older count and support-repair correlation, but require
+    # fresh remote checks for every PR actually displayed.
+    #
+    # Independent reads use a bounded worker pool; neither approval authority
+    # nor release gates are inferred from results that were not checked.
+    def inspect(pr: dict[str, Any]) -> tuple[dict[str, Any], set[str] | None]:
         number = int(pr["number"])
-        head_sha = str(pr["head"]["sha"])
-        compare = api.request(f"/compare/{main_sha}...{head_sha}")
-        checks_payload = api.request(f"/commits/{head_sha}/check-runs")
-        check_state, check_count, check_detail = summarize_required_checks(
-            required, list(checks_payload.get("check_runs", []))
-        )
-        state = classify_pr(
-            pr,
-            compare,
-            check_state,
-            bool(config.get("preproduction", {}).get("configured", False)),
-        )
         updated = datetime.fromisoformat(str(pr["updated_at"]).replace("Z", "+00:00"))
         recent = updated >= display_cutoff
+        files: set[str] | None = None
+
+        if recent:
+            head_sha = str(pr["head"]["sha"])
+            compare = api.request(f"/compare/{main_sha}...{head_sha}")
+            checks_payload = api.request(f"/commits/{head_sha}/check-runs")
+            check_state, check_count, _ = summarize_required_checks(
+                required, list(checks_payload.get("check_runs", []))
+            )
+            state = classify_pr(
+                pr, compare, check_state,
+                bool(config.get("preproduction", {}).get("configured", False)),
+            )
+            behind_by: int | None = int(compare.get("behind_by", 0) or 0)
+        else:
+            # Do not assert health/drift for PRs that have not been checked.
+            # When resumed, they must be revalidated against protected main.
+            check_state, check_count = "not_checked_stale", "not checked"
+            behind_by = None
+            state = "In development" if pr.get("draft") else "Needs revalidation"
+
         if updated >= active_cutoff:
-            files = api.paged(f"/pulls/{number}/files")
-            active_files[number] = {
+            response = api.paged(f"/pulls/{number}/files")
+            files = {
                 str(item["filename"])
-                for item in files
-                if sensitive(str(item["filename"]))
+                for item in response if sensitive(str(item["filename"]))
             }
 
-        pr_states.append(
-            {
-                "number": number,
-                "title": str(pr["title"]),
-                "url": str(pr["html_url"]),
-                "updated_at": str(pr["updated_at"]),
-                "head_sha": head_sha,
-                "behind_by": int(compare.get("behind_by", 0) or 0),
-                "check_state": check_state,
-                "check_count": check_count,
-                "check_detail": check_detail,
-                "state": state,
-                "recent": recent,
-            }
-        )
+        return {
+            "number": number,
+            "title": str(pr["title"]),
+            "url": str(pr["html_url"]),
+            "updated_at": str(pr["updated_at"]),
+            "head_sha": str(pr["head"]["sha"]),
+            "behind_by": behind_by,
+            "check_state": check_state,
+            "check_count": check_count,
+            "check_detail": [] if recent else ["revalidation required before merge"],
+            "state": state,
+            "recent": recent,
+        }, files
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        # executor.map preserves repository listing order for release-attention
+        # prioritization; any GitHub read failure still propagates and blocks
+        # publication rather than claiming a false healthy board.
+        for result, files in executor.map(inspect, pulls):
+            pr_states.append(result)
+            if files is not None:
+                active_files[result["number"]] = files
 
     overlaps: list[dict[str, Any]] = []
     numbers = sorted(active_files)
@@ -482,6 +640,7 @@ def render(board: dict[str, Any]) -> str:
         f"**Generated:** {board['generated_at']}  ",
         f"**Current main:** `{board['main_sha']}`  ",
         f"**Production revision:** `{prod.get('revision', 'unknown')}`  ",
+        "**Production revision basis:** last recorded observation, not a fresh live host check  ",
         f"**Production health:** {prod.get('status', 'unknown')}  ",
         f"**Production evidence observed:** {prod.get('observed_at', 'unknown')}  ",
         f"**Production evidence freshness:** {prod.get('freshness', 'unknown')}"
@@ -631,9 +790,24 @@ def render(board: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def publish(api: Api, issue_number: int, body: str) -> None:
+def publish(
+    api: Api,
+    issue_number: int,
+    body: str,
+    *,
+    max_age_minutes: int = 30,
+    now: datetime | None = None,
+) -> None:
     if not api.token:
         raise RuntimeError("GITHUB_TOKEN is required to publish the control board")
+    # A host-verified publication is allowed to precede its generated
+    # documentation PR merge. Scheduled GitHub refreshes may not regress
+    # that evidence to an older main-branch snapshot.
+    existing = api.request(f"/issues/{issue_number}")
+    body = preserve_newer_host_board_observation(
+        body, str(existing.get("body") or ""),
+        max_age_minutes=max_age_minutes, now=now,
+    )
     api.request(f"/issues/{issue_number}", method="PATCH", payload={"body": body})
 
 
@@ -660,7 +834,10 @@ def main() -> int:
         print(body)
 
     if args.publish:
-        publish(api, int(config["control_board_issue"]), body)
+        publish(
+            api, int(config["control_board_issue"]), body,
+            max_age_minutes=int(config.get("production", {}).get("health_evidence_max_age_minutes", 30)),
+        )
 
     return 0
 

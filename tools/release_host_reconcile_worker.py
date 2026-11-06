@@ -3,28 +3,68 @@
 
 from __future__ import annotations
 
+import importlib.util
+import hashlib
+import fcntl
 import grp
 import json
 import os
 import pwd
 import re
+import sqlite3
 import stat
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-SPOOL = Path("/var/lib/jason/openclaw/release-manager/host-reconcile")
+RELEASE_STATE = Path("/var/lib/jason/openclaw/release-manager")
+SPOOL = RELEASE_STATE / "host-reconcile"
 REQUESTS = SPOOL / "requests"
 RESULTS = SPOOL / "results"
 CANDIDATE_SCRIPTS = SPOOL / "candidate-scripts"
 CURRENT = Path("/opt/jason/current")
 REPO = Path("/home/al/.local/lib/jason/engineering-source-repo")
 SHA = re.compile(r"^[0-9a-f]{40}$")
+ROOT_RECOVERY_POLICY = Path("/etc/jason/release-readback-recovery/production-desired-state.json")
+SOURCE_DRIFT_POLICY = "config/production-desired-state.json"
+POLICY_UNIT_LISTS = (
+    "required_system_units", "allowed_system_units",
+    "required_user_units", "allowed_user_units",
+)
+
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 # Process one request per systemd activation; DirectoryNotEmpty retriggers for
-# remaining requests. Multiple 360s scripts must never overrun one unit start.
+# remaining requests. A recovery reconcile may need one bounded 60-minute
+# SQLite integrity/restore proof plus ordinary host activation.
 MAX_REQUESTS_PER_RUN = 1
-HOST_RECONCILE_TIMEOUT_SECONDS = 360
+HOST_RECONCILE_TIMEOUT_SECONDS = 4200
+# Pinned historical rollback-only check; never skip the mandatory health start.
+LEGACY_LKG_SHA = "aca94fdc0bfa551162f6ea99d7ddded311786414"
+LEGACY_HOST_SCRIPT_SHA256 = "d8bf41dfe824b8eb01ae192386907a6657f09c245aa246306597a1162c7d1707"
+LEGACY_HEALTH_FROM = 'timeout --signal=TERM --kill-after=5s 240s systemctl start "$unit"'
+LEGACY_HEALTH_TO = 'timeout --signal=TERM --kill-after=5s 300s systemctl start "$unit"'
+HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS = 410
+# Exact current-LKG bootstrap recovery. The immutable LKG full-integrity wrapper
+# predates current DB growth and now times out at 1800s. Recovery may materialize
+# ONLY these pinned LKG blobs, extend only that wrapper timeout to 3600s, and
+# redirect Python tempfile work to the existing controlled archive volume. The
+# integrity/backup/restore algorithm and PASS requirements remain unchanged.
+CURRENT_LKG_RECOVERY_SHA = "1b28ddc9863aee563755cb57599cf211ee82ac19"
+CURRENT_LKG_HEALTH_WRAPPER_SHA256 = "bbd7aede51986a5caefb5c99ed64b420786fc9b1f8e1aca69e12f65782dbbb56"
+CURRENT_LKG_HEALTH_TOOL_SHA256 = "f5c7c47db4c62268acfb9cb72bcc63d47b3e5378cbcf2839ad620b430c32425a"
+CURRENT_LKG_HEALTH_TIMEOUT_FROM = "SOURCE_HEALTH_TIMEOUT_SECONDS = 1800"
+CURRENT_LKG_HEALTH_TIMEOUT_TO = "SOURCE_HEALTH_TIMEOUT_SECONDS = 3600"
+CURRENT_LKG_HEALTH_RECOVERY_TIMEOUT_SECONDS = 3650
+CURRENT_LKG_POST_PROOF_RECONCILE_TIMEOUT_SECONDS = 500
+CURRENT_LKG_ARCHIVE_TMP = Path("/srv/jason/archive")
+CURRENT_LKG_FULL_EVIDENCE = Path("/var/lib/jason/openclaw/operational-full-health.json")
+# The immutable health proofs run as al, not root. The root-only candidate
+# script spool is intentionally inaccessible to al; materialize ONLY these two
+# hash-verified health files into a separate root-controlled, group-readable
+# execution directory. Never grant group access to the candidate script spool.
+CURRENT_LKG_EXEC_ROOT = Path("/usr/local/lib/jason/lkg-health-" + CURRENT_LKG_RECOVERY_SHA)
+MOBILE_APPROVAL_LEDGER = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
+CCC_MATERIAL_REVIEW_ROOT = Path("/var/lib/jason/ccc")
 
 
 class HostReconcileError(RuntimeError):
@@ -75,6 +115,13 @@ def _mcp_revision() -> str:
     return value
 
 
+def _host_operator_uid() -> int:
+    try:
+        return pwd.getpwnam("al").pw_uid
+    except KeyError as exc:
+        raise HostReconcileError("Jason host operator account is unavailable") from exc
+
+
 def _git(*args: str) -> list[str]:
     return [
         "git",
@@ -114,6 +161,659 @@ def _verify_main(source_revision: str) -> None:
 
 
 
+def _protected_root_drift_policy() -> dict[str, object]:
+    """Read the root-only policy without following symlinks or weakening mode."""
+    fd = os.open(ROOT_RECOVERY_POLICY, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        meta = os.fstat(fd)
+        if not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0 or meta.st_mode & 0o077:
+            raise HostReconcileError("root recovery policy is not root-only mode-0600")
+        if meta.st_size > 131072:
+            raise HostReconcileError("root recovery policy is unexpectedly large")
+        with os.fdopen(fd, "r", encoding="utf-8", closefd=False) as handle:
+            policy = json.load(handle)
+    finally:
+        os.close(fd)
+    if not isinstance(policy, dict) or policy.get("schema_version") != "1.0":
+        raise HostReconcileError("root recovery policy schema is invalid")
+    return policy
+
+
+def _declared_units(policy: dict[str, object], field: str) -> set[str]:
+    units = policy.get(field)
+    if (not isinstance(units, list)
+            or any(not isinstance(item, str)
+                   or not re.fullmatch(r"jason-[a-z0-9_.@-]{1,120}", item)
+                   for item in units)
+            or len(units) != len(set(units))):
+        raise HostReconcileError("invalid protected drift unit declarations: " + field)
+    return set(units)
+
+
+def _verify_root_policy_covers_candidate(source_revision: str) -> None:
+    """Refuse a host install that root's independent drift checker would reject.
+
+    This is intentionally READ-ONLY. Adding a source unit to an independently
+    root-approved policy is a material authority change: the host reconciler
+    must never silently enlarge its own protected allowlist.
+    """
+    try:
+        raw = subprocess.check_output(
+            _git("show", f"{source_revision}:{SOURCE_DRIFT_POLICY}"),
+            text=True, timeout=15,
+        )
+        candidate = json.loads(raw)
+    except (subprocess.SubprocessError, ValueError) as exc:
+        raise HostReconcileError("exact candidate drift policy could not be verified") from exc
+    if not isinstance(candidate, dict) or candidate.get("schema_version") != "1.0":
+        raise HostReconcileError("exact candidate drift policy schema is invalid")
+
+    root_policy = _protected_root_drift_policy()
+    missing: list[str] = []
+    for field in POLICY_UNIT_LISTS:
+        declared = _declared_units(candidate, field)
+        protected = _declared_units(root_policy, field)
+        # A required timer cannot be substituted by a merely allowed entry.
+        for unit in sorted(declared - protected):
+            missing.append(field + ":" + unit)
+
+    if missing:
+        raise HostReconcileError(
+            "protected root drift policy missing exact candidate unit declarations: "
+            + ", ".join(missing[:16])
+            + (" (additional entries omitted)" if len(missing) > 16 else "")
+            + "; requires separately authorized root-policy migration before host mutation"
+        )
+
+
+def _trusted_root_policy_helper():
+    """Load only the installed root-owned helper, never mutable source."""
+    helper = Path(__file__).with_name("protected_root_policy_migration.py")
+    meta = helper.lstat()
+    if (not stat.S_ISREG(meta.st_mode) or helper.is_symlink()
+            or meta.st_uid != 0 or meta.st_mode & 0o022):
+        raise HostReconcileError("root policy rollback helper is not securely installed")
+    spec = importlib.util.spec_from_file_location("jason_root_policy_migration", helper)
+    if spec is None or spec.loader is None:
+        raise HostReconcileError("root policy rollback helper cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _verified_migration_ancestor(ancestor: str, descendant: str) -> bool:
+    """Verify exact immutable Git lineage; a persisted receipt alone is insufficient."""
+    if (not isinstance(ancestor, str) or not SHA.fullmatch(ancestor)
+            or not isinstance(descendant, str) or not SHA.fullmatch(descendant)):
+        raise HostReconcileError("root policy migration lineage requires exact revisions")
+    try:
+        result = subprocess.run(
+            _git("merge-base", "--is-ancestor", ancestor, descendant),
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HostReconcileError("root policy migration lineage unavailable") from exc
+    if result.returncode not in (0, 1):
+        raise HostReconcileError("root policy migration lineage verification failed")
+    return result.returncode == 0
+
+
+def _forward_recovery_release_authorized(
+    source_revision: str, lkg_revision: str, breaker: dict[str, object],
+) -> bool:
+    """Verify one exact owner-approved forward recovery may retain applied root policy."""
+    if (
+        breaker.get("state") != "open"
+        or breaker.get("source") not in {
+            "production_drift_watchdog", "root_governed_transition"
+        }
+        or not _verified_migration_ancestor(lkg_revision, source_revision)
+    ):
+        return False
+
+    record_path = RELEASE_STATE / "records" / (
+        "release-" + source_revision[:16] + ".json"
+    )
+    try:
+        meta = record_path.lstat()
+        if (
+            not stat.S_ISREG(meta.st_mode)
+            or record_path.is_symlink()
+            or meta.st_uid != _host_operator_uid()
+            or meta.st_mode & 0o022
+            or meta.st_size > 1048576
+        ):
+            return False
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+    owner = record.get("owner_approval") or {}
+    manifest = record.get("release_manifest") or {}
+    exception = record.get("one_transaction_freeze_exception") or {}
+    if (
+        record.get("state") != "production"
+        or record.get("risk_profile") != "production_control_core"
+        or (record.get("release_candidate") or {}).get("candidate_sha")
+            != source_revision
+        or record.get("rollback_sha") != lkg_revision
+        or manifest.get("candidate_sha") != source_revision
+        or manifest.get("rollback_sha") != lkg_revision
+        or owner.get("approved") is not True
+        or owner.get("candidate_sha") != source_revision
+        or not str(owner.get("source") or "").startswith(
+            "authenticated_mobile_teams_owner:relapproval-"
+        )
+        or exception.get("required_recovery_profile_id")
+            != "provider_identity_and_authority_recovery"
+        or exception.get("rollback_sha") != lkg_revision
+        or exception.get("standing_authority") is not False
+        or exception.get("signed_teams_release_approval_required") is not True
+        or exception.get("restore_freeze_after_transaction") is not True
+    ):
+        return False
+
+    try:
+        raw = subprocess.check_output(
+            _git("show", f"{source_revision}:{SOURCE_DRIFT_POLICY}"),
+            text=True, timeout=15,
+        )
+        candidate_policy = json.loads(raw)
+        root_policy = _protected_root_drift_policy()
+        for field in POLICY_UNIT_LISTS:
+            if _declared_units(candidate_policy, field) != _declared_units(
+                root_policy, field
+            ):
+                return False
+    except (OSError, subprocess.SubprocessError, ValueError, HostReconcileError):
+        return False
+    return True
+
+
+def _restore_root_policy_for_target(source_revision: str) -> str:
+    """Restore audited rollback or retain exact independently committed policy."""
+    module = _trusted_root_policy_helper()
+    if not module.ACTIVE.is_file():
+        return "NO_MIGRATION_ACTIVE"
+    receipt = module._json(module._root_only(module.ACTIVE))
+    if receipt.get("candidate_sha") == source_revision:
+        return "CANDIDATE_POLICY_ACTIVE"
+    if receipt.get("rollback_sha") == source_revision:
+        return module.prepare_rollback(source_revision)
+    # Root-verified LKG can advance beyond the original migration SHA.
+    # Retain committed root policy only for independently verified descendants.
+    # An open breaker may restore either the current protected complete LKG
+    # or the EXACT prior LKG retained by the root transition worker. It must
+    # never authorize an arbitrary ancestor or read an unprivileged release
+    # record as proof. The separately reviewed root policy, digest and Git
+    # ancestry checks below remain mandatory.
+    control = module._json(module._root_only(
+        module.ROOT / "production-control-state.json"))
+    lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
+    previous = ((control.get("previous_last_known_good") or {}).get("manifest") or {})
+    breaker = control.get("circuit_breaker") or {}
+    lkg_revision = lkg.get("revision")
+    previous_is_exact_verified_baseline = (
+        previous.get("complete") is True
+        and previous.get("revision") == source_revision
+        and source_revision != lkg_revision
+    )
+    state = breaker.get("state")
+    authorized_target = (
+        state == "closed"
+        or (state == "open" and (
+            source_revision == lkg_revision
+            or previous_is_exact_verified_baseline
+        ))
+    )
+    forward_recovery_target = (
+        lkg.get("complete") is True
+        and isinstance(lkg_revision, str)
+        and SHA.fullmatch(lkg_revision) is not None
+        and _forward_recovery_release_authorized(
+            source_revision, lkg_revision, breaker
+        )
+    )
+    if (receipt.get("phase") == "applied"
+            and lkg.get("complete") is True
+            and (authorized_target or forward_recovery_target)):
+        data = module._root_only(module.POLICY)
+        if module.digest(data) != receipt.get("applied_sha256"):
+            raise HostReconcileError("committed root policy differs from reviewed migration")
+        migration_sha = receipt.get("candidate_sha")
+        if (_verified_migration_ancestor(migration_sha, lkg_revision)
+                and _verified_migration_ancestor(migration_sha, source_revision)):
+            return (
+                "PREVIOUS_MIGRATION_FORWARD_DESCENDANT_VERIFIED"
+                if forward_recovery_target
+                else "PREVIOUS_MIGRATION_LKG_VERIFIED"
+            )
+    raise HostReconcileError("active root policy migration does not belong to target SHA")
+
+
+def _preflight_candidate_root_policy(source_revision: str) -> str:
+    """Read-only reviewed-delta check, never automatic root allowlist writes."""
+    try:
+        _verify_root_policy_covers_candidate(source_revision)
+        return "ALREADY_COVERED"
+    except HostReconcileError as exc:
+        # Only an exact missing declaration is eligible for the separately
+        # authorized, fixed-scope migration path. Any malformed or untrusted
+        # policy must remain a hard denial.
+        if not str(exc).startswith(
+            "protected root drift policy missing exact candidate unit declarations:"
+        ):
+            raise
+    helper = _trusted_root_policy_helper()
+    state = helper._json(helper._root_only(
+        helper.ROOT / "production-control-state.json"
+    ))
+    rollback = (((state.get("last_known_good") or {}).get("manifest") or {})
+                .get("revision"))
+    if not isinstance(rollback, str) or not SHA.fullmatch(rollback):
+        raise HostReconcileError("root LKG absent for reviewed migration preflight")
+    return helper.preview_exact_migration(source_revision, rollback)
+
+
+def _release_transaction_held() -> bool:
+    """True only if a native Release Manager owns an active transaction lock.
+
+    This is a necessary condition, never sufficient approval by itself.
+    Fail closed when the exact advisory lock cannot be independently checked.
+    """
+    path = RELEASE_STATE / "production-transaction.lock"
+    try:
+        fd = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+    except OSError:
+        return False
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != _host_operator_uid()
+                or info.st_mode & 0o002):
+            return False
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        except OSError:
+            return False
+        else:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return False
+    finally:
+        os.close(fd)
+
+
+def _authenticated_rollback_evidence(
+    candidate: str, rollback: str, record: dict[str, object]
+) -> bool:
+    """Bind root's rollback decision to the authenticated Teams and CCC receipts.
+
+    A mutable release record containing an "approved" boolean is never enough
+    to authorize root host recovery. Independent durable authenticated approval
+    and material-review records must match its immutable manifest byte digest.
+    """
+    owner = record.get("owner_approval") or {}
+    source = str(owner.get("source") or "")
+    prefix = "authenticated_mobile_teams_owner:"
+    if not source.startswith(prefix):
+        return False
+    receipt_id = source[len(prefix):]
+    if not re.fullmatch(r"relapproval-[0-9a-f]{32}", receipt_id):
+        return False
+    manifest = record.get("release_manifest") or {}
+    manifest_digest = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                   ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    try:
+        info = MOBILE_APPROVAL_LEDGER.lstat()
+        if (MOBILE_APPROVAL_LEDGER.is_symlink()
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_uid not in {0, _host_operator_uid()}
+                or info.st_mode & 0o002):
+            return False
+        conn = sqlite3.connect(
+            'file:' + MOBILE_APPROVAL_LEDGER.as_posix() + '?mode=ro',
+            uri=True, timeout=2,
+        )
+        try:
+            row = conn.execute(
+                'SELECT payload FROM approval_requests WHERE approval_id=?',
+                (receipt_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return False
+        receipt = json.loads(row[0])
+        meta = receipt.get("metadata") or {}
+        if (receipt.get("status") != "approved"
+                or meta.get("candidate_sha") != candidate
+                or meta.get("rollback_sha") != rollback
+                or meta.get("release_id") != "release-" + candidate[:16]
+                or meta.get("manifest_sha256") != manifest_digest):
+            return False
+        # The separately signed Teams approval above is authoritative.
+        # The governed native scope review replaces a second CCC human
+        # material-review artifact. The production transaction independently
+        # requires the exact scope digest and protected freeze receipt.
+        scope = record.get("manual_scope_review") or {}
+        return (
+            isinstance(scope, dict)
+            and scope.get("schema_version") == "1.0"
+            and scope.get("candidate_sha") == candidate
+            and scope.get("baseline_sha") == rollback
+            and re.fullmatch(r"[0-9a-f]{64}", str(scope.get("scope_sha256") or ""))
+                is not None
+            and isinstance(scope.get("included_prs"), list)
+            and isinstance(scope.get("included_commits"), list)
+        )
+    except (OSError, ValueError, TypeError, sqlite3.Error):
+        return False
+
+
+def _distinct_owner_unfreeze_rollback_authorized(
+    candidate: str, rollback: str, record: dict[str, object]
+) -> bool:
+    """Accept only the exact bounded unfreeze receipt for the active release.
+
+    This is a rollback *only* admission; caller additionally requires a
+    verified signed Teams approval, CCC receipt, protected LKG, a held
+    production transaction, and the freeze removed inside that transaction.
+    """
+    scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
+    owner_source = (record.get("owner_approval") or {}).get("source")
+    if not isinstance(scope, str) or not re.fullmatch(r"[0-9a-f]{64}", scope):
+        return False
+    path = (RELEASE_STATE / "owner-explicit-unfreeze-receipts"
+            / ("release-" + candidate[:16] + ".json"))
+    backup = RELEASE_STATE / "production-deployment-freeze.pmv3-one-release-backup"
+    try:
+        info = path.lstat()
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != _host_operator_uid()
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or not 1 <= info.st_size <= 8192):
+            return False
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        backup_info = backup.lstat()
+        if (backup.is_symlink() or not stat.S_ISREG(backup_info.st_mode)
+                or backup_info.st_uid != _host_operator_uid()
+                or backup_info.st_mode & 0o022):
+            return False
+        freeze_digest = hashlib.sha256(backup.read_bytes()).hexdigest()
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+    return (
+        receipt.get("schema_version") == "1.0"
+        and receipt.get("authorization") == "explicit_exact_sha_owner_unfreeze"
+        and receipt.get("status") == "authorized_pending"
+        and receipt.get("release_id") == "release-" + candidate[:16]
+        and receipt.get("candidate_sha") == candidate
+        and receipt.get("rollback_sha") == rollback
+        and receipt.get("scope_sha256") == scope
+        and receipt.get("prior_release_approval_source") == owner_source
+        and receipt.get("owner_approval_source") == "explicit_owner_instruction"
+        and receipt.get("separate_exact_owner_unfreeze") is True
+        and receipt.get("freeze_remains_active") is True
+        and receipt.get("restore_freeze_after_transaction") is True
+        and receipt.get("standing_authority") is False
+        and receipt.get("automatic_publish_authority") is False
+        and receipt.get("freeze_sha256_before") == freeze_digest
+    )
+
+
+def _exact_signed_inflight_lkg_rollback_authorized(
+    source_revision: str, lkg: dict[str, object], breaker: dict[str, object]
+) -> bool:
+    """Allow pre-breaker rollback only inside the exact signed release's lock.
+
+    During a failed promotion, Release Manager restores MCP to the pinned LKG
+    before requesting the host rollback, but opens the circuit breaker only
+    *after* all rollback checks finish. The older test required an already-open
+    breaker, which made the mandatory host rollback unreachable. This exception
+    is not permission for independent or unrelated host reconciliation.
+    """
+    if (breaker.get("state") != "closed"
+            or lkg.get("complete") is not True
+            or lkg.get("revision") != source_revision
+            or not _release_transaction_held()):
+        return False
+    try:
+        candidate = subprocess.check_output(
+            _git("rev-parse", "origin/main"), text=True, timeout=15
+        ).strip().casefold()
+        if not SHA.fullmatch(candidate) or candidate == source_revision:
+            return False
+        record_path = RELEASE_STATE / "records" / (
+            "release-" + candidate[:16] + ".json"
+        )
+        info = record_path.lstat()
+        if (record_path.is_symlink()
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != _host_operator_uid()
+                or info.st_mode & 0o022
+                or info.st_size > 1048576):
+            return False
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        owner = record.get("owner_approval") or {}
+        manifest = record.get("release_manifest") or {}
+        exception = record.get("one_transaction_freeze_exception") or {}
+        previous = record.get("last_known_good_manifest") or {}
+        pre_mutation = record.get("pre_mutation_health") or {}
+        if (
+            record.get("state") != "production"
+            or record.get("risk_profile") != "production_control_core"
+            or (record.get("release_candidate") or {}).get("candidate_sha")
+                != candidate
+            or record.get("rollback_sha") != source_revision
+            or manifest.get("candidate_sha") != candidate
+            or manifest.get("rollback_sha") != source_revision
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate
+            or not str(owner.get("source") or "").startswith(
+                "authenticated_mobile_teams_owner:relapproval-"
+            )
+            or previous.get("complete") is not True
+            or previous.get("revision") != source_revision
+            or pre_mutation.get("passed") is not True
+            or pre_mutation.get("revision") != source_revision
+            or not _authenticated_rollback_evidence(
+                candidate, source_revision, record
+            )
+        ):
+            return False
+        # Two independent Owner paths exist: the older source-declared
+        # one-transaction exception, or a later distinct exact-scope unfreeze
+        # receipt issued after signed Teams deployment approval. Neither a
+        # mutable release boolean nor an expired approval alone is sufficient.
+        legacy_exception = (
+            manifest.get("one_transaction_freeze_exception") == exception
+            and exception.get("rollback_sha") == source_revision
+            and exception.get("required_recovery_profile_id")
+                == "provider_identity_and_authority_recovery"
+            and exception.get("standing_authority") is False
+            and exception.get("signed_teams_release_approval_required") is True
+            and exception.get("restore_freeze_after_transaction") is True
+        )
+        explicit_unfreeze = _distinct_owner_unfreeze_rollback_authorized(
+            candidate, source_revision, record
+        )
+        if not (legacy_exception or explicit_unfreeze):
+            return False
+        # The one-time freeze backup must actually be present, with the freeze
+        # removed by the native locked transaction, not merely claimed in a
+        # mutable release record.
+        backup = RELEASE_STATE / "production-deployment-freeze.pmv3-one-release-backup"
+        meta = backup.lstat()
+        if (backup.is_symlink() or not stat.S_ISREG(meta.st_mode)
+                or meta.st_uid != _host_operator_uid()
+                or meta.st_mode & 0o022):
+            return False
+        if (RELEASE_STATE / "production-deployment-freeze").exists():
+            return False
+        # _process independently verifies the live MCP is EXACTLY the LKG;
+        # the host may already be candidate or may be only partly updated.
+        return CURRENT.resolve().name.casefold() in {candidate, source_revision}
+    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
+        return False
+
+
+def _current_lkg_recovery_authorized(source_revision: str) -> bool:
+    """Allow exact protected LKG health recovery, never a substitute SHA."""
+    if source_revision != CURRENT_LKG_RECOVERY_SHA:
+        return False
+    helper = _trusted_root_policy_helper()
+    control = helper._json(helper._root_only(
+        helper.ROOT / "production-control-state.json"
+    ))
+    breaker = control.get("circuit_breaker") or {}
+    lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
+    if lkg.get("complete") is not True or lkg.get("revision") != source_revision:
+        return False
+    if breaker.get("state") == "open":
+        return True
+    return _exact_signed_inflight_lkg_rollback_authorized(
+        source_revision, lkg, breaker
+    )
+
+
+def _trusted_current_lkg_archive_tmp() -> None:
+    try:
+        info = CURRENT_LKG_ARCHIVE_TMP.lstat()
+    except OSError as exc:
+        raise HostReconcileError("current-LKG recovery archive path unavailable") from exc
+    al = pwd.getpwnam("al")
+    jason_gid = grp.getgrnam("jason").gr_gid
+    if (
+        CURRENT_LKG_ARCHIVE_TMP.is_symlink()
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != al.pw_uid
+        or info.st_gid != jason_gid
+        or stat.S_IMODE(info.st_mode) != 0o2770
+    ):
+        raise HostReconcileError("current-LKG recovery archive path is not trusted")
+
+
+def _trusted_current_lkg_execution_dir() -> tuple[Path, int]:
+    """Allow only root-written proof code readable to the unprivileged worker.
+
+    The other candidate scripts remain under their existing root-only spool.
+    The execution directory itself must never be writable by the operator,
+    group, or others; the source hash pins and PASS checks are unchanged.
+    """
+    root = CURRENT_LKG_EXEC_ROOT
+    parent = root.parent
+    try:
+        info = parent.lstat()
+        if (parent.is_symlink() or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != 0 or info.st_mode & 0o022):
+            raise HostReconcileError("LKG health executable parent is untrusted")
+        group = grp.getgrnam("jason").gr_gid
+        root.mkdir(mode=0o750, exist_ok=True)
+        info = root.lstat()
+        if (root.is_symlink() or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != 0 or info.st_mode & 0o022):
+            raise HostReconcileError("LKG health executable directory is untrusted")
+        os.chown(root, 0, group)
+        os.chmod(root, 0o750)
+    except (OSError, KeyError) as exc:
+        raise HostReconcileError("trusted LKG health executable directory unavailable") from exc
+    return root, group
+
+
+def _materialize_current_lkg_health_recovery(source_revision: str) -> Path:
+    """Pin exact LKG health code; change only the obsolete wrapper timeout."""
+    if not _current_lkg_recovery_authorized(source_revision):
+        raise HostReconcileError("current-LKG health recovery is not authorized")
+    _trusted_current_lkg_archive_tmp()
+    root, group = _trusted_current_lkg_execution_dir()
+    blobs = {
+        "openclaw_authority_health_snapshot.py": CURRENT_LKG_HEALTH_WRAPPER_SHA256,
+        "openclaw_authority_operational_health.py": CURRENT_LKG_HEALTH_TOOL_SHA256,
+    }
+    materialized = {}
+    for name, expected in blobs.items():
+        try:
+            body = subprocess.check_output(
+                _git("show", f"{source_revision}:tools/{name}"),
+                text=True, timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise HostReconcileError("pinned current-LKG health source unavailable") from exc
+        if hashlib.sha256(body.encode("utf-8")).hexdigest() != expected:
+            raise HostReconcileError("pinned current-LKG health source identity mismatch")
+        if name == "openclaw_authority_health_snapshot.py":
+            if body.count(CURRENT_LKG_HEALTH_TIMEOUT_FROM) != 1:
+                raise HostReconcileError("pinned current-LKG health timeout identity mismatch")
+            body = body.replace(
+                CURRENT_LKG_HEALTH_TIMEOUT_FROM,
+                CURRENT_LKG_HEALTH_TIMEOUT_TO,
+            )
+        target = root / name
+        temp = target.with_suffix(".py.tmp")
+        temp.write_text(body, encoding="utf-8")
+        os.chown(temp, 0, group)
+        os.chmod(temp, 0o640)
+        os.replace(temp, target)
+        materialized[name] = target
+    return materialized["openclaw_authority_health_snapshot.py"]
+
+
+def _run_current_lkg_health_recovery(source_revision: str) -> str:
+    """Regenerate mandatory PASS proof without changing the health algorithm."""
+    wrapper = _materialize_current_lkg_health_recovery(source_revision)
+    al = pwd.getpwnam("al")
+    env = os.environ.copy()
+    env["TMPDIR"] = str(CURRENT_LKG_ARCHIVE_TMP)
+    completed = subprocess.run(
+        [
+            "/usr/sbin/runuser", "-u", "al", "--",
+            "/usr/bin/python3", str(wrapper),
+            "--output", str(CURRENT_LKG_FULL_EVIDENCE),
+        ],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        check=False, timeout=CURRENT_LKG_HEALTH_RECOVERY_TIMEOUT_SECONDS,
+        env=env,
+    )
+    if completed.returncode != 0:
+        raise HostReconcileError(
+            "current-LKG full-integrity recovery did not pass"
+        )
+    try:
+        info = CURRENT_LKG_FULL_EVIDENCE.lstat()
+        report = json.loads(CURRENT_LKG_FULL_EVIDENCE.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise HostReconcileError("current-LKG full-integrity evidence unavailable") from exc
+    if (
+        CURRENT_LKG_FULL_EVIDENCE.is_symlink()
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_uid != al.pw_uid
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or report.get("status") != "pass"
+        or report.get("snapshot_source_exit_code") != 0
+        or report.get("provider_contacted") is not False
+        or report.get("provider_credentials_used") is not False
+        or report.get("failures") != []
+    ):
+        raise HostReconcileError("current-LKG full-integrity evidence did not prove PASS")
+    return "CURRENT_LKG_FULL_INTEGRITY_RECOVERY=PASS"
+
+
+def _host_reconcile_timeout(source_revision: str) -> int:
+    if source_revision == LEGACY_LKG_SHA:
+        return HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS
+    if source_revision == CURRENT_LKG_RECOVERY_SHA:
+        return CURRENT_LKG_POST_PROOF_RECONCILE_TIMEOUT_SECONDS
+    return HOST_RECONCILE_TIMEOUT_SECONDS
+
+
 def _candidate_reconcile_script(source_revision: str) -> Path:
     """Materialize the exact candidate reconciliation script from protected Git evidence."""
     CANDIDATE_SCRIPTS.mkdir(parents=True, exist_ok=True)
@@ -126,6 +826,13 @@ def _candidate_reconcile_script(source_revision: str) -> Path:
         raise HostReconcileError(
             "candidate host reconciliation script is not materializable from protected source"
         ) from exc
+    if source_revision == LEGACY_LKG_SHA:
+        if (hashlib.sha256(body.encode("utf-8")).hexdigest() != LEGACY_HOST_SCRIPT_SHA256
+                or body.count(LEGACY_HEALTH_FROM) != 1):
+            raise HostReconcileError("pinned immutable legacy health script identity mismatch")
+        # Only this exact checked source gets a timeout-only replacement.
+        # Mandatory full health execution and all pass/fail logic are unchanged.
+        body = body.replace(LEGACY_HEALTH_FROM, LEGACY_HEALTH_TO)
     developer_checkout = "/home/al/projects" + "/jason"
     if developer_checkout in body:
         raise HostReconcileError(
@@ -205,6 +912,17 @@ def _process(path: Path) -> None:
                 "live MCP revision does not match requested host release"
             )
 
+        # The audited root overlay must be restored before installing a
+        # previous immutable release that no longer declares its new units.
+        root_policy_result = _restore_root_policy_for_target(source_revision)
+
+        # Prevent the exact failure seen in #1974: host units were installed
+        # but root's independent recovery overlay did not declare them.
+        policy_preflight = _preflight_candidate_root_policy(source_revision)
+
+        if source_revision == CURRENT_LKG_RECOVERY_SHA:
+            _run_current_lkg_health_recovery(source_revision)
+
         script = _candidate_reconcile_script(source_revision)
         if not script.is_file():
             raise HostReconcileError("candidate host reconciliation script is missing")
@@ -238,7 +956,7 @@ def _process(path: Path) -> None:
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                timeout=HOST_RECONCILE_TIMEOUT_SECONDS,
+                timeout=_host_reconcile_timeout(source_revision),
                 env=script_env,
             )
         except subprocess.TimeoutExpired as exc:
@@ -247,7 +965,8 @@ def _process(path: Path) -> None:
                 output = output.decode("utf-8", errors="replace")
             detail = str(output).strip()
             raise HostReconcileError(
-                f"candidate host reconciliation script exceeded {HOST_RECONCILE_TIMEOUT_SECONDS}s"
+                "candidate host reconciliation script exceeded "
+                + str(_host_reconcile_timeout(source_revision)) + "s"
                 + (": " + detail[-3000:] if detail else "")
             ) from exc
         except subprocess.CalledProcessError as exc:
@@ -269,6 +988,11 @@ def _process(path: Path) -> None:
         finally:
             os.umask(previous_umask)
 
+        if policy_preflight != "ALREADY_COVERED":
+            # The candidate install was required to apply its independent
+            # root-reviewed migration. Never accept success if it did not.
+            _verify_root_policy_covers_candidate(source_revision)
+
         release_meta = release_dir.stat()
         if release_meta.st_uid != 0 or (release_meta.st_mode & 0o055) != 0o055:
             raise HostReconcileError(
@@ -279,11 +1003,21 @@ def _process(path: Path) -> None:
             raise HostReconcileError(
                 "immutable host release did not resolve to requested revision"
             )
+        if root_policy_result == "ROLLBACK_ALLOWED_STAGE":
+            # Candidate-only units have now been removed by the immutable
+            # baseline host script. Verify absence, then restore and archive
+            # the exact pre-migration root policy; never mark host PASS sooner.
+            module = _trusted_root_policy_helper()
+            root_policy_result = module.complete_rollback(source_revision)
+            if root_policy_result != "RESTORED":
+                raise HostReconcileError("root rollback policy restoration not certified")
         _write_result(
             request_id,
             source_revision,
             success=True,
-            detail=completed.stdout,
+            detail=("ROOT_POLICY_MIGRATION=" + root_policy_result
+                    + "\nROOT_POLICY_PREFLIGHT=" + policy_preflight
+                    + "\n" + completed.stdout),
         )
     except Exception as exc:
         _write_result(

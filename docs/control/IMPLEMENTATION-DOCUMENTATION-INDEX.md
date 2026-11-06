@@ -93,6 +93,8 @@ If a package README contains a material architecture, authority, security, or op
 | `infrastructure/openclaw-jason-bridge/README.md` | OpenClaw Jason bridge deployment/plugin mechanics | ADR-005/ADR-006, INF-014, OpenClaw operational runbooks, System Registry for deployed bridge state |
 | `infrastructure/showcase/README.md` | Command Center/showcase deployment mechanics, observability components, local-model visibility, and bounded dashboard security notes | `docs/architecture/`; `docs/components/`; `docs/operations/`; governed roadmap and System Registry for authoritative current deployment/readiness state |
 
+| `infrastructure/isolated-services/README.md` | Independent read-only shadow service/timer deployment-package mechanics; no installation or authority by itself | `docs/engineering/PMV3-Isolated-Service-Separation-Plan.md`; PMV3 release governance and System Registry for any later deployed state |
+
 ## How future sessions maintain this index
 
 When a new implementation-local README is introduced or an existing one becomes materially important:

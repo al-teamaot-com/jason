@@ -26,3 +26,41 @@ def test_directory_role_members_are_exact_role_scoped():
     r=MicrosoftGraphSecurityPostureReader(tokens=Tokens(),transport=t).role_members(microsoft_tenant_id="tenant",role_id="role/1",maximum_records=10)
     assert r["role_id"]=="role/1" and r["count"]==1
     assert "/directoryRoles/role%2F1/members" in t.call["url"]
+
+
+def test_directory_roles_does_not_send_unsupported_top_and_bounds_locally():
+    t=Transport({"value":[
+        {"id":"role1","displayName":"Reader","roleTemplateId":"template1"},
+        {"id":"role2","displayName":"Administrator","roleTemplateId":"template2"},
+    ]})
+    data=MicrosoftGraphSecurityPostureReader(tokens=Tokens(),transport=t).directory_roles(
+        microsoft_tenant_id="tenant",maximum_records=1)
+    assert t.call["url"].endswith("/directoryRoles")
+    assert t.call["params"] == {}
+    assert data["count"]==1 and data["truncated"] is True
+    assert data["items"]==[{"id":"role1","display_name":"Reader","role_template_id":"template1"}]
+
+
+def test_directory_role_members_no_unsupported_top_and_preserves_scope():
+    t=Transport({"value":[
+        {"id":"member1","displayName":"Alice","userPrincipalName":"a@example.invalid"},
+        {"id":"member2","displayName":"Bob","userPrincipalName":"b@example.invalid"},
+    ]})
+    data=MicrosoftGraphSecurityPostureReader(tokens=Tokens(),transport=t).role_members(
+        microsoft_tenant_id="tenant",role_id="role/1",maximum_records=1)
+    assert t.call["url"].endswith("/directoryRoles/role%2F1/members")
+    assert t.call["params"] == {}
+    assert data["count"]==1 and data["truncated"] is True
+    assert data["items"][0]["id"]=="member1"
+
+
+def test_directory_roles_refuses_unexpected_provider_records():
+    from connectors.core.contracts import ConnectorTransportError
+    for records in ({"value":{"unexpected":"shape"}}, {"value":[{"id":"ok"},"bad"]}):
+        t=Transport(records)
+        try:
+            MicrosoftGraphSecurityPostureReader(tokens=Tokens(),transport=t).directory_roles(microsoft_tenant_id="tenant",maximum_records=2)
+        except ConnectorTransportError:
+            pass
+        else:
+            assert False, "Invalid provider record must fail closed"

@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "enabled": true,
+  "campaign_id": "AOT-UTA-20261024",
+  "organization_id": "aot",
+  "requester_id": "jason-autonomy-worker",
+  "expires_at": "2026-10-27T04:00:00Z",
+  "policy_file": "universal-approval-internal-pilot-v1.json",
+  "policy_sha256": "2e7109e549c6afa5d9c401b934cd6fe06c120d2290df2277ba07bcb9934460d5",
+  "cases": {
+    "deny": {
+      "approval_id": "planapproval-aot-internal-pilot-20261024-deny",
+      "execution_id": "exec-aot-internal-pilot-20261024-deny",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "payload": {
+          "ticketID": 8870,
+          "title": "AOT Teams Approval Pilot 20261024 DENY",
+          "description": "Controlled AOT internal Teams approval acceptance test. One note is permitted only after the exact signed Teams approval. No customer-facing update.",
+          "noteType": 3,
+          "publish": 2
+        }
+      },
+      "title": "DENY TEST - do not create a test note",
+      "summary": "Select DENY. Jason must create no note. Target: XYZ Test Company, test ticket T20191013.0001 (8870). No customer email or device action."
+    },
+    "approve": {
+      "approval_id": "planapproval-aot-internal-pilot-20261024-approve",
+      "execution_id": "exec-aot-internal-pilot-20261024-approve",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "payload": {
+          "ticketID": 8870,
+          "title": "AOT Teams Approval Pilot 20261024 APPROVE",
+          "description": "Controlled AOT internal Teams approval acceptance test. One note is permitted only after the exact signed Teams approval. No customer-facing update.",
+          "noteType": 3,
+          "publish": 2
+        }
+      },
+      "title": "APPROVE TEST - create one internal test note",
+      "summary": "Select APPROVE. Jason must create exactly one internal note. Target: XYZ Test Company, test ticket T20191013.0001 (8870). No customer email or device action."
+    }
+  }
+}

@@ -1,0 +1,12 @@
+[Unit]
+Description=Jason Owner Teams release approval offers only while automatic promotion is held
+After=docker.service
+ConditionPathExists=/var/lib/jason/openclaw/release-manager/auto-promotion-incident-hold
+ConditionPathExists=/home/al/.local/lib/jason/release_manager_host_runner.py
+
+[Service]
+Type=oneshot
+# Separate read/approval-only command; never initiate deployment.
+ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/release_manager_host_runner.py --repo /home/al/.local/lib/jason/engineering-worker-source --state-root /var/lib/jason/openclaw/release-manager approval-only-held
+WorkingDirectory=/home/al/.local/lib/jason/engineering-worker-source
+Environment=PYTHONUNBUFFERED=1

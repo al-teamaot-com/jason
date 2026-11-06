@@ -10,12 +10,15 @@ recovery cannot restore full functionality.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
 import re
 import subprocess
 import sqlite3
+import stat
 import statistics
 import urllib.request
 from datetime import datetime, timezone
@@ -23,11 +26,18 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from issue_resolution_engine import acceptance_text, correlate_failures, update_recurrence_memory
+from jason_host_storage_health import storage_capacity_failures
 
 DEFAULT_ROOT = Path("/var/lib/jason/openclaw/self-heal")
 HEALTH_URL = "http://127.0.0.1:9467/metrics"
 LOCAL_RECOVERY_CONTAINERS = ("jason-runtime", "jason-mcp-pilot")
 MAX_RECOVERY_ATTEMPTS = 2
+# The signed Release Manager owns an exclusive advisory lock for every
+# production transaction. Self-heal must never admit competing workers or
+# mutate containers while that lock is held. The guard must fail closed.
+PRODUCTION_TRANSACTION_LOCK = Path(
+    "/var/lib/jason/openclaw/release-manager/production-transaction.lock"
+)
 AUTONOMY_ANOMALY_WINDOW = 12
 AUTONOMY_RECENT_WINDOW = 3
 OUTCOME_CONTRACT_DIRNAME = "contracts"
@@ -42,6 +52,9 @@ ROOT_HOST_RECONCILER = Path("/usr/local/lib/jason/release_host_reconcile_worker.
 SCHEDULED_ARTIFACTS = (
     ("support_repair_worker", "tools/support_repair_host_worker.py", Path.home() / ".local/lib/jason/support_repair_host_worker.py"),
     ("owner_approved_development_worker", "tools/owner_approved_development_worker.py", Path.home() / ".local/lib/jason/owner_approved_development_worker.py"),
+    ("engineering_supervisor", "tools/engineering_supervisor.py", Path.home() / ".local/lib/jason/engineering_supervisor.py"),
+    ("release_breaker_recovery_manager", "tools/release_breaker_recovery_manager.py", Path.home() / ".local/lib/jason/release_breaker_recovery_manager.py"),
+    ("engineering_evidence_tools", "tools/engineering_evidence_tools.py", Path.home() / ".local/lib/jason/engineering_evidence_tools.py"),
     ("todo_engineering_intake", "tools/todo_engineering_intake.py", Path.home() / ".local/lib/jason/todo_engineering_intake.py"),
     ("todo_release_bridge", "tools/todo_release_bridge.py", Path.home() / ".local/lib/jason/todo_release_bridge.py"),
     ("self_heal_watchdog", "tools/jason_self_heal_watchdog.py", Path.home() / ".local/lib/jason/jason_self_heal_watchdog.py"),
@@ -666,6 +679,13 @@ def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
     evidence["production_convergence"] = convergence_evidence
     failures.extend(convergence_failures)
 
+    # Existing five-minute watchdog: independent root and archive capacity,
+    # with allocatable-space and inode headroom. Informational detection only;
+    # never triggers deletion, cache prune, container shutdown or provider write.
+    storage_failures, storage_evidence = storage_capacity_failures()
+    evidence["host_storage_capacity"] = storage_evidence
+    failures.extend(storage_failures)
+
     failed_units = failed_jason_user_units()
     evidence["failed_jason_user_units"] = failed_units
     for unit in failed_units:
@@ -719,17 +739,76 @@ def fingerprint(failures: list[str]) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
 
 
-def bounded_recovery(failures: list[str]) -> list[str]:
-    actions: list[str] = []
-    for name in LOCAL_RECOVERY_CONTAINERS:
-        if f"container_down:{name}" in failures:
-            result = run(["docker", "start", name], timeout=30)
-            actions.append(f"docker start {name}: rc={result.returncode}")
+@contextlib.contextmanager
+def non_disruptive_release_guard():
+    """Hold a shared release lock for an entire recovery or worker-start call.
 
-    if "mcp_status_functional_failure" in failures and container_running("jason-mcp-pilot"):
-        result = run(["docker", "restart", "-t", "10", "jason-mcp-pilot"], timeout=40)
-        actions.append(f"docker restart jason-mcp-pilot: rc={result.returncode}")
-    return actions
+    The Release Manager holds the exclusive lock throughout production deploy
+    and rollback. A missing, unreadable, symlinked, or contended lock denies
+    self-heal mutation; incident evidence is still persisted for later retry.
+    """
+    try:
+        fd = os.open(
+            PRODUCTION_TRANSACTION_LOCK,
+            os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+    except OSError:
+        yield False
+        return
+    locked = False
+    try:
+        try:
+            info = os.fstat(fd)
+        except OSError:
+            yield False
+            return
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_mode & 0o002):
+            yield False
+            return
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            locked = True
+        except OSError:
+            yield False
+            return
+        yield True
+    finally:
+        if locked:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def request_engineering_worker() -> str:
+    """Bound watchdog worker activation to the same production mutex."""
+    with non_disruptive_release_guard() as admitted:
+        if not admitted:
+            return "deferred_production_transaction_or_unavailable_lock"
+        result = run(
+            ["systemctl", "--user", "start", "--no-block",
+             "jason-support-repair-worker.service"],
+            timeout=10,
+        )
+        return ("requested" if result.returncode == 0
+                else "systemd_start_failed_rc_" + str(result.returncode))
+
+
+def bounded_recovery(failures: list[str]) -> list[str]:
+    with non_disruptive_release_guard() as admitted:
+        if not admitted:
+            return []
+        actions: list[str] = []
+        for name in LOCAL_RECOVERY_CONTAINERS:
+            if f"container_down:{name}" in failures:
+                result = run(["docker", "start", name], timeout=30)
+                actions.append(f"docker start {name}: rc={result.returncode}")
+
+        if "mcp_status_functional_failure" in failures and container_running("jason-mcp-pilot"):
+            result = run(["docker", "restart", "-t", "10", "jason-mcp-pilot"], timeout=40)
+            actions.append(f"docker restart jason-mcp-pilot: rc={result.returncode}")
+        return actions
 
 
 def queue_support_repair(root: Path, fp: str, failures: list[str], evidence: Mapping[str, Any]) -> Path:
@@ -749,8 +828,8 @@ def queue_support_repair(root: Path, fp: str, failures: list[str], evidence: Map
         "state": "repair_required",
     }
     path = root / "incidents" / f"{fp}.json"
+    incident["worker_activation"] = request_engineering_worker()
     atomic_json(path, incident)
-    run(["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"], timeout=10)
     return path
 
 
@@ -782,8 +861,13 @@ def queue_resolution_incident(root: Path, incident: Mapping[str, Any], evidence:
         "state": "repair_required",
     }
     path = root / "incidents" / f"{fp}.json"
+    # Disk capacity is an owner-reviewed host-maintenance decision, not a
+    # grant to the engineering worker to remove caches or rollback artifacts.
+    if str(incident.get("family")) != "host_storage_capacity":
+        payload["worker_activation"] = request_engineering_worker()
+    else:
+        payload["worker_activation"] = "deferred_owner_storage_approval"
     atomic_json(path, payload)
-    run(["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"], timeout=10)
     return path
 
 
@@ -800,7 +884,14 @@ def write_incident_escalation(root: Path, *, incident: Mapping[str, Any], attemp
         "degraded_function": str(incident.get("title") or ", ".join(symptoms))[:240],
         "evidence_summary": "; ".join(symptoms)[:600],
         "attempt_summary": ("; ".join(actions) or "bounded automatic recovery produced no safe action")[:600],
-        "owner_action": "A genuine authority or disruptive-action boundary remains; review only that specific blocked action.",
+        "owner_action": (
+            "Review root/archive capacity, then explicitly approve bounded storage "
+            "cleanup or relocation. Preserve running containers, active worktrees, "
+            "Docker volumes, immutable rollback images, backups and approval data; "
+            "require independent free-space readback."
+            if str(incident.get("family")) == "host_storage_capacity"
+            else "A genuine authority or disruptive-action boundary remains; review only that specific blocked action."
+        ),
         "repair_level": int(repair.get("level") or 4),
         "repair_class": str(repair.get("name") or "external_or_authority_blocker"),
         "attempts": attempts,
@@ -871,6 +962,24 @@ def main() -> int:
     state = read_json(state_path)
 
     failures, evidence = bounded_detect(root)
+    # The detector remains read-only. A distinct, Owner-authorized and strictly
+    # allowlisted repair routine may archive only clean detached merged Git
+    # worktrees when the second physical filesystem has safe headroom.
+    # This executes only in the installed production watchdog, never tests or
+    # arbitrary local roots, and never manipulates live audit/SQLite services.
+    storage_repair = None
+    if root == DEFAULT_ROOT and any(
+            f.startswith('host_storage_capacity_') for f in failures):
+        try:
+            from jason_storage_autorepair import repair as bounded_storage_repair
+            storage_repair = bounded_storage_repair()
+            if (storage_repair.get('archived_count', 0)
+                    or storage_repair.get('cache_reclaimed_bytes', 0)):
+                failures, evidence = bounded_detect(root)
+            evidence['host_storage_autorepair'] = storage_repair
+        except (OSError,ValueError,RuntimeError,subprocess.TimeoutExpired) as exc:
+            evidence['host_storage_autorepair'] = {
+                'status':'blocked','error_type':type(exc).__name__}
     if not failures:
         update_recurrence_memory(memory_path, [])
         atomic_json(state_path, {
@@ -914,7 +1023,14 @@ def main() -> int:
         incident_path = queue_resolution_incident(root, incident, evidence)
         incident_paths.append(str(incident_path))
         repair = incident.get("repair") if isinstance(incident.get("repair"), Mapping) else {}
-        if attempts >= max(1, int(args.max_attempts)) and bool(repair.get("requires_owner_action")):
+        # No repeating owner approval prompts while this known-safe archival
+        # process is making measurable progress and the other disk is healthy.
+        autorepair_progress = (str(incident.get('family')) == 'host_storage_capacity'
+                               and isinstance(storage_repair, dict)
+                               and (int(storage_repair.get('archived_count') or 0) > 0
+                                    or int(storage_repair.get('cache_reclaimed_bytes') or 0) > 0))
+        if (not autorepair_progress and attempts >= max(1, int(args.max_attempts))
+                and bool(repair.get("requires_owner_action"))):
             escalation = write_incident_escalation(
                 root, incident=incident, attempts=attempts, actions=actions
             )

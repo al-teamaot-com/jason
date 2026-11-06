@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "organizations": {
+    "aot": {
+      "role_members": {
+        "pilot_owner": [
+          "person-al"
+        ]
+      },
+      "capability_roles": {
+        "service.ticket.note.create": [
+          "pilot_owner"
+        ]
+      },
+      "disabled_principals": [],
+      "max_risk": 2,
+      "production_allowed": true,
+      "request_retention_allowed": true,
+      "max_ttl_seconds": 1800,
+      "valid_until": "2026-10-27T04:00:00Z",
+      "service_requesters": {
+        "jason-autonomy-worker": {
+          "microsoft_tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+          "maximum_plan_steps": 1
+        }
+      },
+      "request_allowlist": [
+        {
+          "principal_id": "jason-autonomy-worker",
+          "capability": "service.ticket.note.create",
+          "permission_mode": "execute",
+          "client_id": null,
+          "arguments_sha256": "6b8fb32dd4f27293a8bdc48b9553b6160fe710b3c36743086a9578a4334bea98"
+        },
+        {
+          "principal_id": "jason-autonomy-worker",
+          "capability": "service.ticket.note.create",
+          "permission_mode": "execute",
+          "client_id": null,
+          "arguments_sha256": "15e5de909b18e0138ca7ee052514d5b7042daa1b24a5a11e777dfb9ea14a0594"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "schema_version": "1.0",
+  "status": "source_only_not_installed",
+  "production_deployment_authorized": false,
+  "release_manager_required": true,
+  "default_enable_all_new_units": false,
+  "source_revision_binding": "exact_merged_protected_main_sha_required_at_release_build",
+  "rollback": "complete_immutable_host_units_and_service_sources_required",
+  "required_companion_sources": [
+    "tools/isolated_service_common.py",
+    "tools/isolated_service_live_sources.py",
+    "tools/isolated_service_github_sources.py",
+    "tools/isolated_service_shadow.py",
+    "tools/isolated_service_ledger.py",
+    "tools/isolated_service_supervisor.py",
+    "tools/documentation_assurance_service.py",
+    "tools/provider_health_monitor_service.py",
+    "tools/test_evidence_collection_service.py",
+    "tools/work_reconciliation_service.py",
+    "tools/dependency_conflict_service.py",
+    "tools/source_baseline_monitor_service.py",
+    "tools/rollback_readiness_service.py",
+    "tools/operational_acceptance_service.py",
+    "tools/pmv3_worker_release_gate.py",
+    "tools/ticket_continuity_evidence_review.py",
+    "tools/independent_governed_lane.py"
+  ],
+  "unit_sources": [
+    "infrastructure/isolated-services/jason-isolated-shadow@.service",
+    "infrastructure/isolated-services/jason-isolated-shadow@.timer",
+    "infrastructure/isolated-services/jason-independent-support.service",
+    "infrastructure/isolated-services/jason-independent-support.timer",
+    "infrastructure/isolated-services/jason-independent-todo-intake.service",
+    "infrastructure/isolated-services/jason-independent-todo-intake.timer",
+    "infrastructure/isolated-services/jason-independent-development.service",
+    "infrastructure/isolated-services/jason-independent-development.timer",
+    "infrastructure/isolated-services/jason-independent-supervisor.service",
+    "infrastructure/isolated-services/jason-independent-supervisor.timer"
+  ],
+  "expected_initial_units": "all_disabled_until_explicit_migration_phase",
+  "owner_pause_preservation": "old_monolithic_worker_start_condition_must_remain_until_replacement_lanes_verified",
+  "production_safety_invariants": [
+    "owner_exact_sha_teams_authorization",
+    "single_production_transaction",
+    "immutable_complete_last_known_good_rollback",
+    "protected_root_readback",
+    "drift_and_circuit_breaker",
+    "independent_operational_acceptance"
+  ],
+  "ticket_continuity_release_gate": {
+    "required_before_any_new_worker_activation": true,
+    "require_baseline_and_post_change_readback": true,
+    "require_production_autonomy_worker_health": true,
+    "require_controlled_test_ticket_mutation_evidence": true,
+    "require_two_distinct_post_migration_observations": true,
+    "require_zero_duplicate_ticket_actions_or_claims": true,
+    "require_explicit_no_go_on_unknown_or_failed_receipts": true,
+    "must_preserve": [
+      "existing_autotask_provider_read_and_write_authority",
+      "ticket_intake_and_queue_assignment",
+      "jason_ticket_queue_and_worker_claims",
+      "ticket_notes_and_customer_visibility",
+      "ticket_status_priority_device_association",
+      "datto_edr_backupiq_vulscan_alert_ticket_routing",
+      "ticket_idempotency_and_bounded_retry",
+      "user_and_technician_notification_delivery"
+    ],
+    "evidence_preflight_source": "tools/ticket_continuity_evidence_review.py",
+    "preflight_positive_result": "evidence_review_required (not approval)",
+    "native_provider_reverification_mandatory": true,
+    "automation_can_mint_approval": false
+  },
+  "staged_native_provider_shadow": {
+    "deployment_phase": "stage_disabled_only",
+    "unit_sources": [
+      "infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.service",
+      "infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.timer"
+    ],
+    "desired_policy": "allowed_system_units_only_not_required",
+    "native_stager": "tools/stage_isolated_provider_shadow_units.py",
+    "requires_production_exact_sha_authorization": true,
+    "allows_service_or_timer_activation": false,
+    "source_code_path": "/opt/jason/current/tools/isolated_service_shadow.py",
+    "rollback_bound_increment": 2,
+    "does_not_modify_existing_workers": true,
+    "native_invocation": "reconcile_production_host_services.sh isolated_provider_shadow_disabled_stage",
+    "rollback_planner_compatible_with_lkg": true
+  },
+  "independent_engineering_lane_guard": {
+    "status": "source_only_not_installed",
+    "helper": "tools/independent_governed_lane.py",
+    "serialized_lanes": [
+      "support",
+      "todo-intake",
+      "development"
+    ],
+    "independent_read_only_lane": [
+      "supervisor"
+    ],
+    "support_receipt_max_age_seconds": 600,
+    "holds_production_transaction_shared_lock_for_full_worker_run": true,
+    "worker_runtime_sources_remain_native_and_governed": true,
+    "does_not_grant_provider_or_ticket_write_authority": true,
+    "requires_ticket_continuity_release_gate": true,
+    "does_not_enable_or_replace_existing_workers": true,
+    "requires_loaded_legacy_systemd_inactive_condition": true,
+    "old_controller_guard_path": "/home/al/.config/systemd/user/jason-support-repair-worker.service.d/owner-pause.conf"
+  }
+}

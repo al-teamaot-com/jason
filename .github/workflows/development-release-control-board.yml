@@ -3,7 +3,8 @@ name: Development Release Control Board
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 * * * *"
+    # Best-effort operator visibility; do not interpret schedule ticks as work progress.
+    - cron: "*/5 * * * *"
   push:
     branches:
       - main

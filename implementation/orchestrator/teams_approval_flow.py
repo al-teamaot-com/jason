@@ -89,6 +89,8 @@ class TeamsApprovalFlow:
                 metadata={
                     "microsoft_tenant_id": principal.tenant_id,
                     "authentication_assurance": principal.authentication_assurance,
+                    **({'authentication_evidence_hash': principal.authentication_evidence_hash}
+                       if getattr(principal, 'authentication_evidence_hash', None) is not None else {}),
                 },
             )
 
@@ -99,6 +101,14 @@ class TeamsApprovalFlow:
                 decided_at=decided_at,
             )
 
+            self._record(
+                event_type=ApprovalAuditEventType.RESPONSE_ACTOR_BOUND,
+                approval_id=approval_id, original_request=original_request,
+                occurred_at=decided_at, actor_identity_id=response.approver_identity_id,
+                channel=response.channel, channel_reference_id=response.channel_response_id,
+                metadata=({'authentication_evidence_hash': response.authentication_evidence_hash}
+                    if response.authentication_evidence_hash is not None else {}),
+            )
             stage = "approval_authority"
             accepted = self.approval_service.accept_response(response, now=now)
             if accepted.status == "approved":
@@ -137,17 +147,6 @@ class TeamsApprovalFlow:
                 original_request=original_request,
                 occurred_at=self._now(now),
                 actor_identity_id=accepted.decided_by,
-                channel=accepted.channel,
-                channel_reference_id=accepted.channel_response_id,
-                authority_context_id=resumed.authority_context_id,
-                evidence_references=accepted.evidence_references,
-            )
-            self._record(
-                event_type=ApprovalAuditEventType.ORCHESTRATOR_RESUMED,
-                approval_id=accepted.approval_id,
-                original_request=original_request,
-                occurred_at=self._now(now),
-                actor_identity_id=original_request.principal_id,
                 channel=accepted.channel,
                 channel_reference_id=accepted.channel_response_id,
                 authority_context_id=resumed.authority_context_id,

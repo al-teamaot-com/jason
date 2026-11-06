@@ -21,6 +21,7 @@ from .teams_conversation_flow import (
     BoundConversationPrincipal,
     ConversationIntent,
     TeamsConversationPrincipalEvidence,
+    ConversationGuidanceRequiredError,
 )
 
 
@@ -39,6 +40,11 @@ class ConversationApprovalRequired(ConversationAuthorityError):
 
 class ApprovalWriter(Protocol):
     def put(self, record: ApprovalRecord) -> None: ...
+
+
+class UniversalApprovalRequester(Protocol):
+    def request_approval(self, *, request: OrchestrationRequest,
+                         identity: TeamsConversationPrincipalEvidence): ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +66,7 @@ class GovernedTeamsOrchestrationRequestFactory:
     authority: IdentityAuthorityService
     capabilities: CapabilityRegistryService | None = None
     approvals: ApprovalWriter | None = None
+    approval_requester: UniversalApprovalRequester | None = None
     data_handling: DataHandlingPolicy = DataHandlingPolicy(
         classification="internal",
         hosted_processing_allowed=False,
@@ -120,6 +127,25 @@ class GovernedTeamsOrchestrationRequestFactory:
         approval_present = False
         if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
             if not self._authenticated_imperative_may_approve(capability, intent):
+                if self.approval_requester is not None:
+                    pending = OrchestrationRequest(
+                        execution_id=execution_id, correlation_id=correlation_id,
+                        principal_id=principal.principal_id, organization_id=principal.organization_id,
+                        client_id=principal.client_id, capability_name=intent.capability_name,
+                        capability_version=intent.capability_version, requested_mode=intent.execution_mode,
+                        permission_mode=intent.permission_mode, orchestration_mode=OrchestrationMode.EXECUTE,
+                        authority_allowed=False, approval_present=False, risk=intent.risk,
+                        data_handling=self.data_handling, budget=self.budget,
+                        arguments=dict(intent.arguments), requester_kind="human", policy_ids=self.policy_ids,
+                    )
+                    receipt = self.approval_requester.request_approval(request=pending, identity=identity)
+                    if not receipt.get("delivered") or not receipt.get("approval_id"):
+                        raise RuntimeError("universal approval delivery was not verified")
+                    raise ConversationGuidanceRequiredError(
+                        reason_code="universal_approval_requested",
+                        guidance_text="Approval sent to the authorized approver in Teams. "
+                            "The action has not run. Approval ID: "+receipt["approval_id"],
+                    )
                 raise ConversationApprovalRequired(
                     "APPROVAL_REQUIRED",
                     decision.reason_codes,

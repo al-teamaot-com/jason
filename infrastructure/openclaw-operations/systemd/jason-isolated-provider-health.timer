@@ -1,0 +1,15 @@
+[Unit]
+Description=Advisory Jason isolated provider-health cadence (initially disabled)
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=15min
+AccuracySec=30s
+RandomizedDelaySec=60s
+Persistent=true
+Unit=jason-isolated-provider-health.service
+
+[Install]
+WantedBy=timers.target
+
+# Native release staging installs this definition without enabling it.

@@ -46,15 +46,69 @@ def test_after_start_pid_must_match_systemd_unit_main_pid():
         with patch.object(port_guard, "main_pid", return_value=4711):
             port_guard.verify("owned", UNIT, 0)
         with patch.object(port_guard, "main_pid", return_value=4712):
-            with pytest.raises(RuntimeError, match="different/unknown process"):
+            with pytest.raises(RuntimeError, match="different process"):
                 port_guard.verify("owned", UNIT, 0)
 
 
 def test_unattributed_socket_is_not_accepted_as_healthy():
     with patch.object(port_guard, "listeners", return_value=[("0.0.0.0:9470", ())]):
         with patch.object(port_guard, "main_pid", return_value=4711):
-            with pytest.raises(RuntimeError, match="different/unknown process"):
+            with pytest.raises(RuntimeError, match="unattributed listener"):
                 port_guard.verify("owned", UNIT, 0)
+
+
+def test_unattributed_first_socket_sample_then_exact_pid_is_accepted():
+    # A newly started service can bind before ss prints a PID. It cannot pass
+    # until the next sample contains the exact systemd MainPID.
+    with patch.object(port_guard, "listeners", side_effect=[
+        [("0.0.0.0:9470", ())], [("0.0.0.0:9470", (4711,))],
+    ]) as read, patch.object(port_guard, "main_pid", return_value=4711), \
+            patch.object(port_guard.time, "sleep", return_value=None):
+        port_guard.verify("owned", UNIT, 0.1)
+        assert read.call_count == 2
+
+
+def test_unattributed_first_socket_does_not_mask_followup_foreign_pid():
+    with patch.object(port_guard, "listeners", side_effect=[
+        [("0.0.0.0:9470", ())], [("0.0.0.0:9470", (9911,))],
+    ]) as read, patch.object(port_guard, "main_pid", return_value=4711), \
+            patch.object(port_guard.time, "sleep", return_value=None):
+        with pytest.raises(RuntimeError, match="different process"):
+            port_guard.verify("owned", UNIT, 0.1)
+        assert read.call_count == 2
+
+
+def test_multiple_listeners_require_every_pid_to_be_attributed():
+    with patch.object(port_guard, "listeners", side_effect=[
+        [("0.0.0.0:9470", (4711,)), ("[::]:9470", ())],
+        [("0.0.0.0:9470", (4711,)), ("[::]:9470", (4711,))],
+    ]) as read, patch.object(port_guard, "main_pid", return_value=4711), \
+            patch.object(port_guard.time, "sleep", return_value=None):
+        port_guard.verify("owned", UNIT, 0.1)
+        assert read.call_count == 2
+
+
+def test_mixed_unknown_and_foreign_pid_fails_without_retry():
+    with patch.object(port_guard, "listeners", return_value=[
+        ("0.0.0.0:9470", ()), ("[::]:9470", (9999,)),
+    ]) as read, patch.object(port_guard, "main_pid", return_value=4711), \
+            patch.object(port_guard.time, "sleep") as sleep:
+        with pytest.raises(RuntimeError, match="different process"):
+            port_guard.verify("owned", UNIT, 30)
+        assert read.call_count == 1
+        sleep.assert_not_called()
+
+
+def test_persistently_unattributed_socket_fails_after_bounded_wait():
+    # Never report PASS if ss PID attribution never becomes observable.
+    with patch.object(port_guard, "listeners", return_value=[("0.0.0.0:9470", ())]) as read, \
+            patch.object(port_guard, "main_pid", return_value=4711), \
+            patch.object(port_guard.time, "monotonic", side_effect=[0.0, 0.0, 0.2]), \
+            patch.object(port_guard.time, "sleep") as sleep:
+        with pytest.raises(RuntimeError, match="bounded exporter owned check failed.*unattributed"):
+            port_guard.verify("owned", UNIT, 0.1)
+        assert read.call_count == 2
+        sleep.assert_called_once_with(0.25)
 
 
 def test_down_unit_does_not_claim_occupied_socket():
@@ -86,6 +140,15 @@ def test_tcp_listener_discovery_checks_kernel_socket_table():
         assert observed
         assert any(os.getpid() in owners for _, owners in observed)
     assert port_guard.listeners(port) == []
+
+
+def test_ss_reports_listening_port_even_when_process_pid_is_unavailable():
+    class SocketOutput:
+        returncode = 0
+        stdout = "LISTEN 0 5 0.0.0.0:9470 0.0.0.0:*\n"
+        stderr = ""
+    with patch.object(port_guard.subprocess, "run", return_value=SocketOutput()):
+        assert port_guard.listeners(PORT) == [("0.0.0.0:9470", ())]
 
 
 def test_failed_socket_query_is_not_mistaken_for_free():

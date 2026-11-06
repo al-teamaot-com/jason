@@ -41,6 +41,25 @@ def test_runtime_image_drops_to_host_state_owner_uid_and_uses_internal_entrypoin
     assert 'CMD ["python", "-m", "jason_runtime.main"]' in dockerfile
 
 
+def test_runtime_image_normalizes_git_worktree_private_modes_for_nonroot_read():
+    # Root-governed Release Manager materializes exact-SHA Git source with
+    # restrictive 0700 directories / 0600 Python files under umask 0077.
+    # Docker COPY would retain root ownership and those private modes.
+    # The production container must import its code as 1000:1000, without
+    # making the code writable by that unprivileged runtime account.
+    dockerfile = (_repo_root() / "infrastructure/jason-runtime/Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    assert "COPY implementation /app/implementation" in dockerfile
+    assert "COPY config /app/config" in dockerfile
+    assert "&& chown -R 0:1000 /app/implementation /app/config" in dockerfile
+    assert "&& chmod -R go-w,g+rX /app/implementation /app/config" in dockerfile
+    assert dockerfile.index("RUN python -m pip install") < dockerfile.index("&& chown -R")
+    assert dockerfile.index("&& chmod -R go-w,g+rX") < dockerfile.index("USER 1000:1000")
+    assert "chmod -R 777" not in dockerfile
+    assert "USER root" not in dockerfile
+
+
 def test_runtime_compose_enables_owner_autonomous_completion_teams_notifications():
     compose = (_repo_root() / "infrastructure/jason-runtime/compose.yaml").read_text(encoding="utf-8")
 
@@ -55,3 +74,25 @@ def test_runtime_compose_enables_owner_autonomous_completion_teams_notifications
 
     assert 'COMPLETION_TEAMS_PROFILE="${JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE:-person-al-v1}"' in deploy
     assert '--set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE"' in deploy
+
+
+def test_runtime_compose_keeps_pm_v2_control_dormant_by_default():
+    compose = (_repo_root() / "infrastructure/jason-runtime/compose.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "JASON_PM_V2_CONTROL_PROFILE: ${JASON_PM_V2_CONTROL_PROFILE:-}" in compose
+    assert (
+        "JASON_PM_V2_SHARED_ROOT: "
+        "${JASON_PM_V2_SHARED_ROOT:-/var/lib/jason/openclaw/pm-v2}"
+    ) in compose
+    assert "JASON_PM_V2_CONTROL_PROFILE:-owner-teams-v1" not in compose
+
+
+def test_production_deploy_preserves_pm_v2_profile_without_activating_it():
+    deploy = (
+        _repo_root() / "infrastructure/jason-runtime/production-deploy.sh"
+    ).read_text(encoding="utf-8")
+    assert 'if [ "${JASON_PM_V2_CONTROL_PROFILE+x}" = "x" ]; then' in deploy
+    assert "sed -n 's/^JASON_PM_V2_CONTROL_PROFILE=//p'" in deploy
+    assert '--set-env "JASON_PM_V2_CONTROL_PROFILE=$PM_V2_CONTROL_PROFILE"' in deploy
+    assert '--set-env "JASON_PM_V2_SHARED_ROOT=$PM_V2_SHARED_ROOT"' in deploy

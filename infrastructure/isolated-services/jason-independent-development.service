@@ -1,0 +1,28 @@
+[Unit]
+Description=Jason independent governed engineering lane (development)
+After=network-online.target
+Wants=network-online.target
+# The old monolithic controller must be owner-paused before separation runs.
+ConditionPathExists=/var/lib/jason/openclaw/support-repair/pmv3-engineering-owner-pause.json
+ConditionPathExists=/home/al/.local/lib/jason/pmv3_worker_release_gate.py
+ConditionPathExists=/home/al/.local/lib/jason/independent_governed_lane.py
+ConditionPathExists=/home/al/.local/lib/jason/owner_approved_development_worker.py
+
+[Service]
+Type=oneshot
+User=al
+Group=al
+WorkingDirectory=/home/al/.local/lib/jason/engineering-source-repo
+Environment=HOME=/home/al
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecCondition=/usr/bin/python3 /home/al/.local/lib/jason/pmv3_worker_release_gate.py
+ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/independent_governed_lane.py --lane development --repo /home/al/.local/lib/jason/engineering-source-repo --spool /var/lib/jason/openclaw/support-repair
+TimeoutStartSec=75min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/al/jason-worktrees/support-repair /home/al/jason-worktrees/owner-approved-development /home/al/jason-worktrees/todo-closure /var/lib/jason/openclaw/support-repair
+
+# SOURCE ONLY: install/enable only through an exact-SHA governed PMV3 release.

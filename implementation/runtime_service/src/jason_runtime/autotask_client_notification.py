@@ -252,6 +252,7 @@ def validate_approved_workflow_scope(
     note_title: str,
     note_body: str,
     requested_recipient: str | None = None,
+    ticket_number: str | None = None,
 ) -> ClientNotificationTestScope:
     if not approved_workflow_notification_mode_enabled():
         raise AutotaskClientNotificationScopeError(
@@ -287,6 +288,7 @@ def validate_approved_workflow_scope(
         template = resolve_approved_client_message(
             workflow_id=str(workflow_id or ""),
             template_id=str(template_id or ""),
+            ticket_number=ticket_number,
         )
     except ApprovedClientMessageRegistryError as exc:
         raise AutotaskClientNotificationScopeError(
@@ -408,6 +410,15 @@ class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
 
         if profile == AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE:
             payload = request.arguments.get("payload")
+            # The ticket number supplied for footer rendering must be equal
+            # to the freshly re-read authoritative Autotask ticket number.
+            from .client_information_requests import CLIENT_QUESTION_WORKFLOW_ID
+            if request.arguments.get("workflow_id") == CLIENT_QUESTION_WORKFLOW_ID:
+                if (str(request.arguments.get("ticket_number") or "")
+                        != str(ticket.get("ticketNumber") or "")):
+                    raise AutotaskClientNotificationScopeError(
+                        "CLIENT_NOTIFICATION_TICKET_NUMBER_MISMATCH"
+                    )
             if not isinstance(payload, Mapping):
                 raise AutotaskClientNotificationScopeError(
                     "CLIENT_NOTIFICATION_PAYLOAD_REQUIRED"
@@ -424,6 +435,11 @@ class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
                 note_title=str(payload.get("title") or ""),
                 note_body=str(payload.get("description") or ""),
                 requested_recipient=request.arguments.get("recipient"),
+                ticket_number=(
+                    str(ticket.get("ticketNumber") or "")
+                    if request.arguments.get("workflow_id") == CLIENT_QUESTION_WORKFLOW_ID
+                    else None
+                ),
             )
             return
 
@@ -447,6 +463,7 @@ class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
             template = resolve_approved_client_message(
                 workflow_id=str(request.arguments.get("workflow_id") or ""),
                 template_id=str(request.arguments.get("template_id") or ""),
+                ticket_number=str(request.arguments.get("ticket_number") or ""),
             )
         except ApprovedClientMessageRegistryError as exc:
             raise AutotaskClientNotificationScopeError(

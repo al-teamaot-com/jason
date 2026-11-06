@@ -14,4 +14,4 @@ UMask=0027
 # Must exceed the root worker's bounded 360s candidate-script timeout plus
 # Git validation/result publication overhead; otherwise systemd terminates the
 # worker before it can emit the fail-closed result or remove the request.
-TimeoutStartSec=480
+TimeoutStartSec=4500

@@ -114,24 +114,31 @@ def parse_todo_sections(text: str) -> list[TodoItem]:
 
 def open_todo_issue_map(repo: Path) -> dict[str, dict[str, Any]]:
     issues = gh_json(
-        [
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--limit",
-            "200",
-            "--json",
-            "number,title,body,url,updatedAt",
-        ],
+        ["issue", "list", "--state", "open", "--limit", "5000",
+         "--json", "number,title,body,url,updatedAt"],
         cwd=repo,
     ) or []
+    # A short GitHub window hid canonical October TODO issues and admitted
+    # multiple duplicates. Saturated inventories are UNKNOWN, not empty.
+    if len(issues) >= 5000:
+        raise RuntimeError("TODO inventory at safe limit; do not admit new issue")
     result: dict[str, dict[str, Any]] = {}
     for issue in issues:
         body = str(issue.get("body") or "")
         match = ISSUE_TODO.search(body)
-        if match:
-            result[match.group(1).upper()] = dict(issue)
+        if not match:
+            continue
+        item_id = match.group(1).upper()
+        prior = result.get(item_id)
+        if prior is not None:
+            # Identical duplicate issues do not create new work authority.
+            # Prefer the earliest canonical ID; mismatched scope is unsafe.
+            if (str(prior.get("body") or "") != body
+                    or str(prior.get("title") or "") != str(issue.get("title") or "")):
+                raise RuntimeError("Conflicting GitHub TODO identities: " + item_id)
+            if int(issue["number"]) >= int(prior["number"]):
+                continue
+        result[item_id] = dict(issue)
     return result
 
 
@@ -497,6 +504,19 @@ def main() -> int:
         state["status"] = "dry_run"
         atomic_json(state_path, state)
         print(json.dumps(state, indent=2))
+        return 0
+
+    # Recheck all open TODOs immediately before a new GitHub mutation.
+    # A prior timer invocation can have admitted the same approved item.
+    already = open_todo_issue_map(repo).get(candidate.item_id)
+    if already is not None:
+        state["status"] = "existing_issue_detected"
+        state["issue"] = {
+            "number": int(already["number"]),
+            "url": str(already.get("url") or ""),
+            "todo_id": candidate.item_id,
+        }
+        atomic_json(state_path, state)
         return 0
 
     created = create_issue(repo, candidate)

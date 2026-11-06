@@ -21,6 +21,7 @@ class ApprovalAuditEventType(StrEnum):
     REQUEST_CREATED = "approval.request.created"
     DELIVERY_RECORDED = "approval.delivery.recorded"
     RESPONSE_AUTHENTICATED = "approval.response.authenticated"
+    RESPONSE_ACTOR_BOUND = "approval.response.actor_bound"
     RESPONSE_ACCEPTED = "approval.response.accepted"
     RESPONSE_DENIED = "approval.response.denied"
     RESPONSE_CHANGES_REQUESTED = "approval.response.changes_requested"

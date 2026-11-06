@@ -12,8 +12,11 @@ required=(
   "$UNIT_ROOT/jason-delegation-maintenance.timer"
   "$UNIT_ROOT/jason-openclaw-authority-health.service"
   "$UNIT_ROOT/jason-openclaw-authority-health.timer"
+  "$UNIT_ROOT/jason-openclaw-authority-full-integrity.service"
+  "$UNIT_ROOT/jason-openclaw-authority-full-integrity.timer"
   "$REPO_ROOT/tools/delegation_maintenance.py"
   "$REPO_ROOT/tools/openclaw_authority_health_snapshot.py"
+  "$REPO_ROOT/tools/openclaw_authority_fast_health.py"
 )
 
 for path in "${required[@]}"; do
@@ -34,7 +37,9 @@ for unit in \
   jason-delegation-maintenance.service \
   jason-delegation-maintenance.timer \
   jason-openclaw-authority-health.service \
-  jason-openclaw-authority-health.timer
+  jason-openclaw-authority-health.timer \
+  jason-openclaw-authority-full-integrity.service \
+  jason-openclaw-authority-full-integrity.timer
 do
   sudo install -m 0644 "$UNIT_ROOT/$unit" "/etc/systemd/system/$unit"
   echo "[PASS] Installed $unit"
@@ -43,6 +48,7 @@ done
 sudo systemctl daemon-reload
 sudo systemctl enable --now jason-delegation-maintenance.timer
 sudo systemctl enable --now jason-openclaw-authority-health.timer
+sudo systemctl enable --now jason-openclaw-authority-full-integrity.timer
 
 # Normalize current lifecycle state immediately, then produce the first health snapshot.
 sudo systemctl start jason-delegation-maintenance.service
@@ -56,7 +62,7 @@ else
   exit 1
 fi
 
-for timer in jason-delegation-maintenance.timer jason-openclaw-authority-health.timer; do
+for timer in jason-delegation-maintenance.timer jason-openclaw-authority-health.timer jason-openclaw-authority-full-integrity.timer; do
   state="$(systemctl is-active "$timer")"
   if [[ "$state" != "active" ]]; then
     echo "[FAIL] $timer is $state" >&2

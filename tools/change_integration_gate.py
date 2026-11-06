@@ -13,7 +13,9 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.parse
+import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -52,6 +54,33 @@ def sensitive(path: str) -> bool:
     return path in SENSITIVE_ROOTS or path.startswith(SENSITIVE_PREFIXES)
 
 
+MAX_RATE_LIMIT_WAIT_SECONDS = 900
+
+
+def _rate_limit_delay(headers, attempt: int) -> float | None:
+    """Return a bounded GitHub rate-limit recovery delay.
+
+    Honor provider reset evidence when available instead of blindly retrying a
+    quota that cannot recover in 5-10 seconds. Delays beyond the bounded
+    15-minute gate budget fail closed.
+    """
+    base = float(5 * (attempt + 1))
+    retry_after = headers.get("Retry-After") if headers is not None else None
+    reset_at = headers.get("X-RateLimit-Reset") if headers is not None else None
+    requested = base
+    try:
+        if retry_after is not None:
+            requested = max(requested, float(retry_after))
+        elif reset_at is not None:
+            requested = max(requested, float(reset_at) - time.time() + 2.0)
+    except (TypeError, ValueError):
+        requested = base
+    requested = max(base, requested)
+    if requested > MAX_RATE_LIMIT_WAIT_SECONDS:
+        return None
+    return requested
+
+
 def api_json(url: str, token: str) -> object:
     request = urllib.request.Request(
         url,
@@ -62,8 +91,33 @@ def api_json(url: str, token: str) -> object:
             "User-Agent": "project-jason-change-integration-gate",
         },
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
+    # GitHub can temporarily throttle busy repositories. Retry *only* genuine
+    # rate-limits; other 403s and persistent rate-limits fail closed.
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            error = exc.read(2048).decode("utf-8", errors="replace")
+            limited = exc.code == 429 or (
+                exc.code == 403
+                and ("rate limit" in error.casefold()
+                     or exc.headers.get("X-RateLimit-Remaining") == "0"
+                     or exc.headers.get("Retry-After") is not None)
+            )
+            if not limited or attempt == 2:
+                raise RuntimeError(
+                    f"GitHub integration validation HTTP {exc.code}: "
+                    f"{error[:240]}"
+                ) from exc
+            delay = _rate_limit_delay(exc.headers, attempt)
+            if delay is None:
+                raise RuntimeError(
+                    "GitHub integration validation rate-limit reset exceeds "
+                    "bounded recovery window"
+                ) from exc
+            time.sleep(delay)
+    raise RuntimeError("GitHub integration validation retry exhausted")
 
 
 def paged(url: str, token: str) -> list[dict]:

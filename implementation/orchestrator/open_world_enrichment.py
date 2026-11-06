@@ -154,6 +154,9 @@ class OpenWorldCatalogEnricher:
                     selector_source_policy=(
                         resource.selector_source_policy
                     ),
+                    query_filter_bindings=(
+                        resource.query_filter_bindings
+                    ),
                 )
             )
 

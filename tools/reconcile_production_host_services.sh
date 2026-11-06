@@ -15,7 +15,6 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="/var/backups/jason-systemd-$STAMP"
 ENGINEERING_SOURCE_REPO="/home/al/.local/lib/jason/engineering-source-repo"
 DOCUMENTATION_SOURCE_REPO="/home/al/.local/lib/jason/documentation-source-repo"
-OBSERVABILITY_CURRENT_LINK="/opt/jason/observability/current"
 USER_XDG_RUNTIME_DIR="/run/user/1000"
 USER_DBUS_ADDRESS="unix:path=/run/user/1000/bus"
 
@@ -38,10 +37,12 @@ MAINTENANCE_SERVICES=(
 )
 DEFERRED_MAINTENANCE_SERVICES=(
   jason-documentation-reconciliation.service
+  jason-openclaw-authority-full-integrity.service
 )
 MAINTENANCE_TIMERS=(
   jason-delegation-maintenance.timer
   jason-openclaw-authority-health.timer
+  jason-openclaw-authority-full-integrity.timer
   jason-documentation-reconciliation.timer
 )
 PROVIDER_CANARY_SERVICE=jason-provider-health-canary.service
@@ -202,13 +203,117 @@ if [ ! -d "$DOCUMENTATION_SOURCE_REPO/.git" ]; then
   exit 9
 fi
 
+# Root worker and audited rollback helper MUST be staged before any
+# candidate-specific systemd unit is installed. A separately Owner/CCC-
+# approved migration may temporarily declare the new timer ALLOWED but
+# not yet REQUIRED. The full required timer is committed only after
+# independent systemd activation checks pass near the end of this script.
+step_start protected_root_policy_stage
+/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py" --stage-only
+cmp -s "$RELEASE_DIR/tools/protected_root_policy_migration.py" /usr/local/lib/jason/protected_root_policy_migration.py || {
+  echo "ERROR: root policy migration helper differs from exact immutable release" >&2
+  exit 9
+}
+cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
+  echo "ERROR: root host rollback worker differs from exact immutable release" >&2
+  exit 9
+}
+step_pass protected_root_policy_stage
+
 for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${DEFERRED_MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER" "$DRIFT_WATCHDOG_SERVICE" "$DRIFT_WATCHDOG_TIMER" "${OBSOLETE_UNITS[@]}"; do
   if [ -f "/etc/systemd/system/$unit" ]; then
     cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/$unit.before"
   fi
 done
 
+# During a rollback, candidate-added Jason units can be absent from the
+# previous immutable release manifest. Leaving them installed causes a real
+# desired-state drift failure even if runtime/MCP and the host SHA align.
+# Stage both plans before touching a unit. Compare exact candidate release
+# bytes and bounded, declared delta; unknown/unmanaged changes fail closed.
+step_start release_owned_unit_delta
+PREVIOUS_HOST_RELEASE="$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)"
+if [ -n "$PREVIOUS_HOST_RELEASE" ] && [ "$PREVIOUS_HOST_RELEASE" != "$RELEASE_DIR" ]; then
+  UNIT_DELTA_PLANNER="$RELEASE_DIR/tools/reconcile_managed_unit_delta.py"
+  if [ ! -f "$UNIT_DELTA_PLANNER" ]; then
+    echo "ERROR: immutable target release lacks the unit-delta safety planner" >&2
+    exit 9
+  fi
+  SYSTEM_UNIT_DELTA="$BACKUP_DIR/release-system-unit-delta.txt"
+  USER_UNIT_DELTA="$BACKUP_DIR/release-user-unit-delta.txt"
+  if ! /usr/bin/python3 "$UNIT_DELTA_PLANNER" \
+    --candidate "$PREVIOUS_HOST_RELEASE" --target "$RELEASE_DIR" \
+    --scope system --installed-dir /etc/systemd/system > "$SYSTEM_UNIT_DELTA"; then
+    echo "ERROR: cannot verify previous-release system-unit delta" >&2
+    exit 9
+  fi
+  if ! /usr/bin/python3 "$UNIT_DELTA_PLANNER" \
+    --candidate "$PREVIOUS_HOST_RELEASE" --target "$RELEASE_DIR" \
+    --scope user --installed-dir /home/al/.config/systemd/user > "$USER_UNIT_DELTA"; then
+    echo "ERROR: cannot verify previous-release user-unit delta" >&2
+    exit 9
+  fi
+
+  # Unit names are validated by the immutable Python planner before emission.
+  # Both system and user removals are part of this protected release transaction;
+  # they may not be run as a standalone clean-up task.
+  mapfile -t REMOVE_SYSTEM_UNITS < "$SYSTEM_UNIT_DELTA"
+  mapfile -t REMOVE_USER_UNITS < "$USER_UNIT_DELTA"
+  for unit in "${REMOVE_SYSTEM_UNITS[@]}"; do
+    CURRENT_UNIT="$unit"
+    cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/system-$unit.before"
+    timeout --signal=TERM --kill-after=5s 45s systemctl disable --now "$unit"
+    rm -f -- "/etc/systemd/system/$unit"
+    if [ -e "/etc/systemd/system/$unit" ]; then
+      echo "ERROR: candidate-only system unit not removed: $unit" >&2
+      exit 9
+    fi
+  done
+  for unit in "${REMOVE_USER_UNITS[@]}"; do
+    CURRENT_UNIT="$unit"
+    cp -a "/home/al/.config/systemd/user/$unit" "$BACKUP_DIR/user-$unit.before"
+    timeout --signal=TERM --kill-after=5s 45s \
+      runuser -u al -- env HOME=/home/al \
+      XDG_RUNTIME_DIR="$USER_XDG_RUNTIME_DIR" \
+      DBUS_SESSION_BUS_ADDRESS="$USER_DBUS_ADDRESS" \
+      PATH=/usr/local/bin:/usr/bin:/bin systemctl --user disable --now "$unit"
+    rm -f -- "/home/al/.config/systemd/user/$unit"
+    if [ -e "/home/al/.config/systemd/user/$unit" ]; then
+      echo "ERROR: candidate-only user unit not removed: $unit" >&2
+      exit 9
+    fi
+  done
+  if [ "${#REMOVE_SYSTEM_UNITS[@]}" -ne 0 ]; then
+    systemctl daemon-reload
+  fi
+  if [ "${#REMOVE_USER_UNITS[@]}" -ne 0 ]; then
+    run_as_al systemctl --user daemon-reload
+  fi
+  CURRENT_UNIT=""
+  echo "JASON_RELEASE_UNIT_DELTA_REMOVED=system:${#REMOVE_SYSTEM_UNITS[@]},user:${#REMOVE_USER_UNITS[@]}"
+else
+  echo "JASON_RELEASE_UNIT_DELTA_REMOVED=not_applicable"
+fi
+step_pass release_owned_unit_delta
+
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
+
+RECOVERY_PROFILE="$(/usr/bin/python3 - "$SOURCE_REVISION" <<'PY2'
+import json, pathlib, sys
+sha=sys.argv[1]
+root=pathlib.Path('/var/lib/jason/openclaw/release-manager/records')
+prefix='release-'+sha[:16]
+matched=[]
+for path in sorted(root.glob(prefix+'*.json')):
+    try: doc=json.loads(path.read_text(encoding='utf-8'))
+    except Exception: continue
+    if ((doc.get('release_candidate') or {}).get('candidate_sha') == sha
+            and doc.get('state') == 'production'):
+        matched.append(str((doc.get('open_breaker_recovery') or {}).get('profile_id') or ''))
+if len(matched) > 1: raise SystemExit('multiple production recovery records for exact candidate')
+print(matched[0] if matched else '')
+PY2
+)"
 
 for unit in "${EXPORTER_UNITS[@]}"; do
   src="$RELEASE_DIR/infrastructure/showcase/systemd/$unit"
@@ -315,14 +420,95 @@ for timer in "${MAINTENANCE_TIMERS[@]}"; do
 done
 CURRENT_UNIT="$PROVIDER_CANARY_TIMER"
 systemctl enable --now "$PROVIDER_CANARY_TIMER"
-CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
-timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
+if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+  echo "JASON_PROVIDER_CANARY_INITIAL=DEFERRED_UNTIL_IDENTITY_RECOVERY"
+else
+  CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
+  timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
+fi
+
+ensure_authority_full_integrity_proof() {
+  local evidence=/var/lib/jason/openclaw/operational-full-health.json
+  local max_age_seconds=$((30 * 60 * 60))
+  local al_uid
+  al_uid="$(id -u al)"
+  if /usr/bin/python3 - "$evidence" "$max_age_seconds" "$al_uid" <<'PY2'
+import json, os, stat, sys, time
+path=sys.argv[1]; max_age=int(sys.argv[2]); expected_uid=int(sys.argv[3])
+try:
+    info=os.lstat(path)
+    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
+        raise SystemExit(2)
+    if info.st_uid != expected_uid:
+        raise SystemExit(2)
+    age=time.time()-info.st_mtime
+    if not 0 <= age <= max_age:
+        raise SystemExit(2)
+    doc=json.load(open(path, encoding='utf-8'))
+    if (doc.get('status') != 'pass' or doc.get('snapshot_source_exit_code') != 0
+            or doc.get('provider_contacted') is not False
+            or doc.get('provider_credentials_used') is not False
+            or doc.get('failures') != []):
+        raise SystemExit(2)
+except (OSError, ValueError, TypeError, json.JSONDecodeError):
+    raise SystemExit(2)
+raise SystemExit(0)
+PY2
+  then
+    echo "JASON_AUTHORITY_FULL_INTEGRITY=EXISTING_RECENT_PASS"
+    return 0
+  fi
+
+  CURRENT_UNIT=jason-openclaw-authority-full-integrity.service
+  local state
+  state="$(systemctl is-active "$CURRENT_UNIT" 2>/dev/null || true)"
+  if [ "$state" = "activating" ] || [ "$state" = "active" ]; then
+    echo "JASON_AUTHORITY_FULL_INTEGRITY=WAIT_EXISTING_JOB"
+    # `start` on an already-starting oneshot joins the existing start job. It
+    # does not restart, stop, cancel or replace the in-flight proof.
+    systemctl start "$CURRENT_UNIT"
+  else
+    systemctl reset-failed "$CURRENT_UNIT" || true
+    echo "JASON_AUTHORITY_FULL_INTEGRITY=RUN_REPAIRED_PROOF"
+    systemctl start "$CURRENT_UNIT"
+  fi
+  if [ "$(systemctl show "$CURRENT_UNIT" -p Result --value)" != "success" ]; then
+    echo "ERROR: repaired authority full-integrity proof did not complete successfully" >&2
+    systemctl status "$CURRENT_UNIT" --no-pager -l || true
+    return 1
+  fi
+  /usr/bin/python3 - "$evidence" "$max_age_seconds" "$al_uid" <<'PY2'
+import json, os, stat, sys, time
+path=sys.argv[1]; max_age=int(sys.argv[2]); expected_uid=int(sys.argv[3])
+info=os.lstat(path)
+if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != expected_uid:
+    raise SystemExit('authority full-integrity evidence ownership/mode invalid')
+if not 0 <= time.time()-info.st_mtime <= max_age:
+    raise SystemExit('authority full-integrity evidence stale after proof')
+doc=json.load(open(path, encoding='utf-8'))
+if (doc.get('status') != 'pass' or doc.get('snapshot_source_exit_code') != 0
+        or doc.get('provider_contacted') is not False
+        or doc.get('provider_credentials_used') is not False
+        or doc.get('failures') != []):
+    raise SystemExit('authority full-integrity evidence did not prove PASS')
+PY2
+  echo "JASON_AUTHORITY_FULL_INTEGRITY=FRESH_PASS"
+}
+
+ensure_authority_full_integrity_proof
+
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   CURRENT_UNIT="$unit"
   if [ "$unit" = "jason-openclaw-authority-health.service" ]; then
-    # The intact JKD-001 full-integrity check requires about 135s in
-    # production. Keep the check mandatory, but give it a bounded 180s.
-    timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"
+    # An in-flight legacy full SQLite scan can leave this oneshot activating.
+    # Never block on, cancel, restart or kill that older job. Prove a current
+    # fast-health PASS against the exact newly installed systemd unit instead.
+    AUTHORITY_HANDOFF="$RELEASE_DIR/tools/release_authority_fast_health_handoff.py"
+    test -f "$AUTHORITY_HANDOFF" || {
+      echo "ERROR: missing bounded authority fast-health handoff" >&2
+      exit 9
+    }
+    /usr/bin/python3 "$AUTHORITY_HANDOFF" --release-dir "$RELEASE_DIR"
   else
     timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"
   fi
@@ -362,6 +548,11 @@ for unit in "${MAINTENANCE_SERVICES[@]}"; do
     exit 3
   fi
 done
+# Legacy full-scan completion can overwrite fast evidence during transition.
+# Recheck independent fast-mode evidence before accepting the host service.
+CURRENT_UNIT="jason-openclaw-authority-health.service"
+/usr/bin/python3 "$AUTHORITY_HANDOFF" --release-dir "$RELEASE_DIR" --verify-only
+CURRENT_UNIT=""
 for unit in "${OBSOLETE_UNITS[@]}"; do
   state="$(systemctl is-active "$unit" 2>/dev/null || true)"
   if [ "$state" = "active" ] || [ "$state" = "activating" ]; then
@@ -412,10 +603,16 @@ fi
 for worker in \
   support_repair_host_worker.py \
   owner_approved_development_worker.py \
+  engineering_pipeline.py \
+  pmv3_engineering_controller.py \
+  release_breaker_recovery_manager.py \
+  engineering_supervisor.py \
+  engineering_evidence_tools.py \
   todo_engineering_intake.py \
   todo_release_bridge.py \
   operational_acceptance_reader.py \
   release_manager_gate.py \
+  pmv3_worker_release_gate.py \
   change_integration_gate.py \
   documentation_impact_gate.py; do
   cmp -s "$ENGINEERING_SOURCE_REPO/tools/$worker" "/home/al/.local/lib/jason/$worker" || {
@@ -494,10 +691,110 @@ echo "JASON_USER_WORKER_RECONCILIATION=PASS"
 echo "ENGINEERING_SOURCE_REPO=$ENGINEERING_SOURCE_REPO"
 echo "DOCUMENTATION_SOURCE_REPO=$DOCUMENTATION_SOURCE_REPO"
 
-# Keep the root-governed release-transition processor aligned with the
-# immutable release before final production baseline verification. A retry
+# Install the exact root host worker and policy rollback helper FIRST, so
+# any subsequent protected-policy migration is reversible even if the
+# root transition install fails before the release can be certified.
+step_start root_reconciler_install
+/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py"
+cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
+  echo "ERROR: installed root host reconciler differs from production source" >&2
+  exit 9
+}
+if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || true)" != "active" ]; then
+  echo "ERROR: root host-reconcile path is not active after production install" >&2
+  exit 9
+fi
+step_pass root_reconciler_install
+echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
+# Align the independent root transition processor and its exact reviewed
+# root-only policy only AFTER the rollback-capable host worker is installed. A retry
 # identity accepted by the Release Manager must also be accepted by the root
 # processor; otherwise final closeout unnecessarily rolls production back.
+# Install the newly staged user units BEFORE committing them as REQUIRED and
+# before the final drift guard. Do not replace the running release controller.
+step_start held_approval_user_unit_install
+run_as_al /usr/bin/python3 "$RELEASE_DIR/tools/install_release_manager.py" \
+  --approval-units-only --activate
+step_pass held_approval_user_unit_install
+
+# Stage one isolated read-only provider-health worker and its timer as
+# release-owned, DISABLED system units. They are allowed (not required) by the
+# exact candidate desired state. Never activate, restart, or replace ticket
+# processing here. The existing LKG unit-delta planner can remove the exact
+# two candidate-only unit files on rollback.
+step_start isolated_provider_shadow_disabled_stage
+/usr/bin/python3 "$RELEASE_DIR/tools/stage_isolated_provider_shadow_units.py" \
+  --release-dir "$RELEASE_DIR" --expected-sha "$SOURCE_REVISION"
+step_pass isolated_provider_shadow_disabled_stage
+
+# PM V2 shadow is release-owned and may only be activated when the exact
+# candidate desired-state policy declares it. The first protected-core
+# bootstrap release intentionally defers this unit so the currently installed
+# root helper can accept the release, stage the new reviewed helper, and close
+# the bootstrap loop without weakening root policy validation.
+PM_V2_SHADOW_UNIT="jason-pm-v2-shadow.service"
+PM_V2_SHADOW_DECLARED="$(/usr/bin/python3 - "$RELEASE_DIR/config/production-desired-state.json" "$PM_V2_SHADOW_UNIT" <<'PY2'
+import json, sys
+from pathlib import Path
+policy=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+unit=sys.argv[2]
+allowed=set(policy.get("allowed_user_units") or [])
+required=set(policy.get("required_user_units") or [])
+print("yes" if unit in (allowed | required) else "no")
+PY2
+)"
+if [ "$PM_V2_SHADOW_DECLARED" = "yes" ]; then
+  step_start pm_v2_shadow_user_unit_install
+  PM_V2_SHADOW_SOURCE="$RELEASE_DIR/infrastructure/openclaw-operations/systemd/user/$PM_V2_SHADOW_UNIT"
+  test -f "$PM_V2_SHADOW_SOURCE" || { echo "ERROR: PM V2 shadow unit is missing" >&2; exit 9; }
+  install -d -o al -g al -m 0700 /var/lib/jason/pm-v2 /var/lib/jason/openclaw/pm-v2
+  install -o al -g al -m 0644 "$PM_V2_SHADOW_SOURCE" "/home/al/.config/systemd/user/$PM_V2_SHADOW_UNIT"
+  run_as_al systemctl --user daemon-reload
+  run_as_al systemctl --user enable --now "$PM_V2_SHADOW_UNIT"
+  if [ "$(run_as_al systemctl --user is-active "$PM_V2_SHADOW_UNIT" 2>/dev/null || true)" != "active" ]; then
+    echo "ERROR: PM V2 shadow service is not active after governed install" >&2
+    exit 9
+  fi
+  step_pass pm_v2_shadow_user_unit_install
+  echo "JASON_PM_V2_SHADOW_RECONCILIATION=PASS"
+else
+  echo "JASON_PM_V2_SHADOW_RECONCILIATION=DEFERRED_BOOTSTRAP"
+fi
+
+step_start boot_recovery_install
+BOOT_RECOVERY_SCRIPT="$RELEASE_DIR/tools/jason_boot_recovery.py"
+BOOT_RECOVERY_SERVICE="$RELEASE_DIR/infrastructure/boot-recovery/jason-boot-recovery.service"
+BOOT_RECOVERY_TIMER="$RELEASE_DIR/infrastructure/boot-recovery/jason-boot-recovery.timer"
+for required in "$BOOT_RECOVERY_SCRIPT" "$BOOT_RECOVERY_SERVICE" "$BOOT_RECOVERY_TIMER"; do
+  test -f "$required" || { echo "ERROR: boot recovery source missing: $required" >&2; exit 9; }
+done
+install -o root -g root -m 0750 "$BOOT_RECOVERY_SCRIPT" /usr/local/sbin/jason-boot-recovery
+install -o root -g root -m 0644 "$BOOT_RECOVERY_SERVICE" /etc/systemd/system/jason-boot-recovery.service
+install -o root -g root -m 0644 "$BOOT_RECOVERY_TIMER" /etc/systemd/system/jason-boot-recovery.timer
+cmp -s "$BOOT_RECOVERY_SCRIPT" /usr/local/sbin/jason-boot-recovery || {
+  echo "ERROR: installed boot recovery controller differs from exact immutable release" >&2
+  exit 9
+}
+cmp -s "$BOOT_RECOVERY_SERVICE" /etc/systemd/system/jason-boot-recovery.service || {
+  echo "ERROR: installed boot recovery service differs from exact immutable release" >&2
+  exit 9
+}
+cmp -s "$BOOT_RECOVERY_TIMER" /etc/systemd/system/jason-boot-recovery.timer || {
+  echo "ERROR: installed boot recovery timer differs from exact immutable release" >&2
+  exit 9
+}
+systemctl daemon-reload
+systemctl enable jason-boot-recovery.service jason-boot-recovery.timer >/dev/null
+if [ "$(systemctl is-active jason-boot-recovery.timer 2>/dev/null || true)" != "active" ]; then
+  systemctl start jason-boot-recovery.timer
+fi
+if [ "$(systemctl is-active jason-boot-recovery.timer 2>/dev/null || true)" != "active" ]; then
+  echo "ERROR: boot recovery timer is not active after governed install" >&2
+  exit 9
+fi
+step_pass boot_recovery_install
+echo "JASON_BOOT_RECOVERY_INSTALL=PASS"
+
 step_start root_release_transition_install
 /usr/bin/python3 "$RELEASE_DIR/tools/install_release_control_transition.py"
 cmp -s "$RELEASE_DIR/tools/release_control_transition_worker.py" /usr/local/lib/jason/release_control_transition_worker.py || {
@@ -511,21 +808,109 @@ fi
 step_pass root_release_transition_install
 echo "JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS"
 
-# Keep the privileged host-reconciliation boundary on the exact production
-# implementation after this successful reconciliation. The worker validates
-# only local refs from the managed engineering Git source.
-step_start root_reconciler_install
-/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py"
-cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
-  echo "ERROR: installed root host reconciler differs from production source" >&2
-  exit 9
-}
-if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || true)" != "active" ]; then
-  echo "ERROR: root host-reconcile path is not active after production install" >&2
-  exit 9
+step_start openbao_identity_lifecycle_install
+# The exact release may intentionally retire the lifecycle service. Never
+# invoke an installer absent from that release or silently strand an old unit.
+if [ -f "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py" ]; then
+  for required in provider_secret_provision.py openbao_identity_lifecycle.py openbao_identity_lifecycle_worker.py; do
+    if [ ! -f "$RELEASE_DIR/tools/$required" ]; then
+      echo "ERROR: OpenBao identity lifecycle source is incomplete" >&2
+      exit 9
+    fi
+  done
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py"
+  for required in provider_secret_provision.py openbao_identity_lifecycle.py openbao_identity_lifecycle_worker.py; do
+    cmp -s "$RELEASE_DIR/tools/$required" "/usr/local/lib/jason/$required" || {
+      echo "ERROR: installed OpenBao lifecycle source differs from release" >&2
+      exit 9
+    }
+  done
+  if [ "$(systemctl is-active jason-openbao-identity-lifecycle.timer 2>/dev/null || true)" != "active" ]; then
+    echo "ERROR: declared OpenBao lifecycle timer is not active" >&2
+    exit 9
+  fi
+  echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS"
+else
+  for removed in openbao_identity_lifecycle.py openbao_identity_lifecycle_worker.py; do
+    if [ -e "$RELEASE_DIR/tools/$removed" ]; then
+      echo "ERROR: partially retired OpenBao lifecycle release source" >&2
+      exit 9
+    fi
+  done
+  if systemctl list-unit-files jason-openbao-identity-lifecycle.timer --no-legend --no-pager 2>/dev/null | grep -q 'jason-openbao-identity-lifecycle.timer'; then
+    echo "ERROR: obsolete OpenBao lifecycle unit requires governed retirement" >&2
+    exit 9
+  fi
+  if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+    echo "ERROR: provider identity recovery requires a declared OpenBao lifecycle" >&2
+    exit 9
+  fi
+  echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=NOT_DECLARED"
 fi
-step_pass root_reconciler_install
-echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
+step_pass openbao_identity_lifecycle_install
+
+if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+  step_start provider_identity_release_recovery
+  /usr/bin/python3 /usr/local/lib/jason/openbao_identity_lifecycle.py \
+    recover-release --source-revision "$SOURCE_REVISION"
+
+  docker restart jason-runtime jason-mcp-pilot >/dev/null
+  RUNTIME_RECOVERED=0
+  for attempt in $(seq 1 60); do
+    runtime_revision="$(docker inspect jason-runtime --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+    runtime_health="$(docker inspect jason-runtime --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || true)"
+    mcp_revision="$(docker inspect jason-mcp-pilot --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+    mcp_state="$(docker inspect jason-mcp-pilot --format '{{.State.Status}}' 2>/dev/null || true)"
+    if [ "$runtime_revision" = "$SOURCE_REVISION" ] \
+       && [ "$runtime_health" = "healthy" ] \
+       && [ "$mcp_revision" = "$SOURCE_REVISION" ] \
+       && [ "$mcp_state" = "running" ]; then
+      RUNTIME_RECOVERED=1
+      break
+    fi
+    sleep 2
+  done
+  if [ "$RUNTIME_RECOVERED" -ne 1 ]; then
+    echo "ERROR: provider identity recovery did not restore exact candidate runtime/MCP health" >&2
+    exit 9
+  fi
+
+  CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
+  CANARY_STARTED_AT="$(date +%s)"
+  systemctl start "$PROVIDER_CANARY_SERVICE"
+  /usr/bin/python3 - "$CANARY_STARTED_AT" <<'PY2'
+import json, sys, time
+from pathlib import Path
+started=float(sys.argv[1])
+p=Path('/var/lib/jason/provider-health-canaries.json')
+d=json.loads(p.read_text(encoding='utf-8'))
+generated=d.get('generated_at_epoch')
+if (not isinstance(generated,(int,float)) or generated < started - 1
+        or generated > time.time() + 10
+        or d.get('policy') != 'provider-health-canary-v1'
+        or d.get('principal') != 'jason-provider-canary'):
+    raise SystemExit('provider canary evidence is stale or outside reviewed contract')
+items=[x for x in d.get('results',[]) if isinstance(x,dict) and x.get('provider')=='autotask']
+if not items or any(x.get('healthy') is not True or x.get('error_class') != 'none' for x in items):
+    raise SystemExit('Autotask governed provider canary did not prove healthy after identity recovery')
+PY2
+  CURRENT_UNIT=""
+
+  run_as_al systemctl --user start jason-dnsfilter-boundary-reconcile.service
+  if [ "$(run_as_al systemctl --user show jason-dnsfilter-boundary-reconcile.service -p Result --value)" != "success" ]; then
+    echo "ERROR: DNSFilter reconciliation did not pass after identity recovery" >&2
+    exit 9
+  fi
+
+  # Native provider canary and runtime/MCP health above remain mandatory.
+  # CCC is not a second release certification step.
+  echo "JASON_RECOVERY_NATIVE_HEALTH=PASS"
+  step_pass provider_identity_release_recovery
+  echo "JASON_PROVIDER_IDENTITY_RELEASE_RECOVERY=PASS"
+else
+  echo "JASON_PROVIDER_IDENTITY_RELEASE_RECOVERY=NOT_APPLICABLE"
+fi
+
 echo "JASON_HOST_SERVICE_RECONCILIATION=PASS"
 echo "HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION=$SOURCE_REVISION"
 echo "MANAGED_ENGINEERING_SOURCE=PASS"
@@ -535,37 +920,9 @@ echo "SOURCE_REVISION=$SOURCE_REVISION"
 echo "RELEASE_DIR=$RELEASE_DIR"
 echo "BACKUP_DIR=$BACKUP_DIR"
 
-OBSERVABILITY_INSTALLER="$RELEASE_DIR/tools/install_observability_assurance.sh"
-OBSERVABILITY_PREVIOUS_REVISION=""
-if [ -f "$OBSERVABILITY_CURRENT_LINK/SOURCE_REVISION" ]; then
-  OBSERVABILITY_PREVIOUS_REVISION="$(tr -d '\r\n' < "$OBSERVABILITY_CURRENT_LINK/SOURCE_REVISION")"
-fi
-OBSERVABILITY_CHANGED=1
-if [ -n "$OBSERVABILITY_PREVIOUS_REVISION" ] \
-  && git -C "$REPO_ROOT" cat-file -e "$OBSERVABILITY_PREVIOUS_REVISION^{commit}" 2>/dev/null; then
-  if git -C "$REPO_ROOT" diff --quiet \
-    "$OBSERVABILITY_PREVIOUS_REVISION" "$SOURCE_REVISION" -- \
-    config/observability/grafana-dashboard-manifest.json \
-    infrastructure/showcase \
-    tools/grafana_assurance.py \
-    tools/update_grafana_manifest.py \
-    tools/install_observability_assurance.sh; then
-    OBSERVABILITY_CHANGED=0
-  fi
-fi
-step_start observability_reconciliation
-if [ "$OBSERVABILITY_CHANGED" -eq 1 ]; then
-  test -f "$OBSERVABILITY_INSTALLER" || { echo "ERROR: observability installer is missing" >&2; exit 9; }
-  timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT="$ENGINEERING_SOURCE_REPO" /usr/bin/bash "$OBSERVABILITY_INSTALLER" "$SOURCE_REVISION"
-  if [ "$(readlink -f "$OBSERVABILITY_CURRENT_LINK")" != "/opt/jason/observability/releases/$SOURCE_REVISION" ]; then
-    echo "ERROR: observability release did not converge to production revision" >&2
-    exit 9
-  fi
-  echo "JASON_OBSERVABILITY_RECONCILIATION=PASS"
-else
-  echo "JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED"
-fi
-step_pass observability_reconciliation
+# Grafana dashboards and scrape assurance are separate scheduled observability.
+# They never control host release admission or trigger production rollback.
+echo "JASON_OBSERVABILITY_RELEASE_GATE=NOT_REQUIRED"
 
 # Prove declared production desired-state convergence before host reconciliation
 # can report success. This catches unknown active units/containers, forbidden

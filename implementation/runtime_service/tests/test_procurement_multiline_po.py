@@ -81,6 +81,11 @@ def _submission(*, lines, total, tax="0.00", fees="0.00", source_count=None):
         "tax": tax,
         "fees": fees,
         "total_commitment": total,
+        # This suite tests line fidelity, idempotency, and invoice math; it
+        # uses a verified UDF ceiling high enough for delegated execution.
+        # Approval-specific tests separately require a real signed receipt.
+        "spending_limit": "999999.00",
+        "effective_spending_threshold": "999999.00",
         "product": {
             "name": "Primary Product",
             "cost": "86.11",
@@ -131,7 +136,7 @@ def test_multiline_po_writes_every_resolved_product_before_submit(tmp_path):
     submission = _submission(lines=lines, total="60.37")
     store.put_new(submission["submission_id"], submission)
 
-    result = flow.execute_submission(submission, owner_approval_id="approval-1")
+    result = flow.execute_submission(submission, owner_approval_id=None)
 
     capabilities = [call[0] for call in worker.calls]
     assert capabilities == [
@@ -171,7 +176,7 @@ def test_source_count_mismatch_fails_before_any_provider_write(tmp_path):
         ProcurementFlowError,
         match="does not represent every source item",
     ):
-        flow.execute_submission(submission, owner_approval_id="approval-1")
+        flow.execute_submission(submission, owner_approval_id=None)
 
     assert worker.calls == []
 
@@ -189,7 +194,7 @@ def test_unresolved_paid_line_fails_before_po_creation(tmp_path):
         ProcurementFlowError,
         match="not resolved to an Autotask product",
     ):
-        flow.execute_submission(submission, owner_approval_id="approval-1")
+        flow.execute_submission(submission, owner_approval_id=None)
 
     assert worker.calls == []
 
@@ -207,7 +212,7 @@ def test_total_mismatch_fails_before_po_creation(tmp_path):
         ProcurementFlowError,
         match="does not reconcile",
     ):
-        flow.execute_submission(submission, owner_approval_id="approval-1")
+        flow.execute_submission(submission, owner_approval_id=None)
 
     assert worker.calls == []
 
@@ -240,7 +245,7 @@ def test_unmapped_tax_or_fees_fail_closed_before_po_creation(
     store.put_new(submission["submission_id"], submission)
 
     with pytest.raises(ProcurementFlowError, match=message):
-        flow.execute_submission(submission, owner_approval_id="approval-1")
+        flow.execute_submission(submission, owner_approval_id=None)
 
     assert worker.calls == []
 
@@ -263,7 +268,7 @@ def test_zero_cost_informational_line_is_preserved_in_po_memo(tmp_path):
     submission = _submission(lines=lines, total="207.59")
     store.put_new(submission["submission_id"], submission)
 
-    flow.execute_submission(submission, owner_approval_id="approval-1")
+    flow.execute_submission(submission, owner_approval_id=None)
 
     capabilities = [call[0] for call in worker.calls]
     assert capabilities == [
@@ -290,7 +295,7 @@ def test_partial_multiline_retry_does_not_duplicate_first_po_item(tmp_path):
     with pytest.raises(RuntimeError, match="second-line interruption"):
         first_flow.execute_submission_with_retry_state(
             submission,
-            owner_approval_id="approval-1",
+            owner_approval_id=None,
         )
 
     checkpoint = store.get(submission["submission_id"])
@@ -316,7 +321,7 @@ def test_partial_multiline_retry_does_not_duplicate_first_po_item(tmp_path):
     current = store.get(submission["submission_id"])
     second_flow.execute_submission_with_retry_state(
         current,
-        owner_approval_id="approval-1",
+        owner_approval_id=None,
     )
 
     capabilities = [call[0] for call in second_worker.calls]
@@ -348,6 +353,6 @@ def test_legacy_multiline_declaration_without_line_plan_fails_closed(tmp_path):
         ProcurementFlowError,
         match="no approved PO line plan",
     ):
-        flow.execute_submission(submission, owner_approval_id="approval-1")
+        flow.execute_submission(submission, owner_approval_id=None)
 
     assert worker.calls == []

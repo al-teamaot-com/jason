@@ -129,6 +129,7 @@ class PlaybookAutonomyReviewService:
         *,
         request: ApprovalRequest,
         accepted: AcceptedApproval,
+        allow_new_promotion: bool = True,
     ) -> PlaybookAutonomyPromotionResult:
         if accepted.status != "approved":
             raise PlaybookAutonomyReviewError("PLAYBOOK_AUTONOMY_OWNER_APPROVAL_REQUIRED")
@@ -179,6 +180,8 @@ class PlaybookAutonomyReviewService:
             result = PlaybookAutonomyPromotionResult(existing, False, current)
             self._append_audit(request=request, accepted=accepted, result=result)
             return result
+        if not allow_new_promotion:
+            raise PlaybookAutonomyReviewError("OWNER_ONLY_TEST_CANNOT_GRANT_NEW_PROMOTION")
 
         promotion = self.promotion_store.new(
             playbook_id=current.playbook_id,

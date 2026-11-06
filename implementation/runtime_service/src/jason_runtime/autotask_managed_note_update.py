@@ -55,6 +55,7 @@ from .autotask_internal_note import (
 
 AUTOTASK_MANAGED_NOTE_UPDATE_PROVIDER = "autotask_managed_note_update"
 _ALLOWED_TITLE_PREFIXES = ("GPT Insights", "Jason Activity")
+_ALLOWED_EXACT_TITLES = frozenset({"Jason - Governed Read-Only Investigation"})
 
 
 class AutotaskManagedNoteUpdateActivationError(RuntimeError):
@@ -112,6 +113,7 @@ def _definition(*, now: datetime):
             "pilot_scope": "aot_owner_organization_scope",
             "managed_note_update_only": "true",
             "managed_note_title_prefixes": ",".join(_ALLOWED_TITLE_PREFIXES),
+            "managed_note_exact_titles": ",".join(sorted(_ALLOWED_EXACT_TITLES)),
             "note_type": "3",
             "publish": "2",
             "ownership_rule": "exact_creator_resource_plus_internal_visibility",
@@ -215,7 +217,7 @@ def _sha256(value: str) -> str:
 
 def _allowed_title(title: str) -> bool:
     normalized = title.strip()
-    return any(
+    return normalized in _ALLOWED_EXACT_TITLES or any(
         normalized == prefix or normalized.startswith(prefix + " ")
         for prefix in _ALLOWED_TITLE_PREFIXES
     )

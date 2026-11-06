@@ -10,6 +10,8 @@ from jason_runtime.composition import RuntimeSettings
 from jason_runtime.maintenance_process import (
     autonomy_maintenance_enabled,
     http_runtime_settings,
+    ticket_worker_runtime_settings,
+    auxiliary_maintenance_runtime_settings,
     run_autonomy_maintenance_process,
 )
 
@@ -40,10 +42,48 @@ def test_http_runtime_settings_disable_only_autonomy_maintenance(monkeypatch):
     assert serving.autonomy_worker_enabled is False
     assert serving.autonomy_shadow_enabled is False
     assert serving.autonomy_review_enabled is False
+    assert serving.playbook_approval_ingress_enabled is True
     assert serving.support_repair_autonomy_enabled is False
+    assert autonomy_maintenance_enabled(serving) is False
     assert serving.authority_db == settings.authority_db
     assert serving.port == settings.port
     assert serving.autonomy_worker_db == settings.autonomy_worker_db
+
+
+
+def test_http_only_playbook_ingress_preserves_owner_callbacks_without_producers(monkeypatch):
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "qwen3:1.7b")
+    monkeypatch.setenv("JASON_AUTONOMY_WORKER_ENABLED", "false")
+    monkeypatch.setenv("JASON_AUTONOMY_SHADOW_ENABLED", "false")
+    monkeypatch.setenv("JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED", "true")
+    monkeypatch.setenv("JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED", "false")
+    settings = RuntimeSettings.from_env()
+
+    serving = http_runtime_settings(settings)
+    assert serving.playbook_approval_ingress_enabled is True
+    assert serving.autonomy_review_enabled is False
+    assert autonomy_maintenance_enabled(serving) is False
+
+    # The maintenance child still owns card issuance; the HTTP parent only
+    # receives signed Teams decisions from the existing bound owner.
+    child_settings = settings
+    assert child_settings.autonomy_review_enabled is True
+    assert child_settings.playbook_approval_ingress_enabled is False
+    assert autonomy_maintenance_enabled(child_settings) is True
+
+
+def test_http_settings_never_enable_owner_ingress_when_review_is_off(monkeypatch):
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "qwen3:1.7b")
+    monkeypatch.setenv("JASON_AUTONOMY_WORKER_ENABLED", "false")
+    monkeypatch.setenv("JASON_AUTONOMY_SHADOW_ENABLED", "false")
+    monkeypatch.setenv("JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED", "false")
+    monkeypatch.setenv("JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED", "false")
+    settings = RuntimeSettings.from_env()
+
+    serving = http_runtime_settings(settings)
+    assert serving.playbook_approval_ingress_enabled is False
+    assert serving.autonomy_review_enabled is False
+    assert autonomy_maintenance_enabled(serving) is False
 
 
 def test_maintenance_failure_is_logged_and_process_retries(monkeypatch, caplog):
@@ -68,3 +108,41 @@ def test_maintenance_failure_is_logged_and_process_retries(monkeypatch, caplog):
     assert "Autonomy maintenance cycle failed" in caplog.text
     assert "controlled tick failure" in caplog.text
     assert "RuntimeError: controlled tick failure" in caplog.text
+
+
+def test_nonexecuting_owner_uat_has_exactly_one_maintenance_issuer(monkeypatch):
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "qwen3:1.7b")
+    monkeypatch.setenv("JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED", "false")
+    settings = RuntimeSettings.from_env()
+    pilot = replace(
+        settings, owner_uat_mode="nonexecuting_test_only",
+        owner_uat_worker_enabled=True, owner_uat_session_id="OwnerUAT20261017Pilot",
+    )
+    assert autonomy_maintenance_enabled(pilot) is True
+    serving = http_runtime_settings(pilot)
+    assert serving.owner_uat_mode == "nonexecuting_test_only"
+    assert serving.owner_uat_session_id == "OwnerUAT20261017Pilot"
+    assert serving.owner_uat_worker_enabled is False
+    assert autonomy_maintenance_enabled(serving) is False
+
+
+def test_ticket_worker_and_auxiliary_profiles_do_not_duplicate_admission(monkeypatch):
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "qwen3:1.7b")
+    settings = replace(
+        RuntimeSettings.from_env(),
+        autonomy_worker_enabled=True,
+        autonomy_shadow_enabled=True,
+        autonomy_review_enabled=True,
+        support_repair_autonomy_enabled=True,
+    )
+    ticket = ticket_worker_runtime_settings(settings)
+    auxiliary = auxiliary_maintenance_runtime_settings(settings)
+    assert ticket.autonomy_worker_enabled is True
+    assert ticket.autonomy_shadow_enabled is False
+    assert ticket.autonomy_review_enabled is False
+    assert ticket.support_repair_autonomy_enabled is False
+    assert auxiliary.autonomy_worker_enabled is False
+    assert auxiliary.autonomy_shadow_enabled is True
+    assert auxiliary.autonomy_review_enabled is True
+    assert auxiliary.support_repair_autonomy_enabled is True
+    assert ticket.autonomy_worker_db == auxiliary.autonomy_worker_db

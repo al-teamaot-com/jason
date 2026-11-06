@@ -108,6 +108,8 @@ class ApprovalSubmitEvidence:
     decision: str
     selections: Mapping[str, str]
     channel_response_id: str
+    # Transport-side SDK replyToId observation, NOT cryptographic card proof.
+    callback_reply_to_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,9 +128,17 @@ class HardwareBillingDispositionEvidence:
 
 _TICKET_NUMBER_RE = re.compile(r"\bT\d{8}\.\d{4}\b", re.IGNORECASE)
 _HTTPS_URL_RE = re.compile(r"https://[^\s<>]+", re.IGNORECASE)
-_PROCUREMENT_CONTEXT_TERMS = frozenset({
-    "procurement", "quote", "invoice", "purchase", "order", "product", "part",
+# These are development or documentation destinations, not vendor product
+# pages. A GitHub PR mentioning "invoice/part/PO" must not be intercepted
+# by procurement; the authenticated conversation handler must see it.
+_NON_PROCUREMENT_LINK_HOSTS = frozenset({
+    "github.com", "gitlab.com", "bitbucket.org", "dev.azure.com",
+    "learn.microsoft.com", "docs.microsoft.com", "teams.microsoft.com",
 })
+_PROCUREMENT_INTENT_RE = re.compile(
+    r"\b(?:procurement|quote|invoice|purchase|order|product|part|buy|price|source)\b",
+    re.IGNORECASE,
+)
 
 
 def _procurement_url_context(text: str) -> tuple[str | None, str | None]:
@@ -142,6 +152,12 @@ def _procurement_url_context(text: str) -> tuple[str | None, str | None]:
     parsed = urlsplit(url)
     if parsed.scheme.casefold() != "https" or not parsed.hostname:
         return None, None
+    host = parsed.hostname.casefold().rstrip(".")
+    if any(host == excluded or host.endswith("." + excluded)
+           for excluded in _NON_PROCUREMENT_LINK_HOSTS):
+        # Never convert review, source-control or documentation links into
+        # purchase/invoice operations, even when unrelated words are present.
+        return None, None
 
     tickets = [match.upper() for match in _TICKET_NUMBER_RE.findall(value)]
     if len(set(tickets)) > 1:
@@ -149,9 +165,12 @@ def _procurement_url_context(text: str) -> tuple[str | None, str | None]:
     ticket = tickets[0] if tickets else None
 
     if value == url:
+        # Retain the established paste-one-product-link workflow for any
+        # vendor; supplier domains are NOT an invented new allowlist.
         return url, None
-    lowered = value.casefold()
-    if ticket or any(term in lowered for term in _PROCUREMENT_CONTEXT_TERMS):
+    before_url, _, after_url = value.partition(url)
+    if (ticket or _PROCUREMENT_INTENT_RE.search(before_url)
+            or _PROCUREMENT_INTENT_RE.search(after_url)):
         return url, ticket
     return None, None
 
@@ -343,9 +362,12 @@ class OpenClawTeamsConversationEnvelope:
             if not isinstance(interaction, Mapping):
                 raise ValueError("conversation interaction object is invalid")
             kind = str(interaction.get("kind") or "").strip()
+            if kind != "approval.submit" and "callback_reply_to_id" in interaction:
+                raise PermissionError("callback reply-to evidence belongs only to signed approval submit")
             allowed_interaction_keys = {
                 "kind", "approval_id", "decision", "submission_id",
                 "case_key", "disposition", "selections", "channel_response_id",
+                "callback_reply_to_id",
             }
             if set(interaction) - allowed_interaction_keys:
                 raise PermissionError(
@@ -367,11 +389,19 @@ class OpenClawTeamsConversationEnvelope:
                     raise ValueError("approval interaction id is invalid")
                 if decision not in {"approve", "deny", "request_changes"}:
                     raise ValueError("approval interaction decision is invalid")
+                reply_to = interaction.get("callback_reply_to_id")
+                if reply_to is not None and (
+                    not isinstance(reply_to, str)
+                    or len(reply_to) > 256
+                    or not re.fullmatch(r"[A-Za-z0-9:._/-]{1,256}", reply_to)
+                ):
+                    raise ValueError("approval callback reply-to ID is invalid")
                 approval_submit = ApprovalSubmitEvidence(
                     approval_id=approval_id,
                     decision=decision,
                     selections=selections,
                     channel_response_id=channel_response_id,
+                    callback_reply_to_id=reply_to,
                 )
             elif kind == "procurement.submit":
                 submission_id = str(
@@ -567,6 +597,10 @@ class GovernedOpenClawTeamsConversationIngress:
                         conversation_id=parsed.conversation_id,
                         channel_response_id=parsed.approval_submit.channel_response_id,
                         decided_at=parsed.issued_at,
+                        **({'signed_envelope': envelope}
+                           if parsed.approval_submit.approval_id.startswith((
+                               'planapproval-', 'relapproval-', 'owneruatapproval-'
+                           )) else {}),
                     )
                 )
             except PermissionError as error:

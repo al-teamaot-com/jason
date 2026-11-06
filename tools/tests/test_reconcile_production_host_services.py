@@ -22,11 +22,13 @@ EXPORTER_UNITS = (
 MAINTENANCE_UNITS = (
     "jason-delegation-maintenance.service",
     "jason-openclaw-authority-health.service",
+    "jason-openclaw-authority-full-integrity.service",
     "jason-documentation-reconciliation.service",
 )
 MAINTENANCE_TIMERS = (
     "jason-delegation-maintenance.timer",
     "jason-openclaw-authority-health.timer",
+    "jason-openclaw-authority-full-integrity.timer",
     "jason-documentation-reconciliation.timer",
 )
 PROVIDER_CANARY_UNITS = (
@@ -39,6 +41,28 @@ OBSOLETE_UNITS = (
     "jason-component-engineering-exporter.service",
     "jason-prompt-exporter.service",
 )
+
+
+def test_openbao_lifecycle_reconciliation_requires_exact_declared_sources() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    installer = REPO_ROOT / "tools/install_openbao_identity_lifecycle.py"
+    associated = (
+        "provider_secret_provision.py",
+        "openbao_identity_lifecycle.py",
+        "openbao_identity_lifecycle_worker.py",
+    )
+    if not installer.exists():
+        # This release retired the lifecycle sources; the host must not
+        # attempt an absent installer or silently inherit obsolete units.
+        assert all(not (REPO_ROOT / "tools" / name).exists() for name in associated[1:])
+        assert (REPO_ROOT / "tools" / associated[0]).is_file()
+        assert 'if [ -f "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py" ]; then' in text
+        assert 'JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=NOT_DECLARED' in text
+        assert 'obsolete OpenBao lifecycle unit requires governed retirement' in text
+        assert 'provider identity recovery requires a declared OpenBao lifecycle' in text
+    else:
+        assert all((REPO_ROOT / "tools" / name).is_file() for name in associated)
+    assert 'JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS' in text
 
 
 def test_canonical_host_units_use_immutable_release_path() -> None:
@@ -62,6 +86,28 @@ def test_canonical_host_units_use_immutable_release_path() -> None:
         assert "ReadOnlyPaths=/opt/jason/current" in text
         assert "/home/al/projects/jason" not in text
         assert "/home/al/jason-worktrees/" not in text
+
+
+def test_status_exporter_start_is_not_blocked_by_long_authority_health() -> None:
+    unit = (
+        REPO_ROOT / "infrastructure" / "showcase" / "systemd"
+        / "jason-status-exporter.service"
+    ).read_text(encoding="utf-8")
+    after = [line for line in unit.splitlines() if line.startswith("After=")]
+    assert len(after) == 1
+    assert "docker.service" in after[0]
+    assert "jason-openclaw-authority-health.service" not in after[0]
+    assert "Requires=docker.service" in unit
+    assert "JASON_OPENCLAW_AUTHORITY_HEALTH_PATH" in unit
+
+    # Existing exporter logic fails closed when that asynchronous
+    # authority-health snapshot has not been produced yet.
+    exporter = (
+        REPO_ROOT / "infrastructure" / "showcase" / "status_exporter.py"
+    ).read_text(encoding="utf-8")
+    assert "jason_openclaw_authority_operational_health" in exporter
+    assert "jason_openclaw_authority_snapshot_age_seconds" in exporter
+    assert 'operational.get("status") == "pass"' in exporter
 
 
 def test_reconciliation_contract_covers_all_known_host_drift() -> None:
@@ -99,6 +145,9 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'JASON_USER_WORKER_RECONCILIATION=PASS' in text
     assert 'engineering-worker-source does not match managed production Git source' in text
     assert 'installed worker differs from production source' in text
+    assert 'engineering_supervisor.py' in text
+    assert 'release_breaker_recovery_manager.py' in text
+    assert 'engineering_evidence_tools.py' in text
     assert 'installed self-heal watchdog differs from production source' in text
     assert 'installed issue-resolution engine differs from production source' in text
     assert 'JASON_DOCUMENTATION_REPO_ROOT=/home/al/projects/jason' not in text
@@ -109,7 +158,8 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'jason-release-control-transition.timer' in text
     assert 'root release-transition timer is not active after production install' in text
     assert 'JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS' in text
-    assert text.index('install_release_control_transition.py') < text.index('install_release_host_reconciler.py')
+    # Preserve rollback helper before root-only policy migration can commit.
+    assert text.index('install_release_host_reconciler.py') < text.index('install_release_control_transition.py')
     assert 'install_release_host_reconciler.py' in text
     assert 'installed root host reconciler differs from production source' in text
     assert 'JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS' in text
@@ -120,11 +170,51 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'curl --connect-timeout 2 --max-time 15 -fsS' in text
     assert 'exporter verification failed on port $port after 3 bounded attempts' in text
     assert 'timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"' in text
-    assert 'timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"' in text
     assert 'if [ "$unit" = "jason-openclaw-authority-health.service" ]; then' in text
-    assert text.index('timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"') < text.index('timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"')
+    assert 'AUTHORITY_HANDOFF="$RELEASE_DIR/tools/release_authority_fast_health_handoff.py"' in text
+    assert '/usr/bin/python3 "$AUTHORITY_HANDOFF" --release-dir "$RELEASE_DIR"' in text
+    assert text.index('AUTHORITY_HANDOFF="$RELEASE_DIR/tools/') < text.index('timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"')
+    assert '45s systemctl start "$unit"' not in text
     assert 'HOST_RECONCILE_FAILURE step=' in text
-    assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
+    assert 'JASON_OBSERVABILITY_RELEASE_GATE=NOT_REQUIRED' in text
+
+
+def test_rollback_unit_delta_is_checked_before_immutable_host_revision_switch() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    planner = 'UNIT_DELTA_PLANNER="$RELEASE_DIR/tools/reconcile_managed_unit_delta.py"'
+    plan_system = '--scope system --installed-dir /etc/systemd/system'
+    plan_user = '--scope user --installed-dir /home/al/.config/systemd/user'
+    assert planner in text
+    assert plan_system in text
+    assert plan_user in text
+    assert 'PREVIOUS_HOST_RELEASE="$(readlink -f "$CURRENT_LINK"' in text
+    assert text.index("step_start release_owned_unit_delta") < text.index(
+        'ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"'
+    )
+    assert text.index(plan_system) < text.index('for unit in "${REMOVE_SYSTEM_UNITS[@]}"; do')
+    assert text.index(plan_user) < text.index('for unit in "${REMOVE_USER_UNITS[@]}"; do')
+    # Revalidate both candidate-only sets before any mutation.
+    assert text.index(plan_user) < text.index('for unit in "${REMOVE_SYSTEM_UNITS[@]}"; do')
+    assert 'rm -f -- "/etc/systemd/system/$unit"' in text
+    assert 'rm -f -- "/home/al/.config/systemd/user/$unit"' in text
+    assert 'systemctl disable --now "$unit"' in text
+    assert 'systemctl --user disable --now "$unit"' in text
+    assert 'cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/system-$unit.before"' in text
+    assert 'cp -a "/home/al/.config/systemd/user/$unit" "$BACKUP_DIR/user-$unit.before"' in text
+    assert "step_pass release_owned_unit_delta" in text
+    assert 'run_as_al systemctl --user daemon-reload' in text
+    assert text.index("step_pass release_owned_unit_delta") < text.index("step_start production_drift_guard")
+
+
+def test_rollback_unit_delta_planner_is_root_only_and_read_only() -> None:
+    planner = REPO_ROOT / "tools" / "reconcile_managed_unit_delta.py"
+    text = planner.read_text(encoding="utf-8")
+    assert 'if os.geteuid() != 0:' in text
+    assert "expected_installed" in text
+    assert "MAX_AUTO_REMOVALS = 8" in text
+    for forbidden in ("subprocess.run", "os.unlink", "shutil.rmtree", "systemctl"):
+        assert forbidden not in text
+    assert 'print(unit)' in text
 
 
 def test_reconciliation_fails_closed_without_root() -> None:
@@ -209,17 +299,23 @@ def test_control_panel_exporter_is_reconciled_on_dedicated_port() -> None:
     assert "/home/al/projects/jason" not in unit
 
 
-def test_observability_reconciliation_is_conditional_and_managed() -> None:
+def test_observability_is_not_a_release_blocker() -> None:
     text = RECONCILE.read_text(encoding="utf-8")
-    assert 'OBSERVABILITY_CURRENT_LINK="/opt/jason/observability/current"' in text
-    assert 'OBSERVABILITY_PREVIOUS_REVISION' in text
-    assert 'git -C "$REPO_ROOT" diff --quiet' in text
-    assert 'infrastructure/showcase' in text
-    assert 'config/observability/grafana-dashboard-manifest.json' in text
-    assert 'JASON_REPO_ROOT="$ENGINEERING_SOURCE_REPO" /usr/bin/bash "$OBSERVABILITY_INSTALLER" "$SOURCE_REVISION"' in text
-    assert 'JASON_OBSERVABILITY_RECONCILIATION=PASS' in text
-    assert 'JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED' in text
-    assert 'observability release did not converge to production revision' in text
+    assert 'JASON_OBSERVABILITY_RELEASE_GATE=NOT_REQUIRED' in text
+    assert 'systemctl start jason-grafana-assurance.service' not in text
+    assert 'install_observability_assurance.sh' not in text
+    assert 'step_start production_drift_guard' in text
+    assert 'JASON_RECOVERY_NATIVE_HEALTH=PASS' in text
+    assert 'GRAFANA_REVALIDATION_DEADLINE' not in text
+    assert 'install_ccc_scheduler.sh' not in text
+    assert 'production_drift_guard.py' in text
+
+
+def test_documentation_publication_does_not_block_production_ci() -> None:
+    workflow = (REPO_ROOT / '.github/workflows/validate.yml').read_text(encoding='utf-8')
+    assert 'documentation_impact_gate.py --event' not in workflow
+    assert 'run: mkdocs build --strict' not in workflow
+    assert 'run: mkdocs build' in workflow
 
 
 def test_unmanaged_toner_exporter_is_removed_during_production_reconciliation() -> None:
@@ -381,3 +477,63 @@ def test_exporter_activation_queues_nonblocking_start_and_waits_for_real_port_ow
     assert 'timeout --signal=TERM --kill-after=5s 15s systemctl restart --no-block "$unit"' in text
     assert text.index('systemctl start --no-block "$unit"') < text.index('ensure_owned_exporter "$unit"')
     assert text.index('ensure_owned_exporter "$unit"') < text.index('if [ "$(systemctl is-active "$unit")" != "active" ]')
+
+
+def test_authority_health_refreshes_full_proof_only_when_existing_evidence_is_not_current_pass():
+    text = RECONCILE.read_text(encoding="utf-8")
+    root_worker = (REPO_ROOT / "tools/release_host_reconcile_worker.py").read_text(encoding="utf-8")
+    manager = (REPO_ROOT / "tools/release_manager_host_runner.py").read_text(encoding="utf-8")
+    fast = (REPO_ROOT / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-health.service").read_text(encoding="utf-8")
+    full = (REPO_ROOT / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service").read_text(encoding="utf-8")
+    timer = (REPO_ROOT / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.timer").read_text(encoding="utf-8")
+    assert "HOST_RECONCILE_TIMEOUT_SECONDS = 4200" in root_worker
+    assert "timeout_seconds: float = 4440.0" in manager
+    assert "openclaw_authority_fast_health.py" in fast
+    assert "openclaw_authority_health_snapshot.py" not in fast
+    assert "openclaw_authority_health_snapshot.py" in full
+    assert "OnCalendar=" in timer and "Persistent=false" in timer
+    assert text.count('45s systemctl start "$unit"') == 0
+    assert 'release_authority_fast_health_handoff.py' in text
+    assert '--verify-only' in text
+    assert 'openclaw_authority_fast_health.py' in (REPO_ROOT / 'tools/release_authority_fast_health_handoff.py').read_text()
+    assert 'if [ "$unit" = "jason-openclaw-authority-health.service" ]; then' in text
+    assert "jason-openclaw-authority-full-integrity.service" in text
+    assert "jason-openclaw-authority-full-integrity.timer" in text
+    assert 'ensure_authority_full_integrity_proof' in text
+    assert 'JASON_AUTHORITY_FULL_INTEGRITY=EXISTING_RECENT_PASS' in text
+    assert 'JASON_AUTHORITY_FULL_INTEGRITY=RUN_REPAIRED_PROOF' in text
+    assert 'JASON_AUTHORITY_FULL_INTEGRITY=WAIT_EXISTING_JOB' in text
+    assert 'systemctl start "$CURRENT_UNIT"' in text
+    assert text.index('ensure_authority_full_integrity_proof') < text.index('for unit in "${MAINTENANCE_SERVICES[@]}"; do')
+    assert '120s systemctl start "$unit"' in text
+
+
+def test_boot_recovery_is_installed_from_exact_immutable_release_without_forcing_service_run() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert 'step_start boot_recovery_install' in text
+    assert 'install -o root -g root -m 0750 "$BOOT_RECOVERY_SCRIPT" /usr/local/sbin/jason-boot-recovery' in text
+    assert 'install -o root -g root -m 0644 "$BOOT_RECOVERY_SERVICE" /etc/systemd/system/jason-boot-recovery.service' in text
+    assert 'install -o root -g root -m 0644 "$BOOT_RECOVERY_TIMER" /etc/systemd/system/jason-boot-recovery.timer' in text
+    assert 'cmp -s "$BOOT_RECOVERY_SCRIPT" /usr/local/sbin/jason-boot-recovery' in text
+    assert 'systemctl enable jason-boot-recovery.service jason-boot-recovery.timer' in text
+    assert 'systemctl start jason-boot-recovery.timer' in text
+    assert 'systemctl start jason-boot-recovery.service' not in text
+    assert 'JASON_BOOT_RECOVERY_INSTALL=PASS' in text
+    assert text.index('step_start boot_recovery_install') < text.index('step_start root_release_transition_install')
+
+
+def test_pm_v2_shadow_is_installed_only_inside_governed_host_reconciliation() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert 'step_start pm_v2_shadow_user_unit_install' in text
+    assert 'PM_V2_SHADOW_UNIT="jason-pm-v2-shadow.service"' in text
+    assert 'infrastructure/openclaw-operations/systemd/user/$PM_V2_SHADOW_UNIT' in text
+    assert 'install -d -o al -g al -m 0700 /var/lib/jason/pm-v2 /var/lib/jason/openclaw/pm-v2' in text
+    assert 'install -o al -g al -m 0644 "$PM_V2_SHADOW_SOURCE"' in text
+    assert 'systemctl --user enable --now "$PM_V2_SHADOW_UNIT"' in text
+    assert 'JASON_PM_V2_SHADOW_RECONCILIATION=PASS' in text
+    assert text.index('step_start protected_root_policy_stage') < text.index(
+        'step_start pm_v2_shadow_user_unit_install'
+    )
+    assert text.index('step_start pm_v2_shadow_user_unit_install') < text.index(
+        'step_start root_release_transition_install'
+    )

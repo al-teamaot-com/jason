@@ -48,7 +48,7 @@ def test_resolves_mail_for_exact_authenticated_object():
     assert tokens.tenant_seen == "tenant-1"
     assert transport.call["method"] == "GET"
     assert transport.call["url"] == "https://graph.microsoft.com/v1.0/users/object-1"
-    assert transport.call["params"] == {"$select": "id,mail,userPrincipalName,accountEnabled"}
+    assert transport.call["params"] == {"$select": "id,displayName,mail,userPrincipalName,accountEnabled"}
     assert transport.call["headers"]["Authorization"] == "Bearer token-value"
 
 

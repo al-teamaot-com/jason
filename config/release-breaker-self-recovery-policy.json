@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "enabled": true,
+  "minimum_distinct_clean_observations": 3,
+  "minimum_open_seconds": 90,
+  "minimum_observation_interval_seconds": 15,
+  "maximum_observation_age_seconds": 180,
+  "maximum_authorized_attempts_per_breaker": 2,
+  "minimum_seconds_between_attempts": 300
+}

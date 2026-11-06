@@ -15,6 +15,7 @@ from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
 from jason_runtime.playbook_autonomy_review import (
     OwnerOnlyPlaybookAutonomyAuthority,
     PlaybookAutonomyApprovalInteractionFlow,
+    load_playbook_owner_approval_policy,
     PlaybookAutonomyReviewMaintenance,
 )
 
@@ -218,3 +219,115 @@ def test_request_changes_does_not_promote_and_suppresses_same_fingerprint_rerequ
     )
     assert maintenance.tick() is False
     assert sender.requests == []
+
+
+
+def owner_pilot_policy_fixture(tmp_path, *, values=None, mode=0o600):
+    record = {
+        "schema_version": "1.0",
+        "organization_id": "aot",
+        "capability": "playbook.autonomy.promote",
+        "policy_mode": "owner_only_test",
+        "owner_identity_ids": ["person-owner"],
+        "allowed_requested_modes": ["promote:backupiq_endpoint_backup@1.2.0"],
+    }
+    if values:
+        record.update(values)
+    policy = tmp_path / "owner.json"
+    policy.write_text(json.dumps(record), encoding="utf-8")
+    policy.chmod(mode)
+    return policy
+
+
+def test_owner_pilot_missing_file_preserves_legacy_gate(tmp_path):
+    result = load_playbook_owner_approval_policy(
+        path=tmp_path / "absent.json",
+        legacy_owner_identity_ids=("person-legacy",),
+    )
+    assert result.owner_identity_ids == frozenset({"person-legacy"})
+    assert result.allowed_requested_modes is None
+
+
+def test_owner_pilot_one_actor_one_exact_mode(tmp_path):
+    policy = owner_pilot_policy_fixture(tmp_path)
+    result = load_playbook_owner_approval_policy(
+        path=policy, legacy_owner_identity_ids=("person-other",),
+    )
+    assert result.owner_identity_ids == frozenset({"person-owner"})
+    assert result.allowed_requested_modes == frozenset({"promote:backupiq_endpoint_backup@1.2.0"})
+    authority = OwnerOnlyPlaybookAutonomyAuthority(
+        result.owner_identity_ids,
+        allowed_requested_modes=result.allowed_requested_modes,
+    )
+    common = dict(organization_id="aot", client_id=None, capability="playbook.autonomy.promote")
+    assert authority.can_approve(approver_identity_id="person-owner",
+                                 requested_mode="promote:backupiq_endpoint_backup@1.2.0", **common)
+    assert not authority.can_approve(approver_identity_id="person-other",
+                                     requested_mode="promote:backupiq_endpoint_backup@1.2.0", **common)
+    assert not authority.can_approve(approver_identity_id="person-owner",
+                                     requested_mode="promote:unrelated@1.0.0", **common)
+    assert not authority.can_approve(approver_identity_id="person-owner",
+                                     organization_id="other", client_id=None,
+                                     capability="playbook.autonomy.promote",
+                                     requested_mode="promote:backupiq_endpoint_backup@1.2.0")
+
+
+@pytest.mark.parametrize("modification", [
+    {"owner_identity_ids": ["person-owner", "person-other"]},
+    {"allowed_requested_modes": ["promote:backupiq_endpoint_backup@1.2.0", "promote:other@1.0.0"]},
+    {"organization_id": "other"},
+    {"capability": "service.ticket.update"},
+    {"policy_mode": "production"},
+    {"schema_version": "2.0"},
+    {"unexpected_key": True},
+])
+def test_owner_pilot_rejects_broad_or_unreviewed_scope(tmp_path, modification):
+    policy = owner_pilot_policy_fixture(tmp_path, values=modification)
+    with pytest.raises(PermissionError):
+        load_playbook_owner_approval_policy(path=policy, legacy_owner_identity_ids=("person-legacy",))
+
+
+def test_owner_pilot_rejects_insecure_mode_and_symlink(tmp_path):
+    policy = owner_pilot_policy_fixture(tmp_path, mode=0o644)
+    with pytest.raises(PermissionError, match="0600"):
+        load_playbook_owner_approval_policy(path=policy, legacy_owner_identity_ids=())
+    policy.chmod(0o600)
+    link = tmp_path / "link.json"
+    link.symlink_to(policy)
+    with pytest.raises(PermissionError, match="regular file"):
+        load_playbook_owner_approval_policy(path=link, legacy_owner_identity_ids=())
+
+
+
+def test_owner_only_pilot_fails_closed_without_preexisting_promotion(tmp_path):
+    registry, promotions, requests, review, _ = build(tmp_path)
+    service = ApprovalRequestService(
+        repository=requests,
+        authority=OwnerOnlyPlaybookAutonomyAuthority(
+            {"person-owner"},
+            allowed_requested_modes=frozenset({"promote:demo@1.0.0"}),
+        ),
+    )
+    request = review.build_request(
+        playbook_id="demo", requested_by="svc-test",
+        now=NOW, ttl=timedelta(minutes=10),
+    )
+    service.create(request, now=NOW)
+    flow = PlaybookAutonomyApprovalInteractionFlow(
+        bindings=Bindings(owner=True),
+        approval_service=service,
+        review_service=review,
+    )
+    with pytest.raises(PermissionError, match="requires existing exact promotion"):
+        flow.handle(
+            approval_id=request.approval_id,
+            decision="approve",
+            microsoft_tenant_id="tenant-a",
+            microsoft_object_id="object-owner",
+            conversation_id="test-conversation",
+            channel_response_id="test-owner-click",
+            decided_at=NOW + timedelta(minutes=1),
+        )
+    assert requests.get(request.approval_id).status.value == "pending"
+    assert requests.accepted_decision(request.approval_id) is None
+    assert promotions.list_all() == ()

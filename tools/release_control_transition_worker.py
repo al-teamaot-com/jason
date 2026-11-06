@@ -25,6 +25,24 @@ DRIFT_CONFIG=Path('/etc/jason/release-readback-recovery/production-desired-state
 DRIFT_EVALUATOR=Path('/opt/jason/current/tools/production_drift_guard.py')
 SHA=re.compile(r'[0-9a-f]{40}\Z')
 RID=re.compile(r'[0-9a-f]{32}\Z')
+PROTECTED_LKG_FIELDS=(
+    'revision', 'runtime_revision', 'runtime_image_id',
+    'mcp_revision', 'mcp_image_id', 'host_revision', 'host_release',
+    'release_manager_source_revision', 'desired_state_policy_digest',
+    'mobile_release_approval_policy_digest', 'mobile_release_approval_mode',
+    'scheduled_control_units',
+)
+
+
+def verify_immutable_lkg_fingerprint(recorded: dict, observed: dict) -> None:
+    if recorded.get('complete') is not True or observed.get('complete') is not True:
+        raise ValueError('incomplete independent baseline verification')
+    for key in PROTECTED_LKG_FIELDS:
+        left, right = recorded.get(key), observed.get(key)
+        if left is None or right is None or left != right:
+            raise ValueError('immutable last-known-good mismatch: ' + key)
+
+
 
 
 def protected_read(path: Path) -> dict:
@@ -70,6 +88,37 @@ def verify_health(revision: str) -> dict:
     return manifest
 
 
+def _bounded_drift_denial(raw: str) -> str:
+    """Surface only bounded non-secret issue identity from the root evaluator.
+
+    Never print raw stdout/stderr, arbitrary property values or command lines
+    from protected drift evidence into unprivileged release error messages.
+    """
+    if not isinstance(raw, str) or len(raw) > 131072:
+        return ""
+    try:
+        report = json.loads(raw)
+    except (ValueError, TypeError):
+        return ""
+    if (not isinstance(report, dict) or report.get('schema_version') != '1.0'
+            or report.get('status') != 'drift_detected'
+            or not isinstance(report.get('problems'), list)):
+        return ""
+    reasons = []
+    for entry in report['problems'][:6]:
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get('kind') or '')
+        if not re.fullmatch(r'[a-z][a-z0-9_]{0,62}', kind):
+            continue
+        unit = str(entry.get('unit') or '')
+        if re.fullmatch(r'jason-[a-z0-9_.@-]{1,120}', unit):
+            reasons.append(kind + ':' + unit)
+        else:
+            reasons.append(kind)
+    return ','.join(reasons[:6])
+
+
 def refresh_stale_drift() -> None:
     """Regenerate drift from the independent policy while transaction lock is held.
 
@@ -82,12 +131,17 @@ def refresh_stale_drift() -> None:
         info=path.stat()
         if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or (info.st_mode & 0o002):
             raise PermissionError('root-owned drift evaluator and policy required')
-    result=subprocess.run(
-        ['/usr/bin/python3',str(DRIFT_EVALUATOR),'--config',str(DRIFT_CONFIG)],
-        capture_output=True,text=True,timeout=70,check=False,
-    )
+    try:
+        result=subprocess.run(
+            ['/usr/bin/python3',str(DRIFT_EVALUATOR),'--config',str(DRIFT_CONFIG)],
+            capture_output=True,text=True,timeout=70,check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError('independent production drift refresh timed out within root boundary') from exc
     if result.returncode!=0:
-        raise ValueError('independent production drift refresh did not pass')
+        detail = _bounded_drift_denial(result.stdout)
+        raise ValueError('independent production drift refresh did not pass'
+                         + (': ' + detail if detail else ' (no bounded drift detail available)'))
     payload=json.loads(result.stdout)
     if (payload.get('schema_version')!='1.0' or payload.get('status')!='pass'
             or payload.get('problems') or not payload.get('observed_at')):
@@ -125,6 +179,7 @@ def apply_transition(req: dict, state: dict) -> dict:
         if last.get('manifest',{}).get('revision')!=revision:
             raise ValueError('last known good revision mismatch')
         manifest=verify_health(revision)
+        verify_immutable_lkg_fingerprint(last['manifest'],manifest)
         state['last_revalidation']=manifest
     else:
         release_id=str(req.get('release_id') or '')
@@ -144,6 +199,15 @@ def apply_transition(req: dict, state: dict) -> dict:
         if record.get('state') not in {'production','closed'} or record.get('owner_approval',{}).get('approved') is not True or record['owner_approval'].get('candidate_sha')!=revision:
             raise ValueError('record lacks exact production approval')
         manifest=verify_health(revision)
+        # Preserve the independently root-verified previous LKG in the same
+        # root-owned atomic control record. An open breaker must be able to
+        # restore this EXACT prior revision, not an arbitrary ancestor.
+        previous=state.get('last_known_good')
+        old_manifest=(previous or {}).get('manifest') or {}
+        if (isinstance(previous,dict) and old_manifest.get('complete') is True
+                and isinstance(old_manifest.get('revision'),str)
+                and old_manifest['revision']!=revision):
+            state['previous_last_known_good']=previous
         state['last_known_good']={'release_id':release_id,'manifest':manifest,'recorded_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
     state['circuit_breaker']={'state':'closed','reason':'root_verified_'+action,'revalidated_revision':revision,
                               'updated_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}

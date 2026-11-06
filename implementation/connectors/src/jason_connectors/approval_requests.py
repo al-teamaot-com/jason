@@ -14,6 +14,7 @@ from enum import StrEnum
 import json
 import os
 import sqlite3
+from threading import Lock
 from pathlib import Path
 from typing import Protocol
 
@@ -126,6 +127,7 @@ class ApprovalResponse:
     decided_at: datetime
     channel: str
     channel_response_id: str
+    authentication_evidence_hash: str | None = None
 
     def validate(self) -> None:
         for value in (
@@ -139,6 +141,10 @@ class ApprovalResponse:
                 raise ValueError("approval response identifiers must be non-empty")
         if self.decided_at.tzinfo is None:
             raise ValueError("approval response time must be timezone-aware")
+        if self.authentication_evidence_hash is not None:
+            import re
+            if not re.fullmatch(r'[0-9a-f]{64}', self.authentication_evidence_hash):
+                raise ValueError('authentication evidence must be a SHA-256 digest')
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +163,7 @@ class AcceptedApproval:
     channel_response_id: str
     evidence_references: tuple[ApprovalEvidenceReference, ...]
     attention_resource_id: str | None = None
+    authentication_evidence_hash: str | None = None
 
 
 class ApprovalAuthorityChecker(Protocol):
@@ -175,11 +182,14 @@ class ApprovalRequestRepository(Protocol):
     def get(self, approval_id: str) -> ApprovalRequest | None: ...
     def put(self, request: ApprovalRequest) -> None: ...
     def list_all(self) -> tuple[ApprovalRequest, ...]: ...
+    def transition_pending(self, expected: ApprovalRequest, *, status: ApprovalRequestStatus, response: ApprovalResponse | None = None) -> None: ...
 
 
 @dataclass
 class InMemoryApprovalRequestRepository:
     records: dict[str, ApprovalRequest] = field(default_factory=dict)
+    decisions: dict[str, ApprovalResponse] = field(default_factory=dict)
+    _decision_lock: Lock = field(default_factory=Lock, repr=False)
 
     def get(self, approval_id: str) -> ApprovalRequest | None:
         return self.records.get(approval_id)
@@ -190,12 +200,35 @@ class InMemoryApprovalRequestRepository:
     def list_all(self) -> tuple[ApprovalRequest, ...]:
         return tuple(self.records[key] for key in sorted(self.records))
 
+    def transition_pending(self, expected: ApprovalRequest, *, status: ApprovalRequestStatus,
+                           response: ApprovalResponse | None = None) -> None:
+        with self._decision_lock:
+            current = self.records.get(expected.approval_id)
+            if current != expected or current.status is not ApprovalRequestStatus.PENDING:
+                raise ValueError("approval request is no longer pending or changed")
+            if status is ApprovalRequestStatus.PENDING:
+                raise ValueError("approval transition requires a terminal decision")
+            if response is not None:
+                _validate_receipt(expected, response, status)
+                self.decisions[expected.approval_id] = response
+            self.records[expected.approval_id] = replace(current, status=status)
+
+    def accepted_decision(self, approval_id: str) -> AcceptedApproval | None:
+        with self._decision_lock:
+            response = self.decisions.get(approval_id)
+            request = self.records.get(approval_id)
+            return _accepted_receipt(request, response) if request and response else None
+
 
 class SQLiteApprovalRequestRepository:
     _SCHEMA = """
     CREATE TABLE IF NOT EXISTS approval_requests (
         approval_id TEXT PRIMARY KEY,
         payload TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS approval_decision_receipts (
+        approval_id TEXT PRIMARY KEY,
+        response_json TEXT NOT NULL
     );
     """
 
@@ -218,7 +251,8 @@ class SQLiteApprovalRequestRepository:
     def put(self, request: ApprovalRequest) -> None:
         request.validate()
         payload = self._encode(request)
-        with self._connection:
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
             row = self._connection.execute(
                 "SELECT payload FROM approval_requests WHERE approval_id=?",
                 (request.approval_id,),
@@ -237,11 +271,69 @@ class SQLiteApprovalRequestRepository:
                 (request.approval_id, payload),
             )
 
+            self._connection.execute("COMMIT")
+        except BaseException:
+            self._connection.execute("ROLLBACK")
+            raise
+
     def list_all(self) -> tuple[ApprovalRequest, ...]:
         rows = self._connection.execute(
             "SELECT payload FROM approval_requests ORDER BY approval_id"
         ).fetchall()
         return tuple(self._decode(str(row["payload"])) for row in rows)
+
+    def transition_pending(self, expected: ApprovalRequest, *, status: ApprovalRequestStatus, response: ApprovalResponse | None = None) -> None:
+        """Consume a pending approval once across processes and concurrent clicks.
+
+        Authorization is evaluated by the service before this compare-and-set.
+        Re-read under the SQLite write lock so two workers cannot both accept the
+        same pending request. A changed request fails closed, not last-writer-wins.
+        """
+        expected.validate()
+        if expected.status is not ApprovalRequestStatus.PENDING or status is ApprovalRequestStatus.PENDING:
+            raise ValueError("approval transition requires a pending request and terminal decision")
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self._connection.execute(
+                "SELECT payload FROM approval_requests WHERE approval_id=?", (expected.approval_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError("approval request not found")
+            current = self._decode(str(row["payload"]))
+            if current != expected or current.status is not ApprovalRequestStatus.PENDING:
+                raise ValueError("approval request is no longer pending or changed")
+            if not self._valid_status_transition(current.status, status):
+                raise ValueError("invalid approval request status transition")
+            updated = replace(current, status=status)
+            self._connection.execute(
+                "UPDATE approval_requests SET payload=? WHERE approval_id=?",
+                (self._encode(updated), expected.approval_id),
+            )
+            if response is not None:
+                _validate_receipt(expected, response, status)
+                payload = asdict(response)
+                payload['decision'] = response.decision.value
+                payload['decided_at'] = response.decided_at.isoformat()
+                self._connection.execute(
+                    "INSERT INTO approval_decision_receipts VALUES (?,?)",
+                    (expected.approval_id, json.dumps(payload, sort_keys=True, separators=(',', ':'))),
+                )
+            self._connection.execute("COMMIT")
+        except BaseException:
+            self._connection.execute("ROLLBACK")
+            raise
+
+    def accepted_decision(self, approval_id: str) -> AcceptedApproval | None:
+        row = self._connection.execute(
+            "SELECT response_json FROM approval_decision_receipts WHERE approval_id=?", (approval_id,)
+        ).fetchone()
+        request = self.get(approval_id)
+        if row is None or request is None:
+            return None
+        data = json.loads(row['response_json'])
+        data['decision'] = ApprovalDecision(data['decision'])
+        data['decided_at'] = datetime.fromisoformat(data['decided_at'])
+        return _accepted_receipt(request, ApprovalResponse(**data))
 
     def close(self) -> None:
         self._connection.close()
@@ -338,6 +430,28 @@ class SQLiteApprovalRequestRepository:
         return ApprovalRequest(**body)
 
 
+def _validate_receipt(request: ApprovalRequest, response: ApprovalResponse, status: ApprovalRequestStatus) -> None:
+    response.validate()
+    expected = {ApprovalDecision.APPROVE: ApprovalRequestStatus.APPROVED,
+                ApprovalDecision.DENY: ApprovalRequestStatus.DENIED,
+                ApprovalDecision.REQUEST_CHANGES: ApprovalRequestStatus.CHANGES_REQUESTED}[response.decision]
+    if (request.approval_id != response.approval_id or request.organization_id != response.organization_id
+            or response.approver_identity_id not in request.authorized_approver_ids or status is not expected
+            or response.decided_at < request.requested_at or response.decided_at >= request.expires_at):
+        raise PermissionError('approval decision receipt does not match authorized request')
+
+
+def _accepted_receipt(request: ApprovalRequest, response: ApprovalResponse) -> AcceptedApproval:
+    _validate_receipt(request, response, request.status)
+    return AcceptedApproval(
+        approval_id=request.approval_id, request_id=request.request_id, capability=request.capability,
+        organization_id=request.organization_id, client_id=request.client_id, requested_by=request.requested_by,
+        status=request.status.value, decided_by=response.approver_identity_id, decided_at=response.decided_at,
+        expires_at=request.expires_at, channel=response.channel, channel_response_id=response.channel_response_id,
+        evidence_references=request.evidence_references, attention_resource_id=request.attention_resource_id,
+        authentication_evidence_hash=response.authentication_evidence_hash)
+
+
 @dataclass
 class ApprovalRequestService:
     repository: ApprovalRequestRepository
@@ -366,7 +480,7 @@ class ApprovalRequestService:
         if response.organization_id != request.organization_id:
             raise PermissionError("approval response organization mismatch")
         if current >= request.expires_at or response.decided_at >= request.expires_at:
-            self.repository.put(replace(request, status=ApprovalRequestStatus.EXPIRED))
+            self._transition(request, ApprovalRequestStatus.EXPIRED)
             raise PermissionError("approval request expired")
         if response.approver_identity_id not in request.authorized_approver_ids:
             raise PermissionError("responder is not an authorized approver for this request")
@@ -385,7 +499,7 @@ class ApprovalRequestService:
             final_status = ApprovalRequestStatus.CHANGES_REQUESTED
         else:
             final_status = ApprovalRequestStatus.DENIED
-        self.repository.put(replace(request, status=final_status))
+        self._transition(request, final_status, response=response)
         return AcceptedApproval(
             approval_id=request.approval_id,
             request_id=request.request_id,
@@ -401,7 +515,14 @@ class ApprovalRequestService:
             channel_response_id=response.channel_response_id,
             evidence_references=request.evidence_references,
             attention_resource_id=request.attention_resource_id,
+            authentication_evidence_hash=response.authentication_evidence_hash,
         )
+
+    def _transition(self, request: ApprovalRequest, status: ApprovalRequestStatus, response: ApprovalResponse | None = None) -> None:
+        transition = getattr(self.repository, "transition_pending", None)
+        if not callable(transition):
+            raise TypeError("approval repository must support atomic pending-decision consumption")
+        transition(request, status=status, response=response)
 
     @staticmethod
     def _now(value: datetime | None) -> datetime:

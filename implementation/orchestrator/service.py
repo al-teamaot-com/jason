@@ -646,7 +646,13 @@ class CentralOrchestrator:
             if request.approval_id is not None and self._governed_execution_ledger is not None:
                 self._governed_execution_ledger.fail(request, reason="provider_invocation_failed")
             duration_ms = round((monotonic() - invocation_started) * 1000, 3)
-            safe_error_code = getattr(exc, "error_code", "CAPABILITY_INVOCATION_FAILED")
+            safe_error_code = getattr(exc, "error_code", None)
+            if safe_error_code is None:
+                safe_error_code = (
+                    "INVALID_CAPABILITY_ARGUMENTS"
+                    if isinstance(exc, (ValueError, TypeError))
+                    else "CAPABILITY_INVOCATION_FAILED"
+                )
             result = OrchestrationResult(
                 execution_id=request.execution_id,
                 correlation_id=request.correlation_id,
