@@ -34,9 +34,15 @@ def lab(tmp_path):
     )
     bins = tmp_path / "fake-bin"
     bins.mkdir()
+    subprocess.run(["git","init","-q",str(root)],check=True)
+    subprocess.run(["git","-C",str(root),"add","config/autotask-entity-read-profile.json"],check=True)
+    subprocess.run(["git","-C",str(root),"-c","user.name=Test","-c","user.email=test@example.invalid","commit","-qm","LKG"],check=True)
+    (root/"tools").mkdir(exist_ok=True)
+    (root/"tools/resolve_staff_note_profile_at_revision.py").write_text((ROOT/"tools/resolve_staff_note_profile_at_revision.py").read_text())
     fake = bins / "docker"
     fake.write_text(
         "#!/bin/sh\n"
+        "if [ \"$1\" = image ]; then printf \"%s\\n\" \"$FAKE_IMAGE_SHA\"; exit 0; fi\n"
         "test \"$1\" = inspect || exit 16\n"
         "printf 'JASON_PROVIDER_READ_ACTIVATION_PROFILE=%s\\n' \"$FAKE_LIVE_PROFILE\"\n"
     )
@@ -64,9 +70,10 @@ def check_preflight(lab, path, live_name, rollback_tag, *,
         **os.environ,
         "PATH": str(bins) + os.pathsep + os.environ["PATH"],
         "FAKE_LIVE_PROFILE": live,
+        "FAKE_IMAGE_SHA": subprocess.check_output(["git","-C",str(root),"rev-parse","HEAD"],text=True).strip(),
         "JASON_PROVIDER_READ_ACTIVATION_PROFILE": selected,
         "JASON_PROVIDER_READ_ROLLBACK_PROFILE": rollback,
-        "JASON_SOURCE_REVISION_OVERRIDE": "a" * 40,
+        "JASON_SOURCE_REVISION_OVERRIDE": subprocess.check_output(["git","-C",str(root),"rev-parse","HEAD"],text=True).strip(),
         "JASON_RUNTIME_PRODUCTION_IMAGE": image,
         "JASON_MCP_PRODUCTION_IMAGE": image,
         "JASON_QUICKBOOKS_READ_PROFILE": "quickbooks-sandbox-read-v1",
@@ -221,7 +228,7 @@ def test_v13_rollback_declaration_rejects_old_v10_override(
 
 def _staff_note_source_preflight(lab, path, *, declared="internal-note-v1",
                                   selected="internal-note-v1", rollback=False,
-                                  malformed=False):
+                                  malformed=False, rollback_approved=False):
     """Run only real deployment shell preflight with fake docker, never deploy."""
     root,bins=lab
     source=(ROOT/path).read_text()
@@ -231,13 +238,17 @@ def _staff_note_source_preflight(lab, path, *, declared="internal-note-v1",
     p=root/path;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(dry);p.chmod(0o700)
     profile=root/'config/aot-staff-internal-note-profile.json'
     profile.write_text('not-json' if malformed else json.dumps({"schema_version":"1.0","profile":declared}))
+    if rollback_approved:
+        subprocess.run(["git","-C",str(root),"add","config/aot-staff-internal-note-profile.json"],check=True)
+        subprocess.run(["git","-C",str(root),"-c","user.name=Test","-c","user.email=test@example.invalid","commit","-qm","approved note profile"],check=True)
     env={**os.environ,
          "PATH":str(bins)+os.pathsep+os.environ["PATH"],
          "FAKE_LIVE_PROFILE":V10,
+         "FAKE_IMAGE_SHA":subprocess.check_output(["git","-C",str(root),"rev-parse","HEAD"],text=True).strip(),
          "JASON_PROVIDER_READ_ACTIVATION_PROFILE":V11,
          "JASON_PROVIDER_READ_ROLLBACK_PROFILE":V10,
          "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE":selected,
-         "JASON_SOURCE_REVISION_OVERRIDE":"a"*40}
+         "JASON_SOURCE_REVISION_OVERRIDE":subprocess.check_output(["git","-C",str(root),"rev-parse","HEAD"],text=True).strip()}
     if rollback:
         env['JASON_RUNTIME_PRODUCTION_IMAGE' if 'jason-runtime' in path else 'JASON_MCP_PRODUCTION_IMAGE']=('jason-runtime' if 'jason-runtime' in path else 'jason-mcp')+':rollback-current'
     return subprocess.run(['bash',str(p)],cwd=root,env=env,text=True,capture_output=True,check=False,timeout=12)
@@ -261,7 +272,7 @@ def test_staff_note_source_activation_preflight(lab,path,_,__):
     assert 'STAFF_NOTE_RESULT=internal-note-v1' not in off.stdout
     rollback=_staff_note_source_preflight(lab,path,rollback=True)
     assert rollback.returncode==0,rollback.stderr
-    assert 'STAFF_NOTE_RESULT=internal-note-v1' not in rollback.stdout
+    assert "STAFF_NOTE_RESULT=internal-note-v1" not in rollback.stdout
 
 
 
@@ -289,9 +300,10 @@ def _universal_query_source_preflight(lab, *, declared="aot-internal-read-v1",
         **os.environ,
         "PATH": str(bins) + os.pathsep + os.environ["PATH"],
         "FAKE_LIVE_PROFILE": V10,
+        "FAKE_IMAGE_SHA":subprocess.check_output(["git","-C",str(root),"rev-parse","HEAD"],text=True).strip(),
         "JASON_PROVIDER_READ_ACTIVATION_PROFILE": V11,
         "JASON_PROVIDER_READ_ROLLBACK_PROFILE": V10,
-        "JASON_SOURCE_REVISION_OVERRIDE": "a" * 40,
+        "JASON_SOURCE_REVISION_OVERRIDE": subprocess.check_output(["git","-C",str(root),"rev-parse","HEAD"],text=True).strip(),
         "JASON_RUNTIME_PRODUCTION_IMAGE": "candidate",
         "JASON_QUICKBOOKS_READ_PROFILE": "quickbooks-sandbox-read-v1",
     }
@@ -331,3 +343,10 @@ def test_universal_query_activation_profile_fails_closed(lab):
 def test_runtime_deploy_injects_reviewed_universal_query_state():
     source = (ROOT / "infrastructure/jason-runtime/production-deploy.sh").read_text()
     assert '--set-env "JASON_UNIVERSAL_QUERY_ENABLED=$UNIVERSAL_QUERY_ENABLED"' in source
+
+@pytest.mark.parametrize('path,_,__', SCRIPTS)
+def test_rollback_restores_approved_internal_note_profile(lab, path, _, __):
+    result = _staff_note_source_preflight(
+        lab, path, rollback=True, rollback_approved=True)
+    assert result.returncode == 0, result.stderr
+    assert 'STAFF_NOTE_RESULT=internal-note-v1' in result.stdout
