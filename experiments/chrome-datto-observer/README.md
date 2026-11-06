@@ -153,3 +153,51 @@ Chrome Entra SSO client registration, exact trusted Datto active-user
 permission evidence and production Jason endpoint must be completed
 before activation. Server preproduction tests exercise the equivalent
 binary JPEG format and receipt.
+
+## Version 0.2.0 — Admin-consented AOT Entra sign-in pilot (2026-11-06)
+
+The AOT Entra administrator ran an explicit approval script and reported
+`RESULT=VERIFIED`: existing resource Jason MCP API
+`9b9996e9-5c34-48b7-948c-f44f89352f89` now exposes an admin-only
+`JAssist.Send` scope (ID `182fb307-ffa5-4095-ac95-0ef73d3e9201`);
+existing `Jason.Read` retained its prior ID and enabled status.
+A dedicated single-tenant pilot public SPA app was created:
+`d1cc801b-13ba-4d44-bea6-e7f08186e4d5`. Its configured redirect is
+`https://pihjpgplfhmpenlghbcdbgdkadleflfi.chromiumapp.org/jassist`.
+Admin consent was reported as `JAssist.Send` AllPrincipals only.
+
+The optional **Advanced → Test AOT Microsoft sign-in** control invokes
+Chrome's `identity.launchWebAuthFlow` from the trusted extension worker,
+with PKCE S256 and the exact allowed AOT tenant, client and single delegated
+scope. The worker never returns the Entra access token to the panel,
+never saves it and discards it after the sign-in flow. No Jason URL is
+allowed in Chrome host permissions, no screenshot is sent, and the main
+**Send to Jason** button remains disabled. The existing local preview,
+screenshot copy and download continue as local-only technician tools.
+
+`identity` and `https://login.microsoftonline.com/*` are new permissions
+requiring conscious technician approval on install. This is only a
+technician-initiated **interactive OAuth smoke test**, not proof of
+server-side Jason identity binding, Datto active security level, device
+authorization, image DLP, durable storage, model ingestion or production
+readiness. The sign-in test may fail due to Chrome/Entra redirect
+or browser authorization constraints; capture the user-facing error and
+investigate rather than claiming success.
+
+To smoke-test without altering the existing v0.1.8 extension:
+1. Create an isolated Chrome profile (or use a controlled test profile).
+2. In `chrome://extensions`, enable Developer mode, Load unpacked, select
+   the verified v0.2.0 folder; verify extension ID exactly
+   `pihjpgplfhmpenlghbcdbgdkadleflfi`.
+3. Open an authorized, non-sensitive Datto browser tab and J-Assist.
+4. Under Advanced, click **Test AOT Microsoft sign-in**; authenticate with
+   the AOT technician's own Microsoft account and observe the result.
+5. The expected success indication is **Microsoft OAuth completed;
+   Jason and Datto authorization have not been verified; sending remains
+   disabled.** Confirm the primary Send button stays disabled.
+6. If an Entra error occurs, record its error code and timestamp without
+   sharing any OAuth tokens, callback authorization codes, or screenshots
+   of sensitive content. Do not broaden redirect URI or scopes ad hoc.
+
+The older v0.1.8 folder/extension may remain installed unchanged.
+No main merge, production release, or user-wide deployment is authorized.

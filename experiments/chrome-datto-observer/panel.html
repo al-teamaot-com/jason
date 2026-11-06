@@ -31,8 +31,10 @@ details>*{margin-top:10px}
 <button id="send-to-jason" disabled title="Authenticated Jason screen delivery is not available yet">Send to Jason</button>
 <small id="send-status" role="status">Not connected to Jason. Automatic sending is unavailable in this build.</small>
 <details id="advanced">
-<summary>Advanced · local preview and manual sharing</summary>
-<div class="warn">Full-tab screenshots can expose sensitive client data. Avoid passwords, patient records and restricted information. Nothing is sent automatically.</div>
+<summary>Advanced · AOT sign-in test, local preview and manual sharing</summary>
+<div class="controls"><button id="test-entra-signin" type="button">Test AOT Microsoft sign-in</button></div>
+<small id="entra-status" role="status">Not signed in to Jason. This test never uploads a screenshot or saves a token.</small>
+<div class="warn">Full-tab screenshots can expose sensitive client data. Avoid passwords, patient records and restricted information. Nothing is sent automatically. Microsoft sign-in does not authorize Datto access.</div>
 <div class="controls"><button id="start">Start local preview</button><button id="stop" disabled>Stop preview</button></div>
 <div class="controls"><button id="screenshot" disabled>Capture screenshot</button><button id="copy-for-chatgpt" disabled>Copy reviewed screenshot</button><a id="download" hidden download="j-assist-evidence.jpg">Download reviewed screenshot</a></div>
 <small id="evidence-status" role="status">No screenshot prepared</small>
