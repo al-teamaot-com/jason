@@ -74,10 +74,12 @@ def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_
     atomic_json(evidence, result, owner_from=evidence if evidence.exists() else None)
     status = str(result.get("status") or "unknown")
     problems = list(result.get("problems") or [])
+    advisories = list(result.get("advisories") or [])
     watchdog = {
         "schema_version": "1.0",
         "status": status,
         "problem_count": len(problems),
+        "advisory_count": len(advisories),
         "evidence_path": str(evidence),
         "observed_at": str(result.get("observed_at") or now()),
         "updated_at": now(),
