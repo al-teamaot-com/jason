@@ -340,3 +340,15 @@ def test_merge_provider_error_still_fails_closed(monkeypatch):
         pass
     else:
         raise AssertionError("provider/authentication merge failures must remain fatal")
+
+def test_documentation_reconciliation_uses_existing_bounded_systemd_retry():
+    from pathlib import Path
+    unit = (Path(__file__).resolve().parents[2]
+            / "infrastructure/openclaw-operations/systemd"
+            / "jason-documentation-reconciliation.service").read_text()
+    assert "Type=oneshot" in unit
+    assert "Restart=on-failure" in unit
+    assert "RestartSec=120s" in unit
+    assert "StartLimitBurst=3" in unit
+    assert "StartLimitIntervalSec=15min" in unit
+    assert "SuccessExitStatus=" not in unit
