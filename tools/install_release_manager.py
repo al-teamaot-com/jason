@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,7 @@ UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 STATE = Path("/var/lib/jason/openclaw/release-manager")
 SOURCE_REPO = Path("/home/al/projects/jason")
 APPROVAL_WORKTREE = LIB / "release-approval-source"
+APPROVAL_OVERRIDE = "10-canonical-release-scope.conf"
 
 
 def copy_mode(source: Path, destination: Path, mode: int) -> None:
@@ -87,6 +89,68 @@ def ensure_authoritative_approval_worktree() -> None:
         raise RuntimeError("approval worktree lacks canonical scope reviewer")
 
 
+
+def install_approval_only_rollback_override() -> None:
+    """Keep the source-reviewed approval-only command after LKG unit restore.
+
+    The old LKG installer restores its own base .service but does not remove
+    systemd drop-ins. This exact reviewed override preserves authoritative
+    Git-worktree scope after a failed candidate while production is frozen.
+    Refuse symlinks, unknown existing files, or wrong ownership. Never modify
+    a different unit or an existing unreviewed override.
+    """
+    source = (ROOT / "infrastructure/openclaw-operations/systemd/user"
+              / "jason-release-approval-only.service.d" / APPROVAL_OVERRIDE)
+    if source.is_symlink() or not source.is_file():
+        raise RuntimeError("approval rollback override source must be a reviewed regular file")
+    reviewed = source.read_bytes()
+    expected = (
+        b"[Service]\n"
+        b"ExecStart=\n"
+        b"ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/release_manager_host_runner.py "
+        b"--repo /home/al/.local/lib/jason/release-approval-source "
+        b"--state-root /var/lib/jason/openclaw/release-manager approval-only-held\n"
+        b"WorkingDirectory=/home/al/.local/lib/jason/release-approval-source\n"
+    )
+    if reviewed != expected:
+        raise RuntimeError("approval rollback override differs from reviewed exact content")
+    if UNIT_DIR.is_symlink() or not UNIT_DIR.is_dir():
+        raise RuntimeError("systemd user-unit directory is not an ordinary directory")
+    destination_dir = UNIT_DIR / "jason-release-approval-only.service.d"
+    if destination_dir.is_symlink():
+        raise RuntimeError("approval rollback override directory is a symlink")
+    destination_dir.mkdir(mode=0o755, exist_ok=True)
+    info = destination_dir.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) & 0o022):
+        raise RuntimeError("approval rollback override directory is not safely owned")
+    destination = destination_dir / APPROVAL_OVERRIDE
+    if destination.is_symlink():
+        raise RuntimeError("approval rollback override target is a symlink")
+    if destination.exists():
+        info = destination.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != 0o644
+                or destination.read_bytes() != reviewed):
+            raise RuntimeError("existing approval rollback override is not reviewed")
+    else:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(destination, flags, 0o644)
+        try:
+            with os.fdopen(fd, "wb") as output:
+                output.write(reviewed)
+                output.flush()
+                os.fsync(output.fileno())
+        except Exception:
+            try:
+                destination.unlink()
+            except OSError:
+                pass
+            raise
+        if destination.read_bytes() != reviewed:
+            raise RuntimeError("approval rollback override readback failed")
+
+
 def install_approval_only_units(*, activate: bool = False) -> bool:
     """Install only the reviewed offer units, never update a running controller.
 
@@ -105,6 +169,7 @@ def install_approval_only_units(*, activate: bool = False) -> bool:
         raise RuntimeError("held-only Teams approval systemd policy is incomplete")
     if approval_timer_declared:
         ensure_authoritative_approval_worktree()
+        install_approval_only_rollback_override()
         for unit_name in ("jason-release-approval-only.service",
                           "jason-release-approval-only.timer"):
             copy_mode(
