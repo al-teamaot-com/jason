@@ -376,3 +376,20 @@ holds Jason's internal session credential; browser never sends it.
 `test_signed_entra_image_http.py` contains two additional tests.
 All keys, tokens and JPEG markers in these tests are synthetic.
 This does not establish live AOT Entra sign-in, real DLP or HTTPS ingress.
+
+## Concurrent nonce and evidence-capacity hardening (2026-11-06)
+
+The preproduction image intake is shared by a threaded HTTP loopback
+test server. Its formerly unlocked nonce-set check admitted a race
+between simultaneous requests: two uploads using the same session and
+nonce could both pass while content review was in progress. The intake
+now uses a lock, reserves a session/nonce BEFORE slow content review,
+commits only once, and releases a pending nonce on DLP rejection,
+expired/revoked authorization or any error. Nonces remain replay
+protected through the maximum 300-second governed session lifetime.
+Only 32 unexpired images (up to 1 MiB each) may remain in the in-memory
+test service; at capacity it fails closed until cleanup. Retrieval and
+pruning are lock protected. Three synthetic multithreaded/capacity
+regressions are included in `test_screen_evidence_concurrency.py`.
+This is preproduction memory protection, not durable encrypted storage
+or an approved real DLP implementation.
