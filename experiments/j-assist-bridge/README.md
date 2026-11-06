@@ -102,3 +102,41 @@ consent, explicit frame review, content DLP/redaction, durable audit and
 replay/rate limits before allowing actual screenshots. Keep ChatGPT
 subscription integration separate from transport and do not silently
 enable paid OpenAI API calls.
+
+## ChatGPT subscription-first read-only app adapter (2026-11-06)
+
+`chatgpt_session_tool.py` implements a **preproduction in-process read
+contract** intended for a future **custom ChatGPT Business MCP app**. Only
+safe synthetic receipt metadata is returned; a model never receives a
+session credential, screenshot, login token, API key or raw terminal output.
+The trusted authenticated AOT technician identity is supplied by the MCP
+server adapter (never model JSON), and a server-owned credential lookup
+revalidates the exact device, tenant and current native Datto access
+through `SessionGate.authorize_read` every time. Bad identities, missing
+credentials, wrong device, expired sessions, permissions revoked and
+non-synthetic content all fail closed. The result explicitly flags
+`screenshot_analyzed=false`, `live_transport_connected=false`, and
+`inference_billing=none`.
+
+**Cost policy:** ChatGPT handles reasoning when the future tool is
+invoked **within a technician's eligible AOT ChatGPT workspace**.
+Jason's MCP/tool backend only returns verified governed data. No OpenAI
+API key, Responses endpoint, model call, subscription token, proxy billing
+or hidden API fallback is created in this implementation. A separate
+Chrome-sidebar inference experience is NOT yet subscription-eligible:
+OpenAI Sign in with ChatGPT external app plan usage is currently
+restricted by participation, plan and workspace eligibility. Do not
+claim ChatGPT Business subscriptions cover our custom sidebar by
+default.
+
+Official capability references (verified November 6, 2026):
+- https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt
+- https://developers.openai.com/siwc/quickstart
+- https://help.openai.com/en/articles/9039756-managing-billing-for-chatgpt-and-the-api-platform
+
+**Limitations / next work:** This module is *not registered* in the live
+Jason MCP tool registry, and there is no real browser/backend data
+delivery, SSO, native Datto permission production adapter, durable
+shared-session record, accepted screenshot DLP, production promotion or
+tested AOT ChatGPT workspace deployment. Integrate with shared-session
+PR #1465 and verified server identity before exposing the tool.

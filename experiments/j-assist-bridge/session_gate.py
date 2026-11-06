@@ -122,6 +122,20 @@ class SessionGate:
             raise Denied("Datto permission revoked")
         return entry
 
+    def authorize_read(
+        self, *, trusted_context: object, session_id: str,
+        token: str, device_uid: str,
+    ) -> None:
+        """Revalidate an existing session without incrementing its event sequence.
+
+        Used by a future ChatGPT-facing read-only tool with a server-held
+        credential. It grants no new scope or screen-content permission.
+        """
+        self._get(
+            trusted_context=trusted_context, session_id=session_id,
+            token=token, device_uid=device_uid,
+        )
+
     def acknowledge_metadata(
         self, *, trusted_context: object, session_id: str,
         token: str, device_uid: str, event: str, bytes_sent: int = 0,
