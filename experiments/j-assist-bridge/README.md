@@ -363,3 +363,16 @@ enable live pilot, the required AOT Entra `JAssist.Send` scope and
 dedicated Chrome SPA app CLIENT ID must be admin-granted and the
 approved SPA ID supplied to server configuration; this adapter is
 currently unregistered and no new public HTTPS route exists.
+
+## Signed-Entra-JWT loopback HTTP regression (2026-11-06)
+
+The optional loopback browser-shaped image intake now accepts a
+verified, realistic RS256 Entra JWT exceeding 512 characters and maps
+its signed AOT claims through the active technician binding. A denied
+authentication callback returns HTTP 401 rather than an unhandled 500.
+The test then checks receipt hash, no bearer/session credential returned,
+wrong client/scope rejection and revoked Datto callback. The server
+holds Jason's internal session credential; browser never sends it.
+`test_signed_entra_image_http.py` contains two additional tests.
+All keys, tokens and JPEG markers in these tests are synthetic.
+This does not establish live AOT Entra sign-in, real DLP or HTTPS ingress.
