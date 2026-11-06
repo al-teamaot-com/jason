@@ -38,3 +38,25 @@ The UX is intended for any authenticated **authorized AOT technician**, not one 
 
 ### Test 5 incident clarification (2026-11-06)
 Technician observed that leaving the Datto tab revoked capture but the older v0.1.0 UI left Start disabled and Stop enabled. A subsequent Start after manual Stop returned "Not a supported Datto RMM tab". The first problem is corrected in v0.1.1; the follow-up failure is consistent with Chrome having a non-Datto tab active, but the exact tab state was not captured. The UI now tells technicians to select the actual Datto PowerShell tab before starting. Returning to a prior tab does not recover its revoked session.
+
+## J-Assist graphical scope — version 0.1.4
+
+The technician may open J-Assist on the Datto Web Remote PowerShell tab
+or a graphical/non-shell Datto Web Remote tab. In both cases, the local
+Chrome capture is the **whole active visible Datto browser tab**: no
+remote endpoint agent, WebRTC interception, command transport or new
+permission is added.
+
+The side panel labels the selected surface as PowerShell, non-shell
+Web Remote (potentially graphical), or an ordinary Datto RMM tab.
+This URL-based classification is a descriptive UI hint, **not** proof
+of the actual desktop/session type and **not** an authorization grant.
+The existing background worker performs independent origin, exact-tab,
+active-tab, navigation, and session checks on every capture.
+
+Safety: full-tab screenshots can contain passwords, client data,
+personal information, patient information, or other material not suitable
+for further processing. Screenshot transmission and Jason vision analysis
+remain **disabled** pending separate identity, Datto native role,
+consent, retention, audit, data-minimization and redaction acceptance.
+No staff-wide deployment has occurred.

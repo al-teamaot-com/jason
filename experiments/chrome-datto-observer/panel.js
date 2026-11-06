@@ -1,12 +1,13 @@
 "use strict";
 const start=document.querySelector("#start"),stop=document.querySelector("#stop"),status=document.querySelector("#status"),stamp=document.querySelector("#stamp"),frame=document.querySelector("#frame");
 let tabId=null,sessionId=null,timer=null,running=false,pending=false;
+const scope=document.querySelector("#scope");
 const request=m=>chrome.runtime.sendMessage(m);
 const setStatus=s=>{status.textContent=s;};
 const clearPreview=()=>{frame.removeAttribute("src");frame.hidden=true;stamp.textContent="No retained frame";};
 function endLocally(message){
   running=false;clearInterval(timer);timer=null;sessionId=null;
-  start.disabled=false;stop.disabled=true;clearPreview();setStatus(message);
+  start.disabled=false;stop.disabled=true;clearPreview();scope.textContent="No active assistance session";setStatus(message);
 }
 async function capture(){
   if(!running||pending)return;
@@ -32,7 +33,9 @@ start.addEventListener("click",async()=>{
   try{
     const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
     if(!tab?.id)throw Error("No active browser tab.");
-    if(!/^https:\/\/[a-z0-9-]+\.rmm\.datto\.com\//i.test(tab.url||"")) throw Error("Select the actual Datto PowerShell tab first (not the old or newly navigated tab), then click Start.");
+    const selected=JAssistScope.classify(tab.url||"");
+    if(!selected.supported)throw Error("Select an authorized Datto Web Remote or Datto RMM browser tab, then click Start.");
+    scope.textContent="Assisting: "+selected.label;
     tabId=tab.id;
     const r=await request({type:"start",tabId});
     if(!r.ok)throw Error(r.error);

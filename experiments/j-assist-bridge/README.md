@@ -48,3 +48,38 @@ The native Datto role/permission query and Microsoft identity attestation are
 still missing production adapters. Tests use real JKD service objects but
 synthetic identities and provider permissions. These tests do not prove an
 actual Datto technician's access.
+
+## Shared-session architecture reconciliation (2026-11-06)
+
+The existing draft shared-session foundation is tracked at PR #1465,
+branch `feature/shared-session-foundation-20261015` and documented in
+`docs/architecture/Shared-Governed-Interactive-Sessions.md` on that
+branch. J-Assist must integrate with the shared, provider-neutral
+session lifecycle, events and audit model; the `SessionGate` here is
+an **isolated security boundary prototype**, not a second competing
+production session registry. Production implementation should adapt
+the already-reviewed foundation rather than promoting both ledgers
+or issuing independent grants.
+
+Datto Web Remote is browser/WebRTC driven. No supported third-party API
+for joining or controlling its live terminal was established in the
+existing foundation. Graphical **visible-tab snapshots** are different
+from programmable WebRTC control and do not imply the latter is available.
+
+### Next acceptance milestones
+
+1. Bring the session authority into the provider-neutral shared-session
+   architecture, preserving its durable evidence, revocation and policy
+   boundaries; reject unreviewed overlapping contracts.
+2. Implement trusted Microsoft/AOT human identity binding and verify each
+   technician's native Datto role, tenant and exact device access.
+3. Implement a reviewed TLS-protected, authenticated, server-side session
+   ingress with explicit consent and stop; deny traffic before those checks.
+4. Introduce bounded *opt-in* single-frame sharing and redact/suppress
+   sensitive material. Full-screen continuous streaming must remain off
+   until explicit handling, review, retention and audit are accepted.
+5. Pass two-technician and cross-client isolation tests, race/replay
+   testing, production health requirements and explicit release authority.
+
+The current deliverables prove only local browser capture and offline
+contract tests, not technician-to-Jason data delivery or vision inference.
