@@ -67,10 +67,23 @@ APPROVED_PM_V2_SHADOW_DELTA = {
     "required_user_units": frozenset(),
     "allowed_user_units": frozenset({"jason-pm-v2-shadow.service"}),
 }
+# PMv3.1 adds exactly the two optional system units declared by #2301.
+# This is a separate exact plan: no arbitrary system-unit expansion, no
+# subset, and no union with any previously approved migration.
+APPROVED_PM_V31_PROVIDER_HEALTH_DELTA = {
+    "required_system_units": frozenset(),
+    "allowed_system_units": frozenset({
+        "jason-isolated-provider-health.service",
+        "jason-isolated-provider-health.timer",
+    }),
+    "required_user_units": frozenset(),
+    "allowed_user_units": frozenset(),
+}
 APPROVED_PLANS = (
     APPROVED_DELTA,
     APPROVED_HELD_OFFER_DELTA,
     APPROVED_PM_V2_SHADOW_DELTA,
+    APPROVED_PM_V31_PROVIDER_HEALTH_DELTA,
 )
 
 

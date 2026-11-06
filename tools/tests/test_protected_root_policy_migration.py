@@ -714,3 +714,70 @@ def test_pm_v2_shadow_policy_plan_rejects_any_extra_unit(monkeypatch, tmp_path):
     configure(monkeypatch, tmp_path, policy=prior, old=prior, candidate=candidate)
     with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
         m.preview_exact_migration(CANDIDATE, BASE)
+
+
+def test_pmv31_exact_provider_health_units_staged_and_rollback_is_byte_exact(monkeypatch, tmp_path):
+    old = source()
+    candidate = source()
+    delta = m.APPROVED_PM_V31_PROVIDER_HEALTH_DELTA
+    for key, units in delta.items():
+        candidate[key].extend(sorted(units))
+    policy, before, _ = configure(monkeypatch, tmp_path, policy=old,
+                                  candidate=candidate, old=old)
+    assert m.preview_exact_migration(CANDIDATE, BASE) == "OWNER_CCC_REVIEWED_DELTA_ONLY"
+    assert policy.read_bytes() == before
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    staged = json.loads(policy.read_text())
+    assert set(staged["allowed_system_units"]) == (
+        set(old["allowed_system_units"]) | delta["allowed_system_units"])
+    assert set(staged["required_system_units"]) == set(old["required_system_units"])
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    receipt = json.loads(m.ACTIVE.read_text())
+    assert receipt["reviewed_delta"] == {k: sorted(v) for k, v in delta.items()}
+    assert m.restore_for_baseline(BASE) == "RESTORED"
+    assert policy.read_bytes() == before
+    assert not m.ACTIVE.exists()
+
+
+@pytest.mark.parametrize("unexpected", [
+    "jason-unknown.service", "jason-isolated-provider-health-extra.timer",
+])
+def test_pmv31_extra_system_unit_denied_before_root_write(monkeypatch, tmp_path, unexpected):
+    old = source()
+    candidate = source()
+    for key, units in m.APPROVED_PM_V31_PROVIDER_HEALTH_DELTA.items():
+        candidate[key].extend(sorted(units))
+    candidate["allowed_system_units"].append(unexpected)
+    policy, before, _ = configure(monkeypatch, tmp_path, policy=old,
+                                  candidate=candidate, old=old)
+    with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
+        m.preview_exact_migration(CANDIDATE, BASE)
+    with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
+        m.stage_for_candidate(CANDIDATE, BASE)
+    assert policy.read_bytes() == before
+    assert not m.ACTIVE.exists()
+
+
+def test_pmv31_combined_with_historical_plan_denied(monkeypatch, tmp_path):
+    old = source()
+    candidate = source(new=True)
+    for key, units in m.APPROVED_PM_V31_PROVIDER_HEALTH_DELTA.items():
+        candidate[key].extend(sorted(units))
+    policy, before, _ = configure(monkeypatch, tmp_path, policy=old,
+                                  candidate=candidate, old=old)
+    with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
+        m.stage_for_candidate(CANDIDATE, BASE)
+    assert policy.read_bytes() == before
+    assert not m.ACTIVE.exists()
+
+
+def test_pmv31_missing_one_unit_denied(monkeypatch, tmp_path):
+    old = source()
+    candidate = source()
+    candidate["allowed_system_units"].append("jason-isolated-provider-health.service")
+    policy, before, _ = configure(monkeypatch, tmp_path, policy=old,
+                                  candidate=candidate, old=old)
+    with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
+        m.preview_exact_migration(CANDIDATE, BASE)
+    assert policy.read_bytes() == before
+    assert not m.ACTIVE.exists()
