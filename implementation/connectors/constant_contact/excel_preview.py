@@ -8,12 +8,15 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+import zipfile
 from dataclasses import dataclass
 from typing import Any
 
 MAX_FILE_BYTES = 4_000_000
 MAX_ROWS = 40_000
 MAX_COLUMNS = 60
+MAX_UNCOMPRESSED_BYTES = 24_000_000
+MAX_ZIP_MEMBERS = 200
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 FIELD_ALIASES = {
     "email_address": {"email", "email address", "email_address", "e-mail", "e mail"},
@@ -72,6 +75,19 @@ def preview_xlsx(data: bytes, *, sheet_name: str | None = None) -> ImportPreview
     except ImportError as exc:
         raise WorkbookValidationError("Excel parser dependency openpyxl is unavailable") from exc
 
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            entries = archive.infolist()
+            if len(entries) > MAX_ZIP_MEMBERS or sum(e.file_size for e in entries) > MAX_UNCOMPRESSED_BYTES:
+                raise WorkbookValidationError("Workbook archive exceeds decompression limits")
+            if any(
+                e.filename.startswith(("xl/externalLinks/", "xl/embeddings/", "xl/activeX/"))
+                or e.filename.lower().endswith((".bin", ".vba"))
+                for e in entries
+            ):
+                raise WorkbookValidationError("External links, embedded objects and macros are not allowed")
+    except (zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+        raise WorkbookValidationError("Invalid workbook archive") from exc
     digest = hashlib.sha256(data).hexdigest()
     try:
         workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=False, keep_links=False)
