@@ -1,4 +1,8 @@
-# AOT Jason Datto Observer — source-only local prototype
+# Jason Assistant — Datto local prototype
+
+**Naming update (v0.1.2):** The staff-facing product is **Jason Assistant**, with a Datto mode and a **Start assisting** consent action. This version is still only a local preview: Jason does not receive or analyze the screen. The historical branch/PR and filesystem directory retain the earlier development codename for traceability.
+
+# Historical implementation notes (formerly Datto Observer)
 
 **Status:** Experimental; no production deployment, staff rollout, backend service, or endpoint execution.
 

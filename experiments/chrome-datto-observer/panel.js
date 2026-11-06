@@ -18,7 +18,7 @@ async function capture(){
     if(r.ended){endLocally(r.error||"Observation ended.");return;}
     if(r.paused){clearPreview();setStatus(r.error||"Paused");return;}
     if(!r.ok){clearPreview();setStatus("Capture error: "+r.error);return;}
-    frame.src=r.image;frame.hidden=false;stamp.textContent="Local frame: "+new Date(r.capturedAt).toLocaleTimeString();setStatus("Observing — local preview only");
+    frame.src=r.image;frame.hidden=false;stamp.textContent="Local frame: "+new Date(r.capturedAt).toLocaleTimeString();setStatus("Preview active — local only");
   }catch(e){if(running){clearPreview();setStatus("Capture error: "+e.message);}}
   finally{pending=false;}
 }

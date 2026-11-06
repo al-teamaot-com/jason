@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AOT Jason - Datto Observer (Local Prototype)",
-  "version": "0.1.1",
-  "description": "Technician-started, local-only read-only observation of an active Datto RMM browser tab.",
+  "name": "AOT Jason Assistant - Datto (Local Prototype)",
+  "version": "0.1.2",
+  "description": "Technician-initiated local preview of a Datto RMM tab; Jason connection is not yet enabled.",
   "permissions": [
     "activeTab",
     "sidePanel"
@@ -11,7 +11,7 @@
     "service_worker": "worker.js"
   },
   "action": {
-    "default_title": "Open AOT Jason Observer"
+    "default_title": "Open AOT Jason Assistant"
   },
   "side_panel": {
     "default_path": "panel.html"
