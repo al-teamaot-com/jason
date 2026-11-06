@@ -12,6 +12,8 @@ const ENTRA_HOST="login.microsoftonline.com";
 // Existing AOT Jason MCP resource. This is NOT an unverified api:// URI.
 const JASSIST_SEND_SCOPE="https://mcp-jason.teamaot.com/mcp/JAssist.Send";
 const PINNED_CHROME_EXTENSION_ID="pihjpgplfhmpenlghbcdbgdkadleflfi";
+const AOT_ENTRA_TENANT_ID="f7054323-d52b-4863-8c2f-1898f0b6077c";
+const AOT_PILOT_CLIENT_ID="d1cc801b-13ba-4d44-bea6-e7f08186e4d5";
 function b64url(data){
   const bytes=typeof data==="string"?new TextEncoder().encode(data):data;
   let raw="";for(const byte of bytes)raw+=String.fromCharCode(byte);
@@ -96,5 +98,6 @@ function createEntraPkce({
     }
   });
 }
-const JAssistEntraPkce=Object.freeze({createEntraPkce,validateOptions,JASSIST_SEND_SCOPE,PINNED_CHROME_EXTENSION_ID});
+const JAssistEntraPkce=Object.freeze({createEntraPkce,validateOptions,JASSIST_SEND_SCOPE,PINNED_CHROME_EXTENSION_ID,AOT_ENTRA_TENANT_ID,AOT_PILOT_CLIENT_ID});
+if(typeof globalThis!=="undefined")globalThis.JAssistEntraPkce=JAssistEntraPkce;
 if(typeof module!=="undefined"&&module.exports)module.exports=JAssistEntraPkce;

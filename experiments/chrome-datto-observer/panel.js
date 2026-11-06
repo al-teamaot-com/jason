@@ -7,6 +7,23 @@ const clearEvidence=()=>{copyForChatGPT.disabled=true;download.removeAttribute("
 const clearCapture=()=>{screenshot.disabled=true;clearEvidence();};
 const evidenceFilename=timestamp=>"j-assist-evidence-"+timestamp.replace(/[:.]/g,"-")+".jpg";
 const request=m=>chrome.runtime.sendMessage(m);
+const signInButton=document.querySelector("#test-entra-signin");
+const signInStatus=document.querySelector("#entra-status");
+signInButton.addEventListener("click",async()=>{
+  signInButton.disabled=true;
+  signInStatus.textContent="Opening AOT Microsoft sign-in. No screenshot will be uploaded.";
+  try {
+    const result=await request({type:"test-entra-signin"});
+    if(result?.ok===true && result.loginFlowCompleted===true &&
+       result.jasonAuthorizationVerified===false && result.uploadEnabled===false) {
+      signInStatus.textContent="Microsoft OAuth completed. Jason and Datto authorization have not been verified; sending remains disabled.";
+    } else {
+      signInStatus.textContent="Sign-in test failed: "+String(result?.error||"No valid sign-in confirmation.");
+    }
+  } catch {
+    signInStatus.textContent="Sign-in test failed. See Chrome extension errors; no image was sent.";
+  } finally {signInButton.disabled=false;}
+});
 const setStatus=s=>{status.textContent=s;};
 const clearPreview=()=>{frame.removeAttribute("src");frame.hidden=true;stamp.textContent="No retained frame";};
 function endLocally(message){

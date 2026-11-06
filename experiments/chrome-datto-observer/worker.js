@@ -1,4 +1,8 @@
 "use strict";
+// Explicitly isolated interactive AOT Entra sign-in pilot. This worker
+// never sends screen content or returns access tokens to a panel/page.
+if (typeof importScripts === "function") importScripts("entra_pkce.js");
+let signInInProgress = false;
 const sessions = new Map();
 let nextSessionId = 0;
 const allowed = url => /^https:\/\/[a-z0-9-]+\.rmm\.datto\.com\//i.test(url || "");
@@ -8,6 +12,37 @@ chrome.action.onClicked.addListener(async tab => {
 });
 chrome.runtime.onMessage.addListener((msg,sender,respond) => {
   (async()=>{
+    if (msg?.type === "test-entra-signin") {
+      // Never authorize an OAuth flow initiated by a Datto webpage,
+      // arbitrary extension message or unrelated browser surface.
+      if (typeof chrome.runtime.getURL !== "function" ||
+          sender.id !== chrome.runtime.id ||
+          sender.url !== chrome.runtime.getURL("panel.html")) {
+        throw Error("Only the J-Assist panel can initiate technician sign-in.");
+      }
+      if (signInInProgress) throw Error("An AOT sign-in attempt is already active.");
+      const adapter = globalThis.JAssistEntraPkce;
+      if (!adapter || !chrome.identity?.launchWebAuthFlow) {
+        throw Error("AOT Entra sign-in is not available in this build.");
+      }
+      signInInProgress = true;
+      try {
+        const auth = adapter.createEntraPkce({
+          tenantId:adapter.AOT_ENTRA_TENANT_ID,
+          clientId:adapter.AOT_PILOT_CLIENT_ID,
+          scope:adapter.JASSIST_SEND_SCOPE,
+          chromeIdentity:chrome.identity,
+        });
+        const signedIn = await auth.authorizeInteractive();
+        // Deliberately discard bearer token: no approved HTTPS Jason intake
+        // exists yet. Browser sign-in does not prove Jason/Datto authority.
+        if (!signedIn?.accessToken) throw Error("AOT sign-in was not completed.");
+        return {ok:true,loginFlowCompleted:true,jasonAuthorizationVerified:false,
+                uploadEnabled:false};
+      } finally {
+        signInInProgress = false;
+      }
+    }
     if (msg.type === "start") {
       const tab = await chrome.tabs.get(msg.tabId);
       if (!allowed(tab.url)) throw Error("Not a supported Datto RMM tab.");
