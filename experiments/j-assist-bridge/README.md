@@ -83,3 +83,22 @@ from programmable WebRTC control and do not imply the latter is available.
 
 The current deliverables prove only local browser capture and offline
 contract tests, not technician-to-Jason data delivery or vision inference.
+
+## Synthetic request/response proof — development only, 2026-11-06
+
+`synthetic_probe.py` exercises an in-process **request -> SessionGate
+authorization -> response** loop with an explicitly synthetic marker. It uses
+the existing exact-identity/tenant/device/credential gate, verifies native
+provider access on every request, and rejects content, malformed envelopes,
+replayed IDs, wrong device, cross-technician access, revocation and expiry.
+Responses deliberately state that no screen was analyzed. This is not
+a browser-connected transport, screenshot intake, model output or production
+integration.
+
+**Next engineering task:** Independently attest AOT human identities and
+Datto native per-device authorization; connect a reviewed TLS/protected
+ingress to the provider-neutral shared-session service (PR #1465), with
+consent, explicit frame review, content DLP/redaction, durable audit and
+replay/rate limits before allowing actual screenshots. Keep ChatGPT
+subscription integration separate from transport and do not silently
+enable paid OpenAI API calls.
