@@ -229,3 +229,30 @@ public HTTPS endpoint or Secure MCP Tunnel and verified OAuth. The
 Chrome extension itself is not a substitute for a subscription-backed
 ChatGPT client. Reference:
 https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt
+
+## One-click screenshot intake: fail-closed preproduction component (2026-11-06)
+
+`screen_evidence_intake.py` implements an independent **in-memory**
+preproduction screenshot evidence receipt contract. The intended future
+Send-to-Jason HTTP endpoint must supply a verified server-side principal
+and SessionGate credential. This contract enforces exact device/session
+binding, fresh native authorization on receipt and retrieval, bounded image
+bytes (1 MiB), SHA-256 integrity, one-use request nonce, image magic checks,
+a mandatory external content-review callback, a second authorization check
+*after* review, a server-issued receipt and 120-second image expiration.
+The returned receipt explicitly says `analyzed_by_model: false`.
+Missing/rejected DLP/review denies receipt; no default allow-all exists.
+Eight new Python tests cover synthetic accepted evidence, cross-tenant/
+technician/device isolation, replay, permission loss, review failures,
+size/hash errors and expiry.
+
+**Do not expose this class through a production or remote endpoint.**
+Tests use synthetic data and deliberately lightweight image-header
+recognition, NOT full image parsing or malware scanning. In-memory images
+and nonces are NOT durable, encrypted-at-rest, crash recoverable or safe
+for multi-worker production. The class is not wired into the Chrome
+extension, remote HTTPS ingress, or ChatGPT MCP image retrieval.
+Provider-backed technician access, a real data-loss-prevention/redaction
+engine, strict CORS/origin, OAuth, audit/retention and malicious-image
+handling remain acceptance gates. This step does not send or analyze any
+client image.
