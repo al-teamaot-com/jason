@@ -25,7 +25,12 @@ def setup_installer(tmp_path, monkeypatch, timer=True, service=True):
     units=source/'infrastructure/openclaw-operations/systemd/user'
     units.mkdir(parents=True)
     for name in (TIMER,SERVICE): (units/name).write_text('reviewed '+name)
+    override=units/'jason-release-approval-only.service.d'/m.APPROVAL_OVERRIDE
+    override.parent.mkdir(parents=True)
+    override.write_bytes((ROOT/'infrastructure/openclaw-operations/systemd/user'
+                         /'jason-release-approval-only.service.d'/m.APPROVAL_OVERRIDE).read_bytes())
     unit_dir=tmp_path/'units'
+    unit_dir.mkdir()
     lib=tmp_path/'lib';lib.mkdir()
     (lib/'release_manager_host_runner.py').write_text('unchanged running controller')
     (lib/'release-manager-source').symlink_to(source)
@@ -43,6 +48,7 @@ def test_unit_only_mode_installs_pair_but_never_replaces_running_controller(monk
         assert m.main()==0
     assert (units/TIMER).read_text()=='reviewed '+TIMER
     assert (units/SERVICE).read_text()=='reviewed '+SERVICE
+    assert (units/(SERVICE+'.d')/m.APPROVAL_OVERRIDE).read_bytes() == (ROOT/'infrastructure/openclaw-operations/systemd/user'/ (SERVICE+'.d')/m.APPROVAL_OVERRIDE).read_bytes()
     assert (lib/'release_manager_host_runner.py').read_text()=='unchanged running controller'
     assert (lib/'release-manager-source').is_symlink()
     commands=[call.args[0] for call in run.call_args_list]
@@ -61,7 +67,7 @@ def test_half_pair_refuses_before_copy_or_systemctl(monkeypatch,tmp_path,timer,s
         with pytest.raises(RuntimeError,match='incomplete'):
             m.install_approval_only_units(activate=True)
         run.assert_not_called()
-    assert not units.exists()
+    assert list(units.iterdir()) == []
 
 
 def test_bootstrap_without_pair_does_not_change_units(monkeypatch,tmp_path):
@@ -69,7 +75,7 @@ def test_bootstrap_without_pair_does_not_change_units(monkeypatch,tmp_path):
     with patch.object(m.subprocess,'run') as run:
         assert m.install_approval_only_units(activate=True) is False
         run.assert_not_called()
-    assert not units.exists()
+    assert list(units.iterdir()) == []
 
 
 def test_host_installs_pair_after_staging_before_required_commit_and_drift():
@@ -160,3 +166,68 @@ def test_approval_worktree_rejects_unreviewed_source_revision(tmp_path,monkeypat
     with pytest.raises(RuntimeError,match='exact immutable release SHA'):
         m.ensure_authoritative_approval_worktree()
     assert not target.exists()
+
+
+
+def test_frozen_baseline_rollback_restores_old_unit_but_effective_source_stays_canonical(
+        tmp_path, monkeypatch):
+    """Old LKG overwrites base service, but its installer never clears drop-ins."""
+    units, lib=setup_installer(tmp_path,monkeypatch)
+    with patch.object(m.subprocess,'run'):
+        assert m.install_approval_only_units(activate=False)
+    base=units/SERVICE
+    stable=units/(SERVICE+'.d')/m.APPROVAL_OVERRIDE
+    canonical=stable.read_bytes()
+    # Simulate full pre-existing baseline reconciliation byte-for-byte.
+    prior=(ROOT/'tools/tests/fixtures/pmv31_baseline_approval_only_unit_ee8d0652.service').read_text()
+    assert 'engineering-worker-source' in prior
+    assert 'ConditionPathExists=/var/lib/jason/openclaw/release-manager/auto-promotion-incident-hold' in prior
+    base.write_text(prior)
+    # Baseline's pre-PR installer touches only the base service and timer.
+    assert base.read_text()==prior
+    assert stable.read_bytes()==canonical
+    lines=[line for line in stable.read_text().splitlines()
+           if line.startswith('ExecStart=')]
+    assert len(lines)==2 and lines[0]=='ExecStart='
+    assert '--repo /home/al/.local/lib/jason/release-approval-source' in lines[1]
+    assert 'engineering-worker-source' not in lines[1]
+    assert 'promote' not in lines[1]
+    assert 'WorkingDirectory=/home/al/.local/lib/jason/release-approval-source' in stable.read_text()
+    assert (lib/'release-manager-source').is_symlink()
+
+
+def test_approval_override_install_idempotent_and_refuses_unapproved_tamper(
+        tmp_path, monkeypatch):
+    units,_=setup_installer(tmp_path,monkeypatch)
+    with patch.object(m.subprocess,'run'):
+        assert m.install_approval_only_units()
+        assert m.install_approval_only_units()
+    path=units/(SERVICE+'.d')/m.APPROVAL_OVERRIDE
+    path.write_text('[Service]\nExecStart=/usr/bin/false\n')
+    with patch.object(m.subprocess,'run') as runner:
+        with pytest.raises(RuntimeError,match='existing approval rollback override is not reviewed'):
+            m.install_approval_only_units()
+        runner.assert_not_called()
+    assert path.read_text()=='[Service]\nExecStart=/usr/bin/false\n'
+
+
+def test_approval_override_refuses_symlink_before_unit_mutation(tmp_path,monkeypatch):
+    units,_=setup_installer(tmp_path,monkeypatch)
+    folder=units/(SERVICE+'.d')
+    folder.symlink_to(tmp_path/'alien-target',target_is_directory=True)
+    with patch.object(m.subprocess,'run') as runner:
+        with pytest.raises(RuntimeError,match='directory is a symlink'):
+            m.install_approval_only_units()
+        runner.assert_not_called()
+    assert not (units/SERVICE).exists()
+
+
+def test_production_baseline_script_does_not_remove_approval_dropin():
+    script=(ROOT/'tools/reconcile_production_host_services.sh').read_text()
+    # Explicitly test that the candidate contains no deletion of this durable
+    # rollback source-authority override; the old baseline has no knowledge of
+    # its existence either.
+    assert 'jason-release-approval-only.service.d' not in script
+    assert '10-canonical-release-scope.conf' not in script
+    assert 'jason-release-approval-only.service.d' not in (
+        ROOT/'tools/install_release_host_reconciler.py').read_text()
