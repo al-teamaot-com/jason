@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -14,12 +15,76 @@ ROOT = Path(__file__).resolve().parents[1]
 LIB = Path.home() / ".local" / "lib" / "jason"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 STATE = Path("/var/lib/jason/openclaw/release-manager")
+SOURCE_REPO = Path("/home/al/projects/jason")
+APPROVAL_WORKTREE = LIB / "release-approval-source"
 
 
 def copy_mode(source: Path, destination: Path, mode: int) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
     os.chmod(destination, mode)
+
+
+
+def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], text=True, capture_output=True,
+        timeout=75, check=check,
+    )
+
+
+def _git_common_dir(repo: Path) -> Path:
+    raw = _git(repo, "rev-parse", "--git-common-dir").stdout.strip()
+    if not raw:
+        raise RuntimeError("approval source has no canonical Git common directory")
+    value = Path(raw)
+    return (value if value.is_absolute() else repo / value).resolve()
+
+
+def ensure_authoritative_approval_worktree() -> None:
+    """Bind approval-only scope review to the canonical shared Git registry.
+
+    The separate managed engineering clone has a different worktree inventory.
+    Never use it to verify exact release-scope receipts; an isolated clone
+    would silently ignore concurrent dirty worktrees and fail closed later.
+    This worktree has one stable path across forward releases and is never
+    deleted or force-reset to hide dirty work.
+    """
+    revision = ROOT.name
+    if not re.fullmatch(r"[a-f0-9]{40}", revision):
+        raise RuntimeError("approval worktree requires exact immutable release SHA")
+    if SOURCE_REPO.is_symlink() or not SOURCE_REPO.is_dir():
+        raise RuntimeError("authoritative Project Jason Git directory missing")
+    canonical = _git_common_dir(SOURCE_REPO)
+    if canonical != (SOURCE_REPO / ".git").resolve() or not canonical.is_dir():
+        raise RuntimeError("canonical Project Jason Git registry is not a directory")
+    # The pinned immutable SHA must exist in the canonical source and be on
+    # protected main. Fetch only if needed; never switch its dirty worktree.
+    if _git(SOURCE_REPO, "cat-file", "-e", revision + "^{commit}", check=False).returncode != 0:
+        _git(SOURCE_REPO, "fetch", "--no-tags", "origin", "main")
+    _git(SOURCE_REPO, "cat-file", "-e", revision + "^{commit}")
+    if _git(SOURCE_REPO, "merge-base", "--is-ancestor", revision, "origin/main", check=False).returncode != 0:
+        raise RuntimeError("approval worktree revision is not on protected main")
+
+    if APPROVAL_WORKTREE.is_symlink():
+        raise RuntimeError("approval worktree must not be a symlink")
+    if APPROVAL_WORKTREE.exists():
+        if not APPROVAL_WORKTREE.is_dir() or _git_common_dir(APPROVAL_WORKTREE) != canonical:
+            raise RuntimeError("approval worktree is not in authoritative Git registry")
+        if _git(APPROVAL_WORKTREE, "status", "--porcelain").stdout.strip():
+            raise RuntimeError("approval worktree has uncommitted changes")
+        observed = _git(APPROVAL_WORKTREE, "rev-parse", "HEAD").stdout.strip()
+        if observed != revision:
+            _git(APPROVAL_WORKTREE, "checkout", "--detach", revision)
+    else:
+        APPROVAL_WORKTREE.parent.mkdir(parents=True, exist_ok=True)
+        _git(SOURCE_REPO, "worktree", "add", "--detach", str(APPROVAL_WORKTREE), revision)
+    if (_git_common_dir(APPROVAL_WORKTREE) != canonical
+            or _git(APPROVAL_WORKTREE, "rev-parse", "HEAD").stdout.strip() != revision
+            or _git(APPROVAL_WORKTREE, "status", "--porcelain").stdout.strip()):
+        raise RuntimeError("approval worktree exact-source verification failed")
+    if not (APPROVAL_WORKTREE / "tools/manual_release_scope.py").is_file():
+        raise RuntimeError("approval worktree lacks canonical scope reviewer")
 
 
 def install_approval_only_units(*, activate: bool = False) -> bool:
@@ -39,6 +104,7 @@ def install_approval_only_units(*, activate: bool = False) -> bool:
     if approval_timer_declared != approval_service_declared:
         raise RuntimeError("held-only Teams approval systemd policy is incomplete")
     if approval_timer_declared:
+        ensure_authoritative_approval_worktree()
         for unit_name in ("jason-release-approval-only.service",
                           "jason-release-approval-only.timer"):
             copy_mode(

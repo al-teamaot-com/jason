@@ -2,6 +2,7 @@
 from __future__ import annotations
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 import pytest
@@ -31,6 +32,7 @@ def setup_installer(tmp_path, monkeypatch, timer=True, service=True):
     monkeypatch.setattr(m,'ROOT',source)
     monkeypatch.setattr(m,'UNIT_DIR',unit_dir)
     monkeypatch.setattr(m,'LIB',lib)
+    monkeypatch.setattr(m,'ensure_authoritative_approval_worktree',lambda:None)
     monkeypatch.setattr(m.os,'geteuid',lambda:1000)
     return unit_dir,lib
 
@@ -80,3 +82,81 @@ def test_host_installs_pair_after_staging_before_required_commit_and_drift():
     assert 'run_as_al /usr/bin/python3 "$RELEASE_DIR/tools/install_release_manager.py"' in between
     assert '--approval-units-only --activate' in between
     assert 'promote' not in between
+
+
+def _git(repo, *args):
+    return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
+
+
+def _configured_real_repo(tmp_path, monkeypatch):
+    source=tmp_path/'canonical-project'
+    source.mkdir()
+    subprocess.run(['git','init','-q','-b','main',str(source)],check=True)
+    _git(source,'config','user.email','tests@example.invalid')
+    _git(source,'config','user.name','Test Owner')
+    (source/'tools').mkdir()
+    (source/'tools/manual_release_scope.py').write_text('reviewed scope')
+    _git(source,'add','tools/manual_release_scope.py')
+    _git(source,'commit','-qm','baseline scope reviewer')
+    bare=tmp_path/'bare-origin.git'
+    subprocess.run(['git','init','--bare','-q',str(bare)],check=True)
+    _git(source,'remote','add','origin',str(bare))
+    _git(source,'push','-q','-u','origin','main')
+    _git(source,'fetch','origin','main')
+    sha=_git(source,'rev-parse','HEAD')
+    worktree=tmp_path/'authorized-approval-source'
+    monkeypatch.setattr(m,'SOURCE_REPO',source)
+    monkeypatch.setattr(m,'APPROVAL_WORKTREE',worktree)
+    monkeypatch.setattr(m,'ROOT',tmp_path/'immutable'/sha)
+    return source,worktree,sha
+
+
+def test_approval_worktree_uses_shared_registry_and_is_idempotent(tmp_path,monkeypatch):
+    source,target,sha=_configured_real_repo(tmp_path,monkeypatch)
+    m.ensure_authoritative_approval_worktree()
+    assert _git(target,'rev-parse','HEAD')==sha
+    assert m._git_common_dir(target)==m._git_common_dir(source)
+    m.ensure_authoritative_approval_worktree()
+    assert _git(target,'rev-parse','HEAD')==sha
+    assert len([x for x in _git(source,'worktree','list','--porcelain').splitlines()
+                if x.startswith('worktree ')])==2
+
+
+def test_approval_worktree_does_not_discard_unfinished_work(tmp_path,monkeypatch):
+    _,target,_=_configured_real_repo(tmp_path,monkeypatch)
+    m.ensure_authoritative_approval_worktree()
+    (target/'local-operator-work.txt').write_text('preserve me')
+    with pytest.raises(RuntimeError,match='uncommitted changes'):
+        m.ensure_authoritative_approval_worktree()
+    assert (target/'local-operator-work.txt').read_text()=='preserve me'
+
+
+def test_approval_worktree_refuses_isolated_git_clone(tmp_path,monkeypatch):
+    source,target,_=_configured_real_repo(tmp_path,monkeypatch)
+    subprocess.run(['git','clone','-q',str(source),str(target)],check=True)
+    with pytest.raises(RuntimeError,match='not in authoritative Git registry'):
+        m.ensure_authoritative_approval_worktree()
+    assert target.is_dir()
+
+
+def test_approval_worktree_updates_exact_sha_without_new_registry_entry(tmp_path,monkeypatch):
+    source,target,_=_configured_real_repo(tmp_path,monkeypatch)
+    m.ensure_authoritative_approval_worktree()
+    (source/'tools/manual_release_scope.py').write_text('next reviewed source')
+    _git(source,'add','tools/manual_release_scope.py')
+    _git(source,'commit','-qm','next reviewed candidate')
+    _git(source,'push','-q','origin','main')
+    new_sha=_git(source,'rev-parse','HEAD')
+    monkeypatch.setattr(m,'ROOT',tmp_path/'immutable'/new_sha)
+    m.ensure_authoritative_approval_worktree()
+    assert _git(target,'rev-parse','HEAD')==new_sha
+    assert len([x for x in _git(source,'worktree','list','--porcelain').splitlines()
+                if x.startswith('worktree ')])==2
+
+
+def test_approval_worktree_rejects_unreviewed_source_revision(tmp_path,monkeypatch):
+    _,target,_=_configured_real_repo(tmp_path,monkeypatch)
+    monkeypatch.setattr(m,'ROOT',tmp_path/'immutable'/'not-a-sha')
+    with pytest.raises(RuntimeError,match='exact immutable release SHA'):
+        m.ensure_authoritative_approval_worktree()
+    assert not target.exists()
