@@ -393,3 +393,49 @@ pruning are lock protected. Three synthetic multithreaded/capacity
 regressions are included in `test_screen_evidence_concurrency.py`.
 This is preproduction memory protection, not durable encrypted storage
 or an approved real DLP implementation.
+
+## Optional AOT J-Assist Administrator-only access policy (2026-11-06)
+
+The Owner proposed using membership in the Datto RMM Administrators
+group instead of verifying each user's CURRENT active security level.
+Datto's native built-in designation is **Administrator security level**,
+which grants access to every device in that Datto RMM account. It is a
+level assigned to the user; the user's active UI security level can
+differ if the user switches levels. This is therefore an explicitly
+separate AOT J-Assist **screen-assistance eligibility** policy, not a
+claim about the Datto UI session's active permissions.
+
+The isolated `DattoAdministratorScreenAuthorizer` accepts ONLY fresh,
+provider-verified proof that the **same** Entra-mapped Datto technician:
+1. Is active/enabled, is positively assigned the built-in
+   `Administrator` security level, and belongs to the pinned AOT Datto
+   account. Membership proof expires after 30 seconds.
+2. Requested an actual device UID that a second trusted Datto-native
+   callback confirms belongs to the same pinned account.
+3. Is requesting `screen_assistance` only. Commands, PowerShell,
+   components, reboots and every other endpoint operation are denied by
+   this policy and require independent governed authority.
+
+Browser flags, email-domain matching, personal assertions, shared API
+key security level and Entra membership alone never prove Datto
+Administrator membership. Only server-owned trusted resolvers may
+provide the evidence and device ownership check. The existing regular
+DattoWebRemoteAuthorizer is unchanged; this is an opt-in alternative.
+
+**Provider gap:** Official Datto RMM documents a read-only
+`GET /v2/account/users` listing, but its documented `AuthUser`
+response fields include username, email, status, disabled and dates,
+not the assigned security levels. Thus the documented account-users
+API alone does **not** prove Administrator membership. An independently
+verified provider source (such as an approved Datto-supported
+membership interface, or authenticated mapped KaseyaOne access-group
+source if that is what the Owner means) is required before activating
+the policy. No live adapter is configured. Fail closed until then.
+
+References:
+- https://rmm.datto.com/help/en/Content/3NEWUI/Setup/SecurityLevels.htm
+- https://rmm.datto.com/help/en/Content/3NEWUI/Setup/Users.htm
+- https://rmm.datto.com/help/en/Content/2SETUP/APIv2.htm
+
+No browser Send button is enabled, no production source changed, no
+provider identity is inferred, and no production release is authorized.
