@@ -27,6 +27,7 @@ class DattoWebRemoteEvidence:
     devices_view: bool
     web_remote_enabled: bool
     provider_verified: bool
+    powershell_enabled: bool = False
 
 
 class DattoWebRemoteAuthorizer:
@@ -46,6 +47,15 @@ class DattoWebRemoteAuthorizer:
         self._clock = clock
 
     def __call__(self, technician: VerifiedTechnician, device_uid: str) -> bool:
+        return self.can_access(technician, device_uid, surface="webremote")
+
+    def can_access(
+        self, technician: VerifiedTechnician, device_uid: str, *, surface: str,
+    ) -> bool:
+        # Web Remote PowerShell requires its own toggle in the technician's
+        # active Datto security level; it is not implied by Web Remote.
+        if surface not in {"webremote", "powershell"}:
+            return False
         if not isinstance(technician, VerifiedTechnician):
             return False
         if not isinstance(device_uid, str) or not _DEVICE.fullmatch(device_uid):
@@ -69,4 +79,5 @@ class DattoWebRemoteAuthorizer:
             proof.sites_view is True,
             proof.devices_view is True,
             proof.web_remote_enabled is True,
+            surface != "powershell" or proof.powershell_enabled is True,
         ))

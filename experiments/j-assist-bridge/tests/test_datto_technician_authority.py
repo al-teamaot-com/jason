@@ -50,4 +50,12 @@ class DattoTechnicianAuthorityTests(unittest.TestCase):
         self.assertFalse(self.auth(self.person,"invalid"))
     def test_wrong_identity_type_denied(self):
         self.assertFalse(self.auth(("staff-a","aot"),"1717088"))
+    def test_powershell_requires_separate_active_level_toggle(self):
+        self.assertTrue(self.auth.can_access(self.person,"1717088",surface="webremote"))
+        self.assertFalse(self.auth.can_access(self.person,"1717088",surface="powershell"))
+        self.current=replace(self.proof,powershell_enabled=True)
+        self.assertTrue(self.auth.can_access(self.person,"1717088",surface="powershell"))
+        self.assertFalse(self.auth.can_access(self.person,"1717088",surface="unknown"))
+        self.current=replace(self.proof,web_remote_enabled=False,powershell_enabled=True)
+        self.assertFalse(self.auth.can_access(self.person,"1717088",surface="powershell"))
 if __name__=="__main__":unittest.main()

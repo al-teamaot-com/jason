@@ -201,3 +201,31 @@ per-technician evidence source, durable shared session state, reviewed TLS
 ingress and actual ChatGPT Business workspace integration remain required
 before any screen content is accepted or an extension Send-to-Jason control
 is enabled. No paid API inference is used.
+
+## Active Datto Web Remote vs. PowerShell rights (2026-11-06)
+
+Datto's current security-level documentation states the **active** security
+level controls device visibility and remote tools, and a technician can
+switch levels. The Web Remote documentation explicitly requires an
+independent PowerShell toggle for Web Remote PowerShell. The experimental
+`DattoWebRemoteAuthorizer.can_access(..., surface="powershell")` now
+requires `powershell_enabled=True` in addition to Web Remote permission;
+`surface="webremote"` checks general Web Remote access. Unsupported
+surfaces fail closed. Actual evidence must originate with Datto for the
+**individual** technician; a shared API token's API security level is not
+equivalent to the technician's active UI security level. No provider API
+was confirmed for obtaining that active signed-in level across technicians;
+this is an external live-integration acceptance gap, not grounds for
+trusting Chrome-supplied assertions.
+
+References:
+- https://rmm.datto.com/help/en/Content/3NEWUI/Setup/SecurityLevels.htm
+- https://rmm.datto.com/help/en/Content/3NEWUI/WebRemote/WebRemote.htm
+- https://rmm.datto.com/help/en/Content/2SETUP/APIv2.htm
+
+For ChatGPT subscription use, eligible AOT Business workspace
+admins/owners can install a custom MCP server in **Plugins**, with
+public HTTPS endpoint or Secure MCP Tunnel and verified OAuth. The
+Chrome extension itself is not a substitute for a subscription-backed
+ChatGPT client. Reference:
+https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt
