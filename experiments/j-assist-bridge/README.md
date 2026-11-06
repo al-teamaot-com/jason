@@ -181,3 +181,23 @@ production evidence source has yet been verified, so this module is
 The existing v0.1.6 Chrome preview remains unchanged. The extension
 will need a separate versioned update for an opt-in authenticated
 `Send to Jason` interaction after the server security gate is accepted.
+
+## Existing Jason MCP Entra technician identity adapter (2026-11-06)
+
+`mcp_identity_adapter.py` accepts only the server-verified four-tuple
+returned by the existing `jason_mcp.server._authenticated_identity()`:
+`(jason_principal_id, organization_id, "entra-oauth-bearer", client_id)`.
+That upstream function performs Microsoft access-token validation, Entra
+tenant/object verification, active identity binding and Jason identity
+validation. A browser, a ChatGPT tool invocation or arbitrary JSON must
+never supply this tuple. Missing authentication and non-Microsoft assurance
+fail closed; a changed technician/tenant cannot read the previously opened
+session even if the session reference is known. The model receives only
+bounded synthetic test metadata, not the token or screenshot.
+
+This is a preproduction adapter contract and **not an active tool
+registration** in Jason's production MCP service. The live Datto
+per-technician evidence source, durable shared session state, reviewed TLS
+ingress and actual ChatGPT Business workspace integration remain required
+before any screen content is accepted or an extension Send-to-Jason control
+is enabled. No paid API inference is used.
