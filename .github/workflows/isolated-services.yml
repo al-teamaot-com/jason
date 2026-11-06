@@ -7,6 +7,11 @@ on:
       - "tools/*_service.py"
       - "tools/tests/test_isolated_service*.py"
       - "tools/tests/test_isolated_services.py"
+      # Run independent two-cycle shadow acceptance when this docs isolation slice changes.
+      - "tools/production_drift_guard.py"
+      - "tools/production_drift_watchdog.py"
+      - "tools/documentation_source_reconciler.py"
+      - "infrastructure/openclaw-operations/systemd/jason-documentation-reconciliation.service"
       - "config/isolated-services.json"
       - "infrastructure/isolated-services/**"
       - "tools/ci/isolated_service_preproduction_lab.py"
