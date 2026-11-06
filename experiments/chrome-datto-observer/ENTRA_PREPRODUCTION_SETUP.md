@@ -59,3 +59,32 @@ technicians from a nonfunctional or misleading Send button.
 References:
 - https://developer.chrome.com/docs/extensions/reference/api/identity
 - https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow
+
+## Verified pilot-ready parameters, 2026-11-06
+
+AOT's current Jason MCP Entra API is already registered:
+* Tenant: f7054323-d52b-4863-8c2f-1898f0b6077c
+* Existing resource Application (client) ID: 9b9996e9-5c34-48b7-948c-f44f89352f89
+* API Identifier URI: https://mcp-jason.teamaot.com/mcp
+* Existing ChatGPT delegated scope: Jason.Read (do not change)
+
+The development extension's new manifest PUBLIC RSA key pins Chrome ID:
+pihjpgplfhmpenlghbcdbgdkadleflfi
+
+Its exact SPA redirect is:
+https://pihjpgplfhmpenlghbcdbgdkadleflfi.chromiumapp.org/jassist
+
+Older installed v0.1.8 has a DIFFERENT path-derived extension ID and
+MUST NOT be used for the new Entra pilot redirect. This v0.1.9 development
+build does not include production authentication permissions, registered
+backend transport, or a working Send button.
+
+The administrator should add an *admin-consent-only delegated scope*
+named JAssist.Send to the existing Jason MCP API (without changing
+Jason.Read), then create a new, single-tenant public client
+"AOT J-Assist Chrome (Pilot)" with the exact SPA redirect and only that
+one delegated Jason API permission. No client secret.
+
+See ENTRA_APPROVAL_PACKET.md for the exact administrator actions and the
+one new Application (client) ID to return. The existing ChatGPT OAuth
+client remains untouched. Production freeze stays in place.

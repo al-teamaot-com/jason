@@ -5,8 +5,8 @@ const crypto=require("node:crypto").webcrypto;
 const {createEntraPkce}=require("../entra_pkce");
 const tenantId="12345678-1234-1234-1234-123456789abc";
 const clientId="87654321-4321-4321-4321-abcdefabcdef";
-const scope="api://12345678-1234-1234-1234-123456789abc/JAssist.Send";
-const redirect="https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.chromiumapp.org/jassist";
+const scope="https://mcp-jason.teamaot.com/mcp/JAssist.Send";
+const redirect="https://pihjpgplfhmpenlghbcdbgdkadleflfi.chromiumapp.org/jassist";
 function rig(changes={}) {
  let requested, posted;
  const chromeIdentity={
@@ -64,7 +64,9 @@ test("rejects wrong state and forged redirect host",async()=>{
 test("rejects wrong app identifiers and broad scopes",()=>{
  for(const patch of [
   {tenantId:"common"},{clientId:"invalid"},{scope:"User.Read"},
-  {scope:"api://x/Send"},{scope:scope+" openid offline_access"}
+  {scope:"api://12345678-1234-1234-1234-123456789abc/JAssist.Send"},
+  {scope:"api://x/Send"},{scope:scope+" openid offline_access"},
+  {scope:"https://mcp-jason.teamaot.com/mcp/Jason.Read"}
  ])assert.throws(()=>createEntraPkce({
    tenantId,clientId,scope,chromeIdentity:{
      getRedirectURL:()=>redirect,launchWebAuthFlow:async()=>redirect
@@ -79,4 +81,15 @@ test("rejects token exchange failures and invalid results",async()=>{
    const r=rig({fetchImpl:async()=>response});
    await assert.rejects(r.client.authorizeInteractive());
  }
+});
+
+test("rejects an old unpacked Chrome extension ID even with a valid-shaped redirect",()=>{
+ const old="https://kckeghklalamkjloakolkdceajkbmehj.chromiumapp.org/jassist";
+ assert.throws(()=>createEntraPkce({
+  tenantId,clientId,scope,chromeIdentity:{
+   getRedirectURL:()=>old,
+   launchWebAuthFlow:async()=>old
+  },
+  cryptoImpl:crypto,fetchImpl:async()=>{}
+ }));
 });

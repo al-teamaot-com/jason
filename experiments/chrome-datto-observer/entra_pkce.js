@@ -9,6 +9,9 @@
  */
 const GUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ENTRA_HOST="login.microsoftonline.com";
+// Existing AOT Jason MCP resource. This is NOT an unverified api:// URI.
+const JASSIST_SEND_SCOPE="https://mcp-jason.teamaot.com/mcp/JAssist.Send";
+const PINNED_CHROME_EXTENSION_ID="pihjpgplfhmpenlghbcdbgdkadleflfi";
 function b64url(data){
   const bytes=typeof data==="string"?new TextEncoder().encode(data):data;
   let raw="";for(const byte of bytes)raw+=String.fromCharCode(byte);
@@ -22,8 +25,7 @@ function randomUrlSafe(cryptoImpl,bytes=32) {
 function validateOptions({tenantId,clientId,scope}) {
   if(!GUID.test(tenantId||"")||!GUID.test(clientId||"")||
      typeof scope!=="string" ||
-     !/^api:\/\/[0-9a-f-]{36}\/[A-Za-z0-9._-]+$/i.test(scope) ||
-     /[\s?#]/.test(scope)){
+     scope!==JASSIST_SEND_SCOPE){
     throw Error("Reviewed AOT Entra application configuration required.");
   }
   return true;
@@ -39,7 +41,7 @@ function createEntraPkce({
   const redirectUri=chromeIdentity.getRedirectURL("jassist");
   const redirect=new URL(redirectUri);
   if(redirect.protocol!=="https:" ||
-     !/^[a-p]{32}\.chromiumapp\.org$/.test(redirect.hostname) ||
+     redirect.hostname!==PINNED_CHROME_EXTENSION_ID+".chromiumapp.org" ||
      redirect.pathname!=="/jassist" ||
      redirect.search || redirect.hash) {
     throw Error("Expected pinned Chrome extension OAuth redirect.");
@@ -94,5 +96,5 @@ function createEntraPkce({
     }
   });
 }
-const JAssistEntraPkce=Object.freeze({createEntraPkce,validateOptions});
+const JAssistEntraPkce=Object.freeze({createEntraPkce,validateOptions,JASSIST_SEND_SCOPE,PINNED_CHROME_EXTENSION_ID});
 if(typeof module!=="undefined"&&module.exports)module.exports=JAssistEntraPkce;

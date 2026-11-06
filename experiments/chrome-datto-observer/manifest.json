@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "J-Assist - Datto (Local Prototype)",
-  "version": "0.1.8",
+  "version": "0.1.9",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAogWVuFDmhk2mLZQ7ATcNEXIimy5FfZiwW/Gqt2txWyHHY/b/2QxVCCrUrfQbIUvcghRmPHKbIzoQ5MDFZQLa0AN3JpVg8G3XGuhCuBu9PhwAJ+k+UEbP1Ax93UK/pHkU3ST1knVR6oiTO79xM46Ah8zN/+T8PGPixo0qSZiU4bp0K9eszDc5clMntivyiZZBGTJtfg38Y2Ese8Bg8J4LxsfMAj/LQaf5KH9xE97VmUxz5o83N3oXczVCYVY7zOVjBpyKK91SwjmlI9KBTxkiCsdN2/n7wLOG7Usx5MqyrEsyclpBg9k0Lgvwj22cs8Y8ftVh/4Gjqp8L+PNy3rGcPwIDAQAB",
   "description": "Technician-initiated local Datto preview for J-Assist; no remote transmission in this version.",
   "permissions": [
     "activeTab",
