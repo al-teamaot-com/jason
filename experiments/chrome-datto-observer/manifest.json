@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "J-Assist - Datto (Local Prototype)",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Technician-initiated local Datto preview for J-Assist; no remote transmission in this version.",
   "permissions": [
     "activeTab",
@@ -11,9 +11,19 @@
     "service_worker": "worker.js"
   },
   "action": {
-    "default_title": "Open J-Assist"
+    "default_title": "Open J-Assist",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
   },
   "side_panel": {
     "default_path": "panel.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   }
 }

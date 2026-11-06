@@ -60,3 +60,9 @@ for further processing. Screenshot transmission and Jason vision analysis
 remain **disabled** pending separate identity, Datto native role,
 consent, retention, audit, data-minimization and redaction acceptance.
 No staff-wide deployment has occurred.
+
+## J-Assist approved brand assets — v0.1.5
+
+Chrome extension metadata now uses branded 16/32/48/128 PNG icons. The 16px variant intentionally omits the sparkle detail for legibility. The Datto side panel uses the original dark compact header SVG supplied in **Jason/J-Assist Visual Identity v1.0 (2026-11-06)**. The PNG icons were regenerated from the matching approved SVG geometry at native dimensions; source SVG masters are retained in `brand/`. No new Chrome permissions, hosted assets, network communication, Jason inference or endpoint control. Preview authorization/capture behavior is unchanged.
+
+To update an installed unpacked extension, replace its files with this version, visit `chrome://extensions`, and click **Reload** for J-Assist. Verify the teal toolbar icon and dark side-panel header.
