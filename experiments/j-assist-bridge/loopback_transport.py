@@ -94,10 +94,15 @@ def make_handler(
                 self.send_error(404)
                 return
             auth = self.headers.get("Authorization", "")
-            if not auth.startswith("Bearer ") or len(auth) > 512:
+            if not auth.startswith("Bearer ") or len(auth) > 8192:
                 self.send_error(401)
                 return
-            principal = authenticate(auth[7:])
+            try:
+                principal = authenticate(auth[7:])
+            except Exception:
+                # Real Entra JWT resolvers deny via an exception; never 500.
+                self.send_error(401)
+                return
             if principal is None:
                 self.send_error(401)
                 return
