@@ -3,8 +3,17 @@
   "name": "AOT Jason - Datto Observer (Local Prototype)",
   "version": "0.1.0",
   "description": "Technician-started, local-only read-only observation of an active Datto RMM browser tab.",
-  "permissions": ["activeTab", "tabs", "sidePanel"],
-  "background": {"service_worker": "worker.js"},
-  "action": {"default_title": "Open AOT Jason Observer"},
-  "side_panel": {"default_path": "panel.html"}
+  "permissions": [
+    "activeTab",
+    "sidePanel"
+  ],
+  "background": {
+    "service_worker": "worker.js"
+  },
+  "action": {
+    "default_title": "Open AOT Jason Observer"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  }
 }
