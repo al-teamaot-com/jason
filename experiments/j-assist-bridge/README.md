@@ -343,3 +343,23 @@ and does not authenticate real Entra tokens or attest active signed-in
 Datto permissions. These are **test credentials and synthetic marker
 envelopes**, not real screenshot parsing or DLP. Do NOT expose the route
 outside the local test host or deploy the test reviewer.
+
+## Dedicated JAssist.Send Entra acceptance boundary (2026-11-06)
+
+New preproduction `entra_send_authority.py` accepts a signed Entra
+access token ONLY after trusted RS256 signing-key verification against
+AOT's existing Jason API audience, exact tenant and issuer, expected
+new SPA application's `azp`, strict `scp=JAssist.Send`, temporal
+claims and a server-side ACTIVE AOT Jason identity binding. It rejects
+tokens with `Jason.Read`, cross-tenant/SPA use, revoked identity, JWKS
+failure, invalid signatures and expired tokens. Seven Python tests
+construct actual RS256 JWTs using synthetic ephemeral keys; none use
+tenant credentials or live user tokens.
+
+Existing `jason_mcp.server.EntraTokenVerifier` for ChatGPT
+`Jason.Read` remains unmodified. No user impersonation, Datto scope
+claim from the browser, or privileged API access is introduced. To
+enable live pilot, the required AOT Entra `JAssist.Send` scope and
+dedicated Chrome SPA app CLIENT ID must be admin-granted and the
+approved SPA ID supplied to server configuration; this adapter is
+currently unregistered and no new public HTTPS route exists.
