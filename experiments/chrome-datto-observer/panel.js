@@ -31,7 +31,8 @@ start.addEventListener("click",async()=>{
   start.disabled=true;
   try{
     const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
-    if(!tab?.id)throw Error("No active tab.");
+    if(!tab?.id)throw Error("No active browser tab.");
+    if(!/^https:\/\/[a-z0-9-]+\.rmm\.datto\.com\//i.test(tab.url||"")) throw Error("Select the actual Datto PowerShell tab first (not the old or newly navigated tab), then click Start.");
     tabId=tab.id;
     const r=await request({type:"start",tabId});
     if(!r.ok)throw Error(r.error);
