@@ -66,3 +66,9 @@ No staff-wide deployment has occurred.
 Chrome extension metadata now uses branded 16/32/48/128 PNG icons. The 16px variant intentionally omits the sparkle detail for legibility. The Datto side panel uses the original dark compact header SVG supplied in **Jason/J-Assist Visual Identity v1.0 (2026-11-06)**. The PNG icons were regenerated from the matching approved SVG geometry at native dimensions; source SVG masters are retained in `brand/`. No new Chrome permissions, hosted assets, network communication, Jason inference or endpoint control. Preview authorization/capture behavior is unchanged.
 
 To update an installed unpacked extension, replace its files with this version, visit `chrome://extensions`, and click **Reload** for J-Assist. Verify the teal toolbar icon and dark side-panel header.
+
+## Version 0.1.6 — local reviewed screenshot
+
+After **Start assisting**, select **Capture screenshot** to request a **fresh, active Datto tab** frame from the existing authorization-checked worker. Review it in the side panel, then explicitly click **Download reviewed screenshot**. File name carries UTC capture timestamp and no client details. Screenshots are never auto-attached to Autotask, sent to Jason, uploaded or stored in extension storage. The prepared evidence and download link are invalidated on Stop, inactive tab, failed capture, tab navigation/revocation, and panel close. The existing Chrome activeTab capture permission and worker authorization rules are unchanged.
+
+**Visual acceptance required:** With a non-sensitive authorized Datto test tab active, take a screenshot and download it. Confirm the image depicts that test tab, the screenshot link disappears on Stop or tab switch, and no Autotask attachment is created. Manual redaction and ticket attachment remain technician responsibility.

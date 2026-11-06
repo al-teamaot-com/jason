@@ -3,15 +3,18 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>J-Assist</title>
 <style>
-body{font:14px system-ui,sans-serif;margin:0;background:#121b26;color:#edf3f9}main{padding:16px;display:grid;gap:12px}h1{font-size:19px;margin:0}.brand-header{display:block;width:100%;height:auto;max-width:360px;border:0;border-radius:0}p{line-height:1.45;margin:0;color:#bac8d5}button{padding:10px 14px;border:0;border-radius:6px;font-weight:600;cursor:pointer}button:disabled{opacity:.45}#start{background:#72d4ae}#stop{background:#f4b8b8}#status{padding:10px;background:#243348;border-radius:6px}img{max-width:100%;border:1px solid #41556c;border-radius:4px}small{color:#b7c6d9} .controls{display:flex;gap:8px;flex-wrap:wrap} .warn{border-left:3px solid #eac576;padding:8px;background:#2c2a23}
+body{font:14px system-ui,sans-serif;margin:0;background:#121b26;color:#edf3f9}main{padding:16px;display:grid;gap:12px}h1{font-size:19px;margin:0}.brand-header{display:block;width:100%;height:auto;max-width:360px;border:0;border-radius:0}p{line-height:1.45;margin:0;color:#bac8d5}button{padding:10px 14px;border:0;border-radius:6px;font-weight:600;cursor:pointer}button:disabled{opacity:.45}#download{display:inline-block;color:#121b26;background:#91caee;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:600}#download[hidden]{display:none}#start{background:#72d4ae}#stop{background:#f4b8b8}#status{padding:10px;background:#243348;border-radius:6px}img{max-width:100%;border:1px solid #41556c;border-radius:4px}small{color:#b7c6d9} .controls{display:flex;gap:8px;flex-wrap:wrap} .warn{border-left:3px solid #eac576;padding:8px;background:#2c2a23}
 </style></head>
 <body><main>
 <img class="brand-header" src="brand/jassist-panel-header.svg" width="360" height="96" alt="J-Assist — Technician Copilot">
 <h1>Datto remote assistance</h1>
-<p>Local prototype for authorized AOT staff. This previews the <strong>whole visible Datto tab</strong>, not just PowerShell. Frames stay in your browser; nothing is sent to Jason or saved to disk.</p>
-<div class="warn">This is a full-tab preview, including any visible remote desktop. Do not begin when passwords, patient information, or sensitive client data are visible. Never use screenshots as proof that Jason received live terminal output.</div>
+<p>Local prototype for authorized AOT staff. This previews the <strong>whole visible Datto tab</strong>, not just PowerShell. Live frames stay in your browser. Nothing is sent to Jason; files are saved only when you explicitly download a screenshot.</p>
+<div class="warn">This is a full-tab preview, including any visible remote desktop. Do not capture passwords, patient information, or sensitive client data. Review every screenshot before downloading. Never use screenshots as proof that Jason received live terminal output.</div>
 <div id="scope" role="status">Choose an authorized Datto tab to begin.</div>
 <div class="controls"><button id="start">Start assisting</button><button id="stop" disabled>Stop assisting</button></div>
+<div class="controls"><button id="screenshot" disabled>Capture screenshot</button><a id="download" hidden download="j-assist-evidence.jpg">Download reviewed screenshot</a></div>
+<small id="evidence-status" role="status">No screenshot prepared</small>
+<img id="evidence-frame" alt="Screenshot to review before downloading" hidden>
 <div id="status" role="status">Stopped</div>
 <small id="stamp">No captured frame</small>
 <img id="frame" alt="Most recently captured visible tab" hidden>
