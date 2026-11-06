@@ -164,3 +164,20 @@ origin protections, audited durable provider-neutral sessions (shared-session
 PR #1465), content security/redaction and governed retention. The intended
 subscription-backed ChatGPT interface remains a custom AOT ChatGPT Business
 MCP app; no separate billable model API fallback is permitted.
+
+## Datto native technician authorization contract (development)
+
+`datto_technician_authority.py` requires *fresh Datto-provider-attested
+evidence* tied to the individual AOT technician and the selected device,
+including the current active Datto security level, site/device visibility,
+and Web Remote permission. It does not infer permission from Jason's
+shared service credential, a user's Entra identity alone, or a Chrome
+tab URL. It rejects permission removal, stale evidence, wrong tenant/
+device/technician, missing security-level information, and adapter failure.
+
+Only a test-injected evidence adapter exists. No Datto per-technician
+production evidence source has yet been verified, so this module is
+**not sufficient to enable a real screenshot upload or production rollout**.
+The existing v0.1.6 Chrome preview remains unchanged. The extension
+will need a separate versioned update for an opt-in authenticated
+`Send to Jason` interaction after the server security gate is accepted.
