@@ -278,3 +278,32 @@ identity and Datto user permission, encrypted evidence persistence and
 retention, independent content scanning/redaction, audited remote HTTPS
 ingress, ChatGPT MCP image fetch under matching technician authority,
 and actual technician acceptance.
+
+## One-click send orchestration + MCP read-side contract (2026-11-06)
+
+`experiments/chrome-datto-observer/send_once.js` is a new pure
+background-action coordinator. It rejects an incomplete trusted
+authentication/session/Datto-permission contract BEFORE capturing any
+screen, then checks exact tab continuity, size and type, image hash,
+receipt binding and a post-delivery tab recheck. The send reports success
+only with a matching server-issued receipt. Nine tests cover fail-closed
+capture, bad image, revoked tab and forged acknowledgements. This
+coordinator is **not yet connected to a real Chrome OAuth/HTTPS sender**;
+the v0.1.8 Send button stays disabled.
+
+`chatgpt_image_tool.py` is an in-process, read-only connector contract
+for a future registered Jason MCP image tool. It obtains the confidential
+session credential server-side and revalidates the current technician,
+Datto device, receipt and expiration before yielding base64 image
+evidence with MIME type. It does not run or charge a model, does not
+extract PowerShell text, and does not grant an unverified principal any
+access. Four tests cover exact image bytes, authorization isolation,
+revocation and missing credentials. This adapter is **not registered**
+in the production Jason MCP service or in an AOT ChatGPT workspace.
+
+**Release blockers remain:** verified browser-initiated Entra OAuth and
+Datto active-user Web Remote permission, reviewed encrypted audit and
+image storage, real image content scan/redaction, authorized HTTPS
+ingress, cross-process lifecycle persistence, custom MCP registration
+and genuine AOT ChatGPT Business acceptance. Do not enable live upload
+or declare end-to-end success based on the synthetic tests.
