@@ -31,7 +31,8 @@ class DattoAdministratorEvidence:
     technician_tenant: str
     account_uid: str
     datto_username: str
-    security_level: str
+    # ASSIGNED level, not the currently active Datto UI security level.
+    assigned_security_level: str
     administrator_assigned: bool
     user_enabled: bool
     provider_verified: bool
@@ -78,7 +79,7 @@ class DattoAdministratorScreenAuthorizer:
                     or proof.account_uid != self._aot_account_uid
                     or not isinstance(proof.datto_username, str)
                     or not proof.datto_username.strip()
-                    or proof.security_level != "Administrator"
+                    or proof.assigned_security_level != "Administrator"
                     or proof.administrator_assigned is not True
                     or proof.user_enabled is not True
                     or proof.provider_verified is not True
