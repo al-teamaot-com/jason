@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "services": [
+    {"name":"documentation_assurance","state_file":"documentation-assurance.json","max_age_seconds":3600,"required":false},
+    {"name":"provider_health_monitor","state_file":"provider-health.json","max_age_seconds":900,"required":false},
+    {"name":"test_evidence_collection","state_file":"test-evidence.json","max_age_seconds":86400,"required":false},
+    {"name":"work_reconciliation","state_file":"work-reconciliation.json","max_age_seconds":900,"required":false},
+    {"name":"dependency_conflict","state_file":"dependency-conflict.json","max_age_seconds":3600,"required":false},
+    {"name":"source_baseline_monitor","state_file":"source-baseline.json","max_age_seconds":300,"required":false},
+    {"name":"rollback_readiness","state_file":"rollback-readiness.json","max_age_seconds":900,"required":false},
+    {"name":"operational_acceptance","state_file":"operational-acceptance.json","max_age_seconds":900,"required":false}
+  ]
+}

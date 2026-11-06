@@ -1,0 +1,11 @@
+[Unit]
+Description=Independent governed engineering cadence (todo-intake)
+
+[Timer]
+OnCalendar=*-*-* *:02/5:00 America/New_York
+AccuracySec=15s
+Persistent=true
+Unit=jason-independent-todo-intake.service
+
+[Install]
+WantedBy=timers.target
