@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "J-Assist - Datto (Local Prototype)",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Technician-initiated local Datto preview for J-Assist; no remote transmission in this version.",
   "permissions": [
     "activeTab",
-    "sidePanel"
+    "sidePanel",
+    "clipboardWrite"
   ],
   "background": {
     "service_worker": "worker.js"

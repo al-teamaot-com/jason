@@ -7,9 +7,9 @@ const path=require("node:path");
 const panelCode=fs.readFileSync(path.join(__dirname,"..","panel.js"),"utf8");
 const tinyImage="data:image/jpeg;base64,/9j/2Q==";
 function harness(){
-  const ids=["start","stop","status","stamp","frame","scope","screenshot","download","evidence-frame","evidence-status"];
+  const ids=["start","stop","status","stamp","frame","scope","screenshot","copy-for-chatgpt","download","evidence-frame","evidence-status"];
   const nodes=new Map(ids.map(id=>[id,{id,disabled:false,hidden:true,textContent:"",src:"",href:"",download:"",listeners:{},addEventListener(type,handler){this.listeners[type]=handler;},removeAttribute(name){delete this[name];}}]));
-  nodes.get("stop").disabled=true;nodes.get("screenshot").disabled=true;
+  nodes.get("stop").disabled=true;nodes.get("screenshot").disabled=true;nodes.get("copy-for-chatgpt").disabled=true;
   const calls=[];
   let activeTab=42;
   const handlers={};
@@ -20,9 +20,24 @@ function harness(){
     if(m.type==="capture")return {ok:true,image:tinyImage,capturedAt:"2026-11-06T12:00:00.000Z"};
     throw Error("unexpected");
   }}};
-  const ctx={document:{querySelector:selector=>nodes.get(selector.slice(1))},window:{addEventListener:(event,handler)=>handlers[event]=handler},chrome,JAssistScope:{classify:()=>({supported:true,label:"Datto graphical"})},Date,setInterval:()=>1,clearInterval:()=>{}};
+  const written=[];
+  class FakeImage {
+    set src(value){this._src=value;Promise.resolve().then(()=>this.onload?.());}
+    get naturalWidth(){return 2;}
+    get naturalHeight(){return 2;}
+  }
+  class FakeClipboardItem {constructor(data){this.data=data;}}
+  const navigator={clipboard:{write:async items=>{written.push(await items[0].data["image/png"]);}}};
+  const document={
+    querySelector:selector=>nodes.get(selector.slice(1)),
+    createElement:tag=>{assert.equal(tag,"canvas");return {
+      getContext:()=>({drawImage:()=>{}}),
+      toBlob:callback=>callback({type:"image/png",size:4}),
+    };}
+  };
+  const ctx={document,navigator,ClipboardItem:FakeClipboardItem,Image:FakeImage,window:{addEventListener:(event,handler)=>handlers[event]=handler},chrome,JAssistScope:{classify:()=>({supported:true,label:"Datto graphical"})},Date,setInterval:()=>1,clearInterval:()=>{}};
   vm.runInNewContext(panelCode,ctx,{filename:"panel.js"});
-  return {nodes,calls,handlers,chrome,select:id=>nodes.get(id),changeActive:id=>activeTab=id};
+  return {nodes,calls,handlers,chrome,written,select:id=>nodes.get(id),changeActive:id=>activeTab=id};
 }
 test("requires Start and explicit screenshot click; download is not automatic",async()=>{
  const h=harness(),shot=h.select("screenshot"),save=h.select("download");
@@ -58,4 +73,30 @@ test("page closure revokes download link and requests stop",async()=>{
  assert.equal(h.select("download").hidden,true);
  assert.equal(h.select("screenshot").disabled,true);
  assert.equal(h.calls.at(-1).type,"stop");
+});
+
+test("copy requires explicit review and user click; does not upload",async()=>{
+ const h=harness(),copy=h.select("copy-for-chatgpt");
+ assert.equal(copy.disabled,true);
+ await h.select("start").listeners.click();
+ assert.equal(copy.disabled,true);
+ await h.select("screenshot").listeners.click();
+ assert.equal(copy.disabled,false);
+ assert.equal(h.written.length,0);
+ await copy.listeners.click();
+ assert.equal(h.written.length,1);
+ assert.equal(h.written[0].type,"image/png");
+ assert.match(h.select("evidence-status").textContent,/Paste manually/);
+ assert.equal(h.calls.filter(c=>c.type==="upload"||c.type==="send-to-jason").length,0);
+ await h.select("stop").listeners.click();
+ assert.equal(copy.disabled,true);
+});
+test("changing active tab prevents clipboard copying",async()=>{
+ const h=harness();
+ await h.select("start").listeners.click();
+ await h.select("screenshot").listeners.click();
+ h.changeActive(999);
+ await h.select("copy-for-chatgpt").listeners.click();
+ assert.equal(h.written.length,0);
+ assert.equal(h.select("copy-for-chatgpt").disabled,true);
 });

@@ -72,3 +72,31 @@ To update an installed unpacked extension, replace its files with this version, 
 After **Start assisting**, select **Capture screenshot** to request a **fresh, active Datto tab** frame from the existing authorization-checked worker. Review it in the side panel, then explicitly click **Download reviewed screenshot**. File name carries UTC capture timestamp and no client details. Screenshots are never auto-attached to Autotask, sent to Jason, uploaded or stored in extension storage. The prepared evidence and download link are invalidated on Stop, inactive tab, failed capture, tab navigation/revocation, and panel close. The existing Chrome activeTab capture permission and worker authorization rules are unchanged.
 
 **Visual acceptance required:** With a non-sensitive authorized Datto test tab active, take a screenshot and download it. Confirm the image depicts that test tab, the screenshot link disappears on Stop or tab switch, and no Autotask attachment is created. Manual redaction and ticket attachment remain technician responsibility.
+
+## Version 0.1.7 — copy reviewed screenshot for ChatGPT (manual subscription workflow)
+
+After an authorized Datto session is explicitly started, the technician
+clicks **Capture screenshot**, visually reviews the result, then chooses
+**Copy reviewed screenshot**. The extension converts that selected JPEG
+to a PNG in memory and writes it to the system clipboard, using the added
+`clipboardWrite` permission. The technician must then independently paste
+the image into an approved AOT ChatGPT conversation; no ChatGPT/Datto
+credentials, OpenAI API key or subscription token is requested. The
+extension itself never uploads the image, opens a network connection to
+Jason, or submits the image to ChatGPT. No API inference is used.
+
+Copying is refused before capture, when the selected tab changes, and after
+Stop/closure. The extension clears its download link and internal preview
+on Stop but **cannot erase a screenshot already copied to the operating
+system clipboard**. Technicians must avoid secrets, passwords, protected
+health data or prohibited client information and clear/replace the
+clipboard when finished. Clipboard writes are deliberate user gestures,
+not background capture. Native Chrome permission `clipboardWrite` is
+an additional permission in v0.1.7; do not silently upgrade existing
+staff installations without the technician knowing.
+
+**Not end-to-end automation:** An authorized technician's manual copy/paste
+uses the technician's normal ChatGPT workspace interface and subscription.
+It does not prove custom MCP registration, secure automatic screenshot
+delivery, Datto native-permission evidence, or Jason model analysis via the
+extension. Those remain gated separately.

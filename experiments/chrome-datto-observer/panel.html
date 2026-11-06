@@ -12,11 +12,11 @@ body{font:14px system-ui,sans-serif;margin:0;background:#121b26;color:#edf3f9}ma
 <div class="warn">This is a full-tab preview, including any visible remote desktop. Do not capture passwords, patient information, or sensitive client data. Review every screenshot before downloading. Never use screenshots as proof that Jason received live terminal output.</div>
 <div id="scope" role="status">Choose an authorized Datto tab to begin.</div>
 <div class="controls"><button id="start">Start assisting</button><button id="stop" disabled>Stop assisting</button></div>
-<div class="controls"><button id="screenshot" disabled>Capture screenshot</button><a id="download" hidden download="j-assist-evidence.jpg">Download reviewed screenshot</a></div>
+<div class="controls"><button id="screenshot" disabled>Capture screenshot</button><button id="copy-for-chatgpt" disabled>Copy reviewed screenshot</button><a id="download" hidden download="j-assist-evidence.jpg">Download reviewed screenshot</a></div>
 <small id="evidence-status" role="status">No screenshot prepared</small>
 <img id="evidence-frame" alt="Screenshot to review before downloading" hidden>
 <div id="status" role="status">Stopped</div>
 <small id="stamp">No captured frame</small>
 <img id="frame" alt="Most recently captured visible tab" hidden>
-<p>Phase 1: technician-controlled local preview only. Jason does not yet analyze the content. Authentication, secure delivery, redaction and session audit are not connected.</p>
+<p>To discuss a reviewed screenshot using your AOT ChatGPT subscription, click <strong>Copy reviewed screenshot</strong>, then paste it yourself into an authorized AOT ChatGPT conversation. No image is sent automatically. The clipboard may retain the image until replaced. Do not paste passwords, patient records, or restricted client information.</p><p>Phase 1: technician-controlled local preview only. Jason does not yet analyze the content. Authentication, secure delivery, redaction and session audit are not connected.</p>
 </main><script src="tab_scope.js"></script><script src="panel.js"></script></body></html>
