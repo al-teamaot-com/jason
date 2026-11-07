@@ -5903,15 +5903,37 @@ class OperationalAutonomyMaintenance:
         )
         note_key = f"Client - Approved Communication - {template.template_id}"
         note_fingerprint = template.fingerprint
+        baseline_key = f"{note_key} :: notification receipt baseline"
         prior = self.store.last_note_fingerprint(
             work.ticket_id,
             work.playbook_id,
             note_key,
         )
 
-        baseline_id = self._notification_history_max_id(
-            ticket_id=work.ticket_id, company_id=work.company_id,
-        )
+        if prior == note_fingerprint:
+            # A prior accepted send is not proof that a client received it.
+            # Reuse the pre-send baseline, not the current max ID, so a delayed
+            # receipt remains eligible for confirmation after worker re-entry.
+            prior_baseline = self.store.last_note_fingerprint(
+                work.ticket_id, work.playbook_id, baseline_key,
+            )
+            if prior_baseline is not None:
+                if not prior_baseline.isdecimal():
+                    raise OperationalAutonomyError(
+                        "client-notification durable baseline is invalid"
+                    )
+                baseline_id = int(prior_baseline)
+            else:
+                # Compatibility only for a pending verification state created
+                # before the dedicated baseline key existed. Missing evidence
+                # fails closed instead of declaring an unverified delivery.
+                baseline_id = self._notification_baseline_from_reason(
+                    work.last_reason
+                )
+        else:
+            baseline_id = self._notification_history_max_id(
+                ticket_id=work.ticket_id, company_id=work.company_id,
+            )
         if prior != note_fingerprint:
             self.actions.execute(
                 scope,
@@ -5923,6 +5945,11 @@ class OperationalAutonomyMaintenance:
                         "ticketID": int(work.ticket_id),
                     },
                 },
+            )
+            # Persist the receipt baseline before the send fingerprint. If a
+            # later run sees a prior send, the matching baseline must exist.
+            self.store.remember_note_fingerprint(
+                work.ticket_id, work.playbook_id, baseline_key, str(baseline_id),
             )
             self.store.remember_note_fingerprint(
                 work.ticket_id,
@@ -5962,16 +5989,8 @@ class OperationalAutonomyMaintenance:
                 "VulScan Close Pending/contact readback verification failed"
             )
 
-        if prior == note_fingerprint:
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="vulscan_monitoring" if continue_monitoring else "complete",
-                    last_reason="Approved client VulScan communication already present.",
-                )
-            )
-            return True
-
+        # Even when an earlier send fingerprint matches, a real, post-baseline
+        # Autotask Notification History entry is required for completion.
         if self._gromelski_notification_copy_observed(
             ticket_id=work.ticket_id,
             company_id=work.company_id,
