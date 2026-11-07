@@ -16,6 +16,8 @@ class DattoRmmConnector(ConnectorBase):
     adaptive_collection_keys = {
         "datto_rmm.site.search": "sites",
         "datto_rmm.device.patches.list": "patches",
+        "datto_rmm.site.patches.list": "patches",
+        "datto_rmm.device.patch_policies.list": "policies",
     }
     provider_name = "datto_rmm"
     logical_secret = "datto_rmm.readonly"
@@ -29,6 +31,7 @@ class DattoRmmConnector(ConnectorBase):
             "datto_rmm.device.audit.get",
             "datto_rmm.device.software.list",
             "datto_rmm.device.patches.list",
+            "datto_rmm.device.patch_policies.list",
         }
     )
 
@@ -41,6 +44,8 @@ class DattoRmmConnector(ConnectorBase):
             "datto_rmm.device.audit.get",
             "datto_rmm.device.software.list",
             "datto_rmm.device.patches.list",
+            "datto_rmm.device.patch_policies.list",
+            "datto_rmm.site.patches.list",
             "datto_rmm.account.alerts.open",
             "datto_rmm.site.search",
             "datto_rmm.alerts.list",
@@ -494,7 +499,26 @@ class DattoRmmConnector(ConnectorBase):
         if not collection_key or not isinstance(initial_data, Mapping):
             return initial_data
 
-        adapter = BoundedCollectionReadAdapter(max_probes=5)
+        # The V2 site inventory caps a complete customer-scoped scan at
+        # 6,000 patch rows. The generic 1,000-record read adapter rejects a
+        # valid 1,001+ row site before the inventory can evaluate it.
+        # Widen only this read-only operation; every other collection keeps
+        # the existing 1,000-row and 20-page safeguards.
+        site_patch_read = request.context.capability == "datto_rmm.site.patches.list"
+        if site_patch_read:
+            details = initial_data.get("pageDetails")
+            if isinstance(details, Mapping) and "totalCount" in details:
+                try:
+                    declared = int(details["totalCount"])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Datto site patch declared total is invalid") from exc
+                if declared < 0 or declared > 6000:
+                    raise ValueError("Datto site patch collection exceeds 6000-row scan bound")
+        adapter = (
+            BoundedCollectionReadAdapter(max_probes=5, max_pages=24, max_items=6000)
+            if site_patch_read
+            else BoundedCollectionReadAdapter(max_probes=5)
+        )
 
         def probe(arguments: Mapping[str, Any]) -> Mapping[str, Any]:
             merged_arguments = dict(request.arguments)
@@ -540,6 +564,8 @@ class DattoRmmConnector(ConnectorBase):
                 in {
                     "datto_rmm.site.search",
                     "datto_rmm.device.patches.list",
+                    "datto_rmm.site.patches.list",
+                    "datto_rmm.device.patch_policies.list",
                 }
             ),
         )
@@ -568,6 +594,12 @@ class DattoRmmConnector(ConnectorBase):
             )
 
         payload = result.payload
+
+        # A contradictory provider page cannot bypass the scan limit by
+        # returning more rows than its declared total.
+        if site_patch_read and isinstance(payload.get("patches"), list):
+            if len(payload["patches"]) > 6000:
+                raise ValueError("Datto site patch result exceeds 6000-row scan bound")
 
         if (
             request.context.capability
@@ -1091,6 +1123,18 @@ class DattoRmmConnector(ConnectorBase):
         candidates before any evidence reasoner is allowed to interpret device facts.
         """
 
+        if capability == "datto_rmm.device.patch_policies.list":
+            if isinstance(payload, list):
+                return {"policies": payload}
+            if isinstance(payload, Mapping):
+                if isinstance(payload.get("policies"), list):
+                    return dict(payload)
+                if isinstance(payload.get("items"), list):
+                    return {
+                        "policies": payload["items"],
+                        **({"pageDetails": payload["pageDetails"]} if "pageDetails" in payload else {}),
+                    }
+            raise ValueError("Datto assigned patch-policy collection missing")
         if capability != "datto_rmm.device.search":
             return payload
         records = cls._device_records(payload)
@@ -1313,6 +1357,28 @@ class DattoRmmConnector(ConnectorBase):
             return f"/api/v2/audit/device/{device_uid}/software", {
                 "page": max(int(arguments.get("page", 1)), 1),
                 "max": max(1, min(int(arguments.get("max", 50)), 50)),
+            }
+
+        if capability == "datto_rmm.device.patch_policies.list":
+            device_uid = str(
+                arguments.get("device_uid") or arguments.get("resource_id") or ""
+            ).strip()
+            if not re.fullmatch(r"[A-Za-z0-9-]{1,80}", device_uid):
+                raise ValueError("device_uid or resource_id is required as exact safe UID")
+            return f"/api/v2/device/{device_uid}/policies/patch-management", {
+                "page": max(0, min(int(arguments.get("page", 0)), 100000)),
+                "max": max(1, min(int(arguments.get("max", 250)), 250)),
+            }
+
+        if capability == "datto_rmm.site.patches.list":
+            site_uid = str(
+                arguments.get("site_uid") or arguments.get("resource_id") or ""
+            ).strip()
+            if not re.fullmatch(r"[A-Za-z0-9-]{1,80}", site_uid):
+                raise ValueError("site_uid or resource_id is required as exact safe UID")
+            return f"/api/v2/site/{site_uid}/patches", {
+                "page": max(0, min(int(arguments.get("page", 0)), 100000)),
+                "max": max(1, min(int(arguments.get("max", 250)), 250)),
             }
 
         if capability == "datto_rmm.device.patches.list":
