@@ -53,6 +53,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_COMPANY_READ,
     SERVICE_CONTACT_SEARCH,
     SERVICE_PRODUCT_SEARCH,
+    SERVICE_PURCHASE_ORDER_SEARCH,
     SERVICE_RESOURCE_SEARCH,
     SERVICE_TICKET_SEARCH,
 )
@@ -66,6 +67,9 @@ from .procurement_web_read import CAPABILITY as PROCUREMENT_WEB_PRODUCT_READ
 from .procurement_inventory_billing import AllocationPlan
 from .procurement_supervisor_policy import (
     SupervisorSpendingPolicy, SupervisorPolicyError, money, require_signed_purchase_approval,
+)
+from .procurement_invoice_fidelity import (
+    InvoiceFidelityError, summarize_vendor_invoice, validate_invoice_submission,
 )
 from .parts_inventory_lifecycle import PartsScope, SQLitePartsLifecycleLedger
 from .parts_availability_workflow import GovernedPartsAvailabilityWorkflow
@@ -354,6 +358,14 @@ def _po_execution_plan(
             raise ProcurementFlowError(
                 "multi-line source has no approved PO line plan; refusing PO creation"
             )
+        # Legacy single-line PO writes expose freight, but no deterministic
+        # tax/fee fields. Never record less than the approved commitment.
+        for field in ("tax", "fees"):
+            if _decimal(submission.get(field) or "0", field=field) != Decimal("0.00"):
+                raise ProcurementFlowError(
+                    f"nonzero {field} is not yet deterministically writable "
+                    "to Autotask PO; refusing PO creation"
+                )
         return None
     if not isinstance(raw_lines, list) or not raw_lines:
         raise ProcurementFlowError(
@@ -495,6 +507,20 @@ def _domain(url: Any) -> str | None:
 def _norm(value: Any) -> str | None:
     text = " ".join(str(value or "").casefold().split())
     return text or None
+
+
+def _vendor_invoice_reference(source: Mapping[str, Any]) -> str | None:
+    """Exact, bounded vendor invoice reference for PO matching and creation."""
+    if str(source.get("source_kind") or "").strip().casefold() != "vendor_invoice":
+        return None
+    value = str(source.get("invoice_number") or "").strip()
+    if not value:
+        return None
+    if len(value) > 50 or any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        raise ProcurementFlowError(
+            "Vendor invoice number is invalid or exceeds 50 characters; Human Review required."
+        )
+    return value
 
 
 def _pricing_choices(cost: Decimal) -> tuple[dict[str, str], ...]:
@@ -771,6 +797,22 @@ def _po_card(payload: Mapping[str, Any]) -> dict[str, Any]:
         value = payload.get(key)
         if value not in (None, ""):
             po_facts.append({"title": title, "value": str(value)})
+    reconciliation = payload.get("invoice_reconciliation")
+    if isinstance(reconciliation, Mapping):
+        is_matched = reconciliation.get("status") == "matched"
+        po_facts.append({
+            "title": "Invoice reconciliation",
+            "value": (
+                "Matched"
+                if is_matched
+                else "MISMATCH — resolve source amounts before processing"
+            ),
+        })
+        if not is_matched:
+            po_facts.append({
+                "title": "Unexplained difference",
+                "value": "$" + str(reconciliation.get("difference") or ""),
+            })
     body = [
             {
                 "type": "Container",
@@ -840,7 +882,7 @@ def _po_card(payload: Mapping[str, Any]) -> dict[str, Any]:
                 "type": "Input.Number",
                 "id": "freight",
                 "label": "Freight / Shipping",
-                "value": 0,
+                "value": float(_decimal(payload.get("freight") or "0", field="source freight")),
                 "min": 0,
             },
             {
@@ -859,14 +901,14 @@ def _po_card(payload: Mapping[str, Any]) -> dict[str, Any]:
                 "type": "Input.Number",
                 "id": "tax",
                 "label": "Tax",
-                "value": 0,
+                "value": float(_decimal(payload.get("tax") or "0", field="source tax")),
                 "min": 0,
             },
             {
                 "type": "Input.Number",
                 "id": "fees",
                 "label": "Other Fees",
-                "value": 0,
+                "value": float(_decimal(payload.get("fees") or "0", field="source fees")),
                 "min": 0,
             },
         ],
@@ -1399,6 +1441,10 @@ class ProcurementTeamsFlow:
                 "brand": str(product.get("brand") or "").strip(),
                 "billing_frequency": str(product.get("billing_frequency") or "one_time").strip().casefold(),
                 "cost": f"{cost:.2f}",
+                "quantity": _bounded_int(
+                    1 if product.get("quantity") is None else product["quantity"],
+                    field="source line quantity",
+                ),
                 "existing_product_id": (
                     int(product_match["id"]) if product_match else None
                 ),
@@ -1500,7 +1546,10 @@ class ProcurementTeamsFlow:
                     "brand": str(product.get("brand") or "").strip(),
                     "billing_frequency": billing_frequency,
                     "cost": f"{cost:.2f}",
-                    "quantity": int(product.get("quantity") or 1),
+                    "quantity": _bounded_int(
+                        1 if product.get("quantity") is None else product["quantity"],
+                        field="source line quantity",
+                    ),
                     "existing_product_id": (
                         int(exact_match["id"]) if exact_match else None
                     ),
@@ -1675,6 +1724,14 @@ class ProcurementTeamsFlow:
                 "Normalized procurement source requires one vendor and at least one "
                 "resolvable product line."
             )
+        if len(products) > 100:
+            raise ProcurementFlowError(
+                "Procurement source exceeds the supported 100 line items; Human Review required."
+            )
+        try:
+            reconciliation = summarize_vendor_invoice(normalized, products)
+        except InvoiceFidelityError as exc:
+            raise ProcurementFlowError(str(exc)) from exc
         principal, evidence = self._principal(
             tenant=microsoft_tenant_id,
             object_id=microsoft_object_id,
@@ -1719,6 +1776,8 @@ class ProcurementTeamsFlow:
             )
             if normalized.get(key) is not None
         }
+        if reconciliation:
+            metadata["invoice_reconciliation"] = reconciliation
         if len(products) > 1 or metadata:
             return self._augment_draft_with_parts(
                 draft_result=draft,
@@ -1893,6 +1952,45 @@ class ProcurementTeamsFlow:
             message_id=message_id,
             occurred_at=occurred_at,
         )
+
+    def _reject_existing_vendor_invoice_po(
+        self,
+        *,
+        payload: Mapping[str, Any],
+        principal: BoundConversationPrincipal,
+        evidence: TeamsConversationPrincipalEvidence,
+        correlation_id: str,
+    ) -> None:
+        """Do not create another PO for a known vendor/invoice pair.
+
+        Read via governed Autotask capabilities and fail closed if the query
+        cannot establish uniqueness; never reuse a PO without item validation.
+        """
+        reference = _vendor_invoice_reference(payload)
+        if reference is None:
+            return
+        vendor_id = dict(payload.get("vendor") or {}).get("id")
+        arguments: dict[str, Any] = {
+            "vendor_invoice_number": reference,
+            "page_size": 20,
+        }
+        if vendor_id is not None:
+            arguments["vendor_id"] = int(vendor_id)
+        observed = self._read(
+            principal=principal,
+            evidence=evidence,
+            capability=SERVICE_PURCHASE_ORDER_SEARCH,
+            arguments=arguments,
+            correlation_id=correlation_id,
+        )
+        matches = _items(observed)
+        if matches:
+            existing = matches[0].get("id")
+            raise ProcurementFlowError(
+                "Vendor invoice already matches an Autotask PO"
+                + (f" (ID {existing})" if existing else "")
+                + "; reconcile the existing PO instead of creating a duplicate."
+            )
 
     def _requester_limit(
         self,
@@ -2180,6 +2278,11 @@ class ProcurementTeamsFlow:
         create_client_quote = (
             str(selections.get("create_client_quote") or "false").casefold() == "true"
         )
+        if create_client_quote and create_po:
+            raise ProcurementFlowError(
+                "Creating a client estimate and placing the purchase in the same "
+                "step is prohibited; obtain client acceptance before submitting a PO."
+            )
         item_class = str(selections.get("item_class") or "").strip()
         if item_class not in {"it", "copy_print", "other"}:
             raise ProcurementFlowError("Item classification is invalid.")
@@ -2280,9 +2383,32 @@ class ProcurementTeamsFlow:
         freight = _decimal(selections.get("freight") or "0", field="freight")
         tax = _decimal(selections.get("tax") or "0", field="tax")
         fees = _decimal(selections.get("fees") or "0", field="fees")
+        if create_po and (tax != Decimal("0.00") or fees != Decimal("0.00")):
+            raise ProcurementFlowError(
+                "Autotask PO cannot yet preserve nonzero tax/fees; "
+                "Human Review required before PO creation."
+            )
         unit_cost = Decimal(str(payload["product"]["cost"]))
         commitment = unit_cost * quantity + freight + tax + fees
 
+        try:
+            validate_invoice_submission(
+                payload,
+                quantity=quantity,
+                freight=freight,
+                tax=tax,
+                fees=fees,
+            )
+        except InvoiceFidelityError as exc:
+            raise ProcurementFlowError(str(exc)) from exc
+
+        if create_po:
+            self._reject_existing_vendor_invoice_po(
+                payload=payload,
+                principal=principal,
+                evidence=evidence,
+                correlation_id=correlation,
+            )
         contact_id, requester_name, spending_limit = self._requester_limit(
             payload=payload,
             principal=principal,
@@ -2590,11 +2716,36 @@ class ProcurementTeamsFlow:
                     submission=current,
                 )
 
+        # Repeat source-fidelity verification immediately before execution,
+        # including approval callback/retry paths that bypass the review card.
+        if current.get("invoice_reconciliation"):
+            try:
+                validate_invoice_submission(
+                    current,
+                    quantity=int(current["quantity"]),
+                    freight=_decimal(current.get("freight") or "0", field="freight"),
+                    tax=_decimal(current.get("tax") or "0", field="tax"),
+                    fees=_decimal(current.get("fees") or "0", field="fees"),
+                )
+            except (InvoiceFidelityError, ValueError, KeyError) as exc:
+                raise ProcurementFlowError(
+                    "Approved invoice source no longer reconciles; Human Review required."
+                ) from exc
         po_plan = (
             _po_execution_plan(submission)
             if submission.get("create_po")
             else None
         )
+        invoice_reference = (
+            _vendor_invoice_reference(submission)
+            if submission.get("create_po")
+            else None
+        )
+        ticket_po_reference = None
+        if submission.get("create_po") and submission.get("ticket_id") and submission.get("ticket_number"):
+            ticket_po_reference = str(submission["ticket_number"]).strip().upper()
+            if not ticket_po_reference or len(ticket_po_reference) > 50:
+                raise ProcurementFlowError("Verified ticket PO reference exceeds provider limits")
 
         correlation = f"corr_proc_exec_{uuid4().hex}"
         existing_result = current.get("result")
@@ -2933,6 +3084,11 @@ class ProcurementTeamsFlow:
                 "taxRegionID": 1,
                 "useItemDescriptionsFrom": 1,
             }
+            if invoice_reference:
+                po_payload["vendorInvoiceNumber"] = invoice_reference
+            # Use the provider-verified service ticket as the client PO reference.
+            if ticket_po_reference:
+                po_payload["externalPONumber"] = ticket_po_reference
             purchase_for_company_id = (
                 submission.get("ticket_company_id")
                 or submission.get("selected_company_id")
