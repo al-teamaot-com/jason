@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "production": {
+    "explicit_owner_approval_required": true
+  },
+  "disruption": {
+    "default": "approval_required"
+  },
+  "autonomy": {
+    "default_mode": "approved_playbooks_only"
+  },
+  "ticketing": {},
+  "client_communications": {}
+}
