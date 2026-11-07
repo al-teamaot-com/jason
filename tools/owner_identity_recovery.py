@@ -21,6 +21,7 @@ sys.path.insert(0, str(REPO / "implementation"))
 from orchestrator.owner_identity_recovery import (  # noqa: E402
     RecoveryDenied, apply_recovery, review_recovery,
     apply_rollback, review_rollback,
+    recovery_audit_evidence_sha256,
 )
 
 DEFAULT_BINDINGS = Path("/var/lib/jason/openclaw/teams-identity-bindings.sqlite3")
@@ -50,6 +51,19 @@ def live_owner_allowlist() -> frozenset[str]:
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
             OSError, ValueError, KeyError, IndexError) as exc:
         raise RecoveryDenied("RECOVERY_LIVE_OWNER_VERIFICATION_FAILED") from exc
+
+
+def assert_production_targets(bindings_db: Path, authority_db: Path) -> None:
+    """Production apply must never accept caller-selected alternate databases."""
+    for candidate, canonical in (
+        (bindings_db, DEFAULT_BINDINGS),
+        (authority_db, DEFAULT_AUTHORITY),
+    ):
+        if (candidate != canonical or not candidate.is_file()
+            or candidate.is_symlink() or candidate.resolve() != canonical):
+            raise RecoveryDenied("RECOVERY_PRODUCTION_DATABASE_PATH_REQUIRED")
+        if (candidate.stat().st_mode & 0o077) != 0:
+            raise RecoveryDenied("RECOVERY_PRODUCTION_DATABASE_PERMISSIONS_INVALID")
 
 
 def assert_human_local_approval(digest: str, owner: str, action: str = "RECOVER") -> str:
@@ -125,6 +139,7 @@ def main() -> int:
                 "requires_separate_verified_owner_and_production_authorization": True,
             }, sort_keys=True))
             return 0
+        assert_production_targets(args.bindings_db, args.authority_db)
         if not args.expected_review_sha256 or args.expected_review_sha256 != plan.digest:
             raise RecoveryDenied("RECOVERY_EXPECTED_REVIEW_SHA_REQUIRED_AND_MUST_MATCH")
         if len(args.approval_reference.strip()) < 8 or len(args.directory_evidence_reference.strip()) < 8:
@@ -158,6 +173,10 @@ def main() -> int:
             "action": action,
             "backup_path": str(backup),
             "audit_in_binding_db": True,
+            "audit_evidence_sha256": recovery_audit_evidence_sha256(
+                binding_db=args.bindings_db, event_id=event,
+            ),
+            "requires_external_immutable_audit_archive": True,
         }, sort_keys=True))
         return 0
     except RecoveryDenied as exc:

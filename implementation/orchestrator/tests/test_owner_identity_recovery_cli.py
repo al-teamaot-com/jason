@@ -76,3 +76,16 @@ def test_rollback_requires_distinct_human_challenge(monkeypatch):
         cli.assert_human_local_approval(digest, "person-al", "ROLLBACK")
     monkeypatch.setattr("builtins.input", lambda _: "ROLLBACK person-al " + digest[:16])
     assert cli.assert_human_local_approval(digest, "person-al", "ROLLBACK") == "al"
+
+
+def test_nonproduction_databases_cannot_be_mutated_using_local_recovery_cli(tmp_path):
+    with pytest.raises(RecoveryDenied, match="RECOVERY_PRODUCTION_DATABASE_PATH_REQUIRED"):
+        cli.assert_production_targets(
+            tmp_path / "other-binding.sqlite3",
+            cli.DEFAULT_AUTHORITY,
+        )
+    with pytest.raises(RecoveryDenied, match="RECOVERY_PRODUCTION_DATABASE_PATH_REQUIRED"):
+        cli.assert_production_targets(
+            cli.DEFAULT_BINDINGS,
+            tmp_path / "other-authority.sqlite3",
+        )

@@ -258,7 +258,10 @@ def test_failed_audit_insert_rolls_back_identity_change(sample, monkeypatch):
     with sqlite3.connect(binding) as db:
         db.executescript(recovery._AUDIT_SCHEMA)
         db.execute(
-            "INSERT INTO owner_identity_recovery_audit VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO owner_identity_recovery_audit("
+            "event_id,occurred_at,email,tenant_id,object_id,from_subject,"
+            "to_subject,review_digest,approval_reference,operator_account,action)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             ("owner-recovery-" + fake.hex, "2026-11-07T00:00:00+00:00",
              EMAIL, TENANT, OBJECT, SOURCE, OWNER, recovered.digest,
              "AOT-OLD-EVENT", "al", "recover"),
@@ -302,3 +305,254 @@ def test_concurrent_binding_change_after_backup_does_not_create_audit_schema(sam
         assert db.execute("SELECT jason_identity_id FROM microsoft_identity_bindings").fetchone()[0] == "other-principal"
         assert db.execute("SELECT count(*) FROM sqlite_master WHERE name='owner_identity_recovery_audit'").fetchone()[0] == 0
     assert backup.exists()
+
+
+
+def test_old_recovery_event_cannot_authorize_rollback_of_newer_recovery(sample):
+    from orchestrator.owner_identity_recovery import review_rollback, apply_rollback
+
+    binding, authority, first_backup = sample
+    first = apply_recovery(
+        binding_db=binding, authority_db=authority,
+        review=plan(binding, authority), live_owner_allowlist=OWNERS,
+        approval_reference="AOT-OWNER-FIRST-TEST", operator_account="al",
+        backup_path=first_backup,
+    )
+    rollback_plan = review_rollback(
+        binding_db=binding, authority_db=authority, email=EMAIL,
+        attested_tenant_id=TENANT, attested_object_id=OBJECT,
+        owner_subject=OWNER, original_event_id=first,
+        live_owner_allowlist=OWNERS,
+    )
+    apply_rollback(
+        binding_db=binding, authority_db=authority, review=rollback_plan,
+        live_owner_allowlist=OWNERS, approval_reference="AOT-FIRST-ROLLBACK",
+        operator_account="al",
+        backup_path=first_backup.parent / "second-backup.sqlite3",
+    )
+    second = apply_recovery(
+        binding_db=binding, authority_db=authority,
+        review=plan(binding, authority), live_owner_allowlist=OWNERS,
+        approval_reference="AOT-OWNER-SECOND-TEST", operator_account="al",
+        backup_path=first_backup.parent / "third-backup.sqlite3",
+    )
+    assert second != first
+    with pytest.raises(
+        RecoveryDenied, match="ROLLBACK_ORIGINAL_RECOVERY_NOT_LATEST_EVENT"
+    ):
+        review_rollback(
+            binding_db=binding, authority_db=authority, email=EMAIL,
+            attested_tenant_id=TENANT, attested_object_id=OBJECT,
+            owner_subject=OWNER, original_event_id=first,
+            live_owner_allowlist=OWNERS,
+        )
+    second_rollback = review_rollback(
+        binding_db=binding, authority_db=authority, email=EMAIL,
+        attested_tenant_id=TENANT, attested_object_id=OBJECT,
+        owner_subject=OWNER, original_event_id=second,
+        live_owner_allowlist=OWNERS,
+    )
+    assert second_rollback.original_event_id == second
+    with sqlite3.connect(binding) as db:
+        trace = db.execute(
+            "SELECT related_event_id FROM owner_identity_recovery_audit "
+            "WHERE action='rollback'"
+        ).fetchall()
+        assert trace == [(first,)]
+
+
+def test_original_approval_reference_cannot_be_replayed_after_rollback(sample):
+    from orchestrator.owner_identity_recovery import review_rollback, apply_rollback
+
+    binding, authority, original_backup = sample
+    original = apply_recovery(
+        binding_db=binding, authority_db=authority,
+        review=plan(binding, authority), live_owner_allowlist=OWNERS,
+        approval_reference="OWNER-APPROVED-ONCE", operator_account="al",
+        backup_path=original_backup,
+    )
+    undo = review_rollback(
+        binding_db=binding, authority_db=authority, email=EMAIL,
+        attested_tenant_id=TENANT, attested_object_id=OBJECT,
+        owner_subject=OWNER, original_event_id=original,
+        live_owner_allowlist=OWNERS,
+    )
+    apply_rollback(
+        binding_db=binding, authority_db=authority, review=undo,
+        live_owner_allowlist=OWNERS,
+        approval_reference="OWNER-APPROVED-UNDO", operator_account="al",
+        backup_path=original_backup.parent / "undo.sqlite3",
+    )
+    with pytest.raises(RecoveryDenied, match="RECOVERY_APPROVAL_REFERENCE_ALREADY_USED"):
+        apply_recovery(
+            binding_db=binding, authority_db=authority,
+            review=plan(binding, authority), live_owner_allowlist=OWNERS,
+            approval_reference="OWNER-APPROVED-ONCE", operator_account="al",
+            backup_path=original_backup.parent / "reused.sqlite3",
+        )
+    with sqlite3.connect(binding) as db:
+        assert db.execute(
+            "SELECT jason_identity_id FROM microsoft_identity_bindings"
+        ).fetchone()[0] == SOURCE
+
+
+@pytest.mark.parametrize("email", [
+    "al_admin@@teamaot.com",
+    "hello world@teamaot.com",
+    "al_admin@teamaot.com@example.com",
+])
+def test_malformed_aot_email_denied(sample, email):
+    with pytest.raises(RecoveryDenied, match="RECOVERY_AOT_EMAIL_REQUIRED"):
+        plan(*sample[:2], email=email)
+
+
+@pytest.mark.parametrize("uuid", [
+    "111111111111111111111111111111111111",
+    "zzzzzzzz-1111-1111-1111-111111111111",
+    "1" * 35 + "-",
+])
+def test_invalid_entr_uuid_denied(sample, uuid):
+    with pytest.raises(RecoveryDenied, match="RECOVERY_ATTESTED_ENTRA_UUID_REQUIRED"):
+        plan(*sample[:2], tenant=uuid)
+
+
+def test_recovery_blocks_concurrent_authority_writers_while_binding_lock_held(sample):
+    from orchestrator.owner_identity_recovery import _locked_recovery_connection
+
+    binding, authority, _ = sample
+    db = _locked_recovery_connection(
+        binding_db=binding, authority_db=authority,
+    )
+    try:
+        competing = sqlite3.connect(authority, timeout=0.01)
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                competing.execute(
+                    "INSERT INTO authority_grants VALUES(?,?,?)",
+                    ("late-grant", SOURCE, '{"status":"active","permission":"execute"}'),
+                )
+                competing.commit()
+        finally:
+            competing.rollback()
+            competing.close()
+    finally:
+        db.execute("ROLLBACK")
+        db.close()
+
+
+def test_recovery_denies_if_source_is_promoted_after_backup(sample, monkeypatch):
+    from orchestrator import owner_identity_recovery as recovery
+
+    binding, authority, backup = sample
+    reviewed = plan(binding, authority)
+    original_backup = recovery._take_verified_backup
+
+    def promote_source_after_backup(db_path, out_path):
+        original_backup(db_path, out_path)
+        with sqlite3.connect(authority) as db:
+            db.execute("INSERT INTO authority_grants VALUES(?,?,?)",
+                       ("late-grant", SOURCE,
+                        json.dumps({"grant_id":"late-grant","status":"active",
+                                    "permission":"execute"})))
+
+    monkeypatch.setattr(recovery, "_take_verified_backup", promote_source_after_backup)
+    with pytest.raises(
+        RecoveryDenied, match="RECOVERY_SOURCE_HAS_EXECUTE_OR_ADMINISTER_GRANT"
+    ):
+        apply_recovery(
+            binding_db=binding, authority_db=authority,
+            review=reviewed, live_owner_allowlist=OWNERS,
+            approval_reference="AOT-OWNER-RECOVERY-TEST",
+            operator_account="al", backup_path=backup,
+        )
+    with sqlite3.connect(binding) as db:
+        assert db.execute(
+            "SELECT jason_identity_id FROM microsoft_identity_bindings"
+        ).fetchone()[0] == SOURCE
+
+
+def test_high_risk_apply_denies_wal_authority_mode_without_safe_locking(sample):
+    binding, authority, backup = sample
+    with sqlite3.connect(authority) as db:
+        assert db.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    with pytest.raises(RecoveryDenied, match="RECOVERY_UNSAFE_AUTHORITY_JOURNAL_MODE"):
+        apply_recovery(
+            binding_db=binding, authority_db=authority,
+            review=plan(binding, authority),
+            live_owner_allowlist=OWNERS,
+            approval_reference="AOT-OWNER-RECOVERY-TEST",
+            operator_account="al", backup_path=backup,
+        )
+    with sqlite3.connect(binding) as db:
+        assert db.execute(
+            "SELECT jason_identity_id FROM microsoft_identity_bindings"
+        ).fetchone()[0] == SOURCE
+
+
+def test_audit_evidence_sha_can_be_externally_archived(sample):
+    from orchestrator.owner_identity_recovery import recovery_audit_evidence_sha256
+
+    binding, authority, backup = sample
+    event = apply_recovery(
+        binding_db=binding, authority_db=authority,
+        review=plan(binding, authority), live_owner_allowlist=OWNERS,
+        approval_reference="AUDIT-EVIDENCE-CHANGE",
+        operator_account="al", backup_path=backup,
+    )
+    digest = recovery_audit_evidence_sha256(binding_db=binding, event_id=event)
+    assert len(digest) == 64
+    assert digest == recovery_audit_evidence_sha256(
+        binding_db=binding, event_id=event,
+    )
+    with pytest.raises(RecoveryDenied, match="RECOVERY_AUDIT_EVENT_MISSING"):
+        recovery_audit_evidence_sha256(
+            binding_db=binding, event_id="not-a-real-event",
+        )
+
+
+def test_rollback_denies_if_source_promoted_after_backup(sample, monkeypatch):
+    from orchestrator import owner_identity_recovery as recovery
+
+    binding, authority, initial_backup = sample
+    event = apply_recovery(
+        binding_db=binding, authority_db=authority,
+        review=plan(binding, authority),
+        live_owner_allowlist=OWNERS,
+        approval_reference="OWNER-RECOVERY-FIRST",
+        operator_account="al", backup_path=initial_backup,
+    )
+    rollback_review = recovery.review_rollback(
+        binding_db=binding, authority_db=authority,
+        email=EMAIL, attested_tenant_id=TENANT, attested_object_id=OBJECT,
+        owner_subject=OWNER, original_event_id=event,
+        live_owner_allowlist=OWNERS,
+    )
+    original_backup = recovery._take_verified_backup
+
+    def promote_source_after_backup(db_path, out_path):
+        original_backup(db_path, out_path)
+        with sqlite3.connect(authority) as db:
+            db.execute(
+                "INSERT INTO authority_grants VALUES(?,?,?)",
+                ("late-execute-grant", SOURCE, json.dumps({
+                    "grant_id": "late-execute-grant",
+                    "status": "active", "permission": "execute",
+                })),
+            )
+
+    monkeypatch.setattr(recovery, "_take_verified_backup", promote_source_after_backup)
+    with pytest.raises(RecoveryDenied, match="ROLLBACK_SOURCE_NOT_READ_ONLY"):
+        recovery.apply_rollback(
+            binding_db=binding, authority_db=authority,
+            review=rollback_review, live_owner_allowlist=OWNERS,
+            approval_reference="OWNER-ROLLBACK-REVIEW",
+            operator_account="al",
+            backup_path=initial_backup.parent / "rollback-backup.sqlite3",
+        )
+    with sqlite3.connect(binding) as db:
+        assert db.execute(
+            "SELECT jason_identity_id FROM microsoft_identity_bindings"
+        ).fetchone()[0] == OWNER
+        assert db.execute(
+            "SELECT count(*) FROM owner_identity_recovery_audit"
+        ).fetchone()[0] == 1

@@ -42,8 +42,13 @@ def _read_only(path: Path):
         db.close()
 
 
-def _identity(db: sqlite3.Connection, identity_id: str) -> dict:
-    row = db.execute("SELECT payload FROM identities WHERE identity_id=?", (identity_id,)).fetchone()
+def _identity(
+    db: sqlite3.Connection, identity_id: str, *, attached: bool = False,
+) -> dict:
+    table = "authority.identities" if attached else "identities"
+    row = db.execute(
+        f"SELECT payload FROM {table} WHERE identity_id=?", (identity_id,),
+    ).fetchone()
     if row is None:
         raise RecoveryDenied("RECOVERY_IDENTITY_MISSING")
     try:
@@ -76,9 +81,10 @@ def review_recovery(
     tenant = attested_tenant_id.strip().casefold()
     object_id = attested_object_id.strip().casefold()
     owner = owner_subject.strip()
-    if not email.endswith("@teamaot.com") and not email.endswith("@teamaom.com"):
+    if not re.fullmatch(r"[^@\s]+@(teamaot\.com|teamaom\.com)", email):
         raise RecoveryDenied("RECOVERY_AOT_EMAIL_REQUIRED")
-    if not re.fullmatch(r"[a-f0-9-]{36}", tenant) or not re.fullmatch(r"[a-f0-9-]{36}", object_id):
+    uuid_pattern = r"[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}"
+    if not re.fullmatch(uuid_pattern, tenant) or not re.fullmatch(uuid_pattern, object_id):
         raise RecoveryDenied("RECOVERY_ATTESTED_ENTRA_UUID_REQUIRED")
     if owner not in live_owner_allowlist or not live_owner_allowlist:
         raise RecoveryDenied("RECOVERY_NOT_IN_LIVE_OWNER_ALLOWLIST")
@@ -143,7 +149,8 @@ _AUDIT_DDL = (
         review_digest TEXT NOT NULL,
         approval_reference TEXT NOT NULL,
         operator_account TEXT NOT NULL,
-        action TEXT NOT NULL DEFAULT 'recover'
+        action TEXT NOT NULL DEFAULT 'recover',
+        related_event_id TEXT
     )""",
     """CREATE TRIGGER IF NOT EXISTS owner_recovery_audit_no_update
     BEFORE UPDATE ON owner_identity_recovery_audit
@@ -166,7 +173,8 @@ def _take_verified_backup(binding_db: Path, backup_path: Path) -> None:
     fd.close()
     backup_path.chmod(0o600)
     try:
-        with sqlite3.connect(str(binding_db)) as src:
+        # Do not create an empty production DB if source is missing.
+        with sqlite3.connect(f"file:{binding_db}?mode=ro", uri=True) as src:
             with sqlite3.connect(str(backup_path)) as dst:
                 src.backup(dst)
         with _read_only(backup_path) as copy:
@@ -175,6 +183,94 @@ def _take_verified_backup(binding_db: Path, backup_path: Path) -> None:
     except BaseException:
         backup_path.unlink(missing_ok=True)
         raise
+
+
+
+def _locked_recovery_connection(
+    *, binding_db: Path, authority_db: Path,
+) -> sqlite3.Connection:
+    """Lock both rollback-journal SQLite DBs for a single exact-state action.
+
+    Fail closed for WAL, where a read-only attached DB would not lock out
+    concurrent authority writers. No cross-DB writes are performed.
+    """
+    for path in (binding_db, authority_db):
+        if path.is_symlink() or not path.is_file():
+            raise RecoveryDenied("RECOVERY_DATABASE_UNAVAILABLE")
+    db = sqlite3.connect(
+        f"file:{binding_db}?mode=rw", uri=True,
+        isolation_level=None, timeout=10,
+    )
+    db.row_factory = sqlite3.Row
+    try:
+        db.execute(
+            "ATTACH DATABASE ? AS authority",
+            (f"file:{authority_db}?mode=ro",),
+        )
+        if db.execute(
+            "PRAGMA authority.journal_mode"
+        ).fetchone()[0] not in {"delete", "persist", "truncate"}:
+            raise RecoveryDenied("RECOVERY_UNSAFE_AUTHORITY_JOURNAL_MODE")
+        db.execute("BEGIN IMMEDIATE")
+        return db
+    except BaseException:
+        db.close()
+        raise
+
+
+def _verify_locked_owner_identity(
+    db: sqlite3.Connection, review: RecoveryReview,
+    live_owner_allowlist: frozenset[str],
+) -> None:
+    """Re-check and fingerprint grants while the authority DB is locked."""
+    if review.owner_subject not in live_owner_allowlist:
+        raise RecoveryDenied("RECOVERY_OWNER_POLICY_CHANGED")
+    _identity(db, review.source_subject, attached=True)
+    _identity(db, review.owner_subject, attached=True)
+    grants = db.execute(
+        "SELECT payload FROM authority.authority_grants WHERE subject_id=?",
+        (review.source_subject,),
+    ).fetchall()
+    checked = []
+    for record in grants:
+        try:
+            payload = json.loads(record["payload"])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise RecoveryDenied("RECOVERY_SOURCE_GRANT_CORRUPT") from exc
+        if payload.get("status") == "active" and payload.get("permission") != "observe":
+            raise RecoveryDenied("RECOVERY_SOURCE_HAS_EXECUTE_OR_ADMINISTER_GRANT")
+        checked.append((payload.get("grant_id"), payload.get("status")))
+    proof = {
+        "version": 1, "email": review.email,
+        "tenant_id": review.tenant_id, "object_id": review.object_id,
+        "source_subject": review.source_subject,
+        "owner_subject": review.owner_subject,
+        "source_active": True, "owner_active": True,
+        "owner_allowlist": sorted(live_owner_allowlist),
+        "active_source_grants": sorted(checked),
+    }
+    digest = hashlib.sha256(
+        json.dumps(proof, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if digest != review.digest:
+        raise RecoveryDenied("RECOVERY_AUTHORITY_CHANGED_DURING_PREPARE")
+
+
+def _verify_locked_rollback_identity(
+    db: sqlite3.Connection, review: RecoveryRollbackReview,
+) -> None:
+    _identity(db, review.from_owner, attached=True)
+    _identity(db, review.to_source, attached=True)
+    for row in db.execute(
+        "SELECT payload FROM authority.authority_grants WHERE subject_id=?",
+        (review.to_source,),
+    ):
+        try:
+            grant = json.loads(row["payload"])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise RecoveryDenied("ROLLBACK_SOURCE_GRANT_CORRUPT") from exc
+        if grant.get("status") == "active" and grant.get("permission") != "observe":
+            raise RecoveryDenied("ROLLBACK_SOURCE_NOT_READ_ONLY")
 
 
 def apply_recovery(
@@ -203,14 +299,20 @@ def apply_recovery(
     _take_verified_backup(binding_db, backup_path)
     # Local OS authentication is enforced by the CLI. This operation must never
     # be exposed as an MCP method or as a direct provider mutation.
-    db = sqlite3.connect(str(binding_db), isolation_level=None, timeout=10)
-    db.row_factory = sqlite3.Row
+    db = _locked_recovery_connection(
+        binding_db=binding_db, authority_db=authority_db,
+    )
     try:
-        db.execute("BEGIN IMMEDIATE")
+        _verify_locked_owner_identity(db, review, live_owner_allowlist)
         # Schema, binding mutation and immutable audit are atomic. A denied
         # recovery must not even leave an empty audit table behind.
         for ddl in _AUDIT_DDL:
             db.execute(ddl)
+        if db.execute(
+            "SELECT count(*) FROM owner_identity_recovery_audit "
+            "WHERE approval_reference=?", (approval_reference.strip(),)
+        ).fetchone()[0]:
+            raise RecoveryDenied("RECOVERY_APPROVAL_REFERENCE_ALREADY_USED")
         rows = _binding_rows(db, review.email)
         if (len(rows) != 1 or
             rows[0]["microsoft_tenant_id"].casefold() != review.tenant_id or
@@ -301,6 +403,13 @@ def review_rollback(
             audit["object_id"].casefold() != oid or
             audit["to_subject"] != owner):
             raise RecoveryDenied("ROLLBACK_ORIGINAL_EVENT_ATTESTATION_MISMATCH")
+        latest = bindings.execute(
+            "SELECT event_id FROM owner_identity_recovery_audit "
+            "WHERE email=? AND tenant_id=? AND object_id=? "
+            "ORDER BY rowid DESC LIMIT 1", (email, tenant, oid),
+        ).fetchone()
+        if latest is None or latest["event_id"] != original_event_id:
+            raise RecoveryDenied("ROLLBACK_ORIGINAL_RECOVERY_NOT_LATEST_EVENT")
         source = audit["from_subject"]
         if source != "person-entra-" + re.sub(r"[^a-f0-9]", "", oid):
             raise RecoveryDenied("ROLLBACK_ORIGINAL_SOURCE_NOT_JIT_PRINCIPAL")
@@ -360,10 +469,16 @@ def apply_rollback(
     if current != review:
         raise RecoveryDenied("ROLLBACK_PRESTATE_REVIEW_DIGEST_CHANGED")
     _take_verified_backup(binding_db, backup_path)
-    db = sqlite3.connect(str(binding_db), isolation_level=None, timeout=10)
-    db.row_factory = sqlite3.Row
+    db = _locked_recovery_connection(
+        binding_db=binding_db, authority_db=authority_db,
+    )
     try:
-        db.execute("BEGIN IMMEDIATE")
+        _verify_locked_rollback_identity(db, review)
+        if db.execute(
+            "SELECT count(*) FROM owner_identity_recovery_audit "
+            "WHERE approval_reference=?", (approval_reference.strip(),)
+        ).fetchone()[0]:
+            raise RecoveryDenied("ROLLBACK_APPROVAL_REFERENCE_ALREADY_USED")
         rows = _binding_rows(db, review.email)
         if (len(rows) != 1 or
             rows[0]["microsoft_tenant_id"].casefold() != review.tenant_id or
@@ -377,11 +492,14 @@ def apply_rollback(
         ).fetchone()[0] != 0:
             raise RecoveryDenied("ROLLBACK_CONCURRENT_SOURCE_BINDING_CHANGE")
         event = db.execute(
-            "SELECT event_id FROM owner_identity_recovery_audit "
-            "WHERE event_id=? AND action='recover'", (review.original_event_id,)
+            "SELECT event_id, action FROM owner_identity_recovery_audit "
+            "WHERE email=? AND tenant_id=? AND object_id=? "
+            "ORDER BY rowid DESC LIMIT 1",
+            (review.email, review.tenant_id, review.object_id),
         ).fetchone()
-        if event is None:
-            raise RecoveryDenied("ROLLBACK_ORIGINAL_AUDIT_DISAPPEARED")
+        if (event is None or event["event_id"] != review.original_event_id
+            or event["action"] != "recover"):
+            raise RecoveryDenied("ROLLBACK_ORIGINAL_RECOVERY_NOT_LATEST_EVENT")
         updated = db.execute(
             "UPDATE microsoft_identity_bindings SET jason_identity_id=? "
             "WHERE microsoft_tenant_id=? AND microsoft_object_id=? "
@@ -395,12 +513,14 @@ def apply_rollback(
         db.execute(
             "INSERT INTO owner_identity_recovery_audit"
             "(event_id,occurred_at,email,tenant_id,object_id,from_subject,"
-            "to_subject,review_digest,approval_reference,operator_account,action)"
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "to_subject,review_digest,approval_reference,operator_account,"
+            "action,related_event_id)"
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (event_id, datetime.now(timezone.utc).isoformat(),
              review.email, review.tenant_id, review.object_id,
              review.from_owner, review.to_source, review.digest,
-             approval_reference.strip(), operator_account.strip(), "rollback"),
+             approval_reference.strip(), operator_account.strip(), "rollback",
+             review.original_event_id),
         )
         db.execute("COMMIT")
     except BaseException:
@@ -422,3 +542,27 @@ def apply_rollback(
         if row is None or row[0] != review.to_source or audit != 1:
             raise RecoveryDenied("ROLLBACK_POST_READBACK_FAILED")
     return event_id
+
+
+def recovery_audit_evidence_sha256(
+    *, binding_db: Path, event_id: str,
+) -> str:
+    """Digest the durable audit record for separate immutable evidence archiving.
+
+    SQLite update/delete triggers provide local append protection, not
+    filesystem-level immutability against a privileged host administrator.
+    """
+    with _read_only(binding_db) as db:
+        row = db.execute(
+            "SELECT event_id,occurred_at,email,tenant_id,object_id,"
+            "from_subject,to_subject,review_digest,approval_reference,"
+            "operator_account,action,related_event_id "
+            "FROM owner_identity_recovery_audit WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        if row is None:
+            raise RecoveryDenied("RECOVERY_AUDIT_EVENT_MISSING")
+        encoded = json.dumps(
+            dict(row), sort_keys=True, separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(encoded).hexdigest()

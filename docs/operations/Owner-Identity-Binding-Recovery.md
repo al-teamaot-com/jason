@@ -44,13 +44,15 @@ sudo python3 tools/owner_identity_recovery.py --apply \
   --directory-evidence-reference INDEPENDENT_ENTRA_EVIDENCE_RECORD
 ```
 
-The command fails closed without root effective UID, individual `SUDO_USER`, a real interactive console, and the exact human-entered `RECOVER person-al <digest-prefix>` challenge. It rechecks the live Owner allowlist and identity prestate, creates a restrictive `0600` SQLite backup, updates **exactly one** binding, and appends an immutable `owner_identity_recovery_audit` event **in the same SQLite transaction**. It performs readback before claiming success. No other identities or grants change.
+The command fails closed without root effective UID, individual `SUDO_USER`, a real interactive console, and the exact human-entered `RECOVER person-al <digest-prefix>` challenge. It allows production writes **only to the two canonical database paths**. It rechecks the live Owner allowlist and identity prestate, creates a restrictive `0600` SQLite backup, and opens a coordinated SQLite rollback-journal transaction that locks the separate identity-authority database during the exact update. WAL mode is refused rather than weakening this concurrency guarantee. It updates **exactly one** binding and appends a SQL append-protected `owner_identity_recovery_audit` event **in the same binding database transaction**. It performs readback before claiming success. No other identities or grants change.
+
+**Evidence custody:** A database trigger prevents ordinary SQL UPDATE/DELETE of the audit row, but a host administrator can still alter a database file or schema; this is **not equivalent to true immutable evidence**. The CLI prints an `audit_evidence_sha256` digest and `requires_external_immutable_audit_archive=true`. The authorized human operator must archive the event, digest, source/release SHA, verified approval and backup reference through Jason's separately controlled immutable evidence/change-management system as part of release closeout. Do not claim the identity recovery has completed its evidence obligation before external custody is verified.
 
 ## Deterministic single-binding rollback
 
 Review the returned `owner-recovery-...` event using `--rollback-event-id ORIGINAL_EVENT_ID` with the same read-only email/Entra UUID parameters. Record that rollback review SHA. With separately authorized rollback change, repeat the command with `--apply --rollback-event-id ORIGINAL_EVENT_ID --expected-review-sha256 APPROVED_ROLLBACK_SHA256 --approval-reference APPROVED_ROLLBACK_RECORD --directory-evidence-reference INDEPENDENT_ENTRA_EVIDENCE_RECORD`. The human must enter `ROLLBACK person-al <digest-prefix>`.
 
-Rollback requires the original immutable event, exact current Owner binding and still-active JIT source, takes a new backup, reverses only that binding, appends a separate immutable audit event, and verifies readback. **Never overwrite the whole binding database from a snapshot**, as unrelated bindings may have changed.
+Rollback requires the original SQL append-protected event **as the latest identity event** (an older recovery event cannot undo a newer recovery), exact current Owner binding and still-active JIT source, takes a new backup, reverses only that binding, appends a separate immutable audit event, and verifies readback. **Never overwrite the whole binding database from a snapshot**, as unrelated bindings may have changed.
 
 ## XYZ notification acceptance (only after recovered Owner readback)
 
