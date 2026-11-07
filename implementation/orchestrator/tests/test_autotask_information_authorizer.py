@@ -711,3 +711,79 @@ def test_ticket_contact_profile_does_not_authorize_contact_enumeration(monkeypat
         bindings=_Bindings(None),
     ).invoke(request=request, resolution=_resolution(SERVICE_CONTACT_SEARCH))
     assert result.information_authorization.require_allowed(InformationAction.RELEASE).allowed is False
+
+
+def test_vulscan_notification_read_is_ticket_scoped_and_owner_policy_only() -> None:
+    from dataclasses import replace
+
+    base = _request(
+        SERVICE_NOTIFICATION_HISTORY_SEARCH,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-vulscan-notification-read-v1",),
+    )
+    args = {"company_id": 597, "ticket_id": 143479, "page_size": 100}
+    request = replace(base, arguments=args)
+    output = {"provider": "autotask", "data": {"items": [
+        {"id": 11, "ticketID": 143479, "recipientEmailAddress": "authorized@example.com"},
+    ]}}
+    authorizer = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate(output), bindings=_Bindings(None),
+    )
+    decision = authorizer.invoke(
+        request=request, resolution=_resolution(SERVICE_NOTIFICATION_HISTORY_SEARCH),
+    ).information_authorization.require_allowed(InformationAction.RELEASE)
+    assert decision.allowed is True
+    assert "autonomous-vulscan-notification-read-v1" in decision.authorization_basis
+
+    for restricted_request in (
+        replace(request, policy_ids=("autonomous-worker-read-v1",)),
+        replace(request, principal_id="other-service"),
+        replace(request, requester_kind="human"),
+        replace(request, authority_allowed=False),
+        replace(request, authority_context_id=None),
+        replace(request, permission_mode="execute"),
+        replace(request, arguments={**args, "company_id": 208}),
+        replace(request, arguments={**args, "ticket_id": 0}),
+        replace(request, arguments={**args, "page_size": 101}),
+        replace(request, arguments={**args, "page_size": True}),
+        replace(request, arguments={"company_id": 597, "page_size": 100}),
+        replace(request, arguments={**args, "template_name": "any"}),
+    ):
+        denial = authorizer.invoke(
+            request=restricted_request,
+            resolution=_resolution(SERVICE_NOTIFICATION_HISTORY_SEARCH),
+        ).information_authorization.require_allowed(InformationAction.RELEASE)
+        assert denial.allowed is False
+
+    unrelated = replace(request, capability_name=SERVICE_TICKET_SEARCH)
+    denied_other_capability = authorizer.invoke(
+        request=unrelated, resolution=_resolution(SERVICE_TICKET_SEARCH),
+    ).information_authorization.require_allowed(InformationAction.RELEASE)
+    assert denied_other_capability.allowed is False
+
+
+def test_vulscan_notification_policy_rejects_cross_ticket_provider_evidence() -> None:
+    from dataclasses import replace
+
+    request = replace(
+        _request(
+            SERVICE_NOTIFICATION_HISTORY_SEARCH,
+            requester_kind="service",
+            principal_id="jason-autonomy-worker",
+            policy_ids=("autonomous-vulscan-notification-read-v1",),
+        ),
+        arguments={"company_id": 597, "ticket_id": 143479, "page_size": 100},
+    )
+    for row in (
+        {"ticketID": 143480},
+        {"ticketID": 143479, "companyID": 208},
+        {"id": 1},
+    ):
+        decision = AutotaskImpersonationInformationAuthorizer(
+            delegate=_Delegate({"provider": "autotask", "data": {"items": [row]}}),
+            bindings=_Bindings(None),
+        ).invoke(
+            request=request, resolution=_resolution(SERVICE_NOTIFICATION_HISTORY_SEARCH),
+        ).information_authorization.require_allowed(InformationAction.RELEASE)
+        assert decision.allowed is False
