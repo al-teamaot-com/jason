@@ -548,6 +548,7 @@ def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None
                     "explicit_owner_one_transaction_unfreeze",
                     "signed_teams_replacement_unfreeze",
                     "signed_teams_initial_unfreeze",
+                    "signed_teams_initial_unfreeze_renewal",
                 }
                 and doc.get("freeze_restored") is False
                 and doc.get("status") in {"authorized_pending", "unfrozen_active"}):
@@ -618,8 +619,9 @@ def begin_one_transaction_freeze_exception(
     snapshot = _freeze_marker_snapshot(state_root)
     is_replacement = context.get("authorization") == "signed_teams_replacement_unfreeze"
     is_initial = context.get("authorization") == "signed_teams_initial_unfreeze"
+    is_initial_renewal = context.get("authorization") == "signed_teams_initial_unfreeze_renewal"
     if (context.get("authorization") == "explicit_owner_one_transaction_unfreeze"
-            or is_replacement or is_initial):
+            or is_replacement or is_initial or is_initial_renewal):
         # Revalidate the precise preauthorized receipt while the native
         # production transaction lock is held; do not permit a changed source
         # or freeze marker between context construction and marker removal.
@@ -632,6 +634,12 @@ def begin_one_transaction_freeze_exception(
         elif is_initial:
             proof = state_root / "owner-signed-unfreeze-receipts" / (
                 str(context["release_id"]) + ".json")
+        elif is_initial_renewal:
+            renewal_id = str(context.get("renewal_approval_id") or "")
+            if re.fullmatch(r"relapproval-[0-9a-f]{32}", renewal_id) is None:
+                raise ReleaseManagerError("signed initial renewal approval identity invalid")
+            proof = state_root / "owner-signed-initial-unfreeze-renewals" / (
+                str(context["release_id"]) + "--" + renewal_id + ".json")
         else:
             proof = state_root / "owner-explicit-unfreeze-receipts" / (
                 str(context["release_id"]) + ".json")
@@ -651,15 +659,19 @@ def begin_one_transaction_freeze_exception(
                 or source.get("rollback_sha") != context.get("rollback_sha")
                 or source.get("scope_sha256") != context.get("scope_sha256")):
             raise ReleaseManagerError("explicit Owner unfreeze authorization mismatch")
-        if is_replacement or is_initial:
+        if is_replacement or is_initial or is_initial_renewal:
             try:
                 expires = datetime.fromisoformat(str(source.get("expires_at")))
             except (ValueError, TypeError) as exc:
                 raise ReleaseManagerError("replacement approval has no valid expiry") from exc
-            expected_id = (replacement_id if is_replacement else
-                           str(context["owner_approval_source"]).split(":", 1)[-1])
+            expected_id = (
+                replacement_id if is_replacement else
+                renewal_id if is_initial_renewal else
+                str(context["owner_approval_source"]).split(":", 1)[-1]
+            )
             expected_kind = ("signed_teams_replacement_unfreeze" if is_replacement
-                             else "signed_teams_initial_unfreeze")
+                             else "signed_teams_initial_unfreeze_renewal"
+                             if is_initial_renewal else "signed_teams_initial_unfreeze")
             if (source.get("authorization") != expected_kind
                     or source.get("approval_id") != expected_id
                     or expires.tzinfo is None
@@ -681,17 +693,21 @@ def begin_one_transaction_freeze_exception(
     receipt_path = _freeze_receipt_path(
         state_root, str(context["release_id"]),
         replacement_approval_id=(str(context["replacement_approval_id"])
-                                 if is_replacement else None),
+                                 if is_replacement else
+                                 str(context["renewal_approval_id"])
+                                 if is_initial_renewal else None),
     )
     if receipt_path.exists() or receipt_path.is_symlink():
         raise ReleaseManagerError("one-release freeze exception receipt already exists")
     approval_id = (str(context["replacement_approval_id"]) if is_replacement else
+                   str(context["renewal_approval_id"]) if is_initial_renewal else
                    str(context["owner_approval_source"]).split(":", 1)[-1])
     authorization = str(context.get("authorization") or "signed_teams_one_transaction_unfreeze")
     if authorization not in {"signed_teams_one_transaction_unfreeze",
                              "explicit_owner_one_transaction_unfreeze",
                              "signed_teams_replacement_unfreeze",
-                             "signed_teams_initial_unfreeze"}:
+                             "signed_teams_initial_unfreeze",
+                             "signed_teams_initial_unfreeze_renewal"}:
         raise ReleaseManagerError("unsupported one-transaction freeze authorization")
     receipt = {
         "schema_version": "2.0",
@@ -699,7 +715,8 @@ def begin_one_transaction_freeze_exception(
         **({"explicit_unfreeze_receipt_sha256": context["explicit_unfreeze_receipt_sha256"]}
            if authorization in {"explicit_owner_one_transaction_unfreeze",
                                 "signed_teams_replacement_unfreeze",
-                                "signed_teams_initial_unfreeze"} else {}),
+                                "signed_teams_initial_unfreeze",
+                                "signed_teams_initial_unfreeze_renewal"} else {}),
         "approval_id": approval_id,
         "release_id": str(context["release_id"]),
         "candidate_sha": str(context["candidate_sha"]),
@@ -888,6 +905,7 @@ def restore_one_transaction_freeze_exception(
     if receipt.get("authorization") in {
         "explicit_owner_one_transaction_unfreeze", "signed_teams_replacement_unfreeze",
         "signed_teams_initial_unfreeze",
+        "signed_teams_initial_unfreeze_renewal",
     }:
         if receipt.get("authorization") == "signed_teams_replacement_unfreeze":
             source_receipt = state_root / "owner-replacement-unfreeze-receipts" / (
@@ -895,6 +913,9 @@ def restore_one_transaction_freeze_exception(
         elif receipt.get("authorization") == "signed_teams_initial_unfreeze":
             source_receipt = state_root / "owner-signed-unfreeze-receipts" / (
                 str(receipt["release_id"]) + ".json")
+        elif receipt.get("authorization") == "signed_teams_initial_unfreeze_renewal":
+            source_receipt = state_root / "owner-signed-initial-unfreeze-renewals" / (
+                str(receipt["release_id"]) + "--" + str(receipt["approval_id"]) + ".json")
         else:
             source_receipt = state_root / "owner-explicit-unfreeze-receipts" / (
                 str(receipt["release_id"]) + ".json")
@@ -5660,6 +5681,218 @@ def record_signed_initial_unfreeze(
     return doc
 
 
+def record_signed_initial_unfreeze_renewal(
+    repo: Path, state_root: Path, *, release_id: str, candidate_sha: str,
+    approval_id: str, signed_evidence_sha256: str,
+    request_metadata: Mapping[str, Any], decided_at: datetime,
+    expires_at: datetime,
+) -> dict[str, Any]:
+    """Record a NEW signed frozen transaction, never a second release grant.
+
+    The old expired signed receipt and original exact Owner approval remain
+    untouched. An independent Teams challenge, identity and signature must
+    be verified by release_mobile_approval_consumer before calling here.
+    """
+    from jason_runtime.mobile_release_approval import (
+        read_expired_initial_unfreeze_predecessor,
+    )
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    if (not one_transaction_release_id_matches_candidate(release_id, candidate_sha)
+            or re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", signed_evidence_sha256) is None
+            or decided_at.tzinfo is None or expires_at.tzinfo is None
+            or not decided_at < expires_at
+            or not 0 < (expires_at - decided_at).total_seconds() <= 900
+            or datetime.now(timezone.utc) >= expires_at
+            or request_metadata.get("initial_unfreeze_renewal_only") is not True
+            or request_metadata.get("review_only") is True
+            or request_metadata.get("replacement_unfreeze_only") is True):
+        raise ReleaseManagerError("signed initial unfreeze renewal missing fresh exact owner decision")
+    record = load_record(state_root, release_id)
+    owner = record.get("owner_approval") or {}
+    if (record.get("state") != "production_eligible"
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate_sha
+            or not str(owner.get("source") or "").startswith(
+                "authenticated_mobile_teams_owner:relapproval-"
+            ) or (record.get("release_candidate") or {}).get("candidate_sha") != candidate_sha
+            or request_metadata.get("candidate_sha") != candidate_sha
+            or request_metadata.get("release_id") != release_id
+            or request_metadata.get("rollback_sha") != record.get("rollback_sha")):
+        raise ReleaseManagerError("signed renewal does not match approved exact release")
+    existing = record.get("renewed_initial_unfreeze_authorization")
+    if existing is not None:
+        if (not isinstance(existing, Mapping)
+                or existing.get("approval_id") != approval_id
+                or existing.get("signed_evidence_sha256") != signed_evidence_sha256):
+            raise ReleaseManagerError("another initial unfreeze renewal already exists")
+    verify_candidate_on_main(repo, candidate_sha)
+    require_current_manual_scope_review(repo, state_root, record)
+    revalidate_circuit_breaker(state_root)
+    live_production_alignment(str(record["rollback_sha"]))
+    baseline = dict(record)
+    baseline["renewed_initial_unfreeze_authorization"] = None
+    try:
+        lineage = read_expired_initial_unfreeze_predecessor(
+            state_root, release_id, baseline,
+        )
+    except PermissionError as exc:
+        raise ReleaseManagerError("prior signed initial unfreeze not safely expired") from exc
+    binding = current_initial_freeze_binding(state_root, record)
+    if (request_metadata.get("initial_unfreeze_renewal_lineage") != lineage
+            or request_metadata.get("initial_freeze_binding") != binding
+            or request_metadata.get("manifest_sha256") != binding["manifest_sha256"]):
+        raise ReleaseManagerError("signed initial renewal changed predecessor or freeze scope")
+    offer_path = state_root / "mobile-release-offers" / (release_id + ".json")
+    info = offer_path.lstat()
+    offer = json.loads(offer_path.read_text(encoding="utf-8"))
+    if (offer_path.is_symlink() or not stat.S_ISREG(info.st_mode)
+            or info.st_mode & 0o022 or info.st_size > 8192
+            or offer.get("initial_unfreeze_renewal_only") is not True
+            or offer.get("initial_unfreeze_renewal_lineage") != lineage
+            or offer.get("initial_freeze_binding") != binding
+            or offer.get("candidate_sha") != candidate_sha
+            or offer.get("manifest_sha256") != binding["manifest_sha256"]):
+        raise ReleaseManagerError("signed initial renewal lacks original host offer")
+    doc = {
+        "schema_version": "1.0",
+        "authorization": "signed_teams_initial_unfreeze_renewal",
+        "release_id": release_id, "candidate_sha": candidate_sha,
+        "rollback_sha": binding["rollback_sha"],
+        "scope_sha256": binding["scope_sha256"],
+        "freeze_sha256_before": binding["freeze_sha256"],
+        "manifest_sha256": binding["manifest_sha256"],
+        "approval_id": approval_id,
+        "signed_evidence_sha256": signed_evidence_sha256,
+        "prior_release_approval_source": owner["source"],
+        "original_initial_unfreeze_lineage": lineage,
+        "recorded_at": decided_at.astimezone(timezone.utc).isoformat(),
+        "expires_at": expires_at.astimezone(timezone.utc).isoformat(),
+        "status": "authorized_pending",
+        "freeze_remains_active": True,
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+        "automatic_publish_authority": False,
+        "additional_provider_or_endpoint_authority": False,
+    }
+    directory = state_root / "owner-signed-initial-unfreeze-renewals"
+    if directory.is_symlink():
+        raise ReleaseManagerError("signed renewal receipt directory is a symlink")
+    path = directory / (release_id + "--" + approval_id + ".json")
+    if path.exists() or path.is_symlink():
+        if path.is_symlink() or json.loads(path.read_text(encoding="utf-8")) != doc:
+            raise ReleaseManagerError("signed renewal receipt conflicts with prior decision")
+    else:
+        atomic_json(path, doc)
+    receipt_digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    pointer = {
+        "approval_id": approval_id,
+        "signed_evidence_sha256": signed_evidence_sha256,
+        "receipt_sha256": receipt_digest,
+    }
+    if existing is not None:
+        if existing != pointer:
+            raise ReleaseManagerError("signed renewal pointer differs from existing decision")
+        return doc
+    record["renewed_initial_unfreeze_authorization"] = pointer
+    record.setdefault("history", []).append({
+        "at": now(), "state": "production_eligible",
+        "gate": "separate_signed_initial_unfreeze_renewal_pending_transaction",
+        "approval_id": approval_id,
+    })
+    save_record(state_root, record)
+    return doc
+
+
+def signed_renewed_initial_one_transaction_freeze_context(
+    state_root: Path, record: Mapping[str, Any], *,
+    max_age_seconds: int = 900,
+) -> dict[str, Any] | None:
+    """Accept only a fresh NEW signed receipt bound to the expired predecessor."""
+    from jason_runtime.mobile_release_approval import (
+        read_expired_initial_unfreeze_predecessor,
+    )
+    pointer = record.get("renewed_initial_unfreeze_authorization")
+    owner = record.get("owner_approval") or {}
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    rollback = str(record.get("rollback_sha") or "")
+    release_id = str(record.get("release_id") or "")
+    if (not isinstance(pointer, Mapping)
+            or not re.fullmatch(r"relapproval-[0-9a-f]{32}", str(pointer.get("approval_id") or ""))
+            or not SHA.fullmatch(candidate) or not SHA.fullmatch(rollback)
+            or not one_transaction_release_id_matches_candidate(release_id, candidate)
+            or record.get("state") != "production_eligible"
+            or record.get("production") is not None or record.get("failure") is not None
+            or owner.get("approved") is not True or owner.get("candidate_sha") != candidate):
+        return None
+    approval_id = str(pointer["approval_id"])
+    path = state_root / "owner-signed-initial-unfreeze-renewals" / (
+        release_id + "--" + approval_id + ".json"
+    )
+    try:
+        info = path.lstat()
+        raw = path.read_bytes()
+        doc = json.loads(raw)
+        issued = datetime.fromisoformat(str(doc["recorded_at"]))
+        expiry = datetime.fromisoformat(str(doc["expires_at"]))
+        at = datetime.now(timezone.utc)
+        marker = _freeze_marker_snapshot(state_root)
+        original = dict(record)
+        original["renewed_initial_unfreeze_authorization"] = None
+        predecessor = read_expired_initial_unfreeze_predecessor(
+            state_root, release_id, original,
+        )
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError,
+            PermissionError, ReleaseManagerError):
+        return None
+    manifest_digest = hashlib.sha256(json.dumps(
+        record.get("release_manifest") or {}, sort_keys=True,
+        separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")).hexdigest()
+    digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+    if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != os.geteuid() or info.st_gid != os.getegid()
+            or len(raw) != info.st_size or not 1 <= len(raw) <= 8192
+            or digest != pointer.get("receipt_sha256")
+            or issued.tzinfo is None or expiry.tzinfo is None
+            or not issued <= at < expiry
+            or not 0 < (expiry - issued).total_seconds() <= max_age_seconds
+            or doc.get("schema_version") != "1.0"
+            or doc.get("authorization") != "signed_teams_initial_unfreeze_renewal"
+            or doc.get("approval_id") != approval_id
+            or doc.get("signed_evidence_sha256") != pointer.get("signed_evidence_sha256")
+            or doc.get("prior_release_approval_source") != owner.get("source")
+            or doc.get("release_id") != release_id
+            or doc.get("candidate_sha") != candidate
+            or doc.get("rollback_sha") != rollback
+            or doc.get("scope_sha256") != (
+                (record.get("manual_scope_review") or {}).get("scope_sha256"))
+            or doc.get("manifest_sha256") != manifest_digest
+            or doc.get("freeze_sha256_before") != marker["sha256"]
+            or doc.get("original_initial_unfreeze_lineage") != predecessor
+            or doc.get("status") != "authorized_pending"
+            or doc.get("freeze_remains_active") is not True
+            or doc.get("restore_freeze_after_transaction") is not True
+            or doc.get("standing_authority") is not False
+            or doc.get("automatic_publish_authority") is not False
+            or doc.get("additional_provider_or_endpoint_authority") is not False):
+        return None
+    return {
+        "authorization": "signed_teams_initial_unfreeze_renewal",
+        "renewal_approval_id": approval_id,
+        "release_id": release_id, "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": doc["scope_sha256"],
+        "recovery_profile_id": "one_new_signed_teams_initial_freeze_renewal",
+        "declaration_sha256": digest,
+        "explicit_unfreeze_receipt_sha256": digest,
+        "owner_approval_source": owner["source"],
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+    }
+
+
 def signed_initial_one_transaction_freeze_context(
     state_root: Path, record: Mapping[str, Any], *, max_age_seconds: int = 900,
 ) -> dict[str, Any] | None:
@@ -5912,6 +6145,8 @@ def explicit_owner_one_transaction_freeze_context(
         return None
     if record.get("replacement_unfreeze_authorization") is not None:
         return signed_replacement_unfreeze_context(state_root, record)
+    if record.get("renewed_initial_unfreeze_authorization") is not None:
+        return signed_renewed_initial_one_transaction_freeze_context(state_root, record)
     if record.get("signed_initial_unfreeze_authorization") is not None:
         return signed_initial_one_transaction_freeze_context(state_root, record)
     candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
@@ -7155,6 +7390,19 @@ def signed_owner_offer_purpose(
                 except (ReleaseManagerError, OSError, ValueError):
                     return None
                 return "replacement_unfreeze_only"
+            if (state_root is not None
+                    and record.get("signed_initial_unfreeze_authorization") is not None
+                    and record.get("renewed_initial_unfreeze_authorization") is None):
+                from jason_runtime.mobile_release_approval import (
+                    read_expired_initial_unfreeze_predecessor,
+                )
+                try:
+                    read_expired_initial_unfreeze_predecessor(
+                        state_root, str(record.get("release_id") or ""), record,
+                    )
+                except (PermissionError, OSError, ValueError, TypeError):
+                    return None
+                return "initial_unfreeze_renewal_only"
             return None
         # A conflicting stored review is an authority problem, not an
         # invitation to issue a new card that would overwrite audit evidence.
@@ -7353,6 +7601,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
             repo=repo, state_root=state_root, approve_release=approve_release,
             record_replacement_unfreeze=record_signed_replacement_unfreeze,
             record_initial_unfreeze=record_signed_initial_unfreeze,
+            record_initial_unfreeze_renewal=record_signed_initial_unfreeze_renewal,
         )
     except MobileReleaseEvidenceBusy:
         print("RELEASE_APPROVAL_ONLY=SIGNED_OWNER_EVIDENCE_BUSY", flush=True)
@@ -7396,6 +7645,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
     ).encode("utf-8")).hexdigest()
     review_only_offer = purpose == "ccc_material_review_only"
     replacement_offer = purpose == "replacement_unfreeze_only"
+    renewal_offer = purpose == "initial_unfreeze_renewal_only"
     initial_freeze_binding = None
     if (ordinary_safe and not review_only_offer and not replacement_offer
             and (state_root / PRODUCTION_FREEZE_MARKER).exists()):
@@ -7409,6 +7659,14 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         except ReleaseManagerError:
             print("RELEASE_APPROVAL_ONLY=FROZEN_SCOPE_NOT_READY", flush=True)
             return False
+    renewal_lineage = None
+    if renewal_offer:
+        from jason_runtime.mobile_release_approval import (
+            read_expired_initial_unfreeze_predecessor,
+        )
+        renewal_lineage = read_expired_initial_unfreeze_predecessor(
+            state_root, release_id, record,
+        )
     replacement_lineage = (
         {k: v.removeprefix("sha256:") if k.endswith("_receipt_sha256") else v
          for k, v in attest_consumed_pre_mutation_unfreeze_for_replacement(
@@ -7428,6 +7686,8 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
             existing.get("manifest_sha256") == manifest_digest
             and (existing.get("review_only") is True) == review_only_offer
             and (existing.get("replacement_unfreeze_only") is True) == replacement_offer
+            and (existing.get("initial_unfreeze_renewal_only") is True) == renewal_offer
+            and existing.get("initial_unfreeze_renewal_lineage") == renewal_lineage
             and existing.get("replacement_lineage") == replacement_lineage
             and existing.get("initial_freeze_binding") == initial_freeze_binding
         )
@@ -7450,6 +7710,8 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         **({"review_only": True} if review_only_offer else {}),
         **({"replacement_unfreeze_only": True,
             "replacement_lineage": replacement_lineage} if replacement_offer else {}),
+        **({"initial_unfreeze_renewal_only": True,
+            "initial_unfreeze_renewal_lineage": renewal_lineage} if renewal_offer else {}),
         **({"initial_freeze_binding": initial_freeze_binding}
            if initial_freeze_binding is not None else {}),
         **({
@@ -7636,6 +7898,7 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
                 repo=repo, state_root=state_root, approve_release=approve_release,
             record_replacement_unfreeze=record_signed_replacement_unfreeze,
             record_initial_unfreeze=record_signed_initial_unfreeze,
+            record_initial_unfreeze_renewal=record_signed_initial_unfreeze_renewal,
             )
         except MobileReleaseEvidenceBusy:
             # Only an independently typed SQLITE_BUSY/LOCKED condition permits
