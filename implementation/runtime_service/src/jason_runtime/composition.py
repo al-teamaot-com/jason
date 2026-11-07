@@ -1,4 +1,5 @@
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import os
 from dataclasses import dataclass
@@ -366,6 +367,7 @@ from .autonomy_worker_composition import build_autonomy_worker_maintenance
 from .autonomy_teams_notification_maintenance import TicketOwnerNotificationMaintenance
 from .autonomy_worker_runtime import SQLiteOperationalWorkStore
 from .daily_drmm_alert_reconciliation_composition import build_daily_drmm_alert_reconciliation_maintenance
+from .financial_statement_composition import build_financial_statement_maintenance
 from .windows_time_source_shadow_composition import build_windows_time_source_shadow_maintenance
 from .autonomy_targeted_wake_runtime import CompositeAutonomyMaintenance
 from .datto_component_approval_registry import approval_owner_identities
@@ -518,6 +520,12 @@ class RuntimeSettings:
     microsoft_openbao_secret_id_path: Path = Path(
         "/run/jason-secrets/openbao/microsoft-graph/secret_id"
     )
+    sharepoint_write_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/microsoft-sharepoint-write/role_id"
+    )
+    sharepoint_write_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/microsoft-sharepoint-write/secret_id"
+    )
     autotask_write_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/autotask-write/role_id"
     )
@@ -563,6 +571,15 @@ class RuntimeSettings:
     )
     drmm_recent_alert_reconciliation_lookback_hours: int = 24
     drmm_recent_alert_reconciliation_cadence_hours: int = 24
+    financial_statement_maintenance_enabled: bool = False
+    financial_statement_state_db: Path = Path(
+        "/var/lib/jason/openclaw/financial-statement-maintenance.sqlite3"
+    )
+    financial_statement_tenant_id: str = ""
+    financial_statement_drive_id: str = ""
+    financial_statement_root_path: str = "Bank Checking Accounts Register"
+    financial_statement_timezone: str = "America/New_York"
+    financial_statement_run_hour: int = 5
     windows_time_source_shadow_enabled: bool = False
     windows_time_source_shadow_db: Path = Path(
         "/var/lib/jason/openclaw/windows-time-source-shadow.sqlite3"
@@ -893,6 +910,18 @@ class RuntimeSettings:
                     "/run/jason-secrets/openbao/microsoft-graph/secret_id",
                 )
             ),
+            sharepoint_write_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_SHAREPOINT_WRITE_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/microsoft-sharepoint-write/role_id",
+                )
+            ),
+            sharepoint_write_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_SHAREPOINT_WRITE_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/microsoft-sharepoint-write/secret_id",
+                )
+            ),
             autotask_write_openbao_role_id_path=Path(
                 os.getenv(
                     "JASON_AUTOTASK_WRITE_OPENBAO_ROLE_ID_PATH",
@@ -1009,6 +1038,24 @@ class RuntimeSettings:
             drmm_recent_alert_reconciliation_cadence_hours=int(
                 os.getenv("JASON_DRMM_RECENT_ALERT_RECONCILIATION_CADENCE_HOURS", "24")
             ),
+            financial_statement_maintenance_enabled=os.getenv(
+                "JASON_FINANCIAL_STATEMENT_MAINTENANCE_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            financial_statement_state_db=Path(
+                os.getenv(
+                    "JASON_FINANCIAL_STATEMENT_STATE_DB",
+                    "/var/lib/jason/openclaw/financial-statement-maintenance.sqlite3",
+                )
+            ),
+            financial_statement_tenant_id=os.getenv("JASON_FINANCIAL_STATEMENT_TENANT_ID", "").strip(),
+            financial_statement_drive_id=os.getenv("JASON_FINANCIAL_STATEMENT_DRIVE_ID", "").strip(),
+            financial_statement_root_path=os.getenv(
+                "JASON_FINANCIAL_STATEMENT_ROOT_PATH", "Bank Checking Accounts Register"
+            ).strip(),
+            financial_statement_timezone=os.getenv(
+                "JASON_FINANCIAL_STATEMENT_TIMEZONE", "America/New_York"
+            ).strip(),
+            financial_statement_run_hour=int(os.getenv("JASON_FINANCIAL_STATEMENT_RUN_HOUR", "5")),
             windows_time_source_shadow_enabled=os.getenv(
                 "JASON_WINDOWS_TIME_SOURCE_SHADOW_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
@@ -1170,6 +1217,17 @@ class RuntimeSettings:
             raise ValueError("JASON_DRMM_RECENT_ALERT_RECONCILIATION_LOOKBACK_HOURS must be 1..168")
         if self.drmm_recent_alert_reconciliation_cadence_hours < 1:
             raise ValueError("JASON_DRMM_RECENT_ALERT_RECONCILIATION_CADENCE_HOURS must be at least 1")
+        if self.financial_statement_maintenance_enabled:
+            if not self.financial_statement_tenant_id or not self.financial_statement_drive_id:
+                raise ValueError("financial statement maintenance requires tenant and drive identifiers")
+            if not self.financial_statement_root_path:
+                raise ValueError("financial statement maintenance root path must be non-empty")
+            if not 0 <= self.financial_statement_run_hour <= 23:
+                raise ValueError("JASON_FINANCIAL_STATEMENT_RUN_HOUR must be 0..23")
+            try:
+                ZoneInfo(self.financial_statement_timezone)
+            except Exception as exc:
+                raise ValueError("JASON_FINANCIAL_STATEMENT_TIMEZONE is invalid") from exc
         if self.windows_time_source_shadow_cadence_minutes < 1:
             raise ValueError("JASON_WINDOWS_TIME_SOURCE_SHADOW_CADENCE_MINUTES must be at least 1")
         if self.autonomy_review_interval_seconds < 60:
@@ -2820,6 +2878,21 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         cadence_hours=settings.drmm_recent_alert_reconciliation_cadence_hours,
         audit=reflection_audit,
     )
+    financial_statement_maintenance = build_financial_statement_maintenance(
+        enabled=settings.financial_statement_maintenance_enabled,
+        boundary_db=microsoft_boundary_db,
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.sharepoint_write_openbao_role_id_path,
+        secret_id_path=settings.sharepoint_write_openbao_secret_id_path,
+        transport=http_transport,
+        state_db=settings.financial_statement_state_db,
+        tenant_id=settings.financial_statement_tenant_id,
+        drive_id=settings.financial_statement_drive_id,
+        root_path=settings.financial_statement_root_path,
+        timezone_name=settings.financial_statement_timezone,
+        run_hour=settings.financial_statement_run_hour,
+        audit=reflection_audit,
+    )
     windows_time_source_shadow_maintenance = build_windows_time_source_shadow_maintenance(
         enabled=settings.windows_time_source_shadow_enabled,
         identity_authority=identity_authority,
@@ -2878,6 +2951,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             self_heal_escalation_notification_maintenance,
             support_repair_reasoning_maintenance,
             autonomous_repair_deployment_maintenance,
+            financial_statement_maintenance,
             drmm_recent_alert_reconciliation_maintenance,
             procurement_billing_audit_maintenance,
             procurement_approval_maintenance,
@@ -2899,6 +2973,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             support_repair_reasoning_maintenance,
             autonomous_repair_deployment_maintenance,
             operational_autonomy_maintenance,
+            financial_statement_maintenance,
             drmm_recent_alert_reconciliation_maintenance,
             procurement_billing_audit_maintenance,
             procurement_approval_maintenance,
