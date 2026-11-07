@@ -1,0 +1,885 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "vulscan_missing_patch",
+    "name": "Jason - Windows Update VulScan Missing Patch (JSON migration draft)",
+    "version": "1.1.0-jsonpreview",
+    "lifecycle": "pilot",
+    "target_type": "ticket",
+    "source_owner": "AOT",
+    "source_registry_version": "1.1.0",
+    "documented_version": null,
+    "original_lifecycle": "production"
+  },
+  "trigger": {
+    "source_registry_match": {
+      "title_contains": [
+        "Vulnerability Detected by VulScan"
+      ]
+    },
+    "details_section_key": "2",
+    "execution_enabled": false
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "preview_only": true,
+    "execution_authority": "none",
+    "scope_section_key": "3"
+  },
+  "expected_state": {
+    "details_section_key": "5",
+    "not_reverified_in_json_runtime": true
+  },
+  "state_model": {
+    "entry_step": "identity_gate",
+    "source_section_key": "6",
+    "context_binding_status": "not_implemented_for_migration_draft"
+  },
+  "steps": [
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "evidence_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "authoritative_evidence_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "authorization_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "authorization_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "approved_json_runtime_parity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "migration_hold"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "migration_hold",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Legacy source playbook section 17 and provider readbacks; not executed in this JSON draft",
+    "success_condition": "Legacy source Section 17 and Section 18 must pass independently; classification-only draft cannot verify or close"
+  },
+  "completion": {
+    "terminal_disposition": "Human Review (draft only; existing production source unchanged)"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": []
+  },
+  "procedure": {
+    "section_refs": {
+      "section_goal": "1",
+      "trigger": "2",
+      "scope": "3",
+      "identification": "4",
+      "expected_state": "5",
+      "state_model": "6",
+      "diagnostics": "7",
+      "decision_gates": "8",
+      "remediation": "9",
+      "retry_policy": "10",
+      "periodic_rechecks": "11",
+      "stale_condition": "12",
+      "dependencies": "13",
+      "documentation": "14",
+      "failures": "15",
+      "escalation": "16",
+      "verification": "17",
+      "completion": "18",
+      "final_resolution": "19",
+      "required_capabilities": "20",
+      "acceptance_test": "21",
+      "closure": "22",
+      "autonomy_review": "23"
+    },
+    "section_keys_missing_from_source": [],
+    "diagnostic_substep_titles": [
+      "A. Patch-state classification",
+      "B. Patch-approval waiting",
+      "C. Patch-window check",
+      "D. Standard Windows Update diagnostic component",
+      "E. Supplemental evidence when needed"
+    ],
+    "remediation_substep_titles": [
+      "A. Windows Update core repair",
+      "B. WSUS policy repair",
+      "C. Reboot handling",
+      "D. Patch retry"
+    ],
+    "live_execution_mapped": false,
+    "structured_source_fields": {
+      "identification_checklist": {
+        "source_section_key": "4",
+        "present": true,
+        "verbatim_bullets": [
+          "1. Read the Autotask ticket.",
+          "2. Move a Jason-owned ticket to queue **Jason** (queue ID 29683489) and verify by readback.",
+          "3. Set the appropriate working status.",
+          "4. Identify the exact DRMM endpoint.",
+          "5. Associate the correct Autotask configuration item when a reliable match exists.",
+          "6. Identify the exact KB/update and current DRMM patch object.",
+          "7. Check for relevant prior ticket notes/attempts to avoid repeating completed work.",
+          "1. do **not** force the source ticket into the one-ticket/one-device association gate;",
+          "2. parse the affected-node list;",
+          "3. resolve every node to exactly one active same-company Autotask CI and exact DRMM resource ID/hostname;",
+          "4. require the separately promoted `vulscan_multi_device_split@1.0.0` split playbook;",
+          "5. invoke the shared **Jason Ticket Split Runtime Contract** once with one target per verified endpoint;",
+          "6. create each child in queue **Jason**, status **New**, with exactly one CI and preserved source-ticket lineage;",
+          "7. require post-create readback for every child;",
+          "8. write the verified child IDs to the source ticket;",
+          "9. only after all children are verified, set the source ticket **Complete**;",
+          "10. let each child re-enter the normal one-device VulScan playbook independently."
+        ]
+      },
+      "expected_state_checklist": {
+        "source_section_key": "5",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact KB/update is installed or superseded by an authoritative newer update/build",
+          "- DRMM no longer reports InstallError for the relevant patch condition",
+          "- no approved patch remains unexpectedly pending after the applicable maintenance cycle",
+          "- Windows Update services/stack are functional",
+          "- no unresolved reboot requirement blocks completion",
+          "- the VulScan/monitor condition is cleared or otherwise proven stale/resolved"
+        ]
+      },
+      "decision_gate_checklist": {
+        "source_section_key": "8",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact device and KB identified",
+          "- Jason ownership/device association complete",
+          "- endpoint online",
+          "- applicable patch window has completed OR explicit owner approval allows earlier remediation",
+          "- patch remains missing/pending/failed",
+          "- diagnostic evidence supports Windows Update stack remediation",
+          "- no conflicting patch-policy/maintenance condition exists",
+          "- determine the **current endpoint reboot state** from authoritative endpoint evidence",
+          "- treat endpoint-level `reboot_required` as authoritative for whether a reboot is currently pending",
+          "- treat patch-object `rebootRequired=True` only as metadata about that update's reboot behavior; it is **not** proof that the endpoint currently requires a reboot after installation",
+          "- never block stale/recovered-ticket closure solely because an installed patch object has `rebootRequired=True` when endpoint `reboot_required=False`",
+          "- query live Windows interactive session state before any actual reboot; never use DRMM last_logged_in_user as proof",
+          "- Active or Disconnected session = user session present",
+          "- no user session = unattended",
+          "- confirm WSUS policy is erroneous/unwanted for that endpoint",
+          "- obtain explicit approval unless an approved autonomous playbook version explicitly grants it"
+        ]
+      },
+      "retry_checklist": {
+        "source_section_key": "10",
+        "present": true,
+        "verbatim_bullets": [
+          "- current patch-state read",
+          "- diagnostic evidence",
+          "- Windows Update repair if justified",
+          "- patch re-detection/retry",
+          "- reboot handling if required",
+          "- post-action patch verification"
+        ]
+      },
+      "recheck_checklist": {
+        "source_section_key": "11",
+        "present": true,
+        "verbatim_bullets": [
+          "- recheck the exact reported KB approval state once per day",
+          "- retain the ticket in queue Jason through day 9 while the exact KB remains NOT_APPROVED",
+          "- do not create a new ticket note when the recheck produces no meaningful state change",
+          "- if state changes to APPROVED_PENDING, resume the patch-window path automatically",
+          "- at 10 calendar days still NOT_APPROVED, hand off to Help Desk I with status Human Review",
+          "- recheck after the scheduled maintenance window plus a reasonable grace period.",
+          "- recheck around 3:00 AM after a 2:30 AM scheduled reboot.",
+          "- use bounded rechecks appropriate to Datto patch execution timing.",
+          "- retain Jason queue ownership and the already-proven patch classification",
+          "- release the active-work slot",
+          "- re-evaluate the exact VulScan client-disposition promotion on the normal worker cadence",
+          "- do not change the ticket contact, send a client notification, or move to Close Pending before the exact client-disposition branch is promoted",
+          "- suppress duplicate waiting notes while authority remains unchanged",
+          "- resume automatically from preserved state when the exact promotion becomes active"
+        ]
+      },
+      "stale_checklist": {
+        "source_section_key": "12",
+        "present": true,
+        "verbatim_bullets": [
+          "- day 0 is the first authoritative DRMM observation that the exact reported KB is NOT_APPROVED",
+          "- days 0-9 remain Jason-owned in state=waiting_patch_approval",
+          "- at day 10, if the same exact KB remains NOT_APPROVED and no durable technician decision exists, move to Help Desk I with status Human Review",
+          "- a durable intentional defer/decline decision suppresses repeated 10-day re-escalation until the patch identity, policy state, or technician decision materially changes",
+          "- investigate stale VulScan evidence",
+          "- check supersedence/build mismatch",
+          "- check endpoint rename/reimage/replacement",
+          "- validate patch-policy assignment",
+          "- escalate rather than leave the ticket in an endless waiting state"
+        ]
+      },
+      "dependency_checklist": {
+        "source_section_key": "13",
+        "present": true,
+        "verbatim_bullets": [
+          "- valid DRMM endpoint identity",
+          "- Autotask configuration item",
+          "- Datto patch inventory",
+          "- approved AOT Windows Update diagnostic/repair component",
+          "- scheduler/recheck support",
+          "- interactive-session checker",
+          "- governed reboot capability",
+          "1. verify it is actually missing",
+          "2. search for an existing support/dependency issue",
+          "3. suppress duplicates",
+          "4. create one when appropriate",
+          "5. cross-reference it",
+          "6. set state=blocked"
+        ]
+      },
+      "documentation_checklist": {
+        "source_section_key": "14",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact KB/update",
+          "- current install/approval state",
+          "- whether the patch window has occurred",
+          "- endpoint online/reboot state",
+          "- component flags used",
+          "- job ID and terminal status",
+          "- relevant sanitized StdOut/StdErr",
+          "- HRESULT/event evidence",
+          "- DISM/SFC results when used",
+          "- repair/retry count",
+          "- live-session/reboot decision",
+          "- post-action verification",
+          "- **STATUS**",
+          "- **NEXT STEP** or **ACTION REQUIRED**",
+          "- **WHEN / ESCALATION**",
+          "- **DEVICE**",
+          "- **PATCH STATUS / KEY EVIDENCE**",
+          "- **WHAT JASON FOUND**",
+          "- **WHAT JASON DID**",
+          "- **CHANGES MADE**",
+          "- **JASON STATE**",
+          "- STATUS: WAITING — PATCH NOT APPROVED",
+          "- NEXT STEP: No technician action required yet; Jason will continue monitoring",
+          "- ESCALATION: If still NOT_APPROVED at 10 days, move to Help Desk I / Human Review",
+          "- STATUS: HUMAN REVIEW REQUIRED",
+          "- ACTION REQUIRED: Approve or intentionally defer the listed patch(es)",
+          "- WHY: The exact patch has remained NOT_APPROVED for 10 days",
+          "- AFTER APPROVAL: Jason resumes the normal patch workflow automatically",
+          "- Jason - VulScan - Asset Validation",
+          "- Jason - VulScan - Waiting Patch Approval",
+          "- Jason - VulScan - Waiting Patch Window",
+          "- Jason - VulScan - Diagnostic",
+          "- Jason - VulScan - Windows Update Repair",
+          "- Jason - VulScan - Reboot Scheduled",
+          "- Jason - VulScan - Verification",
+          "- Jason - VulScan - Human Review Required",
+          "- Jason - VulScan - Resolution"
+        ]
+      },
+      "failure_checklist": {
+        "source_section_key": "15",
+        "present": true,
+        "verbatim_bullets": [
+          "- component provider failure before job creation",
+          "- component job failure",
+          "- missing output",
+          "- Windows Update HRESULT",
+          "- patch still pending after maintenance",
+          "- contradictory DISM/SFC/event evidence",
+          "- failed reboot verification",
+          "- update still missing after repair/retry"
+        ]
+      },
+      "escalation_checklist": {
+        "source_section_key": "16",
+        "present": true,
+        "verbatim_bullets": [
+          "- an exact reported KB remains NOT_APPROVED for 10 calendar days with no durable technician approve/defer decision; set status Human Review",
+          "- two full repair/install cycles fail",
+          "- Windows servicing corruption cannot be repaired by the approved component path",
+          "- patch remains missing across authorized windows without explainable state",
+          "- WSUS/policy changes beyond approved scope are required",
+          "- supersedence/build state is ambiguous",
+          "- manual servicing/install media is required",
+          "- disruptive action beyond playbook authority is required"
+        ]
+      },
+      "verification_checklist": {
+        "source_section_key": "17",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact KB installed OR authoritative supersedence/build proof",
+          "- patch no longer APPROVED_PENDING/INSTALL_ERROR for the targeted condition",
+          "- DRMM patch status healthy or otherwise explained",
+          "- no unexpected approved pending patch remains",
+          "- current endpoint-level `reboot_required=False` when closure requires no pending reboot",
+          "- patch-object `rebootRequired` may be recorded as evidence but must not override current endpoint reboot state",
+          "- endpoint remains healthy/online",
+          "- VulScan/monitor finding clears or is proven stale"
+        ]
+      },
+      "completion_checklist": {
+        "source_section_key": "18",
+        "present": true,
+        "verbatim_bullets": [
+          "- identity/association are correct",
+          "- patch state/root cause is classified",
+          "- required remediation/reboot completed when actually required by current endpoint state",
+          "- authoritative exact-KB/build verification succeeds",
+          "- current endpoint reboot state is authoritative; an installed patch's `rebootRequired=True` metadata alone does not prevent completion when endpoint `reboot_required=False`",
+          "- related monitoring condition is resolved/stale by evidence",
+          "- final internal note exists"
+        ]
+      },
+      "required_capabilities_source": {
+        "source_section_key": "20",
+        "present": true,
+        "verbatim_bullets": [
+          "- Autotask ticket read/update/internal-note create",
+          "- Autotask configuration search/association",
+          "- DRMM endpoint read/search",
+          "- DRMM patch search",
+          "- persisted state and scheduler/recheck support",
+          "- `service.ticket.create`",
+          "- `service.ticket.note.create`",
+          "- `service.ticket.update`",
+          "- Autotask configuration search/read",
+          "- DRMM endpoint read",
+          "- shared Jason Ticket Split Runtime Contract and durable split ledger",
+          "- all required core ticket/update capabilities used by the disposition branch",
+          "- `service.ticket.client.notification.create`",
+          "- approved workflow/template registry resolution",
+          "- Autotask ticket/contact authoritative reads",
+          "- Autotask Notification History read/verification",
+          "- DRMM component search/execute/job/output",
+          "- governed read-only Windows commands when supplemental evidence is required",
+          "- interactive Windows session check",
+          "- governed reboot/scheduled reboot"
+        ]
+      },
+      "acceptance_test_checklist": {
+        "source_section_key": "21",
+        "present": true,
+        "verbatim_bullets": [
+          "- Ticket: T20260905.0004",
+          "- Client: Riggins Company",
+          "- Device: OWNi7JAN25",
+          "- KB: KB5121003",
+          "- patch is approved",
+          "- patch previously failed with Windows Update HRESULT 0x80073712",
+          "- DISM/SFC/component-store evidence subsequently appeared healthy",
+          "- patch remains APPROVED_PENDING",
+          "- owner directed Jason to respect the normal patch window rather than force installation",
+          "1. ticket moved/kept in Jason queue",
+          "2. correct configuration item association",
+          "3. exact KB identification",
+          "4. NOT_APPROVED enters waiting_patch_approval instead of immediate Help Desk escalation",
+          "5. unchanged NOT_APPROVED state stays Jason-owned through day 9 with duplicate-note suppression",
+          "6. approval before day 10 resumes automatically into the patch-window path",
+          "7. still NOT_APPROVED at day 10 moves to Help Desk I with status Human Review and a clear ACTION REQUIRED note",
+          "8. durable technician defer/decline prevents unchanged 10-day re-escalation loops",
+          "9. APPROVED_PENDING before-window path waits instead of forcing install",
+          "10. post-window path rechecks exact KB",
+          "11. diagnostic component first runs with all repair flags false",
+          "12. WU_AutoFixCore=True is only used after repair gate",
+          "13. WSUS clearing remains separately gated",
+          "14. live-session gate protects logged-in users from reboot",
+          "15. 2:30 AM/3:00 AM scheduled reboot/resume path works",
+          "16. maximum two repair cycles",
+          "17. installed-patch `rebootRequired=True` does not create a false reboot block when endpoint `reboot_required=False`",
+          "18. stale/recovered installed findings can complete after endpoint-health and exact-KB verification",
+          "19. exact final KB/build verification before completion",
+          "20. Gromelski company 597 resolves the client-specific disposition rule",
+          "21. Chris Benton contact 30684489 is associated and independently read back",
+          "22. exact canned template `vulscan-approved-or-installed-v1` is used with no generated wording",
+          "23. Gromelski terminal ticket status is Close Pending (21), never Complete",
+          "24. Notification History proves a new same-ticket copy to chris.benton@e-gai.com",
+          "25. approved-pending Gromelski tickets remain in persisted monitoring state after Close Pending",
+          "26. a more-specific site/device/user/ticket override wins over the client rule",
+          "27. non-Gromelski tickets preserve the global VulScan disposition",
+          "28. an exact v1.0.0 diagnostic/classification promotion remains eligible even when the v1.1.0 client-disposition branch is not promoted",
+          "29. a Gromelski ticket that reaches client disposition without v1.1.0 promotion enters waiting_client_notification_authority, releases its active slot, and performs no contact/status/client-message mutation",
+          "30. activating the exact v1.1.0 client-disposition promotion automatically resumes the preserved ticket and uses workflow_id=vulscan_missing_patch plus template_id=vulscan-approved-or-installed-v1",
+          "31. the approved-workflow connector reconstructs canned title/body server-side; autonomous VulScan does not supply free-form client wording or an arbitrary recipient",
+          "32. a VulScan source ticket with two or more affected nodes is split before the one-device admission gate",
+          "33. each affected node resolves to exactly one active same-company CI and exact DRMM UID/hostname",
+          "34. each verified node receives exactly one child ticket in queue Jason with one CI and source lineage",
+          "35. a repeated split invocation reuses previously verified children and creates no duplicates",
+          "36. partial child-create failure leaves the source open and resumes only the missing children on retry",
+          "37. source completion occurs only after every requested child has provider readback",
+          "38. the `vulscan_multi_device_split@1.0.0` playbook cannot create tickets unless its exact durable promotion includes service.ticket.create",
+          "39. the two historical multi-device alerts T20260929.0033 and T20260930.0041 can be replayed safely as controlled acceptance cases without guessing a single source CI"
+        ]
+      },
+      "closure_checklist": {
+        "source_section_key": "22",
+        "present": true,
+        "verbatim_bullets": [
+          "- playbook implementation is registered in Project Jason",
+          "- OWNi7JAN25 acceptance completes or an equivalent controlled case passes",
+          "- required session-check/recheck capabilities are proven",
+          "- Grafana/Project Jason playbook status is updated",
+          "- limitations/support items are documented",
+          "- Company: **Gromelski And Associates Inc.**",
+          "- Company ID: **597**",
+          "- Primary Contact: **Chris Benton**",
+          "- Contact ID: **30684489**",
+          "- Primary Contact flag: **true**",
+          "- Receives email notifications: **true**",
+          "- Terminal PSA status: **Close Pending**",
+          "- Autotask status ID: **21**",
+          "1. all exact reported KBs are already installed and endpoint reboot state does not block resolution; or",
+          "2. the exact required patch is approved for implementation and is waiting for the regular maintenance window;",
+          "1. resolve the applicable VulScan disposition policy;",
+          "2. require the exact authoritative Gromelski company identity;",
+          "3. associate Chris Benton as the ticket contact through governed `service.ticket.update` and require `contactID` readback;",
+          "4. publish exactly the approved canned communication through `service.ticket.client.notification.create`;",
+          "5. set ticket status to **Close Pending** rather than **Complete**;",
+          "6. require readback of both `contactID` and `status`;",
+          "7. verify a new Autotask Notification History record for the same ticket was sent to `chris.benton@e-gai.com`;",
+          "8. suppress duplicate client communications using the approved template fingerprint."
+        ]
+      },
+      "owner_review_checklist": {
+        "source_section_key": "23",
+        "present": true,
+        "verbatim_bullets": [
+          "- **Core diagnostic/classification scope:** `vulscan_missing_patch@1.0.0`, policy `playbook-autonomy:vulscan_missing_patch`, capabilities `service.ticket.note.create` + `service.ticket.update`. This preserves the previously owner-promoted read/classify/wait lifecycle and must not be disabled merely because the client-communication branch changes.",
+          "- **Client-disposition scope:** `vulscan_missing_patch@1.1.0`, same policy ID, capabilities `service.ticket.note.create` + `service.ticket.update` + `service.ticket.client.notification.create`. This branch requires its own exact durable owner promotion."
+        ]
+      }
+    },
+    "diagnostic_substeps": [
+      {
+        "id": "7_sub_1",
+        "heading": "A. Patch-state classification",
+        "content_markdown": "\n\nRead the exact KB/update from DRMM.\n\nBranch:\n- INSTALLED: move to verification.\n- APPROVED_PENDING: determine whether the normal patch window has occurred.\n- INSTALL_ERROR/FAILED: move to diagnostics.\n- NOT_APPROVED: set state=waiting_patch_approval. Keep the ticket in queue **Jason** and do not send it immediately to Help Desk I. Jason does not approve patches unless specifically authorized. Persist the first observed NOT_APPROVED timestamp and begin the 10-day approval-aging window.\n- ambiguous/missing object: investigate supersedence or identity before remediation.\n\nAn approved-pending patch before its maintenance window is not a failure.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_2",
+        "heading": "B. Patch-approval waiting",
+        "content_markdown": "\n\nIf an exact reported KB is NOT_APPROVED:\n- keep the ticket in queue **Jason**\n- set state=waiting_patch_approval\n- do not classify NOT_APPROVED alone as a technician failure\n- preserve the first observed NOT_APPROVED timestamp\n- recheck the exact KB approval state daily\n- suppress duplicate ticket notes when the observed state is unchanged\n- if the patch becomes APPROVED_PENDING before day 10, transition to waiting_patch_window and resume automatically\n- if the patch becomes INSTALLED or is authoritatively superseded, transition to verification\n- if the exact KB remains NOT_APPROVED for 10 calendar days, move the ticket to **Help Desk I**, set status **Human Review**, and write one action-required escalation note\n- the Human Review note must state clearly at the top: **ACTION REQUIRED: Approve or intentionally defer the listed patch(es)**\n- if a technician intentionally defers/declines the patch, persist that decision so unchanged evidence does not recycle back into Human Review every 10 days\n\nNOT_APPROVED is therefore a timed dependency state, not an immediate escalation.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_3",
+        "heading": "C. Patch-window check",
+        "content_markdown": "\n\nIf APPROVED_PENDING and the applicable patch window has not completed:\n- do not force-install\n- set state=waiting_patch_window\n- document the expected recheck\n- use Scheduled - Remote or another appropriate waiting status if configured\n- resume after the patch window plus reasonable processing/reboot grace\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_4",
+        "heading": "D. Standard Windows Update diagnostic component",
+        "content_markdown": "\n\nPrimary component:\n**Diagnose & Fix Windows Update Issues [WIN] AOT Ver 06102026-1**\nComponent UID: **3369bb12-66e5-42bb-a5d6-669e3bbb20ec**\n\nFirst diagnostic execution should use:\n- WU_AutoFixCore=False\n- Schedule230AMReboot=False\n- usrClearWSUS=False\n\nPurpose:\n- report OS/update health\n- inspect Windows Update services\n- identify WSUS configuration\n- test Microsoft Update connectivity\n- report Datto patch-policy presence\n- provide ticket-ready findings\n\nRetrieve terminal job state and actual StdOut/StdErr. Job submission alone is not success.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {
+          "purpose": "- report OS/update health"
+        }
+      },
+      {
+        "id": "7_sub_5",
+        "heading": "E. Supplemental evidence when needed",
+        "content_markdown": "\n\nIf diagnosis is inconclusive or patch failure persists:\n- exact WindowsUpdateClient Event ID/error/HRESULT\n- DISM /Online /Cleanup-Image /CheckHealth\n- DISM /ScanHealth when justified\n- SFC verification/scan when justified\n- Windows Update service state\n- current reboot-required state\n- WSUS policy configuration\n- recent patch/install history\n\nDo not assume error 0x80073712 proves persistent component-store corruption. OWNi7JAN25 demonstrated that Windows Update can return 0x80073712 while DISM/SFC later report healthy state.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      }
+    ],
+    "remediation_branches": [
+      {
+        "id": "9_sub_1",
+        "heading": "A. Windows Update core repair",
+        "content_markdown": "\n\nUse:\n**Diagnose & Fix Windows Update Issues [WIN] AOT Ver 06102026-1**\n\nRepair flags:\n- WU_AutoFixCore=True\n- Schedule230AMReboot=False by default\n- usrClearWSUS=False by default\n\nThis resets core Windows Update components only when issues are detected, including BITS/WUAUSERV, SoftwareDistribution, Catroot2, and triggers a scan.\n\nAuthority: modifying but normally non-user-disruptive. Remains governed.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_2",
+        "heading": "B. WSUS policy repair",
+        "content_markdown": "\n\nSet usrClearWSUS=True only when authoritative evidence shows stale/incorrect WSUS policy is the blocker and the action is specifically authorized.\n\nAuthority: modifying/configuration-changing.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_3",
+        "heading": "C. Reboot handling",
+        "content_markdown": "\n\nDo not use the component's reboot flag blindly.\n\nPreferred Jason logic:\n1. Perform a live interactive-session check.\n2. If no Active/Disconnected session and reboot is approved within playbook authority, reboot according to governance.\n3. If any user session exists, do not reboot immediately.\n4. Schedule a one-time **2:30 AM** reboot.\n5. Persist state=reboot_pending.\n6. Resume at approximately **3:00 AM**.\n7. Verify reboot actually occurred using last-boot timestamp/DRMM evidence before continuing.\n\nIf using the component's Schedule230AMReboot=True option, Jason must still satisfy the live-session and authority gates before scheduling it.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_4",
+        "heading": "D. Patch retry",
+        "content_markdown": "\n\nAfter repair, re-detect patch state and allow the normal/authorized patch installation mechanism to retry the already-approved update.\n\nDo not silently approve new patches.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      }
+    ],
+    "source_section_inventory": [
+      {
+        "section_key": "1",
+        "present": true,
+        "title": "Section Goal",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "2",
+        "present": true,
+        "title": "Trigger",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "3",
+        "present": true,
+        "title": "Scope and Boundaries",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "4",
+        "present": true,
+        "title": "Initial Identification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "5",
+        "present": true,
+        "title": "Expected State",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "6",
+        "present": true,
+        "title": "State Model",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "7",
+        "present": true,
+        "title": "Diagnostic Workflow",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "8",
+        "present": true,
+        "title": "Decision Gates",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "9",
+        "present": true,
+        "title": "Remediation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "10",
+        "present": true,
+        "title": "Retry Policy",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "11",
+        "present": true,
+        "title": "Periodic Rechecks",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "12",
+        "present": true,
+        "title": "Aging / Stale Condition",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "13",
+        "present": true,
+        "title": "Dependency Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "14",
+        "present": true,
+        "title": "Documentation Requirements",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "15",
+        "present": true,
+        "title": "Failure Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "16",
+        "present": true,
+        "title": "Escalation Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "17",
+        "present": true,
+        "title": "Verification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "18",
+        "present": true,
+        "title": "Completion Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "19",
+        "present": true,
+        "title": "Final Resolution Note",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "20",
+        "present": true,
+        "title": "Required Capabilities",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "21",
+        "present": true,
+        "title": "Acceptance Test",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "22",
+        "present": true,
+        "title": "Section Goal Closure",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "23",
+        "present": true,
+        "title": "Autonomous Execution Eligibility",
+        "review_status": "source_preserved"
+      }
+    ],
+    "section_semantics": "Source-derived metadata only. Diagnostic commands and remediation branches are inert Markdown, not executable provider calls."
+  },
+  "legacy_registry": {
+    "source_path": "docs/playbooks/Jason-Windows-Update-VulScan-Missing-Patch.md",
+    "source_version": "1.1.0",
+    "review_status": "gromelski_client_disposition_acceptance_required",
+    "source_enabled": true,
+    "source_autonomy_activation": "autonomous",
+    "source_allowed_capabilities": [
+      "service.ticket.note.create",
+      "service.ticket.update",
+      "service.ticket.client.notification.create"
+    ],
+    "source_required_gates": [
+      "trigger",
+      "identity",
+      "patch_evidence",
+      "recent_activity_check",
+      "evidence_fresh",
+      "governance_precheck"
+    ],
+    "source_trigger": {
+      "title_contains": [
+        "Vulnerability Detected by VulScan"
+      ]
+    }
+  },
+  "source_document": {
+    "path": "docs/playbooks/Jason-Windows-Update-VulScan-Missing-Patch.md",
+    "source_blob_sha": "c44b06dabd07b5c6755c16fe8ebd91974cc8f5d6",
+    "prelude_markdown": "# Jason Windows Update / VulScan Missing Patch Playbook\n\n",
+    "sections": [
+      {
+        "key": "1",
+        "title": "Section Goal",
+        "heading_markdown": "## 1. Section Goal",
+        "body_markdown": "\n\nJason must distinguish a genuinely failed Windows update from an approved patch that is merely waiting for its normal patch window, perform bounded Windows Update diagnostics/remediation only when justified, protect active users from disruption, and verify the exact KB/build state before completing the ticket.\n\nSuccess requires a deterministic classification, documented evidence, correct Autotask ownership/device association, bounded repair attempts, safe reboot handling, and authoritative verification that the reported missing patch condition is resolved or appropriately escalated.\n\n"
+      },
+      {
+        "key": "2",
+        "title": "Trigger",
+        "heading_markdown": "## 2. Trigger",
+        "body_markdown": "\n\nApply when an Autotask/VulScan/DRMM ticket or alert identifies a missing Windows security/quality update or a failed Windows patch installation on a managed Windows endpoint.\n\nExamples:\n- \"Vulnerability Detected by VulScan\"\n- \"Missing Critical Security Patch\"\n- DRMM patch status InstallError\n- exact KB reported missing\n\nConfirm the exact KB/update identity before proceeding.\n\n"
+      },
+      {
+        "key": "3",
+        "title": "Scope and Boundaries",
+        "heading_markdown": "## 3. Scope and Boundaries",
+        "body_markdown": "\n\nIn scope:\n- Autotask ticket ownership, queue, status, notes, and configuration-item association\n- DRMM endpoint identity, online state, patch inventory/status, reboot-required state\n- Windows Update health diagnostics\n- Windows Update event-log evidence\n- governed execution of approved AOT diagnostic/repair components\n- patch-window waiting/recheck logic\n- safe scheduled reboot logic\n- exact post-remediation verification\n\nOut of scope unless separately authorized:\n- approving unapproved patches\n- changing organization patch policy\n- bypassing maintenance windows\n- clearing WSUS policy without a specific evidence-based reason and approval\n- immediate user-disruptive reboot when a user session exists\n- unlimited repair/install retries\n\nPreserve Central Orchestrator authority, exact requester grants, provider/client isolation, audit, approval rules, and direct_provider_access=false.\n\n"
+      },
+      {
+        "key": "4",
+        "title": "Initial Identification",
+        "heading_markdown": "## 4. Initial Identification",
+        "body_markdown": "\n\nBefore diagnostics:\n1. Read the Autotask ticket.\n2. Move a Jason-owned ticket to queue **Jason** (queue ID 29683489) and verify by readback.\n3. Set the appropriate working status.\n4. Identify the exact DRMM endpoint.\n5. Associate the correct Autotask configuration item when a reliable match exists.\n6. Identify the exact KB/update and current DRMM patch object.\n7. Check for relevant prior ticket notes/attempts to avoid repeating completed work.\n\nIf identity is ambiguous, set state=identification_blocked and stop rather than guessing.\n\n### Multi-device source alerts\n\nIf the source VulScan ticket contains two or more independently named affected nodes:\n1. do **not** force the source ticket into the one-ticket/one-device association gate;\n2. parse the affected-node list;\n3. resolve every node to exactly one active same-company Autotask CI and exact DRMM resource ID/hostname;\n4. require the separately promoted `vulscan_multi_device_split@1.0.0` split playbook;\n5. invoke the shared **Jason Ticket Split Runtime Contract** once with one target per verified endpoint;\n6. create each child in queue **Jason**, status **New**, with exactly one CI and preserved source-ticket lineage;\n7. require post-create readback for every child;\n8. write the verified child IDs to the source ticket;\n9. only after all children are verified, set the source ticket **Complete**;\n10. let each child re-enter the normal one-device VulScan playbook independently.\n\nIf any listed node cannot be resolved exactly, fail closed before source completion. Already verified children remain idempotently reusable on retry; Jason must not create duplicates.\n\n"
+      },
+      {
+        "key": "5",
+        "title": "Expected State",
+        "heading_markdown": "## 5. Expected State",
+        "body_markdown": "\n\nHealthy state requires:\n- exact KB/update is installed or superseded by an authoritative newer update/build\n- DRMM no longer reports InstallError for the relevant patch condition\n- no approved patch remains unexpectedly pending after the applicable maintenance cycle\n- Windows Update services/stack are functional\n- no unresolved reboot requirement blocks completion\n- the VulScan/monitor condition is cleared or otherwise proven stale/resolved\n\n"
+      },
+      {
+        "key": "6",
+        "title": "State Model",
+        "heading_markdown": "## 6. State Model",
+        "body_markdown": "\n\nidentified ->\n- multi_device_split_required\n- patch_state_check\n\nmulti_device_split_required ->\n- split_creating_children\n- identification_blocked\n\nsplit_creating_children ->\n- split_complete\n- blocked\n\nsplit_complete -> complete_source\n\npatch_state_check ->\n- complete_candidate\n- waiting_patch_window\n- waiting_patch_approval\n- diagnosing_install_failure\n\nwaiting_patch_approval ->\n- waiting_patch_approval\n- waiting_patch_window\n- complete_candidate\n- human_review\n\nwaiting_patch_window -> post_window_verification\n\nclient_disposition_required ->\n- waiting_client_notification_authority\n- client_notification_verifying\n- vulscan_monitoring\n- complete\n\nwaiting_client_notification_authority ->\n- client_disposition_required when the exact client-disposition branch is promoted\n- waiting_client_notification_authority while authority remains absent\n\npost_window_verification ->\n- complete_candidate\n- diagnosing_install_failure\n- reboot_pending\n\ndiagnosing_install_failure -> repairing_update_stack\n\nrepairing_update_stack ->\n- retrying_patch\n- reboot_pending\n- escalated\n\nretrying_patch ->\n- verifying\n- reboot_pending\n- diagnosing_install_failure\n- escalated\n\nreboot_pending -> post_reboot_verification\n\npost_reboot_verification -> verifying\n\nverifying -> complete | escalated\n\nPersist ticket ID, device UID, configuration item ID, KB/patch ID, current state, first NOT_APPROVED observation timestamp, patch-window timestamp, diagnostic job IDs/results, repair attempts, reboot decision, next recheck, and any durable technician approve/defer decision.\n\n"
+      },
+      {
+        "key": "7",
+        "title": "Diagnostic Workflow",
+        "heading_markdown": "## 7. Diagnostic Workflow",
+        "body_markdown": "\n\n### A. Patch-state classification\n\nRead the exact KB/update from DRMM.\n\nBranch:\n- INSTALLED: move to verification.\n- APPROVED_PENDING: determine whether the normal patch window has occurred.\n- INSTALL_ERROR/FAILED: move to diagnostics.\n- NOT_APPROVED: set state=waiting_patch_approval. Keep the ticket in queue **Jason** and do not send it immediately to Help Desk I. Jason does not approve patches unless specifically authorized. Persist the first observed NOT_APPROVED timestamp and begin the 10-day approval-aging window.\n- ambiguous/missing object: investigate supersedence or identity before remediation.\n\nAn approved-pending patch before its maintenance window is not a failure.\n\n### B. Patch-approval waiting\n\nIf an exact reported KB is NOT_APPROVED:\n- keep the ticket in queue **Jason**\n- set state=waiting_patch_approval\n- do not classify NOT_APPROVED alone as a technician failure\n- preserve the first observed NOT_APPROVED timestamp\n- recheck the exact KB approval state daily\n- suppress duplicate ticket notes when the observed state is unchanged\n- if the patch becomes APPROVED_PENDING before day 10, transition to waiting_patch_window and resume automatically\n- if the patch becomes INSTALLED or is authoritatively superseded, transition to verification\n- if the exact KB remains NOT_APPROVED for 10 calendar days, move the ticket to **Help Desk I**, set status **Human Review**, and write one action-required escalation note\n- the Human Review note must state clearly at the top: **ACTION REQUIRED: Approve or intentionally defer the listed patch(es)**\n- if a technician intentionally defers/declines the patch, persist that decision so unchanged evidence does not recycle back into Human Review every 10 days\n\nNOT_APPROVED is therefore a timed dependency state, not an immediate escalation.\n\n### C. Patch-window check\n\nIf APPROVED_PENDING and the applicable patch window has not completed:\n- do not force-install\n- set state=waiting_patch_window\n- document the expected recheck\n- use Scheduled - Remote or another appropriate waiting status if configured\n- resume after the patch window plus reasonable processing/reboot grace\n\n### D. Standard Windows Update diagnostic component\n\nPrimary component:\n**Diagnose & Fix Windows Update Issues [WIN] AOT Ver 06102026-1**\nComponent UID: **3369bb12-66e5-42bb-a5d6-669e3bbb20ec**\n\nFirst diagnostic execution should use:\n- WU_AutoFixCore=False\n- Schedule230AMReboot=False\n- usrClearWSUS=False\n\nPurpose:\n- report OS/update health\n- inspect Windows Update services\n- identify WSUS configuration\n- test Microsoft Update connectivity\n- report Datto patch-policy presence\n- provide ticket-ready findings\n\nRetrieve terminal job state and actual StdOut/StdErr. Job submission alone is not success.\n\n### E. Supplemental evidence when needed\n\nIf diagnosis is inconclusive or patch failure persists:\n- exact WindowsUpdateClient Event ID/error/HRESULT\n- DISM /Online /Cleanup-Image /CheckHealth\n- DISM /ScanHealth when justified\n- SFC verification/scan when justified\n- Windows Update service state\n- current reboot-required state\n- WSUS policy configuration\n- recent patch/install history\n\nDo not assume error 0x80073712 proves persistent component-store corruption. OWNi7JAN25 demonstrated that Windows Update can return 0x80073712 while DISM/SFC later report healthy state.\n\n"
+      },
+      {
+        "key": "8",
+        "title": "Decision Gates",
+        "heading_markdown": "## 8. Decision Gates",
+        "body_markdown": "\n\nBefore repair:\n- exact device and KB identified\n- Jason ownership/device association complete\n- endpoint online\n- applicable patch window has completed OR explicit owner approval allows earlier remediation\n- patch remains missing/pending/failed\n- diagnostic evidence supports Windows Update stack remediation\n- no conflicting patch-policy/maintenance condition exists\n\nBefore reboot:\n- determine the **current endpoint reboot state** from authoritative endpoint evidence\n- treat endpoint-level `reboot_required` as authoritative for whether a reboot is currently pending\n- treat patch-object `rebootRequired=True` only as metadata about that update's reboot behavior; it is **not** proof that the endpoint currently requires a reboot after installation\n- never block stale/recovered-ticket closure solely because an installed patch object has `rebootRequired=True` when endpoint `reboot_required=False`\n- query live Windows interactive session state before any actual reboot; never use DRMM last_logged_in_user as proof\n- Active or Disconnected session = user session present\n- no user session = unattended\n\nBefore clearing WSUS:\n- confirm WSUS policy is erroneous/unwanted for that endpoint\n- obtain explicit approval unless an approved autonomous playbook version explicitly grants it\n\n"
+      },
+      {
+        "key": "9",
+        "title": "Remediation",
+        "heading_markdown": "## 9. Remediation",
+        "body_markdown": "\n\n### A. Windows Update core repair\n\nUse:\n**Diagnose & Fix Windows Update Issues [WIN] AOT Ver 06102026-1**\n\nRepair flags:\n- WU_AutoFixCore=True\n- Schedule230AMReboot=False by default\n- usrClearWSUS=False by default\n\nThis resets core Windows Update components only when issues are detected, including BITS/WUAUSERV, SoftwareDistribution, Catroot2, and triggers a scan.\n\nAuthority: modifying but normally non-user-disruptive. Remains governed.\n\n### B. WSUS policy repair\n\nSet usrClearWSUS=True only when authoritative evidence shows stale/incorrect WSUS policy is the blocker and the action is specifically authorized.\n\nAuthority: modifying/configuration-changing.\n\n### C. Reboot handling\n\nDo not use the component's reboot flag blindly.\n\nPreferred Jason logic:\n1. Perform a live interactive-session check.\n2. If no Active/Disconnected session and reboot is approved within playbook authority, reboot according to governance.\n3. If any user session exists, do not reboot immediately.\n4. Schedule a one-time **2:30 AM** reboot.\n5. Persist state=reboot_pending.\n6. Resume at approximately **3:00 AM**.\n7. Verify reboot actually occurred using last-boot timestamp/DRMM evidence before continuing.\n\nIf using the component's Schedule230AMReboot=True option, Jason must still satisfy the live-session and authority gates before scheduling it.\n\n### D. Patch retry\n\nAfter repair, re-detect patch state and allow the normal/authorized patch installation mechanism to retry the already-approved update.\n\nDo not silently approve new patches.\n\n"
+      },
+      {
+        "key": "10",
+        "title": "Retry Policy",
+        "heading_markdown": "## 10. Retry Policy",
+        "body_markdown": "\n\nMaximum two full repair/install cycles.\n\nA full cycle includes:\n- current patch-state read\n- diagnostic evidence\n- Windows Update repair if justified\n- patch re-detection/retry\n- reboot handling if required\n- post-action patch verification\n\nAfter two failed cycles, transition to escalated.\n\nDo not repeat DISM/SFC/cache-reset work indefinitely.\n\n"
+      },
+      {
+        "key": "11",
+        "title": "Periodic Rechecks",
+        "heading_markdown": "## 11. Periodic Rechecks",
+        "body_markdown": "\n\nFor waiting_patch_approval:\n- recheck the exact reported KB approval state once per day\n- retain the ticket in queue Jason through day 9 while the exact KB remains NOT_APPROVED\n- do not create a new ticket note when the recheck produces no meaningful state change\n- if state changes to APPROVED_PENDING, resume the patch-window path automatically\n- at 10 calendar days still NOT_APPROVED, hand off to Help Desk I with status Human Review\n\nFor waiting_patch_window:\n- recheck after the scheduled maintenance window plus a reasonable grace period.\n\nFor reboot_pending:\n- recheck around 3:00 AM after a 2:30 AM scheduled reboot.\n\nFor retrying_patch:\n- use bounded rechecks appropriate to Datto patch execution timing.\n\nFor waiting_client_notification_authority:\n- retain Jason queue ownership and the already-proven patch classification\n- release the active-work slot\n- re-evaluate the exact VulScan client-disposition promotion on the normal worker cadence\n- do not change the ticket contact, send a client notification, or move to Close Pending before the exact client-disposition branch is promoted\n- suppress duplicate waiting notes while authority remains unchanged\n- resume automatically from preserved state when the exact promotion becomes active\n\nSuppress duplicate scheduled jobs/reboots and stop rechecks after complete/escalated/closed/stale state.\n\n"
+      },
+      {
+        "key": "12",
+        "title": "Aging / Stale Condition",
+        "heading_markdown": "## 12. Aging / Stale Condition",
+        "body_markdown": "\n\nFor NOT_APPROVED findings:\n- day 0 is the first authoritative DRMM observation that the exact reported KB is NOT_APPROVED\n- days 0-9 remain Jason-owned in state=waiting_patch_approval\n- at day 10, if the same exact KB remains NOT_APPROVED and no durable technician decision exists, move to Help Desk I with status Human Review\n- a durable intentional defer/decline decision suppresses repeated 10-day re-escalation until the patch identity, policy state, or technician decision materially changes\n\nFor other critical missing-patch tickets that remain unresolved across multiple patch windows or beyond the defined SLA:\n- investigate stale VulScan evidence\n- check supersedence/build mismatch\n- check endpoint rename/reimage/replacement\n- validate patch-policy assignment\n- escalate rather than leave the ticket in an endless waiting state\n\n"
+      },
+      {
+        "key": "13",
+        "title": "Dependency Handling",
+        "heading_markdown": "## 13. Dependency Handling",
+        "body_markdown": "\n\nDependencies include:\n- valid DRMM endpoint identity\n- Autotask configuration item\n- Datto patch inventory\n- approved AOT Windows Update diagnostic/repair component\n- scheduler/recheck support\n- interactive-session checker\n- governed reboot capability\n\nIf a dependency is missing:\n1. verify it is actually missing\n2. search for an existing support/dependency issue\n3. suppress duplicates\n4. create one when appropriate\n5. cross-reference it\n6. set state=blocked\n\n"
+      },
+      {
+        "key": "14",
+        "title": "Documentation Requirements",
+        "heading_markdown": "## 14. Documentation Requirements",
+        "body_markdown": "\n\nDocument:\n- exact KB/update\n- current install/approval state\n- whether the patch window has occurred\n- endpoint online/reboot state\n- component flags used\n- job ID and terminal status\n- relevant sanitized StdOut/StdErr\n- HRESULT/event evidence\n- DISM/SFC results when used\n- repair/retry count\n- live-session/reboot decision\n- post-action verification\n\nUse a technician-scannable layout wherever practical. The first lines must make the current state and next action obvious.\n\nPreferred field order:\n- **STATUS**\n- **NEXT STEP** or **ACTION REQUIRED**\n- **WHEN / ESCALATION**\n- **DEVICE**\n- **PATCH STATUS / KEY EVIDENCE**\n- **WHAT JASON FOUND**\n- **WHAT JASON DID**\n- **CHANGES MADE**\n- **JASON STATE**\n\nFor waiting_patch_approval, the top of the note should read conceptually:\n- STATUS: WAITING — PATCH NOT APPROVED\n- NEXT STEP: No technician action required yet; Jason will continue monitoring\n- ESCALATION: If still NOT_APPROVED at 10 days, move to Help Desk I / Human Review\n\nFor the day-10 Human Review handoff, the top of the note should read conceptually:\n- STATUS: HUMAN REVIEW REQUIRED\n- ACTION REQUIRED: Approve or intentionally defer the listed patch(es)\n- WHY: The exact patch has remained NOT_APPROVED for 10 days\n- AFTER APPROVAL: Jason resumes the normal patch workflow automatically\n\nSuggested note titles:\n- Jason - VulScan - Asset Validation\n- Jason - VulScan - Waiting Patch Approval\n- Jason - VulScan - Waiting Patch Window\n- Jason - VulScan - Diagnostic\n- Jason - VulScan - Windows Update Repair\n- Jason - VulScan - Reboot Scheduled\n- Jason - VulScan - Verification\n- Jason - VulScan - Human Review Required\n- Jason - VulScan - Resolution\n\n"
+      },
+      {
+        "key": "15",
+        "title": "Failure Handling",
+        "heading_markdown": "## 15. Failure Handling",
+        "body_markdown": "\n\nExplicitly document:\n- component provider failure before job creation\n- component job failure\n- missing output\n- Windows Update HRESULT\n- patch still pending after maintenance\n- contradictory DISM/SFC/event evidence\n- failed reboot verification\n- update still missing after repair/retry\n\nDo not infer success from a component submission.\n\n"
+      },
+      {
+        "key": "16",
+        "title": "Escalation Criteria",
+        "heading_markdown": "## 16. Escalation Criteria",
+        "body_markdown": "\n\nEscalate to Help Desk I when:\n- an exact reported KB remains NOT_APPROVED for 10 calendar days with no durable technician approve/defer decision; set status Human Review\n- two full repair/install cycles fail\n- Windows servicing corruption cannot be repaired by the approved component path\n- patch remains missing across authorized windows without explainable state\n- WSUS/policy changes beyond approved scope are required\n- supersedence/build state is ambiguous\n- manual servicing/install media is required\n- disruptive action beyond playbook authority is required\n\nInclude all HRESULTs, repair jobs, outputs, patch states, and recommended next step.\n\n"
+      },
+      {
+        "key": "17",
+        "title": "Verification",
+        "heading_markdown": "## 17. Verification",
+        "body_markdown": "\n\nAuthoritative verification must include:\n- exact KB installed OR authoritative supersedence/build proof\n- patch no longer APPROVED_PENDING/INSTALL_ERROR for the targeted condition\n- DRMM patch status healthy or otherwise explained\n- no unexpected approved pending patch remains\n- current endpoint-level `reboot_required=False` when closure requires no pending reboot\n- patch-object `rebootRequired` may be recorded as evidence but must not override current endpoint reboot state\n- endpoint remains healthy/online\n- VulScan/monitor finding clears or is proven stale\n\n"
+      },
+      {
+        "key": "18",
+        "title": "Completion Criteria",
+        "heading_markdown": "## 18. Completion Criteria",
+        "body_markdown": "\n\nComplete only when:\n- identity/association are correct\n- patch state/root cause is classified\n- required remediation/reboot completed when actually required by current endpoint state\n- authoritative exact-KB/build verification succeeds\n- current endpoint reboot state is authoritative; an installed patch's `rebootRequired=True` metadata alone does not prevent completion when endpoint `reboot_required=False`\n- related monitoring condition is resolved/stale by evidence\n- final internal note exists\n\n"
+      },
+      {
+        "key": "19",
+        "title": "Final Resolution Note",
+        "heading_markdown": "## 19. Final Resolution Note",
+        "body_markdown": "\n\nInclude original missing KB, patch state, Windows Update error/HRESULT if any, diagnostic findings, repair component/flags/jobs, reboot handling, number of attempts, final KB/build/DRMM state, and resolution timestamp.\n\n"
+      },
+      {
+        "key": "20",
+        "title": "Required Capabilities",
+        "heading_markdown": "## 20. Required Capabilities",
+        "body_markdown": "\n\nCore diagnostic/classification branch (exact existing `vulscan_missing_patch@1.0.0` promotion):\n- Autotask ticket read/update/internal-note create\n- Autotask configuration search/association\n- DRMM endpoint read/search\n- DRMM patch search\n- persisted state and scheduler/recheck support\n\nMulti-device split branch (exact `vulscan_multi_device_split@1.0.0` promotion):\n- `service.ticket.create`\n- `service.ticket.note.create`\n- `service.ticket.update`\n- Autotask configuration search/read\n- DRMM endpoint read\n- shared Jason Ticket Split Runtime Contract and durable split ledger\n\nThis branch is separately promotion-bound. Ticket creation authority is not inherited by the v1.0 diagnostic branch or v1.1 client-disposition branch.\n\nClient-disposition branch (exact `vulscan_missing_patch@1.1.0` promotion):\n- all required core ticket/update capabilities used by the disposition branch\n- `service.ticket.client.notification.create`\n- approved workflow/template registry resolution\n- Autotask ticket/contact authoritative reads\n- Autotask Notification History read/verification\n\nSeparately approval-bound remediation capabilities:\n- DRMM component search/execute/job/output\n- governed read-only Windows commands when supplemental evidence is required\n- interactive Windows session check\n- governed reboot/scheduled reboot\n\nDo not make the v1.1 client-notification capability a prerequisite for admitting the already-approved v1.0 diagnostic/classification branch.\n\n"
+      },
+      {
+        "key": "21",
+        "title": "Acceptance Test",
+        "heading_markdown": "## 21. Acceptance Test",
+        "body_markdown": "\n\nPrimary acceptance case:\n- Ticket: T20260905.0004\n- Client: Riggins Company\n- Device: OWNi7JAN25\n- KB: KB5121003\n\nKnown case evidence:\n- patch is approved\n- patch previously failed with Windows Update HRESULT 0x80073712\n- DISM/SFC/component-store evidence subsequently appeared healthy\n- patch remains APPROVED_PENDING\n- owner directed Jason to respect the normal patch window rather than force installation\n\nAcceptance must prove:\n1. ticket moved/kept in Jason queue\n2. correct configuration item association\n3. exact KB identification\n4. NOT_APPROVED enters waiting_patch_approval instead of immediate Help Desk escalation\n5. unchanged NOT_APPROVED state stays Jason-owned through day 9 with duplicate-note suppression\n6. approval before day 10 resumes automatically into the patch-window path\n7. still NOT_APPROVED at day 10 moves to Help Desk I with status Human Review and a clear ACTION REQUIRED note\n8. durable technician defer/decline prevents unchanged 10-day re-escalation loops\n9. APPROVED_PENDING before-window path waits instead of forcing install\n10. post-window path rechecks exact KB\n11. diagnostic component first runs with all repair flags false\n12. WU_AutoFixCore=True is only used after repair gate\n13. WSUS clearing remains separately gated\n14. live-session gate protects logged-in users from reboot\n15. 2:30 AM/3:00 AM scheduled reboot/resume path works\n16. maximum two repair cycles\n17. installed-patch `rebootRequired=True` does not create a false reboot block when endpoint `reboot_required=False`\n18. stale/recovered installed findings can complete after endpoint-health and exact-KB verification\n19. exact final KB/build verification before completion\n20. Gromelski company 597 resolves the client-specific disposition rule\n21. Chris Benton contact 30684489 is associated and independently read back\n22. exact canned template `vulscan-approved-or-installed-v1` is used with no generated wording\n23. Gromelski terminal ticket status is Close Pending (21), never Complete\n24. Notification History proves a new same-ticket copy to chris.benton@e-gai.com\n25. approved-pending Gromelski tickets remain in persisted monitoring state after Close Pending\n26. a more-specific site/device/user/ticket override wins over the client rule\n27. non-Gromelski tickets preserve the global VulScan disposition\n28. an exact v1.0.0 diagnostic/classification promotion remains eligible even when the v1.1.0 client-disposition branch is not promoted\n29. a Gromelski ticket that reaches client disposition without v1.1.0 promotion enters waiting_client_notification_authority, releases its active slot, and performs no contact/status/client-message mutation\n30. activating the exact v1.1.0 client-disposition promotion automatically resumes the preserved ticket and uses workflow_id=vulscan_missing_patch plus template_id=vulscan-approved-or-installed-v1\n31. the approved-workflow connector reconstructs canned title/body server-side; autonomous VulScan does not supply free-form client wording or an arbitrary recipient\n32. a VulScan source ticket with two or more affected nodes is split before the one-device admission gate\n33. each affected node resolves to exactly one active same-company CI and exact DRMM UID/hostname\n34. each verified node receives exactly one child ticket in queue Jason with one CI and source lineage\n35. a repeated split invocation reuses previously verified children and creates no duplicates\n36. partial child-create failure leaves the source open and resumes only the missing children on retry\n37. source completion occurs only after every requested child has provider readback\n38. the `vulscan_multi_device_split@1.0.0` playbook cannot create tickets unless its exact durable promotion includes service.ticket.create\n39. the two historical multi-device alerts T20260929.0033 and T20260930.0041 can be replayed safely as controlled acceptance cases without guessing a single source CI\n\n"
+      },
+      {
+        "key": "22",
+        "title": "Section Goal Closure",
+        "heading_markdown": "## 22. Section Goal Closure",
+        "body_markdown": "\n\nClose after:\n- playbook implementation is registered in Project Jason\n- OWNi7JAN25 acceptance completes or an equivalent controlled case passes\n- required session-check/recheck capabilities are proven\n- Grafana/Project Jason playbook status is updated\n- limitations/support items are documented\n\n\n## Client / Site / Device / User Disposition Overrides\n\nVulScan remediation logic remains one canonical playbook. Client-specific behavior is resolved through a deterministic policy hierarchy rather than by forking the playbook.\n\nPrecedence from least to most specific:\n\n`global -> client -> site -> device -> user -> ticket`\n\nA more-specific matching rule replaces the less-specific disposition rule. Evidence does not create authority; only source-controlled approved policy entries may change behavior.\n\n### Gromelski And Associates Inc. client override\n\nAuthoritative Autotask identities verified 2026-09-29:\n\n- Company: **Gromelski And Associates Inc.**\n- Company ID: **597**\n- Primary Contact: **Chris Benton**\n- Contact ID: **30684489**\n- Primary Contact flag: **true**\n- Receives email notifications: **true**\n- Terminal PSA status: **Close Pending**\n- Autotask status ID: **21**\n\nThis override applies only when the exact ticket company is 597 unless a more-specific approved site/device/user/ticket rule replaces it.\n\nWhen a Gromelski VulScan ticket reaches either of these states:\n\n1. all exact reported KBs are already installed and endpoint reboot state does not block resolution; or\n2. the exact required patch is approved for implementation and is waiting for the regular maintenance window;\n\nJason must:\n\n1. resolve the applicable VulScan disposition policy;\n2. require the exact authoritative Gromelski company identity;\n3. associate Chris Benton as the ticket contact through governed `service.ticket.update` and require `contactID` readback;\n4. publish exactly the approved canned communication through `service.ticket.client.notification.create`;\n5. set ticket status to **Close Pending** rather than **Complete**;\n6. require readback of both `contactID` and `status`;\n7. verify a new Autotask Notification History record for the same ticket was sent to `chris.benton@e-gai.com`;\n8. suppress duplicate client communications using the approved template fingerprint.\n\nFor an approved-pending patch, Close Pending is a client-facing disposition only; it does **not** end Jason's technical responsibility. Persist `vulscan_monitoring` and continue exact-KB verification through the normal patch window. When the patch becomes installed and endpoint state is healthy, Jason may mark the internal playbook state complete while leaving the PSA ticket in Close Pending for the normal client-facing close lifecycle.\n\nFor an already-installed stale/recovered finding, Jason may mark the internal playbook state complete only after the client communication, primary-contact association, Close Pending status, and notification-copy verification all succeed.\n\nIf the exact client-disposition branch has not yet received durable owner promotion, set `state=waiting_client_notification_authority`, retain Jason ownership, release the active-work slot, and make no client contact/status/communication mutation. Resume automatically when that exact promotion becomes active.\n\nAfter the client-disposition branch is authorized, any contact association failure, notification write failure, notification-copy verification failure, or status readback failure must fail closed. Do not silently fall back to Complete.\n\n### Approved canned client communication\n\nTemplate ID: `vulscan-approved-or-installed-v1`\n\nTitle: `Vulnerability Update`\n\nText:\n\n> The identified vulnerability mentioned in this ticket has been reviewed. The required update has either already been installed or has been approved for implementation and is scheduled to be applied during the device’s next regular patching window in accordance with our maintenance policy.\n>\n> No further action is required at this time. Monitoring will continue to confirm successful deployment and remediation. Please reopen the ticket if you experience any issues following the update.\n\nThe template is source-controlled approved text. Jason must not paraphrase, expand, summarize, or otherwise alter it during autonomous use.\n\n"
+      },
+      {
+        "key": "23",
+        "title": "Autonomous Execution Eligibility",
+        "heading_markdown": "## 23. Autonomous Execution Eligibility",
+        "body_markdown": "\n\nautonomous_allowed: diagnostic_only\n\nApproval owner: person-al\nApproval date: 2026-09-26\n\nClient-disposition design approval: person-al, 2026-09-29\nApproved scope: exact `vulscan_missing_patch@1.0.0` diagnostic/classification branch using governed endpoint/device and exact DRMM patch reads plus internal ticket work-start/note updates.\n\nThe autonomous branch may extract exact KB identities from the ticket, read the matching DRMM patch objects, classify INSTALLED, APPROVED_PENDING, NOT_APPROVED, INSTALL_ERROR/FAILED, ambiguous/supersedence-review states, document reboot-required/online state, and maintain a non-remediating waiting_patch_approval state for NOT_APPROVED findings. A NOT_APPROVED finding alone must not immediately become technician review. After 10 calendar days unchanged, the playbook may perform the governed handoff to Help Desk I / Human Review when that lifecycle branch has passed acceptance and owner review.\n\nIt may not approve patches, force installation, run Windows Update repair, clear WSUS policy, schedule or perform a reboot, or automatically complete the ticket. Those branches remain separately acceptance- and approval-gated. Material changes invalidate this approval until re-reviewed.\n\nVersion 1.1.0 adds the Gromelski client-disposition branch and uses the source-controlled approved-workflow communication registry introduced by PR #629. The exact pair is `workflow_id=vulscan_missing_patch` + `template_id=vulscan-approved-or-installed-v1`; the connector reconstructs the approved title/body server-side and derives the recipient from the authoritative ticket contact.\n\nBranch-level authority is explicit:\n- **Core diagnostic/classification scope:** `vulscan_missing_patch@1.0.0`, policy `playbook-autonomy:vulscan_missing_patch`, capabilities `service.ticket.note.create` + `service.ticket.update`. This preserves the previously owner-promoted read/classify/wait lifecycle and must not be disabled merely because the client-communication branch changes.\n- **Client-disposition scope:** `vulscan_missing_patch@1.1.0`, same policy ID, capabilities `service.ticket.note.create` + `service.ticket.update` + `service.ticket.client.notification.create`. This branch requires its own exact durable owner promotion.\n\nUntil the exact v1.1.0 client-disposition scope is promoted, qualifying Gromelski tickets enter `waiting_client_notification_authority`; Jason retains ownership, releases the active slot, preserves the patch classification, and performs no client communication/contact/Close Pending mutation. Once promoted, Jason resumes automatically and must still satisfy canned-template, contact/company, email-notification, ticket readback, and Notification History verification gates.\n"
+      }
+    ]
+  },
+  "migration": {
+    "status": "SOURCE_PRESERVED_STRUCTURED_DRAFT_NOT_RUNTIME_PARITY",
+    "source_version_discrepancy": false,
+    "production_replacement_allowed": false,
+    "staged": false,
+    "activated": false,
+    "required_before_activation": [
+      "Canonical Python JSON semantic validation",
+      "Exact-capability binding and source-scoped argument context verified",
+      "Safe diagnostic and remediation branches mapped to governed capabilities",
+      "Durable retry/wait/terminal lifecycle parity with shared runtime",
+      "Error, negative-evidence and client-boundary regression tests",
+      "Controlled shadow comparison and independent acceptance",
+      "Owner-bound activation and branch-specific autonomous promotion"
+    ],
+    "external_fact_fields_non_authoritative": true,
+    "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
+    "section_semantic_extraction": "source_text_derived_no_provider_execution"
+  }
+}

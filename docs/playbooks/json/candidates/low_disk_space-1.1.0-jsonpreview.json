@@ -1,0 +1,795 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "low_disk_space",
+    "name": "Jason - Windows Low Disk Space (JSON migration draft)",
+    "version": "1.1.0-jsonpreview",
+    "lifecycle": "pilot",
+    "target_type": "ticket",
+    "source_owner": "AOT",
+    "source_registry_version": "1.1.0",
+    "documented_version": "1.1.0",
+    "original_lifecycle": "production"
+  },
+  "trigger": {
+    "source_registry_match": {
+      "title_contains": [
+        "Low Disk Space"
+      ]
+    },
+    "details_section_key": "2",
+    "execution_enabled": false
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "preview_only": true,
+    "execution_authority": "none",
+    "scope_section_key": "3"
+  },
+  "expected_state": {
+    "details_section_key": "5",
+    "not_reverified_in_json_runtime": true
+  },
+  "state_model": {
+    "entry_step": "identity_gate",
+    "source_section_key": "6",
+    "context_binding_status": "not_implemented_for_migration_draft"
+  },
+  "steps": [
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "evidence_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "authoritative_evidence_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "authorization_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "authorization_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "approved_json_runtime_parity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "migration_hold"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "migration_hold",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Legacy source playbook section 17 and provider readbacks; not executed in this JSON draft",
+    "success_condition": "Legacy source Section 17 and Section 18 must pass independently; classification-only draft cannot verify or close"
+  },
+  "completion": {
+    "terminal_disposition": "Human Review (draft only; existing production source unchanged)"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": []
+  },
+  "procedure": {
+    "section_refs": {
+      "section_goal": "1",
+      "trigger": "2",
+      "scope": "3",
+      "identification": "4",
+      "expected_state": "5",
+      "state_model": "6",
+      "diagnostics": "7",
+      "decision_gates": "8",
+      "remediation": "9",
+      "retry_policy": "10",
+      "periodic_rechecks": "11",
+      "stale_condition": "12",
+      "dependencies": "13",
+      "documentation": "14",
+      "failures": "15",
+      "escalation": "16",
+      "verification": "17",
+      "completion": "18",
+      "final_resolution": "19",
+      "required_capabilities": "20",
+      "acceptance_test": "21",
+      "closure": "22",
+      "autonomy_review": "23"
+    },
+    "section_keys_missing_from_source": [
+      "23"
+    ],
+    "diagnostic_substep_titles": [
+      "Step 1: Capture volume baseline",
+      "Step 2: Check recent automation/activity",
+      "Step 3: Read-only storage analysis",
+      "Step 4: Check known AOT cleanup candidates",
+      "Step 5: Check storage-health and replacement evidence",
+      "Step 6: Capacity / recurrence interpretation"
+    ],
+    "remediation_substep_titles": [
+      "A. Known safe workstation cleanup",
+      "B. Server or protected-role cleanup",
+      "C. Unknown large file/folder",
+      "D. Storage-health risk",
+      "E. Legitimate retained data / undersized drive"
+    ],
+    "live_execution_mapped": false,
+    "structured_source_fields": {
+      "identification_checklist": {
+        "source_section_key": "4",
+        "present": true,
+        "verbatim_bullets": [
+          "1. Identify exact Autotask ticket and client/site.",
+          "2. Run the global CI/device-association gate.",
+          "3. Resolve the exact DRMM endpoint and affected drive/volume.",
+          "4. Confirm current online state.",
+          "5. Before substantive diagnostics, use the global ticket-work-start lifecycle: Jason queue, In Progress, Remote Support, post-write readback.",
+          "6. Record current alert timestamp and any prior related ticket.",
+          "7. Enter the bounded 15-minute Autotask-cleanup grace state before launching any playbook cleanup.",
+          "8. During the grace state, recheck the current DRMM low-disk monitor; do not duplicate the existing Autotask cleanup.",
+          "9. Search recent related tickets and DRMM activity history before dispatching a diagnostic that may already have run.",
+          "10. If device identity, drive identity, or client scope is ambiguous, set state identification_blocked and stop."
+        ]
+      },
+      "expected_state_checklist": {
+        "source_section_key": "5",
+        "present": true,
+        "verbatim_bullets": [
+          "- the exact monitored volume is readable and online;",
+          "- free space is above the active monitoring condition or documented client/site standard;",
+          "- underlying cause is understood or classified;",
+          "- no evidence indicates storage failure or file-system corruption;",
+          "- BitLocker state is known and not altered;",
+          "- any cleanup performed is from an approved target class;",
+          "- the alert clears or current evidence proves the condition is healthy."
+        ]
+      },
+      "decision_gate_checklist": {
+        "source_section_key": "8",
+        "present": true,
+        "verbatim_bullets": [
+          "1. exact client/device/volume identity is proven;",
+          "2. endpoint is online;",
+          "3. current low-space condition is confirmed;",
+          "4. device role is a supported workstation/laptop for autonomous cleanup;",
+          "5. diagnostic evidence identifies the target;",
+          "6. target is an explicitly approved safe cleanup class;",
+          "7. no user/business/application data is included;",
+          "8. no conflicting job/maintenance is active;",
+          "9. current governance and playbook promotion authorize the exact action;",
+          "10. rollback/escalation behavior is known."
+        ]
+      },
+      "retry_checklist": {
+        "source_section_key": "10",
+        "present": true,
+        "verbatim_bullets": [
+          "- Read failures: bounded re-read of the same evidence request; never convert a read failure into cleanup authority.",
+          "- Cleanup: maximum one additional autonomous cleanup attempt per incident cycle, regardless of how many eligible safe targets exist. The pre-existing Autotask-triggered cleanup remains the first cleanup opportunity.",
+          "- Never rerun while prior job state is active/unknown.",
+          "- If verification fails, stop and escalate rather than chaining increasingly aggressive deletion."
+        ]
+      },
+      "recheck_checklist": {
+        "source_section_key": "11",
+        "present": true,
+        "verbatim_bullets": [
+          "- the initial 15-minute Autotask cleanup grace window is active;",
+          "- endpoint was offline;",
+          "- an approved cleanup job is pending;",
+          "- the post-cleanup 15-minute monitor propagation window is active;",
+          "- a dependency/approval is awaited."
+        ]
+      },
+      "stale_checklist": {
+        "source_section_key": "12",
+        "present": true,
+        "verbatim_bullets": [
+          "- endpoint replacement/retirement;",
+          "- stale CI/DRMM object;",
+          "- repeated recurrence after prior cleanup;",
+          "- underlying application growth;",
+          "- storage sizing problem;",
+          "- insufficient system-drive capacity."
+        ]
+      },
+      "dependency_checklist": {
+        "source_section_key": "13",
+        "present": true,
+        "verbatim_bullets": [
+          "- read-only folder-size component;",
+          "- BitLocker status read;",
+          "- DRMM activity/job history;",
+          "- exact approved cleanup component;",
+          "- endpoint/CI association;",
+          "- storage-health evidence."
+        ]
+      },
+      "documentation_checklist": {
+        "source_section_key": "14",
+        "present": true,
+        "verbatim_bullets": [
+          "1. **STATUS** — current free space / current monitor state.",
+          "2. **NEXT STEP** or **ACTION REQUIRED** — what Jason or the technician should do next.",
+          "3. **KEY EVIDENCE** — at most the few material consumers/findings that explain the conclusion.",
+          "4. **DISK HEALTH** — only when health/identity information changes the recommendation or confirms replacement/capacity guidance.",
+          "5. **WHAT JASON DID** — concise diagnostics/remediation summary.",
+          "6. **CHANGES MADE** — explicitly state None when no modification occurred.",
+          "7. **JASON STATE** — persisted state for audit/resume.",
+          "- Jason - Low Disk Space - Baseline",
+          "- Jason - Low Disk Space - Diagnostic",
+          "- Jason - Low Disk Space - Remediation",
+          "- Jason - Low Disk Space - Verification",
+          "- Jason - Low Disk Space - Escalation"
+        ]
+      },
+      "failure_checklist": {
+        "source_section_key": "15",
+        "present": true,
+        "verbatim_bullets": [
+          "- ambiguous device/volume;",
+          "- diagnostic capability unavailable;",
+          "- component execution authorization defect;",
+          "- large data whose purpose is unknown;",
+          "- storage-health warning;",
+          "- cleanup job failure;",
+          "- post-cleanup free space not materially improved;",
+          "- alert persists despite healthy free-space evidence;",
+          "- provider/job state is stale or contradictory."
+        ]
+      },
+      "escalation_checklist": {
+        "source_section_key": "16",
+        "present": true,
+        "verbatim_bullets": [
+          "- target is a server/protected role;",
+          "- storage-health evidence suggests failure;",
+          "- safe cleanup cannot be identified;",
+          "- user/business data is the primary consumer;",
+          "- issue recurs after bounded cleanup;",
+          "- additional disk capacity may be required;",
+          "- execution-plan/governance blocks the approved action;",
+          "- verification fails."
+        ]
+      },
+      "verification_checklist": {
+        "source_section_key": "17",
+        "present": true,
+        "verbatim_bullets": [
+          "1. wait for the exact job to reach a trustworthy terminal state;",
+          "2. retrieve output;",
+          "3. independently re-read volume size/free space/free percentage;",
+          "4. confirm expected target no longer consumes the identified space when relevant;",
+          "5. confirm monitoring returns healthy/clears;",
+          "6. confirm no new storage/file-system errors were introduced;",
+          "7. document final state."
+        ]
+      },
+      "completion_checklist": {
+        "source_section_key": "18",
+        "present": true,
+        "verbatim_bullets": [
+          "- identity and volume are correct;",
+          "- baseline and root-cause classification are documented;",
+          "- required safe remediation completed or no remediation was necessary;",
+          "- independent free-space verification is healthy;",
+          "- monitoring condition is healthy/cleared;",
+          "- no unresolved storage-health risk remains;",
+          "- ticket documentation is complete."
+        ]
+      },
+      "required_capabilities_source": {
+        "source_section_key": "20",
+        "present": true,
+        "verbatim_bullets": [
+          "- service.ticket.read/search/update",
+          "- service.ticket.note.create",
+          "- service.configuration.read/search",
+          "- endpoint.device.read/search",
+          "- endpoint.audit.read",
+          "- endpoint.alert.search/history",
+          "- endpoint.powershell.read for classifier-approved read-only storage diagnostics",
+          "- service.ticket.search for recurrence context when useful",
+          "- automation.component.execute only for exact standing-safe cleanup components",
+          "- automation.job.read",
+          "- automation.job.output.read",
+          "- BitLocker/status evidence",
+          "- DRMM activity/history evidence",
+          "- persisted playbook state",
+          "- orchestration recheck scheduling"
+        ]
+      },
+      "acceptance_test_checklist": {
+        "source_section_key": "21",
+        "present": true,
+        "verbatim_bullets": [
+          "1. exact ticket/device association;",
+          "2. the initial 15-minute Autotask cleanup grace does not dispatch competing cleanup;",
+          "3. recovered/cleared monitor state completes through independent free-space and ticket-status readback;",
+          "4. current volume baseline and current monitor state;",
+          "5. read-only largest-folder and large-file analysis;",
+          "6. VSS, hibernation/pagefile/dump, Windows Update residue, C:\\Sysmon, SoftwareDistribution backup, and common large-file/install-artifact classification;",
+          "7. physical-disk / SMART / reliability evidence and storage-risk override;",
+          "8. recurrence context is surfaced only when relevant;",
+          "9. protected/server targets route to Help Desk I / Human Review without cleanup;",
+          "10. legitimate retained data produces a concise capacity-upgrade recommendation rather than arbitrary deletion;",
+          "11. C:\\Sysmon is eligible only when >=1 GiB and no active service references it;",
+          "12. material SoftwareDistribution.bak_* usage is detected and routed as a review-bound recommendation without autonomous component dispatch;",
+          "13. at most one additional standing-safe Sysmon cleanup component is dispatched per incident cycle;",
+          "14. successful cleanup still requires current free-space re-read and authoritative monitor clear;",
+          "15. failed/uncleared cleanup routes to Help Desk I / Human Review with no second cleanup attempt;",
+          "16. technician notes are relevance-filtered and do not paste raw scan/SMART output;",
+          "17. #261 remains regression-covered as a fixed authorization path; stale/unknown job state fails closed without duplicate dispatch."
+        ]
+      },
+      "closure_checklist": {
+        "source_section_key": "22",
+        "present": true,
+        "verbatim_bullets": [
+          "- playbook 1.1 source and runtime are merged;",
+          "- deterministic/unit/security validation passes;",
+          "- the exact Sysmon cleanup component is standing-safe with a durable fingerprint;",
+          "- the SoftwareDistribution cleanup component is explicitly recorded as review-bound and cannot be dispatched unattended;",
+          "- exact `low_disk_space@1.1.0` playbook autonomy promotion is active;",
+          "- controlled workstation acceptance proves grace, diagnostics, one-cleanup ceiling, verification, and Human Review routing;",
+          "- production runtime is deployed and live readback proves 1.1 is executing;",
+          "- Grafana/Project Jason status and remaining TODOs are updated."
+        ]
+      },
+      "owner_review_checklist": {
+        "source_section_key": "23",
+        "present": false,
+        "verbatim_bullets": []
+      }
+    },
+    "diagnostic_substeps": [
+      {
+        "id": "7_sub_1",
+        "heading": "Step 1: Capture volume baseline",
+        "content_markdown": "\n\nRecord:\n- drive letter / volume identity;\n- total size;\n- free bytes/GB;\n- free percentage;\n- file system;\n- volume label where useful;\n- fixed/removable/system role where available;\n- current BitLocker protection/encryption state;\n- reboot-required state when available.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_2",
+        "heading": "Step 2: Check recent automation/activity",
+        "content_markdown": "\n\nInspect DRMM activity/job history for recent:\n- disk/folder size scans;\n- cleanup components;\n- patching;\n- reboot jobs;\n- security tooling actions;\n- other maintenance that could explain the condition.\n\nIf an exact relevant job is still running, track/read that job instead of redispatching it.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_3",
+        "heading": "Step 3: Read-only storage analysis",
+        "content_markdown": "\n\nUse governed read-only endpoint evidence to identify:\n- largest top-level folders and the dominant retained-data footprint;\n- top large files, especially ISO, IMG, WIM, ESD, ZIP/7z/RAR/CAB, MSI/MSP/EXE, DMP, VHD/VHDX, PST/OST, and similar common large-file types;\n- VSS/shadow-copy consumption;\n- hiberfil.sys, pagefile.sys, MEMORY.DMP, and other material system files;\n- Windows Update / SoftwareDistribution residue and old SoftwareDistribution.bak_* folders;\n- C:\\Sysmon accumulation;\n- Autotask/Datto/software-deployment installers, extracted setup media, and stale deployment artifacts when they appear among material consumers;\n- user/application/business data that should not be deleted simply because it is large;\n- partition/capacity evidence when it materially changes the recommendation.\n\nThe large-file scan is diagnostic evidence, not deletion authority. ISO/IMG/install media, archives, PST/OST, VHD/VHDX, Downloads, user data, and unknown application storage are review candidates unless an exact separately approved cleanup class applies.\n\nDo not modify files during analysis.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_4",
+        "heading": "Step 4: Check known AOT cleanup candidates",
+        "content_markdown": "\n\nExplicitly check C:\\Sysmon when present.\n\nFor C:\\Sysmon:\n- determine whether it exists;\n- determine size;\n- determine whether active services/processes still depend on it;\n- distinguish a current required installation from orphaned/known accumulation;\n- only use an approved cleanup action when the playbook and exact target criteria authorize it.\n\nThe existence of C:\\Sysmon alone is not permission to delete it.\n\nAlso check old `C:\\Windows\\SoftwareDistribution.bak_*` folders. Their aggregate size is useful root-cause evidence, but the current AOT cleanup component is classified by Jason component governance as destructive/review-required and is **not** standing-safe. Jason may recommend that cleanup in Help Desk I / Human Review, but must not dispatch it unattended. Active Windows Update cache is not part of this autonomous cleanup branch.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_5",
+        "heading": "Step 5: Check storage-health and replacement evidence",
+        "content_markdown": "\n\nInspect available evidence for:\n- physical disk model, serial where available, media type, bus/interface, and capacity;\n- SMART/Storage Spaces health and operational status;\n- storage reliability counters, read/write error totals, wear/health indicators when exposed;\n- Event ID 7/bad block;\n- NTFS/file-system errors;\n- controller/disk warnings;\n- repeated unexpected shutdowns associated with storage issues.\n\nIf storage-health risk is present, prioritize preservation/escalation over cleanup. A drive may warrant replacement even if space can be reclaimed. If both health risk and capacity pressure are present, the technician recommendation should make both facts clear.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_6",
+        "heading": "Step 6: Capacity / recurrence interpretation",
+        "content_markdown": "\n\nWhere useful evidence exists, distinguish:\n- transient accumulation that can be safely removed;\n- recurring growth that is likely to return;\n- large but legitimate user/application/business data;\n- a drive that is simply undersized for the retained data footprint;\n- a drive that should be replaced primarily because of health risk.\n\nWhen prior low-disk tickets exist for the same endpoint, surface the recurrence count only if it changes the recommendation. Do not invent growth rates when historical free-space readings are unavailable.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      }
+    ],
+    "remediation_branches": [
+      {
+        "id": "9_sub_1",
+        "heading": "A. Known safe workstation cleanup",
+        "content_markdown": "\n\nVersion 1.1 permits at most **one** additional playbook-scoped cleanup after the existing Autotask cleanup opportunity. Jason does not rerun generic `Disk Cleanup [WIN]`.\n\nThe exact autonomous target is:\n- `Sysmon - Clear C:\\Sysmon Folder - AOT` (`97ddcdd5-2b74-4a4b-9516-cc872af6a7b6`) only when C:\\Sysmon is at least 1 GiB, no active service references that path, and the exact component has active standing-safe approval.\n\nThe existing `Delete SoftwareDistribution Backup Folders - AOT Ver 05122026-1` component remains **review-bound** because standing-safe promotion was rejected by Jason component governance as destructive/review-required. Jason may detect and quantify those old backup folders and recommend technician cleanup, but it must not dispatch that component unattended.\n\nUser/business/application data, active Windows Update cache, Recycle Bin, browser cache, VSS, hibernation, pagefile, dumps, ISO/IMG/install media, PST/OST, VHD/VHDX, and unknown data are not part of this autonomous cleanup authority.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_2",
+        "heading": "B. Server or protected-role cleanup",
+        "content_markdown": "\n\nSet state human_review_server. Jason gathers evidence and proposes the exact cleanup. No autonomous cleanup under this baseline.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_3",
+        "heading": "C. Unknown large file/folder",
+        "content_markdown": "\n\nSet state unknown_large_data. Document path, size, owner/application context when available, and recommended technician action. Do not delete.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_4",
+        "heading": "D. Storage-health risk",
+        "content_markdown": "\n\nSet state storage_health_risk. Do not focus on space recovery alone. Escalate for hardware/storage investigation and preserve evidence. If replacement is already justified by health evidence, include that conclusion even if cleanup could temporarily recover space.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_5",
+        "heading": "E. Legitimate retained data / undersized drive",
+        "content_markdown": "\n\nWhen the low-space condition remains, no approved waste is material, and the dominant footprint appears to be legitimate retained user/application/business data, do not delete the data. Route to Help Desk I / Human Review with a concise capacity recommendation. Include current capacity/free space, the few material consumers that justify the conclusion, recurrence when relevant, physical-disk health/identity when useful, and a recommendation to replace/upgrade with a larger drive if the data is expected to remain.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      }
+    ],
+    "source_section_inventory": [
+      {
+        "section_key": "1",
+        "present": true,
+        "title": "Section Goal",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "2",
+        "present": true,
+        "title": "Trigger",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "3",
+        "present": true,
+        "title": "Scope and Boundaries",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "4",
+        "present": true,
+        "title": "Initial Identification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "5",
+        "present": true,
+        "title": "Expected State",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "6",
+        "present": true,
+        "title": "State Model",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "7",
+        "present": true,
+        "title": "Diagnostic Workflow",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "8",
+        "present": true,
+        "title": "Decision Gates",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "9",
+        "present": true,
+        "title": "Remediation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "10",
+        "present": true,
+        "title": "Retry Policy",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "11",
+        "present": true,
+        "title": "Periodic Rechecks",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "12",
+        "present": true,
+        "title": "Aging / Stale Condition",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "13",
+        "present": true,
+        "title": "Dependency Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "14",
+        "present": true,
+        "title": "Documentation Requirements",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "15",
+        "present": true,
+        "title": "Failure Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "16",
+        "present": true,
+        "title": "Escalation Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "17",
+        "present": true,
+        "title": "Verification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "18",
+        "present": true,
+        "title": "Completion Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "19",
+        "present": true,
+        "title": "Final Resolution Note",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "20",
+        "present": true,
+        "title": "Required Capabilities",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "21",
+        "present": true,
+        "title": "Acceptance Test",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "22",
+        "present": true,
+        "title": "Section Goal Closure",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "23",
+        "present": false,
+        "title": null,
+        "review_status": "missing_in_source_needs_author_review"
+      }
+    ],
+    "section_semantics": "Source-derived metadata only. Diagnostic commands and remediation branches are inert Markdown, not executable provider calls."
+  },
+  "legacy_registry": {
+    "source_path": "docs/playbooks/Jason-Windows-Low-Disk-Space.md",
+    "source_version": "1.1.0",
+    "review_status": "root_cause_autonomous_bounded_cleanup_owner_review_required",
+    "source_enabled": true,
+    "source_autonomy_activation": "autonomous",
+    "source_allowed_capabilities": [
+      "automation.component.execute",
+      "service.ticket.note.create",
+      "service.ticket.update"
+    ],
+    "source_required_gates": [
+      "trigger",
+      "identity",
+      "autotask_cleanup_grace",
+      "current_monitor_state",
+      "device_role",
+      "volume_baseline",
+      "root_cause_evidence",
+      "storage_health",
+      "safe_cleanup_target",
+      "evidence_fresh",
+      "governance_precheck",
+      "autonomy_approved"
+    ],
+    "source_trigger": {
+      "title_contains": [
+        "Low Disk Space"
+      ]
+    }
+  },
+  "source_document": {
+    "path": "docs/playbooks/Jason-Windows-Low-Disk-Space.md",
+    "source_blob_sha": "4702c9a6895ca552a2e70ee2a9bc1eeb5685daf4",
+    "prelude_markdown": "# Jason Playbook: Windows Low Disk Space\n\n```yaml\nplaybook:\n  id: low_disk_space\n  name: Jason - Windows Low Disk Space\n  version: 1.1.0\n  owner: AOT IT Operations\n  target_type: ticket\n  trigger:\n    provider: Autotask/Datto RMM\n    match: ticket title contains \"Low Disk Space\"\n  ownership:\n    while_open: Jason\n    release_active_slot_when_waiting: true\n  retry:\n    max_remediation_attempts: 1\n  recheck:\n    enabled: true\n    cadence: 15 minutes for cleanup/monitor propagation\n  verification:\n    authoritative_source: Datto RMM current low-disk monitor plus current volume free space\n    success_condition: current low-disk alert is clear after current free-space read\n  completion:\n    terminal_disposition: Complete or Help Desk I / Human Review\n  autonomy:\n    allowed_branches:\n      - recovered_after_existing_autotask_cleanup\n      - root_cause_diagnostics\n      - one_exact_safe_cleanup\n    approval_bound_branches:\n      - exact standing-safe cleanup component execution\n    disruptive_branches: []\n```\n\n",
+    "sections": [
+      {
+        "key": "1",
+        "title": "Section Goal",
+        "heading_markdown": "## 1. Section Goal",
+        "body_markdown": "\n\n**Goal:** Jason must process Windows low-disk-space alerts from identification through verified resolution or escalation. Jason should determine what is consuming space, preserve user/business data, perform only approved bounded cleanup on supported workstations, verify resulting free space and monitoring state, and route servers or uncertain cases for human review.\n\n**Success means:**\n- exact ticket, client, CI, DRMM endpoint, and affected volume are proven;\n- Jason gives the existing Autotask-triggered Disk Cleanup a bounded opportunity to finish before doing competing remediation;\n- current capacity, free space, free percentage, and current monitor state are established;\n- the primary storage consumers are classified, including VSS, Windows/update residue, hibernation/pagefile, large files, MSP/install artifacts, application/user data, and other material consumers;\n- physical disk identity, SMART/storage-health evidence, and relevant reliability warnings are considered before recommending cleanup versus replacement;\n- known safe cleanup targets are distinguished from user/business/application data;\n- no more than one additional playbook-scoped cleanup is attempted;\n- if the remaining footprint is legitimate, Jason recommends capacity expansion rather than deleting useful data;\n- technician-facing notes contain only facts that explain the cause, change the remediation decision, justify replacement/capacity expansion, or identify technician action;\n- workstation remediation is independently verified against current free space and the authoritative monitor;\n- server cleanup/remediation remains human-reviewed unless a separately approved server-safe branch exists;\n- arbitrary deletion is never used to make the alert disappear.\n\n"
+      },
+      {
+        "key": "2",
+        "title": "Trigger",
+        "heading_markdown": "## 2. Trigger",
+        "body_markdown": "\n\nPrimary triggers:\n- Autotask/DRMM ticket title contains Low Disk Space;\n- DRMM volume monitor reports a configured low-free-space threshold;\n- an existing Jason-owned ticket explicitly asks for investigation of a nearly full Windows volume.\n\nJason confirms the affected volume and current condition rather than assuming the triggering alert is still current.\n\nWhen the ticket is created, AOT's existing Autotask automation may already dispatch Disk Cleanup and may auto-close the ticket if enough space is recovered. Jason therefore treats the first 15 minutes after first ownership/observation as a cleanup/monitor propagation grace window. During that window Jason does not launch a competing cleanup. If the authoritative low-disk monitor clears, Jason verifies current free space and allows/finishes the normal resolution path. Only a still-current low-disk condition proceeds to deeper root-cause analysis.\n\n"
+      },
+      {
+        "key": "3",
+        "title": "Scope and Boundaries",
+        "heading_markdown": "## 3. Scope and Boundaries",
+        "body_markdown": "\n\n### In Scope\n- managed Windows workstations/laptops;\n- read-only disk, folder, file, BitLocker, system, and DRMM activity evidence;\n- known AOT-approved cleanup targets when the exact action is approved for autonomous use;\n- internal ticket documentation and alert/ticket verification.\n\n### Human Review Required\n- Windows servers;\n- domain controllers, line-of-business servers, database servers, hypervisors, backup repositories, or other protected roles;\n- cleanup involving user profile data, business data, databases, backups, archives, PST/OST data, VHD/VHDX files, or unknown application storage;\n- reboot, service interruption, forced logoff, or another user-disruptive action.\n\n### Out of Scope\n- deleting arbitrary files because they are large;\n- deleting user documents/downloads without explicit approval;\n- disabling BitLocker;\n- shrinking logs/data without knowing the owning application;\n- direct provider access or shell/API bypasses;\n- treating provider-reported cleanup success as proof of adequate free space.\n\nPreserve Central Orchestrator authority, provider/client isolation, exact target identity, audit, bounded retries, and direct_provider_access=false.\n\n"
+      },
+      {
+        "key": "4",
+        "title": "Initial Identification",
+        "heading_markdown": "## 4. Initial Identification",
+        "body_markdown": "\n\n1. Identify exact Autotask ticket and client/site.\n2. Run the global CI/device-association gate.\n3. Resolve the exact DRMM endpoint and affected drive/volume.\n4. Confirm current online state.\n5. Before substantive diagnostics, use the global ticket-work-start lifecycle: Jason queue, In Progress, Remote Support, post-write readback.\n6. Record current alert timestamp and any prior related ticket.\n7. Enter the bounded 15-minute Autotask-cleanup grace state before launching any playbook cleanup.\n8. During the grace state, recheck the current DRMM low-disk monitor; do not duplicate the existing Autotask cleanup.\n9. Search recent related tickets and DRMM activity history before dispatching a diagnostic that may already have run.\n10. If device identity, drive identity, or client scope is ambiguous, set state identification_blocked and stop.\n\n"
+      },
+      {
+        "key": "5",
+        "title": "Expected State",
+        "heading_markdown": "## 5. Expected State",
+        "body_markdown": "\n\nHealthy state means:\n- the exact monitored volume is readable and online;\n- free space is above the active monitoring condition or documented client/site standard;\n- underlying cause is understood or classified;\n- no evidence indicates storage failure or file-system corruption;\n- BitLocker state is known and not altered;\n- any cleanup performed is from an approved target class;\n- the alert clears or current evidence proves the condition is healthy.\n\nDo not invent a fixed free-space percentage if the authoritative monitor/policy supplies the threshold.\n\n"
+      },
+      {
+        "key": "6",
+        "title": "State Model",
+        "heading_markdown": "## 6. State Model",
+        "body_markdown": "\n\nidentified -> waiting_autotask_cleanup -> diagnosing -> classified -> candidate_cleanup -> remediating -> verifying -> complete\n\nWaiting/exception states:\n- waiting_device_access\n- waiting_autotask_cleanup\n- waiting_monitor_propagation\n- human_review_server\n- human_review_capacity\n- unknown_large_data\n- storage_health_risk\n- dependency_blocked\n- approval_pending\n- escalated\n\nPersist state so a recheck does not repeat completed scans or cleanup.\n\n"
+      },
+      {
+        "key": "7",
+        "title": "Diagnostic Workflow",
+        "heading_markdown": "## 7. Diagnostic Workflow",
+        "body_markdown": "\n\n### Step 1: Capture volume baseline\n\nRecord:\n- drive letter / volume identity;\n- total size;\n- free bytes/GB;\n- free percentage;\n- file system;\n- volume label where useful;\n- fixed/removable/system role where available;\n- current BitLocker protection/encryption state;\n- reboot-required state when available.\n\n### Step 2: Check recent automation/activity\n\nInspect DRMM activity/job history for recent:\n- disk/folder size scans;\n- cleanup components;\n- patching;\n- reboot jobs;\n- security tooling actions;\n- other maintenance that could explain the condition.\n\nIf an exact relevant job is still running, track/read that job instead of redispatching it.\n\n### Step 3: Read-only storage analysis\n\nUse governed read-only endpoint evidence to identify:\n- largest top-level folders and the dominant retained-data footprint;\n- top large files, especially ISO, IMG, WIM, ESD, ZIP/7z/RAR/CAB, MSI/MSP/EXE, DMP, VHD/VHDX, PST/OST, and similar common large-file types;\n- VSS/shadow-copy consumption;\n- hiberfil.sys, pagefile.sys, MEMORY.DMP, and other material system files;\n- Windows Update / SoftwareDistribution residue and old SoftwareDistribution.bak_* folders;\n- C:\\Sysmon accumulation;\n- Autotask/Datto/software-deployment installers, extracted setup media, and stale deployment artifacts when they appear among material consumers;\n- user/application/business data that should not be deleted simply because it is large;\n- partition/capacity evidence when it materially changes the recommendation.\n\nThe large-file scan is diagnostic evidence, not deletion authority. ISO/IMG/install media, archives, PST/OST, VHD/VHDX, Downloads, user data, and unknown application storage are review candidates unless an exact separately approved cleanup class applies.\n\nDo not modify files during analysis.\n\n### Step 4: Check known AOT cleanup candidates\n\nExplicitly check C:\\Sysmon when present.\n\nFor C:\\Sysmon:\n- determine whether it exists;\n- determine size;\n- determine whether active services/processes still depend on it;\n- distinguish a current required installation from orphaned/known accumulation;\n- only use an approved cleanup action when the playbook and exact target criteria authorize it.\n\nThe existence of C:\\Sysmon alone is not permission to delete it.\n\nAlso check old `C:\\Windows\\SoftwareDistribution.bak_*` folders. Their aggregate size is useful root-cause evidence, but the current AOT cleanup component is classified by Jason component governance as destructive/review-required and is **not** standing-safe. Jason may recommend that cleanup in Help Desk I / Human Review, but must not dispatch it unattended. Active Windows Update cache is not part of this autonomous cleanup branch.\n\n### Step 5: Check storage-health and replacement evidence\n\nInspect available evidence for:\n- physical disk model, serial where available, media type, bus/interface, and capacity;\n- SMART/Storage Spaces health and operational status;\n- storage reliability counters, read/write error totals, wear/health indicators when exposed;\n- Event ID 7/bad block;\n- NTFS/file-system errors;\n- controller/disk warnings;\n- repeated unexpected shutdowns associated with storage issues.\n\nIf storage-health risk is present, prioritize preservation/escalation over cleanup. A drive may warrant replacement even if space can be reclaimed. If both health risk and capacity pressure are present, the technician recommendation should make both facts clear.\n\n### Step 6: Capacity / recurrence interpretation\n\nWhere useful evidence exists, distinguish:\n- transient accumulation that can be safely removed;\n- recurring growth that is likely to return;\n- large but legitimate user/application/business data;\n- a drive that is simply undersized for the retained data footprint;\n- a drive that should be replaced primarily because of health risk.\n\nWhen prior low-disk tickets exist for the same endpoint, surface the recurrence count only if it changes the recommendation. Do not invent growth rates when historical free-space readings are unavailable.\n\n"
+      },
+      {
+        "key": "8",
+        "title": "Decision Gates",
+        "heading_markdown": "## 8. Decision Gates",
+        "body_markdown": "\n\nBefore cleanup:\n1. exact client/device/volume identity is proven;\n2. endpoint is online;\n3. current low-space condition is confirmed;\n4. device role is a supported workstation/laptop for autonomous cleanup;\n5. diagnostic evidence identifies the target;\n6. target is an explicitly approved safe cleanup class;\n7. no user/business/application data is included;\n8. no conflicting job/maintenance is active;\n9. current governance and playbook promotion authorize the exact action;\n10. rollback/escalation behavior is known.\n\nIf any gate fails, investigate/document or request human review. Do not improvise deletion.\n\n"
+      },
+      {
+        "key": "9",
+        "title": "Remediation",
+        "heading_markdown": "## 9. Remediation",
+        "body_markdown": "\n\n### A. Known safe workstation cleanup\n\nVersion 1.1 permits at most **one** additional playbook-scoped cleanup after the existing Autotask cleanup opportunity. Jason does not rerun generic `Disk Cleanup [WIN]`.\n\nThe exact autonomous target is:\n- `Sysmon - Clear C:\\Sysmon Folder - AOT` (`97ddcdd5-2b74-4a4b-9516-cc872af6a7b6`) only when C:\\Sysmon is at least 1 GiB, no active service references that path, and the exact component has active standing-safe approval.\n\nThe existing `Delete SoftwareDistribution Backup Folders - AOT Ver 05122026-1` component remains **review-bound** because standing-safe promotion was rejected by Jason component governance as destructive/review-required. Jason may detect and quantify those old backup folders and recommend technician cleanup, but it must not dispatch that component unattended.\n\nUser/business/application data, active Windows Update cache, Recycle Bin, browser cache, VSS, hibernation, pagefile, dumps, ISO/IMG/install media, PST/OST, VHD/VHDX, and unknown data are not part of this autonomous cleanup authority.\n\n### B. Server or protected-role cleanup\n\nSet state human_review_server. Jason gathers evidence and proposes the exact cleanup. No autonomous cleanup under this baseline.\n\n### C. Unknown large file/folder\n\nSet state unknown_large_data. Document path, size, owner/application context when available, and recommended technician action. Do not delete.\n\n### D. Storage-health risk\n\nSet state storage_health_risk. Do not focus on space recovery alone. Escalate for hardware/storage investigation and preserve evidence. If replacement is already justified by health evidence, include that conclusion even if cleanup could temporarily recover space.\n\n### E. Legitimate retained data / undersized drive\n\nWhen the low-space condition remains, no approved waste is material, and the dominant footprint appears to be legitimate retained user/application/business data, do not delete the data. Route to Help Desk I / Human Review with a concise capacity recommendation. Include current capacity/free space, the few material consumers that justify the conclusion, recurrence when relevant, physical-disk health/identity when useful, and a recommendation to replace/upgrade with a larger drive if the data is expected to remain.\n\n"
+      },
+      {
+        "key": "10",
+        "title": "Retry Policy",
+        "heading_markdown": "## 10. Retry Policy",
+        "body_markdown": "\n\n- Read failures: bounded re-read of the same evidence request; never convert a read failure into cleanup authority.\n- Cleanup: maximum one additional autonomous cleanup attempt per incident cycle, regardless of how many eligible safe targets exist. The pre-existing Autotask-triggered cleanup remains the first cleanup opportunity.\n- Never rerun while prior job state is active/unknown.\n- If verification fails, stop and escalate rather than chaining increasingly aggressive deletion.\n\n"
+      },
+      {
+        "key": "11",
+        "title": "Periodic Rechecks",
+        "heading_markdown": "## 11. Periodic Rechecks",
+        "body_markdown": "\n\nRecheck when:\n- the initial 15-minute Autotask cleanup grace window is active;\n- endpoint was offline;\n- an approved cleanup job is pending;\n- the post-cleanup 15-minute monitor propagation window is active;\n- a dependency/approval is awaited.\n\nThe grace/recheck windows suppress duplicate cleanup dispatch. If the current low-disk monitor clears at any recheck, Jason verifies current free space and follows the completion path instead of continuing diagnostics.\n\nKnown-ticket rechecks target that ticket/job/device rather than scanning the whole queue.\n\n"
+      },
+      {
+        "key": "12",
+        "title": "Aging / Stale Condition",
+        "heading_markdown": "## 12. Aging / Stale Condition",
+        "body_markdown": "\n\nFor recurring/old low-space tickets, investigate:\n- endpoint replacement/retirement;\n- stale CI/DRMM object;\n- repeated recurrence after prior cleanup;\n- underlying application growth;\n- storage sizing problem;\n- insufficient system-drive capacity.\n\nRepeated cleanup without root-cause review is not success.\n\n"
+      },
+      {
+        "key": "13",
+        "title": "Dependency Handling",
+        "heading_markdown": "## 13. Dependency Handling",
+        "body_markdown": "\n\nPotential dependencies:\n- read-only folder-size component;\n- BitLocker status read;\n- DRMM activity/job history;\n- exact approved cleanup component;\n- endpoint/CI association;\n- storage-health evidence.\n\nProduction validation on GAI-LT2830 proved the #261 execution-plan authorization defect was corrected: both exact approved read-only diagnostics passed governed plan authorization with exactly one provider attempt and readback. The current safety blocker is #265: Datto/Jason job reads can remain `active` with empty output after the endpoint/UI no longer shows a running execution. Treat such state as pending/unknown; never redispatch until current execution state is positively resolved.\n\n"
+      },
+      {
+        "key": "14",
+        "title": "Documentation Requirements",
+        "heading_markdown": "## 14. Documentation Requirements",
+        "body_markdown": "\n\nUse concise, technician-scannable internal notes. **Collect broadly, report selectively.** Include only facts that explain the cause, change the remediation decision, justify replacement/capacity expansion, or identify technician action.\n\nPreferred order:\n1. **STATUS** — current free space / current monitor state.\n2. **NEXT STEP** or **ACTION REQUIRED** — what Jason or the technician should do next.\n3. **KEY EVIDENCE** — at most the few material consumers/findings that explain the conclusion.\n4. **DISK HEALTH** — only when health/identity information changes the recommendation or confirms replacement/capacity guidance.\n5. **WHAT JASON DID** — concise diagnostics/remediation summary.\n6. **CHANGES MADE** — explicitly state None when no modification occurred.\n7. **JASON STATE** — persisted state for audit/resume.\n\nRelevant evidence may include drive/volume, current free space, major consumers, recurrence, C:\\Sysmon or SoftwareDistribution backup size when actionable, large ISO/IMG/install/archive files when material, VSS/system-file consumption when material, storage-health warnings, and exact cleanup job/correlation IDs. Normal/irrelevant SMART attributes, exhaustive folder listings, raw PowerShell output, and low-value details must stay in Jason evidence rather than being pasted into the ticket.\n\nSuggested titles:\n- Jason - Low Disk Space - Baseline\n- Jason - Low Disk Space - Diagnostic\n- Jason - Low Disk Space - Remediation\n- Jason - Low Disk Space - Verification\n- Jason - Low Disk Space - Escalation\n\nAvoid unnecessary end-user communication for ordinary workstation monitoring remediation unless the action is disruptive, user input is needed, or client policy requires contact.\n\n"
+      },
+      {
+        "key": "15",
+        "title": "Failure Handling",
+        "heading_markdown": "## 15. Failure Handling",
+        "body_markdown": "\n\nDocument and fail closed on:\n- ambiguous device/volume;\n- diagnostic capability unavailable;\n- component execution authorization defect;\n- large data whose purpose is unknown;\n- storage-health warning;\n- cleanup job failure;\n- post-cleanup free space not materially improved;\n- alert persists despite healthy free-space evidence;\n- provider/job state is stale or contradictory.\n\n"
+      },
+      {
+        "key": "16",
+        "title": "Escalation Criteria",
+        "heading_markdown": "## 16. Escalation Criteria",
+        "body_markdown": "\n\nEscalate when:\n- target is a server/protected role;\n- storage-health evidence suggests failure;\n- safe cleanup cannot be identified;\n- user/business data is the primary consumer;\n- issue recurs after bounded cleanup;\n- additional disk capacity may be required;\n- execution-plan/governance blocks the approved action;\n- verification fails.\n\n"
+      },
+      {
+        "key": "17",
+        "title": "Verification",
+        "heading_markdown": "## 17. Verification",
+        "body_markdown": "\n\nAfter cleanup:\n1. wait for the exact job to reach a trustworthy terminal state;\n2. retrieve output;\n3. independently re-read volume size/free space/free percentage;\n4. confirm expected target no longer consumes the identified space when relevant;\n5. confirm monitoring returns healthy/clears;\n6. confirm no new storage/file-system errors were introduced;\n7. document final state.\n\nJob success alone is not verification.\n\n"
+      },
+      {
+        "key": "18",
+        "title": "Completion Criteria",
+        "heading_markdown": "## 18. Completion Criteria",
+        "body_markdown": "\n\nComplete when:\n- identity and volume are correct;\n- baseline and root-cause classification are documented;\n- required safe remediation completed or no remediation was necessary;\n- independent free-space verification is healthy;\n- monitoring condition is healthy/cleared;\n- no unresolved storage-health risk remains;\n- ticket documentation is complete.\n\n"
+      },
+      {
+        "key": "19",
+        "title": "Final Resolution Note",
+        "heading_markdown": "## 19. Final Resolution Note",
+        "body_markdown": "\n\nInclude:\n- original low-space condition;\n- volume size/free before;\n- primary cause;\n- cleanup performed, if any;\n- volume size/free after;\n- BitLocker status;\n- storage-health result;\n- alert/monitor result;\n- final disposition.\n\n"
+      },
+      {
+        "key": "20",
+        "title": "Required Capabilities",
+        "heading_markdown": "## 20. Required Capabilities",
+        "body_markdown": "\n\n- service.ticket.read/search/update\n- service.ticket.note.create\n- service.configuration.read/search\n- endpoint.device.read/search\n- endpoint.audit.read\n- endpoint.alert.search/history\n- endpoint.powershell.read for classifier-approved read-only storage diagnostics\n- service.ticket.search for recurrence context when useful\n- automation.component.execute only for exact standing-safe cleanup components\n- automation.job.read\n- automation.job.output.read\n- BitLocker/status evidence\n- DRMM activity/history evidence\n- persisted playbook state\n- orchestration recheck scheduling\n\nMissing/broken capability behavior becomes an explicit blocker, not a shell/API bypass.\n\n"
+      },
+      {
+        "key": "21",
+        "title": "Acceptance Test",
+        "heading_markdown": "## 21. Acceptance Test",
+        "body_markdown": "\n\n**Primary current target:** GAI-LT2830 / ticket T20260924.0078 / CI 280.\n\nProve:\n1. exact ticket/device association;\n2. the initial 15-minute Autotask cleanup grace does not dispatch competing cleanup;\n3. recovered/cleared monitor state completes through independent free-space and ticket-status readback;\n4. current volume baseline and current monitor state;\n5. read-only largest-folder and large-file analysis;\n6. VSS, hibernation/pagefile/dump, Windows Update residue, C:\\Sysmon, SoftwareDistribution backup, and common large-file/install-artifact classification;\n7. physical-disk / SMART / reliability evidence and storage-risk override;\n8. recurrence context is surfaced only when relevant;\n9. protected/server targets route to Help Desk I / Human Review without cleanup;\n10. legitimate retained data produces a concise capacity-upgrade recommendation rather than arbitrary deletion;\n11. C:\\Sysmon is eligible only when >=1 GiB and no active service references it;\n12. material SoftwareDistribution.bak_* usage is detected and routed as a review-bound recommendation without autonomous component dispatch;\n13. at most one additional standing-safe Sysmon cleanup component is dispatched per incident cycle;\n14. successful cleanup still requires current free-space re-read and authoritative monitor clear;\n15. failed/uncleared cleanup routes to Help Desk I / Human Review with no second cleanup attempt;\n16. technician notes are relevance-filtered and do not paste raw scan/SMART output;\n17. #261 remains regression-covered as a fixed authorization path; stale/unknown job state fails closed without duplicate dispatch.\n\nNo unrelated production object may be modified.\n\n"
+      },
+      {
+        "key": "21A",
+        "title": "Autonomous Execution Scope",
+        "heading_markdown": "## 21A. Autonomous Execution Scope",
+        "body_markdown": "\n\n`autonomous_allowed: root_cause_plus_one_bounded_cleanup`\n\nDesign/implementation approval owner: person-al.\nDesign approval date: 2026-09-29.\nSource scope: exact `low_disk_space@1.1.0` branch using governed endpoint/device/audit/alert/ticket reads, classifier-approved read-only PowerShell, internal ticket work-start/note/update, and at most one standing-safe Sysmon cleanup when its deterministic preconditions are met. SoftwareDistribution backup cleanup is evidence/recommendation only and remains human-review bound.\n\nThe branch may not delete arbitrary/user/business/application data; clear VSS; disable hibernation; resize partitions; empty Recycle Bin; clear active Windows Update cache; delete ISO/IMG/install media, PST/OST, VHD/VHDX, or unknown data; alter BitLocker; stop services/processes; reboot; or perform any other unrelated/disruptive action.\n\nA material version/capability/component-fingerprint change requires a new durable owner promotion before unattended execution. Servers/protected roles and storage-health-risk branches remain Help Desk I / Human Review.\n\n"
+      },
+      {
+        "key": "22",
+        "title": "Section Goal Closure",
+        "heading_markdown": "## 22. Section Goal Closure",
+        "body_markdown": "\n\nClose after:\n- playbook 1.1 source and runtime are merged;\n- deterministic/unit/security validation passes;\n- the exact Sysmon cleanup component is standing-safe with a durable fingerprint;\n- the SoftwareDistribution cleanup component is explicitly recorded as review-bound and cannot be dispatched unattended;\n- exact `low_disk_space@1.1.0` playbook autonomy promotion is active;\n- controlled workstation acceptance proves grace, diagnostics, one-cleanup ceiling, verification, and Human Review routing;\n- production runtime is deployed and live readback proves 1.1 is executing;\n- Grafana/Project Jason status and remaining TODOs are updated.\n"
+      }
+    ]
+  },
+  "migration": {
+    "status": "SOURCE_PRESERVED_STRUCTURED_DRAFT_NOT_RUNTIME_PARITY",
+    "source_version_discrepancy": false,
+    "production_replacement_allowed": false,
+    "staged": false,
+    "activated": false,
+    "required_before_activation": [
+      "Canonical Python JSON semantic validation",
+      "Exact-capability binding and source-scoped argument context verified",
+      "Safe diagnostic and remediation branches mapped to governed capabilities",
+      "Durable retry/wait/terminal lifecycle parity with shared runtime",
+      "Error, negative-evidence and client-boundary regression tests",
+      "Controlled shadow comparison and independent acceptance",
+      "Owner-bound activation and branch-specific autonomous promotion"
+    ],
+    "external_fact_fields_non_authoritative": true,
+    "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
+    "section_semantic_extraction": "source_text_derived_no_provider_execution"
+  }
+}
