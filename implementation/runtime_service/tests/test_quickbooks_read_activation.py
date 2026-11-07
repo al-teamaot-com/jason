@@ -95,6 +95,7 @@ def test_exact_production_profile_activates_read_catalog_for_production():
 
     assert state.enabled is True
     assert state.environment == "production"
+    assert "accounting.billpayment.search" in state.capability_names
     assert set(state.capability_names) == QUICKBOOKS_CAPABILITIES
     provider = providers.get(QUICKBOOKS_PROVIDER)
     assert provider.lifecycle_status is ProviderLifecycle.AVAILABLE
