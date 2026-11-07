@@ -6911,6 +6911,16 @@ def test_xyz_isolated_vulscan_notification_acceptance_without_provider_writes(
 
     assert isolated_policy(client_id=1158, ticket_id=7702).client_notification_required is False
     assert isolated_policy(client_id=208, ticket_id=7701).client_notification_required is False
+    # Absent Owner promotion must block even the dedicated notification read
+    # before any mock provider invocation. Restore only the test promotion.
+    promoted_store = worker.promotion_store
+    worker.promotion_store = ExactPromotionStore(
+        approved_scopes=(("vulscan_missing_patch", "1.0.0"),)
+    )
+    with pytest.raises(OperationalAutonomyError, match="NOT_PROMOTED"):
+        worker._notification_history_max_id(ticket_id=7701, company_id=1158)
+    assert reads.notification_history_reads == 0
+    worker.promotion_store = promoted_store
     for company_id, ticket_id in ((208, 7701), (1158, 7702)):
         with pytest.raises(OperationalAutonomyError, match="CLIENT_SCOPE_NOT_APPROVED"):
             worker._notification_history_max_id(ticket_id=ticket_id, company_id=company_id)
