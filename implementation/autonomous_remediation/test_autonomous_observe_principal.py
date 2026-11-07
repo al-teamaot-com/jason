@@ -78,7 +78,14 @@ def _capability():
     )
 
 
-def _factory(tmp_path, *, permission=PermissionMode.OBSERVE, with_grant=True):
+def _factory(
+    tmp_path,
+    *,
+    permission=PermissionMode.OBSERVE,
+    with_grant=True,
+    client_id=None,
+    principal=AutonomousPrincipal(),
+):
     identities = InMemoryIdentityRepository()
     grants = InMemoryAuthorityGrantRepository()
     approvals = InMemoryApprovalRepository()
@@ -92,7 +99,7 @@ def _factory(tmp_path, *, permission=PermissionMode.OBSERVE, with_grant=True):
                 subject_id="jason-autonomy-worker",
                 capability=CAPABILITY,
                 organization_id="aot",
-                client_id=None,
+                client_id=client_id,
                 permission=permission,
                 approval_required=False,
             )
@@ -111,10 +118,9 @@ def _factory(tmp_path, *, permission=PermissionMode.OBSERVE, with_grant=True):
     )
     ledger.initialize()
     promotions = SQLitePlaybookAutonomyApprovalStore(
-        tmp_path / "promotions.sqlite3"
-    )
+        tmp_path / "promotions.sqlite3")
     return AutonomousRequestFactory(
-        principal=AutonomousPrincipal(),
+        principal=principal,
         authority=authority,
         capabilities=registry,
         approvals=approvals,
@@ -136,6 +142,18 @@ def test_observe_request_uses_nonhuman_workload_identity(tmp_path):
     assert request.policy_ids == ("autonomous-shadow-read-v1",)
 
 
+def test_exact_client_bound_observe_grant_succeeds(tmp_path):
+    request = _factory(tmp_path, client_id="client-aot-internal").build_observe(
+        capability_name=CAPABILITY,
+        arguments={"status": "New"},
+        client_id="client-aot-internal",
+    )
+    assert request.client_id == "client-aot-internal"
+    assert request.permission_mode == "observe"
+    assert request.authority_allowed is True
+    assert request.approval_present is False
+
+
 def test_higher_execute_grant_cannot_change_shadow_request_mode(tmp_path):
     request = _factory(
         tmp_path,
@@ -150,6 +168,16 @@ def test_higher_execute_grant_cannot_change_shadow_request_mode(tmp_path):
     assert request.approval_present is False
 
 
+def test_cross_client_bound_observe_denied_closed(tmp_path):
+    factory = _factory(tmp_path, client_id="client-aot-internal")
+    with pytest.raises(AutonomousAuthorityError):
+        factory.build_observe(
+            capability_name=CAPABILITY,
+            arguments={"status": "New"},
+            client_id="client-other",
+        )
+
+
 def test_missing_grant_denies_shadow_read(tmp_path):
     factory = _factory(tmp_path, with_grant=False)
     with pytest.raises(AutonomousAuthorityError):
@@ -157,6 +185,16 @@ def test_missing_grant_denies_shadow_read(tmp_path):
             capability_name=CAPABILITY,
             arguments={"status": "New"},
             client_id=None,
+        )
+
+
+def test_unapproved_playbook_and_write_attempts_fail_closed(tmp_path):
+    factory = _factory(tmp_path, client_id="client-aot-internal")
+    with pytest.raises(AutonomousAuthorityError):
+        factory.build(
+            capability_name=CAPABILITY,
+            arguments={"status": "New"},
+            client_id="client-aot-internal",
         )
 
 
