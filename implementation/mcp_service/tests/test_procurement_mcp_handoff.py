@@ -64,6 +64,7 @@ def test_process_procurement_invoice_routes_to_canonical_flow_and_teams(monkeypa
         invoice_total="207.59",
         vendor_order_reference="DS-1382-09302026",
         ship_to="DPR Construction",
+        requester_comments="Charge this to ticket T20261008.0001 and create a client quote.",
     )
 
     assert result == {
@@ -85,6 +86,9 @@ def test_process_procurement_invoice_routes_to_canonical_flow_and_teams(monkeypa
     assert normalized["invoice_number"] == "PSI393904"
     assert normalized["invoice_total"] == "207.59"
     assert normalized["vendor_order_reference"] == "DS-1382-09302026"
+    assert normalized["requester_comments"] == (
+        "Charge this to ticket T20261008.0001 and create a client quote."
+    )
     assert flow.draft_call["microsoft_tenant_id"] == "tenant-a"
     assert flow.draft_call["microsoft_object_id"] == "object-a"
 
