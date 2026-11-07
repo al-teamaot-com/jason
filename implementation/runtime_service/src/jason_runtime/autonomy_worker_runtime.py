@@ -5785,6 +5785,44 @@ class OperationalAutonomyMaintenance:
                 return True
         return False
 
+    def _set_vulscan_terminal_status(
+        self, work: OperationalWork, *, contact_id: int, status: str,
+    ) -> None:
+        """Change terminal ticket state only after verified notification receipt."""
+        scope = VULSCAN_CLIENT_DISPOSITION_SCOPE
+        desired_contact = int(contact_id)
+        status_update = self.actions.execute(
+            scope,
+            "service.ticket.update",
+            {
+                "payload": {
+                    "id": work.ticket_id,
+                    "contactID": desired_contact,
+                    "status": status,
+                }
+            },
+        )
+        status_data = self._action_data(status_update)
+        verification = status_data.get("jasonVerification")
+        verified_fields = (
+            verification.get("verifiedFields")
+            if isinstance(verification, Mapping)
+            else None
+        )
+        if (
+            not isinstance(verification, Mapping)
+            or verification.get("readbackVerified") is not True
+            or not isinstance(verified_fields, Sequence)
+            or isinstance(verified_fields, (str, bytes))
+            or not {"contactID", "status"}.issubset(
+                {str(value) for value in verified_fields}
+            )
+        ):
+            raise OperationalAutonomyError(
+                "VulScan Close Pending/contact readback verification failed"
+            )
+
+
     @staticmethod
     def _notification_baseline_from_reason(reason: str) -> int:
         match = re.search(r"notification_baseline_id=(\d+)", str(reason or ""))
@@ -5807,6 +5845,17 @@ class OperationalAutonomyMaintenance:
             baseline_id=baseline_id,
         ):
             return
+        policy = resolve_vulscan_policy(
+            client_id=work.company_id, ticket_id=work.ticket_id,
+        )
+        if not policy.client_notification_required or policy.primary_contact_id is None:
+            raise OperationalAutonomyError(
+                "VulScan verified notification has no active client disposition policy"
+            )
+        self._set_vulscan_terminal_status(
+            work, contact_id=int(policy.primary_contact_id),
+            status=policy.terminal_status,
+        )
         self.store.put(
             self._replace(
                 work,
@@ -5958,37 +6007,6 @@ class OperationalAutonomyMaintenance:
                 note_fingerprint,
             )
 
-        status_update = self.actions.execute(
-            scope,
-            "service.ticket.update",
-            {
-                "payload": {
-                    "id": work.ticket_id,
-                    "contactID": desired_contact,
-                    "status": policy.terminal_status,
-                }
-            },
-        )
-        status_data = self._action_data(status_update)
-        verification = status_data.get("jasonVerification")
-        verified_fields = (
-            verification.get("verifiedFields")
-            if isinstance(verification, Mapping)
-            else None
-        )
-        if (
-            not isinstance(verification, Mapping)
-            or verification.get("readbackVerified") is not True
-            or not isinstance(verified_fields, Sequence)
-            or isinstance(verified_fields, (str, bytes))
-            or not {"contactID", "status"}.issubset(
-                {str(value) for value in verified_fields}
-            )
-        ):
-            raise OperationalAutonomyError(
-                "VulScan Close Pending/contact readback verification failed"
-            )
-
         # Even when an earlier send fingerprint matches, a real, post-baseline
         # Autotask Notification History entry is required for completion.
         if self._gromelski_notification_copy_observed(
@@ -5996,6 +6014,9 @@ class OperationalAutonomyMaintenance:
             company_id=work.company_id,
             baseline_id=baseline_id,
         ):
+            self._set_vulscan_terminal_status(
+                work, contact_id=desired_contact, status=policy.terminal_status,
+            )
             self.store.put(
                 self._replace(
                     work,

@@ -3839,6 +3839,11 @@ def test_vulscan_prior_notification_does_not_complete_without_receipt(
     assert pending is not None
     assert pending.phase == "vulscan_client_notification_verify_complete"
     assert "notification_baseline_id=0" in pending.last_reason
+    assert not any(
+        cap == "service.ticket.update"
+        and (args.get("payload") or {}).get("status") == "Close Pending"
+        for _, cap, args in actions.calls
+    ), "Close Pending must wait for a provider-backed notification receipt"
 
     worker._apply_vulscan_client_disposition(
         pending, vulscan_candidate().context, continue_monitoring=False,
@@ -3860,6 +3865,11 @@ def test_vulscan_prior_notification_does_not_complete_without_receipt(
     assert verified is not None
     assert verified.phase == "complete"
     assert "notification copy verified" in verified.last_reason
+    assert len([
+        args for _, cap, args in actions.calls
+        if cap == "service.ticket.update"
+        and (args.get("payload") or {}).get("status") == "Close Pending"
+    ]) == 1
     assert len([
         call for call in actions.calls
         if call[1] == "service.ticket.client.notification.create"
@@ -6802,4 +6812,145 @@ def test_backupiq_nonterminal_job_without_dispatch_timestamp_avoids_infinite_wai
     assert store.get(work.ticket_id).phase=="escalated"
     assert store.get(work.ticket_id).job_uid=="original-job-1"
     assert not any(x[1]=="automation.component.execute" for x in actions.calls)
+    store.close()
+
+
+def test_xyz_isolated_vulscan_notification_acceptance_without_provider_writes(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """XYZ simulation exercises receipts without changing Gromelski production policy."""
+    from dataclasses import replace
+
+    import jason_runtime.autonomy_worker_runtime as runtime_module
+    from jason_runtime.vulscan_client_policy import (
+        VulScanDispositionPolicy,
+        VulScanPolicyOverride,
+        resolve_vulscan_policy as real_resolve_policy,
+    )
+
+    assert real_resolve_policy(client_id=1158, ticket_id=7701).client_notification_required is False
+    xyz_only_policy = VulScanDispositionPolicy(
+        terminal_status="Close Pending",
+        primary_contact_id=30683022,
+        client_notification_required=True,
+        client_notification_template_id="vulscan-approved-or-installed-v1",
+        continue_patch_monitoring=False,
+    )
+    isolated_overrides = (
+        VulScanPolicyOverride(scope="client", scope_id="1158", policy=xyz_only_policy),
+    )
+
+    def isolated_policy(*, client_id=None, site_id=None, device_id=None,
+                        user_id=None, ticket_id=None):
+        # Test-only double allowlist: neither another client nor another
+        # XYZ ticket inherits the synthetic disposition policy.
+        exact_xyz_scope = str(client_id) == "1158" and str(ticket_id) == "7701"
+        return real_resolve_policy(
+            client_id=client_id, site_id=site_id, device_id=device_id,
+            user_id=user_id, ticket_id=ticket_id,
+            overrides=isolated_overrides if exact_xyz_scope else (),
+        )
+
+    monkeypatch.setattr(runtime_module, "resolve_vulscan_policy", isolated_policy)
+
+    class XYZReads(VulscanBranchReads):
+        receipt = None
+
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {"status": "succeeded", "evidence": {"data": {"item": {
+                    "id": 68, "companyID": 1158, "isActive": True,
+                    "referenceNumber": "vul-device-1", "referenceTitle": "GAI-DT2850",
+                }}}}
+            if capability == "service.notification.history.search":
+                assert arguments == {"company_id": 1158, "ticket_id": 7701, "page_size": 100}
+                self.notification_history_reads += 1
+                return {"status": "succeeded", "evidence": {"data": {
+                    "items": [self.receipt] if self.receipt is not None else [],
+                }}}
+            return super().execute(capability, arguments)
+
+    # Isolated receipt stub: this validates the XYZ fixture's ticket, recipient,
+    # and post-baseline ID; the real Gromelski verifier is separately tested.
+    def xyz_receipt_check(self, *, ticket_id, company_id, baseline_id):
+        data = self._vulscan_notification_history_data(
+            ticket_id=ticket_id, company_id=company_id,
+        )
+        return any(
+            isinstance(row, dict)
+            and row.get("ticketID") == 7701
+            and row.get("recipientEmailAddress") == "al.bccomputers@gmail.com"
+            and isinstance(row.get("id"), int)
+            and row["id"] > baseline_id
+            for row in data.get("items", ())
+        )
+
+    monkeypatch.setattr(
+        runtime_module.OperationalAutonomyMaintenance,
+        "_gromelski_notification_copy_observed",
+        xyz_receipt_check,
+    )
+    xyz = replace(
+        vulscan_candidate(), resource_id="7701", context={
+            **vulscan_candidate().context, "id": 7701,
+            "ticketNumber": "T20240821.0001", "companyID": 1158,
+        },
+    )
+    reads = XYZReads("INSTALLED")
+    actions = Actions()  # Records mock operations; never invokes a provider.
+    store = SQLiteOperationalWorkStore(tmp_path / "xyz-vulscan-sim.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(xyz), reads=reads,
+        vulscan_notification_reads=reads, actions=actions, store=store,
+        promotion_store=ExactPromotionStore(approved_scopes=(
+            ("vulscan_missing_patch", "1.0.0"),
+            ("vulscan_missing_patch", "1.1.0"),
+        )),
+        interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+
+    assert isolated_policy(client_id=1158, ticket_id=7702).client_notification_required is False
+    assert isolated_policy(client_id=208, ticket_id=7701).client_notification_required is False
+    for company_id, ticket_id in ((208, 7701), (1158, 7702)):
+        with pytest.raises(OperationalAutonomyError, match="CLIENT_SCOPE_NOT_APPROVED"):
+            worker._notification_history_max_id(ticket_id=ticket_id, company_id=company_id)
+    assert reads.notification_history_reads == 0
+    worker.tick()
+    pending = store.get(7701)
+    assert pending is not None
+    assert pending.phase == "vulscan_client_notification_verify_complete"
+    assert len([x for x in actions.calls if x[1] == "service.ticket.client.notification.create"]) == 1
+    assert not any(x[1] == "service.ticket.update" and
+                   x[2].get("payload", {}).get("status") == "Close Pending"
+                   for x in actions.calls)
+
+    # Restart/retry with no receipt: no resend and no terminal status.
+    worker._apply_vulscan_client_disposition(pending, xyz.context, continue_monitoring=False)
+    assert len([x for x in actions.calls if x[1] == "service.ticket.client.notification.create"]) == 1
+
+    for invalid in (
+        {"id": 0, "ticketID": 7701, "recipientEmailAddress": "al.bccomputers@gmail.com"},
+        {"id": 100, "ticketID": 7702, "recipientEmailAddress": "al.bccomputers@gmail.com"},
+        {"id": 101, "ticketID": 7701, "recipientEmailAddress": "other@example.com"},
+    ):
+        reads.receipt = invalid
+        worker._verify_vulscan_client_notification(
+            store.get(7701), continue_monitoring=False,
+        )
+        assert store.get(7701).phase == "vulscan_client_notification_verify_complete"
+        assert not any(x[1] == "service.ticket.update" and
+                       x[2].get("payload", {}).get("status") == "Close Pending"
+                       for x in actions.calls)
+
+    reads.receipt = {"id": 102, "ticketID": 7701,
+                     "recipientEmailAddress": "al.bccomputers@gmail.com"}
+    worker._verify_vulscan_client_notification(
+        store.get(7701), continue_monitoring=False,
+    )
+    assert store.get(7701).phase == "complete"
+    close_pending = [x for x in actions.calls if x[1] == "service.ticket.update"
+                     and x[2].get("payload", {}).get("status") == "Close Pending"]
+    assert len(close_pending) == 1
+    assert close_pending[0][2]["payload"]["contactID"] == 30683022
+    assert len([x for x in actions.calls if x[1] == "service.ticket.client.notification.create"]) == 1
     store.close()
