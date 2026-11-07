@@ -251,3 +251,22 @@ def test_host_approval_offer_binds_frozen_transaction_once_and_republishes_on_ma
         assert new["initial_freeze_binding"]["freeze_sha256"] != binding["freeze_sha256"]
         assert new["initial_freeze_binding"]["scope_sha256"] == binding["scope_sha256"]
         deploy.assert_not_called()
+
+
+def test_legacy_nonfreeze_offer_is_not_incorrectly_rejected_by_umask(tmp_path):
+    from jason_runtime.mobile_release_approval import _host_offered_initial_freeze
+    marker, raw, record, binding, args = scenario(tmp_path)
+    offer = tmp_path / "mobile-release-offers" / (RID + ".json")
+    offer.chmod(0o664)
+    with pytest.raises(PermissionError, match="unsafe write permissions"):
+        _host_offered_initial_freeze(
+            tmp_path, RID, SHA, ROLLBACK,
+            binding["manifest_sha256"], binding["scope_sha256"],
+        )
+    legacy = json.loads(offer.read_text())
+    legacy.pop("initial_freeze_binding")
+    offer.write_text(json.dumps(legacy))
+    assert _host_offered_initial_freeze(
+        tmp_path, RID, SHA, ROLLBACK,
+        binding["manifest_sha256"], binding["scope_sha256"],
+    ) is None

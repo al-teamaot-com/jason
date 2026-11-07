@@ -220,14 +220,20 @@ def _host_offered_initial_freeze(
     except FileNotFoundError:
         return None
     if (offer_path.is_symlink() or not stat.S_ISREG(info.st_mode)
-            or info.st_mode & 0o022 or info.st_size > 8192):
+            or info.st_size > 8192):
         raise PermissionError("frozen-release offer is not a safe regular file")
     offer = json.loads(offer_path.read_text(encoding="utf-8"))
     if not isinstance(offer, dict):
         raise PermissionError("frozen-release offer is invalid")
     binding = offer.get("initial_freeze_binding")
     if binding is None:
+        # Legacy ordinary offers have no freeze permission. Do not alter their
+        # existing mode/issuance behavior (operator umask may be 0002).
         return None
+    if info.st_mode & 0o022:
+        # A NEW authority-bearing frozen-release offer must never be writable
+        # by group/other. This does not expand legacy non-frozen authority.
+        raise PermissionError("frozen-release offer has unsafe write permissions")
     expected_keys = {
         "schema_version", "release_id", "candidate_sha", "rollback_sha",
         "manifest_sha256", "scope_sha256", "freeze_sha256",
