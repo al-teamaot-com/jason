@@ -787,3 +787,53 @@ def test_vulscan_notification_policy_rejects_cross_ticket_provider_evidence() ->
             request=request, resolution=_resolution(SERVICE_NOTIFICATION_HISTORY_SEARCH),
         ).information_authorization.require_allowed(InformationAction.RELEASE)
         assert decision.allowed is False
+
+def test_vulscan_notification_empty_history_requires_exact_bounded_ticket_query() -> None:
+    """Empty receipt evidence is not an authorization to enumerate a company."""
+    from dataclasses import replace
+
+    base = _request(
+        SERVICE_NOTIFICATION_HISTORY_SEARCH,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-vulscan-notification-read-v1",),
+    )
+    args = {"company_id": 597, "ticket_id": 143479, "page_size": 100}
+    request = replace(base, arguments=args)
+    allowed = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=request, resolution=_resolution(SERVICE_NOTIFICATION_HISTORY_SEARCH),
+    ).information_authorization.require_allowed(InformationAction.RELEASE)
+    assert allowed.allowed is True
+
+    for bad_args in (
+        {"company_id": 597, "page_size": 100},
+        {"company_id": 597, "ticket_id": 143479},
+        {"company_id": 597, "ticket_id": 143479, "page_size": 0},
+        {"company_id": 597, "ticket_id": 143479, "page_size": 1000},
+        {"company_id": 208, "ticket_id": 143479, "page_size": 100},
+    ):
+        decision = AutotaskImpersonationInformationAuthorizer(
+            delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+            bindings=_Bindings(None),
+        ).invoke(
+            request=replace(request, arguments=bad_args),
+            resolution=_resolution(SERVICE_NOTIFICATION_HISTORY_SEARCH),
+        ).information_authorization.require_allowed(InformationAction.RELEASE)
+        assert decision.allowed is False
+
+    for malformed in (
+        {"items": "not-an-array"},
+        {"items": {}},
+        {"items": [None]},
+        {"items": [{}]},
+    ):
+        decision = AutotaskImpersonationInformationAuthorizer(
+            delegate=_Delegate({"provider": "autotask", "data": malformed}),
+            bindings=_Bindings(None),
+        ).invoke(
+            request=request, resolution=_resolution(SERVICE_NOTIFICATION_HISTORY_SEARCH),
+        ).information_authorization.require_allowed(InformationAction.RELEASE)
+        assert decision.allowed is False
