@@ -270,3 +270,49 @@ def test_legacy_nonfreeze_offer_is_not_incorrectly_rejected_by_umask(tmp_path):
         tmp_path, RID, SHA, ROLLBACK,
         binding["manifest_sha256"], binding["scope_sha256"],
     ) is None
+
+
+def test_governed_retry_release_uses_same_single_approval_contract(tmp_path):
+    marker, raw, record, binding, args = scenario(tmp_path)
+    retry_id = RID + "-retry-1"
+    record["release_id"] = retry_id
+    runner.atomic_json(tmp_path / "records" / (retry_id + ".json"), record)
+    # The issued Teams request and protected host offer both identify the
+    # governed retry record, never the superseded original release ID.
+    new_binding = runner.current_initial_freeze_binding(tmp_path, record)
+    assert new_binding["release_id"] == retry_id
+    offer = {
+        "release_id": retry_id,
+        "candidate_sha": SHA,
+        "live_rollback_sha": ROLLBACK,
+        "manifest_sha256": new_binding["manifest_sha256"],
+        "initial_freeze_binding": new_binding,
+    }
+    runner.atomic_json(tmp_path / "mobile-release-offers" / (retry_id + ".json"), offer)
+    args["release_id"] = retry_id
+    args["request_metadata"]["release_id"] = retry_id
+    args["request_metadata"]["initial_freeze_binding"] = new_binding
+    grant = record_grant(tmp_path, args)
+    assert grant["release_id"] == retry_id
+    retry_record = runner.load_record(tmp_path, retry_id)
+    assert retry_record["owner_approval"] == record["owner_approval"]
+    context = runner.explicit_owner_one_transaction_freeze_context(tmp_path, retry_record)
+    assert context is not None
+    opened = runner.begin_one_transaction_freeze_exception(tmp_path, context)
+    assert not marker.exists()
+    runner.restore_one_transaction_freeze_exception(tmp_path, opened, release_state="closed")
+    assert marker.read_bytes() == raw
+    assert json.loads((
+        tmp_path / "owner-signed-unfreeze-receipts" / (retry_id + ".json")
+    ).read_text())["status"] == "consumed"
+
+
+@pytest.mark.parametrize("bad_id", [
+    RID + "-retry-0", RID + "-retry-001", RID + "-retry-1000", RID + "-extra",
+])
+def test_one_click_frozen_release_rejects_malformed_retry_name(tmp_path, bad_id):
+    _, _, record, _, _ = scenario(tmp_path)
+    record["release_id"] = bad_id
+    assert not runner.one_transaction_release_id_matches_candidate(bad_id, SHA)
+    with pytest.raises(runner.ReleaseManagerError, match="exact scope not reviewed"):
+        runner.current_initial_freeze_binding(tmp_path, record)

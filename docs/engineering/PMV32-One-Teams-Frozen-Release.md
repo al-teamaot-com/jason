@@ -18,6 +18,7 @@ Only the existing serialized Production Manager transaction may consume that rec
 - An OPEN production circuit breaker blocks ordinary one-click card publication and promotion. The reviewed provider-recovery exception is unchanged; it is not a shortcut for an ordinary release.
 - An older signed approval without the exact freeze intent does not inherit unfreeze authority. Different freeze fingerprints or scope require a new exact card. Expired, forged, replayed, misbound and owner-revoked approvals fail before freeze mutation.
 - Existing V1, CCC-only, replacement-unfreeze and stand-alone explicit-unfreeze workflows are preserved.
+- Governed retry releases with an exact -retry-N suffix use the same signed freeze permission; malformed retry IDs fail closed.
 - This source cannot make an older installed Production Manager generate these offers. Its own first installation requires a currently supported, separately authorized bootstrap path. Never run uninstalled source against protected production or forge approvals.
 
 ## Acceptance evidence

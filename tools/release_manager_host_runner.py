@@ -443,6 +443,16 @@ def one_transaction_freeze_exception_context(
     }
 
 
+def one_transaction_release_id_matches_candidate(release_id: str, candidate_sha: str) -> bool:
+    """Accept normal and governed retry IDs, never arbitrary release names."""
+    if not SHA.fullmatch(candidate_sha):
+        return False
+    return re.fullmatch(
+        re.escape(record_id(candidate_sha)) + r"(?:-retry-[1-9][0-9]{0,2})?",
+        str(release_id or ""),
+    ) is not None
+
+
 def current_initial_freeze_binding(
     state_root: Path, record: Mapping[str, Any],
 ) -> dict[str, str]:
@@ -469,7 +479,7 @@ def current_initial_freeze_binding(
     scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
     release_id = str(record.get("release_id") or "")
     if (record.get("state") != "production_eligible"
-            or release_id != record_id(candidate)
+            or not one_transaction_release_id_matches_candidate(release_id, candidate)
             or not isinstance(scope, str)
             or re.fullmatch(r"[0-9a-f]{64}", scope) is None):
         raise ReleaseManagerError("frozen-release exact scope not reviewed")
@@ -5566,7 +5576,7 @@ def record_signed_initial_unfreeze(
     normal exact-SHA release grant. Never removes the freeze or deploys code.
     """
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
-    if (release_id != record_id(candidate_sha)
+    if (not one_transaction_release_id_matches_candidate(release_id, candidate_sha)
             or re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None
             or re.fullmatch(r"[0-9a-f]{64}", signed_evidence_sha256) is None
             or decided_at.tzinfo is None or expires_at.tzinfo is None
@@ -5664,7 +5674,7 @@ def signed_initial_one_transaction_freeze_context(
     rollback = str(record.get("rollback_sha") or "")
     if (re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None
             or not SHA.fullmatch(candidate) or not SHA.fullmatch(rollback)
-            or release_id != record_id(candidate)
+            or not one_transaction_release_id_matches_candidate(release_id, candidate)
             or owner.get("approved") is not True
             or owner.get("candidate_sha") != candidate
             or owner.get("source") != "authenticated_mobile_teams_owner:" + approval_id):
