@@ -182,6 +182,7 @@ def consume_mobile_release_decisions(
     *, repo: Path, state_root: Path,
     approve_release: Callable,
     record_replacement_unfreeze: Callable | None = None,
+    record_initial_unfreeze: Callable | None = None,
     database: Path = DEFAULT_MOBILE_DB,
     policy_file: Path = DEFAULT_POLICY,
     ccc_root: Path = DEFAULT_CCC_ROOT,
@@ -486,6 +487,8 @@ def consume_mobile_release_decisions(
             manifest = raw_release.get("release_manifest") or {}
             prior_source = str(prior_approval.get("source") or "")
             if prior_source == "explicit_owner_instruction":
+                if request.metadata.get("initial_freeze_binding") is not None:
+                    raise PermissionError("single Teams frozen release cannot inherit a prior shell approval")
                 if (prior_approval.get("candidate_sha") != request.metadata["candidate_sha"]
                         or digest(manifest) != request.metadata["manifest_sha256"]):
                     raise PermissionError(
@@ -516,6 +519,40 @@ def consume_mobile_release_decisions(
                     or review.get("signed_evidence_sha256") != evidence_sha
                     or review.get("mobile_approval_id") != approval_id):
                 raise PermissionError("prior CCC review is not the same signed Teams decision")
+            if request.metadata.get("initial_freeze_binding") is not None:
+                if record_initial_unfreeze is None:
+                    raise PermissionError("signed frozen release cannot record both grants")
+                # Crash between release approval and the second receipt:
+                # rebuild the original signed card, never mint a new decision.
+                from dataclasses import replace
+                original = read_eligible_release(
+                    state_root, release_id, policy,
+                    allow_existing_owner_approval=True,
+                )
+                original = replace(
+                    original, review_only=False,
+                    initial_freeze_binding=tuple(sorted(
+                        request.metadata["initial_freeze_binding"].items())),
+                )
+                expected = create_mobile_release_request(
+                    original, policy, now=request.requested_at,
+                    card_challenge=request.metadata.get("card_instance_challenge"),
+                )
+                if (request.metadata != {**expected.metadata, **{
+                        key: value for key, value in request.metadata.items()
+                        if key == "delivery_message_ids"}}
+                        or request.presentation != expected.presentation
+                        or request.expires_at != expected.expires_at):
+                    raise PermissionError("crash recovery signed frozen card intent differs")
+                record_initial_unfreeze(
+                    repo, state_root, release_id=release_id,
+                    candidate_sha=request.metadata["candidate_sha"],
+                    approval_id=approval_id,
+                    signed_evidence_sha256=evidence_sha,
+                    request_metadata=request.metadata,
+                    decided_at=timestamp,
+                    expires_at=request.expires_at,
+                )
             _private_atomic(marker, {
                 "schema_version": "1.0", "approval_id": approval_id,
                 "release_id": release_id, "candidate_sha": request.metadata["candidate_sha"],
@@ -524,6 +561,8 @@ def consume_mobile_release_decisions(
                 "signed_evidence_sha256": evidence_sha, "decision": "approve",
                 "processed_at": datetime.now(timezone.utc).isoformat(),
                 "recovery": "previous_exact_owner_approval_verified",
+                **({"initial_unfreeze_receipt_recorded": True}
+                   if request.metadata.get("initial_freeze_binding") is not None else {}),
             })
             continue
         candidate = read_eligible_release(
@@ -532,6 +571,8 @@ def consume_mobile_release_decisions(
         )
         if candidate.review_only != review_only:
             raise PermissionError("CCC-only Teams decision changed release approval state")
+        if candidate.initial_freeze_binding is not None and record_initial_unfreeze is None:
+            raise PermissionError("one signed Teams approval requires BOTH release and freeze receipts")
         renewal_nonce = request.metadata.get("renewal_nonce")
         renewed_from = request.metadata.get("renewed_from_approval_id")
         if renewal_nonce is not None or renewed_from is not None:
@@ -682,6 +723,16 @@ def consume_mobile_release_decisions(
                 repo, state_root, release_id=candidate.release_id,
                 candidate_sha=sha, source="authenticated_mobile_teams_owner:" + approval_id,
             )
+            if candidate.initial_freeze_binding is not None:
+                # Independently bound second permission, SAME authenticated
+                # click; it cannot deploy or modify the live freeze marker.
+                record_initial_unfreeze(
+                    repo, state_root, release_id=candidate.release_id,
+                    candidate_sha=sha, approval_id=approval_id,
+                    signed_evidence_sha256=evidence_sha,
+                    request_metadata=request.metadata,
+                    decided_at=timestamp, expires_at=request.expires_at,
+                )
         else:
             # Only the existing owner release grant is valid. A signed CCC
             # review cannot add, modify or resurrect release execution scope.
@@ -698,6 +749,8 @@ def consume_mobile_release_decisions(
                 "signed_evidence_sha256": evidence_sha,
                 "decision": "approve",
                 **({"review_only": True} if review_only else {}),
+                **({"initial_unfreeze_receipt_recorded": True}
+                   if candidate.initial_freeze_binding is not None else {}),
                 "processed_at": datetime.now(timezone.utc).isoformat(),
             })
         completed += 1

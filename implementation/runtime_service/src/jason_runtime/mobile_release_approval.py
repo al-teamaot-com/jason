@@ -206,6 +206,51 @@ class ExactRelease:
     affected_surfaces: tuple[str, ...]
     review_only: bool = False
     replacement_lineage: tuple[tuple[str, str], ...] | None = None
+    # Host-issued offer intent, not execution authority.
+    initial_freeze_binding: tuple[tuple[str, str], ...] | None = None
+
+
+def _host_offered_initial_freeze(
+    state_root: Path, release_id: str, candidate_sha: str, rollback_sha: str,
+    manifest_sha256: str, scope_sha256: str | None,
+) -> tuple[tuple[str, str], ...] | None:
+    offer_path = Path(state_root) / "mobile-release-offers" / (release_id + ".json")
+    try:
+        info = offer_path.lstat()
+    except FileNotFoundError:
+        return None
+    if (offer_path.is_symlink() or not stat.S_ISREG(info.st_mode)
+            or info.st_mode & 0o022 or info.st_size > 8192):
+        raise PermissionError("frozen-release offer is not a safe regular file")
+    offer = json.loads(offer_path.read_text(encoding="utf-8"))
+    if not isinstance(offer, dict):
+        raise PermissionError("frozen-release offer is invalid")
+    binding = offer.get("initial_freeze_binding")
+    if binding is None:
+        return None
+    expected_keys = {
+        "schema_version", "release_id", "candidate_sha", "rollback_sha",
+        "manifest_sha256", "scope_sha256", "freeze_sha256",
+    }
+    if (not isinstance(binding, dict) or set(binding) != expected_keys
+            or binding["schema_version"] != "1.0"
+            or binding["release_id"] != release_id
+            or binding["candidate_sha"] != candidate_sha
+            or binding["rollback_sha"] != rollback_sha
+            or binding["manifest_sha256"] != manifest_sha256
+            or binding["scope_sha256"] != scope_sha256
+            or not isinstance(scope_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", scope_sha256) is None
+            or not isinstance(binding["freeze_sha256"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", binding["freeze_sha256"]) is None
+            or offer.get("release_id") != release_id
+            or offer.get("candidate_sha") != candidate_sha
+            or offer.get("live_rollback_sha") != rollback_sha
+            or offer.get("manifest_sha256") != manifest_sha256
+            or offer.get("review_only") is True
+            or offer.get("replacement_unfreeze_only") is True):
+        raise PermissionError("frozen-release offer differs from reviewed scope")
+    return tuple(sorted(binding.items()))
 
 
 def read_eligible_release(
@@ -282,11 +327,19 @@ def read_eligible_release(
     purpose = doc.get("description")
     if not isinstance(purpose, str) or not purpose.strip() or len(purpose) > 500:
         raise PermissionError("mobile release card must contain a bounded human-readable change purpose")
+    frozen_intent = (
+        _host_offered_initial_freeze(
+            state_root, release_id, sha, rollback, digest(manifest),
+            (doc.get("manual_scope_review") or {}).get("scope_sha256"),
+        )
+        if not review_only and policy.schema_version in {"2.0", "3.0"} else None
+    )
     return ExactRelease(release_id, sha, rollback, digest(manifest),
         str(manifest.get("policy_digest") or ""),
         str(manifest.get("desired_state_policy_digest") or ""),
         risk, str(manifest.get("change_class") or ""), purpose.strip(),
-        tuple(files), tuple(surfaces), review_only, replacement_lineage)
+        tuple(files), tuple(surfaces), review_only, replacement_lineage,
+        frozen_intent)
 
 
 def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleasePolicy,
@@ -335,6 +388,12 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         "owner_policy_sha256": policy.policy_sha256,
     }
     replacement = evidence.replacement_lineage is not None
+    frozen = evidence.initial_freeze_binding is not None
+    if frozen:
+        if (replacement or evidence.review_only
+                or policy.schema_version not in {"2.0", "3.0"}):
+            raise PermissionError("one-click freeze needs a fresh reviewed owner release")
+        intent["initial_freeze_binding"] = dict(evidence.initial_freeze_binding)
     if replacement:
         if not evidence.review_only or policy.schema_version not in {"2.0", "3.0"}:
             raise PermissionError("replacement Teams unfreeze needs reviewed owner mode")
@@ -366,6 +425,7 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         presentation=ApprovalPresentation(
             title=("Replacement unfreeze ONLY: " if replacement else
                    "CCC Material Review: " if evidence.review_only else
+                   "ONE approval - frozen release: " if frozen else
                    "Production + CCC: ") + evidence.purpose[:90],
             summary=(
                 "The exact production release was already owner-authorized. "
@@ -376,6 +436,11 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
                 "whose prior unfreeze was consumed BEFORE mutation. It does not add standing "
                 "authority, modify the earlier approval, or bypass preflight/rollback."
                 if replacement else
+                "ONE signed click approves the exact release and a SEPARATE, bounded "
+                "one-transaction unfreeze bound to SHA, reviewed scope, rollback and "
+                "freeze fingerprint. Independent gates and rollback remain mandatory; "
+                "the original freeze is restored after success or failure. No standing authority."
+                if frozen else
                 "Review this exact immutable release. Approve authorizes only this SHA's "
                 "release and CCC material review; independent checks, deployment and rollback remain mandatory."
             ),
@@ -387,6 +452,10 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
                 ("Affected services", ", ".join(evidence.affected_surfaces)),
                 ("Changed files", shown),
                 ("Rollback", evidence.rollback_sha),
+                *(((("Reviewed scope SHA256", dict(evidence.initial_freeze_binding)["scope_sha256"]),
+                    ("Frozen marker SHA256", dict(evidence.initial_freeze_binding)["freeze_sha256"]),
+                    ("Freeze restoration", "Automatic after one transaction"))
+                    if frozen else ())),
                 *((("Replaces expired approval", renewed_from),) if renewed_from else ()),
                 *((("Consumed predecessor", dict(evidence.replacement_lineage)["predecessor_transaction_receipt_sha256"]),)
                     if replacement else ()),
@@ -770,6 +839,8 @@ class MobileReleaseApprovalMaintenance:
                 request.metadata.get("replacement_unfreeze_only") is True,
                 (request.metadata.get("replacement_lineage") or {}).get(
                     "predecessor_transaction_receipt_sha256"),
+                (request.metadata.get("initial_freeze_binding") or {}).get("scope_sha256"),
+                (request.metadata.get("initial_freeze_binding") or {}).get("freeze_sha256"),
             )
             for request in self.requests.list_all()
             if request.capability == CAPABILITY
@@ -867,6 +938,8 @@ class MobileReleaseApprovalMaintenance:
                 offer.get("replacement_unfreeze_only") is True,
                 (offer.get("replacement_lineage") or {}).get(
                     "predecessor_transaction_receipt_sha256"),
+                (offer.get("initial_freeze_binding") or {}).get("scope_sha256"),
+                (offer.get("initial_freeze_binding") or {}).get("freeze_sha256"),
             )
             if offer_subject in existing_subjects:
                 # The same immutable approval subject is one-shot even after a
