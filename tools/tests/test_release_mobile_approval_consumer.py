@@ -32,7 +32,7 @@ RID = "release-" + SHA[:16]
 def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=None,
             review_only=False, renewed=False, canonical_owner=False,
             reviewed_version="2.0", release_risk=None, replacement_only=False,
-            initial_freeze=False):
+            initial_freeze=False, initial_unfreeze_renewal=False):
     from implementation.runtime_service.tests.test_mobile_release_approval import (
         policy_file, reviewed_policy_file, mark_release_high_impact, release_record,
     )
@@ -61,6 +61,8 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
             "recorded_at": NOW.isoformat(),
         }
         release_path.write_text(json.dumps(record), encoding="utf-8")
+    if initial_unfreeze_renewal:
+        assert reviewed and not review_only and not replacement_only and not initial_freeze
     if initial_freeze:
         assert reviewed and not review_only and not replacement_only
         doc = json.loads(release_path.read_text(encoding="utf-8"))
@@ -116,12 +118,102 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
             "status": "deployment_returned",
             "release_state_after": "production_eligible"}))
         transaction.chmod(0o600)
+    if initial_unfreeze_renewal:
+        from jason_runtime.mobile_release_approval import (
+            read_expired_initial_unfreeze_predecessor,
+        )
+        old_id = "relapproval-" + "a" * 32
+        original_signed = "d" * 64
+        doc = json.loads(release_path.read_text(encoding="utf-8"))
+        doc["owner_approval"] = {
+            "approved": True,
+            "candidate_sha": SHA,
+            "source": "authenticated_mobile_teams_owner:" + old_id,
+            "recorded_at": (NOW - timedelta(minutes=21)).isoformat(),
+        }
+        doc["manual_scope_review"] = {"scope_sha256": "d" * 64}
+        freeze = root / "production-deployment-freeze"
+        freeze.write_text(json.dumps({
+            "status": "active",
+            "scope": "manual-and-automatic-production-promotions",
+            "remove_only_after": "new explicit exact-SHA owner unfreeze decision",
+        }) + "\n")
+        freeze.chmod(0o600)
+        freeze_hash = hashlib.sha256(freeze.read_bytes()).hexdigest()
+        manifest = hashlib.sha256(json.dumps(
+            doc["release_manifest"], sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")).hexdigest()
+        old = root / "owner-signed-unfreeze-receipts"
+        old.mkdir(mode=0o700)
+        source = old / (RID + ".json")
+        source.write_text(json.dumps({
+            "schema_version": "1.0",
+            "authorization": "signed_teams_initial_unfreeze",
+            "release_id": RID, "candidate_sha": SHA, "rollback_sha": ROLLBACK,
+            "scope_sha256": "d" * 64,
+            "freeze_sha256_before": freeze_hash,
+            "manifest_sha256": manifest,
+            "approval_id": old_id,
+            "signed_evidence_sha256": original_signed,
+            "prior_release_approval_source": doc["owner_approval"]["source"],
+            "recorded_at": (NOW - timedelta(minutes=20)).isoformat(),
+            "expires_at": (NOW - timedelta(minutes=10)).isoformat(),
+            "status": "authorized_pending",
+            "freeze_remains_active": True,
+            "restore_freeze_after_transaction": True,
+            "standing_authority": False,
+            "automatic_publish_authority": False,
+        }, sort_keys=True) + "\n")
+        source.chmod(0o600)
+        doc["signed_initial_unfreeze_authorization"] = {
+            "approval_id": old_id,
+            "signed_evidence_sha256": original_signed,
+            "receipt_sha256": "sha256:" + hashlib.sha256(
+                source.read_bytes()
+            ).hexdigest(),
+        }
+        release_path.write_text(json.dumps(doc) + "\n")
+        release_path.chmod(0o600)
+        lineage = read_expired_initial_unfreeze_predecessor(root, RID, doc)
+        binding = {
+            "schema_version": "1.0", "release_id": RID,
+            "candidate_sha": SHA, "rollback_sha": ROLLBACK,
+            "manifest_sha256": manifest, "scope_sha256": "d" * 64,
+            "freeze_sha256": freeze_hash,
+        }
+        offers = root / "mobile-release-offers"
+        offers.mkdir(mode=0o700)
+        offer = offers / (RID + ".json")
+        offer.write_text(json.dumps({
+            "schema_version": "1.0", "release_id": RID,
+            "candidate_sha": SHA, "live_rollback_sha": ROLLBACK,
+            "manifest_sha256": manifest, "protected_main_sha": SHA,
+            "initial_unfreeze_renewal_only": True,
+            "initial_unfreeze_renewal_lineage": lineage,
+            "initial_freeze_binding": binding,
+            "published_at": NOW.isoformat(),
+        }))
+        offer.chmod(0o600)
     ccc = tmp_path / "ccc"
     ccc.mkdir()
+    if initial_unfreeze_renewal:
+        prior_review = {
+            "source_revision": SHA, "recorded_by": "person-al",
+            "status": "approved",
+            "mobile_approval_id": old_id,
+            "signed_evidence_sha256": original_signed,
+        }
+        (ccc / ("material-review-" + SHA[:16] + ".json")).write_text(
+            json.dumps(prior_review)
+        )
     policy = read_mobile_release_policy(policy_path)
     evidence = read_eligible_release(
-        root, RID, policy, allow_existing_owner_approval=review_only,
+        root, RID, policy, allow_existing_owner_approval=(
+            review_only or initial_unfreeze_renewal
+        ),
         replacement_unfreeze_only=replacement_only,
+        initial_unfreeze_renewal_only=initial_unfreeze_renewal,
     )
     old_request = (
         create_mobile_release_request(evidence, policy, now=NOW - timedelta(minutes=20))
@@ -1342,3 +1434,68 @@ def test_pmv32_signed_frozen_card_rejects_changed_scope_or_freeze_after_issuance
         flow.handle(**args)
     assert repo.accepted_decision(request.approval_id) is None
     assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+
+def test_new_signed_initial_unfreeze_renewal_consumes_only_new_grant(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, initial_unfreeze_renewal=True,
+    )
+    assert request.metadata["initial_unfreeze_renewal_only"] is True
+    assert "review_only" not in request.metadata
+    original = opts["state_root"] / "owner-signed-unfreeze-receipts" / (
+        RID + ".json"
+    )
+    prior_raw = original.read_bytes()
+    record_before = release_path.read_bytes()
+    result = flow.handle(**args)
+    assert result["approval_status"] == "approved"
+    assert result["executed"] is False
+    calls = []
+    opts["approve_release"] = lambda *_args, **_kw: pytest.fail(
+        "renewal must never reapprove the original release"
+    )
+    opts["record_initial_unfreeze_renewal"] = (
+        lambda _repo, _root, **kwargs: calls.append(kwargs)
+    )
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert len(calls) == 1
+    assert calls[0]["approval_id"] == request.approval_id
+    assert calls[0]["request_metadata"]["initial_unfreeze_renewal_lineage"] == (
+        request.metadata["initial_unfreeze_renewal_lineage"]
+    )
+    assert release_path.read_bytes() == record_before
+    assert original.read_bytes() == prior_raw
+    assert consume_mobile_release_decisions(**opts) == 0
+    assert len(calls) == 1
+
+
+def test_signed_initial_renewal_rejects_missing_original_ccc(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, initial_unfreeze_renewal=True,
+    )
+    assert flow.handle(**args)["approval_status"] == "approved"
+    original_review = opts["ccc_root"] / (
+        "material-review-" + SHA[:16] + ".json"
+    )
+    original_review.unlink()
+    opts["approve_release"] = lambda *_a, **_k: pytest.fail("no new grant")
+    opts["record_initial_unfreeze_renewal"] = lambda *_a, **_k: pytest.fail(
+        "without prior CCC, renewal must fail closed"
+    )
+    with pytest.raises(PermissionError, match="original signed CCC"):
+        consume_mobile_release_decisions(**opts)
+    marker = opts["state_root"] / "mobile-release-decisions-processed" / (
+        request.approval_id + ".json"
+    )
+    assert not marker.exists()
+
+
+def test_signed_initial_renewal_rejects_wrong_signed_card_challenge(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, initial_unfreeze_renewal=True,
+        card_selection_override={"card_challenge": "0" * 48},
+    )
+    with pytest.raises(PermissionError, match="card"):
+        flow.handle(**args)
+    assert repo.accepted_decision(request.approval_id) is None

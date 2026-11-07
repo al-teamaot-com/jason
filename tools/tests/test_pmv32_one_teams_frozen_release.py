@@ -316,3 +316,208 @@ def test_one_click_frozen_release_rejects_malformed_retry_name(tmp_path, bad_id)
     assert not runner.one_transaction_release_id_matches_candidate(bad_id, SHA)
     with pytest.raises(runner.ReleaseManagerError, match="exact scope not reviewed"):
         runner.current_initial_freeze_binding(tmp_path, record)
+
+
+
+class _SignedRenewalFutureClock(datetime):
+    """Disposable fixture time: original 7-minute signed window is expired."""
+    @classmethod
+    def now(cls, tz=None):
+        fixed = datetime.now(timezone.utc) + timedelta(minutes=8)
+        return fixed if tz is None else fixed.astimezone(tz)
+
+
+def _expired_initial_renewal_case(tmp_path, monkeypatch):
+    import jason_runtime.mobile_release_approval as mobile
+    marker, raw, _, binding, args = scenario(tmp_path)
+    record_grant(tmp_path, args)
+    original_path = tmp_path / "owner-signed-unfreeze-receipts" / (RID + ".json")
+    original_bytes = original_path.read_bytes()
+    monkeypatch.setattr(runner, "datetime", _SignedRenewalFutureClock)
+    monkeypatch.setattr(mobile, "datetime", _SignedRenewalFutureClock)
+    loaded = runner.load_record(tmp_path, RID)
+    lineage = mobile.read_expired_initial_unfreeze_predecessor(
+        tmp_path, RID, loaded,
+    )
+    offer = tmp_path / "mobile-release-offers" / (RID + ".json")
+    runner.atomic_json(offer, {
+        "schema_version": "1.0",
+        "release_id": RID, "candidate_sha": SHA,
+        "live_rollback_sha": ROLLBACK,
+        "manifest_sha256": binding["manifest_sha256"],
+        "initial_unfreeze_renewal_only": True,
+        "initial_unfreeze_renewal_lineage": lineage,
+        "initial_freeze_binding": binding,
+    })
+    renewal_id = "relapproval-" + "f" * 32
+    decision = _SignedRenewalFutureClock.now(timezone.utc)
+    renewal = {
+        "release_id": RID, "candidate_sha": SHA,
+        "approval_id": renewal_id,
+        "signed_evidence_sha256": "9" * 64,
+        "request_metadata": {
+            "release_id": RID, "candidate_sha": SHA,
+            "rollback_sha": ROLLBACK,
+            "manifest_sha256": binding["manifest_sha256"],
+            "initial_unfreeze_renewal_only": True,
+            "initial_unfreeze_renewal_lineage": lineage,
+            "initial_freeze_binding": binding,
+        },
+        "decided_at": decision,
+        "expires_at": decision + timedelta(minutes=7),
+    }
+    return marker, raw, original_path, original_bytes, lineage, renewal
+
+
+def _record_signed_renewal(tmp_path, args):
+    with patch.object(runner, "verify_candidate_on_main"), \
+         patch.object(runner, "require_current_manual_scope_review"), \
+         patch.object(runner, "revalidate_circuit_breaker"), \
+         patch.object(runner, "live_production_alignment"):
+        return runner.record_signed_initial_unfreeze_renewal(
+            ROOT, tmp_path, **args,
+        )
+
+
+def test_expired_signed_window_requires_distinct_new_teams_decision(tmp_path, monkeypatch):
+    marker, raw, prior, prior_raw, lineage, renewal = (
+        _expired_initial_renewal_case(tmp_path, monkeypatch)
+    )
+    assert runner.explicit_owner_one_transaction_freeze_context(
+        tmp_path, runner.load_record(tmp_path, RID)
+    ) is None  # The expired original is NEVER execution authority.
+    doc = _record_signed_renewal(tmp_path, renewal)
+    assert doc["authorization"] == "signed_teams_initial_unfreeze_renewal"
+    assert doc["original_initial_unfreeze_lineage"] == lineage
+    assert prior.read_bytes() == prior_raw
+    assert marker.read_bytes() == raw
+    saved = runner.load_record(tmp_path, RID)
+    assert saved["owner_approval"]["source"].endswith(APPROVAL_ID)
+    ctx = runner.explicit_owner_one_transaction_freeze_context(tmp_path, saved)
+    assert ctx["authorization"] == "signed_teams_initial_unfreeze_renewal"
+    assert ctx["renewal_approval_id"] == renewal["approval_id"]
+    opened = runner.begin_one_transaction_freeze_exception(tmp_path, ctx)
+    assert not marker.exists()
+    assert opened["receipt_path"].name.endswith(renewal["approval_id"] + ".json")
+    runner.restore_one_transaction_freeze_exception(
+        tmp_path, opened, release_state="closed",
+    )
+    assert marker.read_bytes() == raw
+    assert prior.read_bytes() == prior_raw
+    saved_renewal = tmp_path / "owner-signed-initial-unfreeze-renewals" / (
+        RID + "--" + renewal["approval_id"] + ".json"
+    )
+    assert json.loads(saved_renewal.read_text())["status"] == "consumed"
+    assert runner.explicit_owner_one_transaction_freeze_context(
+        tmp_path, runner.load_record(tmp_path, RID)
+    ) is None  # One transaction only, never replay.
+
+
+@pytest.mark.parametrize("tamper", [
+    "wrong_scope", "wrong_rollback", "wrong_approval", "wrong_predecessor",
+    "changed_freeze", "altered_original_receipt",
+])
+def test_expired_initial_renewal_rejects_changed_subject(
+    tmp_path, monkeypatch, tamper,
+):
+    marker, raw, original, original_bytes, _, approval = (
+        _expired_initial_renewal_case(tmp_path, monkeypatch)
+    )
+    if tamper == "wrong_scope":
+        approval["request_metadata"]["initial_freeze_binding"] = {
+            **approval["request_metadata"]["initial_freeze_binding"],
+            "scope_sha256": "a" * 64,
+        }
+    elif tamper == "wrong_rollback":
+        approval["request_metadata"]["rollback_sha"] = "0" * 40
+    elif tamper == "wrong_approval":
+        approval["approval_id"] = "not-a-real-id"
+    elif tamper == "wrong_predecessor":
+        approval["request_metadata"]["initial_unfreeze_renewal_lineage"] = {
+            **approval["request_metadata"]["initial_unfreeze_renewal_lineage"],
+            "predecessor_receipt_sha256": "0" * 64,
+        }
+    elif tamper == "changed_freeze":
+        marker.write_bytes(raw + b" ")
+        marker.chmod(0o600)
+    else:
+        original.write_bytes(original_bytes + b" ")
+        original.chmod(0o600)
+    with pytest.raises(runner.ReleaseManagerError):
+        _record_signed_renewal(tmp_path, approval)
+    assert not (tmp_path / "owner-signed-initial-unfreeze-renewals").exists()
+    assert not (tmp_path / "owner-unfreeze-receipts").exists()
+    assert marker.exists()
+
+
+def test_signed_initial_renewal_duplicate_decision_is_idempotent(tmp_path, monkeypatch):
+    marker, raw, original, original_bytes, _, approval = (
+        _expired_initial_renewal_case(tmp_path, monkeypatch)
+    )
+    first = _record_signed_renewal(tmp_path, approval)
+    second = _record_signed_renewal(tmp_path, approval)
+    assert first == second
+    assert original.read_bytes() == original_bytes
+    assert marker.read_bytes() == raw
+    other = {**approval, "approval_id": "relapproval-" + "8" * 32}
+    with pytest.raises(runner.ReleaseManagerError):
+        _record_signed_renewal(tmp_path, other)
+
+
+def test_initial_renewal_expires_and_fails_closed(tmp_path, monkeypatch):
+    import jason_runtime.mobile_release_approval as mobile
+    marker, raw, original, old_raw, _, approval = (
+        _expired_initial_renewal_case(tmp_path, monkeypatch)
+    )
+    _record_signed_renewal(tmp_path, approval)
+    class ExpiredAgain(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            fixed = datetime.now(timezone.utc) + timedelta(minutes=25)
+            return fixed if tz is None else fixed.astimezone(tz)
+    monkeypatch.setattr(runner, "datetime", ExpiredAgain)
+    monkeypatch.setattr(mobile, "datetime", ExpiredAgain)
+    assert runner.explicit_owner_one_transaction_freeze_context(
+        tmp_path, runner.load_record(tmp_path, RID)
+    ) is None
+    assert marker.read_bytes() == raw
+    assert original.read_bytes() == old_raw
+
+
+
+def test_approval_only_purpose_recognizes_unused_expired_initial_receipt(
+    tmp_path, monkeypatch,
+):
+    from jason_runtime.mobile_release_approval import MobileReleasePolicy
+    marker, raw, original, original_raw, _, _ = (
+        _expired_initial_renewal_case(tmp_path, monkeypatch)
+    )
+    ccc = tmp_path / "ccc"
+    ccc.mkdir()
+    (ccc / ("material-review-" + SHA[:16] + ".json")).write_text(
+        json.dumps({
+            "source_revision": SHA, "recorded_by": "person-al",
+            "status": "approved",
+        })
+    )
+    record = runner.load_record(tmp_path, RID)
+    record["risk_profile"] = "normal"
+    runner.save_record(tmp_path, record)
+    policy = MobileReleasePolicy(
+        "aot", ("person-al",),
+        frozenset({"normal", "production_control_core"}),
+        600, "a" * 64, "2.0",
+    )
+    assert runner.signed_owner_offer_purpose(
+        record, SHA, policy, "owner_reviewed",
+        ccc_root=ccc, state_root=tmp_path,
+    ) == "initial_unfreeze_renewal_only"
+    assert marker.read_bytes() == raw
+    assert original.read_bytes() == original_raw
+    record["renewed_initial_unfreeze_authorization"] = {
+        "approval_id": "relapproval-" + "f" * 32,
+    }
+    assert runner.signed_owner_offer_purpose(
+        record, SHA, policy, "owner_reviewed",
+        ccc_root=ccc, state_root=tmp_path,
+    ) is None

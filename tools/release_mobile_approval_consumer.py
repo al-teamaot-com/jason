@@ -183,6 +183,7 @@ def consume_mobile_release_decisions(
     approve_release: Callable,
     record_replacement_unfreeze: Callable | None = None,
     record_initial_unfreeze: Callable | None = None,
+    record_initial_unfreeze_renewal: Callable | None = None,
     database: Path = DEFAULT_MOBILE_DB,
     policy_file: Path = DEFAULT_POLICY,
     ccc_root: Path = DEFAULT_CCC_ROOT,
@@ -414,6 +415,88 @@ def consume_mobile_release_decisions(
         )
         review_only = request.metadata.get("review_only") is True
         replacement_only = request.metadata.get("replacement_unfreeze_only") is True
+        initial_renewal_only = request.metadata.get("initial_unfreeze_renewal_only") is True
+        if initial_renewal_only:
+            # This is a distinct signed Owner decision for the unused expired
+            # freeze window, NOT another release grant or a replay of the
+            # original owner/CCC approval. Original evidence remains immutable.
+            if (review_only or replacement_only
+                    or record_initial_unfreeze_renewal is None
+                    or policy.schema_version not in {"2.0", "3.0"}
+                    or prior_approval.get("approved") is not True
+                    or prior_approval.get("candidate_sha") != request.metadata.get("candidate_sha")
+                    or not str(prior_approval.get("source") or "").startswith(
+                        "authenticated_mobile_teams_owner:relapproval-"
+                    )):
+                raise PermissionError("fresh initial freeze renewal requires prior exact signed owner approval")
+            original_id = str(prior_approval["source"]).split(":", 1)[-1]
+            initial = raw_release.get("signed_initial_unfreeze_authorization") or {}
+            named = ccc_root / ("material-review-" + str(
+                request.metadata.get("candidate_sha") or ""
+            )[:16] + ".json")
+            if (not named.is_file() or named.is_symlink()
+                    or initial.get("approval_id") != original_id):
+                raise PermissionError("original signed CCC/Owner review unavailable for renewal")
+            prior_review = json.loads(named.read_text(encoding="utf-8"))
+            if (prior_review.get("source_revision") != request.metadata.get("candidate_sha")
+                    or prior_review.get("recorded_by") != policy_owner_identity
+                    or prior_review.get("status") != "approved"
+                    or prior_review.get("mobile_approval_id") != original_id
+                    or prior_review.get("signed_evidence_sha256")
+                        != initial.get("signed_evidence_sha256")):
+                raise PermissionError("original signed CCC review differs from renewal lineage")
+            candidate = read_eligible_release(
+                state_root, release_id, policy,
+                allow_existing_owner_approval=True,
+                initial_unfreeze_renewal_only=True,
+                initial_unfreeze_renewal_approval_id=approval_id,
+            )
+            if (dict(candidate.initial_unfreeze_renewal_lineage or ())
+                    != request.metadata.get("initial_unfreeze_renewal_lineage")):
+                raise PermissionError("signed initial freeze renewal predecessor changed")
+            expected = create_mobile_release_request(
+                candidate, policy, now=request.requested_at,
+                card_challenge=request.metadata.get("card_instance_challenge"),
+            )
+            if (request.metadata != {**expected.metadata, **{
+                    key: value for key, value in request.metadata.items()
+                    if key == "delivery_message_ids"}}
+                    or request.presentation != expected.presentation
+                    or request.expires_at != expected.expires_at
+                    or request.requested_mode != expected.requested_mode
+                    or request.request_id != expected.request_id
+                    or request.correlation_id != expected.correlation_id):
+                raise PermissionError("signed initial freeze renewal request does not match offered card")
+            if protected_main_sha_reader(repo) != candidate.candidate_sha:
+                raise PermissionError("signed initial freeze renewal is not on protected main")
+            read_release_approval_containment(
+                state_root
+            ).require_request_eligible(request.requested_at)
+            record_initial_unfreeze_renewal(
+                repo, state_root, release_id=release_id,
+                candidate_sha=candidate.candidate_sha,
+                approval_id=approval_id,
+                signed_evidence_sha256=evidence_sha,
+                request_metadata=request.metadata,
+                decided_at=timestamp,
+                expires_at=request.expires_at,
+            )
+            _private_atomic(marker, {
+                "schema_version": "1.0", "approval_id": approval_id,
+                "release_id": release_id,
+                "candidate_sha": candidate.candidate_sha,
+                "manifest_sha256": candidate.manifest_sha256,
+                "mobile_policy_sha256": policy.policy_sha256,
+                "signed_evidence_sha256": evidence_sha,
+                "decision": "approve",
+                "initial_unfreeze_renewal_only": True,
+                "authority_mutated": False,
+                "original_owner_grant_reused": False,
+                "new_unfreeze_receipt_recorded": True,
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            })
+            completed += 1
+            continue
         if replacement_only:
             # This is a DIFFERENT Teams decision, not a replay of the earlier
             # production grant or CCC material-review card. Authenticated

@@ -191,6 +191,110 @@ def read_consumed_unfreeze_predecessor(
     }
 
 
+def read_expired_initial_unfreeze_predecessor(
+    state_root: Path, release_id: str, record: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """Prove that an unused, signed, frozen-release receipt expired.
+
+    This is read-only lineage evidence. It never renews a decision, grants
+    authority, resets a TTL, or changes the original signed receipt.
+    """
+    if not RELEASE_ID.fullmatch(str(release_id)):
+        raise PermissionError("expired initial unfreeze release ID invalid")
+    base = Path(state_root)
+    if record is None:
+        record_path = base / "records" / (release_id + ".json")
+        meta = record_path.lstat()
+        if (record_path.is_symlink() or not stat.S_ISREG(meta.st_mode)
+                or meta.st_mode & 0o022):
+            raise PermissionError("expired initial unfreeze release record unsafe")
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+    native_receipts = base / "owner-unfreeze-receipts"
+    if native_receipts.exists():
+        if native_receipts.is_symlink() or not native_receipts.is_dir():
+            raise PermissionError("initial unfreeze transaction receipt directory unsafe")
+        if any(native_receipts.glob(release_id + "*.json")):
+            raise PermissionError("prior initial unfreeze already attempted a native transaction")
+    if (record.get("state") != "production_eligible"
+            or record.get("release_id") != release_id
+            or record.get("production") is not None
+            or record.get("failure") is not None
+            or record.get("renewed_initial_unfreeze_authorization") is not None
+            or record.get("replacement_unfreeze_authorization") is not None):
+        raise PermissionError("expired initial unfreeze is not an unused eligible release")
+    owner = record.get("owner_approval") or {}
+    pointer = record.get("signed_initial_unfreeze_authorization")
+    candidate = (record.get("release_candidate") or {}).get("candidate_sha")
+    rollback = record.get("rollback_sha")
+    if (not isinstance(pointer, dict)
+            or not SHA.fullmatch(str(candidate))
+            or not SHA.fullmatch(str(rollback))
+            or not release_id_matches_candidate(release_id, candidate)
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate
+            or owner.get("source") != "authenticated_mobile_teams_owner:" + str(pointer.get("approval_id"))
+            or not re.fullmatch(r"relapproval-[0-9a-f]{32}", str(pointer.get("approval_id")))
+            or not re.fullmatch(r"[0-9a-f]{64}", str(pointer.get("signed_evidence_sha256")))):
+        raise PermissionError("expired initial unfreeze owner lineage invalid")
+    path = base / "owner-signed-unfreeze-receipts" / (release_id + ".json")
+    marker_path = base / "production-deployment-freeze"
+    try:
+        pmeta = path.lstat()
+        mmeta = marker_path.lstat()
+        raw = path.read_bytes()
+        freeze_raw = marker_path.read_bytes()
+        receipt = json.loads(raw)
+        expires = datetime.fromisoformat(str(receipt.get("expires_at")))
+        issued = datetime.fromisoformat(str(receipt.get("recorded_at")))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise PermissionError("expired initial unfreeze evidence unavailable") from exc
+    freeze_digest = hashlib.sha256(freeze_raw).hexdigest()
+    scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
+    manifest = digest(record.get("release_manifest") or {})
+    prior_digest = hashlib.sha256(raw).hexdigest()
+    if (path.is_symlink() or marker_path.is_symlink()
+            or not stat.S_ISREG(pmeta.st_mode) or not stat.S_ISREG(mmeta.st_mode)
+            or stat.S_IMODE(pmeta.st_mode) != 0o600
+            or stat.S_IMODE(mmeta.st_mode) != 0o600
+            or pmeta.st_uid not in (0, os.geteuid())
+            or pmeta.st_gid not in (0, os.getegid())
+            or mmeta.st_uid not in (0, os.geteuid())
+            or mmeta.st_gid not in (0, os.getegid())
+            or not 1 <= len(raw) <= 8192 or len(raw) != pmeta.st_size
+            or not 1 <= len(freeze_raw) <= 4096
+            or "sha256:" + prior_digest != pointer.get("receipt_sha256")
+            or issued.tzinfo is None or expires.tzinfo is None
+            or not issued < expires <= datetime.now(timezone.utc)
+            or not 0 < (expires - issued).total_seconds() <= 900
+            or receipt.get("schema_version") != "1.0"
+            or receipt.get("authorization") != "signed_teams_initial_unfreeze"
+            or receipt.get("status") != "authorized_pending"
+            or receipt.get("freeze_remains_active") is not True
+            or receipt.get("restore_freeze_after_transaction") is not True
+            or receipt.get("automatic_publish_authority") is not False
+            or receipt.get("standing_authority") is not False
+            or receipt.get("release_id") != release_id
+            or receipt.get("candidate_sha") != candidate
+            or receipt.get("rollback_sha") != rollback
+            or receipt.get("scope_sha256") != scope
+            or receipt.get("manifest_sha256") != manifest
+            or receipt.get("freeze_sha256_before") != freeze_digest
+            or receipt.get("approval_id") != pointer.get("approval_id")
+            or receipt.get("signed_evidence_sha256") != pointer.get("signed_evidence_sha256")
+            or receipt.get("prior_release_approval_source") != owner.get("source")):
+        raise PermissionError("expired initial unfreeze evidence altered or not expired")
+    return {
+        "predecessor_approval_id": str(pointer["approval_id"]),
+        "predecessor_receipt_sha256": prior_digest,
+        "predecessor_signed_evidence_sha256": str(pointer["signed_evidence_sha256"]),
+        "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": str(scope),
+        "freeze_sha256": freeze_digest,
+        "manifest_sha256": manifest,
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class ExactRelease:
     release_id: str
@@ -208,6 +312,8 @@ class ExactRelease:
     replacement_lineage: tuple[tuple[str, str], ...] | None = None
     # Host-issued offer intent, not execution authority.
     initial_freeze_binding: tuple[tuple[str, str], ...] | None = None
+    initial_unfreeze_renewal_only: bool = False
+    initial_unfreeze_renewal_lineage: tuple[tuple[str, str], ...] | None = None
 
 
 def _host_offered_initial_freeze(
@@ -264,6 +370,8 @@ def read_eligible_release(
     *, allow_existing_owner_approval: bool = False,
     replacement_unfreeze_only: bool = False,
     replacement_approval_id: str | None = None,
+    initial_unfreeze_renewal_only: bool = False,
+    initial_unfreeze_renewal_approval_id: str | None = None,
 ) -> ExactRelease:
     if not isinstance(release_id, str) or not RELEASE_ID.fullmatch(release_id):
         raise ValueError("release ID must be exact")
@@ -293,6 +401,27 @@ def read_eligible_release(
         or owner_approval.get("candidate_sha") != (candidate or {}).get("candidate_sha")
     ):
         raise PermissionError("existing release approval requires a reviewed exact CCC-only card")
+    if initial_unfreeze_renewal_only and (
+        not review_only or policy.schema_version not in {"2.0", "3.0"}
+        or replacement_unfreeze_only
+    ):
+        raise PermissionError("initial unfreeze renewal needs prior signed owner release approval")
+    initial_renewal_lineage = None
+    if initial_unfreeze_renewal_only:
+        existing = doc.get("renewed_initial_unfreeze_authorization")
+        if existing is not None and (
+            initial_unfreeze_renewal_approval_id is None
+            or not isinstance(existing, dict)
+            or existing.get("approval_id") != initial_unfreeze_renewal_approval_id
+        ):
+            raise PermissionError("signed initial unfreeze renewal already recorded")
+        # For crash reconstruction only, temporarily check the immutable
+        # original predecessor without weakening its unexpired/consumed gates.
+        source = dict(doc)
+        source["renewed_initial_unfreeze_authorization"] = None
+        initial_renewal_lineage = tuple(sorted(
+            read_expired_initial_unfreeze_predecessor(state_root, release_id, source).items()
+        ))
     if replacement_unfreeze_only and not review_only:
         raise PermissionError("replacement unfreeze needs an existing signed release approval")
     replacement_lineage = None
@@ -338,14 +467,15 @@ def read_eligible_release(
             state_root, release_id, sha, rollback, digest(manifest),
             (doc.get("manual_scope_review") or {}).get("scope_sha256"),
         )
-        if not review_only and policy.schema_version in {"2.0", "3.0"} else None
+        if (not review_only or initial_unfreeze_renewal_only)
+        and policy.schema_version in {"2.0", "3.0"} else None
     )
     return ExactRelease(release_id, sha, rollback, digest(manifest),
         str(manifest.get("policy_digest") or ""),
         str(manifest.get("desired_state_policy_digest") or ""),
         risk, str(manifest.get("change_class") or ""), purpose.strip(),
         tuple(files), tuple(surfaces), review_only, replacement_lineage,
-        frozen_intent)
+        frozen_intent, initial_unfreeze_renewal_only, initial_renewal_lineage)
 
 
 def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleasePolicy,
@@ -394,18 +524,30 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         "owner_policy_sha256": policy.policy_sha256,
     }
     replacement = evidence.replacement_lineage is not None
+    renewal = evidence.initial_unfreeze_renewal_only
     frozen = evidence.initial_freeze_binding is not None
+    if renewal and (
+        not evidence.review_only or not frozen or replacement
+        or evidence.initial_unfreeze_renewal_lineage is None
+        or policy.schema_version not in {"2.0", "3.0"}
+    ):
+        raise PermissionError("renewal must be one new, signed unfreeze-only decision")
     if frozen:
-        if (replacement or evidence.review_only
+        if (replacement or (evidence.review_only and not renewal)
                 or policy.schema_version not in {"2.0", "3.0"}):
             raise PermissionError("one-click freeze needs a fresh reviewed owner release")
         intent["initial_freeze_binding"] = dict(evidence.initial_freeze_binding)
+    if renewal:
+        intent["initial_unfreeze_renewal_only"] = True
+        intent["initial_unfreeze_renewal_lineage"] = dict(
+            evidence.initial_unfreeze_renewal_lineage or ()
+        )
     if replacement:
         if not evidence.review_only or policy.schema_version not in {"2.0", "3.0"}:
             raise PermissionError("replacement Teams unfreeze needs reviewed owner mode")
         intent["replacement_unfreeze_only"] = True
         intent["replacement_lineage"] = dict(evidence.replacement_lineage)
-    elif evidence.review_only:
+    elif evidence.review_only and not renewal:
         if policy.schema_version not in {"2.0", "3.0"}:
             raise PermissionError("CCC-only Teams material review requires owner-reviewed mode")
         intent["review_only"] = True
@@ -416,6 +558,10 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
     if replacement:
         suffix = ":unfreeze-replacement:" + dict(evidence.replacement_lineage)[
             "predecessor_transaction_receipt_sha256"][:16]
+    elif renewal:
+        suffix = ":initial-unfreeze-renewal:" + dict(
+            evidence.initial_unfreeze_renewal_lineage or ()
+        )["predecessor_receipt_sha256"][:16]
     return ApprovalRequest(
         approval_id=REQUEST_PREFIX + secrets.token_hex(16),
         request_id="mobile-release:" + evidence.release_id + suffix,
@@ -430,6 +576,7 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         authorized_approver_ids=policy.owner_identity_ids,
         presentation=ApprovalPresentation(
             title=("Replacement unfreeze ONLY: " if replacement else
+                   "NEW signed unfreeze ONLY (prior expired): " if renewal else
                    "CCC Material Review: " if evidence.review_only else
                    "ONE approval - frozen release: " if frozen else
                    "Production + CCC: ") + evidence.purpose[:90],
@@ -437,7 +584,12 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
                 "The exact production release was already owner-authorized. "
                 "Approve records ONLY the missing CCC material-change owner review for this SHA. "
                 "Independent CCC, deployment and rollback remain mandatory."
-                if evidence.review_only and not replacement else
+                if evidence.review_only and not replacement and not renewal else
+                "The original signed Owner approval is already accepted, but its unused one-transaction "
+                "unfreeze receipt expired. This NEW signed decision renews ONLY a single frozen "
+                "transaction for exactly the same SHA, rollback, scope and freeze; it cannot grant "
+                "new release privileges, change past evidence or deploy without native gates."
+                if renewal else
                 "This is a NEW one-transaction production unfreeze for an already approved SHA "
                 "whose prior unfreeze was consumed BEFORE mutation. It does not add standing "
                 "authority, modify the earlier approval, or bypass preflight/rollback."
@@ -458,6 +610,9 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
                 ("Affected services", ", ".join(evidence.affected_surfaces)),
                 ("Changed files", shown),
                 ("Rollback", evidence.rollback_sha),
+                *(((("Expired receipt SHA256", dict(
+                    evidence.initial_unfreeze_renewal_lineage or ()
+                )["predecessor_receipt_sha256"]),) if renewal else ())),
                 *(((("Reviewed scope SHA256", dict(evidence.initial_freeze_binding)["scope_sha256"]),
                     ("Frozen marker SHA256", dict(evidence.initial_freeze_binding)["freeze_sha256"]),
                     ("Freeze restoration", "Automatic after one transaction"))
@@ -693,14 +848,17 @@ class MobileReleaseApprovalFlow:
         release_id = request.metadata.get("release_id", "")
         replacement = request.metadata.get("replacement_unfreeze_only") is True
         review = request.metadata.get("review_only") is True
-        if replacement and review:
-            raise PermissionError("replacement unfreeze and CCC-only intents conflict")
+        initial_renewal = request.metadata.get("initial_unfreeze_renewal_only") is True
+        if (replacement and review or initial_renewal and (replacement or review)):
+            raise PermissionError("signed unfreeze and CCC-only intents conflict")
         current = read_eligible_release(
             self.state_root, release_id, policy,
-            allow_existing_owner_approval=(review or replacement),
+            allow_existing_owner_approval=(review or replacement or initial_renewal),
             replacement_unfreeze_only=replacement,
+            initial_unfreeze_renewal_only=initial_renewal,
         )
-        if current.review_only != (review or replacement):
+        if (current.review_only != (review or replacement or initial_renewal)
+                or current.initial_unfreeze_renewal_only != initial_renewal):
             raise PermissionError("mobile owner-only request purpose changed after issuance")
         renewal_nonce = request.metadata.get("renewal_nonce")
         renewed_from = request.metadata.get("renewed_from_approval_id")
@@ -843,6 +1001,9 @@ class MobileReleaseApprovalMaintenance:
                 request.metadata.get("owner_policy_sha256"),
                 request.metadata.get("review_only") is True,
                 request.metadata.get("replacement_unfreeze_only") is True,
+                request.metadata.get("initial_unfreeze_renewal_only") is True,
+                (request.metadata.get("initial_unfreeze_renewal_lineage") or {}).get(
+                    "predecessor_receipt_sha256"),
                 (request.metadata.get("replacement_lineage") or {}).get(
                     "predecessor_transaction_receipt_sha256"),
                 (request.metadata.get("initial_freeze_binding") or {}).get("scope_sha256"),
@@ -942,6 +1103,9 @@ class MobileReleaseApprovalMaintenance:
                 policy.policy_sha256,
                 offer.get("review_only") is True,
                 offer.get("replacement_unfreeze_only") is True,
+                offer.get("initial_unfreeze_renewal_only") is True,
+                (offer.get("initial_unfreeze_renewal_lineage") or {}).get(
+                    "predecessor_receipt_sha256"),
                 (offer.get("replacement_lineage") or {}).get(
                     "predecessor_transaction_receipt_sha256"),
                 (offer.get("initial_freeze_binding") or {}).get("scope_sha256"),
@@ -954,13 +1118,16 @@ class MobileReleaseApprovalMaintenance:
                 continue
             try:
                 replacement = offer.get("replacement_unfreeze_only") is True
-                if replacement and offer.get("review_only") is True:
+                renewal = offer.get("initial_unfreeze_renewal_only") is True
+                if ((replacement or renewal) and offer.get("review_only") is True
+                        or (replacement and renewal)):
                     continue
                 evidence = read_eligible_release(
                     self.state_root, path.stem, policy,
                     allow_existing_owner_approval=(
-                        offer.get("review_only") is True or replacement),
+                        offer.get("review_only") is True or replacement or renewal),
                     replacement_unfreeze_only=replacement,
+                    initial_unfreeze_renewal_only=renewal,
                 )
             except (ValueError, PermissionError, FileNotFoundError, json.JSONDecodeError):
                 continue
@@ -968,7 +1135,10 @@ class MobileReleaseApprovalMaintenance:
                     or evidence.rollback_sha != offer.get("live_rollback_sha")
                     or evidence.manifest_sha256 != offer.get("manifest_sha256")
                     or evidence.review_only != (
-                        offer.get("review_only") is True or replacement)
+                        offer.get("review_only") is True or replacement or renewal)
+                    or (dict(evidence.initial_unfreeze_renewal_lineage)
+                        if evidence.initial_unfreeze_renewal_lineage is not None else None)
+                        != (offer.get("initial_unfreeze_renewal_lineage") if renewal else None)
                     or (dict(evidence.replacement_lineage)
                         if evidence.replacement_lineage is not None else None)
                         != (offer.get("replacement_lineage") if replacement else None)):
