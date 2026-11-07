@@ -113,3 +113,93 @@ def test_rollback_worktree_mismatch_is_recoverable_only_by_native_verified_worke
     )
     assert category == 'recoverable_source'
     assert action == 'native_worker_verify_rollback_interruption_or_escalate'
+
+
+
+def test_supervisor_reports_todo_identity_conflict_without_inventing_worker_authority(tmp_path):
+    write(tmp_path, "state.json", {"items": {}})
+    write(tmp_path, "development-state.json", {"items": {}})
+    write(tmp_path, "todo-intake-state.json", {
+        "active_development_items": 0, "active_support_repairs": 0,
+        "engineering_capacity": 3,
+        "downstream_commitments": {"outstanding_count": 0, "items": []},
+        "identity_conflicts": {
+            "TODO-OPS-013": {
+                "status": "quarantined",
+                "new_work_authorized": False,
+                "issue_numbers": [1459, 1500],
+                "next_gate": "reconcile_exact_issue_scope_and_owner_authority",
+            }
+        },
+    })
+    snapshot = supervisor.build_snapshot(tmp_path)
+    assert snapshot["status"] == "degraded"
+    assert snapshot["reason"] == "external_or_governed_gate"
+    assert snapshot["identity_conflict_count"] == 1
+    assert snapshot["category_counts"]["human_authority"] == 1
+    item = next(row for row in snapshot["items"] if row["id"] == "TODO-OPS-013")
+    assert item["lane"] == "todo_identity"
+    assert item["next_action"] == "reconcile_exact_issue_scope_and_owner_authority"
+    assert supervisor.build_snapshot(tmp_path, snapshot)["unchanged_cycles"] == 1
+
+
+def test_supervisor_fails_closed_on_malformed_todo_quarantine(tmp_path):
+    write(tmp_path, "state.json", {"items": {}})
+    write(tmp_path, "development-state.json", {"items": {}})
+    write(tmp_path, "todo-intake-state.json", {
+        "downstream_commitments": {"outstanding_count": 0, "items": []},
+        "identity_conflicts": {"TODO-OPS-013": {
+            "status": "quarantined", "issue_numbers": [1459, 1500],
+            "new_work_authorized": True,
+        }},
+    })
+    with pytest.raises(ValueError, match="quarantined TODO"):
+        supervisor.build_snapshot(tmp_path)
+
+
+
+def test_exhausted_development_handoff_is_not_retryable_transport(tmp_path):
+    write(tmp_path, "state.json", {"items": {}})
+    write(tmp_path, "development-state.json", {"items": {
+        "DEV-1196": {
+            "phase": "blocked",
+            "reason": "development edit reasoning failed: HTTP transport failed with status 400",
+            "blocker_class": "internal_retry_exhausted",
+            "recovery_support_issue_raised": "SUPPORT-DEV-1196",
+            "recovery_handoff_intake": {"status": "awaiting_governed_repair"},
+        }
+    }})
+    write(tmp_path, "todo-intake-state.json", {
+        "active_support_repairs": 0, "active_development_items": 0,
+        "engineering_capacity": 3,
+        "downstream_commitments": {"outstanding_count": 1, "items": []},
+    })
+    snapshot = supervisor.build_snapshot(tmp_path)
+    assert snapshot["status"] == "degraded"
+    assert snapshot["reason"] == "external_or_governed_gate"
+    assert snapshot["category_counts"] == {"governed_repair_handoff": 1}
+    item = snapshot["items"][0]
+    assert item["next_action"] == "advance_existing_governed_support_repair"
+    assert item["related_support_item"] == "SUPPORT-DEV-1196"
+    assert supervisor.build_snapshot(tmp_path, snapshot)["unchanged_cycles"] == 1
+
+
+def test_exhausted_development_without_handoff_needs_triage_not_unbounded_retries(tmp_path):
+    write(tmp_path, "state.json", {"items": {}})
+    write(tmp_path, "development-state.json", {"items": {
+        "DEV-1446": {
+            "phase": "blocked",
+            "reason": "development reasoning failed: HTTP transport failed",
+            "blocker_class": "internal_retry_exhausted",
+        }
+    }})
+    write(tmp_path, "todo-intake-state.json", {
+        "active_support_repairs": 0, "active_development_items": 0,
+        "engineering_capacity": 3,
+        "downstream_commitments": {"outstanding_count": 1, "items": []},
+    })
+    snapshot = supervisor.build_snapshot(tmp_path)
+    assert snapshot["status"] == "degraded"
+    assert snapshot["reason"] == "external_or_governed_gate"
+    assert snapshot["category_counts"] == {"needs_triage": 1}
+    assert snapshot["items"][0]["next_action"] == "complete_native_exhausted_recovery_handoff"
