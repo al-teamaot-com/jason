@@ -3798,6 +3798,74 @@ def test_vulscan_invalid_exact_kb_selector_recovers_via_governed_endpoint_collec
     assert not any(u.get("status") == "Complete" for u in updates)
     store.close()
 
+
+def test_vulscan_prior_notification_does_not_complete_without_receipt(
+    tmp_path: Path,
+) -> None:
+    """An idempotent re-investigation must not assume a prior send was delivered."""
+    class NoReceiptReads(VulscanBranchReads):
+        receipt_visible = False
+
+        def execute(self, capability, arguments):
+            if capability == "service.notification.history.search":
+                items = (
+                    [{"id": 45, "ticketID": 141183,
+                      "recipientEmailAddress": "chris.benton@e-gai.com"}]
+                    if self.receipt_visible else []
+                )
+                return {"status": "succeeded", "evidence": {"data": {"items": items}}}
+            return super().execute(capability, arguments)
+
+    reads = NoReceiptReads("INSTALLED")
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=reads,
+        vulscan_notification_reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=ExactPromotionStore(
+            approved_scopes=(
+                ("vulscan_missing_patch", "1.0.0"),
+                ("vulscan_missing_patch", "1.1.0"),
+            ),
+        ),
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    pending = store.get(141183)
+    assert pending is not None
+    assert pending.phase == "vulscan_client_notification_verify_complete"
+    assert "notification_baseline_id=0" in pending.last_reason
+
+    worker._apply_vulscan_client_disposition(
+        pending, vulscan_candidate().context, continue_monitoring=False,
+    )
+    retried = store.get(141183)
+    assert retried is not None
+    assert retried.phase == "vulscan_client_notification_verify_complete"
+    send_count = len([
+        call for call in actions.calls
+        if call[1] == "service.ticket.client.notification.create"
+    ])
+    assert send_count == 1  # No resend merely because the ticket was retried.
+
+    reads.receipt_visible = True
+    worker._apply_vulscan_client_disposition(
+        retried, vulscan_candidate().context, continue_monitoring=False,
+    )
+    verified = store.get(141183)
+    assert verified is not None
+    assert verified.phase == "complete"
+    assert "notification copy verified" in verified.last_reason
+    assert len([
+        call for call in actions.calls
+        if call[1] == "service.ticket.client.notification.create"
+    ]) == 1
+    store.close()
+
 def test_vulscan_requires_separate_promotion(tmp_path: Path):
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
