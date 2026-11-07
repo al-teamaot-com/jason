@@ -90,3 +90,13 @@ accept a **fresh signed Teams renewal card** for the original
 release must pass its current gates before any production mutation. Owner
 identity binding recovery and XYZ client notification execution are **separate**
 operations; neither is authorized by this renewal implementation.
+
+## Active workstream coordination
+
+The standalone changes in OPEN PRs #2279 and #2269 are **not** incorporated
+into this production-control fix. PR #2279 overlaps Release Manager and its
+signed Teams consumer with older superseded-approval handling. Its independent
+fail-closed disposition must remain compatible when that PR is later rebased.
+PR #2269 overlaps the mobile release callback with an automated-independent-
+verification wording clarification; this renewal does not add a second human
+reviewer. Each PR must be reconciled and verified independently before merging.
