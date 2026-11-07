@@ -3695,6 +3695,52 @@ def test_vulscan_client_disposition_waits_then_resumes_on_exact_v11_promotion(
     store.close()
 
 
+def test_vulscan_notification_baseline_parser_handles_numeric_receipt_id() -> None:
+    assert OperationalAutonomyMaintenance._notification_baseline_from_reason(
+        "notification_baseline_id=12345"
+    ) == 12345
+    with pytest.raises(OperationalAutonomyError):
+        OperationalAutonomyMaintenance._notification_baseline_from_reason(
+            "notification_baseline_id=not-an-id"
+        )
+
+
+def test_vulscan_notification_read_requires_promotion_and_dedicated_port(
+    tmp_path: Path,
+) -> None:
+    reads = Reads()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    promotions = ExactPromotionStore(
+        approved_scopes=(("vulscan_missing_patch", "1.0.0"),)
+    )
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=reads,
+        actions=Actions(),
+        store=store,
+        promotion_store=promotions,
+        vulscan_notification_reads=reads,
+        max_active_work_items=2,
+        interval_seconds=30,
+    )
+    with pytest.raises(OperationalAutonomyError, match="NOT_PROMOTED"):
+        worker._notification_history_max_id(ticket_id=141183, company_id=597)
+    assert reads.notification_history_reads == 0
+
+    promotions.approved_scopes.add(("vulscan_missing_patch", "1.1.0"))
+    assert worker._notification_history_max_id(ticket_id=141183, company_id=597) == 0
+    assert reads.notification_history_reads == 1
+
+    with pytest.raises(OperationalAutonomyError, match="CLIENT_SCOPE_NOT_APPROVED"):
+        worker._notification_history_max_id(ticket_id=141183, company_id=208)
+    assert reads.notification_history_reads == 1
+
+    worker.vulscan_notification_reads = None
+    with pytest.raises(OperationalAutonomyError, match="NOT_CONFIGURED"):
+        worker._notification_history_max_id(ticket_id=141183, company_id=597)
+    store.close()
+
+
 def test_vulscan_requires_separate_promotion(tmp_path: Path):
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
@@ -6631,50 +6677,4 @@ def test_backupiq_nonterminal_job_without_dispatch_timestamp_avoids_infinite_wai
     assert store.get(work.ticket_id).phase=="escalated"
     assert store.get(work.ticket_id).job_uid=="original-job-1"
     assert not any(x[1]=="automation.component.execute" for x in actions.calls)
-    store.close()
-
-
-def test_vulscan_notification_baseline_parser_handles_numeric_receipt_id() -> None:
-    assert OperationalAutonomyMaintenance._notification_baseline_from_reason(
-        "notification_baseline_id=12345"
-    ) == 12345
-    with pytest.raises(OperationalAutonomyError):
-        OperationalAutonomyMaintenance._notification_baseline_from_reason(
-            "notification_baseline_id=not-an-id"
-        )
-
-
-def test_vulscan_notification_read_requires_promotion_and_dedicated_port(
-    tmp_path: Path,
-) -> None:
-    reads = Reads()
-    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
-    promotions = ExactPromotionStore(
-        approved_scopes=(("vulscan_missing_patch", "1.0.0"),)
-    )
-    worker = OperationalAutonomyMaintenance(
-        queue_source=QueueSource(vulscan_candidate()),
-        reads=reads,
-        actions=Actions(),
-        store=store,
-        promotion_store=promotions,
-        vulscan_notification_reads=reads,
-        max_active_work_items=2,
-        interval_seconds=30,
-    )
-    with pytest.raises(OperationalAutonomyError, match="NOT_PROMOTED"):
-        worker._notification_history_max_id(ticket_id=141183, company_id=597)
-    assert reads.notification_history_reads == 0
-
-    promotions.approved_scopes.add(("vulscan_missing_patch", "1.1.0"))
-    assert worker._notification_history_max_id(ticket_id=141183, company_id=597) == 0
-    assert reads.notification_history_reads == 1
-
-    with pytest.raises(OperationalAutonomyError, match="CLIENT_SCOPE_NOT_APPROVED"):
-        worker._notification_history_max_id(ticket_id=141183, company_id=208)
-    assert reads.notification_history_reads == 1
-
-    worker.vulscan_notification_reads = None
-    with pytest.raises(OperationalAutonomyError, match="NOT_CONFIGURED"):
-        worker._notification_history_max_id(ticket_id=141183, company_id=597)
     store.close()
