@@ -1452,6 +1452,7 @@ class OperationalAutonomyMaintenance:
         ticket_splitter=None,
         client_questions=None,
         contact_reads=None,
+        vulscan_notification_reads=None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
@@ -1485,6 +1486,7 @@ class OperationalAutonomyMaintenance:
         self.ticket_splitter = ticket_splitter
         self.client_questions = client_questions
         self.contact_reads = contact_reads
+        self.vulscan_notification_reads = vulscan_notification_reads
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
         self._ticket_status_cache: dict[int, str] = {}
@@ -5721,10 +5723,34 @@ class OperationalAutonomyMaintenance:
             return []
         return [item for item in items if isinstance(item, Mapping)]
 
-    def _notification_history_max_id(self, *, ticket_id: int, company_id: int) -> int:
-        data = self._read_data(
+    def _vulscan_notification_history_data(
+        self, *, ticket_id: int, company_id: int,
+    ) -> dict[str, Any]:
+        """Read a single ticket's notification receipts under its promoted scope."""
+        if not self._scope_is_promoted(VULSCAN_CLIENT_DISPOSITION_SCOPE):
+            raise OperationalAutonomyError(
+                "VULSCAN_CLIENT_DISPOSITION_SCOPE_NOT_PROMOTED"
+            )
+        if self.vulscan_notification_reads is None:
+            raise OperationalAutonomyError(
+                "VULSCAN_NOTIFICATION_READ_AUTHORITY_NOT_CONFIGURED"
+            )
+        policy = resolve_vulscan_policy(
+            client_id=company_id, ticket_id=ticket_id,
+        )
+        if not policy.client_notification_required:
+            raise OperationalAutonomyError(
+                "VULSCAN_NOTIFICATION_READ_CLIENT_SCOPE_NOT_APPROVED"
+            )
+        result = self.vulscan_notification_reads.execute(
             "service.notification.history.search",
             {"company_id": int(company_id), "ticket_id": int(ticket_id), "page_size": 100},
+        )
+        return self._validated_read_data(result)
+
+    def _notification_history_max_id(self, *, ticket_id: int, company_id: int) -> int:
+        data = self._vulscan_notification_history_data(
+            ticket_id=ticket_id, company_id=company_id,
         )
         ids: list[int] = []
         for item in self._notification_history_items(data):
@@ -5741,9 +5767,8 @@ class OperationalAutonomyMaintenance:
         company_id: int,
         baseline_id: int,
     ) -> bool:
-        data = self._read_data(
-            "service.notification.history.search",
-            {"company_id": int(company_id), "ticket_id": int(ticket_id), "page_size": 100},
+        data = self._vulscan_notification_history_data(
+            ticket_id=ticket_id, company_id=company_id,
         )
         for item in self._notification_history_items(data):
             try:
@@ -5762,7 +5787,7 @@ class OperationalAutonomyMaintenance:
 
     @staticmethod
     def _notification_baseline_from_reason(reason: str) -> int:
-        match = re.search(r"notification_baseline_id=(\\d+)", str(reason or ""))
+        match = re.search(r"notification_baseline_id=(\d+)", str(reason or ""))
         if match is None:
             raise OperationalAutonomyError(
                 "client-notification verification has no durable baseline"
