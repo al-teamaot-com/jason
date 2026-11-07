@@ -83,6 +83,13 @@ def build_autonomy_worker_maintenance(
         orchestrator=orchestrator,
         policy_id="autonomous-worker-read-v1",
     )
+    # This read cannot piggyback on the general worker or client-question policy.
+    # The worker additionally requires exact v1.1.0 Owner promotion at call time.
+    vulscan_notification_reads = GovernedAutonomyReadPort(
+        request_factory=request_factory,
+        orchestrator=orchestrator,
+        policy_id="autonomous-vulscan-notification-read-v1",
+    )
     queue_source = AutotaskQueueSource(
         reads=reads,
         config=AutotaskQueueDiscoveryConfig(
@@ -131,6 +138,7 @@ def build_autonomy_worker_maintenance(
         queue_source=queue_source,
         reads=reads,
         contact_reads=contact_reads,
+        vulscan_notification_reads=vulscan_notification_reads,
         actions=actions,
         store=SQLiteOperationalWorkStore(work_db),
         promotion_store=promotion_store,

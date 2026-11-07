@@ -3636,6 +3636,7 @@ def test_vulscan_client_disposition_waits_then_resumes_on_exact_v11_promotion(
     worker = OperationalAutonomyMaintenance(
         queue_source=QueueSource(vulscan_candidate()),
         reads=reads,
+        vulscan_notification_reads=reads,
         actions=actions,
         store=store,
         promotion_store=promotions,
@@ -3693,6 +3694,177 @@ def test_vulscan_client_disposition_waits_then_resumes_on_exact_v11_promotion(
     )
     store.close()
 
+
+def test_vulscan_notification_baseline_parser_handles_numeric_receipt_id() -> None:
+    assert OperationalAutonomyMaintenance._notification_baseline_from_reason(
+        "notification_baseline_id=12345"
+    ) == 12345
+    with pytest.raises(OperationalAutonomyError):
+        OperationalAutonomyMaintenance._notification_baseline_from_reason(
+            "notification_baseline_id=not-an-id"
+        )
+
+
+def test_vulscan_notification_read_requires_promotion_and_dedicated_port(
+    tmp_path: Path,
+) -> None:
+    reads = Reads()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    promotions = ExactPromotionStore(
+        approved_scopes=(("vulscan_missing_patch", "1.0.0"),)
+    )
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=reads,
+        actions=Actions(),
+        store=store,
+        promotion_store=promotions,
+        vulscan_notification_reads=reads,
+        max_active_work_items=2,
+        interval_seconds=30,
+    )
+    with pytest.raises(OperationalAutonomyError, match="NOT_PROMOTED"):
+        worker._notification_history_max_id(ticket_id=141183, company_id=597)
+    assert reads.notification_history_reads == 0
+
+    promotions.approved_scopes.add(("vulscan_missing_patch", "1.1.0"))
+    assert worker._notification_history_max_id(ticket_id=141183, company_id=597) == 0
+    assert reads.notification_history_reads == 1
+
+    with pytest.raises(OperationalAutonomyError, match="CLIENT_SCOPE_NOT_APPROVED"):
+        worker._notification_history_max_id(ticket_id=141183, company_id=208)
+    assert reads.notification_history_reads == 1
+
+    worker.vulscan_notification_reads = None
+    with pytest.raises(OperationalAutonomyError, match="NOT_CONFIGURED"):
+        worker._notification_history_max_id(ticket_id=141183, company_id=597)
+    store.close()
+
+
+
+
+def test_vulscan_invalid_exact_kb_selector_recovers_via_governed_endpoint_collection(tmp_path: Path):
+    """A changed provider selector must not strand an otherwise eligible ticket."""
+    class SelectorDriftReads(Reads):
+        patch_queries = []
+
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"item": {
+                        "id": 68, "companyID": 597, "isActive": True,
+                        "referenceNumber": "vul-device-1", "referenceTitle": "GAI-DT2850",
+                    }}},
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"record": {
+                        "resource_id": "vul-device-1", "hostname": "GAI-DT2850",
+                        "online": True, "reboot_required": False,
+                    }},
+                }
+            if capability == "endpoint.patch.search":
+                self.patch_queries.append(dict(arguments))
+                if arguments.get("kb"):
+                    return {"status": "failed", "error_code": "INVALID_CAPABILITY_ARGUMENTS"}
+                return {"status": "succeeded", "evidence": {"data": {"items": [
+                    {"title": "2026 security update (KB5124008)", "installStatus": "INSTALLED", "rebootRequired": False},
+                    {"title": "2026 framework update (KB5126052)", "installStatus": "INSTALLED", "rebootRequired": False},
+                    {"title": "unrelated update (KB5999999)", "installStatus": "NOT_APPROVED", "rebootRequired": False},
+                ]}}}
+            return super().execute(capability, arguments)
+
+    reads = SelectorDriftReads()
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()), reads=reads, actions=actions,
+        vulscan_notification_reads=reads,
+        store=store, promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    final = store.get(141183)
+    assert final is not None
+    assert final.phase == "complete"
+    assert [x["kb"] for x in reads.patch_queries if "kb" in x] == ["KB5124008", "KB5126052"]
+    assert all(x["resource_id"] == "vul-device-1" for x in reads.patch_queries)
+    assert len([x for x in reads.patch_queries if "kb" in x]) == 2
+    assert len([x for x in reads.patch_queries if "kb" not in x]) == 2
+    updates = [args["payload"] for _, cap, args in actions.calls if cap == "service.ticket.update"]
+    assert updates[-1]["status"] == "Close Pending"
+    assert not any(u.get("status") == "Complete" for u in updates)
+    store.close()
+
+
+def test_vulscan_prior_notification_does_not_complete_without_receipt(
+    tmp_path: Path,
+) -> None:
+    """An idempotent re-investigation must not assume a prior send was delivered."""
+    class NoReceiptReads(VulscanBranchReads):
+        receipt_visible = False
+
+        def execute(self, capability, arguments):
+            if capability == "service.notification.history.search":
+                items = (
+                    [{"id": 45, "ticketID": 141183,
+                      "recipientEmailAddress": "chris.benton@e-gai.com"}]
+                    if self.receipt_visible else []
+                )
+                return {"status": "succeeded", "evidence": {"data": {"items": items}}}
+            return super().execute(capability, arguments)
+
+    reads = NoReceiptReads("INSTALLED")
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=reads,
+        vulscan_notification_reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=ExactPromotionStore(
+            approved_scopes=(
+                ("vulscan_missing_patch", "1.0.0"),
+                ("vulscan_missing_patch", "1.1.0"),
+            ),
+        ),
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    pending = store.get(141183)
+    assert pending is not None
+    assert pending.phase == "vulscan_client_notification_verify_complete"
+    assert "notification_baseline_id=0" in pending.last_reason
+
+    worker._apply_vulscan_client_disposition(
+        pending, vulscan_candidate().context, continue_monitoring=False,
+    )
+    retried = store.get(141183)
+    assert retried is not None
+    assert retried.phase == "vulscan_client_notification_verify_complete"
+    send_count = len([
+        call for call in actions.calls
+        if call[1] == "service.ticket.client.notification.create"
+    ])
+    assert send_count == 1  # No resend merely because the ticket was retried.
+
+    reads.receipt_visible = True
+    worker._apply_vulscan_client_disposition(
+        retried, vulscan_candidate().context, continue_monitoring=False,
+    )
+    verified = store.get(141183)
+    assert verified is not None
+    assert verified.phase == "complete"
+    assert "notification copy verified" in verified.last_reason
+    assert len([
+        call for call in actions.calls
+        if call[1] == "service.ticket.client.notification.create"
+    ]) == 1
+    store.close()
 
 def test_vulscan_requires_separate_promotion(tmp_path: Path):
     actions = Actions()
@@ -4071,8 +4243,10 @@ def test_vulscan_all_exact_kbs_installed_without_reboot_completes(tmp_path: Path
 
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    reads = InstalledReads()
     worker = OperationalAutonomyMaintenance(
-        queue_source=QueueSource(vulscan_candidate()), reads=InstalledReads(), actions=actions,
+        queue_source=QueueSource(vulscan_candidate()), reads=reads, actions=actions,
+        vulscan_notification_reads=reads,
         store=store, promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
         max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
     )
