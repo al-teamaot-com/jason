@@ -3741,6 +3741,63 @@ def test_vulscan_notification_read_requires_promotion_and_dedicated_port(
     store.close()
 
 
+
+
+def test_vulscan_invalid_exact_kb_selector_recovers_via_governed_endpoint_collection(tmp_path: Path):
+    """A changed provider selector must not strand an otherwise eligible ticket."""
+    class SelectorDriftReads(Reads):
+        patch_queries = []
+
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"item": {
+                        "id": 68, "companyID": 597, "isActive": True,
+                        "referenceNumber": "vul-device-1", "referenceTitle": "GAI-DT2850",
+                    }}},
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"record": {
+                        "resource_id": "vul-device-1", "hostname": "GAI-DT2850",
+                        "online": True, "reboot_required": False,
+                    }},
+                }
+            if capability == "endpoint.patch.search":
+                self.patch_queries.append(dict(arguments))
+                if arguments.get("kb"):
+                    return {"status": "failed", "error_code": "INVALID_CAPABILITY_ARGUMENTS"}
+                return {"status": "succeeded", "evidence": {"data": {"items": [
+                    {"title": "2026 security update (KB5124008)", "installStatus": "INSTALLED", "rebootRequired": False},
+                    {"title": "2026 framework update (KB5126052)", "installStatus": "INSTALLED", "rebootRequired": False},
+                    {"title": "unrelated update (KB5999999)", "installStatus": "NOT_APPROVED", "rebootRequired": False},
+                ]}}}
+            return super().execute(capability, arguments)
+
+    reads = SelectorDriftReads()
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()), reads=reads, actions=actions,
+        vulscan_notification_reads=reads,
+        store=store, promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    final = store.get(141183)
+    assert final is not None
+    assert final.phase == "complete"
+    assert [x["kb"] for x in reads.patch_queries if "kb" in x] == ["KB5124008", "KB5126052"]
+    assert all(x["resource_id"] == "vul-device-1" for x in reads.patch_queries)
+    assert len([x for x in reads.patch_queries if "kb" in x]) == 2
+    assert len([x for x in reads.patch_queries if "kb" not in x]) == 2
+    updates = [args["payload"] for _, cap, args in actions.calls if cap == "service.ticket.update"]
+    assert updates[-1]["status"] == "Close Pending"
+    assert not any(u.get("status") == "Complete" for u in updates)
+    store.close()
+
 def test_vulscan_requires_separate_promotion(tmp_path: Path):
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
