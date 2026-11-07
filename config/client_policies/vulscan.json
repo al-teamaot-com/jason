@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "overrides": [
+    {
+      "scope": "client",
+      "scope_id": "597",
+      "enabled": true,
+      "terminal_status": "Close Pending",
+      "primary_contact_id": 30684489,
+      "client_notification_required": true,
+      "client_notification_template_id": "vulscan-complete-v1",
+      "technical_completion_only": true
+    }
+  ]
+}

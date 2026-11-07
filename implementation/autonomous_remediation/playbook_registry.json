@@ -524,7 +524,7 @@
     {
       "id": "vulscan_missing_patch",
       "name": "Jason - Windows Update VulScan Missing Patch",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "lifecycle": "production",
       "enabled": true,
       "source": "docs/playbooks/Jason-Windows-Update-VulScan-Missing-Patch.md",
@@ -533,7 +533,7 @@
           "Vulnerability Detected by VulScan"
         ]
       },
-      "review_status": "gromelski_client_disposition_acceptance_required",
+      "review_status": "gromelski_completion_only_client_disposition_owner_approved_2026_10_06",
       "autonomy": {
         "activation": "autonomous",
         "required_gates": [
@@ -563,8 +563,11 @@
             "company_id": 597,
             "primary_contact_id": 30684489,
             "terminal_status": "Close Pending",
-            "client_notification_template_id": "vulscan-approved-or-installed-v1",
-            "notification_history_verification_required": true
+            "client_notification_template_id": "vulscan-complete-v1",
+            "notification_history_verification_required": true,
+            "trigger": "technical_completion_only",
+            "external_note_required": true,
+            "continue_patch_monitoring_after_client_notice": false
           }
         ]
       }
