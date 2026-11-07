@@ -274,3 +274,130 @@ def test_approved_workflow_requires_contact_email_notifications(monkeypatch):
             note_title=VULSCAN_CLIENT_NOTE_TITLE,
             note_body=VULSCAN_CLIENT_NOTE_BODY,
         )
+
+
+def test_xyz_notification_acceptance_exact_ticket_and_contact(monkeypatch):
+    from jason_runtime.autotask_client_notification import (
+        validate_xyz_notification_acceptance_scope as validate,
+        XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW as workflow,
+        XYZ_NOTIFICATION_ACCEPTANCE_TEMPLATE as template,
+    )
+    baseline = {
+        "ticket_id": 141431,
+        "ticket_number": "T20260926.0088",
+        "ticket_company_id": 1158,
+        "contact_id": 30683022,
+        "contact_company_id": 1158,
+        "contact_email": "al.bccomputers@gmail.com",
+        "receives_email_notifications": True,
+        "workflow_id": workflow,
+        "template_id": template,
+        "requested_recipient": "AL.BCCOMPUTERS@gmail.com",
+    }
+    assert validate(**baseline) is None
+    for key, wrong in (
+        ("ticket_id", 7701),
+        ("ticket_id", True),
+        ("ticket_number", "T20240821.0001"),
+        ("ticket_company_id", 597),
+        ("contact_id", 30683493),
+        ("contact_company_id", 597),
+        ("contact_email", "not-the-authorized-user@gmail.com"),
+        ("receives_email_notifications", False),
+        ("workflow_id", "vulscan_missing_patch"),
+        ("template_id", "vulscan-approved-or-installed-v1"),
+        ("requested_recipient", "chris.benton@e-gai.com"),
+    ):
+        bad = {**baseline, key: wrong}
+        with pytest.raises(
+            AutotaskClientNotificationScopeError,
+            match="CLIENT_NOTIFICATION_XYZ_ACCEPTANCE_EXACT_SCOPE_REQUIRED",
+        ):
+            validate(**bad)
+
+
+def test_xyz_notification_acceptance_approved_message_is_test_only():
+    from jason_runtime.approved_client_messages import (
+        resolve_approved_client_message,
+    )
+    from jason_runtime.autotask_client_notification import (
+        XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW as workflow,
+        XYZ_NOTIFICATION_ACCEPTANCE_TEMPLATE as template,
+    )
+    approved = resolve_approved_client_message(
+        workflow_id=workflow, template_id=template,
+    )
+    assert approved.title.startswith("JASON TEST ONLY")
+    assert "No action is required" in approved.body
+    assert "vulnerability" in approved.body
+    assert "No service request" in approved.body
+    assert approved.recipient_policy == "ticket_contact"
+    assert approved.require_email_notifications is True
+
+
+def test_xyz_notification_scope_is_enforced_in_connector_before_provider_send(monkeypatch):
+    from types import SimpleNamespace
+    from jason_runtime.autotask_client_notification import (
+        AutotaskClientNotificationConnector as Connector,
+        AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE,
+        XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW,
+        XYZ_NOTIFICATION_ACCEPTANCE_TEMPLATE,
+    )
+    monkeypatch.setenv(
+        AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV,
+        AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE,
+    )
+    calls = []
+    test_ticket = {
+        "companyID": 1158, "contactID": 30683022,
+        "ticketNumber": "T20260926.0088",
+    }
+    test_contact = {
+        "companyID": 1158, "emailAddress": "al.bccomputers@gmail.com",
+        "receivesEmailNotifications": True,
+    }
+
+    class AuthoritativeReads:
+        def _read_item(self, *, request, capability, arguments):
+            calls.append((capability, dict(arguments)))
+            if capability == "autotask.ticket.get":
+                return dict(test_ticket)
+            if capability == "autotask.contact.get":
+                return dict(test_contact)
+            raise AssertionError("unexpected provider capability")
+
+    from jason_runtime.approved_client_messages import resolve_approved_client_message
+    message = resolve_approved_client_message(
+        workflow_id=XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW,
+        template_id=XYZ_NOTIFICATION_ACCEPTANCE_TEMPLATE,
+    )
+    request = SimpleNamespace(arguments={
+        "workflow_id": XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW,
+        "template_id": XYZ_NOTIFICATION_ACCEPTANCE_TEMPLATE,
+        "payload": {
+            "ticketID": 141431,
+            "title": message.title,
+            "description": message.body,
+        },
+        "recipient": "al.bccomputers@gmail.com",
+    })
+    Connector._validate_scope(
+        AuthoritativeReads(), request, 141431,
+    )
+    assert [x[0] for x in calls] == [
+        "autotask.ticket.get", "autotask.contact.get",
+    ]
+    # A different ticket cannot be accepted by merely sending the same
+    # workflow/template pair.
+    with pytest.raises(
+        AutotaskClientNotificationScopeError,
+        match="CLIENT_NOTIFICATION_XYZ_ACCEPTANCE_EXACT_SCOPE_REQUIRED",
+    ):
+        Connector._validate_scope(AuthoritativeReads(), request, 7701)
+    # An Autotask contact override does not confer a new recipient.
+    test_contact["emailAddress"] = "attacker@example.com"
+    with pytest.raises(
+        AutotaskClientNotificationScopeError,
+        match="CLIENT_NOTIFICATION_XYZ_ACCEPTANCE_EXACT_SCOPE_REQUIRED",
+    ):
+        Connector._validate_scope(AuthoritativeReads(), request, 141431)

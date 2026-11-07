@@ -48,6 +48,12 @@ AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV = "JASON_AUTOTASK_CLIENT_NOTIFICATION_P
 AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE = "xyz-test-company-client-notification-v1"
 AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID = 1158
 AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_NAME = "XYZ Test Company"
+XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW = "xyz_client_notification_acceptance"
+XYZ_NOTIFICATION_ACCEPTANCE_TEMPLATE = "xyz-controlled-client-notification-acceptance-v1"
+XYZ_NOTIFICATION_ACCEPTANCE_TICKET_ID = 141431
+XYZ_NOTIFICATION_ACCEPTANCE_TICKET_NUMBER = "T20260926.0088"
+XYZ_NOTIFICATION_ACCEPTANCE_CONTACT_ID = 30683022
+XYZ_NOTIFICATION_ACCEPTANCE_EMAIL = "al.bccomputers@gmail.com"
 
 AUTOTASK_CLIENT_NOTIFICATION_GROMELSKI_VULSCAN_PROFILE = (
     "gromelski-vulscan-client-notification-v1"
@@ -159,6 +165,49 @@ def validate_client_notification_test_scope(
         contact_company_id=contact_company,
         contact_email=email,
     )
+
+
+def validate_xyz_notification_acceptance_scope(
+    *,
+    ticket_id: int,
+    ticket_number: str,
+    ticket_company_id: int,
+    contact_id: int,
+    contact_company_id: int,
+    contact_email: str,
+    receives_email_notifications: bool,
+    workflow_id: str | None,
+    template_id: str | None,
+    requested_recipient: str | None = None,
+) -> None:
+    """Fail closed for the purpose-built XYZ notification acceptance only.
+
+    This explicit exception is deliberately narrower than the generic
+    approved-workflow client notification scope. It cannot be used for another
+    ticket, contact, client, workflow, or recipient.
+    """
+    if (
+        workflow_id != XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW
+        or template_id != XYZ_NOTIFICATION_ACCEPTANCE_TEMPLATE
+        or type(ticket_id) is not int
+        or ticket_id != XYZ_NOTIFICATION_ACCEPTANCE_TICKET_ID
+        or ticket_number != XYZ_NOTIFICATION_ACCEPTANCE_TICKET_NUMBER
+        or type(ticket_company_id) is not int
+        or ticket_company_id != AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID
+        or type(contact_id) is not int
+        or contact_id != XYZ_NOTIFICATION_ACCEPTANCE_CONTACT_ID
+        or type(contact_company_id) is not int
+        or contact_company_id != AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID
+        or str(contact_email).strip().casefold() != XYZ_NOTIFICATION_ACCEPTANCE_EMAIL
+        or receives_email_notifications is not True
+        or (
+            requested_recipient is not None
+            and str(requested_recipient).strip().casefold() != XYZ_NOTIFICATION_ACCEPTANCE_EMAIL
+        )
+    ):
+        raise AutotaskClientNotificationScopeError(
+            "CLIENT_NOTIFICATION_XYZ_ACCEPTANCE_EXACT_SCOPE_REQUIRED"
+        )
 
 
 def validate_gromelski_vulscan_scope(
@@ -409,6 +458,19 @@ class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
             return
 
         if profile == AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE:
+            if request.arguments.get("workflow_id") == XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW:
+                validate_xyz_notification_acceptance_scope(
+                    ticket_id=ticket_id,
+                    ticket_number=ticket.get("ticketNumber"),
+                    ticket_company_id=ticket.get("companyID"),
+                    contact_id=contact_id,
+                    contact_company_id=contact.get("companyID"),
+                    contact_email=contact.get("emailAddress"),
+                    receives_email_notifications=contact.get("receivesEmailNotifications"),
+                    workflow_id=request.arguments.get("workflow_id"),
+                    template_id=request.arguments.get("template_id"),
+                    requested_recipient=request.arguments.get("recipient"),
+                )
             payload = request.arguments.get("payload")
             # The ticket number supplied for footer rendering must be equal
             # to the freshly re-read authoritative Autotask ticket number.
