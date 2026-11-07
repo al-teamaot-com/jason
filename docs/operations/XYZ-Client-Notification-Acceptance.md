@@ -14,8 +14,8 @@ acceptance, not a demonstration of vulnerability remediation.
 - Contact: **al.bccomputers@gmail.com**, active, company 1158,
   `receivesEmailNotifications=true`.
 - On 2026-11-07 the provider notification-history baseline for ticket 141431
-  contained one unrelated historical entry, ID **150**, sent 2026-10-09 to
-  **Lindsey.Collins@teamaot.com**, template **Tech Ticket Nag**. It is not
+  contained one unrelated historical entry, sent 2026-10-09 to
+  **Lindsey.Collins@teamaot.com**, template **Tech Ticket Nag**. Different governed reads reported provider record IDs **150** and **147** for that same timestamp and recipient; two later sequential reads both returned 147. Consequently **do not hardcode a historical ID as durable evidence**. It is not
   proof of a live acceptance send or recipient delivery.
 - All values must be re-read immediately before execution. The historical
   baseline is not a substitute for a fresh provider read.
@@ -63,7 +63,7 @@ workflow, or template. No cross-customer or arbitrary-email exception exists.
 
 Make **one** exact governed `service.ticket.client.notification.create`
 request with `workflow_id`, `template_id` and `payload.ticketID=141431`.
-Record the correlation/approval evidence and the pre-send history maximum ID.
+Record the correlation/approval evidence, a fresh pre-send history snapshot, its highest returned record ID, notification timestamp, ticket, template and recipient. If provider IDs or ordering are inconsistent at the moment of the test, stop and investigate rather than inferring a successful new send.
 This provider operation is non-idempotent. On a timeout, crash, unknown outcome
 or lost acknowledgement, **never blindly resend**.
 
