@@ -95,3 +95,11 @@ def test_more_specific_scope_overrides_client_policy():
         ticket_id=999,
         overrides=overrides,
     ) == site
+
+
+def test_vulscan_notification_baseline_can_be_restored_from_persisted_reason():
+    from jason_runtime.autonomy_worker_runtime import OperationalAutonomyMaintenance
+
+    assert OperationalAutonomyMaintenance._notification_baseline_from_reason(
+        "notification_baseline_id=12345"
+    ) == 12345
