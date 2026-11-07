@@ -6964,3 +6964,138 @@ def test_xyz_isolated_vulscan_notification_acceptance_without_provider_writes(
     assert close_pending[0][2]["payload"]["contactID"] == 30683022
     assert len([x for x in actions.calls if x[1] == "service.ticket.client.notification.create"]) == 1
     store.close()
+
+
+def test_vulscan_notification_dispatch_intent_persists_atomically_across_restart(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "notification-intent.sqlite3"
+    first = SQLiteOperationalWorkStore(path)
+    note = "Client - Approved Communication - vulscan-approved-or-installed-v1"
+    baseline = f"{note} :: notification receipt baseline"
+    assert first.claim_client_notification_send(
+        141183, "vulscan_missing_patch", note, baseline, "sha-expected", 87
+    )
+    assert not first.claim_client_notification_send(
+        141183, "vulscan_missing_patch", note, baseline, "sha-expected", 99
+    )
+    first.close()
+    restarted = SQLiteOperationalWorkStore(path)
+    assert restarted.last_note_fingerprint(
+        141183, "vulscan_missing_patch", note
+    ) == "dispatch-pending:sha-expected"
+    assert restarted.last_note_fingerprint(
+        141183, "vulscan_missing_patch", baseline
+    ) == "87"
+    assert not restarted.claim_client_notification_send(
+        141183, "vulscan_missing_patch", note, baseline, "sha-expected", 100
+    )
+    restarted.close()
+
+
+def test_vulscan_provider_accepted_then_worker_crashed_does_not_resend(
+    tmp_path: Path,
+) -> None:
+    """A crash after non-idempotent provider acceptance must not double-send."""
+    class ReceiptReads(VulscanBranchReads):
+        receipt_visible = False
+
+        def execute(self, capability, arguments):
+            if capability == "service.notification.history.search":
+                items = (
+                    [{"id": 45, "ticketID": 141183,
+                      "recipientEmailAddress": "chris.benton@e-gai.com"}]
+                    if self.receipt_visible else []
+                )
+                return {"status": "succeeded", "evidence": {"data": {"items": items}}}
+            return super().execute(capability, arguments)
+
+    class CrashAfterProviderAcceptance(Actions):
+        def execute(self, scope, capability, arguments):
+            result = super().execute(scope, capability, arguments)
+            if capability == "service.ticket.client.notification.create":
+                # The provider may have accepted the send before caller crashed.
+                raise RuntimeError("simulated process crash after provider acceptance")
+            return result
+
+    path = tmp_path / "worker.sqlite3"
+    ticket = vulscan_candidate()
+    work = OperationalWork(
+        ticket_id=141183, ticket_number="T20260925.0001",
+        title=ticket.context["title"], playbook_id="vulscan_missing_patch",
+        source_queue="Jason", company_id=597, configuration_item_id=68,
+        device_uid="vul-device-1", hostname="GAI-DT2850",
+        phase="vulscan_investigate",
+    )
+    reads = ReceiptReads("INSTALLED")
+    actions = CrashAfterProviderAcceptance()
+    store = SQLiteOperationalWorkStore(path)
+    store.put(work)
+    promotion = ExactPromotionStore(
+        approved_scopes=(
+            ("vulscan_missing_patch", "1.0.0"),
+            ("vulscan_missing_patch", "1.1.0"),
+        ),
+    )
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(ticket), reads=reads,
+        vulscan_notification_reads=reads,
+        actions=actions, store=store, promotion_store=promotion,
+        interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    with pytest.raises(RuntimeError, match="simulated process crash"):
+        worker._apply_vulscan_client_disposition(
+            work, ticket.context, continue_monitoring=False,
+        )
+    note_key = "Client - Approved Communication - vulscan-approved-or-installed-v1"
+    assert str(store.last_note_fingerprint(
+        work.ticket_id, work.playbook_id, note_key,
+    )).startswith("dispatch-pending:")
+    assert store.last_note_fingerprint(
+        work.ticket_id, work.playbook_id,
+        f"{note_key} :: notification receipt baseline",
+    ) == "0"
+    store.close()
+
+    # A new process sees pending durable intent. Even with absent/delayed
+    # history, it does NOT invoke the non-idempotent provider a second time.
+    restarted_store = SQLiteOperationalWorkStore(path)
+    restarted = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(ticket), reads=reads,
+        vulscan_notification_reads=reads,
+        actions=actions, store=restarted_store, promotion_store=promotion,
+        interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    restarted._apply_vulscan_client_disposition(
+        restarted_store.get(141183), ticket.context, continue_monitoring=False,
+    )
+    pending = restarted_store.get(141183)
+    assert pending.phase == "vulscan_client_notification_verify_complete"
+    assert not any(
+        cap == "service.ticket.update"
+        and (args.get("payload") or {}).get("status") == "Close Pending"
+        for _, cap, args in actions.calls
+    )
+    assert len([
+        x for x in actions.calls
+        if x[1] == "service.ticket.client.notification.create"
+    ]) == 1
+
+    reads.receipt_visible = True
+    restarted._verify_vulscan_client_notification(
+        pending, continue_monitoring=False,
+    )
+    assert restarted_store.get(141183).phase == "complete"
+    assert not str(restarted_store.last_note_fingerprint(
+        work.ticket_id, work.playbook_id, note_key,
+    )).startswith("dispatch-pending:")
+    assert len([
+        x for x in actions.calls
+        if x[1] == "service.ticket.client.notification.create"
+    ]) == 1
+    assert len([
+        x for x in actions.calls
+        if x[1] == "service.ticket.update"
+        and x[2].get("payload", {}).get("status") == "Close Pending"
+    ]) == 1
+    restarted_store.close()

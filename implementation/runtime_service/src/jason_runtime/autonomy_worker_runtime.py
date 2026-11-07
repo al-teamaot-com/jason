@@ -1003,6 +1003,37 @@ class SQLiteOperationalWorkStore:
         ).fetchone()
         return None if row is None else str(row["fingerprint"])
 
+    def claim_client_notification_send(
+        self, ticket_id: int, playbook_id: str, note_key: str,
+        baseline_key: str, fingerprint: str, baseline_id: int,
+    ) -> bool:
+        """Atomically record a non-idempotent provider dispatch intent.
+
+        Once this intent exists, even an unknown/crashed provider outcome must
+        never cause a blind resend. Baseline and intent commit together.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection:
+            result = self._connection.execute(
+                "INSERT OR IGNORE INTO autonomy_ticket_note_state("
+                "ticket_id,playbook_id,note_title,fingerprint,documented_at)"
+                "VALUES(?,?,?,?,?)",
+                (int(ticket_id), str(playbook_id), str(note_key),
+                 f"dispatch-pending:{fingerprint}", now),
+            )
+            if result.rowcount != 1:
+                return False
+            self._connection.execute(
+                "INSERT INTO autonomy_ticket_note_state("
+                "ticket_id,playbook_id,note_title,fingerprint,documented_at)"
+                "VALUES(?,?,?,?,?) "
+                "ON CONFLICT(ticket_id,playbook_id,note_title) DO UPDATE SET "
+                "fingerprint=excluded.fingerprint,documented_at=excluded.documented_at",
+                (int(ticket_id), str(playbook_id), str(baseline_key),
+                 str(int(baseline_id)), now),
+            )
+            return True
+
     def remember_note_fingerprint(
         self,
         ticket_id: int,
@@ -5832,6 +5863,28 @@ class OperationalAutonomyMaintenance:
             )
         return int(match.group(1))
 
+    def _acknowledge_vulscan_notification_intent(
+        self, work: OperationalWork, policy: Any,
+    ) -> None:
+        """Mark a pending intent acknowledged only after matching history."""
+        template = resolve_approved_client_message(
+            workflow_id=work.playbook_id,
+            template_id=str(policy.client_notification_template_id or ""),
+        )
+        note_key = f"Client - Approved Communication - {template.template_id}"
+        prior = self.store.last_note_fingerprint(
+            work.ticket_id, work.playbook_id, note_key,
+        )
+        if prior == f"dispatch-pending:{template.fingerprint}":
+            self.store.remember_note_fingerprint(
+                work.ticket_id, work.playbook_id, note_key,
+                template.fingerprint,
+            )
+        elif prior not in (None, template.fingerprint):
+            raise OperationalAutonomyError(
+                "verified notification history conflicts with durable send intent"
+            )
+
     def _verify_vulscan_client_notification(
         self,
         work: OperationalWork,
@@ -5852,6 +5905,7 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "VulScan verified notification has no active client disposition policy"
             )
+        self._acknowledge_vulscan_notification_intent(work, policy)
         self._set_vulscan_terminal_status(
             work, contact_id=int(policy.primary_contact_id),
             status=policy.terminal_status,
@@ -5953,60 +6007,67 @@ class OperationalAutonomyMaintenance:
         note_key = f"Client - Approved Communication - {template.template_id}"
         note_fingerprint = template.fingerprint
         baseline_key = f"{note_key} :: notification receipt baseline"
+        pending_fingerprint = f"dispatch-pending:{note_fingerprint}"
         prior = self.store.last_note_fingerprint(
-            work.ticket_id,
-            work.playbook_id,
-            note_key,
+            work.ticket_id, work.playbook_id, note_key,
         )
-
-        if prior == note_fingerprint:
-            # A prior accepted send is not proof that a client received it.
-            # Reuse the pre-send baseline, not the current max ID, so a delayed
-            # receipt remains eligible for confirmation after worker re-entry.
-            prior_baseline = self.store.last_note_fingerprint(
-                work.ticket_id, work.playbook_id, baseline_key,
+        if prior is not None and prior not in (note_fingerprint, pending_fingerprint):
+            raise OperationalAutonomyError(
+                "client-notification fingerprint changed with a prior send "
+                "or pending dispatch; manual review required before another send"
             )
-            if prior_baseline is not None:
-                if not prior_baseline.isdecimal():
-                    raise OperationalAutonomyError(
-                        "client-notification durable baseline is invalid"
-                    )
-                baseline_id = int(prior_baseline)
-            else:
-                # Compatibility only for a pending verification state created
-                # before the dedicated baseline key existed. Missing evidence
-                # fails closed instead of declaring an unverified delivery.
-                baseline_id = self._notification_baseline_from_reason(
-                    work.last_reason
-                )
-        else:
+
+        if prior is None:
             baseline_id = self._notification_history_max_id(
                 ticket_id=work.ticket_id, company_id=work.company_id,
             )
-        if prior != note_fingerprint:
-            self.actions.execute(
-                scope,
-                "service.ticket.client.notification.create",
-                {
-                    "workflow_id": template.workflow_id,
-                    "template_id": template.template_id,
-                    "payload": {
-                        "ticketID": int(work.ticket_id),
+            # The atomic, durable claim is committed BEFORE provider dispatch.
+            # If the worker dies after Autotask accepted the non-idempotent
+            # request but before the acknowledgement, a successor observes
+            # pending intent and reconciles history without sending again.
+            claimed = self.store.claim_client_notification_send(
+                work.ticket_id, work.playbook_id, note_key,
+                baseline_key, note_fingerprint, baseline_id,
+            )
+            prior = self.store.last_note_fingerprint(
+                work.ticket_id, work.playbook_id, note_key,
+            )
+            if claimed:
+                self.actions.execute(
+                    scope, "service.ticket.client.notification.create",
+                    {
+                        "workflow_id": template.workflow_id,
+                        "template_id": template.template_id,
+                        "payload": {"ticketID": int(work.ticket_id)},
                     },
-                },
-            )
-            # Persist the receipt baseline before the send fingerprint. If a
-            # later run sees a prior send, the matching baseline must exist.
-            self.store.remember_note_fingerprint(
-                work.ticket_id, work.playbook_id, baseline_key, str(baseline_id),
-            )
-            self.store.remember_note_fingerprint(
-                work.ticket_id,
-                work.playbook_id,
-                note_key,
-                note_fingerprint,
-            )
+                )
+                self.store.remember_note_fingerprint(
+                    work.ticket_id, work.playbook_id, note_key,
+                    note_fingerprint,
+                )
+                prior = note_fingerprint
+            elif prior not in (note_fingerprint, pending_fingerprint):
+                raise OperationalAutonomyError(
+                    "client-notification dispatch claim changed concurrently"
+                )
 
+        prior_baseline = self.store.last_note_fingerprint(
+            work.ticket_id, work.playbook_id, baseline_key,
+        )
+        if prior_baseline is not None:
+            if not prior_baseline.isdecimal():
+                raise OperationalAutonomyError(
+                    "client-notification durable baseline is invalid"
+                )
+            baseline_id = int(prior_baseline)
+        elif prior == note_fingerprint:
+            # Compatibility for a historical accepted send before the durable
+            # baseline key was introduced. Missing evidence fails closed.
+            baseline_id = self._notification_baseline_from_reason(work.last_reason)
+        else:
+            raise OperationalAutonomyError(
+                "client-notification pending dispatch has no durable baseline"
+            )
         # Even when an earlier send fingerprint matches, a real, post-baseline
         # Autotask Notification History entry is required for completion.
         if self._gromelski_notification_copy_observed(
@@ -6014,6 +6075,7 @@ class OperationalAutonomyMaintenance:
             company_id=work.company_id,
             baseline_id=baseline_id,
         ):
+            self._acknowledge_vulscan_notification_intent(work, policy)
             self._set_vulscan_terminal_status(
                 work, contact_id=desired_contact, status=policy.terminal_status,
             )
