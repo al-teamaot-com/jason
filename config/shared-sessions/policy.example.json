@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "configuration_version": "2026-10-15-initial",
+  "enabled": false,
+  "transports": {
+    "datto_webremote": false,
+    "ssh": false,
+    "winrm": false,
+    "companion": false
+  },
+  "modes": {
+    "guided": false,
+    "assisted": false,
+    "autonomous": false
+  }
+}
