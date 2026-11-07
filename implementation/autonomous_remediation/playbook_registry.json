@@ -805,6 +805,24 @@
         ],
         "disruptive_branches": []
       }
+    },
+    {
+      "id": "endpoint_security_assessment",
+      "name": "Jason - Endpoint Security Assessment",
+      "version": "0.1.0",
+      "lifecycle": "draft",
+      "enabled": false,
+      "source": "docs/playbooks/Jason-Endpoint-Security-Assessment.md",
+      "trigger": {
+        "provider": "technician_conversation",
+        "intent": "endpoint_security_assessment"
+      },
+      "review_status": "engineering_preproduction_only_no_live_activation",
+      "autonomy": {
+        "activation": "disabled",
+        "allowed_capabilities": [],
+        "policy_id": "playbook-autonomy:endpoint_security_assessment"
+      }
     }
   ]
 }

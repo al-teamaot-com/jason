@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "endpoint_security_assessment",
+    "name": "Jason - Endpoint Security Assessment",
+    "version": "0.1.0",
+    "lifecycle": "draft",
+    "target_type": "endpoint",
+    "owner": "Atlantic Office Technologies",
+    "trigger": {
+      "provider": "technician_conversation",
+      "match": "explicit exact endpoint assessment request"
+    },
+    "reference_document": "docs/playbooks/Jason-Endpoint-Security-Assessment.md"
+  },
+  "state_model": {
+    "entry_step": "identify"
+  },
+  "steps": [
+    {
+      "id": "identify",
+      "type": "diagnostic",
+      "capability": "endpoint.device.search",
+      "arguments": {},
+      "next": "verify_device"
+    },
+    {
+      "id": "verify_device",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {},
+      "next": "locate_component"
+    },
+    {
+      "id": "locate_component",
+      "type": "diagnostic",
+      "capability": "automation.component.search",
+      "arguments": {},
+      "next": "authority_gate"
+    },
+    {
+      "id": "authority_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_approval_bound",
+            "operator": "truthy"
+          },
+          "next": "execute"
+        }
+      ],
+      "default": "await_approval"
+    },
+    {
+      "id": "await_approval",
+      "type": "human_review"
+    },
+    {
+      "id": "execute",
+      "type": "remediation",
+      "capability": "automation.component.execute",
+      "arguments": {},
+      "approval_classification": "non_destructive",
+      "approval_required": true,
+      "verification_step": "read_job",
+      "retry": {
+        "max_attempts": 1
+      }
+    },
+    {
+      "id": "read_job",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {},
+      "next": "read_result"
+    },
+    {
+      "id": "read_result",
+      "type": "diagnostic",
+      "capability": "automation.job.output.read",
+      "arguments": {},
+      "next": "needs_evidence"
+    },
+    {
+      "id": "needs_evidence",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "requires_followup",
+            "operator": "truthy"
+          },
+          "next": "investigate"
+        }
+      ],
+      "default": "verify_assessment"
+    },
+    {
+      "id": "investigate",
+      "type": "diagnostic",
+      "capability": "endpoint.powershell.read",
+      "arguments": {},
+      "next": "verify_assessment"
+    },
+    {
+      "id": "verify_assessment",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "client_report_publishable",
+            "operator": "truthy"
+          },
+          "next": "complete"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    },
+    {
+      "id": "complete",
+      "type": "complete"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Datto RMM exact endpoint identity, managed AV status, terminal component job output and signed executable task/service evidence",
+    "success_condition": "every actionable finding dispositioned and report delivery approved"
+  },
+  "completion": {
+    "terminal_disposition": "report_ready_or_internal_review"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": [],
+    "allowed_branches": [
+      "governed_read_only_investigation",
+      "internal_report_generation"
+    ],
+    "approval_bound_branches": [
+      "component_execute",
+      "client_report_delivery"
+    ],
+    "disruptive_branches": []
+  }
+}

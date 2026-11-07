@@ -1,0 +1,156 @@
+name: Jason Endpoint Security Assessment - preproduction
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/autonomous_remediation/endpoint_security_assessment*.py'
+      - 'implementation/autonomous_remediation/test_endpoint_security_assessment*.py'
+      - 'implementation/autonomous_remediation/playbook_registry.json'
+      - 'implementation/mcp_service/src/jason_mcp/endpoint_security_assessment*.py'
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'implementation/mcp_service/tests/test_endpoint_security_assessment*.py'
+      - 'implementation/mcp_service/pyproject.toml'
+      - 'docs/playbooks/Jason-Endpoint-Security-Assessment.md'
+      - 'docs/playbooks/json/endpoint_security_assessment-0.1.0.json'
+      - '.github/workflows/endpoint-security-assessment.yml'
+  push:
+    paths:
+      - 'implementation/autonomous_remediation/endpoint_security_assessment*.py'
+      - 'implementation/autonomous_remediation/test_endpoint_security_assessment*.py'
+      - 'implementation/autonomous_remediation/playbook_registry.json'
+      - 'implementation/mcp_service/src/jason_mcp/endpoint_security_assessment*.py'
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'implementation/mcp_service/tests/test_endpoint_security_assessment*.py'
+      - 'implementation/mcp_service/pyproject.toml'
+      - 'docs/playbooks/Jason-Endpoint-Security-Assessment.md'
+      - 'docs/playbooks/json/endpoint_security_assessment-0.1.0.json'
+      - '.github/workflows/endpoint-security-assessment.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  governed-acceptance:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/mcp_service/src
+      JASON_ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED: "false"
+    steps:
+      - name: Check out authoritative repo
+        uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated verification dependencies
+        run: python -m pip install "pytest>=8.3,<10" "reportlab>=4.2,<5" "pypdf>=5,<7"
+      - name: Check compile and default-disabled MCP flag
+        run: |
+          python -m compileall -q implementation/autonomous_remediation implementation/mcp_service/src/jason_mcp
+          python - <<'PY'
+          from pathlib import Path
+          server=Path('implementation/mcp_service/src/jason_mcp/server.py').read_text()
+          assert 'JASON_ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED' in server
+          assert '_ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED = os.getenv(' in server
+          assert 'if _ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED:' in server
+          assert 'app = mcp.streamable_http_app(' in server
+          print('MCP_ASSESSMENT_DEFAULT_DISABLED=PASS')
+          PY
+      - name: Validate canonical JSON playbook and disabled registration
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from implementation.autonomous_remediation.playbook_document import validate_playbook_document
+          path=Path('docs/playbooks/json/endpoint_security_assessment-0.1.0.json')
+          item=json.loads(path.read_text())
+          obj=validate_playbook_document(item)
+          registry=json.loads(Path('implementation/autonomous_remediation/playbook_registry.json').read_text())
+          found=[x for x in registry['playbooks'] if x['id']=='endpoint_security_assessment']
+          assert len(found)==1
+          assert found[0]['enabled'] is False
+          assert found[0]['autonomy']['activation']=='disabled'
+          assert item['autonomy']['activation']=='disabled'
+          print('JSON_PLAYBOOK_VALIDATED='+obj.playbook_id)
+          print('JSON_PLAYBOOK_SHA256='+obj.fingerprint)
+          print('PRODUCTION_ACTIVATION=DISABLED')
+          PY
+      - name: Test idempotent source coordinator, governed adapter and PDF policy
+        run: |
+          python -m pytest \
+            implementation/autonomous_remediation/test_endpoint_security_assessment*.py \
+            implementation/mcp_service/tests/test_endpoint_security_assessment*.py -q
+      - name: Test existing Datto EDR AV and JSON playbook baseline
+        run: |
+          python -m pytest \
+            implementation/autonomous_remediation/test_datto_edr_av_security.py \
+            implementation/autonomous_remediation/test_json_playbook_document.py \
+            implementation/autonomous_remediation/test_playbook_catalog.py -q
+
+
+  flagged-mcp-registration:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src:implementation/mcp_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install actual MCP service dependency closure
+        run: |
+          python -m pip install \
+            ./implementation \
+            ./implementation/connectors/openclaw \
+            ./implementation/runtime_service \
+            ./implementation/mcp_service
+      - name: Verify assessment tools register only when explicitly enabled
+        run: |
+          JASON_ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED=true python - <<'PY'
+          from jason_mcp import server
+          assert server._ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED is True
+          for name in (
+              "request_endpoint_security_assessment",
+              "continue_endpoint_security_assessment",
+              "view_endpoint_security_assessment_pdf",
+          ):
+              assert callable(getattr(server, name)), name
+          print("MCP_ASSESSMENT_EXPLICIT_REGISTRATION=PASS")
+          PY
+          JASON_ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED=false python - <<'PY'
+          from jason_mcp import server
+          assert server._ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED is False
+          for name in (
+              "request_endpoint_security_assessment",
+              "continue_endpoint_security_assessment",
+              "view_endpoint_security_assessment_pdf",
+          ):
+              assert not hasattr(server, name), name
+          print("MCP_ASSESSMENT_DEFAULT_DISABLED=PASS")
+          PY
+
+
+  native-windows-powershell-51:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Parse static investigation commands using Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $payload = & python -c 'import json; from implementation.autonomous_remediation.endpoint_security_assessment_investigation import _RECIPES; print(json.dumps([record[1] for record in _RECIPES.values()]))'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot load exact read-only recipe source' }
+          $commands = ConvertFrom-Json -InputObject $payload
+          $count = 0
+          foreach ($script in $commands) {
+              $tokens = $null
+              $errors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseInput(
+                  [string]$script, [ref]$tokens, [ref]$errors)
+              if (@($errors).Count -ne 0) { throw ('PS51_PARSE_FAILED: ' + $errors[0].Message) }
+              $count++
+          }
+          if ($count -ne 3) { throw 'Expected exactly three narrow static investigation recipes' }
+          Write-Output ('WINDOWS_POWERSHELL_51_RECIPES=PASS Count=' + $count)
