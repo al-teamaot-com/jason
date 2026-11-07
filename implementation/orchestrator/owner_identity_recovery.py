@@ -63,6 +63,51 @@ def _identity(
     return value
 
 
+def _require_source_not_delegated_or_execution_eligible(
+    db: sqlite3.Connection, subject: str, *, attached: bool = False,
+) -> None:
+    """Require the JIT source to have no lingering delegated/write authority."""
+    prefix = "authority." if attached else ""
+    rows = db.execute(
+        f"SELECT payload,revoked_at FROM {prefix}delegations "
+        "WHERE delegate_id=? OR delegator_id=?", (subject, subject),
+    ).fetchall()
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise RecoveryDenied("RECOVERY_SOURCE_DELEGATION_CORRUPT") from exc
+        if row["revoked_at"] is None and payload.get("status") != "revoked":
+            raise RecoveryDenied("RECOVERY_SOURCE_HAS_ACTIVE_DELEGATION")
+    # Contexts are historical. Expired/revoked observe contexts are normal;
+    # a current write-capable execution context is not a read-only JIT source.
+    context_rows = db.execute(
+        f"SELECT payload,revoked_at FROM {prefix}execution_contexts "
+        "WHERE payload LIKE ?", (f"%{subject}%",),
+    )
+    now = datetime.now(timezone.utc)
+    for row in context_rows:
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise RecoveryDenied("RECOVERY_SOURCE_CONTEXT_CORRUPT") from exc
+        if payload.get("principal_id") != subject or row["revoked_at"] is not None:
+            continue
+        maximum_mode = payload.get("maximum_mode")
+        if maximum_mode not in ("execute", "administer"):
+            continue
+        try:
+            expiry = datetime.fromisoformat(
+                str(payload["expires_at"]).replace("Z", "+00:00"),
+            )
+            if expiry.tzinfo is None:
+                raise ValueError("naive expiration")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RecoveryDenied("RECOVERY_SOURCE_CONTEXT_EXPIRY_INVALID") from exc
+        if expiry > now:
+            raise RecoveryDenied("RECOVERY_SOURCE_HAS_ACTIVE_WRITE_CONTEXT")
+
+
 def _binding_rows(db: sqlite3.Connection, email: str) -> list[sqlite3.Row]:
     return db.execute(
         "SELECT microsoft_tenant_id,microsoft_object_id,jason_identity_id,"
@@ -104,6 +149,9 @@ def review_recovery(
             raise RecoveryDenied("RECOVERY_ONLY_JIT_READ_ONLY_SOURCE")
         _identity(authority, source)
         _identity(authority, owner)
+        _require_source_not_delegated_or_execution_eligible(
+            authority, source,
+        )
         owner_bindings = bindings.execute(
             "SELECT count(*) FROM microsoft_identity_bindings "
             "WHERE jason_identity_id=? AND status='active'", (owner,)
@@ -227,6 +275,9 @@ def _verify_locked_owner_identity(
         raise RecoveryDenied("RECOVERY_OWNER_POLICY_CHANGED")
     _identity(db, review.source_subject, attached=True)
     _identity(db, review.owner_subject, attached=True)
+    _require_source_not_delegated_or_execution_eligible(
+        db, review.source_subject, attached=True,
+    )
     grants = db.execute(
         "SELECT payload FROM authority.authority_grants WHERE subject_id=?",
         (review.source_subject,),
@@ -261,6 +312,9 @@ def _verify_locked_rollback_identity(
 ) -> None:
     _identity(db, review.from_owner, attached=True)
     _identity(db, review.to_source, attached=True)
+    _require_source_not_delegated_or_execution_eligible(
+        db, review.to_source, attached=True,
+    )
     for row in db.execute(
         "SELECT payload FROM authority.authority_grants WHERE subject_id=?",
         (review.to_source,),
@@ -415,6 +469,9 @@ def review_rollback(
             raise RecoveryDenied("ROLLBACK_ORIGINAL_SOURCE_NOT_JIT_PRINCIPAL")
         _identity(authority, owner)
         _identity(authority, source)
+        _require_source_not_delegated_or_execution_eligible(
+            authority, source,
+        )
         rows = _binding_rows(bindings, email)
         if (len(rows) != 1 or rows[0]["microsoft_tenant_id"].casefold() != tenant
             or rows[0]["microsoft_object_id"].casefold() != oid

@@ -28,7 +28,7 @@ python3 tools/owner_identity_recovery.py --email al_admin@teamaot.com \
   --owner-subject person-al
 ```
 
-The CLI loads the current allowed Owner IDs directly from the running `jason-mcp-pilot` container (without printing other environment values). It verifies exactly one active email binding, exact tenant/object, deterministic JIT read-only source, no client scope or execute/administer source grants, active AOT identities, and no other active binding for the Owner. The JSON `review_sha256` is a binding to that exact reviewed state; the review makes **no changes**.
+The CLI loads the current allowed Owner IDs directly from the running `jason-mcp-pilot` container (without printing other environment values). It verifies exactly one active email binding, exact tenant/object, deterministic JIT read-only source, no client scope, direct execute/administer source grants, active delegations, or unexpired write-capable execution contexts, active AOT identities, and no other active binding for the Owner. The JSON `review_sha256` is a binding to that exact reviewed state; the review makes **no changes**.
 
 ## One-shot apply (human local sudo only)
 
@@ -52,7 +52,7 @@ The command fails closed without root effective UID, individual `SUDO_USER`, a r
 
 Review the returned `owner-recovery-...` event using `--rollback-event-id ORIGINAL_EVENT_ID` with the same read-only email/Entra UUID parameters. Record that rollback review SHA. With separately authorized rollback change, repeat the command with `--apply --rollback-event-id ORIGINAL_EVENT_ID --expected-review-sha256 APPROVED_ROLLBACK_SHA256 --approval-reference APPROVED_ROLLBACK_RECORD --directory-evidence-reference INDEPENDENT_ENTRA_EVIDENCE_RECORD`. The human must enter `ROLLBACK person-al <digest-prefix>`.
 
-Rollback requires the original SQL append-protected event **as the latest identity event** (an older recovery event cannot undo a newer recovery), exact current Owner binding and still-active JIT source, takes a new backup, reverses only that binding, appends a separate immutable audit event, and verifies readback. **Never overwrite the whole binding database from a snapshot**, as unrelated bindings may have changed.
+Rollback requires the original SQL append-protected event **as the latest identity event** (an older recovery event cannot undo a newer recovery), exact current Owner binding and still-active JIT source, takes a new backup, reverses only that binding, appends a separate SQL append-protected audit event linked to the original recovery, and verifies readback. Older recovery events and reused approval references cannot authorize another mutation. **Never overwrite the whole binding database from a snapshot**, as unrelated bindings may have changed.
 
 ## XYZ notification acceptance (only after recovered Owner readback)
 

@@ -32,6 +32,8 @@ def sample(tmp_path):
     with sqlite3.connect(authority) as db:
         db.execute("CREATE TABLE identities(identity_id TEXT PRIMARY KEY,payload TEXT)")
         db.execute("CREATE TABLE authority_grants(grant_id TEXT PRIMARY KEY,subject_id TEXT,payload TEXT)")
+        db.execute("CREATE TABLE delegations(delegation_id TEXT PRIMARY KEY, delegator_id TEXT, delegate_id TEXT, payload TEXT, revoked_at TEXT, revoked_reason TEXT)")
+        db.execute("CREATE TABLE execution_contexts(context_id TEXT PRIMARY KEY, payload TEXT, revoked_at TEXT, revoked_reason TEXT)")
         for subject in (SOURCE, OWNER):
             db.execute("INSERT INTO identities VALUES(?,?)", (
                 subject, json.dumps(dict(identity_id=subject, identity_type="human",
@@ -556,3 +558,73 @@ def test_rollback_denies_if_source_promoted_after_backup(sample, monkeypatch):
         assert db.execute(
             "SELECT count(*) FROM owner_identity_recovery_audit"
         ).fetchone()[0] == 1
+
+
+def test_recovery_denies_active_delegation_of_jit_source(sample):
+    binding, authority, _ = sample
+    with sqlite3.connect(authority) as db:
+        db.execute(
+            "INSERT INTO delegations("
+            "delegation_id,delegator_id,delegate_id,payload,revoked_at"
+            ") VALUES(?,?,?,?,NULL)",
+            ("deleg-1", OWNER, SOURCE, json.dumps({
+                "delegation_id": "deleg-1", "status": "active",
+                "maximum_mode": "execute",
+            })),
+        )
+    with pytest.raises(
+        RecoveryDenied, match="RECOVERY_SOURCE_HAS_ACTIVE_DELEGATION"
+    ):
+        plan(binding, authority)
+
+
+def test_recovery_denies_unexpired_write_execution_context(sample):
+    from datetime import datetime, timedelta, timezone
+
+    binding, authority, _ = sample
+    with sqlite3.connect(authority) as db:
+        db.execute(
+            "INSERT INTO execution_contexts(context_id,payload,revoked_at) "
+            "VALUES(?,?,NULL)",
+            ("ctx-live", json.dumps({
+                "context_id": "ctx-live", "principal_id": SOURCE,
+                "maximum_mode": "execute",
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(hours=2)
+                ).isoformat(),
+            })),
+        )
+    with pytest.raises(
+        RecoveryDenied, match="RECOVERY_SOURCE_HAS_ACTIVE_WRITE_CONTEXT"
+    ):
+        plan(binding, authority)
+
+
+def test_expired_or_revoked_historical_contexts_not_a_false_block(sample):
+    from datetime import datetime, timedelta, timezone
+
+    binding, authority, _ = sample
+    with sqlite3.connect(authority) as db:
+        db.execute(
+            "INSERT INTO execution_contexts(context_id,payload,revoked_at) "
+            "VALUES(?,?,NULL)",
+            ("ctx-expired", json.dumps({
+                "context_id": "ctx-expired", "principal_id": SOURCE,
+                "maximum_mode": "execute",
+                "expires_at": (
+                    datetime.now(timezone.utc) - timedelta(days=1)
+                ).isoformat(),
+            })),
+        )
+        db.execute(
+            "INSERT INTO execution_contexts(context_id,payload,revoked_at) "
+            "VALUES(?,?,?)",
+            ("ctx-revoked", json.dumps({
+                "context_id": "ctx-revoked", "principal_id": SOURCE,
+                "maximum_mode": "execute",
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(hours=2)
+                ).isoformat(),
+            }), "2026-11-07T15:00:00+00:00"),
+        )
+    assert len(plan(binding, authority).digest) == 64
