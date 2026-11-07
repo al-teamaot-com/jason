@@ -64,6 +64,34 @@ class ScheduledSourcePendingTests(unittest.TestCase):
     def test_pending_new_source_is_successful_observation_not_certification(self):
         self.assertTrue(self._evaluate(pending_report()))
 
+    def test_host_only_material_change_is_successful_scheduled_observation(self):
+        report = pending_report(override={"runtime-source-alignment": "PASS"})
+        report["material_changes"] = ["tools/production_drift_guard.py"]
+        # Owner review remains NOT_PROVEN. No CCC pass or release permission is minted.
+        self.assertEqual(report["status"], "NOT_PROVEN")
+        self.assertEqual(
+            {row["check_id"]: row["status"] for row in report["checks"]}[
+                "material-change-owner-review"
+            ],
+            "NOT_PROVEN",
+        )
+        self.assertTrue(self._evaluate(report))
+
+    def test_host_only_exception_refuses_missing_material_change_or_extra_failure(self):
+        base = pending_report(override={"runtime-source-alignment": "PASS"})
+        base["material_changes"] = []
+        self.assertFalse(self._evaluate(base))
+        base["material_changes"] = ["tools/production_drift_guard.py"]
+        self.assertFalse(self._evaluate(
+            pending_report(override={
+                "runtime-source-alignment": "PASS",
+                "mcp-governance-boundary": "NOT_PROVEN",
+            })
+        ))
+        self.assertFalse(self._evaluate(base, force=True))
+        self.assertFalse(self._evaluate(base, trigger="material_change"))
+        self.assertFalse(self._evaluate(base, git_rc=1))
+
     def test_actual_control_failure_still_fails(self):
         self.assertFalse(self._evaluate(pending_report(override={"prometheus-targets": "FAIL"})))
 
