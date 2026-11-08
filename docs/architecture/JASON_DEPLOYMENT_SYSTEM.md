@@ -214,9 +214,11 @@ No material deployment begins without an approved plan.
 
 ### 7.4 Approval
 
-The governance engine verifies that the approver has authority for the target environment and risk level. Approval records include identity, timestamp, plan digest, release digest, scope, conditions, and expiration.
+The governance engine verifies that the approver has authority for the target environment and risk level. Approval records include identity, timestamp, plan digest, release digest, scope, conditions, expiration, and replay/consumption state.
 
 Approval of one plan does not authorize a materially changed plan.
+
+For Production, J-CHANGE-003 is controlling: a current authorized Owner must explicitly approve the exact Production promotion-plan fingerprint, and the approval must be atomically reserved/consumed before material mutation. Candidate readiness, CI success, a merged PR, an eligible autonomous repair classification, or any caller-supplied approval flag does not substitute for the governed Production approval record.
 
 ### 7.5 Apply
 
@@ -291,6 +293,7 @@ Promotion rules:
 - environment configuration is separate, versioned, validated, and access controlled
 - required test evidence follows the release
 - each promotion has an environment-specific plan and approval
+- every Production promotion requires explicit Owner approval bound to the exact Production plan fingerprint under J-CHANGE-003
 - unresolved production blockers prevent promotion
 - Pilot scope must be explicit and reversible
 
@@ -370,7 +373,7 @@ Example request:
 
 Agents may request these capabilities but may not directly invoke one another or bypass central orchestration.
 
-`deployment.repair.apply` is the narrow J-CHANGE-002 exception for pre-authorized repairs. It queues exact immutable repair material through Central Orchestration and a separate rootless host runner; it does not expose Docker or host shell authority to Jason Runtime.
+deployment.repair.apply remains the narrow J-CHANGE-002 repair mechanism, but it does not bypass J-CHANGE-003. Any material Production repair apply requires explicit Owner approval bound to the exact Production promotion plan. The mechanism does not expose Docker or host shell authority to Jason Runtime.
 
 ## 13. Initial Implementation Sequence
 

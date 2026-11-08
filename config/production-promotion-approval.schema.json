@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/production-promotion-approval.schema.json",
+  "title": "Jason Production Promotion Approval",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "approval_id",
+    "promotion_id",
+    "target_environment",
+    "plan_sha256",
+    "decision",
+    "approver_principal_id",
+    "approver_authority",
+    "approved_at",
+    "expires_at",
+    "state",
+    "authority_record_id"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "approval_id": { "type": "string", "minLength": 1 },
+    "promotion_id": { "type": "string", "minLength": 1 },
+    "target_environment": { "const": "production" },
+    "plan_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "decision": { "const": "approved" },
+    "approver_principal_id": { "type": "string", "minLength": 1 },
+    "approver_authority": { "const": "owner" },
+    "approved_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "state": { "enum": ["approved", "reserved"] },
+    "authority_record_id": { "type": "string", "minLength": 1 }
+  }
+}
