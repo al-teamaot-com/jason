@@ -1209,3 +1209,72 @@ def test_expired_approved_renewal_fails_closed_for_wrong_predecessor(tmp_path, c
     with pytest.raises((PermissionError, ValueError)):
         read_expired_initial_unfreeze_predecessor(case.root, RELEASE)
     assert case.freeze.exists()
+
+
+def test_unseen_expired_owner_card_reconciles_without_auto_resend(tmp_path):
+    """A real Teams transport receipt is not proof that the Owner saw a card."""
+    from jason_runtime.mobile_release_approval import (
+        MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority,
+    )
+    policy_path = policy_file(tmp_path)
+    policy = read_mobile_release_policy(policy_path)
+    root, release_path = release_record(tmp_path)
+    # The prior offer has timed out; it must not create another request.
+    make_eligible_main_offer(root, policy_path, published_at=NOW - timedelta(hours=1))
+    repo = SQLiteApprovalRequestRepository(tmp_path / "pending-expired.db")
+    approvals = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
+    evidence = read_eligible_release(root, RELEASE, policy)
+    previous = create_mobile_release_request(
+        evidence, policy, now=NOW - timedelta(minutes=20),
+    )
+    approvals.create(previous, now=NOW - timedelta(minutes=20))
+    repo.put(__import__("dataclasses").replace(
+        previous, metadata={**previous.metadata, "delivery_message_ids": "1794094707793"},
+    ))
+    baseline_release = release_path.read_bytes()
+
+    class NeverSend:
+        def send(self, request):
+            raise AssertionError("expiry reconciliation must not issue approval cards")
+
+    maintenance = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=policy_path, state_root=root,
+        requests=repo, approvals=approvals, sender=NeverSend(),
+        interval_seconds=60, clock=lambda: NOW,
+    )
+    assert maintenance.tick() is False
+    stored = repo.get(previous.approval_id)
+    assert stored.status is ApprovalRequestStatus.EXPIRED
+    assert stored.metadata["delivery_message_ids"] == "1794094707793"
+    assert repo.accepted_decision(previous.approval_id) is None
+    assert release_path.read_bytes() == baseline_release
+    assert len(repo.list_all()) == 1
+    maintenance._next_due = NOW
+    assert maintenance.tick() is False
+    assert len(repo.list_all()) == 1
+    repo.close()
+
+
+def test_unexpired_owner_card_does_not_get_terminal_state(tmp_path):
+    from jason_runtime.mobile_release_approval import (
+        MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority,
+    )
+    policy_path = policy_file(tmp_path)
+    policy = read_mobile_release_policy(policy_path)
+    root, _ = release_record(tmp_path)
+    repo = SQLiteApprovalRequestRepository(tmp_path / "pending-unexpired.db")
+    approvals = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
+    evidence = read_eligible_release(root, RELEASE, policy)
+    pending = create_mobile_release_request(evidence, policy, now=NOW)
+    approvals.create(pending, now=NOW)
+    class NeverSend:
+        def send(self, request):
+            raise AssertionError("no offer may be sent")
+    maintenance = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=policy_path, state_root=root,
+        requests=repo, approvals=approvals, sender=NeverSend(),
+        interval_seconds=60, clock=lambda: NOW,
+    )
+    assert maintenance.tick() is False
+    assert repo.get(pending.approval_id).status is ApprovalRequestStatus.PENDING
+    repo.close()

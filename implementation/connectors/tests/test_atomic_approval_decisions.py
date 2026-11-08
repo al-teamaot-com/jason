@@ -99,3 +99,84 @@ def test_repository_without_atomic_decision_primitive_fails_closed():
             raise AssertionError('non-atomic write must not occur')
     with pytest.raises(TypeError, match='atomic'):
         ApprovalRequestService(UnsafeRepository(), Authority()).accept_response(response(), now=NOW)
+
+
+@pytest.mark.parametrize("durable", [False, True])
+def test_overdue_pending_request_expires_without_signed_decision(tmp_path, durable):
+    repo = (SQLiteApprovalRequestRepository(tmp_path / "expired.db")
+            if durable else InMemoryApprovalRequestRepository())
+    item = request()
+    service = ApprovalRequestService(repo, Authority())
+    service.create(item, now=NOW)
+    assert service.expire_if_due(item.approval_id, now=NOW + timedelta(minutes=9)) is False
+    assert repo.get(item.approval_id).status is ApprovalRequestStatus.PENDING
+    assert service.expire_if_due(item.approval_id, now=NOW + timedelta(minutes=10)) is True
+    assert repo.get(item.approval_id).status is ApprovalRequestStatus.EXPIRED
+    assert repo.accepted_decision(item.approval_id) is None
+    assert service.expire_if_due(item.approval_id, now=NOW + timedelta(minutes=20)) is False
+    with pytest.raises(ValueError, match="no longer pending"):
+        service.accept_response(response(), now=NOW + timedelta(minutes=20))
+    if durable:
+        repo.close()
+
+
+@pytest.mark.parametrize("durable", [False, True])
+def test_expiry_reconciliation_cannot_replace_a_signed_owner_decision(tmp_path, durable):
+    repo = (SQLiteApprovalRequestRepository(tmp_path / "approved.db")
+            if durable else InMemoryApprovalRequestRepository())
+    item = request()
+    service = ApprovalRequestService(repo, Authority())
+    service.create(item, now=NOW)
+    assert service.accept_response(response(), now=NOW).status == "approved"
+    assert service.expire_if_due(item.approval_id, now=NOW + timedelta(days=1)) is False
+    assert repo.get(item.approval_id).status is ApprovalRequestStatus.APPROVED
+    assert repo.accepted_decision(item.approval_id).status == "approved"
+    if durable:
+        repo.close()
+
+
+def test_expiry_reconciliation_rejects_stale_expected_and_missing_atomic_repository(tmp_path):
+    repo = SQLiteApprovalRequestRepository(tmp_path / "raced.db")
+    item = request()
+    repo.put(item)
+    service = ApprovalRequestService(repo, Authority())
+    old_get = repo.get
+    repo.get = lambda approval_id: item
+    # Simulate a concurrent signed decision after the first read, before CAS.
+    repo.put(replace(item, status=ApprovalRequestStatus.DENIED))
+    with pytest.raises(ValueError, match="no longer pending"):
+        service.expire_if_due(item.approval_id, now=NOW + timedelta(days=1))
+    repo.get = old_get
+    assert repo.get(item.approval_id).status is ApprovalRequestStatus.DENIED
+    repo.close()
+
+    class UnsafeRepository:
+        def get(self, approval_id):
+            return item
+        def put(self, value):
+            raise AssertionError("non-atomic put is forbidden")
+    with pytest.raises(TypeError, match="atomic"):
+        ApprovalRequestService(UnsafeRepository(), Authority()).expire_if_due(
+            item.approval_id, now=NOW + timedelta(days=1),
+        )
+
+
+def test_sqlite_expiry_denies_inconsistent_pending_row_with_existing_receipt(tmp_path):
+    from dataclasses import asdict
+    import json
+    repo = SQLiteApprovalRequestRepository(tmp_path / "receipt.db")
+    item = request()
+    repo.put(item)
+    signed = asdict(response())
+    signed["decision"] = signed["decision"].value
+    signed["decided_at"] = signed["decided_at"].isoformat()
+    repo._connection.execute(
+        "INSERT INTO approval_decision_receipts VALUES (?, ?)",
+        (item.approval_id, json.dumps(signed)),
+    )
+    with pytest.raises(ValueError, match="signed decision evidence"):
+        ApprovalRequestService(repo, Authority()).expire_if_due(
+            item.approval_id, now=NOW + timedelta(days=1),
+        )
+    assert repo.get(item.approval_id).status is ApprovalRequestStatus.PENDING
+    repo.close()

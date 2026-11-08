@@ -304,6 +304,11 @@ class SQLiteApprovalRequestRepository:
                 raise ValueError("approval request is no longer pending or changed")
             if not self._valid_status_transition(current.status, status):
                 raise ValueError("invalid approval request status transition")
+            if response is None and self._connection.execute(
+                "SELECT 1 FROM approval_decision_receipts WHERE approval_id=?",
+                (expected.approval_id,),
+            ).fetchone():
+                raise ValueError("cannot expire a request with signed decision evidence")
             updated = replace(current, status=status)
             self._connection.execute(
                 "UPDATE approval_requests SET payload=? WHERE approval_id=?",
@@ -468,6 +473,25 @@ class ApprovalRequestService:
             raise ValueError("approval_id already exists")
         self.repository.put(request)
         return request
+
+    def expire_if_due(self, approval_id: str, *, now: datetime | None = None) -> bool:
+        """Atomically close an elapsed, still-pending request without approving it.
+
+        An expired request is not an approval and never receives a decision
+        receipt.  The repository compare-and-set prevents overwriting a valid
+        concurrent Owner decision or a changed immutable request.
+        """
+        current = self._now(now)
+        request = self.repository.get(approval_id)
+        if request is None:
+            raise ValueError("approval request not found")
+        request.validate()
+        if request.status is not ApprovalRequestStatus.PENDING:
+            return False
+        if current < request.expires_at:
+            return False
+        self._transition(request, ApprovalRequestStatus.EXPIRED)
+        return True
 
     def accept_response(self, response: ApprovalResponse, *, now: datetime | None = None) -> AcceptedApproval:
         response.validate()

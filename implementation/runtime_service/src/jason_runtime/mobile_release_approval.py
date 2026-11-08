@@ -990,6 +990,50 @@ class MobileReleaseApprovalMaintenance:
         policy = read_mobile_release_policy(self.policy_path)
         if policy.schema_version != self.required_policy_version:
             raise PermissionError("Teams release policy changed without the reviewed runtime activation")
+        # The callback used to be the only place that persisted EXPIRED.
+        # A card nobody sees consequently stays PENDING indefinitely and
+        # blocks the native, human-authenticated renewal command.  Reconcile
+        # bounded release-only expired requests via the same atomic approval
+        # lifecycle; no callback, new offer, grant or permission is fabricated.
+        overdue = sorted(
+            (
+                request for request in self.requests.list_all()
+                if request.capability == CAPABILITY
+                and request.organization_id == policy.organization_id
+                and request.requested_by == "svc-jason-release-manager"
+                and request.status is ApprovalRequestStatus.PENDING
+                and now >= request.expires_at
+            ),
+            key=lambda request: (request.expires_at, request.approval_id),
+        )
+        renewal_dir = self.state_root / "mobile-release-renewals"
+        expired_count = 0
+        for request in overdue:
+            if expired_count >= 20:
+                break
+            release_id = request.metadata.get("release_id", "")
+            # A valid local Owner renewal can only be created after a
+            # terminal EXPIRED readback.  If a renewal marker already exists
+            # while the predecessor is still PENDING, do not activate that
+            # inconsistent prestate by automatically expiring it.
+            if (
+                not isinstance(release_id, str)
+                or re.fullmatch(r"release-[0-9a-f]{16}", release_id) is None
+                or (renewal_dir.is_dir() and any(
+                    renewal_dir.glob(release_id + "-renew-*.json")
+                ))
+            ):
+                _LOG.warning(
+                    "release Teams expiry needs manual reconciliation: %s",
+                    request.approval_id,
+                )
+                continue
+            if self.approvals.expire_if_due(request.approval_id, now=now):
+                expired_count += 1
+                _LOG.info(
+                    "release Teams approval expired without owner decision: %s",
+                    request.approval_id,
+                )
         paths = tuple(sorted((self.state_root / "mobile-release-offers").glob("release-*.json"),
                              key=lambda p: p.stat().st_mtime, reverse=True))[:20]
         existing_subjects = {
