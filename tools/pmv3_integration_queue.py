@@ -731,6 +731,18 @@ def reconcile_completed_release_only(
         return state
     if not isinstance(lock, dict) or lock.get("active") is not True:
         raise ValueError("completed-release repair refuses ambiguous release lock")
+    # Independent protected-main movement is a constitutional source hold:
+    # a completed-release status refresh must NEVER clear that separate proof.
+    if (
+        state.get("status") != "release_locked"
+        or lock.get("reason") not in {
+            "release_recovery_candidate_merged",
+            "release_train_complete_awaiting_production",
+        }
+        or lock.get("train_id") is not None
+        or state.get("main_sha") != lock.get("candidate_sha")
+    ):
+        raise ValueError("completed-release repair refuses a source-integrity or unrecognized lock")
 
     current = current_status(api=api, spool=spool, release_state=release_state)
     candidate = str(lock.get("candidate_sha") or "")

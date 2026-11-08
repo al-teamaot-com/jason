@@ -482,6 +482,8 @@ def test_completed_release_only_safe_repair_keeps_approved_queue_and_pause(tmp_p
     "main_ahead","lkg_behind","lock_mismatch","pause_absent",
     "pause_disabled","train_active","release_not_closed","acceptance_failed",
     "release_wrong_sha","record_absent","state_symlink","pause_symlink",
+    "source_integrity_hold","stored_main_mismatch","unknown_lock_reason",
+    "unexpected_lock_train",
 ])
 def test_completed_release_only_refuses_mismatch_and_preserves_everything(tmp_path,alter):
     kwargs={}
@@ -507,6 +509,18 @@ def test_completed_release_only_refuses_mismatch_and_preserves_everything(tmp_pa
     pause=spool/"pmv3-engineering-owner-pause.json"
     if alter=="pause_disabled":
         pause.write_text(json.dumps({"status":"healthy"}))
+    if alter in {"source_integrity_hold","stored_main_mismatch",
+                 "unknown_lock_reason","unexpected_lock_train"}:
+        stored=json.loads(ledger.read_text())
+        if alter=="source_integrity_hold":
+            stored["release_lock"]["reason"]="unattributed_protected_main_movement"
+        elif alter=="stored_main_mismatch":
+            stored["main_sha"]="e"*40
+        elif alter=="unknown_lock_reason":
+            stored["release_lock"]["reason"]="unexpected_owner_override"
+        elif alter=="unexpected_lock_train":
+            stored["release_lock"]["train_id"]="train-unexpected"
+        ledger.write_text(json.dumps(stored))
     if alter=="release_wrong_sha":
         value=json.loads(record.read_text())
         value["release_candidate"]["candidate_sha"]="f"*40
