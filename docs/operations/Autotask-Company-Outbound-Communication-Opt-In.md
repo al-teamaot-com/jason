@@ -28,6 +28,16 @@ These numeric picklists are grounded in live governed Autotask
 - `docs/operations/Approved-Workflow-Client-Communication.md` defines
   the existing recipient, source, approval, and receipt controls.
 
+## Scope: not question-only
+The existing 120-question list is only the client-clarification subset.
+This Company UDF gate applies **equally** to approved client-facing ticket-note
+status updates, work-start/progress/completion notices, scheduling,
+resolution confirmations, authorized low-risk instructions, approval requests,
+and restricted security or business communications. Each category keeps its
+own content, approval and evidence policy. See
+`docs/operations/AOT-External-Client-Message-Classes.md`.
+No new message is implicitly approved by the Company opt-in.
+
 ## Global communication decision
 1. Identify exact Autotask ticket, its company, ticket contact, and approved
    workflow/template, using governed source reads.

@@ -156,8 +156,12 @@ class AutotaskCompanyUdfAdminConnector(AutotaskMutationConnector):
 
     def _query(self, prepared: PreparedRequest, entity: str, field: str, value: Any) -> list[Mapping[str, Any]]:
         url = f"{self._api_root(prepared)}/V1.0/{entity}/query"
+        # Exact-name existence checks need at most two records.  A choice
+        # duplicate check must inspect the entire bounded set for that UDF,
+        # otherwise a 2-item page could silently miss a duplicate choice.
+        limit = 500 if entity == "UserDefinedFieldListItems" else 2
         search = json.dumps(
-            {"MaxRecords": 2, "filter": [{"op": "eq", "field": field, "value": value}]},
+            {"MaxRecords": limit, "filter": [{"op": "eq", "field": field, "value": value}]},
             separators=(",", ":"), sort_keys=True,
         )
         result = self._transport.request(
@@ -167,6 +171,12 @@ class AutotaskCompanyUdfAdminConnector(AutotaskMutationConnector):
         )
         if not isinstance(result, Mapping) or not isinstance(result.get("items"), list):
             raise AutotaskCompanyUdfAdminError("AUTOTASK_COMPANY_UDF_PREFLIGHT_QUERY_INVALID")
+        details = result.get("pageDetails")
+        if (len(result["items"]) >= limit
+                or isinstance(details, Mapping) and details.get("nextPageUrl")):
+            raise AutotaskCompanyUdfAdminError(
+                "AUTOTASK_COMPANY_UDF_PREFLIGHT_QUERY_INCOMPLETE"
+            )
         return result["items"]
 
     def _get(self, prepared: PreparedRequest, entity: str, durable_id: int) -> Mapping[str, Any]:

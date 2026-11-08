@@ -254,3 +254,35 @@ def test_preflight_existing_field_blocks_duplicate_without_mutation(monkeypatch)
     with pytest.raises(AutotaskCompanyUdfAdminError, match="ALREADY_EXISTS"):
         connector.prepare_governed_execution(req)
     assert calls == ["GET"]
+
+def test_company_udf_choice_preflight_never_trusts_incomplete_page():
+    class Transport:
+        def request(self, **kwargs):
+            assert kwargs["method"] == "GET"
+            import json
+            search = json.loads(kwargs["params"]["search"])
+            assert search["MaxRecords"] == 500
+            return {"items": [{"udfFieldId": 111, "valueForDisplay": "False"}],
+                    "pageDetails": {"nextPageUrl": "https://psa.example/next"}}
+
+    class Secrets:
+        def resolve(self, *_):
+            raise AssertionError("secrets must not be needed for direct query test")
+
+    class Audit:
+        def record(self, *args, **kwargs):
+            pass
+
+    connector = AutotaskCompanyUdfAdminConnector(
+        secrets=Secrets(), transport=Transport(), audit=Audit(), bindings=None,
+    )
+    prepared = PreparedRequest(
+        method="POST",
+        url="https://psa.example/V1.0/UserDefinedFieldListItems",
+        headers={},
+        audit_operation="/V1.0/UserDefinedFieldListItems",
+    )
+    with pytest.raises(AutotaskCompanyUdfAdminError, match="QUERY_INCOMPLETE"):
+        connector._query(
+            prepared, "UserDefinedFieldListItems", "udfFieldId", 111,
+        )
