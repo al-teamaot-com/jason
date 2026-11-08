@@ -187,3 +187,16 @@ Retirement requires an equal or stronger mechanism that preserves exact-source r
 
 - 2026-09-28: Added J-CHANGE-002 autonomous repair release exception for previously approved behavior restorations.
 - 2026-09-28: Initial active standard created to prevent concurrent Project Jason workstreams from stepping on one another during merge and production promotion.
+
+
+## Regression-derived post-update acceptance
+
+When an update causes previously working production functionality to fail, the repair is not complete until the defect leaves behind a repeatable acceptance case that would detect the same failure class after a future update. The acceptance case must exercise the real governed boundary that failed, not only an isolated unit below or above it.
+
+For controlled provider mutations, use an approved test target whenever practical. Autotask ticket lifecycle regressions use **XYZ Test Company** and must prove the applicable sequence end to end: create or select the controlled test ticket, governed read, bounded/reversible update, internal-note create, independent note/readback verification, and terminal cleanup or restoration. Autotask Tickets and TicketNotes do not expose delete in the approved pilot, so the acceptance standard must not invent delete semantics.
+
+A regression acceptance case must be added to the relevant automated test or release-smoke layer before closure. Cross-layer contract failures require a cross-layer test that proves the producer and consumer agree on the same payload, visibility, identity, and verification contract. The same rule applies to other previously impacted capabilities: their repair must add a safe post-update acceptance case using a controlled target, or a non-mutating production proof when live mutation is not appropriate.
+
+### First registered regression case — Autotask internal notes
+
+The MCP internal-note producer must generate a payload accepted by `AutotaskInternalNoteConnector._expected_payload`. Production acceptance must then create one internal note on an XYZ Test Company acceptance ticket and independently read it back, proving `noteType=3`, `publish=2`, exact text/title, and requester attribution. This case exists specifically to prevent a future split-version condition where the MCP request builder and runtime connector enforce different visibility values.
