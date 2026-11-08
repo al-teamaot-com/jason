@@ -77,7 +77,13 @@ def test_native_deploy_and_compose_align_on_exact_source_activation():
     repo = Path(__file__).resolve().parents[2]
     for service in ("jason-runtime", "jason-mcp"):
         script = (repo / "infrastructure" / service / "production-deploy.sh").read_text()
-        assert "declared_aot_client_notification_tech_profile" in script
+        assert "aot-client-notification-technician-profile.json" in script
+        assert "PY_NOTIFICATION_TECH" in script
+        assert "unreviewed notification technician policy" in script
+        notification_block = script.split(
+            "SOURCE_CLIENT_NOTIFICATION_TECH_PROFILE=", 1
+        )[1].split("PY_NOTIFICATION_TECH", 1)[0]
+        assert "release_manager_host_runner" not in notification_block
         assert (
             '--set-env "JASON_AOT_CLIENT_NOTIFICATION_TECH_PROFILE=$CLIENT_NOTIFICATION_TECH_PROFILE"'
             in script
