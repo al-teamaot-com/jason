@@ -2,7 +2,7 @@
 
 ## Status
 
-**DEPLOYABLE SOURCE — PRODUCTION WRITES REMAIN DISABLED UNTIL SEPARATE ACTIVATION/ACCEPTANCE**
+**PRODUCTION ACTIVE — FULL GOVERNED DNSFILTER WRITE SURFACE ENABLED 2026-09-24**
 
 This document defines the deployable DNSFilter governed read/write implementation after the accepted read-only production integration. Deploying this source does not authorize or enable any DNSFilter mutation.
 
@@ -202,7 +202,7 @@ Until separately approved:
 - the mutation invoker is not constructed or registered while the mutation profile/gate are absent;
 - `policy_create_acceptance_v1` activates and registers only `dns.protection.policy.create` for the first controlled acceptance;
 - `policy_delete_acceptance_v1` activates and registers only `dns.protection.policy.delete` for the separately governed deletion of acceptance policy `1506474`;
-- `governed_v1` activates the full 25-capability mutation surface and is reserved for a later separately approved stage;
+- `governed_v1` activates the full 25-capability mutation surface; it was production-activated on 2026-09-24 after the bounded create/delete acceptance tests;
 - every active mutation profile also requires `JASON_DNSFILTER_MCP_MUTATION_ENABLED=true`;
 - `JASON_DNSFILTER_MCP_MUTATION_ENABLED=false` or unset is a healthy kill switch that keeps the mutation foundation dormant even if a profile string remains configured;
 - `gate=true` without a valid profile fails closed;
@@ -221,6 +221,40 @@ Until separately approved:
 8. rollback/compensation test where supported;
 9. separate review for user-disruptive families;
 10. source may be merged/deployed dormant after review; only after the controlled acceptance should production write gates, authority grants, and active write registration be considered.
+
+## Production activation — 2026-09-24
+
+The full governed DNSFilter mutation surface is now active in production.
+
+Production source revision:
+
+`75d5886af18c5b72d321148861381930c6d61bf2`
+
+Active production settings:
+
+- `JASON_DNSFILTER_MCP_MUTATION_PROFILE=governed_v1`;
+- `JASON_DNSFILTER_MCP_MUTATION_ENABLED=true`;
+- all 25 DNSFilter mutation capabilities are registered `ACTIVE`;
+- the dedicated `dnsfilter_mcp_mutation` provider is available through the Central Orchestrator;
+- direct provider access remains disabled;
+- every mutation remains approval-gated;
+- all 25 owner execute grants for `person-al` are active with `approval_required=true`;
+- caller-supplied DNSFilter organization/MSP scope and caller-supplied `confirm` remain rejected;
+- maximum provider mutation attempts remain `1`;
+- provider-native readback remains required;
+- ambiguous provider outcomes are not automatically retried.
+
+Deployment verification passed for both `jason-runtime` and `jason-mcp-pilot`, including health checks and the MCP governance post-check. Live MCP capability discovery confirmed the write surface, including `dns.protection.policy.create`, as active and approval-required.
+
+### Fresh-session governance verification
+
+A post-activation policy-create verification request from a fresh session was denied before provider invocation with `client_context_required`. Provider attempts remained `0`, and no DNSFilter change occurred. This is accepted fail-closed behavior: activating the mutation surface does not bypass client-context isolation.
+
+The earlier bounded production acceptance remains the end-to-end provider proof for policy lifecycle mutation: one governed policy was created with exactly one provider mutation attempt and provider-native readback, then separately deleted with exactly one provider mutation attempt and exact-target absence verification. No production client, site, network, or endpoint assignment was changed by those acceptance tests.
+
+### Current operating state
+
+DNSFilter write capability is therefore considered **production-active and governance-enforced**. A write is executable only when the authenticated caller has the required exact authority, client context, explicit approval, and stable bound execution plan. Any missing authority or context must fail closed before provider invocation.
 
 ## Controlled policy-create acceptance profile
 
