@@ -58,6 +58,17 @@ AOT_ROUTINE_AUTOTASK_WRITE_CAPABILITIES = frozenset(
 AOT_STAFF_INTERNAL_NOTE_POLICY = "routine-write:aot-staff-internal-note-v1"
 AOT_STAFF_INTERNAL_NOTE_CAPABILITY = "service.ticket.note.create"
 
+# Independent, explicitly opt-in organization grant for APPROVED, source-controlled
+# client notification templates. It is not a broad ticket-write grant. The
+# connector independently re-reads the exact ticket/contact and refuses any
+# recipient, workflow, template or company drift before provider mutation.
+AOT_APPROVED_CLIENT_NOTIFICATION_POLICY = (
+    "routine-write:aot-technician-approved-client-notification-v1"
+)
+AOT_APPROVED_CLIENT_NOTIFICATION_CAPABILITY = "service.ticket.client.notification.create"
+AOT_APPROVED_CLIENT_NOTIFICATION_PROVIDER = "autotask_client_notification"
+AOT_APPROVED_CLIENT_NOTIFICATION_PROFILE = "approved-workflow-client-notification-v1"
+
 # A remote PowerShell script is an endpoint execution operation, not a passive
 # provider information read, even when AST validation says it is read-only.
 # It retains its separate bounded technician execution authorization.
@@ -75,6 +86,7 @@ class GovernedProviderReadAuthorityMatcher:
     identities: ActiveIdentityReader | None = None
     routine_write_enabled: bool = False
     internal_note_write_enabled: bool = False
+    approved_client_notification_write_enabled: bool = False
     # In a separately activated V4 approval policy, the privileged signer is
     # never an ordinary technician under the broad organization ticket-write
     # grant. The signed admin is still free to use specifically approved and
@@ -94,6 +106,10 @@ class GovernedProviderReadAuthorityMatcher:
         if expression == AOT_STAFF_INTERNAL_NOTE_POLICY:
             return self._matches_routine_autotask_write(
                 grant=grant, request=request, note_only=True,
+            )
+        if expression == AOT_APPROVED_CLIENT_NOTIFICATION_POLICY:
+            return self._matches_routine_autotask_write(
+                grant=grant, request=request, approved_notification_only=True,
             )
 
         if not expression.startswith(PROVIDER_READ_POLICY_PREFIX):
@@ -149,6 +165,7 @@ class GovernedProviderReadAuthorityMatcher:
     def _matches_routine_autotask_write(
         self, *, grant: AuthorityGrant, request: AuthorityRequest,
         note_only: bool = False,
+        approved_notification_only: bool = False,
     ) -> bool:
         """Standing AOT ticket writes, retaining exact JKD-001 approval checks.
 
@@ -157,14 +174,36 @@ class GovernedProviderReadAuthorityMatcher:
         an exact, short-lived, auditable approval and binds the provider plan.
         No autonomous/service principal inherits this standing write grant.
         """
+        if note_only and approved_notification_only:
+            return False
+        if approved_notification_only:
+            policy_enabled = self.approved_client_notification_write_enabled
+            requested_capability_allowed = (
+                request.capability == AOT_APPROVED_CLIENT_NOTIFICATION_CAPABILITY
+            )
+            provider_id = AOT_APPROVED_CLIENT_NOTIFICATION_PROVIDER
+        elif note_only:
+            policy_enabled = self.internal_note_write_enabled
+            requested_capability_allowed = (
+                request.capability == AOT_STAFF_INTERNAL_NOTE_CAPABILITY
+            )
+            provider_id = AOT_ROUTINE_AUTOTASK_WRITE_PROVIDERS.get(
+                request.capability
+            )
+        else:
+            policy_enabled = self.routine_write_enabled
+            requested_capability_allowed = (
+                request.capability in AOT_ROUTINE_AUTOTASK_WRITE_CAPABILITIES
+            )
+            provider_id = AOT_ROUTINE_AUTOTASK_WRITE_PROVIDERS.get(request.capability)
+
         if (
-            not (self.internal_note_write_enabled if note_only else self.routine_write_enabled)
+            not policy_enabled
             or request.organization_id != "aot"
             or request.client_id is not None
             or request.principal_id in self.privileged_admin_principal_ids
             or request.requested_mode is not PermissionMode.EXECUTE
-            or (request.capability != AOT_STAFF_INTERNAL_NOTE_CAPABILITY if note_only
-                else request.capability not in AOT_ROUTINE_AUTOTASK_WRITE_CAPABILITIES)
+            or not requested_capability_allowed
             or grant.subject_id != "organization:aot"
             or grant.organization_id != "aot"
             or grant.client_id is not None
@@ -197,6 +236,19 @@ class GovernedProviderReadAuthorityMatcher:
             ) != "true"
         ):
             return False
+        # A client-visible notification requires additional *registry-owned*
+        # evidence beyond the ordinary technician note. This must be the
+        # active approved-workflow profile, with immutable source-bound text
+        # and the recipient derived from an authoritative Autotask contact.
+        if approved_notification_only and (
+            capability.metadata.get("profile") !=
+            AOT_APPROVED_CLIENT_NOTIFICATION_PROFILE
+            or capability.metadata.get("workflow_template_binding") !=
+            "source_controlled_exact_pair"
+            or capability.metadata.get("recipient_source") !=
+            "authoritative_autotask_contact"
+        ):
+            return False
         return any(
             request.capability in provider.capabilities
             and provider.provider_type is ProviderType.EXTERNAL_CONNECTOR
@@ -204,8 +256,6 @@ class GovernedProviderReadAuthorityMatcher:
             and provider.approval_status in (
                 ProviderApproval.APPROVED, ProviderApproval.PILOT
             )
-            and provider.provider_id == AOT_ROUTINE_AUTOTASK_WRITE_PROVIDERS[
-                request.capability
-            ]
+            and provider.provider_id == provider_id
             for provider in self.providers.list_all()
         )

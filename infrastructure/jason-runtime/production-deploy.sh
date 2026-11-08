@@ -116,6 +116,30 @@ else
   fi
 fi
 
+
+# Shared source-controlled activation for qualified, authenticated AOT human
+# technicians using approved client-notification templates only. This is a new
+# organization grant requiring its own release review; never enable by an SSH
+# environment override or carry it through an older-image rollback.
+SOURCE_CLIENT_NOTIFICATION_TECH_PROFILE="$(python3 - "$REPO_ROOT" <<'PY_NOTIFICATION_TECH'
+from pathlib import Path
+import sys
+repo = Path(sys.argv[1])
+sys.path.insert(0, str(repo / "tools"))
+from release_manager_host_runner import declared_aot_client_notification_tech_profile
+print(declared_aot_client_notification_tech_profile(repo))
+PY_NOTIFICATION_TECH
+)" || exit 2
+if [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
+  CLIENT_NOTIFICATION_TECH_PROFILE=""
+else
+  CLIENT_NOTIFICATION_TECH_PROFILE="$SOURCE_CLIENT_NOTIFICATION_TECH_PROFILE"
+  if [ "${JASON_AOT_CLIENT_NOTIFICATION_TECH_PROFILE:-}" != "$CLIENT_NOTIFICATION_TECH_PROFILE" ]; then
+    echo "DENIED: client-notification technician authority differs from immutable source" >&2
+    exit 2
+  fi
+fi
+
 # Source-bound universal/open-world query activation. The candidate source is
 # authoritative; there is no host-only enable override. Rollback always disables
 # the capability because the prior production revision did not carry this profile.
@@ -302,6 +326,7 @@ exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime 
   --set-env "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH=$QBO_MOUNT_BASE/secret_id" \
   --set-env "JASON_QUICKBOOKS_OAUTH_DB=$QBO_DB" \
   --set-env "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE=$STAFF_NOTE_PROFILE" \
+  --set-env "JASON_AOT_CLIENT_NOTIFICATION_TECH_PROFILE=$CLIENT_NOTIFICATION_TECH_PROFILE" \
   --set-env "JASON_UNIVERSAL_QUERY_ENABLED=$UNIVERSAL_QUERY_ENABLED" \
   --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \

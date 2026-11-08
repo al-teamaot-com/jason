@@ -187,6 +187,10 @@ from .aot_routine_write_authority import (
     configured_aot_routine_autotask_write,
     ensure_aot_routine_autotask_write_authority,
 )
+from .aot_client_notification_authority import (
+    configured_aot_client_notification_technician_write,
+    ensure_aot_client_notification_technician_authority,
+)
 from .aot_staff_internal_note_authority import (
     configured_aot_staff_internal_note_write,
     ensure_aot_staff_internal_note_authority,
@@ -1579,6 +1583,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     identity_repository = SQLiteIdentityRepository(authority_store)
     routine_autotask_write_enabled = configured_aot_routine_autotask_write()
     staff_internal_note_enabled = configured_aot_staff_internal_note_write()
+    approved_client_notification_tech_enabled = (
+        configured_aot_client_notification_technician_write()
+    )
     privileged_admin_principals = frozenset()
     if settings.release_mobile_approval_mode == "admin_approver_separated":
         from uuid import UUID
@@ -1608,6 +1615,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             identities=identity_repository,
             routine_write_enabled=routine_autotask_write_enabled,
             internal_note_write_enabled=staff_internal_note_enabled,
+            approved_client_notification_write_enabled=approved_client_notification_tech_enabled,
             privileged_admin_principal_ids=privileged_admin_principals,
         ),
     )
@@ -1620,6 +1628,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     )
     ensure_aot_staff_internal_note_authority(
         identity_authority, enabled=staff_internal_note_enabled,
+    )
+    ensure_aot_client_notification_technician_authority(
+        identity_authority, enabled=approved_client_notification_tech_enabled,
     )
     ensure_teams_message_send_authority(
         identity_authority, enabled=configured_teams_message_send(),
