@@ -42,3 +42,15 @@ In V4 the privileged admin principal does NOT automatically inherit the organiza
 ## Scope boundary
 
 This change activates account-role separation only after a separately approved release; it is NOT production authorization. Approval for privileged actions beyond the existing release/CCC and exact-grant admin surfaces continues to be controlled by the other registered approval policies, which need separate review before asserting all operations use the new admin. The original ticket-notification acceptance remains incomplete until a real authorized single-send and independent readback.
+
+## Reviewed parallel source overlap (protected integration gate)
+
+This change was created from protected main c43e88e072c0b35c5b342d5e712fe34565b3e0cd. Parallel open PR work overlaps the exact paths below and must be independently reconciled in the approved PMv3 integration window. It is NOT included or implicitly authorized by this candidate:
+
+- #2355: both native runtime and MCP deployment scripts (staff-note rollback authority).
+- #2343, #2333, #2305, #2304: MCP server dispatch for procurement, endpoint assessment and Datto diagnostics/job output.
+- #2336, #2282, #2177: runtime composition for financial statements, KFS/SharePoint.
+- #2279: host Release Manager (superseded signed Teams card lifecycle).
+- #2269: Teams mobile-release approval lifecycle and CCC communications.
+
+The release gate must inventory current main, inspect any changed overlap against the merged candidate, regenerate full scope and candidate SHA after integration, and rerun protected tests. Do not silently merge, rebase, discard, or deploy any of these parallel PRs to make the identity feature pass. Existing Owner freeze and release lock remain authoritative.
