@@ -58,11 +58,15 @@ existing client-notification connector. It is *inactive* until the exact
 set in a **separately authorized governed release** after the field exists.
 An unknown profile fails closed.
 
-Creating the UDF definition itself requires a newly exposed governed
-Autotask definition-create action; the API integration credential already has
-native `userAccessForCreate=All` but Jason's current registry does not
-expose that specific mutation. Source construction and tests are not evidence
-of field creation or operational send authority. Existing Company records have
+The UDF definition/create and list-choice/create operations have now been
+implemented **as dormant, source-only governed capabilities**:
+`service.company.udf.definition.create` and
+`service.company.udf.choice.create`. They use the existing native
+requester-impersonated Autotask write credential and exact execution plans;
+neither is active or exposed in live Jason MCP. The API integration credential
+already has native `userAccessForCreate=All` for the relevant entity metadata.
+Source construction and tests are not evidence of field creation or operational
+send authority. Existing Company records have
 `userAccessForUpdate=None` for the observed API identity, so enabling individual
 clients is a separate provider-permission prerequisite.
 

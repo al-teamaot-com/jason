@@ -271,6 +271,11 @@ from .autotask_procurement import (
     register_autotask_procurement_invoker,
     register_autotask_procurement_runtime_foundation,
 )
+from .autotask_company_udf_admin import (
+    register_autotask_company_udf_admin_foundation,
+    build_autotask_company_udf_admin_invoker,
+    register_autotask_company_udf_admin_invoker,
+)
 from .autotask_ticket_attachment import (
     build_autotask_ticket_attachment_invoker,
     register_autotask_ticket_attachment_invoker,
@@ -1536,6 +1541,11 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         providers=providers,
         now=now,
     )
+    register_autotask_company_udf_admin_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     register_autotask_ticket_attachment_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1884,6 +1894,14 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         audit=ConnectorEventAudit(orchestration_events),
         bindings=source_authorization_bindings,
     )
+    company_udf_admin_invoker = build_autotask_company_udf_admin_invoker(
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.autotask_write_openbao_role_id_path,
+        secret_id_path=settings.autotask_write_openbao_secret_id_path,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+        bindings=source_authorization_bindings,
+    )
     ticket_attachment_invoker = build_autotask_ticket_attachment_invoker(
         openbao_url=settings.openbao_url,
         role_id_path=settings.autotask_write_openbao_role_id_path,
@@ -2157,6 +2175,10 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     register_autotask_procurement_invoker(
         invokers=invokers,
         invoker=procurement_invoker,
+    )
+    register_autotask_company_udf_admin_invoker(
+        invokers=invokers,
+        invoker=company_udf_admin_invoker,
     )
     register_autotask_ticket_attachment_invoker(
         invokers=invokers,

@@ -122,6 +122,19 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_template="/V1.0/NotificationHistory/query",
         query_argument="search",
     ),
+    # Separate governed Autotask schema-administration mutations. These
+    # static vendor endpoints are not reachable through the generic entity
+    # read/query or a caller-supplied arbitrary URL.
+    "autotask.udf.definition.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/UserDefinedFieldDefinitions",
+        json_argument="payload",
+    ),
+    "autotask.udf.list.item.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/UserDefinedFieldListItems",
+        json_argument="payload",
+    ),
     "autotask.ticket.create": OperationDefinition(
         method="POST",
         path_template="/V1.0/Tickets",
