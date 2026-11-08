@@ -257,6 +257,27 @@ class TeamsGatewayPlaybookApprovalSender:
         return ExistingTeamsGatewayTransport(
             gateway_url=self.gateway_url, token_file=self.token_file)
 
+    def preflight_release_delivery(self, request: ApprovalRequest) -> None:
+        """Check the exact V4 admin can use Teams before minting a card.
+
+        This creates neither an approval request nor a Teams conversation.
+        It does not delegate admin authority to the regular requester.
+        """
+        if (request.capability != "release.production.approve"
+                or not request.approval_id.startswith("relapproval-")):
+            raise PermissionError("licensed-admin readiness is release-only")
+        requested = tuple(request.authorized_approver_ids)
+        if (not requested or len(set(requested)) != len(requested)
+                or any(identity not in self.owner_identity_ids for identity in requested)
+                or any(identity not in self.owner_identity_entra_bindings for identity in requested)):
+            raise PermissionError("release admin approver identity not versioned and bound")
+        transport = self._existing_transport()
+        for identity in requested:
+            binding = self._binding_for_identity(identity)
+            if binding is None or getattr(binding, "status", None) != "active":
+                raise PermissionError("release admin Entra identity binding unavailable")
+            transport.preflight_release_approver(binding=binding)
+
     def send(self, request: ApprovalRequest) -> tuple[str, ...]:
         card = render_approval_card(request)
         adaptive = self._adaptive_card(card)

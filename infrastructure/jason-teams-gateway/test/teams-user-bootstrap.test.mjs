@@ -170,3 +170,98 @@ test("missing target identity is classified before install", async () => {
     (error) => error instanceof TeamsBootstrapError && error.code === "identity_not_found",
   );
 });
+
+test("release approver readiness rejects unlicensed admin before Teams install or send", async () => {
+  const { assertTeamsApprovalRecipientReady } = await import("../teams-user-bootstrap.mjs");
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push([String(url), options.method ?? "GET"]);
+    if (String(url).includes("/oauth2/v2.0/token")) return tokenResponse();
+    if (String(url).includes("/users/") && String(url).includes("assignedPlans")) {
+      return response(200, {
+        id: userId, accountEnabled: true, userType: "Member", assignedPlans: [],
+      });
+    }
+    throw new Error("license readiness must not send or install");
+  };
+  await assert.rejects(
+    assertTeamsApprovalRecipientReady({
+      aadObjectId: userId, tenantId, clientId,
+      clientSecret: "opaque-test-secret", fetchImpl,
+    }),
+    (error) => error instanceof TeamsBootstrapError
+      && error.code === "approver_teams_license_unavailable",
+  );
+  assert.equal(calls.some(([url]) => url.includes("/installedApps")), false);
+});
+
+test("release approver requires an enabled Teams plan, not any Microsoft 365 license", async () => {
+  const { assertTeamsApprovalRecipientReady } = await import("../teams-user-bootstrap.mjs");
+  const scenarios = [
+    [{ service: "Exchange", capabilityStatus: "Enabled" }],
+    [{ service: "TeamspaceAPI", capabilityStatus: "Disabled" }],
+    [{ service: "TeamspaceAPI", capabilityStatus: "Suspended" }],
+    null,
+  ];
+  for (const plans of scenarios) {
+    const fetchImpl = async (url) => {
+      if (String(url).includes("/oauth2/v2.0/token")) return tokenResponse();
+      if (String(url).includes("assignedPlans")) {
+        const item = { id: userId, accountEnabled: true, userType: "Member" };
+        if (plans !== null) item.assignedPlans = plans;
+        return response(200, item);
+      }
+      throw new Error("unexpected request");
+    };
+    await assert.rejects(
+      assertTeamsApprovalRecipientReady({
+        aadObjectId: userId, tenantId, clientId,
+        clientSecret: "opaque", fetchImpl,
+      }),
+      (error) => error instanceof TeamsBootstrapError
+        && error.code === (plans === null
+          ? "approver_readiness_unverifiable"
+          : "approver_teams_license_unavailable"),
+    );
+  }
+});
+
+test("licensed release approver passes read-only readiness without Teams send or install", async () => {
+  const { assertTeamsApprovalRecipientReady } = await import("../teams-user-bootstrap.mjs");
+  const calls = [];
+  const fetchImpl = async (url, opts = {}) => {
+    calls.push([String(url), opts.method ?? "GET"]);
+    if (String(url).includes("/oauth2/v2.0/token")) return tokenResponse();
+    if (String(url).includes("assignedPlans")) {
+      return response(200, { id: userId, accountEnabled: true, userType: "Member",
+        assignedPlans: [{ service: "TeamspaceAPI", capabilityStatus: "Enabled" }],
+      });
+    }
+    throw new Error("unexpected provider operation");
+  };
+  const proof = await assertTeamsApprovalRecipientReady({
+    aadObjectId: userId, tenantId, clientId,
+    clientSecret: "opaque", fetchImpl,
+  });
+  assert.equal(proof.ready, true);
+  assert.equal(proof.check, "teams_assigned_plan");
+  assert.equal(calls.some(([url, method]) => method !== "GET"
+    && !url.includes("/oauth2/v2.0/token")), false);
+});
+
+test("license-read Graph 403 is a fail-closed unknown, never a delivery receipt", async () => {
+  const { assertTeamsApprovalRecipientReady } = await import("../teams-user-bootstrap.mjs");
+  const fetchImpl = async (url) => {
+    if (String(url).includes("/oauth2/v2.0/token")) return tokenResponse();
+    if (String(url).includes("assignedPlans")) return response(403, {});
+    throw new Error("unexpected request");
+  };
+  await assert.rejects(
+    assertTeamsApprovalRecipientReady({
+      aadObjectId: userId, tenantId, clientId,
+      clientSecret: "opaque", fetchImpl,
+    }),
+    (error) => error instanceof TeamsBootstrapError
+      && error.code === "approver_readiness_unverifiable",
+  );
+});
