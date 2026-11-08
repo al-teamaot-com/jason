@@ -44,7 +44,7 @@ A client message may be sent only when all of the following are true:
 5. The ticket and contact belong to the same Autotask company.
 6. The contact has a valid email address.
 7. When required by the template, the contact is enabled for email notifications.
-8. When the separately approved Company-UDF opt-in profile is active, `enable_jason_outbound_comm` must be explicitly True on the exact ticket company; missing/null/False or ambiguous denies sending.
+8. When the separately approved Company-UDF opt-in profile is active, `enable_jason_outbound_comm` must be explicitly True on the exact ticket company. The sole temporary exception is XYZ Company `1158` while the field is **absent**, with independently activated sandbox profile, real XYZ ticket, approved template, and only the verified Gmail recipient. Explicit False/null/invalid/ambiguous field values deny sending. No other company exception exists.
 9. The message class, evidence and data-release policy must authorize the exact content; restricted or sensitive classes continue to require their independent human decision.
 
 ## Remediation
@@ -96,17 +96,24 @@ A client-communication step is complete only after the governed write and requir
 
 ## Acceptance Test
 
-**Controlled destination:** XYZ Test Company `1158`, Autotask ticket
-`T20260926.0088` / ID `141431`, contact `30683022`,
-`al.bccomputers@gmail.com` (contact email notifications enabled).
-The Owner approved that test client/recipient on 2026-11-08. Test delivery
-must use the same standard `approved-workflow-client-notification-v1`
-process and existing `xyz_client_notification_acceptance` /
-`xyz-controlled-client-notification-acceptance-v1` exact template,
-**not** a second direct-email sender or legacy test-mode override.
-Only after governed Company opt-in, release authority and recipient
-verification may a real test note be created and delivery verified;
-no production send is implied by this source-only acceptance definition.
+**Owner-approved reusable test sandbox:** XYZ Test Company `1158`
+and **only** the verified test inbox `al.bccomputers@gmail.com`
+via a verified active ticket contact with email notifications enabled.
+`T20260926.0088` / ID `141431`, contact `30683022` is an initial
+known-good fixture, *not* the only authorized test ticket. Any real
+XYZ-owned ticket may be used with any appropriate source-approved
+workflow/template, including the existing acceptance template. The shared
+`approved-workflow-client-notification-v1` process performs the same
+exact ticket, contact, template, governed authority and receipt gates;
+there is no separate XYZ sender and no direct off-ticket email.
+
+For pre-UDF acceptance the optional `JASON_XYZ_TEST_CONSENT_PROFILE`
+setting `xyz-test-company-ticket-sandbox-v1` can be activated only with
+the regular Company UDF gate profile. It permits the **absence** of the
+UDF for XYZ only, not explicit False, and never skips the other gates.
+No release, test note or email is implied by defining this source-only
+test configuration. No second human code reviewer is mandated; automated
+review, all protected tests, and Owner exact-release authority remain.
 
 An approved workflow/template pair succeeds with authoritative ticket-contact routing and evidence tied to the exact ticket. Onboarding and documentation intents must reuse the same pipeline; missing/wrong-company ticket or no authorized ticket-creation path must fail closed. The same template with a different workflow ID, modified body, cross-company contact, arbitrary recipient, or disabled required email notifications must be rejected before provider mutation.
 

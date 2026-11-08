@@ -276,7 +276,7 @@ def test_approved_workflow_requires_contact_email_notifications(monkeypatch):
         )
 
 
-def test_xyz_notification_acceptance_exact_ticket_and_contact(monkeypatch):
+def test_xyz_notification_acceptance_any_valid_xyz_ticket_and_verified_gmail(monkeypatch):
     from jason_runtime.autotask_client_notification import (
         validate_xyz_notification_acceptance_scope as validate,
         XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW as workflow,
@@ -295,25 +295,34 @@ def test_xyz_notification_acceptance_exact_ticket_and_contact(monkeypatch):
         "requested_recipient": "AL.BCCOMPUTERS@gmail.com",
     }
     assert validate(**baseline) is None
+    assert validate(**{**baseline, "ticket_id": 7701,
+                       "ticket_number": "T20240821.0001"}) is None
     for key, wrong in (
-        ("ticket_id", 7701),
         ("ticket_id", True),
-        ("ticket_number", "T20240821.0001"),
+        ("ticket_id", 0),
+        ("ticket_number", ""),
         ("ticket_company_id", 597),
-        ("contact_id", 30683493),
+        ("contact_id", 0),
         ("contact_company_id", 597),
         ("contact_email", "not-the-authorized-user@gmail.com"),
         ("receives_email_notifications", False),
-        ("workflow_id", "vulscan_missing_patch"),
-        ("template_id", "vulscan-approved-or-installed-v1"),
         ("requested_recipient", "chris.benton@e-gai.com"),
     ):
         bad = {**baseline, key: wrong}
         with pytest.raises(
             AutotaskClientNotificationScopeError,
-            match="CLIENT_NOTIFICATION_XYZ_ACCEPTANCE_EXACT_SCOPE_REQUIRED",
+            match="CLIENT_NOTIFICATION_XYZ_TEST_SANDBOX_SCOPE_REQUIRED",
         ):
             validate(**bad)
+    for key, wrong in (
+        ("workflow_id", "vulscan_missing_patch"),
+        ("template_id", "vulscan-approved-or-installed-v1"),
+    ):
+        with pytest.raises(
+            AutotaskClientNotificationScopeError,
+            match="CLIENT_NOTIFICATION_XYZ_ACCEPTANCE_EXACT_SCOPE_REQUIRED",
+        ):
+            validate(**{**baseline, key: wrong})
 
 
 def test_xyz_notification_acceptance_approved_message_is_test_only():
@@ -349,7 +358,7 @@ def test_xyz_notification_scope_is_enforced_in_connector_before_provider_send(mo
     )
     calls = []
     test_ticket = {
-        "companyID": 1158, "contactID": 30683022,
+        "id": 141431, "companyID": 1158, "contactID": 30683022,
         "ticketNumber": "T20260926.0088",
     }
     test_contact = {
@@ -387,18 +396,18 @@ def test_xyz_notification_scope_is_enforced_in_connector_before_provider_send(mo
     assert [x[0] for x in calls] == [
         "autotask.ticket.get", "autotask.contact.get",
     ]
-    # A different ticket cannot be accepted by merely sending the same
-    # workflow/template pair.
+    # A mismatched ticket readback must fail; another genuine XYZ ticket
+    # whose own readback matches is valid under the sandbox approval.
     with pytest.raises(
         AutotaskClientNotificationScopeError,
-        match="CLIENT_NOTIFICATION_XYZ_ACCEPTANCE_EXACT_SCOPE_REQUIRED",
+        match="CLIENT_NOTIFICATION_XYZ_TEST_TICKET_READBACK_MISMATCH",
     ):
         Connector._validate_scope(AuthoritativeReads(), request, 7701)
     # An Autotask contact override does not confer a new recipient.
     test_contact["emailAddress"] = "attacker@example.com"
     with pytest.raises(
         AutotaskClientNotificationScopeError,
-        match="CLIENT_NOTIFICATION_XYZ_ACCEPTANCE_EXACT_SCOPE_REQUIRED",
+        match="CLIENT_NOTIFICATION_XYZ_TEST_SANDBOX_SCOPE_REQUIRED",
     ):
         Connector._validate_scope(AuthoritativeReads(), request, 141431)
 

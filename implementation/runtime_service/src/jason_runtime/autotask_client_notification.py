@@ -26,7 +26,10 @@ from orchestrator.service import CapabilityInvoker
 
 from .client_outbound_opt_in import (
     company_opt_in_gate_enabled,
+    company_outbound_opted_in,
+    company_udf_not_yet_provisioned,
     require_company_outbound_opt_in,
+    xyz_test_consent_exception_enabled,
 )
 from .approved_client_messages import (
     ApprovedClientMessageRegistryError,
@@ -173,6 +176,43 @@ def validate_client_notification_test_scope(
     )
 
 
+def validate_xyz_test_sandbox_scope(
+    *,
+    ticket_id: int,
+    ticket_number: str,
+    ticket_company_id: int,
+    contact_id: int,
+    contact_company_id: int,
+    contact_email: str,
+    receives_email_notifications: bool,
+    requested_recipient: str | None = None,
+) -> None:
+    """Owner-controlled test company across real tickets and approved templates.
+
+    Nothing is authorized by an unverified Company name alone. Test outbound
+    is always ticket-bound and email goes only to the one approved Gmail.
+    """
+    if (
+        type(ticket_id) is not int or ticket_id < 1
+        or not isinstance(ticket_number, str) or not ticket_number.strip()
+        or type(ticket_company_id) is not int
+        or ticket_company_id != AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID
+        or type(contact_id) is not int or contact_id < 1
+        or type(contact_company_id) is not int
+        or contact_company_id != AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID
+        or str(contact_email).strip().casefold() != XYZ_NOTIFICATION_ACCEPTANCE_EMAIL
+        or receives_email_notifications is not True
+        or (
+            requested_recipient is not None
+            and str(requested_recipient).strip().casefold()
+            != XYZ_NOTIFICATION_ACCEPTANCE_EMAIL
+        )
+    ):
+        raise AutotaskClientNotificationScopeError(
+            "CLIENT_NOTIFICATION_XYZ_TEST_SANDBOX_SCOPE_REQUIRED"
+        )
+
+
 def validate_xyz_notification_acceptance_scope(
     *,
     ticket_id: int,
@@ -186,34 +226,28 @@ def validate_xyz_notification_acceptance_scope(
     template_id: str | None,
     requested_recipient: str | None = None,
 ) -> None:
-    """Fail closed for the purpose-built XYZ notification acceptance only.
+    """Existing acceptance template is reusable across genuine XYZ tickets.
 
-    This explicit exception is deliberately narrower than the generic
-    approved-workflow client notification scope. It cannot be used for another
-    ticket, contact, client, workflow, or recipient.
+    A test message is not a separate delivery/authorization path. The normal
+    exact approved workflow/template pair and recipient checks still apply.
     """
     if (
         workflow_id != XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW
         or template_id != XYZ_NOTIFICATION_ACCEPTANCE_TEMPLATE
-        or type(ticket_id) is not int
-        or ticket_id != XYZ_NOTIFICATION_ACCEPTANCE_TICKET_ID
-        or ticket_number != XYZ_NOTIFICATION_ACCEPTANCE_TICKET_NUMBER
-        or type(ticket_company_id) is not int
-        or ticket_company_id != AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID
-        or type(contact_id) is not int
-        or contact_id != XYZ_NOTIFICATION_ACCEPTANCE_CONTACT_ID
-        or type(contact_company_id) is not int
-        or contact_company_id != AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID
-        or str(contact_email).strip().casefold() != XYZ_NOTIFICATION_ACCEPTANCE_EMAIL
-        or receives_email_notifications is not True
-        or (
-            requested_recipient is not None
-            and str(requested_recipient).strip().casefold() != XYZ_NOTIFICATION_ACCEPTANCE_EMAIL
-        )
     ):
         raise AutotaskClientNotificationScopeError(
             "CLIENT_NOTIFICATION_XYZ_ACCEPTANCE_EXACT_SCOPE_REQUIRED"
         )
+    validate_xyz_test_sandbox_scope(
+        ticket_id=ticket_id,
+        ticket_number=ticket_number,
+        ticket_company_id=ticket_company_id,
+        contact_id=contact_id,
+        contact_company_id=contact_company_id,
+        contact_email=contact_email,
+        receives_email_notifications=receives_email_notifications,
+        requested_recipient=requested_recipient,
+    )
 
 
 def validate_gromelski_vulscan_scope(
@@ -424,9 +458,19 @@ class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
             capability="autotask.ticket.get",
             arguments={"ticket_id": ticket_id},
         )
-        # An explicit Company UDF True is an additional gate, never an
-        # alternative to the existing exact workflow/template approval.
-        # Enabled only after UDF provisioning and governed deployment.
+        # A test ticket must be the same durable provider record that the
+        # caller selected; company/name equality alone is not enough.
+        if request.arguments.get("workflow_id") == XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW:
+            if type(ticket.get("id")) is not int or ticket["id"] != ticket_id:
+                raise AutotaskClientNotificationScopeError(
+                    "CLIENT_NOTIFICATION_XYZ_TEST_TICKET_READBACK_MISMATCH"
+                )
+        # Company UDF is the normal consent gate. An explicitly activated
+        # XYZ sandbox may bypass an ABSENT UDF only for the Owner's one test
+        # company and Gmail recipient, on ANY genuine authorized XYZ ticket.
+        # It does not bypass workflow/template approval or ticket-note rules.
+        xyz_test_exception_pending = False
+        xyz_test_exception_active = xyz_test_consent_exception_enabled()
         if company_opt_in_gate_enabled():
             try:
                 company_id = int(ticket["companyID"])
@@ -439,7 +483,17 @@ class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
                 capability="autotask.company.get",
                 arguments={"company_id": company_id},
             )
-            require_company_outbound_opt_in(company, expected_id=company_id)
+            if not company_outbound_opted_in(company, expected_id=company_id):
+                xyz_test_exception_pending = (
+                    xyz_test_exception_active
+                    and _active_profile() == AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE
+                    and company_id == AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID
+                    and company_udf_not_yet_provisioned(
+                        company, expected_id=AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID
+                    )
+                )
+                if not xyz_test_exception_pending:
+                    require_company_outbound_opt_in(company, expected_id=company_id)
         contact_id = ticket.get("contactID")
         if contact_id in (None, "", 0, "0"):
             raise AutotaskClientNotificationScopeError(
@@ -450,6 +504,28 @@ class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
             capability="autotask.contact.get",
             arguments={"contact_id": int(contact_id)},
         )
+
+        if xyz_test_exception_pending or (
+            xyz_test_exception_active
+            and ticket.get("companyID") == AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID
+        ):
+            # Test-client scope is broader in TICKETS and MESSAGE CLASSES,
+            # not in destination. The exact approved template check remains
+            # mandatory below and the provider ticket must match the request.
+            if type(ticket.get("id")) is not int or ticket["id"] != ticket_id:
+                raise AutotaskClientNotificationScopeError(
+                    "CLIENT_NOTIFICATION_XYZ_TEST_TICKET_READBACK_MISMATCH"
+                )
+            validate_xyz_test_sandbox_scope(
+                ticket_id=ticket_id,
+                ticket_number=ticket.get("ticketNumber"),
+                ticket_company_id=ticket.get("companyID"),
+                contact_id=int(contact_id),
+                contact_company_id=contact.get("companyID"),
+                contact_email=contact.get("emailAddress"),
+                receives_email_notifications=contact.get("receivesEmailNotifications"),
+                requested_recipient=request.arguments.get("recipient"),
+            )
 
         profile = _active_profile()
         if profile == AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE:

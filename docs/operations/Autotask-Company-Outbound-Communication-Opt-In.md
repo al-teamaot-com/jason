@@ -18,11 +18,16 @@ These numeric picklists are grounded in live governed Autotask
 - TODO-COMM-001 / GitHub #947 is the canonical communication framework.
 - `config/client_communications/approved.json` has the existing fixed
   VulScan message and a bounded XYZ Test Company acceptance message.
-  The Owner approved XYZ as the test **client and Gmail recipient** on
-  2026-11-08, limited to existing ticket `T20260926.0088` and the
-  exact contact `al.bccomputers@gmail.com`. This test approval does
-  **not** replace Company UDF enablement, workflow/template approval,
-  production release approval or notification readback.
+  On 2026-11-08 the Owner approved **XYZ Company 1158** as a reusable
+  test client across multiple genuine XYZ tickets and different approved
+  templates. Only the verified `al.bccomputers@gmail.com` inbox is an
+  authorized external test destination. The ticket
+  `T20260926.0088` / ID `141431` is an initial fixture, not a permanent
+  single-ticket constraint. The sole optional pre-UDF test exception can
+  treat an **absent** UDF as test-only consent for XYZ after an explicit
+  sandbox profile activation, never a Company UDF False/invalid setting.
+  Ordinary workflow/template approval, exact ticket/recipient readback,
+  production release governance and notification verification remain.
 - `config/client_communications/information_requests_round1.json` includes
   120 owner-approved canned questions with 15 categories and eight questions
   each; autonomous sending is **disabled** for all 120 entries.
@@ -100,9 +105,12 @@ clients is a separate provider-permission prerequisite.
 
 **Authorized target:** Autotask Company `1158`, XYZ Test Company.
 **Required setting:** Company UDF `enable_jason_outbound_comm=True`.
-**Approved acceptance ticket:** `T20260926.0088` (ticket ID `141431`).
-**Verified recipient:** contact `30683022`,
-`al.bccomputers@gmail.com`, with email notifications enabled.
+**Initial verified acceptance ticket:** `T20260926.0088` (ID `141431`);
+any other legitimate XYZ ticket is also eligible after its own readback.
+**Verified recipient:** `al.bccomputers@gmail.com` only, derived from
+the current XYZ ticket contact. Contact `30683022` is the initial fixture
+and has notifications enabled; other XYZ contacts are eligible only if
+they resolve to the same verified Gmail and notifications are enabled.
 The Owner approved the controlled XYZ recipient and specifically directed
 enabling the Company UDF for XYZ on 2026-11-08.
 
@@ -142,9 +150,15 @@ The Owner's instruction does not bypass native provider permission.
    and bound exact-action approval, then re-read Company `1158`.
 4. Assert the Company UDF is uniquely `True`; assert all other clients
    remain OFF (missing is OFF), and no unrelated fields changed.
-5. Only after independent class/template authority and approved release may
-   the single outbound process send an exact XYZ test TicketNote, verify
-   the expected recipient and NotificationHistory, and prevent duplicates.
+5. A separately approved temporary sandbox profile may exercise the same
+   ticket-bound communication process **before** the UDF is created, but only
+   for Company 1158 with **absent** consent field, exact Gmail contact,
+   approved class/template and governed action/production authority.
+   No provider update or external send is implied by source-only test code.
+6. After governed release the same process may post one authorized
+   customer-visible TicketNote per test request, on any verified XYZ ticket;
+   verify note publication and NotificationHistory and prevent duplicates.
+   No second human code-reviewer gate is introduced.
 
 Production freeze, engineering Owner pause and automatic-promotion hold remain
 unchanged. No customer message, time entry, UDF change or customer opt-in occurs
