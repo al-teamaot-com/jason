@@ -94,6 +94,7 @@ def test_registry_matches_connector_capabilities_and_dormant_mutations() -> None
         "autotask.ticket.attachment.get",
         "autotask.ticket.attachment.content.get",
         "autotask.notification_history.search",
+        "autotask.company.outbound.optin.update",
         "autotask.udf.definition.create",
         "autotask.udf.list.item.create",
         "autotask.ticket.create",

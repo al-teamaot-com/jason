@@ -69,7 +69,9 @@ AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE = (
 
 _SUPPORTED_PROFILES = frozenset(
     {
-        AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE,
+        # Legacy XYZ-specific mode had broader Gmail routing than the
+        # Owner-approved exact test ticket/contact. Acceptance now uses
+        # the one approved-workflow/template process instead.
         AUTOTASK_CLIENT_NOTIFICATION_GROMELSKI_VULSCAN_PROFILE,
         AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE,
     }
@@ -451,13 +453,13 @@ class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
 
         profile = _active_profile()
         if profile == AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE:
-            validate_client_notification_test_scope(
-                ticket_company_id=ticket.get("companyID"),
-                contact_company_id=contact.get("companyID"),
-                contact_email=str(contact.get("emailAddress") or ""),
-                requested_recipient=request.arguments.get("recipient"),
+            # The legacy generic XYZ/Gmail profile is not a separately
+            # authorized sender. The Owner-approved test fixture is bound to
+            # one exact ticket and Gmail contact via the normal approved
+            # workflow + template path below.
+            raise AutotaskClientNotificationScopeError(
+                "CLIENT_NOTIFICATION_XYZ_LEGACY_PROFILE_DISABLED"
             )
-            return
 
         if profile == AUTOTASK_CLIENT_NOTIFICATION_GROMELSKI_VULSCAN_PROFILE:
             payload = request.arguments.get("payload")

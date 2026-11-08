@@ -104,3 +104,24 @@ def test_connector_company_gate_precedes_contact_and_send(monkeypatch, opt_value
                 FakeReads(), request, 7751
             )
         assert calls == ["autotask.ticket.get", "autotask.company.get"]
+
+def test_xyz_company_test_approval_is_not_company_udf_enablement():
+    """The owner's test-recipient consent is not a skip of Company opt-in."""
+    assert not company_outbound_opted_in(
+        {"id": 1158, "userDefinedFields": []}, expected_id=1158,
+    )
+    assert not company_outbound_opted_in(
+        {"id": 1158, "userDefinedFields": [
+            {"name": CLIENT_OUTBOUND_OPT_IN_FIELD, "value": "False"},
+        ]}, expected_id=1158,
+    )
+    assert company_outbound_opted_in(
+        {"id": 1158, "userDefinedFields": [
+            {"name": CLIENT_OUTBOUND_OPT_IN_FIELD, "value": "True"},
+        ]}, expected_id=1158,
+    )
+    assert not company_outbound_opted_in(
+        {"id": 1158, "userDefinedFields": [
+            {"name": CLIENT_OUTBOUND_OPT_IN_FIELD, "value": "True"},
+        ]}, expected_id=597,
+    )

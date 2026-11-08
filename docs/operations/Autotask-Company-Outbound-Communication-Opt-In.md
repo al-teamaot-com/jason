@@ -16,8 +16,13 @@ These numeric picklists are grounded in live governed Autotask
 
 ## Existing source to reuse
 - TODO-COMM-001 / GitHub #947 is the canonical communication framework.
-- `config/client_communications/approved.json` has the existing approved fixed
-  VulScan message; obsolete XYZ test text is **not** a send authorization.
+- `config/client_communications/approved.json` has the existing fixed
+  VulScan message and a bounded XYZ Test Company acceptance message.
+  The Owner approved XYZ as the test **client and Gmail recipient** on
+  2026-11-08, limited to existing ticket `T20260926.0088` and the
+  exact contact `al.bccomputers@gmail.com`. This test approval does
+  **not** replace Company UDF enablement, workflow/template approval,
+  production release approval or notification readback.
 - `config/client_communications/information_requests_round1.json` includes
   120 owner-approved canned questions with 15 categories and eight questions
   each; autonomous sending is **disabled** for all 120 entries.
@@ -90,6 +95,56 @@ Source construction and tests are not evidence of field creation or operational
 send authority. Existing Company records have
 `userAccessForUpdate=None` for the observed API identity, so enabling individual
 clients is a separate provider-permission prerequisite.
+
+## Owner's exact XYZ Test Company opt-in target
+
+**Authorized target:** Autotask Company `1158`, XYZ Test Company.
+**Required setting:** Company UDF `enable_jason_outbound_comm=True`.
+**Approved acceptance ticket:** `T20260926.0088` (ticket ID `141431`).
+**Verified recipient:** contact `30683022`,
+`al.bccomputers@gmail.com`, with email notifications enabled.
+The Owner approved the controlled XYZ recipient and specifically directed
+enabling the Company UDF for XYZ on 2026-11-08.
+
+Do not mistakenly enable all companies or treat the fact that the Owner
+approved the test recipient as proof that the Company UDF is already present.
+The live read on 2026-11-08 showed **93 UDF definitions and NO target field**;
+XYZ's authoritative Company read showed **25 other UDFs and NO target value**.
+Do not fabricate a successful write or skip the normal release/approval gates.
+
+An additional source-only, dormant, reusable governed action now supports the
+exact Company `userDefinedFields` update:
+`service.company.outbound.optin.update`, with
+`JASON_AUTOTASK_COMPANY_OUTBOUND_OPTIN_PROFILE=owner-company-outbound-optin-v1`
+as a separately enabled profile after deployment. It accepts only
+`{company_id, enabled}` with strict Boolean, then constructs the **only**
+native PATCH fields: `id`, and
+`userDefinedFields=[{"name":"enable_jason_outbound_comm","value":"True"|"False"}]`.
+The exact Company record and UDF definition are read before preparation and
+again immediately before write; native requester permissions and immutable
+exact-action plans are mandatory. One PATCH is followed by provider Company
+readback proving the target value and unchanged unrelated UDFs.
+The production action remains unexposed until a governed release activates it.
+
+The Companies entity is API-update-capable, but the **current live read
+identity** reports `userAccessForUpdate=None`. This is **not** conclusive
+proof of the final impersonated technician's rights: the governed write action
+queries native permission under the authenticated technician's exact
+`ImpersonationResourceId`; if that is None the write must stop before PATCH.
+The Owner's instruction does not bypass native provider permission.
+
+**Exact required sequence after authorized release:**
+1. Read UDF definition list again, create one Company List definition only
+   if still absent, add active `False` and `True` choices, and verify by GET.
+2. Verify Company `1158` and exact approved contact and ticket readback.
+3. Invoke the governed Company consent update for
+   `{"company_id":1158,"enabled":true}`, with provider-native update access
+   and bound exact-action approval, then re-read Company `1158`.
+4. Assert the Company UDF is uniquely `True`; assert all other clients
+   remain OFF (missing is OFF), and no unrelated fields changed.
+5. Only after independent class/template authority and approved release may
+   the single outbound process send an exact XYZ test TicketNote, verify
+   the expected recipient and NotificationHistory, and prevent duplicates.
 
 Production freeze, engineering Owner pause and automatic-promotion hold remain
 unchanged. No customer message, time entry, UDF change or customer opt-in occurs

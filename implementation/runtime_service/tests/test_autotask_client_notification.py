@@ -459,3 +459,146 @@ def test_approved_client_note_is_exactly_ticket_bound_and_client_visibility_is_d
     })
     with pytest.raises(Exception, match="publish=1"):
         AutotaskClientNotificationConnector._expected_payload(internal_request)
+
+def test_approved_client_note_provider_plan_is_bound_to_one_ticket_and_never_sends_during_prepare(
+    monkeypatch,
+):
+    from connectors.autotask.mutation_connector import AUTOTASK_MUTATION_ENABLED_ENV
+    from connectors.core.connector_base import PreparedRequest
+    from connectors.core.contracts import ConnectorContext, ConnectorRequest
+    from jason_runtime.autotask_client_notification import AutotaskClientNotificationConnector
+    from jason_runtime.approved_client_messages import resolve_approved_client_message
+
+    _enable_approved_workflow(monkeypatch)
+    monkeypatch.setenv(AUTOTASK_MUTATION_ENABLED_ENV, "true")
+    requested_ticket = 71443
+    scopes = []
+
+    class Secrets:
+        def resolve(self, *_):
+            return {}
+
+    class Transport:
+        def request(self, **kwargs):
+            raise AssertionError("no provider write/read during synthetic prepare test")
+
+    class Audit:
+        def record(self, *_):
+            pass
+
+    def fake_scope(self, request, ticket_id):
+        scopes.append(ticket_id)
+
+    def fake_prepare(self, request, credentials):
+        return PreparedRequest(
+            method="POST", url="https://psa.example/V1.0/TicketNotes",
+            headers={}, params=None, json=request.arguments["payload"],
+            audit_operation="/V1.0/TicketNotes",
+        )
+
+    monkeypatch.setattr(AutotaskClientNotificationConnector, "_validate_scope", fake_scope)
+    monkeypatch.setattr(AutotaskClientNotificationConnector, "prepare_request", fake_prepare)
+    connector = AutotaskClientNotificationConnector(
+        secrets=Secrets(), transport=Transport(), audit=Audit(), bindings=None
+    )
+    message = resolve_approved_client_message(
+        workflow_id="vulscan_missing_patch",
+        template_id=VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+    )
+
+    def req(ticket_id):
+        return ConnectorRequest(
+            context=ConnectorContext(
+                correlation_id="corr-plan", principal_id="person-al",
+                organization_id="aot", client_id=None,
+                capability="autotask.ticket.note.create", mode="execute",
+            ),
+            arguments={
+                "workflow_id": "vulscan_missing_patch",
+                "template_id": VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+                "payload": {"ticketID": ticket_id,
+                            "title": "untrusted title is not used",
+                            "description": "untrusted body is not used"},
+            },
+        )
+
+    plan = connector.prepare_governed_execution(req(requested_ticket))
+    assert scopes == [requested_ticket]
+    assert plan.resource_identifier == str(requested_ticket)
+    assert plan.payload == {
+        "ticketID": requested_ticket,
+        "title": message.title,
+        "description": message.body,
+        "noteType": 3,
+        "publish": 1,
+    }
+    with pytest.raises(Exception):
+        connector.prepare_governed_execution(req(None))
+    assert scopes == [requested_ticket]
+
+def test_owner_approved_xyz_fixture_uses_one_standard_workflow_not_legacy_send_mode(
+    monkeypatch,
+):
+    """Approved client != approval for a separate generic Gmail sender."""
+    from datetime import datetime, timezone
+    from kernel.capabilities import CapabilityRegistryService, InMemoryCapabilityRegistry
+    from kernel.execution_providers import (
+        ExecutionProviderRegistryService, InMemoryExecutionProviderRegistry,
+    )
+    from jason_runtime.autotask_client_notification import (
+        AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE,
+        AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE,
+        AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV,
+        XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW,
+        XYZ_NOTIFICATION_ACCEPTANCE_TEMPLATE,
+        XYZ_NOTIFICATION_ACCEPTANCE_CONTACT_ID,
+        XYZ_NOTIFICATION_ACCEPTANCE_EMAIL,
+        XYZ_NOTIFICATION_ACCEPTANCE_TICKET_ID,
+        XYZ_NOTIFICATION_ACCEPTANCE_TICKET_NUMBER,
+        AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID,
+        validate_xyz_notification_acceptance_scope,
+        register_autotask_client_notification_runtime_foundation,
+    )
+    from jason_runtime.approved_client_messages import resolve_approved_client_message
+
+    assert XYZ_NOTIFICATION_ACCEPTANCE_TICKET_ID == 141431
+    assert XYZ_NOTIFICATION_ACCEPTANCE_TICKET_NUMBER == "T20260926.0088"
+    assert XYZ_NOTIFICATION_ACCEPTANCE_CONTACT_ID == 30683022
+    assert XYZ_NOTIFICATION_ACCEPTANCE_EMAIL == "al.bccomputers@gmail.com"
+    assert AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID == 1158
+    monkeypatch.setenv(
+        AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV,
+        AUTOTASK_CLIENT_NOTIFICATION_TEST_PROFILE,
+    )
+    with pytest.raises(RuntimeError, match="unsupported.*profile"):
+        register_autotask_client_notification_runtime_foundation(
+            capabilities=CapabilityRegistryService(
+                registry=InMemoryCapabilityRegistry()
+            ),
+            providers=ExecutionProviderRegistryService(
+                registry=InMemoryExecutionProviderRegistry()
+            ),
+            now=datetime.now(timezone.utc),
+        )
+    monkeypatch.setenv(
+        AUTOTASK_CLIENT_NOTIFICATION_PROFILE_ENV,
+        AUTOTASK_CLIENT_NOTIFICATION_APPROVED_WORKFLOW_PROFILE,
+    )
+    template = resolve_approved_client_message(
+        workflow_id=XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW,
+        template_id=XYZ_NOTIFICATION_ACCEPTANCE_TEMPLATE,
+    )
+    assert template.recipient_policy == "ticket_contact"
+    assert template.title.startswith("JASON TEST ONLY")
+    assert validate_xyz_notification_acceptance_scope(
+        ticket_id=XYZ_NOTIFICATION_ACCEPTANCE_TICKET_ID,
+        ticket_number=XYZ_NOTIFICATION_ACCEPTANCE_TICKET_NUMBER,
+        ticket_company_id=AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID,
+        contact_id=XYZ_NOTIFICATION_ACCEPTANCE_CONTACT_ID,
+        contact_company_id=AUTOTASK_CLIENT_NOTIFICATION_TEST_COMPANY_ID,
+        contact_email=XYZ_NOTIFICATION_ACCEPTANCE_EMAIL,
+        receives_email_notifications=True,
+        workflow_id=XYZ_NOTIFICATION_ACCEPTANCE_WORKFLOW,
+        template_id=XYZ_NOTIFICATION_ACCEPTANCE_TEMPLATE,
+        requested_recipient="AL.BCCOMPUTERS@gmail.com",
+    ) is None

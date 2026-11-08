@@ -90,7 +90,19 @@ that the approved-message framework supports **non-question** content.
   exact workflow/template resolver.
 - Every new class/template is source-controlled, reviewed, enabled separately,
   and bound to its exact workflow, content revision and permitted audience.
-- The abandoned XYZ acceptance text is **not** authorization for live sending.
+- **XYZ Test Company is the Owner-approved controlled test client** for
+  this shared ticket-bound process, not a separate messaging engine. Its
+  existing approved test template is restricted to ticket
+  `T20260926.0088` (Autotask ID `141431`), company `1158`,
+  contact `30683022`, and `al.bccomputers@gmail.com`. Live governed
+  Autotask reads confirmed that the ticket, company and contact match and
+  that the contact receives email notifications (2026-11-08).
+  This approval does **not** authorize other tickets, other Gmail
+  addresses, arbitrary messages, client-wide opt-in, provider writes,
+  deployment or relaxation of information-release rules.
+  The test must use the existing exact approved-workflow/template
+  connector and verify the TicketNote/readback and notification receipt.
+  It cannot bypass the separate Company UDF and production release gates.
 
 ## Canned vs. semi-canned
 

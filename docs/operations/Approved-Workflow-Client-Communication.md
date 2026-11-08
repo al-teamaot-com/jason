@@ -96,6 +96,18 @@ A client-communication step is complete only after the governed write and requir
 
 ## Acceptance Test
 
+**Controlled destination:** XYZ Test Company `1158`, Autotask ticket
+`T20260926.0088` / ID `141431`, contact `30683022`,
+`al.bccomputers@gmail.com` (contact email notifications enabled).
+The Owner approved that test client/recipient on 2026-11-08. Test delivery
+must use the same standard `approved-workflow-client-notification-v1`
+process and existing `xyz_client_notification_acceptance` /
+`xyz-controlled-client-notification-acceptance-v1` exact template,
+**not** a second direct-email sender or legacy test-mode override.
+Only after governed Company opt-in, release authority and recipient
+verification may a real test note be created and delivery verified;
+no production send is implied by this source-only acceptance definition.
+
 An approved workflow/template pair succeeds with authoritative ticket-contact routing and evidence tied to the exact ticket. Onboarding and documentation intents must reuse the same pipeline; missing/wrong-company ticket or no authorized ticket-creation path must fail closed. The same template with a different workflow ID, modified body, cross-company contact, arbitrary recipient, or disabled required email notifications must be rejected before provider mutation.
 
 ## Section Goal Closure
