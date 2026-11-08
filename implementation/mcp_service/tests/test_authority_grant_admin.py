@@ -22,6 +22,7 @@ class CapabilityRegistry:
         self.items=[
             SimpleNamespace(capability_name="service.ticket.attachment.create", lifecycle_status=SimpleNamespace(value="active")),
             SimpleNamespace(capability_name="service.ticket.update", lifecycle_status=SimpleNamespace(value="active")),
+            SimpleNamespace(capability_name="service.ticket.client.notification.create", lifecycle_status=SimpleNamespace(value="active")),
         ]
     def list_all(self): return tuple(self.items)
 
@@ -154,3 +155,142 @@ def test_list_exact_grants_defaults_to_owner_subject(owner):
     assert result["subject_id"] == "person-al"
     assert len(result["grants"]) == 1
     assert result["grants"][0]["capability"] == "service.ticket.attachment.create"
+
+
+# Privileged role is a separate, explicitly sourced V4 policy, not a
+# migration of the admin login to the ordinary technician/Owner binding.
+ADMIN_TENANT = "f7054323-d52b-4863-8c2f-1898f0b6077c"
+ADMIN_OID = "c848022d-e13b-4457-84b0-e2f5c00dcaf6"
+NORMAL_OID = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+ADMIN_PRINCIPAL = "person-entra-c848022de13b445784b0e2f5c00dcaf6"
+NORMAL_PRINCIPAL = "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
+
+
+def v4_admin_fixture(monkeypatch, tmp_path, *, tenant=ADMIN_TENANT,
+                     oid=ADMIN_OID, principal=ADMIN_PRINCIPAL,
+                     client_id=None, enable=True):
+    import json
+    from pathlib import Path
+    p=tmp_path / "root-owned-equivalent-v4.json"
+    repo=Path(__file__).resolve().parents[3]
+    source=repo / "config" / "mobile-release-approval-policy.json"
+    policy=json.loads(source.read_text())
+    assert policy["schema_version"] == "4.0"
+    p.write_text(json.dumps(policy))
+    p.chmod(0o600)
+    runtime=app()
+    runtime.identity_authority.identities.put(IdentityRecord(
+        identity_id=ADMIN_PRINCIPAL, identity_type="human", organization_id="aot",
+    ))
+    runtime.identity_authority.identities.put(IdentityRecord(
+        identity_id=NORMAL_PRINCIPAL, identity_type="human", organization_id="aot",
+    ))
+    monkeypatch.setattr(server,"_runtime",lambda:runtime)
+    monkeypatch.setattr(
+        server,"_authenticated_write_identity",
+        lambda:(principal,"aot","entra-oauth-bearer",client_id),
+    )
+    monkeypatch.setattr(
+        server,"get_access_token",
+        lambda:SimpleNamespace(claims={"tid":tenant,"oid":oid}),
+    )
+    monkeypatch.setattr(server,"approval_owner_identities",lambda:frozenset({"person-al"}))
+    monkeypatch.setenv("JASON_RELEASE_MOBILE_APPROVAL_POLICY",str(p))
+    if enable:
+        monkeypatch.setenv("JASON_AOT_ADMIN_APPROVER_PROFILE","admin-separated-v1")
+    else:
+        monkeypatch.delenv("JASON_AOT_ADMIN_APPROVER_PROFILE",raising=False)
+    return runtime,p
+
+
+def test_v4_authenticated_admin_can_add_one_approved_client_scoped_grant(monkeypatch, tmp_path):
+    runtime,_=v4_admin_fixture(monkeypatch,tmp_path)
+    # Recipient and action remain the normal identity, never elevated to
+    # unrestricted Owner or admin account.
+    action=server.grant_exact_authority(
+        subject_id=NORMAL_PRINCIPAL,
+        capability="service.ticket.client.notification.create",
+        permission="execute",approval_required=True,client_id="1158",
+    )
+    assert action["status"]=="succeeded"
+    assert action["client_id"]=="1158"
+    assert action["subject_id"]==NORMAL_PRINCIPAL
+    assert action["approval_required"] is True
+    grant=runtime.identity_authority.grants.get(action["grant_id"])
+    assert grant.permission is PermissionMode.EXECUTE
+    assert grant.subject_id==NORMAL_PRINCIPAL
+    assert grant.client_id=="1158"
+    assert grant.approval_required is True
+    reread=server.list_exact_authority_grants(subject_id=NORMAL_PRINCIPAL)
+    assert reread["status"]=="succeeded"
+    assert len(reread["grants"])==1
+    assert reread["grants"][0]["grant_id"]==action["grant_id"]
+    retry=server.grant_exact_authority(
+        subject_id=NORMAL_PRINCIPAL,
+        capability="service.ticket.client.notification.create",
+        permission="execute",approval_required=True,client_id="1158",
+    )
+    assert retry["status"]=="succeeded" and retry["idempotent"] is True
+    assert len(runtime.identity_authority.audit.events)==2
+
+
+@pytest.mark.parametrize("tenant,oid,principal,client",[
+    (ADMIN_TENANT,NORMAL_OID,NORMAL_PRINCIPAL,None),
+    (ADMIN_TENANT,NORMAL_OID,ADMIN_PRINCIPAL,None),
+    (ADMIN_TENANT,ADMIN_OID,NORMAL_PRINCIPAL,None),
+    ("00000000-0000-4000-8000-000000000000",ADMIN_OID,ADMIN_PRINCIPAL,None),
+    (ADMIN_TENANT,ADMIN_OID,ADMIN_PRINCIPAL,"1158"),
+    (ADMIN_TENANT,"00000000-0000-4000-8000-000000000000",ADMIN_PRINCIPAL,None),
+])
+def test_v4_regular_wrong_tenant_wrong_id_and_client_scope_never_administer(
+        monkeypatch,tmp_path,tenant,oid,principal,client):
+    runtime,_=v4_admin_fixture(
+        monkeypatch,tmp_path,tenant=tenant,oid=oid,principal=principal,
+        client_id=client,
+    )
+    result=server.grant_exact_authority(
+        subject_id=NORMAL_PRINCIPAL,capability="service.ticket.update",
+        permission="execute",approval_required=True,client_id="1158",
+    )
+    assert result=={"status":"rejected","error_code":"AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED"}
+    assert server.list_exact_authority_grants(
+        subject_id=NORMAL_PRINCIPAL
+    )=={"status":"rejected","error_code":"AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED"}
+    assert not runtime.identity_authority.grants.list_for_subject(NORMAL_PRINCIPAL)
+
+
+def test_v4_mode_not_active_on_legacy_source_or_off_profile(monkeypatch,tmp_path):
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        reviewed_policy_file,
+    )
+    runtime,p=v4_admin_fixture(monkeypatch,tmp_path)
+    policy=reviewed_policy_file(tmp_path)
+    monkeypatch.setenv("JASON_RELEASE_MOBILE_APPROVAL_POLICY",str(policy))
+    result=server.grant_exact_authority(
+        subject_id=NORMAL_PRINCIPAL,capability="service.ticket.update",
+        permission="execute",approval_required=True,
+    )
+    assert result=={"status":"rejected","error_code":"AUTHORITY_GRANT_ADMIN_ROLE_POLICY_REQUIRED"}
+    monkeypatch.setenv("JASON_RELEASE_MOBILE_APPROVAL_POLICY",str(p))
+    monkeypatch.delenv("JASON_AOT_ADMIN_APPROVER_PROFILE",raising=False)
+    assert server.list_exact_authority_grants(
+        subject_id=NORMAL_PRINCIPAL
+    )=={"status":"rejected","error_code":"AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED"}
+    assert not runtime.identity_authority.grants.list_for_subject(NORMAL_PRINCIPAL)
+
+
+@pytest.mark.parametrize("permission,approve,client,capability",[
+    ("execute",False,"1158","service.ticket.update"),
+    ("administer",True,"1158","service.ticket.update"),
+    ("execute",True,"*","service.ticket.update"),
+    ("execute",True,"1158","service.*"),
+])
+def test_v4_privileged_admin_cannot_issue_unsafe_exact_grant(
+        monkeypatch,tmp_path,permission,approve,client,capability):
+    runtime,_=v4_admin_fixture(monkeypatch,tmp_path)
+    result=server.grant_exact_authority(
+        subject_id=NORMAL_PRINCIPAL,capability=capability,
+        permission=permission,approval_required=approve,client_id=client,
+    )
+    assert result["status"]=="rejected"
+    assert not runtime.identity_authority.grants.list_for_subject(NORMAL_PRINCIPAL)

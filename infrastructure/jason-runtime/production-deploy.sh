@@ -213,18 +213,42 @@ esac
 # Owner-reviewed release approval is source-bound. Preproduction can validate
 # the exact candidate declaration but always runs the approval lane OFF.
 SOURCE_RELEASE_APPROVAL_MODE="$(python3 - "$REPO_ROOT/config/mobile-release-approval-policy.json" <<'PY2'
-import json, sys
+import json, re, sys, uuid
 from pathlib import Path
 p=Path(sys.argv[1])
 if p.is_symlink() or not p.is_file():
     raise SystemExit("DENIED: immutable mobile release approval policy absent")
 d=json.loads(p.read_text(encoding="utf-8"))
-if (d.get("schema_version") != "2.0"
-        or d.get("organization_id") != "aot"
-        or d.get("policy_mode") != "owner_reviewed"
+version=d.get("schema_version")
+if version == "2.0":
+    mode = "owner_reviewed"
+    risks = {"normal", "production_control_core"}
+    expected = {"schema_version", "organization_id", "policy_mode",
+                "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
+                "capability", "high_impact_review"}
+elif version == "3.0":
+    mode = "owner_reviewed"
+    risks = {"normal", "production_control_core", "production_repair"}
+    expected = {"schema_version", "organization_id", "policy_mode",
+                "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
+                "capability", "high_impact_review"}
+elif version == "4.0":
+    mode = "admin_approver_separated"
+    risks = {"normal", "production_control_core"}
+    expected = {"schema_version", "organization_id", "policy_mode",
+                "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
+                "capability", "high_impact_review", "admin_approver_binding",
+                "regular_requester_binding"}
+else:
+    raise SystemExit("DENIED: source mobile release approval policy version unreviewed")
+actual_risks=d.get("allowed_risk_profiles")
+ttl=d.get("ttl_seconds")
+if (set(d) != expected or d.get("organization_id") != "aot"
+        or d.get("policy_mode") != mode
         or d.get("owner_identity_ids") != ["person-al"]
-        or set(d.get("allowed_risk_profiles") or []) != {"normal", "production_control_core"}
-        or d.get("ttl_seconds") not in range(300, 901)
+        or type(actual_risks) is not list
+        or set(actual_risks) != risks or len(actual_risks) != len(risks)
+        or type(ttl) is not int or not 300 <= ttl <= 900
         or d.get("capability") != "release.production.approve"
         or d.get("high_impact_review") != {
             "owner_exact_sha_required": True,
@@ -232,15 +256,34 @@ if (d.get("schema_version") != "2.0"
             "independent_ccc_required": True,
             "protected_release_gates_unchanged": True,
         }):
-    raise SystemExit("DENIED: source mobile release approval policy is not the reviewed owner V2 contract")
-print("owner_reviewed")
+    raise SystemExit("DENIED: source mobile release approval policy is invalid")
+if version == "4.0":
+    def exact_binding(field):
+        binding=d.get(field)
+        if not isinstance(binding, dict) or set(binding) != {
+            "microsoft_tenant_id", "microsoft_object_id"
+        }:
+            raise SystemExit("DENIED: missing exact separated Entra binding")
+        tenant=binding["microsoft_tenant_id"]
+        oid=binding["microsoft_object_id"]
+        for value in (tenant, oid):
+            if (not isinstance(value, str)
+                    or re.fullmatch(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", value) is None
+                    or str(uuid.UUID(value)) != value):
+                raise SystemExit("DENIED: separated Entra binding is invalid")
+        return tenant,oid
+    admin=exact_binding("admin_approver_binding")
+    regular=exact_binding("regular_requester_binding")
+    if admin[0] != regular[0] or admin[1] == regular[1]:
+        raise SystemExit("DENIED: approver cannot be normal requester")
+print(mode)
 PY2
 )" || exit 2
 if [ ${#UAT_PREFLIGHT[@]} -gt 0 ]; then
   RELEASE_APPROVAL_MODE="off"
 elif [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
   RELEASE_APPROVAL_MODE="${JASON_RELEASE_MOBILE_APPROVAL_ROLLBACK_MODE:-off}"
-  case "$RELEASE_APPROVAL_MODE" in owner_only_pilot|owner_reviewed|off) ;; *) echo "DENIED: invalid rollback release approval mode" >&2; exit 2;; esac
+  case "$RELEASE_APPROVAL_MODE" in owner_only_pilot|owner_reviewed|admin_approver_separated|off) ;; *) echo "DENIED: invalid rollback release approval mode" >&2; exit 2;; esac
 else
   if [ "${JASON_RELEASE_MOBILE_APPROVAL_MODE:-}" != "$SOURCE_RELEASE_APPROVAL_MODE" ]; then
     echo "DENIED: invoking release approval mode differs from reviewed source" >&2
