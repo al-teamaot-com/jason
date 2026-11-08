@@ -69,6 +69,10 @@ jobs:
             implementation/runtime_service/tests/test_teams_message_send_execution_plan.py \
             implementation/connectors/tests/test_autotask_mutation_connector.py \
             implementation/connectors/tests/test_autotask_procurement_mutation_connector.py
+      - name: Unlicensed-admin Entra browser step-up security regressions
+        run: |
+          python -m pytest -q \
+            implementation/mcp_service/tests/test_entra_release_stepup.py
       - name: Approval and transport authority regressions
         run: |
           python -m pytest -q \
