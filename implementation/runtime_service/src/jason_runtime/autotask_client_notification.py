@@ -24,6 +24,10 @@ from orchestrator.provider_mutation_capability_catalog import (
 )
 from orchestrator.service import CapabilityInvoker
 
+from .client_outbound_opt_in import (
+    company_opt_in_gate_enabled,
+    require_company_outbound_opt_in,
+)
 from .approved_client_messages import (
     ApprovedClientMessageRegistryError,
     resolve_approved_client_message,
@@ -414,6 +418,22 @@ class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
             capability="autotask.ticket.get",
             arguments={"ticket_id": ticket_id},
         )
+        # An explicit Company UDF True is an additional gate, never an
+        # alternative to the existing exact workflow/template approval.
+        # Enabled only after UDF provisioning and governed deployment.
+        if company_opt_in_gate_enabled():
+            try:
+                company_id = int(ticket["companyID"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise AutotaskClientNotificationScopeError(
+                    "CLIENT_OUTBOUND_TICKET_COMPANY_REQUIRED"
+                ) from exc
+            company = self._read_item(
+                request=request,
+                capability="autotask.company.get",
+                arguments={"company_id": company_id},
+            )
+            require_company_outbound_opt_in(company, expected_id=company_id)
         contact_id = ticket.get("contactID")
         if contact_id in (None, "", 0, "0"):
             raise AutotaskClientNotificationScopeError(
