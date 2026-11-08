@@ -122,6 +122,28 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_template="/V1.0/NotificationHistory/query",
         query_argument="search",
     ),
+    # Separate governed Autotask schema-administration mutations. These
+    # static vendor endpoints are not reachable through the generic entity
+    # read/query or a caller-supplied arbitrary URL.
+    # Governed, narrowly scoped Company outbound-consent update only.
+    # The exact Company UDF payload is assembled and validated by the
+    # independently activation-gated outbound-optin connector.
+    "autotask.company.outbound.optin.update": OperationDefinition(
+        method="PATCH",
+        path_template="/V1.0/Companies",
+        json_argument="payload",
+        require_positive_body_id=True,
+    ),
+    "autotask.udf.definition.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/UserDefinedFieldDefinitions",
+        json_argument="payload",
+    ),
+    "autotask.udf.list.item.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/UserDefinedFieldListItems",
+        json_argument="payload",
+    ),
     "autotask.ticket.create": OperationDefinition(
         method="POST",
         path_template="/V1.0/Tickets",
