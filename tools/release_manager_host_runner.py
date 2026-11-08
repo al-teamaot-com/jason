@@ -28,7 +28,7 @@ from contextlib import contextmanager, closing
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Mapping
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import release_manager_gate as gate
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -50,6 +50,7 @@ MUTATION_ENV_OVERRIDES = {
     "JASON_AUTOTASK_TICKET_UPDATE_MCP_PROFILE": "",
     "JASON_AUTOTASK_INTERNAL_NOTE_MCP_PROFILE": "",
     "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE": "",
+    "JASON_AOT_ADMIN_APPROVER_PROFILE": "",
     "JASON_AUTOTASK_CLIENT_NOTIFICATION_PROFILE": "",
     "JASON_AUTOTASK_PROCUREMENT_MCP_PROFILE": "",
     "JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE": "",
@@ -1081,9 +1082,15 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
     elif version in {"2.0", "3.0"}:
         expected = shared | {"high_impact_review"}
         mode = "owner_reviewed"
+    elif version == "4.0":
+        expected = shared | {
+            "high_impact_review", "admin_approver_binding",
+            "regular_requester_binding",
+        }
+        mode = "admin_approver_separated"
     else:
         raise ReleaseManagerError("mobile release approval policy version is unsupported")
-    if source_v2_required and version not in {"2.0", "3.0"}:
+    if source_v2_required and version not in {"2.0", "3.0", "4.0"}:
         raise ReleaseManagerError("candidate source must declare an owner-reviewed release policy")
     risks = doc.get("allowed_risk_profiles")
     ttl = doc.get("ttl_seconds")
@@ -1099,7 +1106,7 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
             raise ReleaseManagerError("V1 release approval policy must remain normal-risk only")
     else:
         exact_risks = (
-            {"normal", "production_control_core"} if version == "2.0"
+            {"normal", "production_control_core"} if version in {"2.0", "4.0"}
             else {"normal", "production_control_core", "production_repair"}
         )
         if (set(risks) != exact_risks
@@ -1110,7 +1117,27 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
                     "independent_ccc_required": True,
                     "protected_release_gates_unchanged": True,
                 }):
-            raise ReleaseManagerError("V2 high-impact release approval policy is not the reviewed contract")
+            raise ReleaseManagerError("reviewed high-impact release policy is invalid")
+    if version == "4.0":
+        def exact_enrolled_user(field):
+            role = doc.get(field)
+            if not isinstance(role, dict) or set(role) != {
+                "microsoft_tenant_id", "microsoft_object_id"
+            }:
+                raise ReleaseManagerError("versioned administrative role binding invalid")
+            values = (role["microsoft_tenant_id"], role["microsoft_object_id"])
+            if not all(
+                isinstance(value, str)
+                and re.fullmatch(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", value)
+                and str(UUID(value)) == value
+                for value in values
+            ):
+                raise ReleaseManagerError("versioned administrative role identity invalid")
+            return values
+        admin = exact_enrolled_user("admin_approver_binding")
+        regular = exact_enrolled_user("regular_requester_binding")
+        if admin[0] != regular[0] or admin[1] == regular[1]:
+            raise ReleaseManagerError("administrative approver cannot be normal requester")
     return {
         "schema_version": version, "mode": mode, "risks": sorted(risks),
         "ttl_seconds": ttl, "raw": raw,
@@ -3157,6 +3184,15 @@ def native_deploy_environment(
     if os.environ.get("JASON_RELEASE_MOBILE_APPROVAL_MODE") not in (None, mobile_policy["mode"]):
         raise ReleaseManagerError("invoking release approval mode conflicts with immutable candidate")
     env["JASON_RELEASE_MOBILE_APPROVAL_MODE"] = str(mobile_policy["mode"])
+    expected_admin = (
+        "admin-separated-v1"
+        if mobile_policy["mode"] == "admin_approver_separated" else ""
+    )
+    if os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE") not in (None, expected_admin):
+        raise ReleaseManagerError(
+            "admin approver profile cannot override exact source policy"
+        )
+    env["JASON_AOT_ADMIN_APPROVER_PROFILE"] = expected_admin
     return env
 
 
@@ -3168,6 +3204,7 @@ _NATIVE_DEPLOY_CONTRACT_KEYS = (
     "JASON_PROVIDER_READ_ROLLBACK_PROFILE",
     "JASON_QUICKBOOKS_READ_PROFILE",
     "JASON_RELEASE_MOBILE_APPROVAL_MODE",
+    "JASON_AOT_ADMIN_APPROVER_PROFILE",
     "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE",
 )
 
@@ -4886,7 +4923,7 @@ def _deploy_production_locked(
     prior_release_approval_mode = live_release_mobile_approval_mode(
         live_runtime() if recovery_context is None else live_runtime_unchecked_health()
     )
-    if prior_release_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
+    if prior_release_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed", "admin_approver_separated"}:
         raise ReleaseManagerError("live release approval mode is not a supported rollback baseline")
     candidate_autotask_profile = declared_autotask_read_profile(deploy_worktree)
     prior_autotask_profile = (
@@ -6646,7 +6683,7 @@ def rollback_closed_release(
                 raise ReleaseManagerError("rollback QuickBooks profile is unavailable")
             previous_uid = worker_enrollment.approved_diagnostic_uid(rollback_tree)
             prior_release_mode = str(baseline.get("mobile_release_approval_mode") or "")
-            if prior_release_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
+            if prior_release_mode not in {"off", "owner_only_pilot", "owner_reviewed", "admin_approver_separated"}:
                 raise ReleaseManagerError("rollback release approval mode is invalid")
 
             rollback_env = quickbooks_rollback_environment(
@@ -7026,7 +7063,7 @@ def live_release_mobile_approval_mode(runtime: dict[str, Any]) -> str:
                 and value.startswith("JASON_RELEASE_MOBILE_APPROVAL_MODE=")]
     if len(selected) != 1:
         return "off"
-    return selected[0] if selected[0] in {"owner_only_pilot", "owner_reviewed"} else "off"
+    return selected[0] if selected[0] in {"owner_only_pilot", "owner_reviewed", "admin_approver_separated"} else "off"
 
 
 def _open_breaker_recovery_policy(repo: Path, candidate_sha: str) -> dict[str, Any]:
@@ -7347,6 +7384,16 @@ def governed_open_breaker_recovery_context(
     }
 
 
+def _reviewed_mobile_release_mode(policy: Any) -> str:
+    if policy.schema_version == "1.0":
+        return "owner_only_pilot"
+    if policy.schema_version == "4.0":
+        return "admin_approver_separated"
+    if policy.schema_version in {"2.0", "3.0", "4.0"}:
+        return "owner_reviewed"
+    raise ReleaseManagerError("unreviewed Teams Owner release policy mode")
+
+
 def signed_owner_offer_purpose(
     record: dict[str, Any], candidate_sha: str, reviewed_policy: Any,
     live_mode: str, *, ccc_root: Path,
@@ -7359,8 +7406,7 @@ def signed_owner_offer_purpose(
     separately authenticated CCC material review is missing. A fully reviewed
     release gets no redundant card. Neither case certifies CCC or deploys.
     """
-    expected_mode = ("owner_only_pilot" if reviewed_policy.schema_version == "1.0"
-                     else "owner_reviewed")
+    expected_mode = _reviewed_mobile_release_mode(reviewed_policy)
     if live_mode != expected_mode:
         return None
     if str(record.get("risk_profile") or "unknown") not in reviewed_policy.allowed_risk_profiles:
@@ -7368,7 +7414,7 @@ def signed_owner_offer_purpose(
     owner = record.get("owner_approval") or {}
     if owner.get("approved") is not True:
         return "release_and_ccc"
-    if (reviewed_policy.schema_version not in {"2.0", "3.0"}
+    if (reviewed_policy.schema_version not in {"2.0", "3.0", "4.0"}
             or owner.get("candidate_sha") != candidate_sha):
         return None
     named = ccc_root / ("material-review-" + candidate_sha[:16] + ".json")
@@ -7555,8 +7601,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         return False
     reviewed_policy = read_mobile_release_policy(policy_path)
     mode = live_release_mobile_approval_mode(live)
-    expected_mode = ("owner_only_pilot" if reviewed_policy.schema_version == "1.0"
-                     else "owner_reviewed")
+    expected_mode = _reviewed_mobile_release_mode(reviewed_policy)
     if mode != expected_mode:
         print("RELEASE_APPROVAL_ONLY=REVIEWED_MODE_NOT_ACTIVE", flush=True)
         return False
@@ -7649,7 +7694,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
     initial_freeze_binding = None
     if (ordinary_safe and not review_only_offer and not replacement_offer
             and (state_root / PRODUCTION_FREEZE_MARKER).exists()):
-        if reviewed_policy.schema_version not in {"2.0", "3.0"}:
+        if reviewed_policy.schema_version not in {"2.0", "3.0", "4.0"}:
             print("RELEASE_APPROVAL_ONLY=FROZEN_RELEASE_REQUIRES_REVIEWED_OWNER_MODE", flush=True)
             return False
         try:
@@ -7774,8 +7819,7 @@ def request_expired_owner_card_renewal(
     if containment.active:
         raise ReleaseManagerError("owner Teams release approval is contained")
     policy = read_mobile_release_policy(policy_path)
-    expected_mode = ("owner_only_pilot" if policy.schema_version == "1.0"
-                     else "owner_reviewed")
+    expected_mode = _reviewed_mobile_release_mode(policy)
     if live_release_mobile_approval_mode(live) != expected_mode:
         raise ReleaseManagerError("reviewed Teams approval mode does not match live runtime")
     candidate = read_eligible_release(state_root, release_id, policy)
@@ -7978,8 +8022,7 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
                 and reviewed_policy_path.is_file()):
             reviewed_policy = read_mobile_release_policy(reviewed_policy_path)
             live_mode = live_release_mobile_approval_mode(live_runtime())
-            expected_mode = ("owner_only_pilot" if reviewed_policy.schema_version == "1.0"
-                             else "owner_reviewed")
+            expected_mode = _reviewed_mobile_release_mode(reviewed_policy)
             requested_risk = str(record.get("risk_profile") or "unknown")
             purpose = signed_owner_offer_purpose(
                 record, candidate_sha, reviewed_policy, live_mode,

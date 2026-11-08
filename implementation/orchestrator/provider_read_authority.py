@@ -75,6 +75,11 @@ class GovernedProviderReadAuthorityMatcher:
     identities: ActiveIdentityReader | None = None
     routine_write_enabled: bool = False
     internal_note_write_enabled: bool = False
+    # In a separately activated V4 approval policy, the privileged signer is
+    # never an ordinary technician under the broad organization ticket-write
+    # grant. The signed admin is still free to use specifically approved and
+    # recorded *exact* grants under JKD-001, never by inheriting this policy.
+    privileged_admin_principal_ids: frozenset[str] = frozenset()
 
     def matches(
         self,
@@ -156,6 +161,7 @@ class GovernedProviderReadAuthorityMatcher:
             not (self.internal_note_write_enabled if note_only else self.routine_write_enabled)
             or request.organization_id != "aot"
             or request.client_id is not None
+            or request.principal_id in self.privileged_admin_principal_ids
             or request.requested_mode is not PermissionMode.EXECUTE
             or (request.capability != AOT_STAFF_INTERNAL_NOTE_CAPABILITY if note_only
                 else request.capability not in AOT_ROUTINE_AUTOTASK_WRITE_CAPABILITIES)

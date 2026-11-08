@@ -59,6 +59,27 @@ class MobileReleasePolicy:
     ttl_seconds: int
     policy_sha256: str
     schema_version: str = "1.0"
+    # Reviewed V4 only: exact authenticated Microsoft Entra object identities,
+    # not mutable email, UPN, or a privilege-granting binding migration.
+    admin_approver_binding: tuple[str, str] | None = None
+    regular_requester_binding: tuple[str, str] | None = None
+
+
+def _exact_entra_binding(value: Any) -> tuple[str, str]:
+    if not isinstance(value, dict) or set(value) != {
+        "microsoft_tenant_id", "microsoft_object_id"
+    }:
+        raise PermissionError("separated Entra role binding has invalid fields")
+    tenant = value["microsoft_tenant_id"]
+    subject = value["microsoft_object_id"]
+    if not all(
+        isinstance(raw, str)
+        and re.fullmatch(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", raw)
+        and str(uuid.UUID(raw)) == raw
+        for raw in (tenant, subject)
+    ):
+        raise PermissionError("separated Entra role binding requires exact UUID identities")
+    return tenant, subject
 
 
 def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
@@ -85,6 +106,15 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
     elif version in {"2.0", "3.0"}:
         expected = shared | {"high_impact_review"}
         mode = "owner_reviewed"
+    elif version == "4.0":
+        # Separate normal requester from high-impact approver. The version
+        # must be activated independently from an existing owner_reviewed
+        # deployment and must be attested by the protected host policy.
+        expected = shared | {
+            "high_impact_review", "admin_approver_binding",
+            "regular_requester_binding",
+        }
+        mode = "admin_approver_separated"
     else:
         raise PermissionError("unsupported versioned mobile release policy")
     if (set(doc) != expected
@@ -105,7 +135,7 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
     else:
         review = doc["high_impact_review"]
         required_risks = (
-            {"normal", "production_control_core"} if version == "2.0"
+            {"normal", "production_control_core"} if version in {"2.0", "4.0"}
             else {"normal", "production_control_core", "production_repair"}
         )
         if (not isinstance(review, dict)
@@ -118,8 +148,21 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
             raise PermissionError("high-impact Teams release policy requires exact reviewed controls")
         # Even V3 only authorizes the Teams review *channel*, never a standing
         # class-wide release grant or a production unfreeze. Root gates remain.
+    admin_binding = None
+    regular_binding = None
+    if version == "4.0":
+        admin_binding = _exact_entra_binding(doc["admin_approver_binding"])
+        regular_binding = _exact_entra_binding(doc["regular_requester_binding"])
+        if (
+            admin_binding[0] != regular_binding[0]
+            or admin_binding[1] == regular_binding[1]
+        ):
+            raise PermissionError(
+                "administrative approver must be distinct from regular requester in one tenant"
+            )
     return MobileReleasePolicy(
         "aot", ("person-al",), frozenset(risks), ttl, digest(doc), version,
+        admin_binding, regular_binding,
     )
 
 
@@ -397,12 +440,12 @@ def read_eligible_release(
     # This cannot mint another release approval or make the old V1 pilot
     # accept protected-control changes.
     if review_only and (
-        not allow_existing_owner_approval or policy.schema_version not in {"2.0", "3.0"}
+        not allow_existing_owner_approval or policy.schema_version not in {"2.0", "3.0", "4.0"}
         or owner_approval.get("candidate_sha") != (candidate or {}).get("candidate_sha")
     ):
         raise PermissionError("existing release approval requires a reviewed exact CCC-only card")
     if initial_unfreeze_renewal_only and (
-        not review_only or policy.schema_version not in {"2.0", "3.0"}
+        not review_only or policy.schema_version not in {"2.0", "3.0", "4.0"}
         or replacement_unfreeze_only
     ):
         raise PermissionError("initial unfreeze renewal needs prior signed owner release approval")
@@ -468,7 +511,7 @@ def read_eligible_release(
             (doc.get("manual_scope_review") or {}).get("scope_sha256"),
         )
         if (not review_only or initial_unfreeze_renewal_only)
-        and policy.schema_version in {"2.0", "3.0"} else None
+        and policy.schema_version in {"2.0", "3.0", "4.0"} else None
     )
     return ExactRelease(release_id, sha, rollback, digest(manifest),
         str(manifest.get("policy_digest") or ""),
@@ -498,7 +541,7 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
     # private persisted request. Signed callback/host consumer BOTH verify it
     # before accepting owner or CCC authority. A manufactured activity.value
     # containing only approval_id and decision cannot satisfy this contract.
-    if policy.schema_version in {"2.0", "3.0"}:
+    if policy.schema_version in {"2.0", "3.0", "4.0"}:
         challenge = card_challenge if card_challenge is not None else secrets.token_hex(24)
         if type(challenge) is not str or re.fullmatch(r"[0-9a-f]{48}", challenge) is None:
             raise PermissionError("reviewed release requires a valid card-instance challenge")
@@ -529,12 +572,12 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
     if renewal and (
         not evidence.review_only or not frozen or replacement
         or evidence.initial_unfreeze_renewal_lineage is None
-        or policy.schema_version not in {"2.0", "3.0"}
+        or policy.schema_version not in {"2.0", "3.0", "4.0"}
     ):
         raise PermissionError("renewal must be one new, signed unfreeze-only decision")
     if frozen:
         if (replacement or (evidence.review_only and not renewal)
-                or policy.schema_version not in {"2.0", "3.0"}):
+                or policy.schema_version not in {"2.0", "3.0", "4.0"}):
             raise PermissionError("one-click freeze needs a fresh reviewed owner release")
         intent["initial_freeze_binding"] = dict(evidence.initial_freeze_binding)
     if renewal:
@@ -543,12 +586,12 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
             evidence.initial_unfreeze_renewal_lineage or ()
         )
     if replacement:
-        if not evidence.review_only or policy.schema_version not in {"2.0", "3.0"}:
+        if not evidence.review_only or policy.schema_version not in {"2.0", "3.0", "4.0"}:
             raise PermissionError("replacement Teams unfreeze needs reviewed owner mode")
         intent["replacement_unfreeze_only"] = True
         intent["replacement_lineage"] = dict(evidence.replacement_lineage)
     elif evidence.review_only and not renewal:
-        if policy.schema_version not in {"2.0", "3.0"}:
+        if policy.schema_version not in {"2.0", "3.0", "4.0"}:
             raise PermissionError("CCC-only Teams material review requires owner-reviewed mode")
         intent["review_only"] = True
     if renewal_nonce is not None:
@@ -769,6 +812,32 @@ class MobileReleaseApprovalFlow:
     owner_identity_email_fallbacks: Mapping[str, str] | None = None
 
     def _authorized_owner_identity(self, *, binding, identity, policy: MobileReleasePolicy) -> str:
+        if policy.schema_version == "4.0":
+            approved = policy.admin_approver_binding
+            if approved is None or policy.regular_requester_binding is None:
+                raise PermissionError("separated Owner role policy is incomplete")
+            try:
+                derived_identity = (
+                    "person-entra-" + uuid.UUID(str(binding.microsoft_object_id)).hex
+                )
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise PermissionError("verified admin binding identity is invalid") from exc
+            if (
+                str(getattr(binding, "microsoft_tenant_id", "")) != approved[0]
+                or str(getattr(binding, "microsoft_object_id", "")) != approved[1]
+                or (str(getattr(binding, "microsoft_tenant_id", "")),
+                    str(getattr(binding, "microsoft_object_id", "")))
+                    == policy.regular_requester_binding
+                or getattr(binding, "status", None) != "active"
+                or getattr(binding, "client_id", None) is not None
+                or str(getattr(binding, "jason_identity_id", "")) != derived_identity
+                or str(getattr(identity, "identity_id", "")) != derived_identity
+                or getattr(identity, "status", None) != "active"
+                or getattr(identity, "identity_type", None) not in ("human", "person")
+                or getattr(identity, "organization_id", None) != policy.organization_id
+            ):
+                raise PermissionError("signed administrative approver is not the configured Entra actor")
+            return policy.owner_identity_ids[0]
         if identity.identity_id in policy.owner_identity_ids:
             return identity.identity_id
         fallbacks = {
@@ -871,7 +940,7 @@ class MobileReleaseApprovalFlow:
             )
             if previous_id != renewed_from:
                 raise PermissionError("owner renewal predecessor does not match")
-        if policy.schema_version in {"2.0", "3.0"}:
+        if policy.schema_version in {"2.0", "3.0", "4.0"}:
             proof = request.metadata.get("card_instance_challenge")
             if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
                     or hashlib.sha256(proof.encode("ascii")).hexdigest()

@@ -1125,8 +1125,10 @@ class RuntimeSettings:
     def validate(self) -> None:
         if self.universal_approval_mode not in {"off", "enforced"}:
             raise ValueError("JASON_UNIVERSAL_APPROVAL_MODE must be off or enforced")
-        if self.release_mobile_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
-            raise ValueError("JASON_RELEASE_MOBILE_APPROVAL_MODE must be off, owner_only_pilot or owner_reviewed")
+        if self.release_mobile_approval_mode not in {
+            "off", "owner_only_pilot", "owner_reviewed", "admin_approver_separated"
+        }:
+            raise ValueError("unsupported JASON_RELEASE_MOBILE_APPROVAL_MODE")
         if self.release_mobile_interval_seconds < 60:
             raise ValueError("mobile release approval scans require at least a 60-second interval")
         if self.owner_uat_mode not in {"off", "nonexecuting_test_only"}:
@@ -1577,6 +1579,24 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     identity_repository = SQLiteIdentityRepository(authority_store)
     routine_autotask_write_enabled = configured_aot_routine_autotask_write()
     staff_internal_note_enabled = configured_aot_staff_internal_note_write()
+    privileged_admin_principals = frozenset()
+    if settings.release_mobile_approval_mode == "admin_approver_separated":
+        from uuid import UUID
+        from .mobile_release_approval import read_mobile_release_policy
+        privileged_policy = read_mobile_release_policy(
+            settings.release_mobile_approval_policy
+        )
+        if (
+            privileged_policy.schema_version != "4.0"
+            or privileged_policy.admin_approver_binding is None
+            or privileged_policy.regular_requester_binding is None
+        ):
+            raise PermissionError("privileged admin separation requires V4 approval policy")
+        privileged_admin_principals = frozenset({
+            "person-entra-" + UUID(
+                privileged_policy.admin_approver_binding[1]
+            ).hex,
+        })
     identity_authority = IdentityAuthorityService(
         identities=identity_repository,
         grants=SQLiteAuthorityGrantRepository(authority_store),
@@ -1588,6 +1608,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             identities=identity_repository,
             routine_write_enabled=routine_autotask_write_enabled,
             internal_note_write_enabled=staff_internal_note_enabled,
+            privileged_admin_principal_ids=privileged_admin_principals,
         ),
     )
     # Mandatory standing observe policy. Authenticated AOT human staff receive
@@ -2566,7 +2587,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
 
     release_mobile_flow = None
     release_mobile_maintenance = None
-    if settings.release_mobile_approval_mode in {"owner_only_pilot", "owner_reviewed"}:
+    if settings.release_mobile_approval_mode in {
+        "owner_only_pilot", "owner_reviewed", "admin_approver_separated"
+    }:
         from .mobile_release_approval import (
             MobileReleaseApprovalFlow, MobileReleaseApprovalMaintenance,
             MobileReleaseOwnerAuthority, MobileReleaseSignedEvidenceStore,
@@ -2577,9 +2600,21 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         if settings.release_mobile_approval_mode == "owner_only_pilot":
             if owner_policy.schema_version != "1.0":
                 raise PermissionError("active release approval mode and reviewed policy version do not match")
+        elif settings.release_mobile_approval_mode == "admin_approver_separated":
+            if owner_policy.schema_version != "4.0":
+                raise PermissionError("admin-separated release mode requires reviewed V4 policy")
         elif owner_policy.schema_version not in {"2.0", "3.0"}:
             raise PermissionError("active release approval mode and reviewed policy version do not match")
         expected_version = owner_policy.schema_version
+        # V4 has no email-based Owner delegation or preexisting Owner alias
+        # lookup. Both card routing and callback use the same exact Entra OID
+        # selected by the root-owned versioned policy.
+        separate_admin = expected_version == "4.0"
+        owner_fallback = {} if separate_admin else {"person-al": "al@teamaot.com"}
+        owner_entra_bindings = (
+            {owner_policy.owner_identity_ids[0]: owner_policy.admin_approver_binding}
+            if separate_admin else {}
+        )
         release_repo = SQLiteApprovalRequestRepository(settings.release_mobile_approval_db)
         release_approval_service = ApprovalRequestService(
             release_repo, MobileReleaseOwnerAuthority(settings.release_mobile_approval_policy),
@@ -2595,14 +2630,12 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                 authenticator=teams_authenticator,
                 allowed_machine_identities=settings.allowed_machine_identities,
                 allowed_approval_prefixes=("relapproval-",),
-                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0"}
+                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0", "4.0"}
                                         else frozenset()),
             ),
             signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),
             required_policy_version=expected_version,
-            owner_identity_email_fallbacks={
-                "person-al": "al@teamaot.com",
-            },
+            owner_identity_email_fallbacks=owner_fallback,
         )
         if settings.release_mobile_approval_worker_enabled:
             release_mobile_maintenance = MobileReleaseApprovalMaintenance(
@@ -2616,9 +2649,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                     token_file=settings.teams_proactive_token_file,
                     bindings=durable_bindings,
                     owner_identity_ids=owner_policy.owner_identity_ids,
-                    owner_identity_email_fallbacks={
-                        "person-al": "al@teamaot.com",
-                    },
+                    owner_identity_email_fallbacks=owner_fallback,
+                    owner_identity_entra_bindings=owner_entra_bindings,
                 ),
                 interval_seconds=settings.release_mobile_interval_seconds,
                 required_policy_version=expected_version,

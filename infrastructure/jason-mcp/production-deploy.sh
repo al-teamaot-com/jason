@@ -112,6 +112,32 @@ if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
 fi
 
+# The privileged-grant administrator is separately authenticated. This
+# activation is bound to the reviewed source V4 release policy and is OFF for
+# legacy candidates. An SSH/environment override cannot enable it.
+SOURCE_ADMIN_APPROVER_PROFILE="$(python3 - "$REPO_ROOT" <<'PY_ADMIN_ROLE'
+import sys
+from pathlib import Path
+repo = Path(sys.argv[1])
+sys.path.insert(0, str(repo / "tools"))
+from release_manager_host_runner import _validated_mobile_release_policy
+policy = _validated_mobile_release_policy(
+    repo / "config" / "mobile-release-approval-policy.json",
+    source_v2_required=True,
+)
+print("admin-separated-v1" if policy["mode"] == "admin_approver_separated" else "")
+PY_ADMIN_ROLE
+)" || exit 2
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  ADMIN_APPROVER_PROFILE=""
+else
+  ADMIN_APPROVER_PROFILE="$SOURCE_ADMIN_APPROVER_PROFILE"
+  if [ "${JASON_AOT_ADMIN_APPROVER_PROFILE:-}" != "$ADMIN_APPROVER_PROFILE" ]; then
+    echo "DENIED: admin approval profile differs from reviewed exact source" >&2
+    exit 2
+  fi
+fi
+
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 ROLLBACK="jason-mcp-pilot-rollback-$STAMP"
 QBO_DEV_ROLE_HOST="${JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/quickbooks-development-oauth-client-approle/role-id}"
@@ -161,6 +187,7 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --set-env JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH="$QBO_ACTIVE_SECRET_CONTAINER" \
   --set-env JASON_QUICKBOOKS_OAUTH_DB="$QBO_ACTIVE_DB" \
   --set-env "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE=$STAFF_NOTE_PROFILE" \
+  --set-env "JASON_AOT_ADMIN_APPROVER_PROFILE=$ADMIN_APPROVER_PROFILE" \
   --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \

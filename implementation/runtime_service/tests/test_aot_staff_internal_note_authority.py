@@ -115,11 +115,14 @@ class Providers:
         ),)
 
 
-def make_service(*, enabled=True, approval_required=True):
+def make_service(*, enabled=True, approval_required=True,
+                 privileged_admin_principals=frozenset()):
     identities = InMemoryIdentityRepository()
     for principal, kind, org, status in (
         ("tech", "human", "aot", "active"),
         ("frontdesk", "person", "aot", "active"),
+        ("person-entra-c848022de13b445784b0e2f5c00dcaf6", "human", "aot", "active"),
+        ("person-entra-bee80bdcffb04c50b453c09d4d411f5f", "human", "aot", "active"),
         ("automation", "service", "aot", "active"),
         ("disabled", "person", "aot", "disabled"),
         ("external", "human", "other", "active"),
@@ -139,6 +142,7 @@ def make_service(*, enabled=True, approval_required=True):
             caps, providers, identities,
             routine_write_enabled=False,
             internal_note_write_enabled=enabled,
+            privileged_admin_principal_ids=privileged_admin_principals,
         ),
     )
     return service, caps, providers, approvals
@@ -315,3 +319,22 @@ def test_policy_is_not_named_user_allowlist_and_preserves_person_approvals():
     unknown = decide(service, principal="unregistered")
     assert unknown.outcome is AuthorityOutcome.INDETERMINATE
     assert unknown.reason_codes == ("IDENTITY_NOT_FOUND",)
+
+
+
+def test_v4_admin_is_not_an_everyday_technician_but_regular_user_remains_eligible():
+    # A versioned policy role separation must not make the admin principal
+    # eligible for the organization-wide routine human ticket-write shortcut.
+    admin = "person-entra-c848022de13b445784b0e2f5c00dcaf6"
+    regular = "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
+    service, _, _, _ = make_service(privileged_admin_principals=frozenset({admin}))
+    assert decide(service, principal=admin).outcome is AuthorityOutcome.DENIED
+    allowed = decide(service, principal=regular)
+    assert allowed.outcome is AuthorityOutcome.APPROVAL_REQUIRED
+    assert allowed.matched_grants == ("staff-note-grant",)
+
+
+def test_legacy_human_ticket_authority_is_unchanged_until_v4_opt_in():
+    admin = "person-entra-c848022de13b445784b0e2f5c00dcaf6"
+    service, _, _, _ = make_service()
+    assert decide(service, principal=admin).outcome is AuthorityOutcome.APPROVAL_REQUIRED

@@ -181,6 +181,7 @@ class TeamsGatewayPlaybookApprovalSender:
         bindings: ActiveMicrosoftIdentityBindingReader,
         owner_identity_ids,
         owner_identity_email_fallbacks: Mapping[str, str] | None = None,
+        owner_identity_entra_bindings: Mapping[str, tuple[str, str]] | None = None,
     ) -> None:
         self.gateway_url = str(gateway_url).rstrip("/")
         self.token_file = Path(token_file)
@@ -191,8 +192,40 @@ class TeamsGatewayPlaybookApprovalSender:
             for identity, email in dict(owner_identity_email_fallbacks or {}).items()
             if str(identity).strip() and str(email).strip()
         }
+        self.owner_identity_entra_bindings = dict(
+            owner_identity_entra_bindings or {}
+        )
+        if set(self.owner_identity_entra_bindings) - set(self.owner_identity_ids):
+            raise PermissionError("separated Owner binding is outside approval audience")
+        if set(self.owner_identity_entra_bindings).intersection(
+            self.owner_identity_email_fallbacks
+        ):
+            raise PermissionError("separated Owner cannot use mutable email fallback")
 
     def _binding_for_identity(self, identity: str):
+        if identity in self.owner_identity_entra_bindings:
+            tenant, object_id = self.owner_identity_entra_bindings[identity]
+            try:
+                expected_identity = "person-entra-" + uuid.UUID(object_id).hex
+                if str(uuid.UUID(tenant)) != tenant or str(uuid.UUID(object_id)) != object_id:
+                    raise ValueError("noncanonical Microsoft identity")
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise PermissionError("reviewed Owner Entra identity is invalid") from exc
+            binding = self.bindings.find(
+                microsoft_tenant_id=tenant, microsoft_object_id=object_id,
+            )
+            if (
+                binding is None
+                or getattr(binding, "microsoft_tenant_id", None) != tenant
+                or getattr(binding, "microsoft_object_id", None) != object_id
+                or getattr(binding, "jason_identity_id", None) != expected_identity
+                or getattr(binding, "client_id", None) is not None
+                or getattr(binding, "status", None) != "active"
+            ):
+                raise PermissionError(
+                    "admin Teams approval recipient is not the authenticated Entra binding"
+                )
+            return binding
         binding = self.bindings.find_active_by_jason_identity(
             jason_identity_id=identity)
         if binding is not None:

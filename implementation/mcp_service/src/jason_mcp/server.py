@@ -4300,7 +4300,52 @@ _UNSUPERVISED_COMPONENT_BLOCK_PATTERNS = (
 
 
 def _authority_admin_owner() -> tuple[str, str]:
-    principal, organization, _, _ = _authenticated_write_identity()
+    """Administer exact grants with the authenticated privileged account only.
+
+    V4 is a distinct *opt-in* release policy. It does not remap the admin
+    Entra identity into the routine technician account or write identity
+    bindings. An enabled profile must be attested by source-controlled release
+    input and the exact root-owned private policy; unknown profiles fail closed.
+    """
+    principal, organization, assurance, client_id = _authenticated_write_identity()
+    mode = os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE", "").strip()
+    if mode not in {"", "admin-separated-v1"}:
+        raise PermissionError("AUTHORITY_GRANT_ADMIN_POLICY_INVALID")
+    if mode == "admin-separated-v1":
+        from uuid import UUID
+        from jason_runtime.mobile_release_approval import read_mobile_release_policy
+
+        policy = read_mobile_release_policy(Path(os.environ.get(
+            "JASON_RELEASE_MOBILE_APPROVAL_POLICY",
+            "/var/lib/jason/authority/mobile-release-approval-policy.json",
+        )))
+        if (
+            policy.schema_version != "4.0"
+            or policy.admin_approver_binding is None
+            or policy.regular_requester_binding is None
+        ):
+            raise PermissionError("AUTHORITY_GRANT_ADMIN_ROLE_POLICY_REQUIRED")
+        token = get_access_token()
+        claims = getattr(token, "claims", None) or {}
+        tenant_id = str(claims.get("tid") or "").strip()
+        object_id = str(claims.get("oid") or "").strip()
+        try:
+            expected = "person-entra-" + UUID(object_id).hex
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise PermissionError("AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED") from exc
+        if (
+            (tenant_id, object_id) != policy.admin_approver_binding
+            or (tenant_id, object_id) == policy.regular_requester_binding
+            or principal != expected
+            or organization != policy.organization_id
+            or assurance != "entra-oauth-bearer"
+            or client_id is not None
+        ):
+            raise PermissionError("AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED")
+        return principal, organization
+
+    # Legacy profile remains unchanged until exact source and private V4
+    # policy are independently reviewed and deliberately activated.
     owners = approval_owner_identities()
     if not owners or principal not in owners:
         raise PermissionError("AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED")
