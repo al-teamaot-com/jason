@@ -694,6 +694,108 @@ def current_status(*, api: IntegrationApi, spool: Path, release_state: Path) -> 
     return result
 
 
+def reconcile_completed_release_only(
+    *,
+    api: IntegrationApi,
+    spool: Path,
+    release_state: Path,
+) -> dict[str, Any]:
+    """One bounded status repair, never a release or PR integration.
+
+    This exists because an intentional Owner pause can leave a completed
+    release's old integration lock in the persisted status. Normal reconcile()
+    may immediately select/merge unrelated queued PRs when it clears that
+    lock, so it is NOT safe to use for bookkeeping-only recovery.
+
+    No provider/production writes, no GitHub status writes, no PR selection,
+    no authorization or pause-file mutation. The original Owner pause must
+    remain active, and read-only GitHub/protected LKG and final release-record
+    evidence must agree on the exact lock candidate before an atomic update.
+    """
+    state_path = spool / "pmv3-integration-queue-state.json"
+    pause_path = spool / "pmv3-engineering-owner-pause.json"
+    if (
+        not state_path.is_file() or state_path.is_symlink()
+        or not pause_path.is_file() or pause_path.is_symlink()
+    ):
+        raise ValueError("completed-release repair requires existing real state and Owner pause")
+    original = state_path.read_bytes()
+    state = load_state(state_path)
+    if load_json(pause_path, default={}).get("status") != "paused_by_owner":
+        raise ValueError("completed-release repair requires continuing Owner engineering pause")
+    if state.get("train") is not None:
+        raise ValueError("completed-release repair refuses a pending integration train")
+    lock = state.get("release_lock")
+    if lock is None:
+        # Idempotent: no state rewrite, no need to visit the GitHub mutation API.
+        return state
+    if not isinstance(lock, dict) or lock.get("active") is not True:
+        raise ValueError("completed-release repair refuses ambiguous release lock")
+    # Independent protected-main movement is a constitutional source hold:
+    # a completed-release status refresh must NEVER clear that separate proof.
+    if (
+        state.get("status") != "release_locked"
+        or lock.get("reason") not in {
+            "release_recovery_candidate_merged",
+            "release_train_complete_awaiting_production",
+        }
+        or lock.get("train_id") is not None
+        or state.get("main_sha") != lock.get("candidate_sha")
+    ):
+        raise ValueError("completed-release repair refuses a source-integrity or unrecognized lock")
+
+    current = current_status(api=api, spool=spool, release_state=release_state)
+    candidate = str(lock.get("candidate_sha") or "")
+    if (
+        not current["release_lock_reconciliation_pending"]
+        or current["status"] != "release_complete_pending_queue_refresh"
+        or candidate != current["main_sha"]
+        or candidate != current["production_lkg_sha"]
+    ):
+        raise ValueError("completed-release repair requires exact completed LKG/main/lock")
+    record_path = release_state / "records" / ("release-" + candidate[:16] + ".json")
+    if not record_path.is_file() or record_path.is_symlink():
+        raise ValueError("completed-release repair requires immutable final release evidence")
+    release = load_json(record_path, default={})
+    production = release.get("production") or {}
+    if (
+        release.get("release_id") != "release-" + candidate[:16]
+        or release.get("state") != "closed"
+        or (release.get("release_candidate") or {}).get("candidate_sha") != candidate
+        or any(production.get(key) != candidate for key in (
+            "live_sha", "runtime_revision", "mcp_revision", "host_revision",
+        ))
+        or not all(production.get(key) is True for key in (
+            "alignment_verified", "health_passed",
+            "functional_smoke_tests_passed", "host_reconciliation_passed",
+            "production_manifest_complete",
+        ))
+        or not production.get("verified_at")
+    ):
+        raise ValueError("completed-release repair refuses incomplete release acceptance")
+
+    if state_path.read_bytes() != original:
+        raise RuntimeError("completed-release repair detected concurrently updated queue")
+    updated = dict(state)
+    updated["release_lock"] = None
+    updated["status"] = "idle"
+    updated["main_sha"] = candidate
+    updated["production_lkg_sha"] = candidate
+    updated["updated_at"] = now()
+    updated["last_action"] = {
+        "action": "reconciled_completed_release_without_integration",
+        "candidate_sha": candidate,
+        "at": updated["updated_at"],
+        "owner_pause_preserved": True,
+        "github_mutation": False,
+    }
+    updated["metrics"] = {**(state.get("metrics") or {}), "release_locked": False}
+    # Keep the previously admitted PR queue byte-for-byte semantically;
+    # critically do not start the next release train.
+    atomic_json(state_path, updated)
+    return updated
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, required=True)
@@ -701,9 +803,30 @@ def main() -> int:
     parser.add_argument("--release-state", type=Path, required=True)
     parser.add_argument("--repository", default=DEFAULT_REPOSITORY)
     parser.add_argument("--batch-size", type=int, default=3)
-    parser.add_argument("--status-only", action="store_true",
-                        help="Read current GitHub/production revisions without changing queue state")
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument("--status-only", action="store_true",
+                         help="Read live revisions without changing queue state")
+    actions.add_argument("--reconcile-completed-release-only", action="store_true",
+                         help="With Owner pause active, clear only a verified completed stale release lock; never merge PRs")
     args = parser.parse_args()
+    if args.reconcile_completed_release_only:
+        try:
+            repaired = reconcile_completed_release_only(
+                api=GhApi(args.repository), spool=args.spool.resolve(),
+                release_state=args.release_state.resolve(),
+            )
+        except Exception as exc:
+            print("PMV3_INTEGRATION_QUEUE " + json.dumps({
+                "status": "control_failure",
+                "action": "reconcile_completed_release_only",
+                "error_type": type(exc).__name__,
+                "reason": str(exc)[:500],
+            }, sort_keys=True))
+            return 1
+        print("PMV3_INTEGRATION_QUEUE " + json.dumps(
+            snapshot(repaired), sort_keys=True,
+        ))
+        return 0
     if args.status_only:
         try:
             status = current_status(
