@@ -38,6 +38,17 @@ own content, approval and evidence policy. See
 `docs/operations/AOT-External-Client-Message-Classes.md`.
 No new message is implicitly approved by the Company opt-in.
 
+## One shared, ticket-bound send process
+This UDF is checked by **one** TODO-COMM-001 outbound communication process,
+regardless of whether the intent came from ticket resolution, onboarding,
+documentation upkeep or security workflows. No process sends directly outside
+Autotask. Every client-facing notification requires a legitimate, existing
+and verified Autotask ticket. If there is no appropriate ticket, a separate
+governed ticket-create workflow must create/read back an appropriate ticket
+first; otherwise communication remains blocked. A ticket note and an
+Autotask-originated email about that note are considered one ticket-bound send.
+TimeEntries are only for verified work on the same ticket.
+
 ## Global communication decision
 1. Identify exact Autotask ticket, its company, ticket contact, and approved
    workflow/template, using governed source reads.

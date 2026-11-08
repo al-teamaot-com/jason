@@ -401,3 +401,61 @@ def test_xyz_notification_scope_is_enforced_in_connector_before_provider_send(mo
         match="CLIENT_NOTIFICATION_XYZ_ACCEPTANCE_EXACT_SCOPE_REQUIRED",
     ):
         Connector._validate_scope(AuthoritativeReads(), request, 141431)
+
+def test_approved_client_note_is_exactly_ticket_bound_and_client_visibility_is_distinct(monkeypatch):
+    from connectors.core.contracts import ConnectorContext, ConnectorRequest
+    from jason_runtime.autotask_client_notification import (
+        AutotaskClientNotificationConnector,
+    )
+    from jason_runtime.autotask_internal_note import AutotaskInternalNoteConnector
+    from jason_runtime.approved_client_messages import resolve_approved_client_message
+
+    _enable_approved_workflow(monkeypatch)
+    template = resolve_approved_client_message(
+        workflow_id="vulscan_missing_patch",
+        template_id=VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+    )
+    context = ConnectorContext(
+        correlation_id="corr-ticketbound", principal_id="person-al",
+        organization_id="aot", client_id=None,
+        capability="autotask.ticket.note.create", mode="execute",
+    )
+
+    def payload(ticket_id):
+        return ConnectorRequest(context=context, arguments={
+            "workflow_id": "vulscan_missing_patch",
+            "template_id": VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
+            "payload": {
+                "ticketID": ticket_id, "title": template.title,
+                "description": template.body,
+            },
+        })
+
+    # Existing note transport binds the actual ticket ID into the immutable
+    # provider plan, rather than sending free-form email.
+    client_request = AutotaskClientNotificationConnector._normalize_approved_workflow_request(
+        None, payload(71443)
+    )
+    expected = AutotaskClientNotificationConnector._expected_payload(client_request)
+    assert expected["ticketID"] == 71443
+    assert expected["noteType"] == 3
+    assert expected["publish"] == 1
+    assert AutotaskInternalNoteConnector.required_note_publish == 2
+
+    # Ticketless or nonpositive targets are blocked before scope lookup, POST,
+    # or any client delivery attempt.
+    for invalid_id in (None, 0, -1, "not-a-ticket"):
+        invalid_request = AutotaskClientNotificationConnector._normalize_approved_workflow_request(
+            None, payload(invalid_id)
+        )
+        with pytest.raises(Exception):
+            AutotaskClientNotificationConnector._expected_payload(invalid_request)
+
+    # The client-visible and internal-only note contracts are disjoint.
+    with pytest.raises(Exception, match="publish=2"):
+        AutotaskInternalNoteConnector._expected_payload(client_request)
+    internal_request = ConnectorRequest(context=context, arguments={
+        "payload": {**expected, "publish": 2},
+    })
+    with pytest.raises(Exception, match="publish=1"):
+        AutotaskClientNotificationConnector._expected_payload(internal_request)

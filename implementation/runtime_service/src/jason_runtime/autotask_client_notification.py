@@ -371,6 +371,10 @@ def validate_approved_workflow_scope(
 class AutotaskClientNotificationConnector(AutotaskInternalNoteConnector):
     """Ticket-note transport plus authoritative fail-closed client scope."""
 
+    # Must never inherit the publish=2 internal-only note contract. Exact
+    # client-notification publication is bound in both plan and readback.
+    required_note_publish = 1
+
     def _read_item(
         self,
         *,

@@ -319,6 +319,11 @@ class AutotaskInternalNoteConnector(
 ):
     """Exact TicketNote-create connector with mandatory readback."""
 
+    # Native internal notes use publish=2; the separately governed
+    # client-notification subclass binds publish=1. This is validated
+    # consistently at both preparation and readback.
+    required_note_publish = 2
+
     def __init__(
         self,
         *,
@@ -411,8 +416,9 @@ class AutotaskInternalNoteConnector(
             credentials,
         )
 
-    @staticmethod
+    @classmethod
     def _expected_payload(
+        cls,
         request: ConnectorRequest,
     ) -> dict[str, Any]:
         raw = request.arguments.get("payload")
@@ -450,17 +456,17 @@ class AutotaskInternalNoteConnector(
                 "internal note visibility metadata is invalid"
             ) from error
 
-        if note_type != 3 or publish != 2:
+        if note_type != 3 or publish != cls.required_note_publish:
             raise ConnectorAuthorizationError(
-                "internal note visibility must remain "
-                "noteType=3,publish=2"
+                "TicketNote visibility must remain "
+                f"noteType=3,publish={cls.required_note_publish}"
             )
 
         expected = {
             "ticketID": ticket_id,
             "description": description,
             "noteType": 3,
-            "publish": 2,
+            "publish": cls.required_note_publish,
         }
 
         title = str(
@@ -645,7 +651,7 @@ class AutotaskInternalNoteConnector(
                 "ticket note type failed readback"
             )
 
-        if observed_publish != 2:
+        if observed_publish != int(expected["publish"]):
             raise AutotaskInternalNoteVerificationError(
                 "ticket note publish failed readback"
             )
