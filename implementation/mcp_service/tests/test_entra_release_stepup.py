@@ -84,6 +84,7 @@ def test_admin_signin_pkce_tenant_scoped_not_admin_teams(fixture):
     url=login_authorization_url(
         route=ROUTE, login=fixture.login,
         client_id=CLIENT, redirect_uri=REDIRECT,
+        required_auth_context="c1",
     )
     u=urlsplit(url);params=parse_qs(u.query)
     assert u.hostname == "login.microsoftonline.com"
@@ -92,6 +93,10 @@ def test_admin_signin_pkce_tenant_scoped_not_admin_teams(fixture):
     assert params["code_challenge_method"] == ["S256"]
     assert params["prompt"] == ["login"]
     assert params["max_age"] == ["300"]
+    import json
+    assert json.loads(params["claims"][0]) == {
+        "id_token": {"acrs": {"essential": True, "value": "c1"}},
+    }
     assert params["state"] == [fixture.login.state]
     assert params["nonce"] == [fixture.login.nonce]
     assert "code_verifier" not in params
@@ -183,6 +188,7 @@ def test_regular_user_can_never_be_the_admin_signer(fixture):
         login_authorization_url(
             route=ROUTE, login=fixture.login, client_id=CLIENT,
             redirect_uri="https://attacker.example/steal-token",
+            required_auth_context="c1",
         )
 
 

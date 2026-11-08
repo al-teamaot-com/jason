@@ -30,8 +30,14 @@ The correct single process is:
 3. The server verifies state, nonce, code_verifier, short session TTL,
    token cryptographic signature from Microsoft JWKS, exact `iss`, `aud`,
    `tid`, `oid`, token `exp`, `nbf`, `iat`, `auth_time`, and an
-   explicitly reviewed Microsoft Entra Conditional Access authentication
-   context (MFA/step-up). Missing context denies.
+   explicitly requested Microsoft Entra Conditional Access authentication
+   context (MFA/step-up) through the ID-token `claims` parameter.
+   **The presence of an `acrs` value alone does not prove MFA.** Microsoft
+   may issue the claim when there is no tenant Conditional Access policy
+   protecting that context. Before any live activation, an independently
+   verified tenant policy must prove this exact context actually enforces
+   appropriate MFA/step-up for the admin application. Missing context or
+   missing independent policy proof denies.
 4. Show the exact approved release SHA, scope digest, rollback SHA, release
    manifest digest, expiration, and pending ID. Owner explicitly chooses
    approve or deny while *admin-authenticated*. The link and regular Teams

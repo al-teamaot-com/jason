@@ -128,12 +128,21 @@ def new_login(approval: ExactRelease, *, now: datetime) -> PendingEntraLogin:
 def login_authorization_url(
     *, route: ReleaseIdentityRoute, login: PendingEntraLogin,
     client_id: str, redirect_uri: str,
+    required_auth_context: str,
 ) -> str:
-    """Use Entra OIDC, not Teams or a caller-supplied identity assertion."""
+    """Use Entra OIDC, not Teams or a caller-supplied identity assertion.
+
+    IMPORTANT: An acrs claim alone is not proof that the auth context has a
+    protecting Conditional Access policy. Activation must independently
+    verify the Entra CA policy and its required step-up control.
+    """
     route.validate()
     login.validate()
     if not UUID.fullmatch(client_id) or redirect_uri != REDIRECT:
         raise EntraStepUpDenied("REVIEWED_ENTRA_APP_REDIRECT_REQUIRED")
+    if (not isinstance(required_auth_context, str)
+            or not re.fullmatch(r"c[1-9][0-9]?", required_auth_context)):
+        raise EntraStepUpDenied("REVIEWED_ADMIN_STEP_UP_POLICY_MISSING")
     challenge = _base64url(sha256(login.code_verifier.encode("ascii")).digest())
     return (
         f"https://login.microsoftonline.com/{route.tenant_id}/oauth2/v2.0/authorize?"
@@ -149,6 +158,14 @@ def login_authorization_url(
             "code_challenge_method": "S256",
             "prompt": "login",
             "max_age": "300",
+            "claims": json.dumps({
+                "id_token": {
+                    "acrs": {
+                        "essential": True,
+                        "value": required_auth_context,
+                    },
+                },
+            }, separators=(",", ":"), sort_keys=True),
         })
     )
 
