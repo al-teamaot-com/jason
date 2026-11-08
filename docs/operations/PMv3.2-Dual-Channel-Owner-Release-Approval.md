@@ -61,6 +61,14 @@ The correct single process is:
 - the result is **identity evidence only**, marked
   `release_authorized=False`. It does NOT create a decision or authorize a
   production transaction.
+- `jason_mcp.entra_release_browser_sessions.OneTimeBrowserLoginStore`
+  implements a private 0600 server-side SQLite login session ledger. The
+  browser cookie is random and stored only by SHA256, the PKCE verifier/
+  nonce/state never leave the server, exact release fingerprint is locked,
+  one-time use is enforced in a transactional consume, and invalid state,
+  wrong cookie, scope tampering, stale/expired or replayed sessions fail
+  closed. The adapter must set `Secure; HttpOnly; SameSite=Lax`; this
+  library **does not** establish an HTTPS web route or actually set a cookie.
 
 The old #2377 admin Teams-license preflight is only a defense against a
 misleading message-ID receipt. It is not the end-to-end remedy for this
@@ -77,8 +85,9 @@ reproduce an unlicensed admin delivery failure.
   The code rejects any arbitrary redirect URI. Do not assume a redirect is
   registered merely because Jason's MCP OAuth is functional.
 - Implement the server-side, secure `HttpOnly; Secure; SameSite=Lax`
-  single-use browser session store, authorization-code redemption, PKCE
-  matching, CSRF and callback replay prevention, Entra signing keys and token
+  HTTP cookie/session adapter on top of the existing protected one-time
+  store, authorization-code redemption with the registered confidential
+  client, CSRF and callback replay checks, Entra signing keys and token
   storage restrictions. Use a mature auth library as appropriate; no access
   or refresh tokens in Teams URLs, cookies or durable approval evidence.
 - Verify the configured tenant Conditional Access authentication context

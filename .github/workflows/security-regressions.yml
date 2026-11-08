@@ -72,7 +72,8 @@ jobs:
       - name: Unlicensed-admin Entra browser step-up security regressions
         run: |
           python -m pytest -q \
-            implementation/mcp_service/tests/test_entra_release_stepup.py
+            implementation/mcp_service/tests/test_entra_release_stepup.py \
+            implementation/mcp_service/tests/test_entra_release_browser_sessions.py
       - name: Approval and transport authority regressions
         run: |
           python -m pytest -q \
