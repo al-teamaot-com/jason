@@ -390,3 +390,154 @@ def test_read_only_status_does_not_clear_unrelated_release_lock(tmp_path):
     assert result['release_candidate_sha'] == unrelated
     assert ledger.read_bytes() == before
     assert not api.gates and not api.merges and not api.gate_required
+
+
+def completed_release_fixture(tmp_path, *, main=None, lkg=None, locked=None,
+                              pause=True, closed=True, accepted=True, train=None):
+    main = main or "a" * 40
+    lkg = lkg or main
+    locked = locked or main
+    spool = tmp_path / "spool"
+    release = tmp_path / "release"
+    spool.mkdir(parents=True)
+    write_lkg(release, lkg)
+    if pause:
+        (spool / "pmv3-engineering-owner-pause.json").write_text(
+            json.dumps({"schema_version":"1.0","status":"paused_by_owner"})
+        )
+    prior_queue = [
+        {"pr_number": 1330, "title": "another admitted PR", "head_sha": "b" * 40, "priority": 100},
+        {"pr_number": 2297, "title": "unrelated release fix", "head_sha": "c" * 40, "priority": 100},
+    ]
+    baseline = {
+        **queue.empty_state(),
+        "status":"release_locked",
+        "main_sha":main,
+        "production_lkg_sha":"0" * 40,
+        "release_lock":queue._release_lock(
+            locked, None, reason="release_recovery_candidate_merged",
+        ),
+        "queue":prior_queue,
+        "train":train,
+        "metrics":{"admitted_open":2,"queued":2,"release_locked":True},
+    }
+    ledger = spool / "pmv3-integration-queue-state.json"
+    ledger.write_text(json.dumps(baseline))
+    record = release / "records" / ("release-" + locked[:16] + ".json")
+    record.parent.mkdir(parents=True)
+    record.write_text(json.dumps({
+        "release_id":"release-" + locked[:16],
+        "state":"closed" if closed else "production_eligible",
+        "release_candidate":{"candidate_sha":locked},
+        "production":{
+            "live_sha":locked,"runtime_revision":locked,"mcp_revision":locked,
+            "host_revision":locked,"alignment_verified":accepted,
+            "health_passed":accepted,"functional_smoke_tests_passed":accepted,
+            "host_reconciliation_passed":accepted,
+            "production_manifest_complete":accepted,
+            "verified_at":"2026-11-08T13:06:37+00:00" if accepted else None,
+        },
+    }))
+    # Even if these unapproved unrelated PRs are fully green and would merge
+    # under a normal reconciliation pass, this operation must not select them.
+    api=FakeApi(main_sha=main,prs=[
+        pr(1330, "b" * 40, labels=[queue.INTEGRATION_READY_LABEL]),
+        pr(2297, "c" * 40, labels=[queue.INTEGRATION_READY_LABEL]),
+    ])
+    return spool, release, ledger, api, baseline, record
+
+
+def test_completed_release_only_safe_repair_keeps_approved_queue_and_pause(tmp_path):
+    spool, release, ledger, api, before, record = completed_release_fixture(tmp_path)
+    original_queue=list(before["queue"])
+    original_pause=(spool/"pmv3-engineering-owner-pause.json").read_bytes()
+    release_evidence=record.read_bytes()
+    result=queue.reconcile_completed_release_only(
+        api=api, spool=spool, release_state=release,
+    )
+    assert result["release_lock"] is None
+    assert result["status"] == "idle"
+    assert result["main_sha"] == "a" * 40
+    assert result["production_lkg_sha"] == "a" * 40
+    assert result["queue"] == original_queue
+    assert result["train"] is None
+    assert result["metrics"] == {"admitted_open":2,"queued":2,"release_locked":False}
+    assert result["last_action"]["action"] == "reconciled_completed_release_without_integration"
+    assert result["last_action"]["owner_pause_preserved"] is True
+    assert result["last_action"]["github_mutation"] is False
+    assert (spool/"pmv3-engineering-owner-pause.json").read_bytes() == original_pause
+    assert record.read_bytes() == release_evidence
+    assert ledger.read_text() == json.dumps(result,indent=2,sort_keys=True)+"\n"
+    assert not api.merges and not api.gates and not api.updates and not api.gate_required
+    # Second call is strictly idempotent; it must not even rewrite status.
+    exact=ledger.read_bytes()
+    assert queue.reconcile_completed_release_only(
+        api=api,spool=spool,release_state=release,
+    ) == result
+    assert ledger.read_bytes() == exact
+    assert not api.merges and not api.gates
+
+
+@pytest.mark.parametrize("alter", [
+    "main_ahead","lkg_behind","lock_mismatch","pause_absent",
+    "pause_disabled","train_active","release_not_closed","acceptance_failed",
+    "release_wrong_sha","record_absent","state_symlink","pause_symlink",
+])
+def test_completed_release_only_refuses_mismatch_and_preserves_everything(tmp_path,alter):
+    kwargs={}
+    if alter == "main_ahead":
+        kwargs["main"]="e" * 40
+        kwargs["locked"]="a" * 40
+        kwargs["lkg"]="a" * 40
+    if alter == "lkg_behind":
+        kwargs["lkg"]="0" * 40
+    if alter == "lock_mismatch":
+        kwargs["locked"]="d" * 40
+        kwargs["main"]="a" * 40
+        kwargs["lkg"]="a" * 40
+    if alter == "pause_absent":
+        kwargs["pause"]=False
+    if alter == "train_active":
+        kwargs["train"]={"train_id":"train-active", "prs":[]}
+    if alter == "release_not_closed":
+        kwargs["closed"]=False
+    if alter == "acceptance_failed":
+        kwargs["accepted"]=False
+    spool,release,ledger,api,_,record=completed_release_fixture(tmp_path,**kwargs)
+    pause=spool/"pmv3-engineering-owner-pause.json"
+    if alter=="pause_disabled":
+        pause.write_text(json.dumps({"status":"healthy"}))
+    if alter=="release_wrong_sha":
+        value=json.loads(record.read_text())
+        value["release_candidate"]["candidate_sha"]="f"*40
+        record.write_text(json.dumps(value))
+    if alter=="record_absent":
+        record.unlink()
+    if alter=="state_symlink":
+        orig=spool/"real-state.json"
+        ledger.rename(orig)
+        ledger.symlink_to(orig)
+    if alter=="pause_symlink":
+        real=spool/"real-pause.json"
+        pause.rename(real)
+        pause.symlink_to(real)
+    expected=ledger.read_bytes()
+    with pytest.raises((ValueError,RuntimeError)):
+        queue.reconcile_completed_release_only(
+            api=api,spool=spool,release_state=release,
+        )
+    assert ledger.read_bytes()==expected
+    assert not api.merges and not api.gates and not api.updates and not api.gate_required
+
+
+def test_completed_release_only_never_advances_a_valid_active_lock(tmp_path):
+    spool,release,ledger,api,baseline,_=completed_release_fixture(
+        tmp_path,main="a"*40,lkg="0"*40,locked="a"*40,
+    )
+    assert queue.current_status(api=api,spool=spool,release_state=release)["status"]=="release_locked"
+    with pytest.raises(ValueError):
+        queue.reconcile_completed_release_only(
+            api=api,spool=spool,release_state=release,
+        )
+    assert queue.load_state(ledger) == baseline
+    assert not api.merges and not api.gates and not api.updates

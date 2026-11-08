@@ -328,3 +328,11 @@ Routine releases do not wait for optional documentation publication.
 This source-only change needs protected CI, independent staging and approved
 release integration before it can be considered for the one-click Teams
 production transaction. It does not install or enable any new service.
+
+## Completed-release queue bookkeeping without resuming Owner-paused engineering (2026-11-08)
+
+A release may have state=closed and a protected Last Known Good identical to GitHub main while the paused PMV3 integration queue retains an older release_lock. Normal pmv3_integration_queue.py reconciliation is NOT suitable for status-only repair: once it clears a lock, it may immediately select or merge unrelated admitted PRs. Do not use that path while engineering is Owner-paused.
+
+The existing queue program now has a narrowly bounded --reconcile-completed-release-only operator mode. It requires the existing Owner engineering pause, exact GitHub protected-main SHA == protected LKG SHA == locked candidate SHA, and a closed release record with complete runtime/MCP/host, health, smoke and reconciliation acceptance. It atomically updates only the paused queue's stale completion fields, retains the admitted queue and pause, and issues NO GitHub status/PR mutation, provider write, production deployment, unfreeze or automatic promotion. Invalid/mismatched evidence fails closed. Second invocation is idempotent without a write.
+
+Run only through approved managed-source installation and current operator governance; do not invoke unreviewed worktree code against live state or use this feature to bypass a release lock for an unverified candidate. --status-only remains the nonmutating investigation path. A paused engineering service is still paused after this bookkeeping repair. Tests include controlled snapshots of the real November 8 release and adversarial paused/mismatched/closed-false cases. No new controller, timer, gate or queue was introduced.
