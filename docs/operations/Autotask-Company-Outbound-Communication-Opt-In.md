@@ -160,3 +160,29 @@ from merging the preproduction source.
 - One approved note sends once; matching notification receipt is verified where
   required; duplicates/unknown delivery remain pending.
 - Rollback and exact source SHA pass separate production-release gates.
+
+
+## Engineering integration coordination (draft PR #2375)
+
+This source-only feature composes new consent/schema capabilities into the
+existing Jason runtime, but does not replace its authority engine,
+communication service, release manager, or any other workflow's provider
+adapter.
+
+- PR #2373 owns the distinct technician client-notification authority
+  profile. Its own capability gate and our Company UDF opt-in must BOTH pass.
+  The two heads are mechanically mergeable; fully integrated approval and
+  receipt acceptance remains outstanding.
+- PR #2336 owns financial-statement maintenance. Its `composition.py`
+  changes are in independent setup/maintenance branches and mechanically
+  mergeable with this source.
+- KFS PRs #2282 and #2177 touch `composition.py` but do not change the
+  Company consent/notification functions. Both KFS heads have six
+  conflicts against current `origin/main` itself; none are newly caused
+  by this PR's UDF changes. Do not merge their older code into this
+  branch or disable their source-level governance to satisfy integration.
+- The Pull Request body carries the required `Integration coordination:`
+  acknowledgment and retains the independent exact-SHA release gate.
+
+The Owner's exact Company `1158` opt-in remains pending provider write and
+readback, irrespective of local/unit or GitHub CI results.
