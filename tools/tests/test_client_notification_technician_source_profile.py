@@ -93,3 +93,49 @@ def test_native_deploy_and_compose_align_on_exact_source_activation():
     compose = (repo / "infrastructure/jason-runtime/compose.yaml").read_text()
     assert "JASON_AOT_CLIENT_NOTIFICATION_TECH_PROFILE" in compose
     assert (repo / "config/aot-client-notification-technician-profile.json").is_file()
+
+
+@pytest.mark.parametrize("service", ["jason-runtime", "jason-mcp"])
+def test_deploy_inline_source_reader_runs_without_any_repo_tools(tmp_path, service):
+    """Execute actual native script's inline profile parser in isolated Python.
+
+    GitHub's rollback fixture copies only the deploy script, not
+    release_manager_host_runner. The profile reader must remain standalone.
+    """
+    import subprocess
+    import sys
+
+    repo = Path(__file__).resolve().parents[2]
+    shell = (repo / "infrastructure" / service / "production-deploy.sh").read_text()
+    marker = "<<'PY_NOTIFICATION_TECH'\n"
+    assert shell.count(marker) == 1
+    inline = shell.split(marker, 1)[1].split("\nPY_NOTIFICATION_TECH", 1)[0]
+    filename = tmp_path / "config" / "aot-client-notification-technician-profile.json"
+    filename.parent.mkdir(parents=True)
+
+    def run():
+        return subprocess.run(
+            [sys.executable, "-I", "-c", inline, str(filename)],
+            cwd=tmp_path,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+
+    missing = run()
+    assert missing.returncode == 0, missing.stderr
+    assert missing.stdout.strip() == ""
+    filename.write_text('{"schema_version":"1.0","profile":"approved-workflow-technician-v1"}')
+    approved = run()
+    assert approved.returncode == 0, approved.stderr
+    assert approved.stdout.strip() == "approved-workflow-technician-v1"
+    filename.write_text('{"schema_version":"1.0","profile":"unreviewed"}')
+    denied = run()
+    assert denied.returncode != 0
+    filename.unlink()
+    target = tmp_path / "unreviewed-policy.json"
+    target.write_text('{"schema_version":"1.0","profile":"approved-workflow-technician-v1"}')
+    filename.symlink_to(target)
+    symlinked = run()
+    assert symlinked.returncode != 0
