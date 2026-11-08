@@ -69,6 +69,14 @@ The correct single process is:
   wrong cookie, scope tampering, stale/expired or replayed sessions fail
   closed. The adapter must set `Secure; HttpOnly; SameSite=Lax`; this
   library **does not** establish an HTTPS web route or actually set a cookie.
+- `jason_mcp.entra_release_code_exchange.redeem_admin_browser_code`
+  performs the exact tenant-specific confidential-client **authorization-code
+  + PKCE redemption** after the one-time browser session is consumed.
+  The requested scope is only `openid profile`; the redirect is pinned to
+  the separately reviewed callback. It validates Microsoft's signed ID
+  token through the exact admin verifier and never returns the authorization
+  code, secret, access/refresh token or raw ID token. A provider error or
+  token exchange failure is generic and cannot become an approval.
 
 The old #2377 admin Teams-license preflight is only a defense against a
 misleading message-ID receipt. It is not the end-to-end remedy for this
@@ -86,9 +94,9 @@ reproduce an unlicensed admin delivery failure.
   registered merely because Jason's MCP OAuth is functional.
 - Implement the server-side, secure `HttpOnly; Secure; SameSite=Lax`
   HTTP cookie/session adapter on top of the existing protected one-time
-  store, authorization-code redemption with the registered confidential
-  client, CSRF and callback replay checks, Entra signing keys and token
-  storage restrictions. Use a mature auth library as appropriate; no access
+  store, connection to the separately registered confidential OAuth client,
+  CSRF and callback replay checks, Entra signing keys and token storage
+  restrictions. The tested code-exchange helper does not perform web routing. Use a mature auth library as appropriate; no access
   or refresh tokens in Teams URLs, cookies or durable approval evidence.
 - Verify the configured tenant Conditional Access authentication context
   forces suitable step-up/MFA for the privileged account; context absent or
