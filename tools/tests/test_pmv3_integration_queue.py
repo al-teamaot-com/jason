@@ -555,3 +555,29 @@ def test_completed_release_only_never_advances_a_valid_active_lock(tmp_path):
         )
     assert queue.load_state(ledger) == baseline
     assert not api.merges and not api.gates and not api.updates
+
+
+def test_completed_release_only_does_not_overwrite_concurrent_queue_change(tmp_path):
+    spool, release, ledger, api, _, _ = completed_release_fixture(tmp_path)
+
+    class ConcurrentWriter(FakeApi):
+        def main_sha(self):
+            # Simulate a second queue invocation after the repair's initial
+            # read. This must be detected rather than clobbering newer work.
+            state=json.loads(ledger.read_text())
+            state["queue"].append({
+                "pr_number":2371, "title":"new approved work",
+                "head_sha":"f"*40, "priority": 0,
+            })
+            ledger.write_text(json.dumps(state))
+            return super().main_sha()
+
+    mutated=ConcurrentWriter(main_sha="a"*40,prs=list(api.prs.values()))
+    with pytest.raises(RuntimeError,match="concurrently updated queue"):
+        queue.reconcile_completed_release_only(
+            api=mutated,spool=spool,release_state=release,
+        )
+    latest=json.loads(ledger.read_text())
+    assert latest["release_lock"] is not None
+    assert latest["queue"][-1]["pr_number"]==2371
+    assert not mutated.merges and not mutated.gates and not mutated.updates
