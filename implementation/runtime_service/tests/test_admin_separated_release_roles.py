@@ -274,6 +274,12 @@ def test_v4_is_separately_opted_in_not_silently_enabled_by_old_mode(tmp_path):
 
 
 def test_host_policy_validator_attests_same_v4_principal_pair(tmp_path):
+    import sys
+    # Runtime-service CI imports implementation only; the actual source-bound
+    # Host Release Manager is a separate tools entrypoint, not on that PYTHONPATH.
+    tools_dir = str(Path(__file__).resolve().parents[3] / "tools")
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
     from release_manager_host_runner import (
         _validated_mobile_release_policy, ReleaseManagerError,
         _reviewed_mobile_release_mode,

@@ -105,6 +105,13 @@ else
   fi
 fi
 
+if [ -z "$REVISION" ]; then
+  REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+fi
+if [ -z "$REVISION" ]; then
+  REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+fi
+
 # The privileged-grant administrator is separately authenticated. This
 # activation is bound to the reviewed source V4 release policy and is OFF for
 # legacy candidates. An SSH/environment override cannot enable it.
@@ -129,13 +136,6 @@ else
     echo "DENIED: admin approval profile differs from reviewed exact source" >&2
     exit 2
   fi
-fi
-
-if [ -z "$REVISION" ]; then
-  REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
-fi
-if [ -z "$REVISION" ]; then
-  REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
 fi
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
