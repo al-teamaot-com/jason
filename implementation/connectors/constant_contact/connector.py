@@ -78,7 +78,7 @@ class ConstantContactConnector:
         if email is not None:
             if (request.context.capability != CONTACTS_SEARCH
                     or not isinstance(email, str)
-                    or len(email) > 50 or not re.fullmatch(r"[^\\s@]+@[^\\s@]+\\.[^\\s@]+", email)):
+                    or len(email) > 50 or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email)):
                 raise ConnectorConfigurationError("Invalid contact email selector")
         if status is not None:
             if request.context.capability != CONTACTS_SEARCH or status not in {"all", "active", "unsubscribed"}:
