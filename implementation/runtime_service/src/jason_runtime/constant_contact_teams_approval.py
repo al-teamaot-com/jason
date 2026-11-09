@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from orchestrator.approval_plan_scope import ProposedPlanStep
 from orchestrator.approval_plan_grants import PlanGrantLedger
-from .import_authorization import ExactImportIntent, ImportAuthorizationError
+from connectors.constant_contact.import_authorization import ExactImportIntent, ImportAuthorizationError
 
 IMPORT_CAPABILITY = "marketing.contact.import"
 
