@@ -125,6 +125,167 @@ misleading message-ID receipt. It is not the end-to-end remedy for this
 unlicensed privileged account. No production should be deployed solely to
 reproduce an unlicensed admin delivery failure.
 
+## Source-only browser HTTP adapter (2026-11-09)
+
+`jason_mcp.entra_release_browser_http.AdminReleaseBrowserAdapter` now
+provides a **non-mounted**, dependency-injected Starlette HTTP implementation
+of the existing one-time session and confidential Entra code-exchange
+primitives. Its ordinary-request route is the reviewed
+`/admin/release-approval`, and its callback is exactly
+`/admin/release-approval/callback`. The notice page has no approval action.
+
+The adapter refuses every request until a **trusted independent Conditional
+Access/MFA enforcement attestor** returns strict True. It validates exact
+HTTPS host/path against the reviewed route, checks form Origin, limits body
+size, denies polluted parameters, sets a Secure+HttpOnly+SameSite=Lax
+`__Host-` cookie, consumes the exact session before code redemption,
+clears the cookie on callback, and never reflects OAuth codes, JWTs,
+client secrets or PKCE into its response. Its successful response is
+**identity verified / no release approved**; the underlying
+`verified_admin_signin` evidence remains `release_authorized=False`.
+
+A new opaque-cookie hash lookup on `OneTimeBrowserLoginStore` resolves the
+correct **server-stored** approval ID; a URL parameter or forwarded
+Teams notice cannot choose which release is consumed on callback.
+The callback re-reads the immutable exact release before atomic consumption.
+
+The HTTP adapter remains intentionally **UNMOUNTED** in `server.py`.
+It does not load a production policy, register the Entra confidential
+client, attest a live CA authentication context, expose an approval UI,
+sign an approval decision, or modify the host Release Manager. This is
+security preproduction, not an actionable owner approval.
+
+Tests run with a completely offline, isolated copy of the MCP runtime's
+Starlette/AnyIO source dependencies and synthetic identities/hostnames,
+without contacting Microsoft or altering running containers. The tests
+cover nonactionable notice, unverified CA, CSRF Origin, parameter
+pollution, exact registered redirect, secure cookie, one-time callback,
+replay, wrong state, and exact release-scope changes during login.
+
+## Explicit administrator consent and independent V5 evidence (2026-11-09)
+
+Source-only security primitives now also distinguish **successful Entra
+authentication from an explicit administrative approval**. The new
+`OneTimeAdminDecisionStore` creates a private 0600 short-lived consent
+session only after the previously verified privileged Entra login. The
+browser displays the exact candidate and rollback SHA and requires a separate
+same-origin, CSRF-bound `approve` or `deny` POST. The consent cookie is
+Secure, HttpOnly, SameSite=Strict and one-use. An unavailable signer or
+evidence sink blocks the POST; failed/forged CSRF cannot consume a valid
+session. Neither a Teams notification nor a successful OAuth callback
+can automatically approve a release.
+
+`entra_release_browser_decision.py` implements a versioned **V5 source-only**
+Ed25519 envelope bound to exact pending approval ID, candidate and rollback
+SHA, reviewed scope and manifest digests, tenant, privileged OID,
+canonical owner subject, fresh login, decision, nonce and expiry. The
+independent verifier accepts *only* trusted reviewed public key IDs and a
+valid signature over canonical bytes. Its result deliberately contains
+`release_authorized=False`. Private signing keys are NOT committed, generated
+in production, or provided with this PR. The actual signer and public key
+must be enrolled through governed OpenBao/root policy only after explicit
+approval, not from an environment-supplied or arbitrary user key.
+
+The explicit decision hand-off now uses a **private SQLite signed-evidence
+outbox**: signing precedes one atomic transaction that consumes the
+one-use consent and stores the exact signed envelope/digest. A sink failure
+does not lose the user's authenticated decision; a separate governed,
+idempotent ledger reconciler may re-deliver exactly the SAME signed envelope
+and acknowledge its SHA-256, without issuing another approval or duplicating
+authority. Concurrent browser sessions for the same immutable approval ID
+cannot record contradictory decisions. The browser itself does not run
+background recovery: a protected native worker must be wired into the
+existing ApprovalRequestService before activation.
+
+The V5 browser decision is still **not accepted by the existing V4
+Release Manager consumer**. It must be incorporated into the *existing*
+`ApprovalRequestService` signed decision lifecycle, with atomic
+nonreplay, signed root policy migration, CCC, freeze transaction,
+and independent exact-key verification. **Do not treat this evidence
+primitive as a standing release grant.** No live HTTP routes are mounted.
+
+The isolated ASGI and cryptographic source tests cover full login-to-decision
+hand-off, authentication-vs-consent separation, unlicensed normal account
+impersonation, unavailable signer, forged CSRF, replay, wrong signing key,
+expiry, changed SHA/scope/manifest, and revoked CA attestation. SEC-007
+now requires all five component regression suites.
+
+## Protected host trust for V5 browser signatures
+
+`kernel.entra_release_root_trust.read_root_browser_release_trust` now
+provides a **read-only, fail-closed** parser for a future reviewed 0600
+root-owned signing-key trust manifest. There is no default key, no embedded
+tenant/owner identity, no private signing key on the host and no code path
+that writes this manifest. Independent host tests prove the approved
+Ed25519 public key verifies the exact signed browser decision while a
+wrong key, unreviewed trust policy hash, alternate tenant/admin OID,
+symlink, world-readable file, duplicate key or malformed key fails.
+
+This is an additional **independent trust primitive only**. No V5
+root policy is installed and the V4 release consumer continues rejecting
+all non-Teams evidence. A decision becomes operational only after separate
+governed policy migration and integration with the existing approval
+ledger, CCC and one-transaction freeze controls.
+
+## Required tenant evidence before any live V5 approval route
+
+No available, authorized Project Jason read capability can confirm that an
+Entra confidential **Web** client has the reviewed registered redirect
+or that a tenant authentication context is actually protected by Conditional
+Access requiring appropriate MFA. The prior privileged-user authentication
+method read returned HTTP 403. These are **real tenant configuration and
+authorization dependencies**, not reason to silently assume `c1` is MFA.
+
+The separately privileged tenant administrator must verify/create a reviewed
+confidential Web app registration with the **exact** registered HTTPS redirect
+`https://mcp-jason.teamaot.com/admin/release-approval/callback`
+(or a separately reviewed deployment-specific URI; never hard-coded into
+reusable source). A server-side confidential credential belongs in the
+existing governed OpenBao secret store and must not be pasted into chat, Git,
+Teams, or browser URLs. The available source code currently supports the
+client-secret OAuth redemption variant; certificate-based client assertions
+would require an additional reviewed implementation.
+
+The tenant administrator must also confirm that an authentication-context
+reference `c1` through `c99` is actually assigned an enabled Conditional
+Access policy requiring suitable MFA for the exact privileged signer and
+application, and that the tenant has the necessary Entra ID P1 rights.
+A configured context label, `acrs` JWT claim or sign-in method list by
+itself **does not prove** enforcement. Only independently verified live
+CA policy and login evidence can enable the policy attestor.
+
+Microsoft source references:
+- https://learn.microsoft.com/en-us/entra/identity-platform/developer-guide-conditional-access-authentication-context
+- https://learn.microsoft.com/en-us/entra/identity-platform/msal-client-application-configuration
+- https://learn.microsoft.com/en-us/azure/active-directory/develop/v2-oauth2-auth-code-flow
+
+Before activation the **same existing** ApprovalRequestService and native
+root Release Manager must accept an explicitly versioned V5 decision under
+its own root policy, protected signer trust, nonreplay, exact release scope,
+CCC and one-transaction freeze. The V4 signed-Teams-only policy is intact,
+and the new V5 source cannot approve a release on its own. This requires an
+independently reviewed Owner policy transition, not an ordinary Teams
+notification or a code-only edit.
+
+## Read-only existing host release-consumer attestation (2026-11-09)
+
+`tools/verify_browser_release_evidence.py` now adds a pure, non-activated
+verification function usable by the **existing** host Release Manager consumer
+once a distinct reviewed V5 root policy exists. It requires exact
+`policy_version=5.0`, currently PENDING `ApprovalRequest` from the
+native release manager, one governed Owner identity, exact reviewed policy
+hash, candidate SHA, rollback SHA, manifest, scope, request TTL, and
+`entra_browser_admin` channel metadata. It independently loads only the
+root-reviewed mode-0600 Ed25519 trust manifest and verifies the browser
+signature and exact administrative Entra OID. The result remains
+`release_authorized=False`; no approval ledger mutation, CCC review,
+release unlock, or signed Teams impersonation is performed.
+
+20 host negative/positive tests are mandatory in the protected SEC-007
+security workflow. This verifier is **NOT** invoked by the live V4
+signed-Teams-only consumer, because a genuine, independently reviewed V5
+policy migration and browser decision ledger integration are still required.
+
 ## Unimplemented integration — release gates
 
 **Do not treat these source helpers as a working approval flow yet.**

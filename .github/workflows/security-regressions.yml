@@ -74,7 +74,13 @@ jobs:
           python -m pytest -q \
             implementation/mcp_service/tests/test_entra_release_stepup.py \
             implementation/mcp_service/tests/test_entra_release_browser_sessions.py \
-            implementation/mcp_service/tests/test_entra_release_code_exchange.py
+            implementation/mcp_service/tests/test_entra_release_code_exchange.py \
+            implementation/mcp_service/tests/test_entra_release_browser_http.py \
+            implementation/mcp_service/tests/test_entra_release_browser_decision.py \
+            implementation/mcp_service/tests/test_entra_release_browser_decision_sessions.py \
+            implementation/mcp_service/tests/test_entra_release_browser_full_flow.py \
+            implementation/kernel/tests/test_entra_release_root_trust.py \
+            tools/tests/test_verify_browser_release_evidence.py
       - name: Approval and transport authority regressions
         run: |
           python -m pytest -q \
