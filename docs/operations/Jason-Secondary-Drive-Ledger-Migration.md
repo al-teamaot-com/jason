@@ -31,7 +31,8 @@ serialized and require exact release-manager authorization through Teams.
 tools/jason_secondary_ledger_preflight.py --preflight fails closed on
 missing/unmounted/same-device archive, insufficient archive reserve or
 inodes, source symlinks or unsafe mode/ownership, unexpected source schema,
-an existing target, or split writer-container paths/mounts. It uses bounded
+an existing target, or split writer-container paths/mounts/inodes. It independently
+proves both writer-container ledger inodes equal the host source inode. It uses bounded
 read-only SQLite queries, prints no event payloads or secrets, and never
 backs up, checkpoints, copies, truncates, moves, unmounts or restarts the
 production databases or containers. It requires enough archive capacity to

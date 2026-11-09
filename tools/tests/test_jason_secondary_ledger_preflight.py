@@ -150,27 +150,43 @@ class LiveRouteGuardTests(unittest.TestCase):
             for name in ("jason-runtime", "jason-mcp-pilot")
         ]
 
+    @staticmethod
+    def fake_runner(fixtures, *, observed_inode="10:20"):
+        def run(command, **_kwargs):
+            if command[:2] == ["docker", "inspect"]:
+                return SimpleNamespace(stdout=json.dumps(fixtures))
+            if command[:2] == ["docker", "exec"]:
+                return SimpleNamespace(stdout=observed_inode + "\n")
+            raise AssertionError("unexpected Docker command")
+        return run
+
     def test_dual_writer_route_proven_without_secret_leak(self):
         fixtures = self.fixtures()
-        response = SimpleNamespace(stdout=json.dumps(fixtures))
-        with mock.patch.object(m.subprocess, "run", return_value=response):
-            result = m.inspect_container_routes()
+        with mock.patch.object(m.subprocess, "run", side_effect=self.fake_runner(fixtures)):
+            result = m.inspect_container_routes(expected_inode="10:20")
         self.assertEqual(set(result), {"jason-runtime", "jason-mcp-pilot"})
+        self.assertTrue(all(v["exact_host_inode"] for v in result.values()))
         self.assertNotIn("never-expose-me", json.dumps(result))
 
     def test_split_writer_routes_refused(self):
         fixtures = self.fixtures()
         fixtures[1]["Config"]["Env"][0] = "JASON_ORCHESTRATION_EVENTS_DB=/srv/different"
-        with mock.patch.object(m.subprocess, "run", return_value=SimpleNamespace(stdout=json.dumps(fixtures))):
+        with mock.patch.object(m.subprocess, "run", side_effect=self.fake_runner(fixtures)):
             with self.assertRaisesRegex(m.MigrationAdmissionDenied, "split or unreviewed"):
-                m.inspect_container_routes()
+                m.inspect_container_routes(expected_inode="10:20")
 
     def test_readonly_writer_mount_refused(self):
         fixtures = self.fixtures()
         fixtures[0]["Mounts"][0]["RW"] = False
-        with mock.patch.object(m.subprocess, "run", return_value=SimpleNamespace(stdout=json.dumps(fixtures))):
+        with mock.patch.object(m.subprocess, "run", side_effect=self.fake_runner(fixtures)):
             with self.assertRaisesRegex(m.MigrationAdmissionDenied, "data bind"):
-                m.inspect_container_routes()
+                m.inspect_container_routes(expected_inode="10:20")
+
+    def test_stale_container_inode_refused_even_when_mount_path_matches(self):
+        fixtures = self.fixtures()
+        with mock.patch.object(m.subprocess, "run", side_effect=self.fake_runner(fixtures, observed_inode="10:21")):
+            with self.assertRaisesRegex(m.MigrationAdmissionDenied, "divergent ledger inode"):
+                m.inspect_container_routes(expected_inode="10:20")
 
 
 class ConsumerRouteContractTests(unittest.TestCase):

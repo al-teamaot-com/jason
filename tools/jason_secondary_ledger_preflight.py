@@ -149,7 +149,7 @@ def inspect(
     return evidence
 
 
-def inspect_container_routes(legacy: Path = LEGACY) -> dict[str, object]:
+def inspect_container_routes(legacy: Path = LEGACY, *, expected_inode: str) -> dict[str, object]:
     """Prove both live writer containers still target one exact existing ledger.
 
     Docker's raw environment may contain credentials. Never return/log it:
@@ -183,7 +183,14 @@ def inspect_container_routes(legacy: Path = LEGACY) -> dict[str, object]:
             if (len(mounts) != 1 or mounts[0].get("Source") != str(legacy)
                     or mounts[0].get("RW") is not True):
                 raise MigrationAdmissionDenied("unexpected writer data bind: " + name)
-            proof[name] = {"source_path": route, "openclaw_mount_rw": True}
+            observed = subprocess.run(
+                ["docker", "exec", name, "stat", "-c", "%d:%i", expected],
+                capture_output=True, text=True, check=True, timeout=15,
+            ).stdout.strip()
+            if observed != expected_inode:
+                raise MigrationAdmissionDenied("stale or divergent ledger inode: " + name)
+            proof[name] = {"source_path": route, "openclaw_mount_rw": True,
+                           "exact_host_inode": True}
         if len(proof) != 2:
             raise MigrationAdmissionDenied("required writer container missing")
         return proof
@@ -199,7 +206,10 @@ def main() -> int:
     result = inspect()
     if result["status"] == "preflight_pass":
         try:
-            result["live_writer_routes"] = inspect_container_routes()
+            identity = result["source_files"][FILES[0]]
+            result["live_writer_routes"] = inspect_container_routes(
+                expected_inode=f"{identity['device']}:{identity['inode']}",
+            )
         except MigrationAdmissionDenied as error:
             result["status"] = "preflight_denied"
             result["reason"] = str(error)[:200]
