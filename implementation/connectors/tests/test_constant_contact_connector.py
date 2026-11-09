@@ -78,3 +78,28 @@ def test_unauthorized_or_unbounded_requests_fail_without_provider_access(tmp_pat
     with pytest.raises((ConnectorAuthorizationError, ConnectorConfigurationError)):
         adapter.execute(ConnectorRequest(context, arguments))
     assert transport.calls == []
+
+
+def test_exact_email_lookup_includes_deleted_and_list_readback(tmp_path):
+    adapter, transport, audit = connector(tmp_path)
+    adapter.execute(ConnectorRequest(ctx(), {
+        "email": "ONE@EXAMPLE.COM", "status": "all", "include": "list_memberships",
+        "limit": 5,
+    }))
+    assert transport.calls[0]["params"] == {
+        "limit": 5, "email": "one@example.com", "status": "all",
+        "include": "list_memberships",
+    }
+
+
+@pytest.mark.parametrize("arguments", [
+    {"email": "invalid"},
+    {"email": "x" * 51 + "@example.com"},
+    {"status": "something-else"},
+    {"include": "notes"},
+])
+def test_invalid_contact_filters_denied_without_provider_access(tmp_path, arguments):
+    adapter, transport, audit = connector(tmp_path)
+    with pytest.raises(ConnectorConfigurationError):
+        adapter.execute(ConnectorRequest(ctx(), arguments))
+    assert transport.calls == []
