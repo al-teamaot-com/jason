@@ -15,6 +15,8 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from .entra_release_browser_sessions import OneTimeBrowserLoginStore
+from .entra_release_browser_decision_sessions import OneTimeAdminDecisionStore
+from .entra_release_browser_decision import create_browser_decision_envelope
 from .entra_release_code_exchange import redeem_admin_browser_code
 from .entra_release_stepup import (
     EntraStepUpDenied, ExactRelease, ReleaseIdentityRoute,
@@ -22,6 +24,7 @@ from .entra_release_stepup import (
 )
 
 _COOKIE = "__Host-jason-admin-release"
+_DECISION_COOKIE = "__Host-jason-admin-decision"
 _FAILURE = "This administrative sign-in could not be verified. No release was authorized."
 _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"}
 
@@ -44,6 +47,10 @@ class AdminReleaseBrowserAdapter:
         verify_ca_enforcement: Callable[[], bool],
         required_auth_context: str,
         proof_sink: Callable[[Mapping[str, object]], None] | None = None,
+        decision_store: OneTimeAdminDecisionStore | None = None,
+        signing_key_loader=None,
+        signing_key_id: str | None = None,
+        signed_decision_sink=None,
         jwk_client=None,
         request_open=None,
     ) -> None:
@@ -57,18 +64,25 @@ class AdminReleaseBrowserAdapter:
         self.required_auth_context = required_auth_context
         # Not an approval sink: only nonauthorizing identity evidence.
         self.proof_sink = proof_sink
+        self.decision_store = decision_store
+        self.signing_key_loader = signing_key_loader
+        self.signing_key_id = signing_key_id
+        self.signed_decision_sink = signed_decision_sink
         self.jwk_client = jwk_client
         self.request_open = request_open
 
-    def _check_request(self, request: Request, *, callback: bool = False) -> None:
+    def _check_request(
+        self, request: Request, *, callback: bool = False,
+        decision: bool = False,
+    ) -> None:
         expected = urlsplit(self.route.notice_uri)
         host = str(request.headers.get("host") or "")
+        expected_path = (urlsplit(self.route.registered_redirect_uri).path if callback
+                         else expected.path + "/decision" if decision
+                         else expected.path)
         if (host.lower() != expected.netloc.lower()
                 or request.url.scheme != "https"
-                or request.url.path != (
-                    urlsplit(self.route.registered_redirect_uri).path
-                    if callback else expected.path
-                )):
+                or request.url.path != expected_path):
             raise EntraStepUpDenied("ADMIN_BROWSER_UNTRUSTED_ORIGIN")
 
     def _policy_ready(self) -> None:
@@ -184,6 +198,24 @@ class AdminReleaseBrowserAdapter:
                 raise EntraStepUpDenied("ADMIN_EVIDENCE_MUST_NOT_AUTHORIZE_RELEASE")
             if self.proof_sink is not None:
                 self.proof_sink(proof)
+            if self.decision_store is not None:
+                issued = self.decision_store.issue(
+                    approval=approval, route=self.route,
+                    verified_login_proof=proof, now=datetime.now(timezone.utc),
+                )
+                authorized_view = RedirectResponse(
+                    self.route.notice_uri + "/decision", status_code=303,
+                    headers=_NO_STORE,
+                )
+                authorized_view.set_cookie(
+                    _DECISION_COOKIE, issued.cookie_value,
+                    max_age=300, path="/", secure=True,
+                    httponly=True, samesite="strict",
+                )
+                authorized_view.delete_cookie(
+                    _COOKIE, path="/", secure=True, httponly=True, samesite="lax",
+                )
+                return authorized_view
             success = PlainTextResponse(
                 "Administrator identity verified. No release has been approved or deployed.",
                 status_code=200, headers=_NO_STORE,
@@ -191,4 +223,118 @@ class AdminReleaseBrowserAdapter:
             success.delete_cookie(_COOKIE, path="/", secure=True, httponly=True, samesite="lax")
             return success
         except (EntraStepUpDenied, ValueError, TypeError, OSError, UnicodeError):
+            return response
+
+
+    async def decision_page(self, request: Request):
+        """Display exact release after fresh login; no GET can authorize."""
+        try:
+            self._check_request(request, decision=True)
+            self._policy_ready()
+            if self.decision_store is None:
+                raise EntraStepUpDenied("ADMIN_DECISION_SURFACE_NOT_CONFIGURED")
+            cookie = request.cookies.get(_DECISION_COOKIE)
+            if not isinstance(cookie, str):
+                raise EntraStepUpDenied("ADMIN_DECISION_COOKIE_REQUIRED")
+            approval = self._load(
+                self.decision_store.lookup_release_id(cookie_value=cookie)
+            )
+            csrf = self.decision_store.load_consent(
+                cookie_value=cookie, approval=approval,
+                now=datetime.now(timezone.utc),
+            )
+            markup = (
+                "<!doctype html><html><head><meta charset='utf-8'></head>"
+                "<body><h1>Confirm exact administrator decision</h1>"
+                "<p>Release candidate SHA: <code>"
+                + escape(approval.candidate_sha, quote=True)
+                + "</code></p><p>Rollback SHA: <code>"
+                + escape(approval.rollback_sha, quote=True)
+                + "</code></p>"
+                "<p>A decision is separately checked by the governed host. "
+                "No deployment starts on this page.</p>"
+                "<form action='/admin/release-approval/decision' method='post'>"
+                "<input name='csrf' type='hidden' value='"
+                + escape(csrf, quote=True)
+                + "'><button name='decision' value='approve'>Approve exact release</button>"
+                "<button name='decision' value='deny'>Deny</button></form></body></html>"
+            )
+            return HTMLResponse(markup, headers=_NO_STORE)
+        except (EntraStepUpDenied, ValueError, TypeError, OSError):
+            return PlainTextResponse(_FAILURE, status_code=403, headers=_NO_STORE)
+
+    async def decision_submit(self, request: Request):
+        """One explicit CSRF-bound action, not direct release authorization."""
+        response = PlainTextResponse(_FAILURE, status_code=403, headers=_NO_STORE)
+        response.delete_cookie(
+            _DECISION_COOKIE, path="/", secure=True,
+            httponly=True, samesite="strict",
+        )
+        try:
+            self._check_request(request, decision=True)
+            self._policy_ready()
+            if (self.decision_store is None or self.signing_key_loader is None
+                    or self.signing_key_id is None
+                    or self.signed_decision_sink is None):
+                raise EntraStepUpDenied("SIGNED_ADMIN_DECISION_NOT_CONFIGURED")
+            expected_origin = self.route.notice_uri.rsplit(
+                "/admin/release-approval", 1,
+            )[0]
+            if request.headers.get("origin") != expected_origin:
+                raise EntraStepUpDenied("ADMIN_DECISION_CSRF_ORIGIN")
+            if request.headers.get("content-type", "").split(";")[0].strip() != "application/x-www-form-urlencoded":
+                raise EntraStepUpDenied("ADMIN_DECISION_FORM_INVALID")
+            length = request.headers.get("content-length")
+            if length is not None and (not length.isdecimal() or int(length) > 2048):
+                raise EntraStepUpDenied("ADMIN_DECISION_FORM_TOO_LARGE")
+            chunks=[]
+            total=0
+            async for part in request.stream():
+                total += len(part)
+                if total > 2048:
+                    raise EntraStepUpDenied("ADMIN_DECISION_FORM_TOO_LARGE")
+                chunks.append(part)
+            form = parse_qs(
+                b"".join(chunks).decode("ascii"),
+                keep_blank_values=True, strict_parsing=True,
+            )
+            if (set(form) != {"decision", "csrf"}
+                    or len(form["decision"]) != 1
+                    or len(form["csrf"]) != 1):
+                raise EntraStepUpDenied("ADMIN_DECISION_FORM_INVALID")
+            cookie = request.cookies.get(_DECISION_COOKIE)
+            if not isinstance(cookie, str):
+                raise EntraStepUpDenied("ADMIN_DECISION_COOKIE_REQUIRED")
+            approval = self._load(
+                self.decision_store.lookup_release_id(cookie_value=cookie)
+            )
+            # Loading the signing key BEFORE consuming prevents taking the
+            # user's one-time decision if the signer is unavailable.
+            signing_key = self.signing_key_loader()
+            now = datetime.now(timezone.utc)
+            proof = self.decision_store.consume_explicit_decision(
+                cookie_value=cookie, csrf_token=form["csrf"][0],
+                decision=form["decision"][0],
+                approval=approval, route=self.route, now=now,
+            )
+            signed = create_browser_decision_envelope(
+                approval=approval, route=self.route,
+                verified_login_proof=proof, decision=form["decision"][0],
+                signing_key=signing_key, key_id=self.signing_key_id, now=now,
+            )
+            # Protected source must persist to the existing approval ledger;
+            # no synthetic host owner approval from the browser adapter.
+            self.signed_decision_sink(signed)
+            accepted = PlainTextResponse(
+                "Signed decision recorded for independent governed verification. "
+                "No release has been deployed.",
+                status_code=200, headers=_NO_STORE,
+            )
+            accepted.delete_cookie(
+                _DECISION_COOKIE, path="/", secure=True,
+                httponly=True, samesite="strict",
+            )
+            return accepted
+        except (EntraStepUpDenied, ValueError, TypeError, OSError,
+                PermissionError, RuntimeError, UnicodeError):
             return response

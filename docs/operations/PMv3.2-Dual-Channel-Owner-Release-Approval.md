@@ -162,6 +162,43 @@ cover nonactionable notice, unverified CA, CSRF Origin, parameter
 pollution, exact registered redirect, secure cookie, one-time callback,
 replay, wrong state, and exact release-scope changes during login.
 
+## Explicit administrator consent and independent V5 evidence (2026-11-09)
+
+Source-only security primitives now also distinguish **successful Entra
+authentication from an explicit administrative approval**. The new
+`OneTimeAdminDecisionStore` creates a private 0600 short-lived consent
+session only after the previously verified privileged Entra login. The
+browser displays the exact candidate and rollback SHA and requires a separate
+same-origin, CSRF-bound `approve` or `deny` POST. The consent cookie is
+Secure, HttpOnly, SameSite=Strict and one-use. An unavailable signer or
+evidence sink blocks the POST; failed/forged CSRF cannot consume a valid
+session. Neither a Teams notification nor a successful OAuth callback
+can automatically approve a release.
+
+`entra_release_browser_decision.py` implements a versioned **V5 source-only**
+Ed25519 envelope bound to exact pending approval ID, candidate and rollback
+SHA, reviewed scope and manifest digests, tenant, privileged OID,
+canonical owner subject, fresh login, decision, nonce and expiry. The
+independent verifier accepts *only* trusted reviewed public key IDs and a
+valid signature over canonical bytes. Its result deliberately contains
+`release_authorized=False`. Private signing keys are NOT committed, generated
+in production, or provided with this PR. The actual signer and public key
+must be enrolled through governed OpenBao/root policy only after explicit
+approval, not from an environment-supplied or arbitrary user key.
+
+The V5 browser decision is still **not accepted by the existing V4
+Release Manager consumer**. It must be incorporated into the *existing*
+`ApprovalRequestService` signed decision lifecycle, with atomic
+nonreplay, signed root policy migration, CCC, freeze transaction,
+and independent exact-key verification. **Do not treat this evidence
+primitive as a standing release grant.** No live HTTP routes are mounted.
+
+The isolated ASGI and cryptographic source tests cover full login-to-decision
+hand-off, authentication-vs-consent separation, unlicensed normal account
+impersonation, unavailable signer, forged CSRF, replay, wrong signing key,
+expiry, changed SHA/scope/manifest, and revoked CA attestation. SEC-007
+now requires all five component regression suites.
+
 ## Unimplemented integration — release gates
 
 **Do not treat these source helpers as a working approval flow yet.**
