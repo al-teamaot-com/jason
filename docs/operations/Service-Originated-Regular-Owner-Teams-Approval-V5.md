@@ -51,3 +51,7 @@ This document makes no assertion that V5 is deployed or that the eventual releas
 - Original V4 admin-only grant administration remains separated under the V5 runtime configuration; ordinary technician actions do not gain admin rights.
 - Native source tests verify invalid policy, untrusted sender, wrong role, revoked/inactive identity, missing one-use challenge, and regression of the original V4 signed-card route. Local focused tests PASS, but these are not proof of live provider-backed approval.
 - Remaining release-scope risk: this branch touches shared native release and runtime scripts and MUST be reconciled with active parallel PRs and rerun root rollback/preproduction checks against protected main before release. Protected PMV3 integration remains locked, and no valid signed Teams V5 transition approval exists. **Do not change source policy to V5 merely to trigger issuance.**
+
+## Parallel source integration reconciliation
+
+The V5 source feature additionally touches native Release Manager and deployment files. Reviewed overlapping PRs include #2378 (signed receipt persistence), #2382 (native promotion/rollback safety), #2355 (staff note deployment source), #2279 (superseded signed release decisions), plus #2336, #2384, #2377, #2373, #2282, #2177, #2269, #2392, #2391. The reviewed hunks are separately scoped, but exact protected-main integration must preserve every independent feature and rerun contract tests. This coordination is **not** integration-gate approval or permission to merge while the PMV3 release queue is locked.
