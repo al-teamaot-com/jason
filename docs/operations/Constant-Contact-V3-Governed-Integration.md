@@ -72,3 +72,12 @@ The PMV3 engineering Owner pause is active. Do not remove the pause receipt, res
 - https://developer.constantcontact.com/api_guide/server_flow.html
 - https://developer.constantcontact.com/api_guide/import_contacts.html
 - https://developer.constantcontact.com/api_guide/contacts_sync.html
+
+## Engineering restart dependency — verified November 9, 2026
+
+- The old PMV3 owner pause remains active. The replacement independent engineering lane is **not installed**; do not remove the pause file or restart the original monolith to accelerate this integration.
+- Isolated-lane source safety tests: 17/17 passed. This is not operational ticket-continuity or cutover acceptance.
+- Jason's existing universal Teams plan issuer requires a registered, authorized capability. No engineering-resume/unfreeze action is currently registered. Therefore ordinary release-approval cards cannot be relabeled as engineering-unfreeze authorization.
+- The live release-approval-only timer reports `SAFETY_GATE_BLOCKED`, and this source PR is not a production-eligible release.
+- User's regular Teams identity and privileged administrative identity are distinct; no approval recipient fallback is permitted. A Teams notification is not a signed approval request.
+- Engineering restart work is tracked in Project Jason #2300 and must deliver the real Teams approval workflow, exact-scope migration/rollback evidence and ticket-continuity tests before activation.
