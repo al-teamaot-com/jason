@@ -1,0 +1,42 @@
+name: Validate PMV3 Engineering Migration Approval
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/runtime_service/src/jason_runtime/engineering_migration_approval.py'
+      - 'implementation/runtime_service/tests/test_engineering_migration_approval.py'
+      - 'implementation/orchestrator/engineering_migration_capability.py'
+      - 'implementation/orchestrator/tests/test_engineering_migration_capability.py'
+      - 'tools/independent_governed_lane.py'
+      - 'tools/pmv3_worker_release_gate.py'
+      - 'tools/ticket_continuity_evidence_review.py'
+      - '.github/workflows/pmv3-engineering-migration-approval.yml'
+  push:
+    paths:
+      - 'implementation/runtime_service/src/jason_runtime/engineering_migration_approval.py'
+      - 'implementation/runtime_service/tests/test_engineering_migration_approval.py'
+      - 'implementation/orchestrator/engineering_migration_capability.py'
+      - 'implementation/orchestrator/tests/test_engineering_migration_capability.py'
+      - '.github/workflows/pmv3-engineering-migration-approval.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  signed-teams-approval-and-cutover-boundaries:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/runtime_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check 'pytest>=8.3,<10'
+      - name: Compile approval and isolated lane sources
+        run: |
+          python -m compileall -q implementation/runtime_service/src/jason_runtime/engineering_migration_approval.py implementation/orchestrator/engineering_migration_capability.py tools/independent_governed_lane.py tools/ticket_continuity_evidence_review.py
+      - name: Reject unauthorized approval and cutover attempts
+        run: |
+          python -m pytest -q implementation/runtime_service/tests/test_engineering_migration_approval.py implementation/orchestrator/tests/test_engineering_migration_capability.py tools/tests/test_independent_governed_lane.py tools/tests/test_isolated_service_units.py tools/tests/test_pmv3_worker_release_gate.py tools/tests/test_ticket_continuity_evidence_review.py
