@@ -1,5 +1,3 @@
-[Reading 84 lines from start (total: 84 lines, 0 remaining)]
-
 import importlib.util
 import json
 from pathlib import Path
