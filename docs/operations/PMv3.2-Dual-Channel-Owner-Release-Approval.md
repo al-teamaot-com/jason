@@ -286,6 +286,22 @@ security workflow. This verifier is **NOT** invoked by the live V4
 signed-Teams-only consumer, because a genuine, independently reviewed V5
 policy migration and browser decision ledger integration are still required.
 
+## Existing approval-ledger bridge acceptance
+
+`jason_runtime.browser_release_approval_bridge.V5BrowserApprovalDecisionBridge`
+is now staged **without live mounting**, and delegates signed V5 decisions
+only to the same existing `ApprovalRequestService.accept_response`.
+It requires a root-reviewed `5.0` policy, exact pending release, independent
+root public-key signature proof, original privileged OID, valid request TTL,
+and canonical Jason owner authorization. Negative tests reject a V4 policy,
+normal Teams identity, tampered release SHA/scope, denied Jason authority,
+and a duplicate click. Recording a decision does NOT deploy a release;
+the existing host Release Manager independently revalidates the signed
+receipt, CCC and freeze controls before production.
+
+This bridge must not be enabled before the signed V5 policy migration,
+root trust enrollment, and host consumer code review are complete.
+
 ## Unimplemented integration — release gates
 
 **Do not treat these source helpers as a working approval flow yet.**
