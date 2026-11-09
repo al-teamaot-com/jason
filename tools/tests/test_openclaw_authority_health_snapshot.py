@@ -21,6 +21,7 @@ def _load_module():
 
 def test_snapshot_uses_bounded_timeout_for_full_integrity_checks(monkeypatch, tmp_path):
     module = _load_module()
+    monkeypatch.setattr(module, "BACKUP_TEMP_ROOT", tmp_path)
     observed = {}
 
     class Completed:
@@ -41,6 +42,7 @@ def test_snapshot_uses_bounded_timeout_for_full_integrity_checks(monkeypatch, tm
 
 def test_timeout_records_explicit_failure_and_replaces_stale_pass(monkeypatch, tmp_path):
     module = _load_module()
+    monkeypatch.setattr(module, "BACKUP_TEMP_ROOT", tmp_path)
     output = tmp_path / "health.json"
     output.write_text(json.dumps({"status": "pass", "stale": True}), encoding="utf-8")
 
@@ -80,6 +82,7 @@ def test_systemd_timeout_exceeds_checker_deadline():
 
 def test_snapshot_uses_archive_temp_root_and_systemd_allows_only_existing_archive_mount(monkeypatch, tmp_path):
     module = _load_module()
+    monkeypatch.setattr(module, "BACKUP_TEMP_ROOT", tmp_path)
     observed = {}
 
     class Completed:
@@ -94,7 +97,7 @@ def test_snapshot_uses_archive_temp_root_and_systemd_allows_only_existing_archiv
     monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "--output", str(tmp_path / "health.json")])
     assert module.main() == 0
     assert observed["args"][-2] == "--backup-temp-root"
-    assert Path(observed["args"][-1]).parent == Path("/srv/jason/archive")
+    assert Path(observed["args"][-1]).parent == tmp_path
     assert Path(observed["args"][-1]).name.startswith("jason-authority-integrity-run-")
 
     unit = (
@@ -105,6 +108,7 @@ def test_snapshot_uses_archive_temp_root_and_systemd_allows_only_existing_archiv
 
 def test_nonzero_source_exit_cannot_publish_pass(monkeypatch, tmp_path):
     module = _load_module()
+    monkeypatch.setattr(module, "BACKUP_TEMP_ROOT", tmp_path)
 
     class Completed:
         stdout = json.dumps({"status": "pass", "failures": []})
