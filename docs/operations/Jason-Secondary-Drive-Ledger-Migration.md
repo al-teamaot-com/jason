@@ -46,8 +46,22 @@ path unchanged when the variable is absent. Both paths must be changed
 together in a **later** exact-scope release.
 
 A synthetic SQLite backup/restore, last-event readback and schema/integrity
-check are tested on small isolated files. This is not an assertion of a
-successful full-size production migration.
+check are tested on small isolated files. The separately reviewed, TEST-ONLY
+tools/jason_secondary_ledger_snapshot.py library now rehearses a two-file
+SQLite backup into a new private sandbox, strict original-source file identity
+checks before/after both backups, exact reflection table count and orchestration
+rowid/count/end-sample identity parity, destination PRAGMA integrity_check,
+SHA-256 plus fsynced private 0600 manifest, and cleanup of only the newly
+created synthetic directory on failure. It accepts only owned synthetic
+fixtures below /tmp or /srv/jason/archive/engineering-worktrees, rejects
+production source/target paths and symlinks, and has NO production CLI, release
+authorization, service control, writable mount, or live database migration
+path. Tests cover WAL-committed rows, unsafe permissions, target collision,
+missing schema, altered source stamps and preservation of originals.
+
+The existing OpenClaw CI workflow executes both read-only admission tests and
+the separate synthetic-only snapshot suite on each relevant source change.
+This is not an assertion of a successful full-size production migration.
 
 ## Required cutover implementation and acceptance — NOT YET AUTHORIZED
 
