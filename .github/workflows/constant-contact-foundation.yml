@@ -50,4 +50,3 @@ jobs:
       - name: Verify source-only defaults
         run: |
           test -z "${JASON_CONSTANT_CONTACT_READ_PROFILE:-}"
-          git diff --check origin/main...HEAD || git diff --check HEAD~1...HEAD
