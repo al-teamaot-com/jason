@@ -125,6 +125,43 @@ misleading message-ID receipt. It is not the end-to-end remedy for this
 unlicensed privileged account. No production should be deployed solely to
 reproduce an unlicensed admin delivery failure.
 
+## Source-only browser HTTP adapter (2026-11-09)
+
+`jason_mcp.entra_release_browser_http.AdminReleaseBrowserAdapter` now
+provides a **non-mounted**, dependency-injected Starlette HTTP implementation
+of the existing one-time session and confidential Entra code-exchange
+primitives. Its ordinary-request route is the reviewed
+`/admin/release-approval`, and its callback is exactly
+`/admin/release-approval/callback`. The notice page has no approval action.
+
+The adapter refuses every request until a **trusted independent Conditional
+Access/MFA enforcement attestor** returns strict True. It validates exact
+HTTPS host/path against the reviewed route, checks form Origin, limits body
+size, denies polluted parameters, sets a Secure+HttpOnly+SameSite=Lax
+`__Host-` cookie, consumes the exact session before code redemption,
+clears the cookie on callback, and never reflects OAuth codes, JWTs,
+client secrets or PKCE into its response. Its successful response is
+**identity verified / no release approved**; the underlying
+`verified_admin_signin` evidence remains `release_authorized=False`.
+
+A new opaque-cookie hash lookup on `OneTimeBrowserLoginStore` resolves the
+correct **server-stored** approval ID; a URL parameter or forwarded
+Teams notice cannot choose which release is consumed on callback.
+The callback re-reads the immutable exact release before atomic consumption.
+
+The HTTP adapter remains intentionally **UNMOUNTED** in `server.py`.
+It does not load a production policy, register the Entra confidential
+client, attest a live CA authentication context, expose an approval UI,
+sign an approval decision, or modify the host Release Manager. This is
+security preproduction, not an actionable owner approval.
+
+Tests run with a completely offline, isolated copy of the MCP runtime's
+Starlette/AnyIO source dependencies and synthetic identities/hostnames,
+without contacting Microsoft or altering running containers. The tests
+cover nonactionable notice, unverified CA, CSRF Origin, parameter
+pollution, exact registered redirect, secure cookie, one-time callback,
+replay, wrong state, and exact release-scope changes during login.
+
 ## Unimplemented integration — release gates
 
 **Do not treat these source helpers as a working approval flow yet.**
