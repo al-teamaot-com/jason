@@ -34,10 +34,13 @@ class VerifiedMigrationPlan:
 
 def require_signed_migration_grant(
     *, approval_id: str, proposals: Any, requests: Any,
-    grants: Any, now: datetime,
+    grants: Any, now: datetime, privileged_approver_identity_id: str,
 ) -> VerifiedMigrationPlan:
     if not isinstance(approval_id, str) or not approval_id.startswith("planapproval-"):
         raise EngineeringMigrationApprovalError("Original Teams plan approval identity required")
+    if (not isinstance(privileged_approver_identity_id, str)
+            or not privileged_approver_identity_id.strip()):
+        raise EngineeringMigrationApprovalError("Trusted privileged approver identity required")
     if now.tzinfo is None:
         raise EngineeringMigrationApprovalError("Trusted aware time required")
     try:
@@ -54,7 +57,7 @@ def require_signed_migration_grant(
             or scope.organization_id != "aot"
             or scope.allowed_capabilities != frozenset({ENGINEERING_MIGRATION_ACTIVATE})
             or scope.allowed_clients
-            or scope.max_risk < 3
+            or scope.max_risk != 3
             or not scope.production_allowed
             or proposal.requester_id != stored[0].principal_id
             or proposal.plan_fingerprint != plan_fingerprint(stored, scope)
@@ -81,7 +84,7 @@ def require_signed_migration_grant(
             or receipt.get("plan_id") != scope.plan_id
             or receipt.get("plan_fingerprint") != proposal.plan_fingerprint
             or receipt.get("revoked_at") is not None
-            or not receipt.get("approver_identity_id")
+            or receipt.get("approver_identity_id") != privileged_approver_identity_id
         ):
             raise EngineeringMigrationApprovalError("Original signed Teams decision unavailable")
     except EngineeringMigrationApprovalError:
