@@ -275,7 +275,8 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_gid": 1000,
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
-    },    "constant_contact": {
+    },
+    "constant_contact": {
         "logical_name": "constant_contact.oauth_client",
         "secret_path": "secret/data/connectors/constant-contact/production/oauth-client",
         "fields": ("client_id", "client_secret", "token_key_b64"),
