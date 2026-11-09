@@ -257,6 +257,70 @@ class TeamsGatewayPlaybookApprovalSender:
         return ExistingTeamsGatewayTransport(
             gateway_url=self.gateway_url, token_file=self.token_file)
 
+    def send_v5_owner_release_notice(self, *, request: ApprovalRequest,
+                                     reviewed_policy: Any,
+                                     tenant_id: str, regular_oid: str,
+                                     admin_oid: str, notice_url: str
+                                     ) -> tuple[str, ...]:
+        """Non-approving Teams notice to the reviewed normal user only.
+
+        The root-read immutable V5 policy, not any request or caller-selected
+        email address, resolves the exact tenant, admin, requester and origin.
+        A separately authenticated privileged Entra admin makes the decision.
+        """
+        from urllib.parse import urlencode
+        from jason_runtime.mobile_release_approval import MobileReleasePolicy
+        from jason_runtime.release_v5_aot_policy import AotV5BrowserPolicy, CHANNEL
+        import re
+        import uuid
+        if (not isinstance(reviewed_policy, MobileReleasePolicy)
+                or reviewed_policy.schema_version != "5.0"
+                or not isinstance(reviewed_policy.browser_policy, AotV5BrowserPolicy)):
+            raise PermissionError("V5_RELEASE_REVIEWED_OWNER_POLICY_REQUIRED")
+        bp=reviewed_policy.browser_policy
+        if (
+            request.capability != "release.production.approve"
+            or re.fullmatch(r"relapproval-[0-9a-f]{32}", request.approval_id) is None
+            or request.organization_id != reviewed_policy.organization_id
+            or request.authorized_approver_ids != reviewed_policy.owner_identity_ids
+            or request.metadata.get("owner_policy_sha256") != reviewed_policy.policy_sha256
+            or request.metadata.get("approval_channel") != CHANNEL
+            or (tenant_id,admin_oid)!=(bp.tenant_id,bp.admin_approver_oid)
+            or (tenant_id,regular_oid)!=(bp.tenant_id,bp.requester_oid)
+            or notice_url!=bp.notice_uri
+            or reviewed_policy.admin_approver_binding!=(tenant_id,admin_oid)
+            or reviewed_policy.regular_requester_binding!=(tenant_id,regular_oid)
+            or request.metadata.get("notice_to_entra_oid") != regular_oid
+            or request.metadata.get("admin_approver_entra_oid") != admin_oid
+        ):
+            raise PermissionError("V5_RELEASE_NOTIFY_ONLY_REVIEWED_BOUNDARY")
+        binding = self.bindings.find(
+            microsoft_tenant_id=tenant_id,
+            microsoft_object_id=regular_oid,
+        )
+        if (
+            binding is None or getattr(binding, "status", None) != "active"
+            or getattr(binding, "microsoft_tenant_id", None) != tenant_id
+            or getattr(binding, "microsoft_object_id", None) != regular_oid
+            or getattr(binding, "client_id", None) is not None
+            or getattr(binding, "jason_identity_id", None)
+                != "person-entra-" + uuid.UUID(regular_oid).hex
+        ):
+            raise PermissionError("V5_REGULAR_TEAMS_REQUESTER_BINDING_UNAVAILABLE")
+        url = notice_url + "?" + urlencode({"request": request.approval_id})
+        text = (
+            "Jason production release requires administrator review. "
+            "Sign in separately as the privileged administrator using "
+            "the secure link. This Teams message CANNOT authorize release. "
+            + url
+        )
+        receipt = self._existing_transport().send(
+            binding=binding, text=text, card=None,
+        )
+        if receipt.recipient_identity_id != binding.jason_identity_id:
+            raise PermissionError("V5_TEAMS_NOTICE_RECIPIENT_NOT_VERIFIED")
+        return (receipt.message_id,)
+
     def send(self, request: ApprovalRequest) -> tuple[str, ...]:
         card = render_approval_card(request)
         adaptive = self._adaptive_card(card)

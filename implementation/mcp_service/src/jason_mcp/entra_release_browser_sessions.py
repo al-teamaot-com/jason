@@ -92,6 +92,20 @@ class OneTimeBrowserLoginStore:
             )
         return NewBrowserLoginSession(cookie_value=raw_cookie, login=login)
 
+    def peek_approval_id(self, *, cookie_value: str) -> str:
+        """Resolve only an opaque server-issued login cookie; never from URL."""
+        if type(cookie_value) is not str or not 40 <= len(cookie_value) <= 128:
+            raise EntraStepUpDenied("BROWSER_SESSION_COOKIE_INVALID")
+        digest=sha256(cookie_value.encode("utf-8")).hexdigest()
+        with self._connect() as db:
+            row=db.execute(
+                "SELECT approval_id FROM browser_login_sessions "
+                "WHERE cookie_sha256=?", (digest,),
+            ).fetchone()
+        if row is None:
+            raise EntraStepUpDenied("BROWSER_SESSION_MISSING_OR_REPLAYED")
+        return str(row[0])
+
     def consume(
         self, *, cookie_value: str, returned_state: str,
         approval: ExactRelease, now: datetime,
