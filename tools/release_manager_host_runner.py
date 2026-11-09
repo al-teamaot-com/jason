@@ -549,6 +549,7 @@ def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None
                     "explicit_owner_one_transaction_unfreeze",
                     "signed_teams_replacement_unfreeze",
                     "signed_teams_initial_unfreeze",
+                    "signed_entra_browser_initial_unfreeze",
                     "signed_teams_initial_unfreeze_renewal",
                 }
                 and doc.get("freeze_restored") is False
@@ -585,8 +586,12 @@ def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None
     atomic_json(receipt_path, receipt)
     if receipt.get("authorization") in {
         "signed_teams_replacement_unfreeze", "signed_teams_initial_unfreeze",
+        "signed_entra_browser_initial_unfreeze",
     }:
-        is_initial = receipt.get("authorization") == "signed_teams_initial_unfreeze"
+        is_initial = receipt.get("authorization") in {
+            "signed_teams_initial_unfreeze",
+            "signed_entra_browser_initial_unfreeze",
+        }
         approval_id = str(receipt.get("approval_id") or "")
         if re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None:
             raise ReleaseManagerError("replacement crash recovery approval identity invalid")
@@ -619,7 +624,10 @@ def begin_one_transaction_freeze_exception(
 ) -> dict[str, Any]:
     snapshot = _freeze_marker_snapshot(state_root)
     is_replacement = context.get("authorization") == "signed_teams_replacement_unfreeze"
-    is_initial = context.get("authorization") == "signed_teams_initial_unfreeze"
+    is_initial = context.get("authorization") in {
+        "signed_teams_initial_unfreeze","signed_entra_browser_initial_unfreeze",
+    }
+    is_browser_initial = context.get("authorization") == "signed_entra_browser_initial_unfreeze"
     is_initial_renewal = context.get("authorization") == "signed_teams_initial_unfreeze_renewal"
     if (context.get("authorization") == "explicit_owner_one_transaction_unfreeze"
             or is_replacement or is_initial or is_initial_renewal):
@@ -672,7 +680,9 @@ def begin_one_transaction_freeze_exception(
             )
             expected_kind = ("signed_teams_replacement_unfreeze" if is_replacement
                              else "signed_teams_initial_unfreeze_renewal"
-                             if is_initial_renewal else "signed_teams_initial_unfreeze")
+                             if is_initial_renewal else
+                             "signed_entra_browser_initial_unfreeze"
+                             if is_browser_initial else "signed_teams_initial_unfreeze")
             if (source.get("authorization") != expected_kind
                     or source.get("approval_id") != expected_id
                     or expires.tzinfo is None
@@ -708,6 +718,7 @@ def begin_one_transaction_freeze_exception(
                              "explicit_owner_one_transaction_unfreeze",
                              "signed_teams_replacement_unfreeze",
                              "signed_teams_initial_unfreeze",
+                             "signed_entra_browser_initial_unfreeze",
                              "signed_teams_initial_unfreeze_renewal"}:
         raise ReleaseManagerError("unsupported one-transaction freeze authorization")
     receipt = {
@@ -717,6 +728,7 @@ def begin_one_transaction_freeze_exception(
            if authorization in {"explicit_owner_one_transaction_unfreeze",
                                 "signed_teams_replacement_unfreeze",
                                 "signed_teams_initial_unfreeze",
+                                "signed_entra_browser_initial_unfreeze",
                                 "signed_teams_initial_unfreeze_renewal"} else {}),
         "approval_id": approval_id,
         "release_id": str(context["release_id"]),
@@ -906,12 +918,16 @@ def restore_one_transaction_freeze_exception(
     if receipt.get("authorization") in {
         "explicit_owner_one_transaction_unfreeze", "signed_teams_replacement_unfreeze",
         "signed_teams_initial_unfreeze",
+        "signed_entra_browser_initial_unfreeze",
         "signed_teams_initial_unfreeze_renewal",
     }:
         if receipt.get("authorization") == "signed_teams_replacement_unfreeze":
             source_receipt = state_root / "owner-replacement-unfreeze-receipts" / (
                 str(receipt["release_id"]) + "--" + str(receipt["approval_id"]) + ".json")
-        elif receipt.get("authorization") == "signed_teams_initial_unfreeze":
+        elif receipt.get("authorization") in {
+            "signed_teams_initial_unfreeze",
+            "signed_entra_browser_initial_unfreeze",
+        }:
             source_receipt = state_root / "owner-signed-unfreeze-receipts" / (
                 str(receipt["release_id"]) + ".json")
         elif receipt.get("authorization") == "signed_teams_initial_unfreeze_renewal":
@@ -1088,15 +1104,24 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
             "regular_requester_binding",
         }
         mode = "admin_approver_separated"
+    elif version == "5.0":
+        expected = shared | {
+            "high_impact_review", "admin_approver_binding",
+            "regular_requester_binding", "entra_browser_approval",
+        }
+        mode = "admin_browser_stepup_regular_teams_notice"
     else:
         raise ReleaseManagerError("mobile release approval policy version is unsupported")
-    if source_v2_required and version not in {"2.0", "3.0", "4.0"}:
+    if source_v2_required and version not in {"2.0", "3.0", "4.0", "5.0"}:
         raise ReleaseManagerError("candidate source must declare an owner-reviewed release policy")
     risks = doc.get("allowed_risk_profiles")
     ttl = doc.get("ttl_seconds")
-    if (set(doc) != expected or doc.get("organization_id") != "aot"
+    if (set(doc) != expected or (version != "5.0" and doc.get("organization_id") != "aot")
             or doc.get("policy_mode") != mode
-            or doc.get("owner_identity_ids") != ["person-al"]
+            or (version != "5.0" and doc.get("owner_identity_ids") != ["person-al"])
+            or (version == "5.0" and (not isinstance(doc.get("owner_identity_ids"), list)
+                 or len(doc["owner_identity_ids"]) != 1
+                 or not isinstance(doc["owner_identity_ids"][0], str)))
             or doc.get("capability") != "release.production.approve"
             or not isinstance(risks, list) or len(risks) != len(set(risks))
             or type(ttl) is not int):
@@ -1106,19 +1131,22 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
             raise ReleaseManagerError("V1 release approval policy must remain normal-risk only")
     else:
         exact_risks = (
-            {"normal", "production_control_core"} if version in {"2.0", "4.0"}
+            {"normal", "production_control_core"} if version in {"2.0", "4.0", "5.0"}
             else {"normal", "production_control_core", "production_repair"}
         )
+        high_impact = {
+            "owner_exact_sha_required": True,
+            "signed_teams_identity_required": version != "5.0",
+            "independent_ccc_required": True,
+            "protected_release_gates_unchanged": True,
+        }
+        if version == "5.0":
+            high_impact["signed_admin_browser_identity_required"] = True
         if (set(risks) != exact_risks
                 or not 300 <= ttl <= 900
-                or doc.get("high_impact_review") != {
-                    "owner_exact_sha_required": True,
-                    "signed_teams_identity_required": True,
-                    "independent_ccc_required": True,
-                    "protected_release_gates_unchanged": True,
-                }):
+                or doc.get("high_impact_review") != high_impact):
             raise ReleaseManagerError("reviewed high-impact release policy is invalid")
-    if version == "4.0":
+    if version in {"4.0", "5.0"}:
         def exact_enrolled_user(field):
             role = doc.get(field)
             if not isinstance(role, dict) or set(role) != {
@@ -1138,6 +1166,18 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
         regular = exact_enrolled_user("regular_requester_binding")
         if admin[0] != regular[0] or admin[1] == regular[1]:
             raise ReleaseManagerError("administrative approver cannot be normal requester")
+        if version == "5.0":
+            from jason_runtime.release_v5_aot_policy import AotV5BrowserPolicy
+            try:
+                AotV5BrowserPolicy.parse(
+                    doc["entra_browser_approval"],admin=admin,regular=regular,
+                    owner_identity_id=doc["owner_identity_ids"][0],
+                    organization_id=doc["organization_id"],
+                )
+            except PermissionError as exc:
+                raise ReleaseManagerError(
+                    "V5 versioned browser Owner policy does not match reviewed identity boundary"
+                ) from exc
     return {
         "schema_version": version, "mode": mode, "risks": sorted(risks),
         "ttl_seconds": ttl, "raw": raw,
@@ -5646,10 +5686,19 @@ def record_signed_initial_unfreeze(
         raise ReleaseManagerError("single-click signed freeze decision invalid or expired")
     record = load_record(state_root, release_id)
     owner = record.get("owner_approval") or {}
+    is_browser = request_metadata.get("approval_channel") == "microsoft_entra_browser_stepup"
+    if is_browser:
+        active_policy = _validated_mobile_release_policy(MOBILE_APPROVAL_POLICY)
+        if active_policy["schema_version"] != "5.0":
+            raise ReleaseManagerError("browser signed unfreeze requires exact active V5 root policy")
+    expected_owner_source = (
+        "authenticated_entra_browser_owner:" if is_browser
+        else "authenticated_mobile_teams_owner:"
+    ) + approval_id
     if (record.get("state") != "production_eligible"
             or owner.get("approved") is not True
             or owner.get("candidate_sha") != candidate_sha
-            or owner.get("source") != "authenticated_mobile_teams_owner:" + approval_id
+            or owner.get("source") != expected_owner_source
             or request_metadata.get("candidate_sha") != candidate_sha
             or request_metadata.get("release_id") != release_id
             or request_metadata.get("rollback_sha") != record.get("rollback_sha")):
@@ -5676,7 +5725,8 @@ def record_signed_initial_unfreeze(
         raise ReleaseManagerError("single-click host offer no longer matches signed card")
     doc = {
         "schema_version": "1.0",
-        "authorization": "signed_teams_initial_unfreeze",
+        "authorization": ("signed_entra_browser_initial_unfreeze" if is_browser
+                          else "signed_teams_initial_unfreeze"),
         "release_id": release_id, "candidate_sha": candidate_sha,
         "rollback_sha": binding["rollback_sha"],
         "scope_sha256": binding["scope_sha256"],
@@ -5711,7 +5761,8 @@ def record_signed_initial_unfreeze(
     record["signed_initial_unfreeze_authorization"] = pointer
     record.setdefault("history", []).append({
         "at": now(), "state": "production_eligible",
-        "gate": "single_signed_teams_approval_two_bound_receipts",
+        "gate": ("single_signed_entra_browser_approval_two_bound_receipts"
+                 if is_browser else "single_signed_teams_approval_two_bound_receipts"),
         "approval_id": approval_id,
     })
     save_record(state_root, record)
@@ -5947,8 +5998,19 @@ def signed_initial_one_transaction_freeze_context(
             or not one_transaction_release_id_matches_candidate(release_id, candidate)
             or owner.get("approved") is not True
             or owner.get("candidate_sha") != candidate
-            or owner.get("source") != "authenticated_mobile_teams_owner:" + approval_id):
+            or owner.get("source") not in {
+                "authenticated_mobile_teams_owner:" + approval_id,
+                "authenticated_entra_browser_owner:" + approval_id,
+            }):
         return None
+    browser_signed = owner["source"] == "authenticated_entra_browser_owner:" + approval_id
+    if browser_signed:
+        try:
+            live_policy = _validated_mobile_release_policy(MOBILE_APPROVAL_POLICY)
+        except ReleaseManagerError:
+            return None
+        if live_policy["schema_version"] != "5.0":
+            return None
     path = state_root / "owner-signed-unfreeze-receipts" / (release_id + ".json")
     try:
         info = path.lstat()
@@ -5970,7 +6032,10 @@ def signed_initial_one_transaction_freeze_context(
             or (expires - issued).total_seconds() > max_age_seconds
             or "sha256:" + hashlib.sha256(raw).hexdigest() != pointer.get("receipt_sha256")
             or receipt.get("schema_version") != "1.0"
-            or receipt.get("authorization") != "signed_teams_initial_unfreeze"
+            or receipt.get("authorization") != (
+                "signed_entra_browser_initial_unfreeze" if browser_signed
+                else "signed_teams_initial_unfreeze"
+            )
             or receipt.get("approval_id") != approval_id
             or receipt.get("signed_evidence_sha256") != pointer.get("signed_evidence_sha256")
             or receipt.get("prior_release_approval_source") != owner.get("source")
@@ -5991,11 +6056,15 @@ def signed_initial_one_transaction_freeze_context(
         return None
     digest = "sha256:" + hashlib.sha256(raw).hexdigest()
     return {
-        "authorization": "signed_teams_initial_unfreeze",
+        "authorization": ("signed_entra_browser_initial_unfreeze"
+                          if browser_signed else "signed_teams_initial_unfreeze"),
         "release_id": release_id, "candidate_sha": candidate,
         "rollback_sha": rollback,
         "scope_sha256": receipt["scope_sha256"],
-        "recovery_profile_id": "one_signed_teams_ordinary_release",
+        "recovery_profile_id": (
+            "one_signed_entra_browser_ordinary_release" if browser_signed
+            else "one_signed_teams_ordinary_release"
+        ),
         "declaration_sha256": digest,
         "explicit_unfreeze_receipt_sha256": digest,
         "owner_approval_source": owner["source"],
@@ -6101,6 +6170,21 @@ def owner_unfreeze_release(
     signed_source = re.fullmatch(
         r"authenticated_mobile_teams_owner:relapproval-[0-9a-f]{32}", owner_source,
     ) is not None
+    browser_source = re.fullmatch(
+        r"authenticated_entra_browser_owner:relapproval-[0-9a-f]{32}", owner_source,
+    ) is not None
+    if browser_source:
+        # Browser approval is NOT a Teams signature or shell authorization.
+        # It is trusted only under the reviewed, root-owned V5 transition
+        # and matching one-time signed browser freeze receipt.
+        live_policy = _validated_mobile_release_policy(MOBILE_APPROVAL_POLICY)
+        if (live_policy["schema_version"] != "5.0"
+                or signed_initial_one_transaction_freeze_context(state_root, record)
+                    is None):
+            raise ReleaseManagerError(
+                "V5 exact-scope signed browser Owner unfreeze evidence unavailable"
+            )
+        signed_source = True
     if not explicit_source and not signed_source:
         raise ReleaseManagerError("owner approval source is not trusted for exact unfreeze")
     require_current_manual_scope_review(repo, state_root, record)

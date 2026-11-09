@@ -170,3 +170,35 @@ def test_teams_gateway_rejects_contradictory_receipt_flags(tmp_path, monkeypatch
             request=_request(), resolution=_resolution(), prepared=prepared,
         )
     assert calls == [1]  # a contradictory send result must not be retried
+
+
+@pytest.mark.parametrize("action_type", ("Action.Submit", "Action.Execute", "Action.Http"))
+def test_generic_teams_send_rejects_forged_approval_actions(tmp_path, action_type):
+    from jason_runtime.teams_message_send import TeamsMessageSendInvoker
+    token_file = tmp_path / "token"
+    token_file.write_text("synthetic-proactive-token")
+    invoker = TeamsMessageSendInvoker(
+        gateway_url="http://gateway.internal:3979", token_file=str(token_file),
+    )
+    card = {"type": "AdaptiveCard", "version": "1.4", "body": [{
+        "type": "ActionSet", "actions": [{
+            "type": "Action.ShowCard", "card": {"type": "AdaptiveCard", "actions": [{
+                "type": action_type, "title": "Approve",
+            }]},
+        }],
+    }]}
+    with pytest.raises(PermissionError, match="canonical approval"):
+        invoker.prepare_execution_plan(request=_request(card=card), resolution=_resolution())
+
+
+def test_generic_teams_send_allows_noninteractive_card(tmp_path):
+    token_file = tmp_path / "token"
+    token_file.write_text("synthetic-proactive-token")
+    invoker = module.TeamsMessageSendInvoker(
+        gateway_url="http://gateway.internal:3979", token_file=str(token_file),
+    )
+    card = {"type": "AdaptiveCard", "version": "1.4", "body": [{
+        "type": "TextBlock", "text": "Information only",
+    }]}
+    prepared = invoker.prepare_execution_plan(request=_request(card=card), resolution=_resolution())
+    assert prepared.plan.normalized_payload["card"] == card

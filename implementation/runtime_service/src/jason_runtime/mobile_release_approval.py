@@ -28,6 +28,9 @@ from connectors.src.jason_connectors.approval_requests import (
 )
 from jason_runtime.playbook_autonomy_review import TeamsGatewayPlaybookApprovalSender
 from jason_runtime.owner_release_approval_containment import read_release_approval_containment
+from jason_runtime.release_v5_aot_policy import (
+    AotV5BrowserPolicy, CHANNEL as BROWSER_CHANNEL,
+)
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_ID = re.compile(r"^release-[0-9a-f]{16}(?:-retry-[1-9][0-9]{0,2})?$")
@@ -63,6 +66,7 @@ class MobileReleasePolicy:
     # not mutable email, UPN, or a privilege-granting binding migration.
     admin_approver_binding: tuple[str, str] | None = None
     regular_requester_binding: tuple[str, str] | None = None
+    browser_policy: AotV5BrowserPolicy | None = None
 
 
 def _exact_entra_binding(value: Any) -> tuple[str, str]:
@@ -115,13 +119,25 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
             "regular_requester_binding",
         }
         mode = "admin_approver_separated"
+    elif version == "5.0":
+        # V5 keeps the *same* shared approval ledger, replacing the
+        # unreachable unlicensed admin Teams button with a browser step-up.
+        # Source support alone cannot activate a root-owned 0600 policy.
+        expected = shared | {
+            "high_impact_review", "admin_approver_binding",
+            "regular_requester_binding", "entra_browser_approval",
+        }
+        mode = "admin_browser_stepup_regular_teams_notice"
     else:
         raise PermissionError("unsupported versioned mobile release policy")
     if (set(doc) != expected
-            or doc["organization_id"] != "aot"
+            or (version != "5.0" and doc["organization_id"] != "aot")
             or doc["policy_mode"] != mode
             or doc["capability"] != CAPABILITY
-            or doc["owner_identity_ids"] != ["person-al"]):
+            or (version != "5.0" and doc["owner_identity_ids"] != ["person-al"])
+            or (version == "5.0" and (not isinstance(doc["owner_identity_ids"], list)
+                 or len(doc["owner_identity_ids"]) != 1
+                 or not isinstance(doc["owner_identity_ids"][0], str)))):
         raise PermissionError("mobile release policy role, version or mode is not authorized")
     risks = doc["allowed_risk_profiles"]
     ttl = doc["ttl_seconds"]
@@ -135,22 +151,27 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
     else:
         review = doc["high_impact_review"]
         required_risks = (
-            {"normal", "production_control_core"} if version in {"2.0", "4.0"}
+            {"normal", "production_control_core"} if version in {"2.0", "4.0", "5.0"}
             else {"normal", "production_control_core", "production_repair"}
         )
+        expected_review = {
+            "owner_exact_sha_required": True,
+            "signed_teams_identity_required": version != "5.0",
+            "independent_ccc_required": True,
+            "protected_release_gates_unchanged": True,
+        }
+        if version == "5.0":
+            expected_review["signed_admin_browser_identity_required"] = True
         if (not isinstance(review, dict)
-                or review != {
-                    "owner_exact_sha_required": True,
-                    "signed_teams_identity_required": True,
-                    "independent_ccc_required": True,
-                    "protected_release_gates_unchanged": True,
-                } or set(risks) != required_risks):
+                or review != expected_review
+                or set(risks) != required_risks):
             raise PermissionError("high-impact Teams release policy requires exact reviewed controls")
         # Even V3 only authorizes the Teams review *channel*, never a standing
         # class-wide release grant or a production unfreeze. Root gates remain.
     admin_binding = None
     regular_binding = None
-    if version == "4.0":
+    browser_policy = None
+    if version in {"4.0", "5.0"}:
         admin_binding = _exact_entra_binding(doc["admin_approver_binding"])
         regular_binding = _exact_entra_binding(doc["regular_requester_binding"])
         if (
@@ -160,9 +181,16 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
             raise PermissionError(
                 "administrative approver must be distinct from regular requester in one tenant"
             )
+        if version == "5.0":
+            browser_policy = AotV5BrowserPolicy.parse(
+                doc["entra_browser_approval"],
+                admin=admin_binding, regular=regular_binding,
+                owner_identity_id=doc["owner_identity_ids"][0],
+                organization_id=doc["organization_id"],
+            )
     return MobileReleasePolicy(
-        "aot", ("person-al",), frozenset(risks), ttl, digest(doc), version,
-        admin_binding, regular_binding,
+        doc["organization_id"], tuple(doc["owner_identity_ids"]), frozenset(risks), ttl, digest(doc), version,
+        admin_binding, regular_binding, browser_policy,
     )
 
 
@@ -357,6 +385,7 @@ class ExactRelease:
     initial_freeze_binding: tuple[tuple[str, str], ...] | None = None
     initial_unfreeze_renewal_only: bool = False
     initial_unfreeze_renewal_lineage: tuple[tuple[str, str], ...] | None = None
+    reviewed_scope_sha256: str | None = None
 
 
 def _host_offered_initial_freeze(
@@ -440,12 +469,12 @@ def read_eligible_release(
     # This cannot mint another release approval or make the old V1 pilot
     # accept protected-control changes.
     if review_only and (
-        not allow_existing_owner_approval or policy.schema_version not in {"2.0", "3.0", "4.0"}
+        not allow_existing_owner_approval or policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}
         or owner_approval.get("candidate_sha") != (candidate or {}).get("candidate_sha")
     ):
         raise PermissionError("existing release approval requires a reviewed exact CCC-only card")
     if initial_unfreeze_renewal_only and (
-        not review_only or policy.schema_version not in {"2.0", "3.0", "4.0"}
+        not review_only or policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}
         or replacement_unfreeze_only
     ):
         raise PermissionError("initial unfreeze renewal needs prior signed owner release approval")
@@ -511,14 +540,21 @@ def read_eligible_release(
             (doc.get("manual_scope_review") or {}).get("scope_sha256"),
         )
         if (not review_only or initial_unfreeze_renewal_only)
-        and policy.schema_version in {"2.0", "3.0", "4.0"} else None
+        and policy.schema_version in {"2.0", "3.0", "4.0", "5.0"} else None
     )
+    reviewed_scope = (doc.get("manual_scope_review") or {}).get("scope_sha256")
+    if policy.schema_version == "5.0" and (
+        not isinstance(reviewed_scope, str)
+        or re.fullmatch(r"[0-9a-f]{64}", reviewed_scope) is None
+    ):
+        raise PermissionError("V5_RELEASE_REVIEWED_SCOPE_NOT_VERIFIED")
     return ExactRelease(release_id, sha, rollback, digest(manifest),
         str(manifest.get("policy_digest") or ""),
         str(manifest.get("desired_state_policy_digest") or ""),
         risk, str(manifest.get("change_class") or ""), purpose.strip(),
         tuple(files), tuple(surfaces), review_only, replacement_lineage,
-        frozen_intent, initial_unfreeze_renewal_only, initial_renewal_lineage)
+        frozen_intent, initial_unfreeze_renewal_only, initial_renewal_lineage,
+        reviewed_scope)
 
 
 def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleasePolicy,
@@ -572,12 +608,12 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
     if renewal and (
         not evidence.review_only or not frozen or replacement
         or evidence.initial_unfreeze_renewal_lineage is None
-        or policy.schema_version not in {"2.0", "3.0", "4.0"}
+        or policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}
     ):
         raise PermissionError("renewal must be one new, signed unfreeze-only decision")
     if frozen:
         if (replacement or (evidence.review_only and not renewal)
-                or policy.schema_version not in {"2.0", "3.0", "4.0"}):
+                or policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}):
             raise PermissionError("one-click freeze needs a fresh reviewed owner release")
         intent["initial_freeze_binding"] = dict(evidence.initial_freeze_binding)
     if renewal:
@@ -586,12 +622,12 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
             evidence.initial_unfreeze_renewal_lineage or ()
         )
     if replacement:
-        if not evidence.review_only or policy.schema_version not in {"2.0", "3.0", "4.0"}:
+        if not evidence.review_only or policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}:
             raise PermissionError("replacement Teams unfreeze needs reviewed owner mode")
         intent["replacement_unfreeze_only"] = True
         intent["replacement_lineage"] = dict(evidence.replacement_lineage)
     elif evidence.review_only and not renewal:
-        if policy.schema_version not in {"2.0", "3.0", "4.0"}:
+        if policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}:
             raise PermissionError("CCC-only Teams material review requires owner-reviewed mode")
         intent["review_only"] = True
     if renewal_nonce is not None:
@@ -670,6 +706,12 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         ),
         metadata={
             **intent, "intent_sha256": digest(intent), "owner_policy_sha256": policy.policy_sha256,
+            **({
+                "approval_channel": BROWSER_CHANNEL,
+                "notice_to_entra_oid": policy.regular_requester_binding[1],
+                "admin_approver_entra_oid": policy.admin_approver_binding[1],
+                "scope_sha256": evidence.reviewed_scope_sha256,
+            } if policy.schema_version == "5.0" else {}),
             **({
                 "card_instance_challenge": challenge,
                 "card_instance_challenge_sha256": hashlib.sha256(
@@ -1177,7 +1219,18 @@ class MobileReleaseApprovalMaintenance:
                         read_release_approval_containment(
                             self.state_root
                         ).require_request_eligible(request.requested_at)
-                        receipts = self.sender.send(request)
+                        receipts = (
+                            self.sender.send_v5_owner_release_notice(
+                                request=request,
+                                reviewed_policy=policy,
+                                tenant_id=policy.regular_requester_binding[0],
+                                regular_oid=policy.regular_requester_binding[1],
+                                admin_oid=policy.admin_approver_binding[1],
+                                notice_url=policy.browser_policy.notice_uri,
+                            )
+                            if policy.schema_version == "5.0"
+                            else self.sender.send(request)
+                        )
                         if len(receipts) != len(policy.owner_identity_ids):
                             raise RuntimeError("renewed Teams card delivery not confirmed")
                         self.requests.put(replace(
@@ -1264,7 +1317,18 @@ class MobileReleaseApprovalMaintenance:
             read_release_approval_containment(self.state_root).require_request_eligible(
                 request.requested_at
             )
-            receipts = self.sender.send(request)
+            receipts = (
+                self.sender.send_v5_owner_release_notice(
+                    request=request,
+                    reviewed_policy=policy,
+                    tenant_id=policy.regular_requester_binding[0],
+                    regular_oid=policy.regular_requester_binding[1],
+                    admin_oid=policy.admin_approver_binding[1],
+                    notice_url=policy.browser_policy.notice_uri,
+                )
+                if policy.schema_version == "5.0"
+                else self.sender.send(request)
+            )
             if len(receipts) != len(policy.owner_identity_ids):
                 raise RuntimeError("mobile Teams approval was not delivered to every bound owner")
             self.requests.put(replace(
