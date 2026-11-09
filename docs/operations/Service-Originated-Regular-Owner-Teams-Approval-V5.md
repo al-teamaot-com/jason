@@ -55,3 +55,13 @@ This document makes no assertion that V5 is deployed or that the eventual releas
 ## Parallel source integration reconciliation
 
 The V5 source feature additionally touches native Release Manager and deployment files. Reviewed overlapping PRs include #2378 (signed receipt persistence), #2382 (native promotion/rollback safety), #2355 (staff note deployment source), #2279 (superseded signed release decisions), plus #2336, #2384, #2377, #2373, #2282, #2177, #2269, #2392, #2391. The reviewed hunks are separately scoped, but exact protected-main integration must preserve every independent feature and rerun contract tests. This coordination is **not** integration-gate approval or permission to merge while the PMV3 release queue is locked.
+
+## Native V4-to-V5 staged policy transition and rollback regression (2026-11-09)
+
+The existing native `stage_mobile_release_approval_policy`/ `restore_mobile_release_approval_policy` routines already implement atomic private 0600 policy staging, original-byte backup and restoration **inside the governed release manager transaction**. The V5 candidate therefore reuses those routines; it adds no direct production file editing path. New `tools/tests/test_v5_native_policy_transition.py` verifies V4-to-V5 staging, crash retry and byte-identical restore; V4 rollback backup digest conflict; failure after a staged write restores exact V4 bytes; and runtime policy SHA/mode mismatch prevents acceptance.
+
+This test found and fixed an existing retry weakness: a replaced rollback backup matching the candidate could be accepted on replay. The native stage now requires the backup to match the **immutable previously recorded prior-policy digest, candidate digest, candidate mode, and backup path**, failing closed on tampering or absent lineage. This is a source-only correction; no live policy was staged or restored.
+
+The current protected-main V4 test fixture in `test_owner_reviewed_release_activation.py` still asserts the old canonical V2 policy. Its 8 failures when run against current main are stale fixture assumptions, not V5 transition acceptance. The same broader run passed 242 other tests and 5 subtests. Do not describe the whole legacy suite as green until that separate fixture migration is resolved under governance.
+
+**Bootstrap remains blocked:** even with reversible native policy staging, the release manager may stage V5 **only after** a legitimate V4-governed exact-SHA release authorization; the engine may not grant permission to its own transition. The connected admin Teams identity cannot currently receive the privileged signed Teams card, while the regular account does not satisfy V4. No policy transition, Teams decision, production release or frozen-worker restart has occurred.
