@@ -20,9 +20,9 @@ from .session import current_access_token
 
 PROVIDER = "constant_contact"
 LOGICAL_SECRET = "constant_contact.oauth_client"
-CONTACTS_SEARCH = "constant_contact.contacts.search"
-LISTS_SEARCH = "constant_contact.lists.search"
-CUSTOM_FIELDS_SEARCH = "constant_contact.fields.search"
+CONTACTS_SEARCH = "marketing.contact.search"
+LISTS_SEARCH = "marketing.contact_list.search"
+CUSTOM_FIELDS_SEARCH = "marketing.contact_field.search"
 READ_CAPABILITIES = frozenset({CONTACTS_SEARCH, LISTS_SEARCH, CUSTOM_FIELDS_SEARCH})
 PATHS = {
     CONTACTS_SEARCH: "/contacts",
