@@ -302,6 +302,29 @@ receipt, CCC and freeze controls before production.
 This bridge must not be enabled before the signed V5 policy migration,
 root trust enrollment, and host consumer code review are complete.
 
+## Protected host-consumer SQLite readback acceptance
+
+`release_mobile_approval_consumer.verify_protected_v5_browser_ledger` now
+performs a **read-only** bounded lookup of the native approval ledger's
+accepted decision, exact request, and retained signed browser evidence.
+`v5_browser_release_host_consumer.verify_v5_browser_release_receipt`
+revalidates the original versioned V5 policy, root-trusted signing key,
+admin Entra OID, timestamp, exact release/rollback/manifest/scope and
+cross-matches the signed evidence digest against the *native*
+`ApprovalResponse`. Any V4 Teams card, wrong actor, absent ledger,
+changed hash, fabricated receipt or expired scope fails closed.
+
+The V5 host readback returns `release_authorized=False`,
+`ccc_attested=False`, and `production_changed=False`.
+It cannot populate an `owner_approval` field, fabricate CCC, remove
+the freeze, deploy or restart services. A separately approved V5 policy
+and final host promotion authorization are required to wire the verified
+result into the existing release-authority transaction. This intentionally
+does **not** modify V4 signed Teams receipt processing.
+
+The new protected SQLite and signature regression suites are required by
+SEC-007. No production routing or privileged account license changes occur.
+
 ## Unimplemented integration — release gates
 
 **Do not treat these source helpers as a working approval flow yet.**

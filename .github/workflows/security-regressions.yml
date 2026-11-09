@@ -81,7 +81,9 @@ jobs:
             implementation/mcp_service/tests/test_entra_release_browser_full_flow.py \
             implementation/kernel/tests/test_entra_release_root_trust.py \
             tools/tests/test_verify_browser_release_evidence.py \
-            implementation/runtime_service/tests/test_browser_release_approval_bridge.py
+            implementation/runtime_service/tests/test_browser_release_approval_bridge.py \
+            tools/tests/test_v5_browser_release_host_consumer.py \
+            tools/tests/test_v5_browser_protected_sqlite_consumer.py
       - name: Approval and transport authority regressions
         run: |
           python -m pytest -q \
