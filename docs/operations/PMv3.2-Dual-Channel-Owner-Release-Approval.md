@@ -398,3 +398,30 @@ verified one-time signed admin decision for an exact registered capability,
 independent post-action readback, and preservation of the original release
 freeze and privilege boundaries. Source regression tests cannot substitute
 for a live native approval receipt or final production acceptance.
+
+## V5 Conditional Access activation preflight (2026-11-09)
+
+Live governed `identity.conditional.access.search` returned 18 AOT tenant policies.
+One enabled policy named `Require multifactor authentication for admins`
+requires MFA for included admin roles; several other broad policies explicitly
+exclude the dedicated privileged administrator OID. **None of the 18 policies
+references an authentication context** in
+`includeAuthenticationContextClassReferences`. This prevents proof that V5's
+requested step-up context enforces MFA; a generic role policy or an ID-token
+`acrs` value must not be represented as exact V5 authentication-context proof.
+Read-only role membership via the current Jason directory-role connector was
+independently attempted and failed `PROVIDER_HTTP_STATUS_403`, so even role
+application has not been established from the available governed role read.
+
+The new pure `assess_exact_admin_auth_context_mfa` preflight deliberately
+requires a live, enabled Conditional Access policy for **the reviewed exact
+admin OID**, browser clients and the reviewed authentication-context ID,
+explicitly including the MFA grant. Group- or role-targeted context policies
+are not accepted without separate authoritative membership evidence. Broad
+MFA rules, report-only policy, target exclusion, missing context or duplicate
+eligible policies fail closed. Its output is *only a candidate for independent
+root review*, never the protected root CA enforcement receipt or privileged
+approval. A tenant administrator must separately configure a reviewed context
+and matching Conditional Access policy under the native Teams governance
+approval path. Do not alter other security policies or remove break-glass
+exclusions to make this preflight pass.

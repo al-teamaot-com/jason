@@ -68,3 +68,70 @@ def verify_root_ca_enforcement_receipt(
         raise PermissionError("V5_CA_MFA_ENFORCEMENT_NOT_INDEPENDENTLY_VERIFIED")
     # The caller returns this SHA, which is included in the signed decision.
     return browser_policy.ca_enforcement_receipt_sha256
+
+
+def assess_exact_admin_auth_context_mfa(*, policies, admin_oid: str,
+                                        auth_context_id: str) -> dict[str, object]:
+    """Read-only preflight from a governed Entra CA policy list.
+
+    This does NOT author the root CA receipt or activate V5. It proves only a
+    narrow case: an enabled browser MFA policy explicitly targets the exact
+    administrator and authentication context. Group/role-derived policies need
+    separate independently verified membership evidence, so fail closed here.
+    The caller must obtain the list from a separately authorized provider read.
+    """
+    import uuid
+    if (not isinstance(policies, list) or not 1 <= len(policies) <= 100
+            or not isinstance(admin_oid, str)
+            or not isinstance(auth_context_id, str)
+            or re.fullmatch(r"c[1-9][0-9]?", auth_context_id) is None):
+        raise PermissionError("V5_CA_POLICY_READ_NOT_VERIFIABLE")
+    try:
+        if str(uuid.UUID(admin_oid)) != admin_oid:
+            raise ValueError("not canonical")
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise PermissionError("V5_CA_EXACT_ADMIN_REQUIRED") from exc
+    matches = []
+    for policy in policies:
+        if not isinstance(policy, dict):
+            raise PermissionError("V5_CA_POLICY_READ_NOT_VERIFIABLE")
+        conditions = policy.get("conditions") or {}
+        users = conditions.get("users") or {}
+        apps = conditions.get("applications") or {}
+        grants = policy.get("grant_controls") or {}
+        if (not isinstance(conditions, dict)
+                or not isinstance(users, dict)
+                or not isinstance(apps, dict)
+                or not isinstance(grants, dict)):
+            raise PermissionError("V5_CA_POLICY_READ_NOT_VERIFIABLE")
+        if auth_context_id not in (apps.get("includeAuthenticationContextClassReferences") or []):
+            continue
+        if (policy.get("state") != "enabled"
+                or "mfa" not in (grants.get("builtInControls") or [])
+                or (grants.get("operator") not in {"AND", "OR"})
+                or admin_oid not in (users.get("includeUsers") or [])
+                or admin_oid in (users.get("excludeUsers") or [])
+                or (users.get("excludeGroups") or [])
+                or (users.get("excludeRoles") or [])
+                or not any(x in (conditions.get("clientAppTypes") or [])
+                           for x in ("browser", "all"))):
+            continue
+        try:
+            if str(uuid.UUID(policy.get("id"))) != policy["id"]:
+                continue
+        except (TypeError, ValueError, AttributeError, KeyError):
+            continue
+        matches.append(policy)
+    if len(matches) != 1:
+        raise PermissionError("V5_CA_EXACT_AUTH_CONTEXT_MFA_NOT_PROVEN")
+    # A content digest is useful for human/root review, but not equivalent to
+    # a signed or root-protected enforcement receipt. Never return approval.
+    raw = json.dumps(matches[0], sort_keys=True, separators=(",", ":"),
+                     ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return {
+        "status": "candidate_requires_independent_root_review",
+        "provider_policy_id": matches[0]["id"],
+        "provider_read_evidence_sha256": sha256(raw).hexdigest(),
+        "auth_context_id": auth_context_id,
+        "approval_authorized": False,
+    }
