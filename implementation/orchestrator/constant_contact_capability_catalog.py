@@ -15,8 +15,8 @@ from kernel.execution_providers import (
 
 PROVIDER = "constant_contact"
 CONTACTS_SEARCH = "marketing.contact.search"
-LISTS_SEARCH = "marketing.contact_list.search"
-FIELDS_SEARCH = "marketing.contact_field.search"
+LISTS_SEARCH = "marketing.contact.list.search"
+FIELDS_SEARCH = "marketing.contact.field.search"
 CAPABILITIES = frozenset({CONTACTS_SEARCH, LISTS_SEARCH, FIELDS_SEARCH})
 
 
