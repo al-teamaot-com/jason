@@ -12,9 +12,9 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
-_UUID = re.compile(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\\Z")
-_SHA = re.compile(r"[0-9a-f]{40}\\Z")
-_DIGEST = re.compile(r"[0-9a-f]{64}\\Z")
+_UUID = re.compile(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\Z")
+_SHA = re.compile(r"[0-9a-f]{40}\Z")
+_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _REQUIRED = frozenset({
     "schema_version", "policy_mode", "organization_id", "microsoft_tenant_id",
     "owner_approver_object_id", "privileged_admin_object_id",
