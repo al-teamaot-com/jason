@@ -1,5 +1,3 @@
-[Reading 104 lines from start (total: 104 lines, 0 remaining)]
-
 """Read-only Workboard release scope guard for Jason's existing governed release workflow.
 
 This module deliberately NEVER issues approval, unfreezes production, rewrites
