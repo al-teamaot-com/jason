@@ -226,6 +226,12 @@ def main() -> int:
     copy_mode(ROOT / "tools" / "production_read_canary_gate.py",
               LIB / "production_read_canary_gate.py", 0o644)
     copy_mode(ROOT / "tools" / "worker_execution_enrollment.py", LIB / "worker_execution_enrollment.py", 0o644)
+    # One native release transaction owns OpenClaw Workboard activation and
+    # rollback. Install both reviewed helpers with the manager entrypoint.
+    copy_mode(ROOT / "tools" / "openclaw_workboard_release_scope.py",
+              LIB / "openclaw_workboard_release_scope.py", 0o644)
+    copy_mode(ROOT / "tools" / "openclaw_workboard_release_surface.py",
+              LIB / "openclaw_workboard_release_surface.py", 0o644)
     copy_mode(
         ROOT / "infrastructure" / "openclaw-operations" / "systemd" / "user" / "jason-release-manager.service",
         UNIT_DIR / "jason-release-manager.service",

@@ -34,6 +34,7 @@ import release_manager_gate as gate
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import production_read_canary_gate as owner_read_canary
 import worker_execution_enrollment as worker_enrollment
+import openclaw_workboard_release_surface as workboard_surface
 
 DEFAULT_REPO = Path("/home/al/.local/lib/jason/engineering-worker-source")
 DEFAULT_STATE = Path("/var/lib/jason/openclaw/release-manager")
@@ -1558,6 +1559,9 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
         or path in {
             "config/release-manager-policy.json",
             "config/production-desired-state.json",
+            "config/openclaw-workboard-activation.json",
+            "tools/openclaw_workboard_release_scope.py",
+            "tools/openclaw_workboard_release_surface.py",
             "config/mobile-release-approval-policy.json",
             "config/open-breaker-recovery-policy.json",
             "config/production-deployment-freeze-exception.json",
@@ -2597,6 +2601,19 @@ def install_release_manager_from_current(expected_sha: str) -> dict[str, Any]:
     ).digest():
         raise ReleaseManagerError("installed Release Manager runner differs from host release")
 
+    # Workboard companions are mandatory for source revisions that import them.
+    # Historical known-good revisions predate this optional surface. Their
+    # rollback installer/runner must remain restorable without new files.
+    if b"import openclaw_workboard_release_surface as workboard_surface" in expected_runner.read_bytes():
+        for companion in ("openclaw_workboard_release_scope.py",
+                          "openclaw_workboard_release_surface.py"):
+            expected = current / "tools" / companion
+            installed = Path.home() / ".local" / "lib" / "jason" / companion
+            if (not expected.is_file() or not installed.is_file()
+                    or hashlib.sha256(expected.read_bytes()).digest() !=
+                       hashlib.sha256(installed.read_bytes()).digest()):
+                raise ReleaseManagerError("installed Workboard release companion differs from host release")
+
     timer = subprocess.run(
         ["systemctl", "--user", "is-active", "jason-release-manager.timer"],
         env=user_systemd_env(),
@@ -3226,6 +3243,13 @@ def production_preflight(
     require_host_reconciler_ready(state_root)
     candidate_tree = worktree(repo, state_root, candidate_sha)
     try:
+        declaration = workboard_surface.source_declaration(candidate_tree)
+        if declaration["profile"] != "off":
+            # Preproduction is read-only against the exact live gateway config.
+            # It cannot issue approvals, enable the plugin, or restart services.
+            workboard_surface.plan(candidate_tree)
+            if workboard_surface.GatewayOps().image_id() != declaration["image_id"]:
+                raise ReleaseManagerError("preproduction Workboard gateway image differs from reviewed source")
         env = native_deploy_environment(candidate_tree, image, mcp_image, candidate_sha)
         run(
             [
@@ -4900,6 +4924,10 @@ def _deploy_production_locked(
         raise ReleaseManagerError(
             "exact candidate worktree is missing a required production deploy script"
         )
+    workboard_source_profile = workboard_surface.source_declaration(deploy_worktree)
+    if workboard_source_profile["profile"] != "off":
+        # Strictly read-only exact baseline/candidate/image preflight.
+        workboard_surface.plan(deploy_worktree)
     candidate_quickbooks_profile = declared_quickbooks_read_profile(deploy_worktree)
     candidate_worker_uid = worker_enrollment.approved_diagnostic_uid(deploy_worktree)
     try:
@@ -5058,6 +5086,8 @@ def _deploy_production_locked(
     release_manager_installed = False
     approval_policy_staged = False
     approval_policy_activation: dict[str, Any] | None = None
+    workboard_attempted = False
+    workboard_activation: dict[str, Any] | None = None
 
     try:
         # Policy staging is the first production mutation. It is source-bound,
@@ -5065,6 +5095,15 @@ def _deploy_production_locked(
         # running runtime still advertises the V1 owner_only_pilot mode.
         stage_mobile_release_approval_policy(deploy_worktree, state_root, record)
         approval_policy_staged = True
+        if workboard_source_profile["profile"] != "off":
+            # Existing native signed Teams grant + freeze exception, not another
+            # OpenClaw approval pipeline. Failed activation restores its own bytes.
+            workboard_attempted = True
+            workboard_activation = workboard_surface.activate(
+                deploy_worktree, state_root, record,
+            )
+            record["openclaw_workboard_activation"] = workboard_activation
+            save_record(state_root, record)
         # Mark *attempt* BEFORE executing the helper. A failed helper may have
         # already stopped/renamed/replaced live state before returning nonzero.
         runtime_attempted = True
@@ -5131,6 +5170,8 @@ def _deploy_production_locked(
             verified_owner_read_canary = owner_read_canary.require_authenticated_read_canary(
                 state_root, owner_read_canary_session,
             )
+        if workboard_attempted:
+            workboard_surface.verify_active(deploy_worktree)
         # One native postflight: exact image/source alignment, functional smoke,
         # protected drift and complete production manifest. Every failure
         # still raises inside the same automatic rollback transaction.
@@ -5233,6 +5274,17 @@ def _deploy_production_locked(
         gate_transition(repo, state_root, record, "production_verified")
         gate_transition(repo, state_root, record, "closed")
         save_record(state_root, record)
+        if workboard_attempted:
+            # Best-effort administrative journal closeout; a failure cannot
+            # reverse a completely healthy, already-closed native transaction.
+            # Native recovery will reverify/commit the journal on its next run.
+            try:
+                workboard_surface.recover_interrupted(state_root)
+            except Exception:
+                record.setdefault("administrative_closeout", {})[
+                    "workboard_journal_closeout_pending"
+                ] = True
+                save_record(state_root, record)
         # Production verification is now complete. Notification publication is
         # administrative work and must never roll back a healthy release.
         try:
@@ -5272,7 +5324,8 @@ def _deploy_production_locked(
         rollback_errors: list[str] = []
         recovery_steps = {"mcp": "not_attempted", "host": "not_attempted",
                           "manager": "not_attempted", "runtime": "not_attempted",
-                          "approval_policy": "not_attempted"}
+                          "approval_policy": "not_attempted",
+                          "openclaw_workboard": "not_attempted"}
 
         # Reverse the forward transaction in dependency order. A script can
         # return nonzero AFTER mutating production; do not trust its exit code
@@ -5364,6 +5417,19 @@ def _deploy_production_locked(
                 recovery_steps["approval_policy"] = "unverified"
                 rollback_errors.append(
                     "approval_policy=" + type(exc).__name__ + ":" + str(exc)[:200]
+                )
+
+        if workboard_attempted:
+            try:
+                recovery_steps["openclaw_workboard"] = "restoration_attempted"
+                restored_workboard = workboard_surface.rollback(
+                    deploy_worktree, state_root, record,
+                )
+                recovery_steps["openclaw_workboard"] = restored_workboard["status"]
+            except Exception as exc:
+                recovery_steps["openclaw_workboard"] = "unverified"
+                rollback_errors.append(
+                    "openclaw_workboard=" + type(exc).__name__ + ":" + str(exc)[:200]
                 )
 
         rollback_ok = False
@@ -6480,6 +6546,10 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                 # starting; the active-state check handles work that began earlier.
                 require_pmv3_engineering_quiescent()
                 restore_stranded_one_transaction_freeze_under_lock(state_root)
+                # Native transaction lock already held: resolve only a previously
+                # signed, interrupted gateway activation back to its exact LKG.
+                # This can NEVER authorize or initiate a new activation.
+                workboard_surface.recover_interrupted(state_root)
                 require_current_manual_scope_review(repo, state_root, record)
                 require_current_protected_release_source(repo, record)
                 require_host_reconciler_ready(state_root)
@@ -6726,6 +6796,12 @@ def rollback_closed_release(
             if not rollback_surface_is_verified("runtime", rollback_sha, baseline):
                 raise ReleaseManagerError("runtime post-acceptance rollback is not verified")
             recovery_steps["runtime"] = "restored_and_verified"
+
+            if workboard_surface.source_declaration(candidate_tree)["profile"] != "off":
+                workboard_restored = workboard_surface.rollback(
+                    candidate_tree, state_root, record,
+                )
+                recovery_steps["openclaw_workboard"] = workboard_restored["status"]
 
             alignment = live_production_alignment(rollback_sha)
             verified = capture_production_manifest(rollback_sha)
