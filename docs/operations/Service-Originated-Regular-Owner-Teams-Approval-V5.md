@@ -34,3 +34,11 @@ The source-only `service_originated_owner_approval_policy.py` is a validator; it
 `PYTHONPATH=implementation:implementation/runtime_service/src python3 -m pytest -q implementation/runtime_service/tests/test_service_originated_owner_approval_policy.py`
 
 This document makes no assertion that V5 is deployed or that the eventual release is currently eligible.
+
+## 2026-11-09 guarded runtime implementation progress
+
+- An isolated V5 source path now extends the existing `MobileReleasePolicy` schema, exact-requester ID, signed original Teams callback, exact Entra recipient routing in `composition.py` and retention of the one-use card challenge; V4 remains the installed default and a V4 runtime rejects V5 policy.
+- Unlike a mere notification redirect, the V5 callback checks the originally signed regular Owner Entra object and its matching active, unscoped Jason identity; the admin account, wrong tenant, disabled identity and client-scoped identity are denied.
+- Native V4 separate administrative authorization remains in place even when the Owner signs a V5 release card. Passing callback tests does not grant a release transaction.
+- Source-only tests: V5 role guards and signed Teams callback plus V4 original tests and deployment-contract tests pass locally. The first dedicated CI revision omitted canonical runtime dependencies and was corrected; only latest-head CI can be treated as authoritative.
+- **Not activated:** current installed V4 root release consumer, host policy, production-bound deployment mode and preproduction/rollback admission are not yet V5-capable. No real Teams card or signed Owner decision has been issued. Further governed source integration and a separate valid V4-to-V5 policy transition are still required.
