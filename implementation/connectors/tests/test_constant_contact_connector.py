@@ -69,7 +69,7 @@ def test_read_routes_through_injected_transport(tmp_path):
 @pytest.mark.parametrize("context,arguments", [
     (ctx(organization="other"), {}),
     (ctx(mode="execute"), {}),
-    (ctx(capability="constant_contact.contacts.import"), {}),
+    (ctx(capability="marketing.contact.import"), {}),
     (ctx(), {"url": "https://evil.example"}),
     (ctx(), {"limit": 9999}),
 ])
