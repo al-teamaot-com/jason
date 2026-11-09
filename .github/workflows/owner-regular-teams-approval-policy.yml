@@ -5,6 +5,9 @@ on:
     paths:
       - 'implementation/runtime_service/src/jason_runtime/service_originated_owner_approval_policy.py'
       - 'implementation/runtime_service/tests/test_service_originated_owner_approval_policy.py'
+      - 'implementation/runtime_service/src/jason_runtime/mobile_release_approval.py'
+      - 'implementation/runtime_service/tests/test_v5_service_originated_owner_release.py'
+      - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'docs/operations/Service-Originated-Regular-Owner-Teams-Approval-V5.md'
       - '.github/workflows/owner-regular-teams-approval-policy.yml'
   push:
@@ -26,4 +29,4 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install --disable-pip-version-check 'pytest>=8.3,<10'
       - run: python -m compileall -q implementation/runtime_service/src/jason_runtime/service_originated_owner_approval_policy.py
-      - run: python -m pytest -q implementation/runtime_service/tests/test_service_originated_owner_approval_policy.py
+      - run: python -m pytest -q implementation/runtime_service/tests/test_service_originated_owner_approval_policy.py implementation/runtime_service/tests/test_v5_service_originated_owner_release.py implementation/runtime_service/tests/test_admin_separated_release_roles.py tools/tests/test_admin_separated_deploy_contract.py
