@@ -199,6 +199,23 @@ impersonation, unavailable signer, forged CSRF, replay, wrong signing key,
 expiry, changed SHA/scope/manifest, and revoked CA attestation. SEC-007
 now requires all five component regression suites.
 
+## Protected host trust for V5 browser signatures
+
+`kernel.entra_release_root_trust.read_root_browser_release_trust` now
+provides a **read-only, fail-closed** parser for a future reviewed 0600
+root-owned signing-key trust manifest. There is no default key, no embedded
+tenant/owner identity, no private signing key on the host and no code path
+that writes this manifest. Independent host tests prove the approved
+Ed25519 public key verifies the exact signed browser decision while a
+wrong key, unreviewed trust policy hash, alternate tenant/admin OID,
+symlink, world-readable file, duplicate key or malformed key fails.
+
+This is an additional **independent trust primitive only**. No V5
+root policy is installed and the V4 release consumer continues rejecting
+all non-Teams evidence. A decision becomes operational only after separate
+governed policy migration and integration with the existing approval
+ledger, CCC and one-transaction freeze controls.
+
 ## Unimplemented integration — release gates
 
 **Do not treat these source helpers as a working approval flow yet.**

@@ -78,7 +78,8 @@ jobs:
             implementation/mcp_service/tests/test_entra_release_browser_http.py \
             implementation/mcp_service/tests/test_entra_release_browser_decision.py \
             implementation/mcp_service/tests/test_entra_release_browser_decision_sessions.py \
-            implementation/mcp_service/tests/test_entra_release_browser_full_flow.py
+            implementation/mcp_service/tests/test_entra_release_browser_full_flow.py \
+            implementation/kernel/tests/test_entra_release_root_trust.py
       - name: Approval and transport authority regressions
         run: |
           python -m pytest -q \
