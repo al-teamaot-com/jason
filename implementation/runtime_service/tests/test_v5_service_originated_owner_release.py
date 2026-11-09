@@ -86,7 +86,7 @@ def test_v5_cannot_mutate_existing_v4_policy_without_explicit_opt_in(tmp_path):
     )
     # Old production V4 runtime refuses the V5 policy, even if a card exists.
     assert flow.required_policy_version == "4.0"
-    with pytest.raises(PermissionError, match="reviewed runtime activation"):
+    with pytest.raises(PermissionError, match="reviewed runtime mode"):
         click(flow, req, microsoft_tenant_id=TENANT, microsoft_object_id=REGULAR)
     assert repo.get(req.approval_id).status is ApprovalRequestStatus.PENDING
 
