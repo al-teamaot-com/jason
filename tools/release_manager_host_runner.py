@@ -1082,15 +1082,18 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
     elif version in {"2.0", "3.0"}:
         expected = shared | {"high_impact_review"}
         mode = "owner_reviewed"
-    elif version == "4.0":
+    elif version in {"4.0", "5.0"}:
         expected = shared | {
             "high_impact_review", "admin_approver_binding",
             "regular_requester_binding",
         }
-        mode = "admin_approver_separated"
+        if version == "5.0":
+            expected |= {"release_requester_principal_id"}
+        mode = ("admin_approver_separated" if version == "4.0"
+                else "service_requester_regular_owner_teams")
     else:
         raise ReleaseManagerError("mobile release approval policy version is unsupported")
-    if source_v2_required and version not in {"2.0", "3.0", "4.0"}:
+    if source_v2_required and version not in {"2.0", "3.0", "4.0", "5.0"}:
         raise ReleaseManagerError("candidate source must declare an owner-reviewed release policy")
     risks = doc.get("allowed_risk_profiles")
     ttl = doc.get("ttl_seconds")
@@ -1106,7 +1109,7 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
             raise ReleaseManagerError("V1 release approval policy must remain normal-risk only")
     else:
         exact_risks = (
-            {"normal", "production_control_core"} if version in {"2.0", "4.0"}
+            {"normal", "production_control_core"} if version in {"2.0", "4.0", "5.0"}
             else {"normal", "production_control_core", "production_repair"}
         )
         if (set(risks) != exact_risks
@@ -1118,7 +1121,7 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
                     "protected_release_gates_unchanged": True,
                 }):
             raise ReleaseManagerError("reviewed high-impact release policy is invalid")
-    if version == "4.0":
+    if version in {"4.0", "5.0"}:
         def exact_enrolled_user(field):
             role = doc.get(field)
             if not isinstance(role, dict) or set(role) != {
@@ -1138,6 +1141,8 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
         regular = exact_enrolled_user("regular_requester_binding")
         if admin[0] != regular[0] or admin[1] == regular[1]:
             raise ReleaseManagerError("administrative approver cannot be normal requester")
+        if version == "5.0" and doc.get("release_requester_principal_id") != "svc-jason-release-manager":
+            raise ReleaseManagerError("V5 release requester must be the native service principal")
     return {
         "schema_version": version, "mode": mode, "risks": sorted(risks),
         "ttl_seconds": ttl, "raw": raw,
@@ -3186,7 +3191,7 @@ def native_deploy_environment(
     env["JASON_RELEASE_MOBILE_APPROVAL_MODE"] = str(mobile_policy["mode"])
     expected_admin = (
         "admin-separated-v1"
-        if mobile_policy["mode"] == "admin_approver_separated" else ""
+        if mobile_policy["mode"] in {"admin_approver_separated", "service_requester_regular_owner_teams"} else ""
     )
     if os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE") not in (None, expected_admin):
         raise ReleaseManagerError(
@@ -4923,7 +4928,7 @@ def _deploy_production_locked(
     prior_release_approval_mode = live_release_mobile_approval_mode(
         live_runtime() if recovery_context is None else live_runtime_unchecked_health()
     )
-    if prior_release_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed", "admin_approver_separated"}:
+    if prior_release_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed", "admin_approver_separated", "service_requester_regular_owner_teams"}:
         raise ReleaseManagerError("live release approval mode is not a supported rollback baseline")
     candidate_autotask_profile = declared_autotask_read_profile(deploy_worktree)
     prior_autotask_profile = (
@@ -7063,7 +7068,7 @@ def live_release_mobile_approval_mode(runtime: dict[str, Any]) -> str:
                 and value.startswith("JASON_RELEASE_MOBILE_APPROVAL_MODE=")]
     if len(selected) != 1:
         return "off"
-    return selected[0] if selected[0] in {"owner_only_pilot", "owner_reviewed", "admin_approver_separated"} else "off"
+    return selected[0] if selected[0] in {"owner_only_pilot", "owner_reviewed", "admin_approver_separated", "service_requester_regular_owner_teams"} else "off"
 
 
 def _open_breaker_recovery_policy(repo: Path, candidate_sha: str) -> dict[str, Any]:
@@ -7389,7 +7394,9 @@ def _reviewed_mobile_release_mode(policy: Any) -> str:
         return "owner_only_pilot"
     if policy.schema_version == "4.0":
         return "admin_approver_separated"
-    if policy.schema_version in {"2.0", "3.0", "4.0"}:
+    if policy.schema_version == "5.0":
+        return "service_requester_regular_owner_teams"
+    if policy.schema_version in {"2.0", "3.0", "4.0", "5.0"}:
         return "owner_reviewed"
     raise ReleaseManagerError("unreviewed Teams Owner release policy mode")
 
