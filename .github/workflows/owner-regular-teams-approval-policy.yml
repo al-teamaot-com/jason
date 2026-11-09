@@ -21,7 +21,7 @@ jobs:
   policy-negative-tests:
     runs-on: ubuntu-latest
     env:
-      PYTHONPATH: implementation:implementation/runtime_service/src
+      PYTHONPATH: tools:implementation:implementation/runtime_service/src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,4 +31,4 @@ jobs:
           python -m pip install --disable-pip-version-check 'pytest>=8.3,<10'
           python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service
       - run: python -m compileall -q implementation/runtime_service/src/jason_runtime/service_originated_owner_approval_policy.py
-      - run: python -m pytest -q implementation/runtime_service/tests/test_service_originated_owner_approval_policy.py implementation/runtime_service/tests/test_v5_service_originated_owner_release.py implementation/runtime_service/tests/test_admin_separated_release_roles.py tools/tests/test_admin_separated_deploy_contract.py
+      - run: python -m pytest -q implementation/runtime_service/tests/test_service_originated_owner_approval_policy.py implementation/runtime_service/tests/test_v5_service_originated_owner_release.py implementation/runtime_service/tests/test_admin_separated_release_roles.py tools/tests/test_admin_separated_deploy_contract.py tools/tests/test_v5_native_release_policy.py tools/tests/test_v5_native_owner_release_evidence.py
