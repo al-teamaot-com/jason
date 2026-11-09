@@ -42,3 +42,9 @@ An issued Teams card is **not** an approved release; only the provider-authentic
 `PYTHONPATH=implementation:implementation/runtime_service/src python3 -m pytest -q implementation/runtime_service/tests/test_engineering_migration_approval.py implementation/orchestrator/tests/test_engineering_migration_capability.py tools/tests/test_independent_governed_lane.py tools/tests/test_isolated_service_units.py tools/tests/test_pmv3_worker_release_gate.py tools/tests/test_ticket_continuity_evidence_review.py`
 
 Passing source tests means only that code contracts pass. It never proves signed Teams card delivery, release eligibility, runtime installation, live ticket continuity or completed migration.
+
+## Source policy admission gap
+
+The repository's `config/universal-approval-internal-pilot-v1.json` permits maximum risk 2, expires on October 27, 2026 and allows only a narrow Autotask note-create workflow. It **does not** authorize the new critical-risk engineering migration (risk 3). Do not silently edit, extend or reuse that expired policy. A distinct, independently reviewed versioned policy and privileged Teams approver authorization are necessary before the source-only BUILDING capability can be activated. Production policy state must be verified separately; repository policy is not proof of installed state.
+
+The live `jason-runtime` configuration observed November 9 declares `JASON_RELEASE_MOBILE_APPROVAL_MODE=admin_approver_separated`. The ordinary requester and privileged administrator are separate Entra identities. A message accepted for the ordinary account is not a privileged release approval; if the admin account cannot receive a signed Teams challenge, stop and resolve its Teams eligibility through governed identity/license administration before requesting release authorization.
