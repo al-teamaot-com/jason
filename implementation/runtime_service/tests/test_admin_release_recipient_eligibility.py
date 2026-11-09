@@ -60,7 +60,7 @@ def test_licensed_exact_admin_uses_provider_read_only_preflight(tmp_path):
         assert req.full_url.endswith("/internal/proactive/recipient-eligibility")
         assert json.loads(req.data) == {"tenantId": TENANT, "aadObjectId": ADMIN}
         return Response({"status":"eligible", "tenantId":TENANT, "aadObjectId":ADMIN})
-    with patch("urllib.request.urlopen", fake_send):
+    with patch("jason_runtime.teams_message_send.urlopen", fake_send):
         sender.preflight_release_recipient_eligibility(policy=policy)
     assert len(requests)==1
 
@@ -74,7 +74,7 @@ def test_licensed_exact_admin_uses_provider_read_only_preflight(tmp_path):
 def test_sender_wrong_actor_or_unlicensed_result_fails_closed(tmp_path,result):
     sender = actual_sender(tmp_path)
     policy = read_mobile_release_policy(separated_policy_file(tmp_path))
-    with patch("urllib.request.urlopen", return_value=Response(result)):
+    with patch("jason_runtime.teams_message_send.urlopen", return_value=Response(result)):
         with pytest.raises(PermissionError):
             sender.preflight_release_recipient_eligibility(policy=policy)
 
@@ -82,7 +82,7 @@ def test_sender_wrong_actor_or_unlicensed_result_fails_closed(tmp_path,result):
 def test_graph_403_fails_closed_without_email_fallback(tmp_path):
     sender = actual_sender(tmp_path)
     policy = read_mobile_release_policy(separated_policy_file(tmp_path))
-    with patch("urllib.request.urlopen", side_effect=HTTPError(
+    with patch("jason_runtime.teams_message_send.urlopen", side_effect=HTTPError(
             "http://127.0.0.1:9999",403,"Graph role missing",None,None)):
         with pytest.raises(PermissionError, match="unverified"):
             sender.preflight_release_recipient_eligibility(policy=policy)

@@ -13,7 +13,10 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
-from .teams_message_send import post_existing_teams_gateway
+from .teams_message_send import (
+    post_existing_teams_gateway,
+    check_existing_teams_recipient_eligibility,
+)
 from uuid import UUID
 
 from communication.audience.engine import AudiencePolicyEngine
@@ -55,6 +58,21 @@ class ExistingTeamsGatewayTransport:
     gateway_url: str
     token_file: str | Path
     timeout_seconds: int = 20
+
+    def check_approval_recipient_eligibility(self, *, binding: Any) -> None:
+        """Single canonical Teams transport for a read-only recipient preflight."""
+        if getattr(binding, "status", None) != "active":
+            raise PermissionError("Teams approval recipient identity not active")
+        tenant = _uuid(getattr(binding, "microsoft_tenant_id", None))
+        actor = _uuid(getattr(binding, "microsoft_object_id", None))
+        credential = Path(self.token_file).read_text(encoding="utf-8").strip()
+        if not credential:
+            raise PermissionError("existing Teams proactive token unavailable")
+        check_existing_teams_recipient_eligibility(
+            gateway_url=self.gateway_url, token=credential,
+            tenant_id=tenant, aad_object_id=actor,
+            timeout_seconds=self.timeout_seconds,
+        )
 
     def send(self, *, binding: Any, text: str,
              card: Mapping[str, Any] | None = None) -> TeamsDeliveryReceipt:

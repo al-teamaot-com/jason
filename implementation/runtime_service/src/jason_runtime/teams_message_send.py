@@ -112,6 +112,47 @@ def post_existing_teams_gateway(
     }
 
 
+def check_existing_teams_recipient_eligibility(
+    *, gateway_url: str, token: str, tenant_id: str, aad_object_id: str,
+    timeout_seconds: float = 12,
+) -> None:
+    """Read-only, exact-object-ID Teams license check via existing gateway.
+
+    This is an extension of the sole governed Teams transport. Never creates
+    an approval, falls back to email, installs a Teams app or retries sends.
+    """
+    from urllib.error import URLError
+    from uuid import UUID
+
+    if (not isinstance(gateway_url, str) or not gateway_url.strip()
+            or not isinstance(token, str) or not token.strip()):
+        raise PermissionError("existing Teams eligibility transport unavailable")
+    try:
+        tenant = str(UUID(tenant_id))
+        actor = str(UUID(aad_object_id))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise PermissionError("Teams eligibility requires exact Entra identities") from exc
+    if tenant != tenant_id or actor != aad_object_id:
+        raise PermissionError("Teams eligibility identity not canonical")
+    body = json.dumps({"tenantId": tenant, "aadObjectId": actor},
+                      sort_keys=True, separators=(",", ":")).encode("utf-8")
+    req = Request(
+        gateway_url.rstrip("/") + "/internal/proactive/recipient-eligibility",
+        data=body, method="POST",
+        headers={"Authorization": "Bearer " + token,
+                 "Content-Type": "application/json"},
+    )
+    try:
+        with urlopen(req, timeout=bounded_execution_timeout(timeout_seconds)) as response:
+            result = json.loads(response.read(4096).decode("utf-8"))
+    except (URLError, OSError, ValueError, KeyError, TypeError) as exc:
+        raise PermissionError("privileged Teams recipient eligibility unverified") from exc
+    if (not isinstance(result, dict) or result.get("status") != "eligible"
+            or result.get("tenantId") != tenant
+            or result.get("aadObjectId") != actor):
+        raise PermissionError("privileged Teams approver cannot act on Teams card")
+
+
 @dataclass
 class TeamsMessageSendInvoker:
     gateway_url: str

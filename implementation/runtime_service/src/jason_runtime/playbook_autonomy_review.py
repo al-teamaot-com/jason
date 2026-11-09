@@ -277,34 +277,11 @@ class TeamsGatewayPlaybookApprovalSender:
         if (binding is None or getattr(binding, "microsoft_tenant_id", None) != expected[0]
                 or getattr(binding, "microsoft_object_id", None) != expected[1]):
             raise PermissionError("release approver identity unavailable")
-        import urllib.error
-        import urllib.request
-        from kernel.execution_deadline import bounded_execution_timeout
-
-        secret = self.token_file.read_text(encoding="utf-8").strip()
-        if not secret:
-            raise PermissionError("release Teams eligibility token unavailable")
-        body = json.dumps({
-            "tenantId": expected[0], "aadObjectId": expected[1],
-        }, separators=(",", ":")).encode("utf-8")
-        req = urllib.request.Request(
-            self.gateway_url + "/internal/proactive/recipient-eligibility",
-            data=body, method="POST",
-            headers={"Authorization": "Bearer " + secret,
-                     "Content-Type": "application/json"},
+        # Reuse the canonical approved Teams transport. Do NOT fork a new
+        # urllib/HTTP code path from this approval-specific sender.
+        self._existing_transport().check_approval_recipient_eligibility(
+            binding=binding,
         )
-        try:
-            with urllib.request.urlopen(
-                req, timeout=bounded_execution_timeout(12)
-            ) as response:
-                result = json.loads(response.read(4096).decode("utf-8"))
-        except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
-            # No fallback to sending, no card, and no automatic alternate actor.
-            raise PermissionError("privileged Teams recipient eligibility unverified") from exc
-        if (not isinstance(result, dict) or result.get("status") != "eligible"
-                or result.get("tenantId") != expected[0]
-                or result.get("aadObjectId") != expected[1]):
-            raise PermissionError("privileged Teams approver cannot act on Teams card")
 
     def notify_separated_requester_unavailable(self, *, policy, release_id: str) -> str:
         """Inform the regular owner only; no approval card or authority transfer."""
