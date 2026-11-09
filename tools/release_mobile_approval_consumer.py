@@ -96,6 +96,33 @@ def _authorized_policy_owner_identity(*, binding, owner, policy, receipt_identit
     """
     if receipt_identity_id not in policy.owner_identity_ids:
         raise PermissionError("mobile release receipt approver is outside owner policy")
+    if policy.schema_version == "5.0":
+        # Native host consumption must independently resolve the very same
+        # reviewed regular Owner Entra object; never accept email fallback,
+        # caller-selected role or admin substitution for a V5 release card.
+        expected = policy.regular_requester_binding
+        admin = policy.admin_approver_binding
+        if (expected is None or admin is None or expected == admin
+                or policy.service_release_requester_id != "svc-jason-release-manager"):
+            raise PermissionError("native V5 release Owner policy invalid")
+        try:
+            derived = "person-entra-" + uuid.UUID(str(binding.microsoft_object_id)).hex
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise PermissionError("native V5 Owner Entra identity invalid") from exc
+        if (
+            str(getattr(binding, "microsoft_tenant_id", "")) != expected[0]
+            or str(getattr(binding, "microsoft_object_id", "")) != expected[1]
+            or getattr(binding, "status", None) != "active"
+            or getattr(binding, "client_id", None) is not None
+            or str(getattr(binding, "jason_identity_id", "")) != derived
+            or owner is None
+            or str(getattr(owner, "identity_id", "")) != derived
+            or getattr(owner, "status", None) != "active"
+            or getattr(owner, "organization_id", None) != policy.organization_id
+            or getattr(owner, "identity_type", None) not in ("human", "person")
+        ):
+            raise PermissionError("native V5 Owner is not the exact signed Teams actor")
+        return receipt_identity_id
     if (owner is None or owner.status != "active"
             or owner.organization_id != policy.organization_id):
         raise PermissionError("mobile release approval has no active independent Jason owner identity")
@@ -366,7 +393,7 @@ def consume_mobile_release_decisions(
             authenticator=key_auth, allowed_machine_identities=frozenset({"svc-openclaw-gateway"}),
             allowed_approval_prefixes=(REQUEST_PREFIX,), clock=lambda: timestamp,
             allowed_selection_keys=(frozenset({"card_challenge"})
-                                    if policy.schema_version in {"2.0", "3.0"} else frozenset()),
+                                    if policy.schema_version in {"2.0", "3.0", "5.0"} else frozenset()),
         )
         token = json.dumps(signed, separators=(",", ":"), ensure_ascii=False)
         _, original = verifier.parse(token)
@@ -378,7 +405,7 @@ def consume_mobile_release_decisions(
                 or original.documents
                 or principal.authentication_evidence_hash != evidence_sha):
             raise PermissionError("original signed Teams evidence does not match decision receipt")
-        if policy.schema_version in {"2.0", "3.0"}:
+        if policy.schema_version in {"2.0", "3.0", "5.0"}:
             proof = request.metadata.get("card_instance_challenge")
             if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
                     or hashlib.sha256(proof.encode("ascii")).hexdigest()
