@@ -27,3 +27,18 @@ On October 25 the primary drive was about 96% used with the secondary archive on
 ## Production sandbox invariant
 
 Do **not** relax `ProtectHome=read-only` or grant the production watchdog write access to `/home/al/projects/jason`. The protected `test_self_heal_user_unit_has_no_developer_checkout_dependency` contract remains mandatory. `jason_storage_autorepair.repair()` defaults to cache-only and never inspects the developer Git worktree registry. The archive helper requires an explicit `engineering_archive=True` invocation in a separately governed engineering maintenance lane, and is **not** invoked by the production watchdog. This limitation must be reported as a remaining workstream rather than incorrectly claiming archival is already autonomous.
+
+
+## Verified ledger-capacity discovery and separate cutover path — November 9, 2026
+
+The live orchestration event database has grown to ~34 GB decimal
+(with ~915 MB active WAL) and the reflection database to ~1.86 GB.
+A source-only read-only migration preflight and controlled cutover
+contract are documented in
+[Jason Secondary-Drive Ledger Migration](Jason-Secondary-Drive-Ledger-Migration.md).
+Its full-copy capacity and dual-writer-path checks pass on the live
+host without mutating SQLite, but no cutover is approved or performed.
+The protected primary filesystem remains critically full.
+A separate exact-SHA Teams-approved production transaction, proven
+dual-writer rollback and later separately authorized safe source
+retirement are necessary before claiming sustainable capacity.

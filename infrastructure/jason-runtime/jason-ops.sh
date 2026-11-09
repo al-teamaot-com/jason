@@ -267,14 +267,19 @@ PY
     echo "========== ORCHESTRATION =========="
     if container_exists "$RUNTIME_CONTAINER"; then
         docker exec -i "$RUNTIME_CONTAINER" python - "$minutes" <<'PY'
+import os
 import sqlite3
 import sys
+from pathlib import Path
 
 minutes = int(sys.argv[1])
-conn = sqlite3.connect(
-    "file:/var/lib/jason/openclaw/orchestration-events.sqlite3?mode=ro",
-    uri=True,
-)
+# The runtime's configured event ledger is authoritative after the exact
+# governed secondary-drive cutover. Never silently inspect stale legacy data.
+db_path = Path(os.environ.get(
+    "JASON_ORCHESTRATION_EVENTS_DB",
+    "/var/lib/jason/openclaw/orchestration-events.sqlite3",
+))
+conn = sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)
 conn.row_factory = sqlite3.Row
 rows = conn.execute(
     """
