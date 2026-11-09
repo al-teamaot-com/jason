@@ -216,6 +216,46 @@ all non-Teams evidence. A decision becomes operational only after separate
 governed policy migration and integration with the existing approval
 ledger, CCC and one-transaction freeze controls.
 
+## Required tenant evidence before any live V5 approval route
+
+No available, authorized Project Jason read capability can confirm that an
+Entra confidential **Web** client has the reviewed registered redirect
+or that a tenant authentication context is actually protected by Conditional
+Access requiring appropriate MFA. The prior privileged-user authentication
+method read returned HTTP 403. These are **real tenant configuration and
+authorization dependencies**, not reason to silently assume `c1` is MFA.
+
+The separately privileged tenant administrator must verify/create a reviewed
+confidential Web app registration with the **exact** registered HTTPS redirect
+`https://mcp-jason.teamaot.com/admin/release-approval/callback`
+(or a separately reviewed deployment-specific URI; never hard-coded into
+reusable source). A server-side confidential credential belongs in the
+existing governed OpenBao secret store and must not be pasted into chat, Git,
+Teams, or browser URLs. The available source code currently supports the
+client-secret OAuth redemption variant; certificate-based client assertions
+would require an additional reviewed implementation.
+
+The tenant administrator must also confirm that an authentication-context
+reference `c1` through `c99` is actually assigned an enabled Conditional
+Access policy requiring suitable MFA for the exact privileged signer and
+application, and that the tenant has the necessary Entra ID P1 rights.
+A configured context label, `acrs` JWT claim or sign-in method list by
+itself **does not prove** enforcement. Only independently verified live
+CA policy and login evidence can enable the policy attestor.
+
+Microsoft source references:
+- https://learn.microsoft.com/en-us/entra/identity-platform/developer-guide-conditional-access-authentication-context
+- https://learn.microsoft.com/en-us/entra/identity-platform/msal-client-application-configuration
+- https://learn.microsoft.com/en-us/azure/active-directory/develop/v2-oauth2-auth-code-flow
+
+Before activation the **same existing** ApprovalRequestService and native
+root Release Manager must accept an explicitly versioned V5 decision under
+its own root policy, protected signer trust, nonreplay, exact release scope,
+CCC and one-transaction freeze. The V4 signed-Teams-only policy is intact,
+and the new V5 source cannot approve a release on its own. This requires an
+independently reviewed Owner policy transition, not an ordinary Teams
+notification or a code-only edit.
+
 ## Unimplemented integration — release gates
 
 **Do not treat these source helpers as a working approval flow yet.**
