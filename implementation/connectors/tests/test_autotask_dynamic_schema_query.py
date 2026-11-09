@@ -322,3 +322,71 @@ def test_missing_or_malformed_live_entity_information_fails_closed():
     with pytest.raises(PermissionError, match="QUERY_NOT_AUTHORIZED"):
         connector(transport).execute(request("ActionTypes"))
     assert not any(url.endswith("/query") for url, _ in transport.requests)
+
+class ContractScopedTransport(Transport):
+    def __init__(self, *, parent_exists=True, cross_contract=False):
+        super().__init__()
+        self.access = "Restricted"
+        self.parent_exists = parent_exists
+        self.cross_contract = cross_contract
+        self.fields = [
+            {"name": "id", "isQueryable": True},
+            {"name": "contractID", "isQueryable": True},
+            {"name": "serviceID", "isQueryable": True},
+        ]
+
+    def request(self, **kwargs):
+        url = kwargs["url"]
+        if url.endswith("/Contracts/query"):
+            self.requests.append((url, kwargs.get("params")))
+            return {"items": [{"id": 42, "companyID": 311}]} if self.parent_exists else {"items": []}
+        if url.endswith("/ContractServices/query"):
+            self.requests.append((url, kwargs.get("params")))
+            return {"items": [{"id": 9, "contractID": 99 if self.cross_contract else 42, "serviceID": 48}]}
+        return super().request(**kwargs)
+
+
+def test_restricted_contract_requires_exact_parent_and_checks_returned_rows():
+    t = ContractScopedTransport()
+    result = connector(t).execute(request(
+        "ContractServices", filters={"contractID": 42}, page_size=5,
+    ))
+    assert result.data["items"] == [{"id": 9, "contractID": 42, "serviceID": 48}]
+    assert sum(url.endswith("/Contracts/query") for url, _ in t.requests) == 1
+
+
+@pytest.mark.parametrize("filters", [{}, {"serviceID": 48},
+                                      {"contractID": {"op": "gt", "value": 0}}])
+def test_restricted_contract_unscoped_queries_never_reach_provider(filters):
+    t = ContractScopedTransport()
+    with pytest.raises(PermissionError, match="QUERY_NOT_AUTHORIZED"):
+        connector(t).execute(request("ContractServices", filters=filters))
+    assert not any(url.endswith("/query") for url, _ in t.requests)
+
+
+def test_restricted_contract_parent_must_be_readable_and_unique():
+    t = ContractScopedTransport(parent_exists=False)
+    with pytest.raises(PermissionError, match="PARENT_UNVERIFIED"):
+        connector(t).execute(request("ContractServices", filters={"contractID":42}))
+    assert not any(url.endswith("/ContractServices/query") for url, _ in t.requests)
+
+
+def test_restricted_contract_cross_parent_rows_are_denied():
+    t = ContractScopedTransport(cross_contract=True)
+    with pytest.raises(PermissionError, match="ROW_SCOPE_MISMATCH"):
+        connector(t).execute(request("ContractServices", filters={"contractID":42}))
+
+
+def test_restricted_contract_selection_must_include_join_key():
+    t = ContractScopedTransport()
+    with pytest.raises(PermissionError, match="QUERY_NOT_AUTHORIZED"):
+        connector(t).execute(request("ContractServices", filters={"contractID":42},
+                                     select=["serviceID"]))
+    assert not any(url.endswith("/query") for url, _ in t.requests)
+
+
+def test_restricted_service_units_still_denied_without_parent_proof():
+    t = ContractScopedTransport()
+    with pytest.raises(PermissionError, match="QUERY_NOT_AUTHORIZED"):
+        connector(t).execute(request("ContractServiceUnits", filters={"contractID":42}))
+    assert not any(url.endswith("/query") for url, _ in t.requests)

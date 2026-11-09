@@ -43,6 +43,36 @@ def dynamic_generic_entity_eligible(entity: object) -> bool:
     )
 
 
+# Conditional API access is NOT general permission. Only these child entities
+# may enter the exact-parent proof path. Other Restricted entities stay denied.
+_CONTRACT_SCOPED_ENTITIES = frozenset({"ContractServices", "ContractServiceBundles"})
+
+
+def restricted_contract_id(*, entity: str, info: Mapping[str, Any],
+                           query: Mapping[str, Any]) -> int | None:
+    """Require one exact contract parent; never allow broad Restricted reads."""
+    if entity not in _CONTRACT_SCOPED_ENTITIES or (
+        info.get("canQuery") is not True
+        or info.get("userAccessForQuery") != "Restricted"
+    ):
+        return None
+    selected = query.get("IncludeFields")
+    if selected is not None and (
+        not isinstance(selected, list) or "contractID" not in selected
+    ):
+        return None
+    clauses = query.get("filter")
+    if not isinstance(clauses, list):
+        return None
+    matches = [c for c in clauses if isinstance(c, Mapping)
+               and c.get("field") == "contractID"
+               and c.get("op") == "eq"
+               and type(c.get("value")) is int and c["value"] > 0]
+    if len(matches) != 1:
+        return None
+    return matches[0]["value"]
+
+
 def proven_queryable_fields(
     *,
     entity: str,
@@ -69,7 +99,8 @@ def proven_queryable_fields(
     if (not isinstance(metadata_name, str)
             or not _ENTITY_NAME.fullmatch(metadata_name)
             or info.get("canQuery") is not True
-            or info.get("userAccessForQuery") != "All"):
+            or (info.get("userAccessForQuery") != "All"
+                and restricted_contract_id(entity=entity, info=info, query=query) is None)):
         raise PermissionError("AUTOTASK_DYNAMIC_PROVIDER_QUERY_NOT_AUTHORIZED")
     raw_fields = field_metadata.get("fields")
     if (not isinstance(raw_fields, list) or not 1 <= len(raw_fields) <= 500
