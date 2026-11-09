@@ -229,12 +229,13 @@ ledger, CCC and one-transaction freeze controls.
 
 ## Required tenant evidence before any live V5 approval route
 
-No available, authorized Project Jason read capability can confirm that an
-Entra confidential **Web** client has the reviewed registered redirect
-or that a tenant authentication context is actually protected by Conditional
-Access requiring appropriate MFA. The prior privileged-user authentication
-method read returned HTTP 403. These are **real tenant configuration and
-authorization dependencies**, not reason to silently assume `c1` is MFA.
+The newly available, delegated administrator Microsoft Graph read confirmed
+that AOT_OpenClaw has **no Web redirect URI**, and the tenant currently
+returns **zero authentication-context references**. No live CA policy has
+been verified to enforce context-specific step-up on this route. The prior
+privileged-user authentication method read returned HTTP 403. These are
+**real tenant configuration and authorization dependencies**, not reason to
+silently assume `c1` is MFA. See the live read-only inventory below.
 
 The separately privileged tenant administrator must verify/create a reviewed
 confidential Web app registration with the **exact** registered HTTPS redirect
@@ -266,6 +267,45 @@ CCC and one-transaction freeze. The V4 signed-Teams-only policy is intact,
 and the new V5 source cannot approve a release on its own. This requires an
 independently reviewed Owner policy transition, not an ordinary Teams
 notification or a code-only edit.
+
+## Live AOT Entra inventory, read-only (2026-11-09)
+
+A separately authenticated `al_admin@teamaot.com` delegated Microsoft Graph
+session was successfully reused through the supported `CurrentUser` MS Graph
+cache on the user's Windows PC. Queries were read-only; no tenant policies,
+applications, credentials, or production controls were modified.
+
+- The existing **AOT_OpenClaw** single-tenant application has application ID
+  `84bd25c4-2f7e-4d55-8db3-14e7c21e3b33`, two active registered client
+  credentials expiring in March 2028, and **no configured Web redirect URI**.
+  Existing credential usage was *not* established. Do not overwrite, remove,
+  rotate, or repurpose it until its workload owners/dependencies are verified.
+- The service principal was enabled, with zero assigned app roles and zero
+  granted delegated scopes in the queried inventory. This does **not** prove
+  that its existing client credentials are unused or safe to share.
+- Graph `GET /identity/conditionalAccess/authenticationContextClassReferences`
+  returned an empty collection. No tenant authentication-context `cX` is
+  available to satisfy V5's mandatory explicit CA step-up claim. No default
+  `c1` may be assumed or fabricated.
+- Multiple enabled Conditional Access MFA policies target all cloud apps.
+  **The privileged admin is explicitly excluded** from several, including
+  the policy `M365 - Require MFA + 8h reauth` and `[All cloud apps] GRANT:
+  Require MFA for All users`. The enabled `Require multifactor authentication
+  for admins` policy contains applicable admin role IDs and has no explicit
+  user, role, group, or application exclusions; however, role assignment,
+  policy conditions and a live sign-in have not been independently attested.
+  Hence **MFA for the exact V5 browser approval is not yet verified**.
+
+**Required next gated actions:** independently confirm existing OpenClaw
+credential dependencies; select a dedicated confidential browser sign-in
+identity if extending the existing app would risk workload isolation; prepare
+and review an exact redirect + client-credential enrollment; configure and
+verify a named CA authentication context requiring fresh admin MFA; then
+perform an isolated preproduction sign-in and binding test. Any tenant
+configuration requiring approval must use the Teams-governed process; a Teams
+notification cannot by itself authorize production release. The existing V4
+root signed-Teams-only policy, production freeze and engineering Owner pause
+remain controlling until separately authorized V5 transition and release.
 
 ## Read-only existing host release-consumer attestation (2026-11-09)
 
