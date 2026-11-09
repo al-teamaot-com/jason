@@ -180,3 +180,51 @@ export async function ensureTeamsUserBootstrap({
     "Jason Teams app installation has not become visible within the bounded bootstrap window",
   );
 }
+
+
+// Read-only tenant-authoritative eligibility for a PRIVILEGED release approver.
+// The normal Teams bootstrap only verifies membership and app installation;
+// neither proves that an unlicensed administrative identity can act on a card.
+export async function verifyReleaseApproverTeamsEligibility({
+  aadObjectId, tenantId, clientId, clientSecret, fetchImpl = fetch,
+}) {
+  if (![aadObjectId, tenantId, clientId, clientSecret].every(nonBlank)) {
+    throw new TeamsBootstrapError("invalid_request", "Release approver identity or Graph credentials missing");
+  }
+  const token = await getGraphToken({ tenantId, clientId, clientSecret, fetchImpl });
+  // Graph licenseDetails does not support the gateway's app-only token.
+  // AssignedPlans is a user resource property exposed by the existing
+  // Graph-backed identity read. This is the published TEAMS1 plan UUID.
+  const { response, payload } = await graphRequest({
+    accessToken: token,
+    path: `/users/${encodeURIComponent(aadObjectId)}?$select=id,accountEnabled,userType,assignedPlans`,
+    fetchImpl,
+  });
+  if (!response.ok) {
+    throw new TeamsBootstrapError(
+      "license_verification_unavailable",
+      `Microsoft Graph assignedPlans read failed with HTTP ${response.status}`,
+    );
+  }
+  if (String(payload?.id ?? "").toLowerCase() !== aadObjectId.toLowerCase() ||
+      payload?.accountEnabled !== true ||
+      String(payload?.userType ?? "").toLowerCase() !== "member") {
+    throw new TeamsBootstrapError("identity_not_authorized", "Exact enabled tenant member is required");
+  }
+  if (!Array.isArray(payload?.assignedPlans)) {
+    throw new TeamsBootstrapError(
+      "license_verification_unavailable", "Microsoft Graph assignedPlans property missing",
+    );
+  }
+  const TEAMS1 = "57ff2da0-773e-42df-b2af-ffb7a2317929";
+  const enabled = payload.assignedPlans.some((plan) =>
+    String(plan?.servicePlanId ?? "").toLowerCase() === TEAMS1 &&
+    String(plan?.capabilityStatus ?? "").toLowerCase() === "enabled"
+  );
+  if (!enabled) {
+    throw new TeamsBootstrapError(
+      "teams_license_unavailable", "Configured approver lacks active verified Teams entitlement",
+    );
+  }
+  return { status: "eligible", tenantId, aadObjectId };
+}

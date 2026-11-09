@@ -1041,6 +1041,97 @@ class MobileReleaseApprovalMaintenance:
     _next_due: datetime | None = None
     required_policy_version: str = "1.0"
 
+    def _require_eligible_recipient(
+        self, *, policy, release_id: str, now: datetime,
+        existing_pending: bool = False,
+    ) -> None:
+        """Fail before persisting a release approval for an unreachable admin.
+
+        A Teams delivery receipt is not proof of a licensed actionable
+        recipient. Retain an exact-release diagnostic without creating a
+        permission grant, mutable fallback, repeatable pending card or callback.
+        """
+        if policy.schema_version != "4.0":
+            return
+        method = getattr(self.sender, "preflight_release_recipient_eligibility", None)
+        try:
+            if not callable(method):
+                raise PermissionError("separated Teams release eligibility verifier unavailable")
+            method(policy=policy)
+        except (PermissionError, OSError, RuntimeError, ValueError) as exc:
+            if re.fullmatch(r"release-[0-9a-f]{16}(?:-retry-[1-9][0-9]{0,2})?", release_id) is None:
+                raise PermissionError("invalid blocked release identity") from exc
+            import tempfile
+            folder = self.state_root / "mobile-release-recipient-blocks"
+            if folder.is_symlink():
+                raise PermissionError("release eligibility audit directory unsafe") from exc
+            folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(folder, 0o700)
+            record = {
+                "schema_version": "1.0",
+                "release_id": release_id,
+                "status": "recipient_unavailable",
+                "reason": "licensed_teams_approver_unverified",
+                "policy_sha256": policy.policy_sha256,
+                "admin_approver_object_id": policy.admin_approver_binding[1],
+                "observed_at": now.isoformat(),
+                "approval_issued": False,
+                "previous_pending_request": bool(existing_pending),
+                "alternate_approver_authorized": False,
+            }
+            target = folder / (release_id + ".json")
+            if target.is_symlink():
+                raise PermissionError("blocked-release audit file symlink rejected") from exc
+            first_observation = not target.exists()
+            def persist(value):
+                fd, temp = tempfile.mkstemp(prefix=".eligibility-", dir=folder)
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                        os.fchmod(stream.fileno(), 0o600)
+                        json.dump(value, stream, sort_keys=True)
+                        stream.write("\n")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.replace(temp, target)
+                finally:
+                    if os.path.exists(temp):
+                        os.unlink(temp)
+            if not first_observation:
+                previous = json.loads(target.read_text(encoding="utf-8"))
+                if (previous.get("release_id") != release_id
+                        or previous.get("admin_approver_object_id") != policy.admin_approver_binding[1]
+                        or previous.get("policy_sha256") != policy.policy_sha256
+                        or previous.get("status") != "recipient_unavailable"):
+                    raise PermissionError("blocked recipient evidence conflicts with policy")
+            else:
+                persist(record)
+            # An informational status may reach the licensed *requester*.
+            # It is NEVER an Adaptive Card, approval, or authority delegation.
+            # Only the first observation may send: no reminder/spam loop.
+            if first_observation:
+                notice = getattr(
+                    self.sender, "notify_separated_requester_unavailable", None,
+                )
+                if callable(notice):
+                    try:
+                        receipt = notice(policy=policy, release_id=release_id)
+                        if isinstance(receipt, str) and receipt.strip():
+                            record["informational_notice_message_id"] = receipt.strip()
+                            persist(record)
+                    except (PermissionError, OSError, RuntimeError, ValueError):
+                        _LOG.warning(
+                            "release approver blocked; informational Teams notice unavailable: %s",
+                            release_id,
+                        )
+            _LOG.error(
+                "release Teams approval blocked: inaccessible privileged recipient release=%s",
+                release_id,
+            )
+            raise PermissionError(
+                "privileged release approver is not verified as Teams-eligible; "
+                "signed release approval not issued"
+            ) from exc
+
     def tick(self) -> bool:
         if not self.enabled:
             return False
@@ -1103,6 +1194,29 @@ class MobileReleaseApprovalMaintenance:
                     "release Teams approval expired without owner decision: %s",
                     request.approval_id,
                 )
+        # Reconcile cards created by an OLDER runtime before entitlement checks
+        # existed. No pending card is revoked, rebound or reissued here; the
+        # checked and immutable Entra actor remains the sole privileged owner.
+        if policy.schema_version == "4.0":
+            pending = (
+                req for req in self.requests.list_all()
+                if req.capability == CAPABILITY
+                and req.organization_id == policy.organization_id
+                and req.status is ApprovalRequestStatus.PENDING
+                and req.requested_by == "svc-jason-release-manager"
+                and req.metadata.get("release_id")
+            )
+            for req in pending:
+                try:
+                    self._require_eligible_recipient(
+                        policy=policy, release_id=req.metadata["release_id"],
+                        now=now, existing_pending=True,
+                    )
+                except PermissionError:
+                    # The existing card may be unreadable, but it is not
+                    # automatically approved, transferred or resent.
+                    return False
+
         paths = tuple(sorted((self.state_root / "mobile-release-offers").glob("release-*.json"),
                              key=lambda p: p.stat().st_mtime, reverse=True))[:20]
         existing_subjects = {
@@ -1170,6 +1284,9 @@ class MobileReleaseApprovalMaintenance:
                         request = create_mobile_release_request(
                             candidate, policy, now=now,
                             renewed_from=parent_id, renewal_nonce=nonce,
+                        )
+                        self._require_eligible_recipient(
+                            policy=policy, release_id=release_id, now=now,
                         )
                         # Create BEFORE network delivery. A crash after this
                         # point blocks unattended replay or duplicate sends.
@@ -1257,6 +1374,15 @@ class MobileReleaseApprovalMaintenance:
                         != (offer.get("replacement_lineage") if replacement else None)):
                 continue
             read_release_approval_containment(self.state_root).require_request_eligible(now)
+            try:
+                self._require_eligible_recipient(
+                    policy=policy, release_id=path.stem, now=now,
+                )
+            except PermissionError:
+                # Block this exact offer, not the whole background release
+                # maintenance service. A separately licensed identity is NOT
+                # substituted and no pending approval is created.
+                continue
             request = create_mobile_release_request(evidence, policy, now=now)
             self.approvals.create(request, now=now)
             # A failed delivery leaves one durable pending request, not a loop

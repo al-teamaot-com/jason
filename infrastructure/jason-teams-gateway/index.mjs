@@ -20,7 +20,7 @@ import {
 } from "./bridge-core.mjs";
 import { createApprovalDecisionStore } from "./approval-decision-store.mjs";
 import { buildProactiveActivity, resolveProactiveSendResult } from "./proactive-send-result.mjs";
-import { ensureTeamsUserBootstrap, TeamsBootstrapError } from "./teams-user-bootstrap.mjs";
+import { ensureTeamsUserBootstrap, verifyReleaseApproverTeamsEligibility, TeamsBootstrapError } from "./teams-user-bootstrap.mjs";
 
 const PORT = Number(process.env.PORT ?? 3979);
 const OPENCLAW_CONFIG_PATH =
@@ -601,6 +601,43 @@ server.get("/healthz", (_req, res) => {
     runtime: RUNTIME_URL,
   });
 });
+// Read-only, exact-object-ID preflight for separately privileged release
+// approvals. This endpoint NEVER changes the approver, installs an app, sends
+// a message, creates a pending approval, or grants release authority.
+server.post("/internal/proactive/recipient-eligibility", async (req, res) => {
+  if (!PROACTIVE_TOKEN || req.get("authorization") !== `Bearer ${PROACTIVE_TOKEN}`) {
+    res.status(401).json({ status: "blocked", error_code: "unauthorized" });
+    return;
+  }
+  const aadObjectId = nonBlank(req.body?.aadObjectId);
+  const tenantId = nonBlank(req.body?.tenantId);
+  if (!aadObjectId || !isUuid(aadObjectId) || !tenantId || !isUuid(tenantId) ||
+      tenantId.toLowerCase() !== auth.tenantId.toLowerCase()) {
+    res.status(403).json({ status: "blocked", error_code: "identity_mismatch" });
+    return;
+  }
+  try {
+    const result = await verifyReleaseApproverTeamsEligibility({
+      aadObjectId, tenantId, clientId: auth.clientId, clientSecret: auth.clientSecret,
+    });
+    res.json(result);
+  } catch (error) {
+    const code = error instanceof TeamsBootstrapError
+      ? error.code : "license_verification_unavailable";
+    console.warn(JSON.stringify({
+      event: "release_teams_approver_eligibility_blocked", aadObjectId, reason: code,
+    }));
+    res.status(403).json({ status: "blocked", error_code: code });
+  }
+});
+
+function isReleaseApprovalCard(card) {
+  return Boolean(card && Array.isArray(card.actions) && card.actions.some((action) =>
+    typeof action?.data?.approval_id === "string" &&
+    action.data.approval_id.startsWith("relapproval-")
+  ));
+}
+
 server.post("/internal/proactive/send", async (req, res) => {
   if (!PROACTIVE_TOKEN || req.get("authorization") !== `Bearer ${PROACTIVE_TOKEN}`) {
     console.error(JSON.stringify({ event: "jason_teams_proactive_rejected", errorCode: "unauthorized" }));
@@ -634,6 +671,13 @@ server.post("/internal/proactive/send", async (req, res) => {
   }
   console.log(JSON.stringify({ event: "jason_teams_proactive_preflight_passed", aadObjectId, hasStoredConversation: Boolean(record) }));
   try {
+    // Defense in depth: a release card is not accepted merely because a
+    // proactive bot send returned a message ID. Check licensing again at send.
+    if (isReleaseApprovalCard(card)) {
+      await verifyReleaseApproverTeamsEligibility({
+        aadObjectId, tenantId, clientId: auth.clientId, clientSecret: auth.clientSecret,
+      });
+    }
     const bootstrap = await ensureTeamsUserBootstrap({
       aadObjectId,
       tenantId,

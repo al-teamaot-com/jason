@@ -257,6 +257,89 @@ class TeamsGatewayPlaybookApprovalSender:
         return ExistingTeamsGatewayTransport(
             gateway_url=self.gateway_url, token_file=self.token_file)
 
+    def preflight_release_recipient_eligibility(self, *, policy) -> None:
+        """Provider-backed, read-only readiness for a separated release owner.
+
+        Validate the SAME immutable Entra OID used by card routing and signed
+        callback. Provider failures block the release; never substitute a
+        requester, mutable email alias or an unverified Teams send receipt.
+        """
+        if getattr(policy, "schema_version", None) != "4.0":
+            return
+        binding_ids = tuple(getattr(policy, "owner_identity_ids", ()))
+        if len(binding_ids) != 1:
+            raise PermissionError("separated release requires one exact Owner identity")
+        identity = binding_ids[0]
+        expected = getattr(policy, "admin_approver_binding", None)
+        if not expected or self.owner_identity_entra_bindings.get(identity) != expected:
+            raise PermissionError("release owner approval recipient policy changed")
+        binding = self._binding_for_identity(identity)
+        if (binding is None or getattr(binding, "microsoft_tenant_id", None) != expected[0]
+                or getattr(binding, "microsoft_object_id", None) != expected[1]):
+            raise PermissionError("release approver identity unavailable")
+        import urllib.error
+        import urllib.request
+        from kernel.execution_deadline import bounded_execution_timeout
+
+        secret = self.token_file.read_text(encoding="utf-8").strip()
+        if not secret:
+            raise PermissionError("release Teams eligibility token unavailable")
+        body = json.dumps({
+            "tenantId": expected[0], "aadObjectId": expected[1],
+        }, separators=(",", ":")).encode("utf-8")
+        req = urllib.request.Request(
+            self.gateway_url + "/internal/proactive/recipient-eligibility",
+            data=body, method="POST",
+            headers={"Authorization": "Bearer " + secret,
+                     "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(
+                req, timeout=bounded_execution_timeout(12)
+            ) as response:
+                result = json.loads(response.read(4096).decode("utf-8"))
+        except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
+            # No fallback to sending, no card, and no automatic alternate actor.
+            raise PermissionError("privileged Teams recipient eligibility unverified") from exc
+        if (not isinstance(result, dict) or result.get("status") != "eligible"
+                or result.get("tenantId") != expected[0]
+                or result.get("aadObjectId") != expected[1]):
+            raise PermissionError("privileged Teams approver cannot act on Teams card")
+
+    def notify_separated_requester_unavailable(self, *, policy, release_id: str) -> str:
+        """Inform the regular owner only; no approval card or authority transfer."""
+        if (getattr(policy, "schema_version", None) != "4.0"
+                or not isinstance(release_id, str)
+                or re.fullmatch(r"release-[0-9a-f]{16}(?:-retry-[1-9][0-9]{0,2})?", release_id) is None):
+            raise PermissionError("bounded release identity and policy required")
+        pair = policy.regular_requester_binding
+        if (pair is None or pair == policy.admin_approver_binding
+                or len(pair) != 2):
+            raise PermissionError("separated informational requester unavailable")
+        binding = self.bindings.find(
+            microsoft_tenant_id=pair[0], microsoft_object_id=pair[1],
+        )
+        try:
+            expected_identity = "person-entra-" + uuid.UUID(pair[1]).hex
+        except (ValueError, TypeError) as exc:
+            raise PermissionError("regular requester Entra object invalid") from exc
+        if (binding is None or getattr(binding, "status", None) != "active"
+                or getattr(binding, "microsoft_tenant_id", None) != pair[0]
+                or getattr(binding, "microsoft_object_id", None) != pair[1]
+                or getattr(binding, "jason_identity_id", None) != expected_identity
+                or getattr(binding, "client_id", None) is not None):
+            raise PermissionError("regular requester identity not verified")
+        notice = (
+            f"Jason release {release_id} is blocked: the separately configured "
+            "administrative approver is not verified as Teams-eligible. "
+            "No new approval was issued and no release authority was granted "
+            "or delegated. This is an informational "
+            "status, not an approval request. The privileged approval policy must "
+            "be corrected through governed review before another card can be issued."
+        )
+        receipt = self._existing_transport().send(binding=binding, text=notice)
+        return receipt.message_id
+
     def send(self, request: ApprovalRequest) -> tuple[str, ...]:
         card = render_approval_card(request)
         adaptive = self._adaptive_card(card)
