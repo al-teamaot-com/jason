@@ -286,6 +286,49 @@ security workflow. This verifier is **NOT** invoked by the live V4
 signed-Teams-only consumer, because a genuine, independently reviewed V5
 policy migration and browser decision ledger integration are still required.
 
+## Existing approval-ledger bridge acceptance
+
+`jason_runtime.browser_release_approval_bridge.V5BrowserApprovalDecisionBridge`
+is now staged **without live mounting**, and delegates signed V5 decisions
+only to the same existing `ApprovalRequestService.accept_response`.
+It requires a root-reviewed `5.0` policy, exact pending release, independent
+root public-key signature proof, original privileged OID, valid request TTL,
+and canonical Jason owner authorization. The standalone runtime module
+imports **no MCP or host-only packages**: the protected host attestor is
+an explicit injected fail-closed port, not a user-substitutable model input.
+Standalone runtime tests reject V4 and missing host attestation before any
+approval write. Negative tests reject a V4 policy,
+normal Teams identity, tampered release SHA/scope, denied Jason authority,
+and a duplicate click. Recording a decision does NOT deploy a release;
+the existing host Release Manager independently revalidates the signed
+receipt, CCC and freeze controls before production.
+
+This bridge must not be enabled before the signed V5 policy migration,
+root trust enrollment, and host consumer code review are complete.
+
+## Protected host-consumer SQLite readback acceptance
+
+`release_mobile_approval_consumer.verify_protected_v5_browser_ledger` now
+performs a **read-only** bounded lookup of the native approval ledger's
+accepted decision, exact request, and retained signed browser evidence.
+`v5_browser_release_host_consumer.verify_v5_browser_release_receipt`
+revalidates the original versioned V5 policy, root-trusted signing key,
+admin Entra OID, timestamp, exact release/rollback/manifest/scope and
+cross-matches the signed evidence digest against the *native*
+`ApprovalResponse`. Any V4 Teams card, wrong actor, absent ledger,
+changed hash, fabricated receipt or expired scope fails closed.
+
+The V5 host readback returns `release_authorized=False`,
+`ccc_attested=False`, and `production_changed=False`.
+It cannot populate an `owner_approval` field, fabricate CCC, remove
+the freeze, deploy or restart services. A separately approved V5 policy
+and final host promotion authorization are required to wire the verified
+result into the existing release-authority transaction. This intentionally
+does **not** modify V4 signed Teams receipt processing.
+
+The runtime/MCP bridge and protected SQLite/signature integration tests are required by
+SEC-007. No production routing or privileged account license changes occur.
+
 ## Unimplemented integration — release gates
 
 **Do not treat these source helpers as a working approval flow yet.**
