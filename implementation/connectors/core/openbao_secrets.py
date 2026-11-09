@@ -105,6 +105,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "quickbooks.production.oauth_client": (
         "secret/data/connectors/quickbooks/production/oauth-client"
     ),
+    "constant_contact.oauth_client": (
+        "secret/data/connectors/constant-contact/production/oauth-client"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
