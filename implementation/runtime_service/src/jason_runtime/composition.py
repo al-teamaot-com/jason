@@ -1136,7 +1136,8 @@ class RuntimeSettings:
         if self.universal_approval_mode not in {"off", "enforced"}:
             raise ValueError("JASON_UNIVERSAL_APPROVAL_MODE must be off or enforced")
         if self.release_mobile_approval_mode not in {
-            "off", "owner_only_pilot", "owner_reviewed", "admin_approver_separated"
+            "off", "owner_only_pilot", "owner_reviewed", "admin_approver_separated",
+            "service_requester_regular_owner_teams"
         }:
             raise ValueError("unsupported JASON_RELEASE_MOBILE_APPROVAL_MODE")
         if self.release_mobile_interval_seconds < 60:
@@ -2632,7 +2633,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     release_mobile_flow = None
     release_mobile_maintenance = None
     if settings.release_mobile_approval_mode in {
-        "owner_only_pilot", "owner_reviewed", "admin_approver_separated"
+        "owner_only_pilot", "owner_reviewed", "admin_approver_separated",
+        "service_requester_regular_owner_teams"
     }:
         from .mobile_release_approval import (
             MobileReleaseApprovalFlow, MobileReleaseApprovalMaintenance,
@@ -2647,17 +2649,24 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         elif settings.release_mobile_approval_mode == "admin_approver_separated":
             if owner_policy.schema_version != "4.0":
                 raise PermissionError("admin-separated release mode requires reviewed V4 policy")
+        elif settings.release_mobile_approval_mode == "service_requester_regular_owner_teams":
+            if (owner_policy.schema_version != "5.0"
+                    or owner_policy.service_release_requester_id != "svc-jason-release-manager"):
+                raise PermissionError("service-originated Owner Teams mode requires reviewed V5 policy")
         elif owner_policy.schema_version not in {"2.0", "3.0"}:
             raise PermissionError("active release approval mode and reviewed policy version do not match")
         expected_version = owner_policy.schema_version
         # V4 has no email-based Owner delegation or preexisting Owner alias
         # lookup. Both card routing and callback use the same exact Entra OID
         # selected by the root-owned versioned policy.
-        separate_admin = expected_version == "4.0"
-        owner_fallback = {} if separate_admin else {"person-al": "al@teamaot.com"}
+        exact_entra_owner = expected_version in {"4.0", "5.0"}
+        owner_fallback = {} if exact_entra_owner else {"person-al": "al@teamaot.com"}
         owner_entra_bindings = (
-            {owner_policy.owner_identity_ids[0]: owner_policy.admin_approver_binding}
-            if separate_admin else {}
+            {owner_policy.owner_identity_ids[0]: (
+                owner_policy.admin_approver_binding if expected_version == "4.0"
+                else owner_policy.regular_requester_binding
+            )}
+            if exact_entra_owner else {}
         )
         release_repo = SQLiteApprovalRequestRepository(settings.release_mobile_approval_db)
         release_approval_service = ApprovalRequestService(
@@ -2674,7 +2683,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                 authenticator=teams_authenticator,
                 allowed_machine_identities=settings.allowed_machine_identities,
                 allowed_approval_prefixes=("relapproval-",),
-                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0", "4.0"}
+                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0", "4.0", "5.0"}
                                         else frozenset()),
             ),
             signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),
