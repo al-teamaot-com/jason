@@ -79,6 +79,28 @@ def test_supervisor_detects_real_model_turn_without_phase_change(tmp_path):
     assert third["unchanged_cycles"] == 0
 
 
+def test_supervisor_reports_active_work_that_stops_advancing(tmp_path):
+    write(tmp_path, "state.json", {"items": {
+        "SUPPORT-OPS-054": {"phase": "implementing", "reasoning_request_id": "a" * 64},
+    }})
+    write(tmp_path, "development-state.json", {"items": {}})
+    write(tmp_path, "todo-intake-state.json", {
+        "active_development_items": 0, "active_support_repairs": 1,
+        "engineering_capacity": 2,
+        "downstream_commitments": {"outstanding_count": 1},
+    })
+
+    first = supervisor.build_snapshot(tmp_path)
+    second = supervisor.build_snapshot(tmp_path, first)
+    stalled = supervisor.build_snapshot(tmp_path, second)
+
+    assert first["status"] == "healthy"
+    assert second["status"] == "healthy"
+    assert stalled["unchanged_cycles"] == 2
+    assert stalled["status"] == "degraded"
+    assert stalled["reason"] == "active_work_not_advancing"
+
+
 def test_supervisor_fails_closed_on_bad_work_inventory(tmp_path):
     write(tmp_path, "state.json", {"items": []})
     write(tmp_path, "development-state.json", {"items": {}})
