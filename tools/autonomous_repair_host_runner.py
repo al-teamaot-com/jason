@@ -23,6 +23,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+# The standalone governance unittest loads this module directly by file path,
+# while production invokes the installed runner as a script. Bind its sibling
+# helper to the same immutable source directory in both execution modes.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 import jason_engineering_worktree_storage as worktree_storage
 from typing import Any, Mapping
 
