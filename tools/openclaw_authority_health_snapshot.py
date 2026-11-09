@@ -45,17 +45,24 @@ def main() -> int:
     args = parser.parse_args()
 
     tool = Path(__file__).with_name('openclaw_authority_operational_health.py')
+    # The worker's inner backup TemporaryDirectory cannot run its cleanup
+    # when the parent kills it on timeout. Parent-OWN one private staging
+    # directory so both timeout and normal completion remove only THIS run's
+    # temporary backup/restore copies, never any prior or unrelated files.
     try:
-        completed = subprocess.run(
-            [sys.executable, str(tool), '--backup-temp-root', str(BACKUP_TEMP_ROOT)],
-            capture_output=True,
-            text=True,
-            check=False,
-            # Full PRAGMA integrity_check includes the multi-GB orchestration
-            # audit database, plus authority backup/restore verification.
-            # Keep the *complete* checks bounded, but do not truncate them.
-            timeout=SOURCE_HEALTH_TIMEOUT_SECONDS,
-        )
+        with tempfile.TemporaryDirectory(
+            prefix='jason-authority-integrity-run-', dir=BACKUP_TEMP_ROOT,
+        ) as scoped_backup_root:
+            completed = subprocess.run(
+                [sys.executable, str(tool), '--backup-temp-root', scoped_backup_root],
+                capture_output=True,
+                text=True,
+                check=False,
+                # Full PRAGMA integrity_check includes the multi-GB
+                # orchestration audit plus authority backup/restore.
+                # Never replace a full integrity proof with a quick check.
+                timeout=SOURCE_HEALTH_TIMEOUT_SECONDS,
+            )
     except subprocess.TimeoutExpired:
         # A timeout must not leave a previously successful snapshot looking
         # current: publish explicit failure evidence and exit nonzero.
