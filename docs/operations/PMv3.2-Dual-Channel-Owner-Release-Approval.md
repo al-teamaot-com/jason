@@ -322,7 +322,7 @@ and final host promotion authorization are required to wire the verified
 result into the existing release-authority transaction. This intentionally
 does **not** modify V4 signed Teams receipt processing.
 
-The new protected SQLite and signature regression suites are required by
+The runtime/MCP bridge and protected SQLite/signature integration tests are required by
 SEC-007. No production routing or privileged account license changes occur.
 
 ## Unimplemented integration — release gates
