@@ -33,7 +33,7 @@ def definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
         lifecycle_status=CapabilityLifecycle.PILOT,
         business_purpose="Governed read-only AOT Constant Contact contact management evidence",
         owner_service="Jason Contact Management",
-        architectural_capability_ids=frozenset(),
+        architectural_capability_ids=frozenset({"JAC-005", "JAC-013"}),
         risk_level=CapabilityRisk.LOW,
         data_classifications=frozenset({"internal", "confidential"}),
         permitted_execution_modes=frozenset({"deterministic"}),
