@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 import json
 import sqlite3
 
@@ -16,7 +17,15 @@ from orchestrator.approval_plan_scope import ApprovedPlanScope
 from orchestrator.teams_plan_grant_bridge import ServerOwnedPlanProposal
 from orchestrator.teams_plan_request_repository import PlanRequestRepository, plan_fingerprint
 from jason_runtime.engineering_migration_approval import EngineeringMigrationApprovalError
-from jason_runtime.engineering_migration_signed_receipt import require_signed_migration_grant
+from jason_runtime.engineering_migration_signed_receipt import require_signed_migration_grant as native_signed_migration_grant
+
+def require_signed_migration_grant(*, protected_approver_policy_path, **kwargs):
+    # Only tests may replace the canonical root policy path. The production API
+    # does not accept a caller-selected path or untrusted approver ID.
+    with patch("jason_runtime.engineering_migration_signed_receipt.PROTECTED_POLICY_PATH",
+               protected_approver_policy_path):
+        return native_signed_migration_grant(**kwargs)
+
 
 NOW = datetime(2026, 11, 9, 20, 0, tzinfo=timezone.utc)
 APPROVAL = "planapproval-test-valid"
