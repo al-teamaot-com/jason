@@ -99,8 +99,8 @@ def test_revoked_grant_denied(tmp_path):
         verify(tmp_path, revoked=True)
 
 
-def test_wrong_capability_in_plan_denied(tmp_path):
-    with pytest.raises(EngineeringMigrationApprovalError):
+def test_wrong_capability_in_plan_denied_by_canonical_store(tmp_path):
+    with pytest.raises(PermissionError, match="plan capabilities must exactly match"):
         verify(tmp_path, altered_scope={
             "allowed_capabilities": frozenset({"service.ticket.update"})
         })
