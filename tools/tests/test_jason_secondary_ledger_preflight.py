@@ -206,5 +206,81 @@ class ConsumerRouteContractTests(unittest.TestCase):
         subprocess.run(["bash", "-n", str(p)], check=True)
 
 
+class CanonicalEventStoreMigrationTests(unittest.TestCase):
+    def test_two_actual_writers_reopen_restored_secondary_ledger_with_original_retained(self):
+        # Isolated fixtures only. This test never connects to production data.
+        implementation = str(Path(__file__).resolve().parents[2] / "implementation")
+        if implementation not in sys.path:
+            sys.path.insert(0, implementation)
+        from datetime import datetime, timezone
+        from orchestrator.event_store import OrchestrationEvent, SQLiteOrchestrationEventStore
+        from reflection.store import SQLiteReflectionStore
+
+        def event(event_id):
+            return OrchestrationEvent(
+                event_id=event_id, event_type="orchestration.test",
+                execution_id="simulated-exec", correlation_id="simulated-corr",
+                organization_id="aot-test", principal_id="isolated-test",
+                capability_name="service.company.search", stage="completed",
+                payload={"immutable": True},
+                occurred_at=datetime(2026, 11, 9, tzinfo=timezone.utc),
+            )
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            primary = root / "legacy"
+            secondary = root / "second-drive"
+            primary.mkdir()
+            secondary.mkdir()
+            old_path = primary / "orchestration-events.sqlite3"
+            new_path = secondary / "orchestration-events.sqlite3"
+            first = SQLiteOrchestrationEventStore(old_path)
+            first.append_event(event("legacy-immutable-event"))
+            first.close()
+
+            old_reflection = primary / "reflection.sqlite3"
+            original_reflection = SQLiteReflectionStore(old_reflection)
+            original_reflection._connection.close()
+            with sqlite3.connect(old_path) as source, sqlite3.connect(new_path) as dest:
+                source.backup(dest)
+            with sqlite3.connect(old_reflection) as source, sqlite3.connect(
+                secondary / "reflection.sqlite3") as dest:
+                source.backup(dest)
+
+            writer_one = SQLiteOrchestrationEventStore(new_path)
+            writer_two = SQLiteOrchestrationEventStore(new_path)
+            try:
+                self.assertIsNotNone(writer_one.get("legacy-immutable-event"))
+                writer_one.append_event(event("second-drive-writer-one"))
+                writer_two.append_event(event("second-drive-writer-two"))
+                self.assertIsNotNone(writer_one.get("second-drive-writer-two"))
+                self.assertIsNotNone(writer_two.get("second-drive-writer-one"))
+                self.assertEqual(
+                    {record.event_id for record in writer_one.list_by_execution("simulated-exec")},
+                    {"legacy-immutable-event", "second-drive-writer-one", "second-drive-writer-two"},
+                )
+            finally:
+                writer_two.close()
+                writer_one.close()
+
+            reloaded = SQLiteOrchestrationEventStore(new_path)
+            try:
+                self.assertIsNotNone(reloaded.get("second-drive-writer-two"))
+            finally:
+                reloaded.close()
+
+            with sqlite3.connect(old_path) as legacy:
+                self.assertEqual(
+                    legacy.execute("SELECT COUNT(*) FROM orchestration_events").fetchone()[0],
+                    1,
+                )
+            copied_reflection = SQLiteReflectionStore(secondary / "reflection.sqlite3")
+            copied_reflection._connection.close()
+            self.assertEqual(
+                os.stat(new_path).st_mode & 0o777,
+                0o600,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
