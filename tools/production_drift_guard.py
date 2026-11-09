@@ -14,6 +14,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "production-desired-state.json"
 FORBIDDEN_FIELD_NAMES = ("ExecStart", "WorkingDirectory")
+# This separately scheduled documentation writer is optional for production.
+# Only a DECLARED, NON-REQUIRED instance is advisory. All other failed units,
+# forbidden paths and undeclared units remain production drift problems.
+INDEPENDENT_OPTIONAL_SYSTEM_ONESHOTS = frozenset({
+    "jason-documentation-reconciliation.service",
+})
 
 
 def run(args: list[str], *, env: dict[str, str] | None = None) -> str:
@@ -111,6 +117,7 @@ def stopped_rollback_containers(prefixes: list[str]) -> list[str]:
 
 def evaluate(config: dict[str, Any]) -> dict[str, Any]:
     problems: list[dict[str, Any]] = []
+    advisories: list[dict[str, Any]] = []
     forbidden = tuple(str(value) for value in config.get("forbidden_execution_prefixes") or [])
 
     system_seen = unit_names(user=False)
@@ -134,7 +141,15 @@ def evaluate(config: dict[str, Any]) -> dict[str, Any]:
 
     for unit, state in sorted(system_states.items()):
         if state == "failed":
-            problems.append({"kind": "failed_system_unit", "unit": unit, "state": state})
+            if (unit in INDEPENDENT_OPTIONAL_SYSTEM_ONESHOTS
+                    and unit in allowed_system and unit not in required_system):
+                advisories.append({
+                    "kind": "independent_optional_system_unit_failed",
+                    "unit": unit,
+                    "state": state,
+                })
+            else:
+                problems.append({"kind": "failed_system_unit", "unit": unit, "state": state})
     for unit, state in sorted(user_states.items()):
         if state == "failed":
             problems.append({"kind": "failed_user_unit", "unit": unit, "state": state})
@@ -188,6 +203,7 @@ def evaluate(config: dict[str, Any]) -> dict[str, Any]:
         "status": "pass" if not problems else "drift_detected",
         "observed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "problems": problems,
+        "advisories": advisories,
         "evidence": {
             "system_units_seen": sorted(system_seen),
             "user_units_seen": sorted(user_seen),

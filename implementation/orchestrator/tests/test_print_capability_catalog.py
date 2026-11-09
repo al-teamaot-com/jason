@@ -18,6 +18,7 @@ from orchestrator.print_capability_catalog import (
     PRINT_METER_READ,
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
+    PRINT_METER_USAGE_SEARCH,
     PRINT_SUPPLIES_READ,
     kyocera_kfs_provider,
     print_capabilities,
@@ -37,6 +38,7 @@ def test_print_capability_catalog_is_read_only_and_aot_internal_scoped() -> None
         PRINT_METER_READ,
         PRINT_METER_HISTORY_SEARCH,
         PRINT_METER_USAGE_READ,
+        PRINT_METER_USAGE_SEARCH,
         PRINT_SUPPLIES_READ,
         PRINT_ALERT_SEARCH,
     }
@@ -92,6 +94,7 @@ def test_register_print_foundation_registers_all_capabilities_and_provider() -> 
         PRINT_METER_READ,
         PRINT_METER_HISTORY_SEARCH,
         PRINT_METER_USAGE_READ,
+        PRINT_METER_USAGE_SEARCH,
         PRINT_SUPPLIES_READ,
         PRINT_ALERT_SEARCH,
     ):
@@ -101,3 +104,17 @@ def test_register_print_foundation_registers_all_capabilities_and_provider() -> 
         ).capability_name == name
 
     assert providers.get(KYOCERA_KFS_PROVIDER).provider_id == KYOCERA_KFS_PROVIDER
+
+
+def test_period_usage_search_is_generic_open_world_collection():
+    definition = next(
+        item for item in print_capabilities(NOW)
+        if item.capability_name == PRINT_METER_USAGE_SEARCH
+    )
+    assert definition.metadata["operation"] == "search"
+    assert definition.metadata["selector_required"] == "false"
+    assert definition.metadata["resource_types"] == "print_usage"
+    assert "total_impressions" in definition.metadata["resource_schema"]
+    assert definition.metadata["query_filter_bindings"]["period_end"]["gte"] == "start"
+    assert "rank" not in definition.display_name.casefold()
+    assert "report" not in definition.business_purpose.casefold()

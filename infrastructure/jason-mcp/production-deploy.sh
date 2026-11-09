@@ -73,11 +73,69 @@ case "$IMAGE" in
     ;;
 esac
 
+# Source-bound staff note authority: source-only activation, no host fallback.
+SOURCE_STAFF_NOTE_PROFILE="$(python3 - "$REPO_ROOT/config/aot-staff-internal-note-profile.json" <<'PY_STAFF'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.is_symlink():
+    raise SystemExit("DENIED: staff-note profile is a symlink")
+if not p.exists():
+    print("")  # Historical releases are default-off.
+    raise SystemExit(0)
+try:
+    d=json.loads(p.read_text(encoding="utf-8"))
+except (OSError,ValueError):
+    raise SystemExit("DENIED: invalid staff-note profile declaration")
+if (not isinstance(d,dict) or set(d)!={"schema_version","profile"}
+        or d.get("schema_version")!="1.0"
+        or d.get("profile") not in ("off","internal-note-v1")):
+    raise SystemExit("DENIED: unreviewed staff-note profile declaration")
+print("" if d["profile"]=="off" else "internal-note-v1")
+PY_STAFF
+)" || exit 2
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  # A rollback must not grant rights absent from the prior release.
+  STAFF_NOTE_PROFILE=""
+else
+  STAFF_NOTE_PROFILE="$SOURCE_STAFF_NOTE_PROFILE"
+  if [ "${JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE:-}" != "$STAFF_NOTE_PROFILE" ]; then
+    echo "DENIED: staff-note activation differs from immutable source" >&2
+    exit 2
+  fi
+fi
+
 if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
 fi
 if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+fi
+
+# The privileged-grant administrator is separately authenticated. This
+# activation is bound to the reviewed source V4 release policy and is OFF for
+# legacy candidates. An SSH/environment override cannot enable it.
+SOURCE_ADMIN_APPROVER_PROFILE="$(python3 - "$REPO_ROOT" <<'PY_ADMIN_ROLE'
+import sys
+from pathlib import Path
+repo = Path(sys.argv[1])
+sys.path.insert(0, str(repo / "tools"))
+from release_manager_host_runner import _validated_mobile_release_policy
+policy = _validated_mobile_release_policy(
+    repo / "config" / "mobile-release-approval-policy.json",
+    source_v2_required=True,
+)
+print("admin-separated-v1" if policy["mode"] == "admin_approver_separated" else "")
+PY_ADMIN_ROLE
+)" || exit 2
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  ADMIN_APPROVER_PROFILE=""
+else
+  ADMIN_APPROVER_PROFILE="$SOURCE_ADMIN_APPROVER_PROFILE"
+  if [ "${JASON_AOT_ADMIN_APPROVER_PROFILE:-}" != "$ADMIN_APPROVER_PROFILE" ]; then
+    echo "DENIED: admin approval profile differs from reviewed exact source" >&2
+    exit 2
+  fi
 fi
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -128,6 +186,8 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --set-env JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH="$QBO_ACTIVE_ROLE_CONTAINER" \
   --set-env JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH="$QBO_ACTIVE_SECRET_CONTAINER" \
   --set-env JASON_QUICKBOOKS_OAUTH_DB="$QBO_ACTIVE_DB" \
+  --set-env "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE=$STAFF_NOTE_PROFILE" \
+  --set-env "JASON_AOT_ADMIN_APPROVER_PROFILE=$ADMIN_APPROVER_PROFILE" \
   --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \

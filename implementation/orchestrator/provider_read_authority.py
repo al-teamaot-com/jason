@@ -53,6 +53,11 @@ AOT_ROUTINE_AUTOTASK_WRITE_CAPABILITIES = frozenset(
     AOT_ROUTINE_AUTOTASK_WRITE_PROVIDERS
 )
 
+# Separate opt-in standing policy for human-requested INTERNAL notes only.
+# No ticket creation/update or autonomous principal inherits this permission.
+AOT_STAFF_INTERNAL_NOTE_POLICY = "routine-write:aot-staff-internal-note-v1"
+AOT_STAFF_INTERNAL_NOTE_CAPABILITY = "service.ticket.note.create"
+
 # A remote PowerShell script is an endpoint execution operation, not a passive
 # provider information read, even when AST validation says it is read-only.
 # It retains its separate bounded technician execution authorization.
@@ -69,6 +74,12 @@ class GovernedProviderReadAuthorityMatcher:
     providers: ExecutionProviderRegistryService
     identities: ActiveIdentityReader | None = None
     routine_write_enabled: bool = False
+    internal_note_write_enabled: bool = False
+    # In a separately activated V4 approval policy, the privileged signer is
+    # never an ordinary technician under the broad organization ticket-write
+    # grant. The signed admin is still free to use specifically approved and
+    # recorded *exact* grants under JKD-001, never by inheriting this policy.
+    privileged_admin_principal_ids: frozenset[str] = frozenset()
 
     def matches(
         self,
@@ -80,6 +91,10 @@ class GovernedProviderReadAuthorityMatcher:
 
         if expression == AOT_TECHNICIAN_ROUTINE_AUTOTASK_WRITE_POLICY:
             return self._matches_routine_autotask_write(grant=grant, request=request)
+        if expression == AOT_STAFF_INTERNAL_NOTE_POLICY:
+            return self._matches_routine_autotask_write(
+                grant=grant, request=request, note_only=True,
+            )
 
         if not expression.startswith(PROVIDER_READ_POLICY_PREFIX):
             return False
@@ -133,6 +148,7 @@ class GovernedProviderReadAuthorityMatcher:
 
     def _matches_routine_autotask_write(
         self, *, grant: AuthorityGrant, request: AuthorityRequest,
+        note_only: bool = False,
     ) -> bool:
         """Standing AOT ticket writes, retaining exact JKD-001 approval checks.
 
@@ -142,11 +158,13 @@ class GovernedProviderReadAuthorityMatcher:
         No autonomous/service principal inherits this standing write grant.
         """
         if (
-            not self.routine_write_enabled
+            not (self.internal_note_write_enabled if note_only else self.routine_write_enabled)
             or request.organization_id != "aot"
             or request.client_id is not None
+            or request.principal_id in self.privileged_admin_principal_ids
             or request.requested_mode is not PermissionMode.EXECUTE
-            or request.capability not in AOT_ROUTINE_AUTOTASK_WRITE_CAPABILITIES
+            or (request.capability != AOT_STAFF_INTERNAL_NOTE_CAPABILITY if note_only
+                else request.capability not in AOT_ROUTINE_AUTOTASK_WRITE_CAPABILITIES)
             or grant.subject_id != "organization:aot"
             or grant.organization_id != "aot"
             or grant.client_id is not None

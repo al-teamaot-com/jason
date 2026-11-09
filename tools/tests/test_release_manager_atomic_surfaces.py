@@ -88,7 +88,8 @@ def record():
                 "JASON_RUNTIME_PRODUCTION_IMAGE": "jason-runtime:test-a",
                 "JASON_MCP_PRODUCTION_IMAGE": "jason-mcp:test-a",
                 "JASON_SOURCE_REVISION_OVERRIDE": SHA_A,
-                "JASON_RELEASE_MOBILE_APPROVAL_MODE": "owner_reviewed",
+                "JASON_RELEASE_MOBILE_APPROVAL_MODE": "admin_approver_separated",
+                "JASON_AOT_ADMIN_APPROVER_PROFILE": "admin-separated-v1",
             }),
         },
         "history": [],
@@ -163,7 +164,7 @@ def atomic_release_sandbox(monkeypatch, tmp_path):
     monkeypatch.setattr(
         runner, "live_release_mobile_approval_mode",
         lambda runtime: (
-            "owner_reviewed" if str((runtime or {}).get("revision") or "") == SHA_A
+            "admin_approver_separated" if str((runtime or {}).get("revision") or "") == SHA_A
             else "owner_only_pilot"
         ),
     )

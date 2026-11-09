@@ -84,6 +84,68 @@ case "$IMAGE" in
     ;;
 esac
 
+# Source-bound staff note authority: source-only activation, no host fallback.
+SOURCE_STAFF_NOTE_PROFILE="$(python3 - "$REPO_ROOT/config/aot-staff-internal-note-profile.json" <<'PY_STAFF'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.is_symlink():
+    raise SystemExit("DENIED: staff-note profile is a symlink")
+if not p.exists():
+    print("")  # Historical releases are default-off.
+    raise SystemExit(0)
+try:
+    d=json.loads(p.read_text(encoding="utf-8"))
+except (OSError,ValueError):
+    raise SystemExit("DENIED: invalid staff-note profile declaration")
+if (not isinstance(d,dict) or set(d)!={"schema_version","profile"}
+        or d.get("schema_version")!="1.0"
+        or d.get("profile") not in ("off","internal-note-v1")):
+    raise SystemExit("DENIED: unreviewed staff-note profile declaration")
+print("" if d["profile"]=="off" else "internal-note-v1")
+PY_STAFF
+)" || exit 2
+if [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
+  # A rollback must not grant rights absent from the prior release.
+  STAFF_NOTE_PROFILE=""
+else
+  STAFF_NOTE_PROFILE="$SOURCE_STAFF_NOTE_PROFILE"
+  if [ "${JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE:-}" != "$STAFF_NOTE_PROFILE" ]; then
+    echo "DENIED: staff-note activation differs from immutable source" >&2
+    exit 2
+  fi
+fi
+
+# Source-bound universal/open-world query activation. The candidate source is
+# authoritative; there is no host-only enable override. Rollback always disables
+# the capability because the prior production revision did not carry this profile.
+SOURCE_UNIVERSAL_QUERY_PROFILE="$(python3 - "$REPO_ROOT/config/universal-query-activation.json" <<'PY_UNIVERSAL'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("DENIED: immutable universal-query activation profile absent")
+try:
+    d=json.loads(p.read_text(encoding="utf-8"))
+except (OSError,ValueError):
+    raise SystemExit("DENIED: invalid universal-query activation profile")
+if (not isinstance(d,dict) or set(d)!={"schema_version","profile"}
+        or d.get("schema_version")!="1.0"
+        or d.get("profile") not in ("off","aot-internal-read-v1")):
+    raise SystemExit("DENIED: unreviewed universal-query activation profile declaration")
+print(d["profile"])
+PY_UNIVERSAL
+)" || exit 2
+if [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
+  UNIVERSAL_QUERY_ENABLED="false"
+else
+  case "$SOURCE_UNIVERSAL_QUERY_PROFILE" in
+    off) UNIVERSAL_QUERY_ENABLED="false" ;;
+    aot-internal-read-v1) UNIVERSAL_QUERY_ENABLED="true" ;;
+    *) echo "DENIED: unsupported universal-query activation profile" >&2; exit 2 ;;
+  esac
+fi
+
 if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
 fi
@@ -151,18 +213,42 @@ esac
 # Owner-reviewed release approval is source-bound. Preproduction can validate
 # the exact candidate declaration but always runs the approval lane OFF.
 SOURCE_RELEASE_APPROVAL_MODE="$(python3 - "$REPO_ROOT/config/mobile-release-approval-policy.json" <<'PY2'
-import json, sys
+import json, re, sys, uuid
 from pathlib import Path
 p=Path(sys.argv[1])
 if p.is_symlink() or not p.is_file():
     raise SystemExit("DENIED: immutable mobile release approval policy absent")
 d=json.loads(p.read_text(encoding="utf-8"))
-if (d.get("schema_version") != "2.0"
-        or d.get("organization_id") != "aot"
-        or d.get("policy_mode") != "owner_reviewed"
+version=d.get("schema_version")
+if version == "2.0":
+    mode = "owner_reviewed"
+    risks = {"normal", "production_control_core"}
+    expected = {"schema_version", "organization_id", "policy_mode",
+                "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
+                "capability", "high_impact_review"}
+elif version == "3.0":
+    mode = "owner_reviewed"
+    risks = {"normal", "production_control_core", "production_repair"}
+    expected = {"schema_version", "organization_id", "policy_mode",
+                "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
+                "capability", "high_impact_review"}
+elif version == "4.0":
+    mode = "admin_approver_separated"
+    risks = {"normal", "production_control_core"}
+    expected = {"schema_version", "organization_id", "policy_mode",
+                "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
+                "capability", "high_impact_review", "admin_approver_binding",
+                "regular_requester_binding"}
+else:
+    raise SystemExit("DENIED: source mobile release approval policy version unreviewed")
+actual_risks=d.get("allowed_risk_profiles")
+ttl=d.get("ttl_seconds")
+if (set(d) != expected or d.get("organization_id") != "aot"
+        or d.get("policy_mode") != mode
         or d.get("owner_identity_ids") != ["person-al"]
-        or set(d.get("allowed_risk_profiles") or []) != {"normal", "production_control_core"}
-        or d.get("ttl_seconds") not in range(300, 901)
+        or type(actual_risks) is not list
+        or set(actual_risks) != risks or len(actual_risks) != len(risks)
+        or type(ttl) is not int or not 300 <= ttl <= 900
         or d.get("capability") != "release.production.approve"
         or d.get("high_impact_review") != {
             "owner_exact_sha_required": True,
@@ -170,15 +256,34 @@ if (d.get("schema_version") != "2.0"
             "independent_ccc_required": True,
             "protected_release_gates_unchanged": True,
         }):
-    raise SystemExit("DENIED: source mobile release approval policy is not the reviewed owner V2 contract")
-print("owner_reviewed")
+    raise SystemExit("DENIED: source mobile release approval policy is invalid")
+if version == "4.0":
+    def exact_binding(field):
+        binding=d.get(field)
+        if not isinstance(binding, dict) or set(binding) != {
+            "microsoft_tenant_id", "microsoft_object_id"
+        }:
+            raise SystemExit("DENIED: missing exact separated Entra binding")
+        tenant=binding["microsoft_tenant_id"]
+        oid=binding["microsoft_object_id"]
+        for value in (tenant, oid):
+            if (not isinstance(value, str)
+                    or re.fullmatch(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", value) is None
+                    or str(uuid.UUID(value)) != value):
+                raise SystemExit("DENIED: separated Entra binding is invalid")
+        return tenant,oid
+    admin=exact_binding("admin_approver_binding")
+    regular=exact_binding("regular_requester_binding")
+    if admin[0] != regular[0] or admin[1] == regular[1]:
+        raise SystemExit("DENIED: approver cannot be normal requester")
+print(mode)
 PY2
 )" || exit 2
 if [ ${#UAT_PREFLIGHT[@]} -gt 0 ]; then
   RELEASE_APPROVAL_MODE="off"
 elif [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
   RELEASE_APPROVAL_MODE="${JASON_RELEASE_MOBILE_APPROVAL_ROLLBACK_MODE:-off}"
-  case "$RELEASE_APPROVAL_MODE" in owner_only_pilot|owner_reviewed|off) ;; *) echo "DENIED: invalid rollback release approval mode" >&2; exit 2;; esac
+  case "$RELEASE_APPROVAL_MODE" in owner_only_pilot|owner_reviewed|admin_approver_separated|off) ;; *) echo "DENIED: invalid rollback release approval mode" >&2; exit 2;; esac
 else
   if [ "${JASON_RELEASE_MOBILE_APPROVAL_MODE:-}" != "$SOURCE_RELEASE_APPROVAL_MODE" ]; then
     echo "DENIED: invoking release approval mode differs from reviewed source" >&2
@@ -196,6 +301,8 @@ exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime 
   --set-env "JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH=$QBO_MOUNT_BASE/role_id" \
   --set-env "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH=$QBO_MOUNT_BASE/secret_id" \
   --set-env "JASON_QUICKBOOKS_OAUTH_DB=$QBO_DB" \
+  --set-env "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE=$STAFF_NOTE_PROFILE" \
+  --set-env "JASON_UNIVERSAL_QUERY_ENABLED=$UNIVERSAL_QUERY_ENABLED" \
   --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \

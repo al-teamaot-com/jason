@@ -281,3 +281,24 @@ def test_service_resource_search_and_read_are_provider_neutral():
 
     read = adapt_autotask_arguments(SERVICE_RESOURCE_READ, {"resource_id": 29682899})
     assert read == {"entity": "Resources", "entity_id": 29682899}
+
+
+def test_configuration_search_supports_exact_serial_selector_for_governed_lookup():
+    from orchestrator.provider_read_capability_catalog import SERVICE_CONFIGURATION_SEARCH
+
+    adapted = adapt_autotask_arguments(
+        SERVICE_CONFIGURATION_SEARCH,
+        {"serial_number": "RRG2301432", "page_size": 2},
+    )
+    query = json.loads(adapted["search"])
+    assert query["MaxRecords"] == 2
+    assert query["filter"] == [
+        {"op": "eq", "field": "serialNumber", "value": "RRG2301432"}
+    ]
+
+    operations = {
+        operation.capability_name: operation
+        for resource in build_autotask_manifest().resources
+        for operation in resource.operations
+    }
+    assert "serial_number" in operations[SERVICE_CONFIGURATION_SEARCH].selector_names

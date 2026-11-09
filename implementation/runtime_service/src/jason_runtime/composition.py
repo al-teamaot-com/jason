@@ -174,6 +174,7 @@ from orchestrator.print_capability_catalog import (
     PRINT_METER_READ,
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
+    PRINT_METER_USAGE_SEARCH,
     PRINT_SUPPLIES_READ,
     register_print_resource_foundation,
 )
@@ -186,6 +187,10 @@ from .aot_operational_read_authority import ensure_aot_technician_read_authority
 from .aot_routine_write_authority import (
     configured_aot_routine_autotask_write,
     ensure_aot_routine_autotask_write_authority,
+)
+from .aot_staff_internal_note_authority import (
+    configured_aot_staff_internal_note_write,
+    ensure_aot_staff_internal_note_authority,
 )
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
@@ -266,6 +271,16 @@ from .autotask_procurement import (
     build_autotask_procurement_invoker,
     register_autotask_procurement_invoker,
     register_autotask_procurement_runtime_foundation,
+)
+from .autotask_company_outbound_opt_in_update import (
+    register_autotask_company_outbound_opt_in_foundation,
+    build_autotask_company_outbound_opt_in_invoker,
+    register_autotask_company_outbound_opt_in_invoker,
+)
+from .autotask_company_udf_admin import (
+    register_autotask_company_udf_admin_foundation,
+    build_autotask_company_udf_admin_invoker,
+    register_autotask_company_udf_admin_invoker,
 )
 from .autotask_ticket_attachment import (
     build_autotask_ticket_attachment_invoker,
@@ -1167,8 +1182,10 @@ class RuntimeSettings:
     def validate(self) -> None:
         if self.universal_approval_mode not in {"off", "enforced"}:
             raise ValueError("JASON_UNIVERSAL_APPROVAL_MODE must be off or enforced")
-        if self.release_mobile_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
-            raise ValueError("JASON_RELEASE_MOBILE_APPROVAL_MODE must be off, owner_only_pilot or owner_reviewed")
+        if self.release_mobile_approval_mode not in {
+            "off", "owner_only_pilot", "owner_reviewed", "admin_approver_separated"
+        }:
+            raise ValueError("unsupported JASON_RELEASE_MOBILE_APPROVAL_MODE")
         if self.release_mobile_interval_seconds < 60:
             raise ValueError("mobile release approval scans require at least a 60-second interval")
         if self.owner_uat_mode not in {"off", "nonexecuting_test_only"}:
@@ -1587,6 +1604,16 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         providers=providers,
         now=now,
     )
+    register_autotask_company_outbound_opt_in_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
+    register_autotask_company_udf_admin_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     register_autotask_ticket_attachment_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1629,6 +1656,25 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
 
     identity_repository = SQLiteIdentityRepository(authority_store)
     routine_autotask_write_enabled = configured_aot_routine_autotask_write()
+    staff_internal_note_enabled = configured_aot_staff_internal_note_write()
+    privileged_admin_principals = frozenset()
+    if settings.release_mobile_approval_mode == "admin_approver_separated":
+        from uuid import UUID
+        from .mobile_release_approval import read_mobile_release_policy
+        privileged_policy = read_mobile_release_policy(
+            settings.release_mobile_approval_policy
+        )
+        if (
+            privileged_policy.schema_version != "4.0"
+            or privileged_policy.admin_approver_binding is None
+            or privileged_policy.regular_requester_binding is None
+        ):
+            raise PermissionError("privileged admin separation requires V4 approval policy")
+        privileged_admin_principals = frozenset({
+            "person-entra-" + UUID(
+                privileged_policy.admin_approver_binding[1]
+            ).hex,
+        })
     identity_authority = IdentityAuthorityService(
         identities=identity_repository,
         grants=SQLiteAuthorityGrantRepository(authority_store),
@@ -1639,6 +1685,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             capabilities=capabilities, providers=providers,
             identities=identity_repository,
             routine_write_enabled=routine_autotask_write_enabled,
+            internal_note_write_enabled=staff_internal_note_enabled,
+            privileged_admin_principal_ids=privileged_admin_principals,
         ),
     )
     # Mandatory standing observe policy. Authenticated AOT human staff receive
@@ -1647,6 +1695,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     ensure_aot_technician_read_authority(identity_authority)
     ensure_aot_routine_autotask_write_authority(
         identity_authority, enabled=routine_autotask_write_enabled,
+    )
+    ensure_aot_staff_internal_note_authority(
+        identity_authority, enabled=staff_internal_note_enabled,
     )
     ensure_teams_message_send_authority(
         identity_authority, enabled=configured_teams_message_send(),
@@ -1904,6 +1955,22 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         ticket_attention=ticket_attention_relay.notify,
     )
     procurement_invoker = build_autotask_procurement_invoker(
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.autotask_write_openbao_role_id_path,
+        secret_id_path=settings.autotask_write_openbao_secret_id_path,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+        bindings=source_authorization_bindings,
+    )
+    company_outbound_optin_invoker = build_autotask_company_outbound_opt_in_invoker(
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.autotask_write_openbao_role_id_path,
+        secret_id_path=settings.autotask_write_openbao_secret_id_path,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+        bindings=source_authorization_bindings,
+    )
+    company_udf_admin_invoker = build_autotask_company_udf_admin_invoker(
         openbao_url=settings.openbao_url,
         role_id_path=settings.autotask_write_openbao_role_id_path,
         secret_id_path=settings.autotask_write_openbao_secret_id_path,
@@ -2185,6 +2252,14 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         invokers=invokers,
         invoker=procurement_invoker,
     )
+    register_autotask_company_outbound_opt_in_invoker(
+        invokers=invokers,
+        invoker=company_outbound_optin_invoker,
+    )
+    register_autotask_company_udf_admin_invoker(
+        invokers=invokers,
+        invoker=company_udf_admin_invoker,
+    )
     register_autotask_ticket_attachment_invoker(
         invokers=invokers,
         invoker=ticket_attachment_invoker,
@@ -2233,6 +2308,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     invokers.register(PRINT_METER_READ, kfs_invoker)
     invokers.register(PRINT_METER_HISTORY_SEARCH, kfs_history_invoker)
     invokers.register(PRINT_METER_USAGE_READ, kfs_history_invoker)
+    invokers.register(PRINT_METER_USAGE_SEARCH, kfs_history_invoker)
     invokers.register(PRINT_SUPPLIES_READ, kfs_invoker)
     invokers.register(PRINT_ALERT_SEARCH, kfs_invoker)
     invokers.register(BACKUP_ENDPOINT_ASSET_SEARCH, backup_net_invoker)
@@ -2613,7 +2689,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
 
     release_mobile_flow = None
     release_mobile_maintenance = None
-    if settings.release_mobile_approval_mode in {"owner_only_pilot", "owner_reviewed"}:
+    if settings.release_mobile_approval_mode in {
+        "owner_only_pilot", "owner_reviewed", "admin_approver_separated"
+    }:
         from .mobile_release_approval import (
             MobileReleaseApprovalFlow, MobileReleaseApprovalMaintenance,
             MobileReleaseOwnerAuthority, MobileReleaseSignedEvidenceStore,
@@ -2624,9 +2702,21 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         if settings.release_mobile_approval_mode == "owner_only_pilot":
             if owner_policy.schema_version != "1.0":
                 raise PermissionError("active release approval mode and reviewed policy version do not match")
+        elif settings.release_mobile_approval_mode == "admin_approver_separated":
+            if owner_policy.schema_version != "4.0":
+                raise PermissionError("admin-separated release mode requires reviewed V4 policy")
         elif owner_policy.schema_version not in {"2.0", "3.0"}:
             raise PermissionError("active release approval mode and reviewed policy version do not match")
         expected_version = owner_policy.schema_version
+        # V4 has no email-based Owner delegation or preexisting Owner alias
+        # lookup. Both card routing and callback use the same exact Entra OID
+        # selected by the root-owned versioned policy.
+        separate_admin = expected_version == "4.0"
+        owner_fallback = {} if separate_admin else {"person-al": "al@teamaot.com"}
+        owner_entra_bindings = (
+            {owner_policy.owner_identity_ids[0]: owner_policy.admin_approver_binding}
+            if separate_admin else {}
+        )
         release_repo = SQLiteApprovalRequestRepository(settings.release_mobile_approval_db)
         release_approval_service = ApprovalRequestService(
             release_repo, MobileReleaseOwnerAuthority(settings.release_mobile_approval_policy),
@@ -2642,14 +2732,12 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                 authenticator=teams_authenticator,
                 allowed_machine_identities=settings.allowed_machine_identities,
                 allowed_approval_prefixes=("relapproval-",),
-                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0"}
+                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0", "4.0"}
                                         else frozenset()),
             ),
             signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),
             required_policy_version=expected_version,
-            owner_identity_email_fallbacks={
-                "person-al": "al@teamaot.com",
-            },
+            owner_identity_email_fallbacks=owner_fallback,
         )
         if settings.release_mobile_approval_worker_enabled:
             release_mobile_maintenance = MobileReleaseApprovalMaintenance(
@@ -2663,9 +2751,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                     token_file=settings.teams_proactive_token_file,
                     bindings=durable_bindings,
                     owner_identity_ids=owner_policy.owner_identity_ids,
-                    owner_identity_email_fallbacks={
-                        "person-al": "al@teamaot.com",
-                    },
+                    owner_identity_email_fallbacks=owner_fallback,
+                    owner_identity_entra_bindings=owner_entra_bindings,
                 ),
                 interval_seconds=settings.release_mobile_interval_seconds,
                 required_policy_version=expected_version,

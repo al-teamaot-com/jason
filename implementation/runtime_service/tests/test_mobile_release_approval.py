@@ -960,3 +960,321 @@ def test_v3_policy_owner_mode_and_source_digest_remain_bound(tmp_path):
     assert old.authorized_approver_ids == ("person-al",)
     with pytest.raises(PermissionError):
         read_mobile_release_policy(policy_file(tmp_path, schema_version="3.0"))
+
+
+def test_issue_2339_replacement_owner_card_has_new_exact_signed_subject(tmp_path):
+    import hashlib
+    root, record_path = release_record(tmp_path)
+    record = json.loads(record_path.read_text())
+    record['owner_approval'] = {
+        'approved': True, 'candidate_sha': SHA,
+        'source': 'authenticated_mobile_teams_owner:relapproval-' + 'a'*32,
+    }
+    record['manual_scope_review'] = {'scope_sha256': 'd'*64}
+    record_path.write_text(json.dumps(record))
+    record_path.chmod(0o600)
+    policy = read_mobile_release_policy(reviewed_policy_file(tmp_path))
+    marker=root/'production-deployment-freeze'
+    marker.write_text('{"scope":"manual-and-automatic-production-promotions","status":"active"}\n')
+    marker.chmod(0o600)
+    freeze_hash=hashlib.sha256(marker.read_bytes()).hexdigest()
+    source=root/'owner-explicit-unfreeze-receipts'/(RELEASE+'.json')
+    tx=root/'owner-unfreeze-receipts'/(RELEASE+'.json')
+    source.parent.mkdir();tx.parent.mkdir()
+    common={'release_id':RELEASE,'candidate_sha':SHA,'rollback_sha':ROLLBACK,
+            'scope_sha256':'d'*64,'freeze_sha256_before':freeze_hash,
+            'freeze_sha256_after':freeze_hash,'freeze_restored':True}
+    source.write_text(json.dumps({**common,'schema_version':'1.0',
+        'authorization':'explicit_exact_sha_owner_unfreeze','status':'consumed',
+        'standing_authority':False,'automatic_publish_authority':False}))
+    source.chmod(0o600)
+    tx.write_text(json.dumps({**common,'schema_version':'2.0',
+        'authorization':'explicit_owner_one_transaction_unfreeze',
+        'status':'deployment_returned','release_state_after':'production_eligible'}))
+    tx.chmod(0o600)
+    # A previously approved release cannot issue a second ordinary release card.
+    with pytest.raises(PermissionError, match='existing release approval'):
+        read_eligible_release(root, RELEASE, policy)
+    replacement = read_eligible_release(
+        root, RELEASE, policy, allow_existing_owner_approval=True,
+        replacement_unfreeze_only=True)
+    assert replacement.review_only is True
+    assert replacement.replacement_lineage is not None
+    card=create_mobile_release_request(replacement, policy, now=NOW,
+        card_challenge='b'*48)
+    assert card.metadata['replacement_unfreeze_only'] is True
+    assert card.metadata['replacement_lineage']['freeze_sha256']==freeze_hash
+    assert card.metadata['replacement_lineage']['scope_sha256']=='d'*64
+    assert 'review_only' not in card.metadata
+    assert 'unfreeze-replacement:' in card.request_id
+    assert card.presentation.title.startswith('Replacement unfreeze ONLY:')
+    assert 'standing authority' in card.presentation.summary
+    # Same card from same immutable evidence reconstructs exactly, apart from
+    # the intentionally fresh approval ID used for one signed Teams click.
+    repeated=create_mobile_release_request(replacement,policy,now=NOW,
+        card_challenge='b'*48)
+    assert card.metadata==repeated.metadata
+    assert card.presentation==repeated.presentation
+    # A changed predecessor or already-authorized replacement cannot be
+    # reinterpreted as an ordinary CCC review or a fresh retry.
+    tampered=json.loads(tx.read_text());tampered['freeze_sha256_after']='0'*64
+    tx.write_text(json.dumps(tampered))
+    with pytest.raises(PermissionError, match='predecessor'):
+        read_eligible_release(root, RELEASE,policy,
+            allow_existing_owner_approval=True,replacement_unfreeze_only=True)
+
+
+
+def _approved_expired_frozen_renewal_fixture(tmp_path):
+    from jason_runtime.mobile_release_approval import (
+        read_expired_initial_unfreeze_predecessor,
+    )
+    policy_path = reviewed_policy_file(tmp_path)
+    policy = read_mobile_release_policy(policy_path)
+    old_id = "relapproval-" + "b" * 32
+    signed_old = "a" * 64
+    root, path = release_record(tmp_path, owner_approval={
+        "approved": True,
+        "candidate_sha": SHA,
+        "source": "authenticated_mobile_teams_owner:" + old_id,
+        "recorded_at": (NOW - timedelta(minutes=21)).isoformat(),
+    })
+    record = json.loads(path.read_text())
+    record["manual_scope_review"] = {
+        "scope_sha256": "c" * 64, "candidate_sha": SHA,
+        "baseline_sha": ROLLBACK,
+    }
+    freeze = root / "production-deployment-freeze"
+    freeze.write_text(json.dumps({
+        "schema_version": "1.0", "status": "active",
+        "scope": "manual-and-automatic-production-promotions",
+        "remove_only_after": "new explicit exact-SHA owner unfreeze decision",
+    }) + "\n")
+    freeze.chmod(0o600)
+    import hashlib
+    frozen_digest = hashlib.sha256(freeze.read_bytes()).hexdigest()
+    manifest = digest(record["release_manifest"])
+    initial = {
+        "schema_version": "1.0",
+        "authorization": "signed_teams_initial_unfreeze",
+        "release_id": RELEASE, "candidate_sha": SHA,
+        "rollback_sha": ROLLBACK, "scope_sha256": "c" * 64,
+        "freeze_sha256_before": frozen_digest,
+        "manifest_sha256": manifest,
+        "approval_id": old_id,
+        "signed_evidence_sha256": signed_old,
+        "prior_release_approval_source": record["owner_approval"]["source"],
+        "recorded_at": (NOW - timedelta(minutes=20)).isoformat(),
+        "expires_at": (NOW - timedelta(minutes=10)).isoformat(),
+        "status": "authorized_pending",
+        "freeze_remains_active": True,
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+        "automatic_publish_authority": False,
+    }
+    previous = root / "owner-signed-unfreeze-receipts"
+    previous.mkdir(mode=0o700)
+    original_path = previous / (RELEASE + ".json")
+    original_path.write_text(json.dumps(initial, sort_keys=True) + "\n")
+    original_path.chmod(0o600)
+    previous_digest = hashlib.sha256(original_path.read_bytes()).hexdigest()
+    record["signed_initial_unfreeze_authorization"] = {
+        "approval_id": old_id,
+        "signed_evidence_sha256": signed_old,
+        "receipt_sha256": "sha256:" + previous_digest,
+    }
+    path.write_text(json.dumps(record, sort_keys=True) + "\n")
+    path.chmod(0o600)
+    lineage = read_expired_initial_unfreeze_predecessor(root, RELEASE, record)
+    binding = {
+        "schema_version": "1.0",
+        "release_id": RELEASE, "candidate_sha": SHA,
+        "rollback_sha": ROLLBACK, "manifest_sha256": manifest,
+        "scope_sha256": "c" * 64, "freeze_sha256": frozen_digest,
+    }
+    offers = root / "mobile-release-offers"
+    offers.mkdir(mode=0o700)
+    offer = offers / (RELEASE + ".json")
+    offer.write_text(json.dumps({
+        "schema_version": "1.0",
+        "release_id": RELEASE, "candidate_sha": SHA,
+        "live_rollback_sha": ROLLBACK,
+        "manifest_sha256": manifest,
+        "protected_main_sha": SHA,
+        "initial_unfreeze_renewal_only": True,
+        "initial_unfreeze_renewal_lineage": lineage,
+        "initial_freeze_binding": binding,
+        "published_at": NOW.isoformat(),
+    }))
+    offer.chmod(0o600)
+    return SimpleNamespace(
+        policy_path=policy_path, policy=policy, root=root, record=path,
+        freeze=freeze, original=original_path, old_id=old_id, lineage=lineage,
+        offer=offer,
+    )
+
+
+def test_approved_expired_freeze_issues_new_unfreeze_only_card(tmp_path):
+    from jason_runtime.mobile_release_approval import (
+        MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority,
+    )
+    case = _approved_expired_frozen_renewal_fixture(tmp_path)
+    evidence = read_eligible_release(
+        case.root, RELEASE, case.policy,
+        allow_existing_owner_approval=True,
+        initial_unfreeze_renewal_only=True,
+    )
+    assert evidence.review_only is True
+    assert evidence.initial_unfreeze_renewal_only is True
+    request = create_mobile_release_request(evidence, case.policy, now=NOW)
+    request.validate()
+    assert request.metadata["initial_unfreeze_renewal_only"] is True
+    assert "review_only" not in request.metadata
+    assert request.metadata["initial_unfreeze_renewal_lineage"] == case.lineage
+    assert request.metadata["initial_freeze_binding"]["scope_sha256"] == "c" * 64
+    assert request.presentation.title.startswith("NEW signed unfreeze ONLY")
+    assert "expired" in request.presentation.summary.lower()
+    assert request.request_id.endswith(
+        ":initial-unfreeze-renewal:" + case.lineage["predecessor_receipt_sha256"][:16]
+    )
+    # A newly issued card, not a second release grant or a direct unfreeze.
+    original_bytes = case.original.read_bytes()
+    record_bytes = case.record.read_bytes()
+    freeze_bytes = case.freeze.read_bytes()
+    repository = SQLiteApprovalRequestRepository(tmp_path / "approved-expired.sqlite3")
+    approvals = ApprovalRequestService(
+        repository, MobileReleaseOwnerAuthority(case.policy_path),
+    )
+    class Sender:
+        def __init__(self):
+            self.sent = []
+        def send(self, card):
+            self.sent.append(card)
+            return ("governed-teams-message-id",)
+    sender = Sender()
+    maintenance = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=case.policy_path, state_root=case.root,
+        requests=repository, approvals=approvals, sender=sender,
+        interval_seconds=60, clock=lambda: NOW,
+        required_policy_version="2.0",
+    )
+    assert maintenance.tick() is True
+    assert len(sender.sent) == 1
+    assert sender.sent[0].metadata["initial_unfreeze_renewal_only"] is True
+    assert case.record.read_bytes() == record_bytes
+    assert case.original.read_bytes() == original_bytes
+    assert case.freeze.read_bytes() == freeze_bytes
+    maintenance._next_due = NOW
+    assert maintenance.tick() is False
+    assert len(sender.sent) == 1
+
+
+@pytest.mark.parametrize("changed", [
+    "consumed", "unexpired", "original_tampered", "freeze_changed",
+    "wrong_owner", "wrong_scope", "already_renewed", "prior_native_transaction",
+])
+def test_expired_approved_renewal_fails_closed_for_wrong_predecessor(tmp_path, changed):
+    from jason_runtime.mobile_release_approval import (
+        read_expired_initial_unfreeze_predecessor,
+    )
+    case = _approved_expired_frozen_renewal_fixture(tmp_path)
+    if changed in ("consumed", "unexpired", "original_tampered"):
+        old = json.loads(case.original.read_text())
+        if changed == "consumed":
+            old["status"] = "consumed"
+        elif changed == "unexpired":
+            old["expires_at"] = (NOW + timedelta(minutes=5)).isoformat()
+        else:
+            old["scope_sha256"] = "f" * 64
+        case.original.write_text(json.dumps(old) + "\n")
+        case.original.chmod(0o600)
+    elif changed == "freeze_changed":
+        case.freeze.write_bytes(case.freeze.read_bytes() + b" ")
+    elif changed == "prior_native_transaction":
+        tx = case.root / "owner-unfreeze-receipts"
+        tx.mkdir()
+        (tx / (RELEASE + ".json")).write_text('{"status":"begin_failed_freeze_restored"}')
+    else:
+        doc = json.loads(case.record.read_text())
+        if changed == "wrong_owner":
+            doc["owner_approval"]["source"] = "authenticated_mobile_teams_owner:relapproval-" + "f" * 32
+        elif changed == "wrong_scope":
+            doc["manual_scope_review"]["scope_sha256"] = "f" * 64
+        else:
+            doc["renewed_initial_unfreeze_authorization"] = {
+                "approval_id": "relapproval-" + "f" * 32,
+            }
+        case.record.write_text(json.dumps(doc) + "\n")
+        case.record.chmod(0o600)
+    with pytest.raises((PermissionError, ValueError)):
+        read_expired_initial_unfreeze_predecessor(case.root, RELEASE)
+    assert case.freeze.exists()
+
+
+def test_unseen_expired_owner_card_reconciles_without_auto_resend(tmp_path):
+    """A real Teams transport receipt is not proof that the Owner saw a card."""
+    from jason_runtime.mobile_release_approval import (
+        MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority,
+    )
+    policy_path = policy_file(tmp_path)
+    policy = read_mobile_release_policy(policy_path)
+    root, release_path = release_record(tmp_path)
+    # The prior offer has timed out; it must not create another request.
+    make_eligible_main_offer(root, policy_path, published_at=NOW - timedelta(hours=1))
+    repo = SQLiteApprovalRequestRepository(tmp_path / "pending-expired.db")
+    approvals = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
+    evidence = read_eligible_release(root, RELEASE, policy)
+    previous = create_mobile_release_request(
+        evidence, policy, now=NOW - timedelta(minutes=20),
+    )
+    approvals.create(previous, now=NOW - timedelta(minutes=20))
+    repo.put(__import__("dataclasses").replace(
+        previous, metadata={**previous.metadata, "delivery_message_ids": "1794094707793"},
+    ))
+    baseline_release = release_path.read_bytes()
+
+    class NeverSend:
+        def send(self, request):
+            raise AssertionError("expiry reconciliation must not issue approval cards")
+
+    maintenance = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=policy_path, state_root=root,
+        requests=repo, approvals=approvals, sender=NeverSend(),
+        interval_seconds=60, clock=lambda: NOW,
+    )
+    assert maintenance.tick() is False
+    stored = repo.get(previous.approval_id)
+    assert stored.status is ApprovalRequestStatus.EXPIRED
+    assert stored.metadata["delivery_message_ids"] == "1794094707793"
+    assert repo.accepted_decision(previous.approval_id) is None
+    assert release_path.read_bytes() == baseline_release
+    assert len(repo.list_all()) == 1
+    maintenance._next_due = NOW
+    assert maintenance.tick() is False
+    assert len(repo.list_all()) == 1
+    repo.close()
+
+
+def test_unexpired_owner_card_does_not_get_terminal_state(tmp_path):
+    from jason_runtime.mobile_release_approval import (
+        MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority,
+    )
+    policy_path = policy_file(tmp_path)
+    policy = read_mobile_release_policy(policy_path)
+    root, _ = release_record(tmp_path)
+    repo = SQLiteApprovalRequestRepository(tmp_path / "pending-unexpired.db")
+    approvals = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
+    evidence = read_eligible_release(root, RELEASE, policy)
+    pending = create_mobile_release_request(evidence, policy, now=NOW)
+    approvals.create(pending, now=NOW)
+    class NeverSend:
+        def send(self, request):
+            raise AssertionError("no offer may be sent")
+    maintenance = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=policy_path, state_root=root,
+        requests=repo, approvals=approvals, sender=NeverSend(),
+        interval_seconds=60, clock=lambda: NOW,
+    )
+    assert maintenance.tick() is False
+    assert repo.get(pending.approval_id).status is ApprovalRequestStatus.PENDING
+    repo.close()
