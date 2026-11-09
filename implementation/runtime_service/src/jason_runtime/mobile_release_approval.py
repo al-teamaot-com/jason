@@ -63,6 +63,7 @@ class MobileReleasePolicy:
     # not mutable email, UPN, or a privilege-granting binding migration.
     admin_approver_binding: tuple[str, str] | None = None
     regular_requester_binding: tuple[str, str] | None = None
+    service_release_requester_id: str | None = None
 
 
 def _exact_entra_binding(value: Any) -> tuple[str, str]:
@@ -106,7 +107,10 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
     elif version in {"2.0", "3.0"}:
         expected = shared | {"high_impact_review"}
         mode = "owner_reviewed"
-    elif version == "4.0":
+    elif version in {"4.0", "5.0"}:
+        # Separate human operational requester from the privileged actor.
+        # V5 is a distinct opt-in service-originated Owner decision profile;
+        # existing V4 policy remains unchanged.
         # Separate normal requester from high-impact approver. The version
         # must be activated independently from an existing owner_reviewed
         # deployment and must be attested by the protected host policy.
@@ -114,7 +118,10 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
             "high_impact_review", "admin_approver_binding",
             "regular_requester_binding",
         }
-        mode = "admin_approver_separated"
+        if version == "5.0":
+            expected |= {"release_requester_principal_id"}
+        mode = ("admin_approver_separated" if version == "4.0"
+                else "service_requester_regular_owner_teams")
     else:
         raise PermissionError("unsupported versioned mobile release policy")
     if (set(doc) != expected
@@ -135,7 +142,7 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
     else:
         review = doc["high_impact_review"]
         required_risks = (
-            {"normal", "production_control_core"} if version in {"2.0", "4.0"}
+            {"normal", "production_control_core"} if version in {"2.0", "4.0", "5.0"}
             else {"normal", "production_control_core", "production_repair"}
         )
         if (not isinstance(review, dict)
@@ -150,7 +157,7 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
         # class-wide release grant or a production unfreeze. Root gates remain.
     admin_binding = None
     regular_binding = None
-    if version == "4.0":
+    if version in {"4.0", "5.0"}:
         admin_binding = _exact_entra_binding(doc["admin_approver_binding"])
         regular_binding = _exact_entra_binding(doc["regular_requester_binding"])
         if (
@@ -160,9 +167,14 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
             raise PermissionError(
                 "administrative approver must be distinct from regular requester in one tenant"
             )
+    service_requester = None
+    if version == "5.0":
+        service_requester = doc.get("release_requester_principal_id")
+        if service_requester != "svc-jason-release-manager":
+            raise PermissionError("V5 Owner approval requires native release service requester")
     return MobileReleasePolicy(
         "aot", ("person-al",), frozenset(risks), ttl, digest(doc), version,
-        admin_binding, regular_binding,
+        admin_binding, regular_binding, service_requester,
     )
 
 
@@ -440,7 +452,7 @@ def read_eligible_release(
     # This cannot mint another release approval or make the old V1 pilot
     # accept protected-control changes.
     if review_only and (
-        not allow_existing_owner_approval or policy.schema_version not in {"2.0", "3.0", "4.0"}
+        not allow_existing_owner_approval or policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}
         or owner_approval.get("candidate_sha") != (candidate or {}).get("candidate_sha")
     ):
         raise PermissionError("existing release approval requires a reviewed exact CCC-only card")
@@ -812,6 +824,32 @@ class MobileReleaseApprovalFlow:
     owner_identity_email_fallbacks: Mapping[str, str] | None = None
 
     def _authorized_owner_identity(self, *, binding, identity, policy: MobileReleasePolicy) -> str:
+        if policy.schema_version == "5.0":
+            # Service-originated release is a distinct V5 policy; signer's
+            # original signed Entra identity must be the regular Owner.
+            if policy.service_release_requester_id != "svc-jason-release-manager":
+                raise PermissionError("V5 release requester policy not verified")
+            expected = policy.regular_requester_binding
+            if expected is None or policy.admin_approver_binding is None:
+                raise PermissionError("V5 release Owner identities unavailable")
+            try:
+                derived = "person-entra-" + uuid.UUID(str(binding.microsoft_object_id)).hex
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise PermissionError("V5 signed Owner identity invalid") from exc
+            if (
+                str(getattr(binding, "microsoft_tenant_id", "")) != expected[0]
+                or str(getattr(binding, "microsoft_object_id", "")) != expected[1]
+                or expected == policy.admin_approver_binding
+                or getattr(binding, "status", None) != "active"
+                or getattr(binding, "client_id", None) is not None
+                or str(getattr(binding, "jason_identity_id", "")) != derived
+                or str(getattr(identity, "identity_id", "")) != derived
+                or getattr(identity, "status", None) != "active"
+                or getattr(identity, "identity_type", None) not in ("human", "person")
+                or getattr(identity, "organization_id", None) != policy.organization_id
+            ):
+                raise PermissionError("V5 signed Owner identity differs from reviewed Teams role")
+            return policy.owner_identity_ids[0]
         if policy.schema_version == "4.0":
             approved = policy.admin_approver_binding
             if approved is None or policy.regular_requester_binding is None:
