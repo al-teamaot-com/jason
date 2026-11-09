@@ -34,7 +34,7 @@ def preflight(
     known_suppressed: Iterable[str] | None = None,
     suppression_inventory_complete: bool = False,
 ) -> ImportPreflight:
-    """Build an approval preview; never produce executable=true without suppression readback.
+    """Build an advisory preview; never grant execution authority.
 
     A 'true' spreadsheet consent column is not enough: each accepted entry must
     also have documented consent evidence, represented by consent_evidence.
@@ -44,6 +44,7 @@ def preflight(
     accepted: list[dict[str, str]] = []
     rejected: list[dict[str, str]] = []
     seen: set[str] = set()
+    consent_evidence_digests: list[dict[str, str]] = []
     for index, raw in enumerate(rows, start=2):
         if index > MAX_ROWS + 1:
             rejected.append({"row": str(index), "reason": "row_limit_exceeded"})
@@ -77,11 +78,17 @@ def preflight(
             rejected.append({"row": str(index), "email": email, "reason": reason})
         else:
             accepted.append(contact)
-    payload = {"accepted": accepted, "rejected": rejected, "suppression_inventory_complete": suppression_inventory_complete}
+            consent_evidence_digests.append({
+                "email": email,
+                "evidence_sha256": hashlib.sha256(str(raw["consent_evidence"]).strip().encode()).hexdigest(),
+            })
+    payload = {"accepted": accepted, "rejected": rejected,
+               "consent_evidence_digests": consent_evidence_digests,
+               "suppression_inventory_complete": suppression_inventory_complete}
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return ImportPreflight(
         accepted=tuple(accepted),
         rejected=tuple(rejected),
         digest=digest,
-        executable=bool(accepted) and not rejected and suppression_inventory_complete,
+        executable=False,  # Advisory only: exact-action Teams approval and fresh provider readback are required.
     )
