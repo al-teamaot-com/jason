@@ -1,7 +1,7 @@
 from io import BytesIO
 
 import pytest
-from openpyxl import Workbook
+Workbook = pytest.importorskip("openpyxl").Workbook
 
 from connectors.constant_contact.xlsx_preflight import WorkbookPreflightError, preview_xlsx
 
