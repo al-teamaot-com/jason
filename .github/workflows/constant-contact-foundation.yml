@@ -1,0 +1,53 @@
+name: Validate Constant Contact Integration Foundation
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/connectors/constant_contact/**'
+      - 'implementation/connectors/tests/test_constant_contact_*.py'
+      - 'implementation/orchestrator/constant_contact_capability_catalog.py'
+      - 'implementation/runtime_service/src/jason_runtime/constant_contact_*.py'
+      - 'implementation/runtime_service/tests/test_constant_contact_*.py'
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'implementation/connectors/core/openbao_secrets.py'
+      - 'implementation/runtime_service/src/jason_runtime/composition.py'
+      - 'tools/constant_contact_oauth.py'
+      - 'tools/provider_secret_provision.py'
+      - 'tools/tests/test_constant_contact_*.py'
+      - 'implementation/pyproject.toml'
+      - '.github/workflows/constant-contact-foundation.yml'
+  push:
+    paths:
+      - 'implementation/connectors/constant_contact/**'
+      - 'implementation/connectors/tests/test_constant_contact_*.py'
+      - 'implementation/orchestrator/constant_contact_capability_catalog.py'
+      - 'implementation/runtime_service/src/jason_runtime/constant_contact_*.py'
+      - 'implementation/runtime_service/tests/test_constant_contact_*.py'
+      - '.github/workflows/constant-contact-foundation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  constant-contact-source:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/runtime_service/src:implementation/cap-001/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install source test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'pytest>=8.3,<10' 'cryptography>=43,<47' 'openpyxl>=3.1,<4'
+      - name: Compile source and runtime integration
+        run: |
+          python -m compileall -q implementation/connectors/constant_contact implementation/orchestrator/constant_contact_capability_catalog.py implementation/runtime_service/src/jason_runtime/constant_contact_activation.py implementation/runtime_service/src/jason_runtime/constant_contact_reads.py implementation/runtime_service/src/jason_runtime/composition.py implementation/mcp_service/src/jason_mcp/server.py tools/constant_contact_oauth.py
+      - name: Run Constant Contact regression tests
+        run: |
+          python -m pytest -q implementation/connectors/tests/test_constant_contact_*.py implementation/runtime_service/tests/test_constant_contact_*.py tools/tests/test_constant_contact_secret_provision.py
+      - name: Verify source-only defaults
+        run: |
+          test -z "${JASON_CONSTANT_CONTACT_READ_PROFILE:-}"
+          git diff --check origin/main...HEAD || git diff --check HEAD~1...HEAD
