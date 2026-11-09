@@ -8,17 +8,23 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from jason_mcp.entra_release_stepup import (
-    REDIRECT, ReleaseIdentityRoute, ExactRelease, new_login, EntraStepUpDenied,
+    ReleaseIdentityRoute, ExactRelease, new_login, EntraStepUpDenied,
 )
 from jason_mcp.entra_release_code_exchange import redeem_admin_browser_code
 
 
 NOW=datetime.now(timezone.utc).replace(microsecond=0)
-TENANT="f7054323-d52b-4863-8c2f-1898f0b6077c"
-ADMIN="c848022d-e13b-4457-84b0-e2f5c00dcaf6"
-REGULAR="bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
-CLIENT="267b5641-cea0-4251-95c5-685178e0e087"
-ROUTE=ReleaseIdentityRoute(TENANT,REGULAR,ADMIN)
+TENANT="11111111-1111-4111-8111-111111111111"
+ADMIN="22222222-2222-4222-8222-222222222222"
+REGULAR="33333333-3333-4333-8333-333333333333"
+CLIENT="44444444-4444-4444-8444-444444444444"
+REDIRECT="https://approval.example.org/admin/release-approval/callback"
+ROUTE=ReleaseIdentityRoute(
+    tenant_id=TENANT,regular_teams_oid=REGULAR,admin_approver_oid=ADMIN,
+    owner_subject_id="owner-fixture",
+    registered_redirect_uri=REDIRECT,
+    notice_uri="https://approval.example.org/admin/release-approval",
+)
 APPROVAL=ExactRelease(
     approval_id="relapproval-"+"a"*32,
     candidate_sha="b"*40, rollback_sha="c"*40,

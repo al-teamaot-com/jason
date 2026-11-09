@@ -11,18 +11,27 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from jason_mcp.entra_release_stepup import (
-    REDIRECT, EntraStepUpDenied, ReleaseIdentityRoute, ExactRelease,
+    EntraStepUpDenied, ReleaseIdentityRoute, ExactRelease,
     new_login, login_authorization_url, regular_teams_notice,
     verified_admin_signin,
 )
 
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
-TENANT = "f7054323-d52b-4863-8c2f-1898f0b6077c"
-ADMIN = "c848022d-e13b-4457-84b0-e2f5c00dcaf6"
-REGULAR = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
-CLIENT = "267b5641-cea0-4251-95c5-685178e0e087"
-ROUTE = ReleaseIdentityRoute(TENANT, REGULAR, ADMIN)
+TENANT = "11111111-1111-4111-8111-111111111111"
+ADMIN = "22222222-2222-4222-8222-222222222222"
+REGULAR = "33333333-3333-4333-8333-333333333333"
+CLIENT = "44444444-4444-4444-8444-444444444444"
+REDIRECT = "https://approval.example.org/admin/release-approval/callback"
+NOTICE = "https://approval.example.org/admin/release-approval"
+ROUTE = ReleaseIdentityRoute(
+    tenant_id=TENANT,
+    regular_teams_oid=REGULAR,
+    admin_approver_oid=ADMIN,
+    owner_subject_id="owner-fixture",
+    registered_redirect_uri=REDIRECT,
+    notice_uri=NOTICE,
+)
 APPROVAL = ExactRelease(
     approval_id="relapproval-" + "a" * 32,
     candidate_sha="b" * 40,
@@ -74,7 +83,7 @@ def test_teams_notice_is_nonactionable_and_only_regular_receiver():
     assert note["kind"] == "notification"
     assert note["can_approve_from_teams"] is False
     assert note["card"] is None
-    assert note["view_url"].startswith("https://mcp-jason.teamaot.com/admin/release-approval?")
+    assert note["view_url"].startswith("https://approval.example.org/admin/release-approval?")
     assert "candidate_sha" not in note["view_url"]
     assert "nonce" not in note["view_url"]
     assert "approval" in note["view_url"]
@@ -225,3 +234,70 @@ def test_exact_scope_cannot_be_changed_mid_browser_login(fixture):
 def test_acrs_string_is_not_an_authenticated_mfa_context(fixture):
     with pytest.raises(EntraStepUpDenied, match="PRIVILEGED_ADMIN_SESSION"):
         fixture.verify(token=fixture.mint(acrs="c1"))
+
+
+def test_owner_and_web_endpoint_are_required_policy_inputs_not_deployment_defaults():
+    # A reusable source module cannot quietly default to the original owner,
+    # AOT's hostname or one tenant's Entra Object IDs.
+    with pytest.raises(TypeError):
+        ReleaseIdentityRoute(TENANT, REGULAR, ADMIN)
+    assert ROUTE.owner_subject_id == "owner-fixture"
+    other = replace(ROUTE, owner_subject_id="governed-second-owner")
+    assert other.validate() is None
+    notice = regular_teams_notice(route=other, approval=APPROVAL)
+    assert notice["recipient_entra_oid"] == REGULAR
+    assert notice["view_url"].startswith(other.notice_uri + "?")
+
+@pytest.mark.parametrize("bad_route", [
+    {"notice_uri": "http://approval.example.org/admin/release-approval"},
+    {"notice_uri": "https://attacker.example/admin/release-approval"},
+    {"registered_redirect_uri": "https://attacker.example/admin/release-approval/callback"},
+    {"registered_redirect_uri": "https://approval.example.org/admin/release-approval/callback?next=evil"},
+    {"registered_redirect_uri": "https://user:pass@approval.example.org/admin/release-approval/callback"},
+    {"registered_redirect_uri": "https://127.0.0.1/admin/release-approval/callback"},
+    {"registered_redirect_uri": "https://localhost/admin/release-approval/callback"},
+    {"notice_uri": "https://approval.example.org/admin/release-approval#fragment"},
+    {"notice_uri": "https://approval.example.org:444/admin/release-approval"},
+    {"owner_subject_id": ""},
+    {"owner_subject_id": "al_admin@example.org"},
+    {"owner_subject_id": " "},
+    {"admin_approver_oid": REGULAR},
+])
+def test_unreviewed_approval_identity_or_redirect_is_never_accepted(bad_route):
+    with pytest.raises(EntraStepUpDenied):
+        regular_teams_notice(
+            route=replace(ROUTE, **bad_route), approval=APPROVAL,
+        )
+
+
+def test_authorize_requires_redirect_matching_policy_not_an_arbitrary_call():
+    with pytest.raises(EntraStepUpDenied, match="REVIEWED_ENTRA_APP_REDIRECT_REQUIRED"):
+        login_authorization_url(
+            route=ROUTE, login=new_login(APPROVAL, now=NOW),
+            client_id=CLIENT,
+            redirect_uri="https://other.example.org/admin/release-approval/callback",
+            required_auth_context="c1",
+        )
+
+
+def test_second_tenant_and_approver_can_be_configured_without_source_change():
+    different = replace(
+        ROUTE,
+        tenant_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        regular_teams_oid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        admin_approver_oid="cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        owner_subject_id="person-second-owner",
+        registered_redirect_uri="https://jason.example.net/admin/release-approval/callback",
+        notice_uri="https://jason.example.net/admin/release-approval",
+    )
+    assert different.validate() is None
+    token_login = new_login(APPROVAL, now=NOW)
+    url = login_authorization_url(
+        route=different, login=token_login, client_id=CLIENT,
+        redirect_uri=different.registered_redirect_uri,
+        required_auth_context="c1",
+    )
+    assert different.tenant_id in url
+    notice = regular_teams_notice(route=different, approval=APPROVAL)
+    assert notice["view_url"].startswith(different.notice_uri + "?")
+    assert notice["recipient_entra_oid"] == different.regular_teams_oid

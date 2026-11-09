@@ -51,6 +51,42 @@ The correct single process is:
    There must be only ONE Owner decision per exact release, not a second
    approval service or standing release permission.
 
+## Configuration-driven identity and destination policy (no hard-coded people)
+
+Jason's core implementation must **never** contain `person-al`, an AOT
+admin username/email, a specific Entra Object ID, or a fixed AOT hostname
+as an authorization condition or default. This is not an Al-specific
+feature. The same governed process must work for another appropriately
+authorized technician/Owner, another tenant and a different registered
+approval host, without rebuilding the code.
+
+- Access and capability eligibility come from the **reviewed Entra security
+  group IDs**, the canonical Jason authority model and the signed/reviewed
+  organizational policy. Do not infer authority from group display names,
+  usernames, email suffixes or a Teams message recipient. The future web
+  adapter must verify the actual group membership and per-release Owner
+  eligibility using authoritative Entra data before issuing the approval.
+- The **exact final privileged signer** must be bound to the reviewed
+  privileged role and current Entra Object ID, checked again against the
+  fresh OIDC login claims. Unlicensed administrator accounts are supported:
+  Teams entitlement is required for the *notification* account only.
+- The single `ReleaseIdentityRoute` now has **required policy inputs**:
+  `tenant_id`, `regular_teams_oid`, `admin_approver_oid`,
+  `owner_subject_id`, `registered_redirect_uri`, and `notice_uri`.
+  There are **no deployment-specific defaults**. The two HTTPS approval
+  URLs must have the same validated origin, fixed application route paths,
+  no arbitrary port, credentials, query strings or fragments. The token
+  redemption uses that exact policy-bound registered redirect.
+- The account names and Object IDs above are a **current incident
+  reference**, not an allowlist compiled into Jason. They belong in
+  versioned, root-governed organizational bindings. Test fixtures use
+  synthetic identities and example domains; a second tenant/Owner/host
+  must pass identical tests.
+- A generic or self-reported `owner_subject_id`, group ID, or route object
+  is **not itself an authority grant**. Until the existing release
+  authority, group proof, root policy and native host consumer are
+  integrated, all these pure functions remain dormant.
+
 ## Source established by this change
 
 `implementation/mcp_service/src/jason_mcp/entra_release_stepup.py` provides

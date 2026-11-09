@@ -19,7 +19,8 @@ import hmac
 import re
 import secrets
 from typing import Any, Mapping
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
+import ipaddress
 
 import jwt
 from jwt import PyJWKClient, PyJWTError
@@ -29,8 +30,39 @@ UUID = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA64 = re.compile(r"^[0-9a-f]{64}$")
 APPROVAL = re.compile(r"^relapproval-[0-9a-f]{32}$")
-REDIRECT = "https://mcp-jason.teamaot.com/admin/release-approval/callback"
-NOTICE = "https://mcp-jason.teamaot.com/admin/release-approval"
+# Hostnames and identities are supplied by a *trusted, reviewed policy*.
+# None of these are fixed to an individual AOT account or deployment URL.
+_OWNER_ID = re.compile(r"^[a-z][a-z0-9_.:-]{2,127}$")
+_NOTICE_PATH = "/admin/release-approval"
+_CALLBACK_PATH = "/admin/release-approval/callback"
+
+
+def _https_origin(value: str, *, required_path: str) -> str:
+    """Reject insecure, injected, or unreviewable approval destinations."""
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise EntraStepUpDenied("REVIEWED_APPROVAL_ENDPOINT_REQUIRED")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+        host = (parsed.hostname or "").lower()
+        if not host or host in ("localhost",) or host.endswith((".local", ".internal")):
+            raise ValueError("not a public HTTPS host")
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("IP literal is not an approved FQDN")
+    except ValueError as exc:
+        raise EntraStepUpDenied("REVIEWED_APPROVAL_ENDPOINT_REQUIRED") from exc
+    if (parsed.scheme != "https" or not host or "." not in host
+            or parsed.username is not None or parsed.password is not None
+            or port not in (None, 443)
+            or parsed.path != required_path
+            or parsed.query or parsed.fragment
+            or value != f"https://{parsed.netloc}{required_path}"):
+        raise EntraStepUpDenied("REVIEWED_APPROVAL_ENDPOINT_REQUIRED")
+    return f"https://{parsed.netloc}"
 
 
 class EntraStepUpDenied(PermissionError):
@@ -39,18 +71,34 @@ class EntraStepUpDenied(PermissionError):
 
 @dataclass(frozen=True)
 class ReleaseIdentityRoute:
+    """Trusted, reviewable tenant/authority binding; never an email allowlist.
+
+    The future adapter must populate these from the versioned protected
+    approval policy after group/owner role authorization, not caller input.
+    The OIDs are exact subjects resolved from Entra and can be rotated in
+    governance without a code release.
+    """
     tenant_id: str
     regular_teams_oid: str
     admin_approver_oid: str
-    # This is the original reviewed Owner role, NOT a normal requester grant.
-    owner_role_id: str = "person-al"
+    owner_subject_id: str
+    registered_redirect_uri: str
+    notice_uri: str
 
     def validate(self) -> None:
-        if (not all(UUID.fullmatch(x) for x in (
-                self.tenant_id, self.regular_teams_oid, self.admin_approver_oid))
+        if (not all(isinstance(x, str) and UUID.fullmatch(x)
+                    for x in (self.tenant_id, self.regular_teams_oid,
+                              self.admin_approver_oid))
                 or self.regular_teams_oid == self.admin_approver_oid
-                or self.owner_role_id != "person-al"):
+                or not isinstance(self.owner_subject_id, str)
+                or not _OWNER_ID.fullmatch(self.owner_subject_id)):
             raise EntraStepUpDenied("SEPARATE_ENTRA_ADMIN_REQUIRED")
+        callback_origin = _https_origin(
+            self.registered_redirect_uri, required_path=_CALLBACK_PATH,
+        )
+        notice_origin = _https_origin(self.notice_uri, required_path=_NOTICE_PATH)
+        if callback_origin != notice_origin:
+            raise EntraStepUpDenied("APPROVAL_ENDPOINT_ORIGIN_MISMATCH")
 
 
 @dataclass(frozen=True)
@@ -138,7 +186,7 @@ def login_authorization_url(
     """
     route.validate()
     login.validate()
-    if not UUID.fullmatch(client_id) or redirect_uri != REDIRECT:
+    if not UUID.fullmatch(client_id) or redirect_uri != route.registered_redirect_uri:
         raise EntraStepUpDenied("REVIEWED_ENTRA_APP_REDIRECT_REQUIRED")
     if (not isinstance(required_auth_context, str)
             or not re.fullmatch(r"c[1-9][0-9]?", required_auth_context)):
@@ -176,7 +224,7 @@ def regular_teams_notice(
     """Informative only: NO approve/deny card or credential-bearing link."""
     route.validate()
     approval.validate()
-    link = f"{NOTICE}?{urlencode({'request': approval.approval_id})}"
+    link = f"{route.notice_uri}?{urlencode({'request': approval.approval_id})}"
     return {
         "recipient_entra_oid": route.regular_teams_oid,
         "tenant_id": route.tenant_id,
@@ -256,6 +304,7 @@ def verified_admin_signin(
     return {
         "authenticated_admin_oid": route.admin_approver_oid,
         "tenant_id": route.tenant_id,
+        "owner_subject_id": route.owner_subject_id,
         "approval_id": approval.approval_id,
         "channel": "microsoft_entra_browser_stepup",
         "candidate_sha": approval.candidate_sha,

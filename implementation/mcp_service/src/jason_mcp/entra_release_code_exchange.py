@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
 from .entra_release_stepup import (
-    REDIRECT, EntraStepUpDenied, ExactRelease,
+    EntraStepUpDenied, ExactRelease,
     PendingEntraLogin, ReleaseIdentityRoute,
     verified_admin_signin,
 )
@@ -66,7 +66,7 @@ def redeem_admin_browser_code(
         "client_id":app_client_id,
         "client_secret":client_secret,
         "code":code,
-        "redirect_uri":REDIRECT,
+        "redirect_uri":route.registered_redirect_uri,
         "code_verifier":login.code_verifier,
         "scope":"openid profile",
     }).encode("utf-8")
