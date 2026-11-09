@@ -81,6 +81,8 @@ from connectors.dnsfilter.mcp_oauth import (
     DnsFilterMcpOAuthStore,
     complete_dnsfilter_oauth,
 )
+from connectors.constant_contact.callback import complete_authorization as complete_constant_contact_oauth
+from connectors.constant_contact.oauth_store import EncryptedOAuthStore
 from connectors.quickbooks.connector import (
     QUICKBOOKS_LOGICAL_SECRET,
     QUICKBOOKS_PRODUCTION_LOGICAL_SECRET,
@@ -233,6 +235,19 @@ JASON_QUICKBOOKS_PRODUCTION_OPENBAO_SECRET_ID_PATH = Path(
         "/run/jason-secrets/openbao/quickbooks-production/secret_id",
     )
 )
+
+JASON_CONSTANT_CONTACT_OAUTH_DB = Path(os.environ.get(
+    "JASON_CONSTANT_CONTACT_OAUTH_DB",
+    "/var/lib/jason/openclaw/constant-contact/oauth.sqlite3",
+))
+JASON_CONSTANT_CONTACT_OPENBAO_ROLE_ID_PATH = Path(os.environ.get(
+    "JASON_CONSTANT_CONTACT_OPENBAO_ROLE_ID_PATH",
+    "/run/jason-secrets/openbao/constant-contact/role_id",
+))
+JASON_CONSTANT_CONTACT_OPENBAO_SECRET_ID_PATH = Path(os.environ.get(
+    "JASON_CONSTANT_CONTACT_OPENBAO_SECRET_ID_PATH",
+    "/run/jason-secrets/openbao/constant-contact/secret_id",
+))
 
 JASON_AUTOENROLL_DOMAINS = frozenset(
     item.strip().casefold()
@@ -8514,6 +8529,54 @@ async def _complete_quickbooks_oauth_callback(
     )
 
 
+def _constant_contact_credentials() -> Mapping[str, str]:
+    resolver = OpenBaoSecretResolver(
+        base_url=os.environ.get("JASON_OPENBAO_URL", "http://openbao:8200"),
+        role_id_path=JASON_CONSTANT_CONTACT_OPENBAO_ROLE_ID_PATH,
+        secret_id_path=JASON_CONSTANT_CONTACT_OPENBAO_SECRET_ID_PATH,
+    )
+    return resolver.resolve(
+        "constant_contact.oauth_client",
+        ConnectorContext(
+            correlation_id="constant-contact-oauth-callback",
+            principal_id="svc-jason-mcp-oauth",
+            organization_id="aot",
+            client_id=None,
+            capability="constant_contact.oauth.complete",
+            mode="execute",
+        ),
+    )
+
+
+def _complete_constant_contact_callback(query_string: str) -> dict[str, object]:
+    import base64
+    credentials = _constant_contact_credentials()
+    try:
+        key = base64.b64decode(credentials["token_key_b64"], validate=True)
+    except (KeyError, ValueError):
+        raise ValueError("Constant Contact OAuth token encryption key unavailable") from None
+    return complete_constant_contact_oauth(
+        query_string=query_string,
+        store=EncryptedOAuthStore(JASON_CONSTANT_CONTACT_OAUTH_DB, key),
+        credentials=credentials,
+    )
+
+
+async def constant_contact_oauth_callback(request: StarletteRequest):
+    try:
+        result = await asyncio.to_thread(
+            _complete_constant_contact_callback, request.url.query,
+        )
+    except Exception:
+        logger.warning("Constant Contact OAuth authorization rejected without credential disclosure")
+        return JSONResponse(
+            {"status": "error", "message": "Constant Contact authorization could not be completed."},
+            status_code=400,
+            headers={"Cache-Control": "no-store"},
+        )
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
 async def quickbooks_oauth_callback(request: StarletteRequest):
     return await _complete_quickbooks_oauth_callback(
         request, environment="sandbox"
@@ -8666,6 +8729,11 @@ app.add_route(
 app.add_route(
     "/oauth/dnsfilter/callback",
     dnsfilter_oauth_callback,
+    methods=["GET"],
+)
+app.add_route(
+    "/oauth/constant-contact/callback",
+    constant_contact_oauth_callback,
     methods=["GET"],
 )
 app.add_route(
