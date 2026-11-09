@@ -344,6 +344,34 @@ def activate(
             "backup_path": str(backup), "image_id": declaration["image_id"]}
 
 
+
+
+def rollback_if_prepared(
+    repo: Path, state_root: Path, record: dict[str, Any],
+    *, config_path: Path = GATEWAY_CONFIG, ops: GatewayOps | None = None,
+) -> dict[str, Any]:
+    """Native catch-path: no backup means activation never mutated the gateway.
+
+    The release backup is created and fsynced BEFORE any gateway write. If an
+    earlier image/baseline preflight failed, safely verify the unchanged config
+    without causing a redundant restart or a fabricated failed rollback.
+    """
+    declaration = source_declaration(repo)
+    if declaration["profile"] == "off":
+        return {"status": "off"}
+    candidate_sha = require_teams_owner_release(record)
+    if record.get("release_id") != "release-" + candidate_sha[:16]:
+        raise WorkboardReleaseError("native release identity invalid")
+    backup = _backup_path(state_root, record["release_id"])
+    if not backup.exists() and not backup.is_symlink():
+        if (config_path.is_symlink() or not config_path.is_file()
+                or sha(config_path.read_bytes()) != declaration["base_config_sha256"]):
+            raise WorkboardReleaseError("missing Workboard backup but configuration drifted")
+        return {"status": "not_mutated_prebackup"}
+    return rollback(repo, state_root, record, config_path=config_path, ops=ops)
+
+
+
 def rollback(
     repo: Path, state_root: Path, record: dict[str, Any],
     *, config_path: Path = GATEWAY_CONFIG, ops: GatewayOps | None = None,

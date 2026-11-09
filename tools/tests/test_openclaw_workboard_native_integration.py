@@ -41,7 +41,8 @@ def test_release_controller_source_integrates_preflight_native_transaction_and_r
     assert "workboard_surface.plan(deploy_worktree)" in source
     assert "workboard_surface.activate(" in source
     assert "workboard_surface.verify_active(" in source
-    assert source.count("workboard_surface.rollback(") == 2
+    assert source.count("workboard_surface.rollback(") == 1
+    assert source.count("workboard_surface.rollback_if_prepared(") == 1
     assert "workboard_attempted = True" in source
     assert '"openclaw_workboard" = "unverified"' not in source
     assert 'recovery_steps["openclaw_workboard"] = "unverified"' in source

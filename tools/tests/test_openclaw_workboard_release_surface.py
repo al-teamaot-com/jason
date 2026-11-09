@@ -256,3 +256,21 @@ def test_candidate_serializer_preserves_existing_config_order(tmp_path):
                       + "\n").encode()
     assert sorted_variant != future
     assert module.sha(sorted_variant) != declaration["candidate_config_sha256"]
+
+
+def test_unapplied_preflight_failure_requires_no_workboard_restart(tmp_path):
+    repo, config, before, future, declaration, record, gateway = fixture(tmp_path)
+    state = tmp_path / "state"
+    result = module.rollback_if_prepared(repo, state, record, config_path=config, ops=gateway)
+    assert result["status"] == "not_mutated_prebackup"
+    assert config.read_bytes() == before
+    assert gateway.restarts == 0
+
+
+def test_missing_backup_cannot_disguise_unexpected_config_mutation(tmp_path):
+    repo, config, before, future, declaration, record, gateway = fixture(tmp_path)
+    config.write_bytes(future)
+    with pytest.raises(module.WorkboardReleaseError, match="missing Workboard backup"):
+        module.rollback_if_prepared(repo, tmp_path / "state", record,
+                                    config_path=config, ops=gateway)
+    assert gateway.restarts == 0

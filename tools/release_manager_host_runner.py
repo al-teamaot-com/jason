@@ -5422,7 +5422,7 @@ def _deploy_production_locked(
         if workboard_attempted:
             try:
                 recovery_steps["openclaw_workboard"] = "restoration_attempted"
-                restored_workboard = workboard_surface.rollback(
+                restored_workboard = workboard_surface.rollback_if_prepared(
                     deploy_worktree, state_root, record,
                 )
                 recovery_steps["openclaw_workboard"] = restored_workboard["status"]
