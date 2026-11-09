@@ -457,7 +457,7 @@ def read_eligible_release(
     ):
         raise PermissionError("existing release approval requires a reviewed exact CCC-only card")
     if initial_unfreeze_renewal_only and (
-        not review_only or policy.schema_version not in {"2.0", "3.0", "4.0"}
+        not review_only or policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}
         or replacement_unfreeze_only
     ):
         raise PermissionError("initial unfreeze renewal needs prior signed owner release approval")
@@ -523,7 +523,7 @@ def read_eligible_release(
             (doc.get("manual_scope_review") or {}).get("scope_sha256"),
         )
         if (not review_only or initial_unfreeze_renewal_only)
-        and policy.schema_version in {"2.0", "3.0", "4.0"} else None
+        and policy.schema_version in {"2.0", "3.0", "4.0", "5.0"} else None
     )
     return ExactRelease(release_id, sha, rollback, digest(manifest),
         str(manifest.get("policy_digest") or ""),
@@ -553,7 +553,7 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
     # private persisted request. Signed callback/host consumer BOTH verify it
     # before accepting owner or CCC authority. A manufactured activity.value
     # containing only approval_id and decision cannot satisfy this contract.
-    if policy.schema_version in {"2.0", "3.0", "4.0"}:
+    if policy.schema_version in {"2.0", "3.0", "4.0", "5.0"}:
         challenge = card_challenge if card_challenge is not None else secrets.token_hex(24)
         if type(challenge) is not str or re.fullmatch(r"[0-9a-f]{48}", challenge) is None:
             raise PermissionError("reviewed release requires a valid card-instance challenge")
@@ -584,12 +584,12 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
     if renewal and (
         not evidence.review_only or not frozen or replacement
         or evidence.initial_unfreeze_renewal_lineage is None
-        or policy.schema_version not in {"2.0", "3.0", "4.0"}
+        or policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}
     ):
         raise PermissionError("renewal must be one new, signed unfreeze-only decision")
     if frozen:
         if (replacement or (evidence.review_only and not renewal)
-                or policy.schema_version not in {"2.0", "3.0", "4.0"}):
+                or policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}):
             raise PermissionError("one-click freeze needs a fresh reviewed owner release")
         intent["initial_freeze_binding"] = dict(evidence.initial_freeze_binding)
     if renewal:
@@ -598,12 +598,12 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
             evidence.initial_unfreeze_renewal_lineage or ()
         )
     if replacement:
-        if not evidence.review_only or policy.schema_version not in {"2.0", "3.0", "4.0"}:
+        if not evidence.review_only or policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}:
             raise PermissionError("replacement Teams unfreeze needs reviewed owner mode")
         intent["replacement_unfreeze_only"] = True
         intent["replacement_lineage"] = dict(evidence.replacement_lineage)
     elif evidence.review_only and not renewal:
-        if policy.schema_version not in {"2.0", "3.0", "4.0"}:
+        if policy.schema_version not in {"2.0", "3.0", "4.0", "5.0"}:
             raise PermissionError("CCC-only Teams material review requires owner-reviewed mode")
         intent["review_only"] = True
     if renewal_nonce is not None:
@@ -978,7 +978,7 @@ class MobileReleaseApprovalFlow:
             )
             if previous_id != renewed_from:
                 raise PermissionError("owner renewal predecessor does not match")
-        if policy.schema_version in {"2.0", "3.0", "4.0"}:
+        if policy.schema_version in {"2.0", "3.0", "4.0", "5.0"}:
             proof = request.metadata.get("card_instance_challenge")
             if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
                     or hashlib.sha256(proof.encode("ascii")).hexdigest()
