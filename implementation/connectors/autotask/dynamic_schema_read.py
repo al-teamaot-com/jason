@@ -45,7 +45,10 @@ def dynamic_generic_entity_eligible(entity: object) -> bool:
 
 # Conditional API access is NOT general permission. Only these child entities
 # may enter the exact-parent proof path. Other Restricted entities stay denied.
-_CONTRACT_SCOPED_ENTITIES = frozenset({"ContractServices", "ContractServiceBundles"})
+_CONTRACT_SCOPED_ENTITIES = frozenset({
+    "ContractServices", "ContractServiceUnits",
+    "ContractServiceBundles", "ContractServiceBundleUnits",
+})
 
 
 def restricted_contract_id(*, entity: str, info: Mapping[str, Any],

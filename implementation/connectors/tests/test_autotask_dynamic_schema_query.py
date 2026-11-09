@@ -340,7 +340,8 @@ class ContractScopedTransport(Transport):
         if url.endswith("/Contracts/query"):
             self.requests.append((url, kwargs.get("params")))
             return {"items": [{"id": 42, "companyID": 311}]} if self.parent_exists else {"items": []}
-        if url.endswith("/ContractServices/query"):
+        if url.endswith(("/ContractServices/query", "/ContractServiceUnits/query",
+                         "/ContractServiceBundles/query", "/ContractServiceBundleUnits/query")):
             self.requests.append((url, kwargs.get("params")))
             return {"items": [{"id": 9, "contractID": 99 if self.cross_contract else 42, "serviceID": 48}]}
         return super().request(**kwargs)
@@ -385,11 +386,14 @@ def test_restricted_contract_selection_must_include_join_key():
     assert not any(url.endswith("/query") for url, _ in t.requests)
 
 
-def test_restricted_service_units_still_denied_without_parent_proof():
+@pytest.mark.parametrize("entity", ["ContractServices", "ContractServiceUnits",
+                                    "ContractServiceBundles", "ContractServiceBundleUnits"])
+def test_four_restricted_contract_entities_require_exact_parent(entity):
     t = ContractScopedTransport()
-    with pytest.raises(PermissionError, match="QUERY_NOT_AUTHORIZED"):
-        connector(t).execute(request("ContractServiceUnits", filters={"contractID":42}))
-    assert not any(url.endswith("/query") for url, _ in t.requests)
+    r = connector(t).execute(request(entity, filters={"contractID": 42}))
+    assert len(r.data["items"]) == 1
+    assert r.data["items"][0]["contractID"] == 42
+    assert any(url.endswith("/Contracts/query") for url, _ in t.requests)
 
 
 def test_restricted_contract_malformed_parent_does_not_allow_child_query():

@@ -641,7 +641,8 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         if request.arguments.get("jason_dynamic_schema_read") is not True:
             return result
         entity = request.arguments.get("entity")
-        if entity not in {"ContractServices", "ContractServiceBundles"}:
+        if entity not in {"ContractServices", "ContractServiceUnits",
+                          "ContractServiceBundles", "ContractServiceBundleUnits"}:
             return result
         search = json.loads(request.arguments["search"])
         parent = restricted_contract_id(
