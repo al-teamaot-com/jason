@@ -17,6 +17,9 @@ from orchestrator.engineering_migration_capability import ENGINEERING_MIGRATION_
 from orchestrator.teams_plan_request_repository import plan_fingerprint
 
 from .mobile_release_approval import read_mobile_release_policy
+
+# Canonical native host policy. No request parameter or environment override.
+PROTECTED_POLICY_PATH = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
 from .engineering_migration_approval import (
     EngineeringMigrationApprovalError, validate_exact_request,
 )
@@ -36,8 +39,7 @@ class VerifiedMigrationPlan:
 
 def require_signed_migration_grant(
     *, approval_id: str, proposals: Any, requests: Any,
-    grants: Any, now: datetime, protected_approver_policy_path: Path,
-    active_identity_bindings: Any,
+    grants: Any, now: datetime, active_identity_bindings: Any,
 ) -> VerifiedMigrationPlan:
     if not isinstance(approval_id, str) or not approval_id.startswith("planapproval-"):
         raise EngineeringMigrationApprovalError("Original Teams plan approval identity required")
@@ -46,7 +48,7 @@ def require_signed_migration_grant(
     try:
         # Read only the native host-owned 0600 V4 policy; no caller-controlled
         # approver identity string and no regular-user recipient fallback.
-        policy = read_mobile_release_policy(Path(protected_approver_policy_path))
+        policy = read_mobile_release_policy(PROTECTED_POLICY_PATH)
         if policy.schema_version != "4.0" or policy.admin_approver_binding is None:
             raise EngineeringMigrationApprovalError("Privileged V4 release identity policy required")
         tenant_id, object_id = policy.admin_approver_binding
@@ -103,7 +105,7 @@ def require_signed_migration_grant(
             raise EngineeringMigrationApprovalError("Original signed Teams decision unavailable")
     except EngineeringMigrationApprovalError:
         raise
-    except (PermissionError, ValueError, KeyError, TypeError, AttributeError):
+    except (PermissionError, ValueError, KeyError, TypeError, AttributeError, OSError):
         raise EngineeringMigrationApprovalError("Teams migration approval unverified") from None
     return VerifiedMigrationPlan(
         approval_id=approval_id,
