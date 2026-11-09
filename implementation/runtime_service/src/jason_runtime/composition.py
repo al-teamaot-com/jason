@@ -1614,7 +1614,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             or privileged_policy.admin_approver_binding is None
             or privileged_policy.regular_requester_binding is None
         ):
-            raise PermissionError("privileged administration needs reviewed V4/V5 policy")
+            if settings.release_mobile_approval_mode == "admin_approver_separated":
+                raise PermissionError("privileged admin separation requires V4 approval policy")
+            raise PermissionError("V5 owner approval needs separately reviewed V5 policy")
         privileged_admin_principals = frozenset({
             "person-entra-" + UUID(
                 privileged_policy.admin_approver_binding[1]
