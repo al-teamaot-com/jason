@@ -8,13 +8,15 @@ not install units, lift pauses, invoke a release or grant native PMV3 authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from orchestrator.approval_plan_scope import ProposedPlanStep
 from orchestrator.engineering_migration_capability import ENGINEERING_MIGRATION_ACTIVATE
 from orchestrator.teams_plan_request_repository import plan_fingerprint
 
+from .mobile_release_approval import read_mobile_release_policy
 from .engineering_migration_approval import (
     EngineeringMigrationApprovalError, validate_exact_request,
 )
@@ -34,16 +36,28 @@ class VerifiedMigrationPlan:
 
 def require_signed_migration_grant(
     *, approval_id: str, proposals: Any, requests: Any,
-    grants: Any, now: datetime, privileged_approver_identity_id: str,
+    grants: Any, now: datetime, protected_approver_policy_path: Path,
+    active_identity_bindings: Any,
 ) -> VerifiedMigrationPlan:
     if not isinstance(approval_id, str) or not approval_id.startswith("planapproval-"):
         raise EngineeringMigrationApprovalError("Original Teams plan approval identity required")
-    if (not isinstance(privileged_approver_identity_id, str)
-            or not privileged_approver_identity_id.strip()):
-        raise EngineeringMigrationApprovalError("Trusted privileged approver identity required")
     if now.tzinfo is None:
         raise EngineeringMigrationApprovalError("Trusted aware time required")
     try:
+        # Read only the native host-owned 0600 V4 policy; no caller-controlled
+        # approver identity string and no regular-user recipient fallback.
+        policy = read_mobile_release_policy(Path(protected_approver_policy_path))
+        if policy.schema_version != "4.0" or policy.admin_approver_binding is None:
+            raise EngineeringMigrationApprovalError("Privileged V4 release identity policy required")
+        tenant_id, object_id = policy.admin_approver_binding
+        binding = active_identity_bindings.find(
+            microsoft_tenant_id=tenant_id, microsoft_object_id=object_id,
+        )
+        if (binding is None or binding.status != "active"
+                or not isinstance(binding.jason_identity_id, str)
+                or not binding.jason_identity_id):
+            raise EngineeringMigrationApprovalError("Privileged Entra identity binding unavailable")
+        privileged_approver_identity_id = binding.jason_identity_id
         proposal = proposals.require(approval_id)
         requests.verify_proposal(proposal)
         stored = requests.steps(approval_id)
