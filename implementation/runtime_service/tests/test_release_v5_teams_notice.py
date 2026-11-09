@@ -133,3 +133,43 @@ def test_v5_refuses_admin_teams_account_even_if_binding_reader_returns_it():
     with pytest.raises(PermissionError,match="REGULAR_TEAMS_REQUESTER_BINDING"):
         _call(sender)
     assert all(label!="send" for label,_ in seen)
+
+
+def test_v5_rejects_synthetic_or_inconsistent_delivery_evidence():
+    from dataclasses import replace as dc_replace
+    for receipt in (
+        TeamsDeliveryReceipt(
+            message_id="accepted:synthetic", conversation_id="fake",
+            recipient_identity_id=REGULAR_JASON,
+            message_id_synthetic=True,
+            delivery_evidence_type="provider_call_completed_without_message_id",
+            delivery_state="provider_accepted_delivery_unverified",
+        ),
+        TeamsDeliveryReceipt(
+            message_id="accepted:synthetic", conversation_id="fake",
+            recipient_identity_id=REGULAR_JASON,
+        ),
+        TeamsDeliveryReceipt(
+            message_id="provider-id", conversation_id="fake",
+            recipient_identity_id=REGULAR_JASON,
+            delivery_state="provider_accepted_delivery_unverified",
+        ),
+    ):
+        sender, seen = _sender(_bind())
+        sender._existing_transport=lambda value=receipt: SimpleNamespace(
+            send=lambda **kwargs: value,
+        )
+        with pytest.raises(PermissionError,match="V5_TEAMS_NOTICE_PROVIDER_DELIVERY_UNVERIFIED"):
+            _call(sender)
+
+
+def test_v5_rejects_notice_delivered_to_different_jason_identity():
+    sender, seen = _sender(_bind())
+    sender._existing_transport=lambda: SimpleNamespace(
+        send=lambda **kwargs: TeamsDeliveryReceipt(
+            message_id="provider-id", conversation_id="fake",
+            recipient_identity_id="different-user",
+        ),
+    )
+    with pytest.raises(PermissionError,match="V5_TEAMS_NOTICE_RECIPIENT_NOT_VERIFIED"):
+        _call(sender)

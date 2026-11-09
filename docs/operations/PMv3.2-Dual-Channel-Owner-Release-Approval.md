@@ -181,3 +181,59 @@ candidate remains undeployed; PMv3.2 integration remains release-locked,
 and Company `1158` has no live `enable_jason_outbound_comm` UDF value.
 Source-only code does **not** fix this without registered auth callback,
 reviewed root approval-policy migration and live acceptance.
+
+## November 9 communication and approval routing incident
+
+A ChatGPT Teams connector authenticated as an unlicensed privileged admin
+returned Graph HTTP 403 `Failed to get license information for the user` on
+an attempted Teams self-chat. This **does not** mean AOT's regular licensed
+Teams identity or Jason's existing gateway is broken, and **must not** be
+remediated by licensing the administrator. The connector's current OAuth
+identity is not an authorization to address an arbitrary different account.
+
+The separately registered, governed `communication.teams.message.send` Jason
+MCP capability was then used with the reviewed regular Entra Teams recipient;
+it returned `status=succeeded`, `provider_attempts=1` and a completed
+execution on 2026-11-09. Its result is a **nonapproving notification**, not
+proof that a client displayed the message and not signed approval. Its native
+provider gateway is the operational Teams transport for approved Jason work,
+not the admin-authenticated ChatGPT Teams connector. Obtain independent
+client-visible delivery confirmation before asserting that the person saw it.
+
+This is a general routing rule for all owner and technician workflows, not a
+special case for one account or provider:
+
+1. Determine the request type: ordinary message, informational review notice,
+   or **approval requiring an immutable ApprovalRequest**. Never treat a
+   Teams message with the word 'approve', a standard message send or a
+   connector response as a valid signed approval.
+2. Resolve the intended Teams recipient from **reviewed organizational
+   identity bindings**, not from the connected Graph administrator's identity,
+   a guessed email address, a user-provided recipient, or a blanket assumption
+   that administrators are Teams-licensed. Verify actual Teams reachability
+   for the selected notice account. Unlicensed/restricted results fail closed
+   rather than causing license purchases or silently substituting an approver.
+3. Use Jason's existing governed Teams gateway and authority/capability checks
+   for notifications; preserve Teams provider ID vs synthetic `accepted:`
+   distinctions. Generic Teams message execution rejects interactive
+   `Action.Submit`, `Action.Execute` and `Action.Http` card actions, including
+   nested cards; only the existing signed approval issuer may create them.
+4. A high-impact privilege grant (e.g., Microsoft Graph `Sites.Selected`
+   app-role assignment) requires a **registered exact-action capability** and
+   its own original, policy-authorized immutable approval request. The V5
+   release workflow does **not** authorize unrelated Entra permission grants.
+   If no native high-impact approval issuer is active, leave the grant
+   unexecuted, report the exact missing capability, and track remediation;
+   never spoof an approval card or accept a user message as consent.
+5. Where the regular Teams identity differs from the privileged administrator,
+   issue the notice to the regular licensed account and authenticate the
+   administrator separately using reviewed Entra browser-step-up with fresh
+   enforced CA/MFA, exact tenant/group and requested-action binding. The notice
+   recipient cannot become a privileged signer through Teams alone.
+
+Acceptance: real Teams notice to the policy-bound regular user, failed/hidden
+notice when target is unlicensed, no interactive generic approval card,
+verified one-time signed admin decision for an exact registered capability,
+independent post-action readback, and preservation of the original release
+freeze and privilege boundaries. Source regression tests cannot substitute
+for a live native approval receipt or final production acceptance.

@@ -319,6 +319,17 @@ class TeamsGatewayPlaybookApprovalSender:
         )
         if receipt.recipient_identity_id != binding.jason_identity_id:
             raise PermissionError("V5_TEAMS_NOTICE_RECIPIENT_NOT_VERIFIED")
+        # A gateway acceptance reference (accepted:<uuid>) is not a Teams
+        # message ID and cannot justify telling the Owner a notice arrived.
+        # A regular Teams user is the notice recipient; a privileged admin
+        # browser decision, not a message receipt, is the only approval route.
+        if (not isinstance(receipt.message_id, str)
+                or not receipt.message_id.strip()
+                or receipt.message_id.startswith("accepted:")
+                or receipt.message_id_synthetic is not False
+                or receipt.delivery_evidence_type != "provider_message_id"
+                or receipt.delivery_state != "provider_accepted"):
+            raise PermissionError("V5_TEAMS_NOTICE_PROVIDER_DELIVERY_UNVERIFIED")
         return (receipt.message_id,)
 
     def send(self, request: ApprovalRequest) -> tuple[str, ...]:
