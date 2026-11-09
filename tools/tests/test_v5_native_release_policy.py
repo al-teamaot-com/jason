@@ -27,7 +27,7 @@ def test_native_v5_requires_exact_aot_service_requester_and_owner_separation(tmp
     result = _validated_mobile_release_policy(p, source_v2_required=True)
     assert result["schema_version"] == "5.0"
     assert result["mode"] == "service_requester_regular_owner_teams"
-    assert result["ttl_seconds"] == 600
+    assert result["ttl_seconds"] == 900
     assert result["digest"].startswith("sha256:")
 
 
