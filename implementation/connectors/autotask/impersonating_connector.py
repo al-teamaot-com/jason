@@ -628,6 +628,7 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         )
         rows = payload.get("items") if isinstance(payload, Mapping) else None
         if (not isinstance(rows, list) or len(rows) != 1
+                or not isinstance(rows[0], Mapping)
                 or type(rows[0].get("id")) is not int
                 or rows[0]["id"] != contract_id
                 or type(rows[0].get("companyID")) is not int

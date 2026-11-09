@@ -390,3 +390,17 @@ def test_restricted_service_units_still_denied_without_parent_proof():
     with pytest.raises(PermissionError, match="QUERY_NOT_AUTHORIZED"):
         connector(t).execute(request("ContractServiceUnits", filters={"contractID":42}))
     assert not any(url.endswith("/query") for url, _ in t.requests)
+
+
+def test_restricted_contract_malformed_parent_does_not_allow_child_query():
+    class MalformedContractTransport(ContractScopedTransport):
+        def request(self, **kwargs):
+            if kwargs["url"].endswith("/Contracts/query"):
+                self.requests.append((kwargs["url"], kwargs.get("params")))
+                return {"items": [None]}
+            return super().request(**kwargs)
+
+    t = MalformedContractTransport()
+    with pytest.raises(PermissionError, match="PARENT_UNVERIFIED"):
+        connector(t).execute(request("ContractServices", filters={"contractID":42}))
+    assert not any(url.endswith("/ContractServices/query") for url, _ in t.requests)
