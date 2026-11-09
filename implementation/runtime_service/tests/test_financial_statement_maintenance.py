@@ -34,6 +34,14 @@ def test_non_statement_is_not_classified():
     ) is None
 
 
+class FakeAudit:
+    def __init__(self):
+        self.events = []
+
+    def append(self, event_type, payload):
+        self.events.append((event_type, payload))
+
+
 class FakeSharePoint:
     def __init__(self):
         self.items = {
@@ -92,7 +100,7 @@ def test_daily_run_moves_verified_statement_and_second_run_is_idempotent(tmp_pat
         datetime(2026, 11, 5, 10, 8, tzinfo=timezone.utc),
     ])
     worker = FinancialStatementMaintenance(
-        client=client, state=state, tenant_id="tenant", drive_id="drive",
+        client=client, state=state, tenant_id="tenant", drive_id="drive", audit=FakeAudit(),
         now=lambda: next(times),
     )
     first = worker.run_once(now=datetime(2026, 11, 5, 10, 5, tzinfo=timezone.utc))
@@ -110,7 +118,7 @@ def test_tick_waits_until_0500_eastern_and_runs_once(tmp_path, monkeypatch):
     state = SQLiteFinancialStatementState(tmp_path / "state.sqlite3")
     clock = [datetime(2026, 11, 5, 9, 59, tzinfo=timezone.utc)]  # 04:59 EST
     worker = FinancialStatementMaintenance(
-        client=client, state=state, tenant_id="tenant", drive_id="drive", now=lambda: clock[0]
+        client=client, state=state, tenant_id="tenant", drive_id="drive", audit=FakeAudit(), now=lambda: clock[0]
     )
     assert worker.tick() is False
     clock[0] = datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc)  # 05:00 EST
@@ -132,7 +140,7 @@ def test_partial_run_is_not_marked_complete_and_retries_after_15_minutes(tmp_pat
     state = SQLiteFinancialStatementState(tmp_path / "state.sqlite3")
     clock = [datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc)]
     worker = FinancialStatementMaintenance(
-        client=client, state=state, tenant_id="tenant", drive_id="drive", now=lambda: clock[0]
+        client=client, state=state, tenant_id="tenant", drive_id="drive", audit=FakeAudit(), now=lambda: clock[0]
     )
     assert worker.tick() is True
     assert state.completed("2026-11-05") is False
@@ -149,3 +157,112 @@ def test_statement_period_range_uses_closing_month():
     )
     assert identity is not None
     assert identity.filename == "PNCBank-5842-102026.pdf"
+
+
+def test_audit_event_chain_preserves_retry_history_and_detects_tampering(tmp_path, monkeypatch):
+    client = FakeSharePoint()
+    monkeypatch.setattr(mod, "extract_pdf_text", lambda data: data.decode())
+    state = SQLiteFinancialStatementState(tmp_path / "audit.sqlite3")
+    clock = [datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc)]
+    worker = FinancialStatementMaintenance(
+        client=client, state=state, tenant_id="tenant", drive_id="drive", audit=FakeAudit(), now=lambda: clock[0]
+    )
+    original_move = client.move_and_rename
+    fail_once = [True]
+
+    def fail_then_move(**kwargs):
+        if fail_once[0]:
+            fail_once[0] = False
+            raise RuntimeError("controlled provider rejection")
+        return original_move(**kwargs)
+
+    client.move_and_rename = fail_then_move
+    assert worker.tick() is True
+    assert state.completed("2026-11-05") is False
+    clock[0] = datetime(2026, 11, 5, 10, 15, tzinfo=timezone.utc)
+    assert worker.tick() is True
+    assert state.completed("2026-11-05") is True
+    events = [x[0] for x in state.db.execute(
+        "SELECT event_type FROM financial_statement_events ORDER BY event_id"
+    )]
+    assert events.count("run_started") == 2
+    assert events.count("run_finished") == 2
+    assert events.count("move_intent") == 2
+    assert events.count("file_error") == 1
+    assert events.count("move_verified") == 1
+    assert state.verify_event_chain() is True
+    # These events live in an independent table, not the replaceable run summary.
+    state.db.execute(
+        "UPDATE financial_statement_events SET metadata_json=? WHERE event_type='file_error'",
+        ('{"error":"fabricated"}',),
+    )
+    assert state.verify_event_chain() is False
+
+
+def test_audit_write_failure_prevents_sharepoint_mutation(tmp_path, monkeypatch):
+    client = FakeSharePoint()
+    monkeypatch.setattr(mod, "extract_pdf_text", lambda data: data.decode())
+    state = SQLiteFinancialStatementState(tmp_path / "audit.sqlite3")
+    now = datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc)
+    original = state.event
+
+    def reject_intent(date, when, kind, metadata):
+        if kind == "move_intent":
+            raise RuntimeError("audit ledger unavailable")
+        return original(date, when, kind, metadata)
+
+    monkeypatch.setattr(state, "event", reject_intent)
+    worker = FinancialStatementMaintenance(
+        client=client, state=state, tenant_id="tenant", drive_id="drive", audit=FakeAudit(), now=lambda: now
+    )
+    summary = worker.run_once(now=now)
+    assert summary["success"] is False
+    assert summary["moved"] == 0
+    assert client.moves == []
+    assert state.verify_event_chain() is True
+
+
+def test_canonical_audit_persists_intent_before_any_sharepoint_move(tmp_path, monkeypatch):
+    client = FakeSharePoint()
+    monkeypatch.setattr(mod, "extract_pdf_text", lambda data: data.decode())
+    audit = FakeAudit()
+    state = SQLiteFinancialStatementState(tmp_path / "audit.sqlite3")
+    now = datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc)
+    worker = FinancialStatementMaintenance(
+        client=client, state=state, tenant_id="tenant", drive_id="drive",
+        audit=audit, now=lambda: now,
+    )
+    original_move = client.move_and_rename
+
+    def verified_prewrite(**kwargs):
+        assert any(e[0] == "financial.statement.move_intent" for e in audit.events)
+        return original_move(**kwargs)
+
+    client.move_and_rename = verified_prewrite
+    assert worker.run_once(now=now)["moved"] == 1
+    assert any(e[0] == "financial.statement.move_verified" for e in audit.events)
+    assert state.verify_event_chain()
+
+
+def test_canonical_audit_failure_blocks_sharepoint_move(tmp_path, monkeypatch):
+    client = FakeSharePoint()
+    monkeypatch.setattr(mod, "extract_pdf_text", lambda data: data.decode())
+    audit = FakeAudit()
+    state = SQLiteFinancialStatementState(tmp_path / "audit.sqlite3")
+    now = datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc)
+    original = audit.append
+
+    def fail_intent(event_type, payload):
+        if event_type == "financial.statement.move_intent":
+            raise RuntimeError("canonical audit unavailable")
+        return original(event_type, payload)
+
+    audit.append = fail_intent
+    worker = FinancialStatementMaintenance(
+        client=client, state=state, tenant_id="tenant", drive_id="drive",
+        audit=audit, now=lambda: now,
+    )
+    result = worker.run_once(now=now)
+    assert result["success"] is False
+    assert client.moves == []
+    assert state.verify_event_chain()

@@ -16,6 +16,8 @@ def build_financial_statement_maintenance(*, enabled: bool, boundary_db: Path,
                                           run_hour: int = 5, audit=None):
     if not enabled:
         return None
+    if audit is None or not callable(getattr(audit, "append", None)):
+        raise ValueError("financial statement canonical audit sink required")
     runtime = build_microsoft_sharepoint_runtime(
         boundary_db=boundary_db, openbao_url=openbao_url,
         role_id_path=role_id_path, secret_id_path=secret_id_path,

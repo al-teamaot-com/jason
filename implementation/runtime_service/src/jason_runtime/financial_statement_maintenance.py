@@ -79,12 +79,82 @@ class SQLiteFinancialStatementState:
       completed_at TEXT,
       summary_json TEXT
     );
+    -- Runs are mutable retry state. This independent chain is append-only.
+    CREATE TABLE IF NOT EXISTS financial_statement_events (
+      event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      recorded_at TEXT NOT NULL,
+      run_date TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      metadata_json TEXT NOT NULL,
+      previous_sha256 TEXT NOT NULL,
+      event_sha256 TEXT NOT NULL UNIQUE
+    );
     """
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(self.path), timeout=10.0, isolation_level=None)
         self.db.executescript(self._SCHEMA)
+
+    @staticmethod
+    def _canonical_event_bytes(data: Mapping[str, Any]) -> bytes:
+        return json.dumps(dict(data), sort_keys=True, separators=(",", ":"),
+                          ensure_ascii=False).encode("utf-8")
+
+    def _append_event_unlocked(self, run_date: str, when: datetime,
+                               event_type: str, metadata: Mapping[str, Any]) -> str:
+        if when.tzinfo is None:
+            raise ValueError("financial audit event requires an aware timestamp")
+        if not re.fullmatch(r"[a-z][a-z0-9_]{1,63}", event_type):
+            raise ValueError("invalid financial audit event type")
+        previous = self.db.execute(
+            "SELECT event_sha256 FROM financial_statement_events ORDER BY event_id DESC LIMIT 1"
+        ).fetchone()
+        prior = str(previous[0]) if previous else "0" * 64
+        body = {
+            "recorded_at": when.astimezone(timezone.utc).isoformat(),
+            "run_date": run_date,
+            "event_type": event_type,
+            "metadata": dict(metadata),
+            "previous_sha256": prior,
+        }
+        signature = hashlib.sha256(self._canonical_event_bytes(body)).hexdigest()
+        self.db.execute(
+            "INSERT INTO financial_statement_events "
+            "(recorded_at,run_date,event_type,metadata_json,previous_sha256,event_sha256) "
+            "VALUES(?,?,?,?,?,?)",
+            (body["recorded_at"], run_date, event_type,
+             self._canonical_event_bytes(body["metadata"]).decode("utf-8"),
+             prior, signature),
+        )
+        return signature
+
+    def event(self, run_date: str, when: datetime, event_type: str,
+              metadata: Mapping[str, Any]) -> str:
+        """Durably append before a provider mutation; never rewrite old events."""
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            return self._append_event_unlocked(run_date, when, event_type, metadata)
+
+    def verify_event_chain(self) -> bool:
+        """Verify the local chain; suffix truncation needs an external anchor."""
+        prior = "0" * 64
+        for recorded_at, run_date, event_type, metadata_json, previous_sha, signature in self.db.execute(
+            "SELECT recorded_at,run_date,event_type,metadata_json,previous_sha256,event_sha256 "
+            "FROM financial_statement_events ORDER BY event_id"
+        ):
+            try:
+                metadata = json.loads(metadata_json)
+                body = {"recorded_at": recorded_at, "run_date": run_date,
+                        "event_type": event_type, "metadata": metadata,
+                        "previous_sha256": previous_sha}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return False
+            if (not isinstance(metadata, dict) or previous_sha != prior
+                    or hashlib.sha256(self._canonical_event_bytes(body)).hexdigest() != signature):
+                return False
+            prior = signature
+        return True
 
     def completed(self, run_date: str) -> bool:
         row = self.db.execute("SELECT completed_at FROM financial_statement_runs WHERE run_date=?", (run_date,)).fetchone()
@@ -106,10 +176,16 @@ class SQLiteFinancialStatementState:
 
     def start(self, run_date: str, when: datetime) -> None:
         with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            self._append_event_unlocked(run_date, when, "run_started", {})
             self.db.execute("INSERT INTO financial_statement_runs(run_date,started_at,completed_at,summary_json) VALUES(?,?,NULL,NULL) ON CONFLICT(run_date) DO UPDATE SET started_at=excluded.started_at,completed_at=NULL,summary_json=NULL", (run_date, when.isoformat()))
 
     def finish(self, run_date: str, when: datetime, summary: Mapping[str, Any], *, success: bool) -> None:
         with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            self._append_event_unlocked(run_date, when, "run_finished", {
+                "success": success, "summary": dict(summary),
+            })
             self.db.execute(
                 "UPDATE financial_statement_runs SET completed_at=?,summary_json=? WHERE run_date=?",
                 (when.isoformat() if success else None, json.dumps(dict(summary), sort_keys=True), run_date),
@@ -216,6 +292,24 @@ class FinancialStatementMaintenance:
         self.run_once(now=current)
         return True
 
+    def _record_event(self, run_date, when, kind, details):
+        event_hash = self.state.event(run_date, when, kind, details)
+        if self.audit is None:
+            if kind == "move_intent":
+                raise RuntimeError("financial statement canonical audit unavailable")
+            return event_hash
+        self.audit.append("financial.statement." + kind, {
+            "execution_id": "financial-statement-" + event_hash[:32],
+            "correlation_id": "financial-statement-" + run_date,
+            "organization_id": "aot",
+            "principal_id": "jason-financial-statement-maintenance",
+            "capability_name": "documentation.financial_statement.organize",
+            "stage": "invoking" if kind == "move_intent" else "completed",
+            "event_sha256": event_hash,
+            "details": dict(details),
+        })
+        return event_hash
+
     def _walk(self, root: Mapping[str, Any]):
         stack = [(root, self.root_path)]
         seen = set()
@@ -281,11 +375,19 @@ class FinancialStatementMaintenance:
                 digest = self._sha256(data)
                 prior = known_hashes.get(digest)
                 if prior is not None:
+                    self._record_event(run_date, current, "duplicate_skipped", {
+                        "path": path, "item_id": str(item.get("id") or ""),
+                        "sha256": digest, "first_seen_path": prior,
+                    })
                     summary["duplicates"] += 1
                     continue
                 known_hashes[digest] = path
                 identity = classify_statement(extract_pdf_text(data))
                 if identity is None:
+                    self._record_event(run_date, current, "unclassified_preserved", {
+                        "path": path, "item_id": str(item.get("id") or ""),
+                        "sha256": digest,
+                    })
                     summary["ambiguous_or_unclassified"] += 1
                     continue
                 summary["classified"] += 1
@@ -296,6 +398,10 @@ class FinancialStatementMaintenance:
                 desired = identity.filename
                 parent_ref = item.get("parentReference") if isinstance(item.get("parentReference"), Mapping) else {}
                 if str(parent_ref.get("id") or "") == destination_id and name == desired:
+                    self._record_event(run_date, current, "already_canonical", {
+                        "path": path, "item_id": str(item.get("id") or ""),
+                        "sha256": digest, "filename": desired,
+                    })
                     summary["already_canonical"] += 1
                     continue
                 destinations = [x for x in self.client.list_children(tenant_id=self.tenant_id, drive_id=self.drive_id, item_id=destination_id)
@@ -304,9 +410,18 @@ class FinancialStatementMaintenance:
                     other = destinations[0]
                     other_data = self.client.download_file(tenant_id=self.tenant_id, drive_id=self.drive_id, item_id=str(other.get("id") or ""))
                     if self._sha256(other_data) == digest:
+                        self._record_event(run_date, current, "duplicate_skipped", {
+                            "path": path, "item_id": str(item.get("id") or ""),
+                            "sha256": digest, "canonical_item_id": str(other.get("id") or ""),
+                        })
                         summary["duplicates"] += 1
                         continue
                     raise RuntimeError(f"canonical filename collision: {desired}")
+                self._record_event(run_date, current, "move_intent", {
+                    "path": path, "item_id": str(item.get("id") or ""),
+                    "sha256": digest, "destination_parent_id": destination_id,
+                    "filename": desired,
+                })
                 moved = self.client.move_and_rename(tenant_id=self.tenant_id, drive_id=self.drive_id,
                                                     item_id=str(item.get("id") or ""), destination_parent_id=destination_id,
                                                     new_name=desired)
@@ -316,9 +431,16 @@ class FinancialStatementMaintenance:
                     raise RuntimeError("SharePoint move/rename readback failed")
                 if str(moved.get("id") or "") and str(moved.get("id")) != str(item.get("id") or ""):
                     raise RuntimeError("SharePoint move returned unexpected item identity")
+                self._record_event(run_date, current, "move_verified", {
+                    "path": path, "item_id": str(item.get("id") or ""),
+                    "sha256": digest, "destination_parent_id": destination_id,
+                    "filename": desired,
+                })
                 summary["moved"] += 1
             except Exception as exc:
-                summary["errors"].append({"path": path, "error": type(exc).__name__, "message": str(exc)[:240]})
+                error = {"path": path, "error": type(exc).__name__, "message": str(exc)[:240]}
+                self._record_event(run_date, current, "file_error", error)
+                summary["errors"].append(error)
         completed = self.now()
         summary["success"] = not bool(summary["errors"])
         self.state.finish(run_date, completed, summary, success=bool(summary["success"]))
