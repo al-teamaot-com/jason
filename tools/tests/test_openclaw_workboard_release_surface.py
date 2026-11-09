@@ -42,7 +42,7 @@ def fixture(tmp_path):
     before = (json.dumps(baseline, indent=2) + "\n").encode()
     current.write_bytes(before)
     current.chmod(0o600)
-    future = (json.dumps(candidate_for(baseline), sort_keys=True, indent=2) + "\n").encode()
+    future = (json.dumps(candidate_for(baseline), indent=2, ensure_ascii=False) + "\n").encode()
     image = "sha256:" + "b" * 64
     declaration = {
         "schema_version": "1.0",
@@ -246,3 +246,13 @@ def test_recovery_requires_native_record_and_signed_origin(tmp_path):
         module.recover_interrupted(state, config_path=config, ops=gateway)
     assert config.read_bytes() == future
     assert gateway.restarts == 1
+
+
+def test_candidate_serializer_preserves_existing_config_order(tmp_path):
+    repo, config, before, future, declaration, record, gateway = fixture(tmp_path)
+    assert module.plan(repo, config)["candidate"] == future
+    # Changing JSON ordering without new sealed approval must not deploy.
+    sorted_variant = (json.dumps(json.loads(future), sort_keys=True, indent=2)
+                      + "\n").encode()
+    assert sorted_variant != future
+    assert module.sha(sorted_variant) != declaration["candidate_config_sha256"]

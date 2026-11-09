@@ -69,7 +69,7 @@ def plan(repo: Path, config_path: Path = GATEWAY_CONFIG) -> dict[str, Any]:
     try:
         baseline = config_path.read_bytes()
         target = candidate_for(json.loads(baseline))
-        candidate = (json.dumps(target, indent=2, sort_keys=True) + "\n").encode()
+        candidate = (json.dumps(target, indent=2, ensure_ascii=False) + "\n").encode()
         result = verify(baseline, declaration, candidate_bytes=candidate)
     except (OSError, ValueError, WorkboardScopeError) as exc:
         raise WorkboardReleaseError("candidate does not match reviewed source scope") from exc
