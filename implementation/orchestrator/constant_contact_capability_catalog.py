@@ -67,7 +67,7 @@ def definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             "read_only": "true",
             "resource_types": resource,
             "operation": "search",
-            "selector_keys": "limit,cursor",
+            "selector_keys": ("limit,cursor,email,status,include" if name == CONTACTS_SEARCH else "limit,cursor"),
             "fact_hints": hints,
             "scope_model": "aot_internal_single_oauth_account",
             "account_bound_by": "approved_oauth_connection",
