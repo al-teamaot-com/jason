@@ -93,7 +93,7 @@ def _call(sender,request=None,**kwargs):
         return sender.send_v5_owner_release_notice(**args)
 
 
-def test_v5_uses_existing_gateway_to_regular_only_with_no_approval_button():
+def test_v5_uses_existing_gateway_to_regular_with_admin_only_review_link():
     sender,seen=_sender(_bind())
     assert _call(sender)==("verified-synthetic-provider-id",)
     assert len(seen)==2
@@ -102,11 +102,21 @@ def test_v5_uses_existing_gateway_to_regular_only_with_no_approval_button():
         "microsoft_object_id":AOT_REQUESTER_OID,
     }
     posted=seen[1][1]
-    assert posted["card"] is None
+    card=posted["card"]
+    assert card["type"]=="AdaptiveCard"
+    assert card["actions"]==[{
+        "type":"Action.OpenUrl",
+        "title":"Review and Approve/Deny (admin sign-in)",
+        "url":NOTICE_URL + "?request=relapproval-" + "a"*32,
+    }]
     assert posted["binding"].microsoft_object_id==AOT_REQUESTER_OID
     assert "CANNOT authorize" in posted["text"]
     assert "request=relapproval-"+"a"*32 in posted["text"]
-    assert "Action.Submit" not in posted["text"]
+    assert "Action.Submit" not in str(card)
+    assert "Action.Execute" not in str(card)
+    assert "Action.Http" not in str(card)
+    assert AOT_ADMIN_OID not in str(card)
+    assert AOT_REQUESTER_OID not in str(card)
 
 
 @pytest.mark.parametrize("change",[

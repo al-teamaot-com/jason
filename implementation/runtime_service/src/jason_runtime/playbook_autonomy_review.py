@@ -314,8 +314,34 @@ class TeamsGatewayPlaybookApprovalSender:
             "the secure link. This Teams message CANNOT authorize release. "
             + url
         )
+        # A safe Teams launch control, NOT an approval action. The reviewed
+        # URL begins a fresh admin-only browser sign-in; no decision, bearer
+        # token, Teams actor claim or editable release facts are embedded.
+        # The signed decision is made later by the separately authenticated
+        # privileged administrator on the guarded review page.
+        review_card = {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard", "version": "1.4",
+            "body": [
+                {"type": "TextBlock", "text": "Administrator review required",
+                 "weight": "Bolder", "wrap": True},
+                {"type": "TextBlock", "wrap": True,
+                 "text": "This Teams card does not grant approval. Sign in "
+                         "with the separate administrator account to review "
+                         "the exact release and choose Approve or Deny."},
+                {"type": "FactSet", "facts": [
+                    {"title": "Request", "value": request.approval_id},
+                    {"title": "Expires", "value": request.expires_at.isoformat()},
+                ]},
+            ],
+            "actions": [{
+                "type": "Action.OpenUrl",
+                "title": "Review and Approve/Deny (admin sign-in)",
+                "url": url,
+            }],
+        }
         receipt = self._existing_transport().send(
-            binding=binding, text=text, card=None,
+            binding=binding, text=text, card=review_card,
         )
         if receipt.recipient_identity_id != binding.jason_identity_id:
             raise PermissionError("V5_TEAMS_NOTICE_RECIPIENT_NOT_VERIFIED")

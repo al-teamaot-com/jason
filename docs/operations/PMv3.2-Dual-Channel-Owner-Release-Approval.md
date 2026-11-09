@@ -425,3 +425,25 @@ approval. A tenant administrator must separately configure a reviewed context
 and matching Conditional Access policy under the native Teams governance
 approval path. Do not alter other security policies or remove break-glass
 exclusions to make this preflight pass.
+
+## Teams secure-review launch control (2026-11-09)
+
+V5 source now renders a bounded Adaptive Card with **one** `Action.OpenUrl`
+button labeled `Review and Approve/Deny (admin sign-in)` rather than a plain
+text-only notice. This responds to the Owner's observation that the earlier
+non-approving Teams delivery proof contained no decision affordance. The URL
+is derived **only** from the exact protected, reviewed V5 policy
+`notice_uri` and immutable `relapproval-...` request ID. It contains no
+credentials, arbitrary recipient or new release facts. The button merely
+opens the existing guarded Entra admin browser sign-in and review form; the
+**only actual** Approve/Deny decision controls remain on the fresh
+privileged-admin-authenticated review page.
+
+The Teams card must NEVER include `Action.Submit`, `Action.Execute` or
+`Action.Http` for this flow, since the receiving regular Teams account is
+not the privileged administrator and cannot sign a V5 release. The card
+states visibly that it does not approve anything. Source tests prove exact
+URL/action rendering, no admin/regular OIDs or other identities in the card,
+regular-account-only delivery, immutable request validation, and rejection
+of synthetic or mismatched delivery receipts. Actual card appearance and
+admin-sign-in acceptance require a separately approved production activation.
