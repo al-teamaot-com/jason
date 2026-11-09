@@ -10,6 +10,7 @@ from connectors.src.jason_connectors.approval_requests import (
 from jason_runtime.mobile_release_approval import MobileReleaseSignedEvidenceStore
 from jason_runtime.browser_release_approval_bridge import V5BrowserApprovalDecisionBridge
 from tools.tests.test_verify_browser_release_evidence import environment
+from tools.verify_browser_release_evidence import verify_pending_v5_admin_browser_decision
 
 
 class Authority:
@@ -36,6 +37,7 @@ def fixture(tmp_path, *, allowed=True):
         organization_id=src["organization_id"],
         owner_identity_ids=src["owner_identity_ids"],
         policy_version="5.0",
+        attest_signed_browser_evidence=verify_pending_v5_admin_browser_decision,
     )
     return src,repo,bridge,authority
 
@@ -106,3 +108,13 @@ def test_parallel_double_submit_cannot_create_second_decision(tmp_path):
     with pytest.raises(PermissionError):
         bridge.handle_signed_browser_decision(**kwargs)
     assert authority.calls==1
+
+def test_missing_host_attestor_fails_before_any_approval_write(tmp_path):
+    src,repo,bridge,authority=fixture(tmp_path)
+    bridge.attest_signed_browser_evidence=None
+    with pytest.raises(PermissionError,match="HOST_ATTESTOR_NOT_INSTALLED"):
+        bridge.handle_signed_browser_decision(
+            envelope=src["envelope"],exact_release=src["exact_release"],now=src["now"],
+        )
+    assert repo.get(src["request"].approval_id).status is ApprovalRequestStatus.PENDING
+    assert authority.calls==0

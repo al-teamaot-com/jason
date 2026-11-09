@@ -293,7 +293,11 @@ is now staged **without live mounting**, and delegates signed V5 decisions
 only to the same existing `ApprovalRequestService.accept_response`.
 It requires a root-reviewed `5.0` policy, exact pending release, independent
 root public-key signature proof, original privileged OID, valid request TTL,
-and canonical Jason owner authorization. Negative tests reject a V4 policy,
+and canonical Jason owner authorization. The standalone runtime module
+imports **no MCP or host-only packages**: the protected host attestor is
+an explicit injected fail-closed port, not a user-substitutable model input.
+Standalone runtime tests reject V4 and missing host attestation before any
+approval write. Negative tests reject a V4 policy,
 normal Teams identity, tampered release SHA/scope, denied Jason authority,
 and a duplicate click. Recording a decision does NOT deploy a release;
 the existing host Release Manager independently revalidates the signed

@@ -9,13 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from connectors.src.jason_connectors.approval_requests import (
     ApprovalDecision, ApprovalResponse, ApprovalRequestStatus,
 )
-from jason_mcp.entra_release_stepup import ExactRelease, ReleaseIdentityRoute
-from tools.verify_browser_release_evidence import verify_pending_v5_admin_browser_decision
 
 
 @dataclass
@@ -24,16 +22,19 @@ class V5BrowserApprovalDecisionBridge:
     approvals: Any
     requests: Any
     signed_evidence: Any
-    reviewed_route: ReleaseIdentityRoute
+    reviewed_route: Any
     root_trust_path: Path
     reviewed_policy_sha256: str
     organization_id: str
     owner_identity_ids: tuple[str, ...]
     policy_version: str = "not-activated"
+    # Explicit host-verified trust port, never a user-provided callback.
+    # The standalone runtime service must NOT import MCP/host packages.
+    attest_signed_browser_evidence: Callable[..., Mapping[str, Any]] | None = None
 
     def handle_signed_browser_decision(
         self, *, envelope: Mapping[str, Any],
-        exact_release: ExactRelease,
+        exact_release: Any,
         now: datetime,
     ) -> Mapping[str, Any]:
         """Persist signed evidence then consume one native pending decision.
@@ -47,12 +48,14 @@ class V5BrowserApprovalDecisionBridge:
             raise PermissionError("V5_BROWSER_POLICY_NOT_INSTALLED")
         if now.tzinfo is None:
             raise PermissionError("V5_BROWSER_CLOCK_INVALID")
+        if not callable(self.attest_signed_browser_evidence):
+            raise PermissionError("V5_BROWSER_HOST_ATTESTOR_NOT_INSTALLED")
         request = self.requests.get(exact_release.approval_id)
         if request is None:
             raise PermissionError("V5_BROWSER_REQUEST_MISSING")
         # This source is not callable from any live V4 handler. The
         # *protected root policy* and exact reviewed Owner route are inputs.
-        attested = verify_pending_v5_admin_browser_decision(
+        attested = self.attest_signed_browser_evidence(
             request=request, envelope=envelope,
             exact_release=exact_release, route=self.reviewed_route,
             policy_version=self.policy_version,
