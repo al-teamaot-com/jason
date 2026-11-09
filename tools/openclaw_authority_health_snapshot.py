@@ -11,9 +11,9 @@ from pathlib import Path
 
 DEFAULT_OUTPUT = Path('/var/lib/jason/openclaw/operational-health.json')
 # Full SQLite checks now cover a >28 GB orchestration audit and multi-GB
-# authority backup/restore. Retain a strict bound, but allow one 60-minute
+# authority backup/restore. Retain a strict bound, but allow one 90-minute
 # overnight attempt; never convert a timeout into a passing proof.
-SOURCE_HEALTH_TIMEOUT_SECONDS = 3600
+SOURCE_HEALTH_TIMEOUT_SECONDS = 5400
 BACKUP_TEMP_ROOT = Path('/srv/jason/archive')
 SOURCE_HEALTH_TIMEOUT_EXIT_CODE = 124
 
