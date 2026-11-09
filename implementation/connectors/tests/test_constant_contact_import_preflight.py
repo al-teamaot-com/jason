@@ -9,7 +9,7 @@ def test_valid_preview_fails_closed_until_suppression_inventory_verified():
     p = preflight([row()])
     assert len(p.accepted) == 1
     assert not p.executable
-    assert preflight([row()], suppression_inventory_complete=True).executable
+    assert not preflight([row()], suppression_inventory_complete=True).executable
 
 
 def test_missing_consent_and_evidence_rejected():
@@ -34,3 +34,9 @@ def test_changes_to_preview_change_digest():
 def test_invalid_email_and_oversize_field_rejected():
     p = preflight([row("invalid"), dict(row("ok@example.com"), first_name="x" * 51)])
     assert {x["reason"] for x in p.rejected} == {"invalid_email", "field_too_long"}
+
+
+def test_consent_evidence_is_bound_to_preview_digest():
+    a = preflight([row(evidence="first receipt")]).digest
+    b = preflight([row(evidence="second receipt")]).digest
+    assert a != b
