@@ -7,6 +7,7 @@ and encrypted OAuth refresh. Import mutations deliberately remain unavailable.
 from __future__ import annotations
 
 import base64
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -50,7 +51,7 @@ class ConstantContactConnector:
         if request.context.organization_id.strip().casefold() != "aot":
             raise ConnectorAuthorizationError("Constant Contact access is restricted to AOT")
         args = dict(request.arguments)
-        if set(args) - {"limit", "cursor"}:
+        if set(args) - {"limit", "cursor", "email", "status", "include"}:
             raise ConnectorConfigurationError("Unsupported Constant Contact selectors")
         limit = args.get("limit", 50)
         if not isinstance(limit, int) or not 1 <= limit <= 500:
@@ -71,7 +72,27 @@ class ConstantContactConnector:
             raise ConnectorAuthorizationError(
                 "Constant Contact OAuth credentials or connection unavailable"
             ) from None
+        email = args.get("email")
+        status = args.get("status")
+        include = args.get("include")
+        if email is not None:
+            if (request.context.capability != CONTACTS_SEARCH
+                    or not isinstance(email, str)
+                    or len(email) > 50 or not re.fullmatch(r"[^\\s@]+@[^\\s@]+\\.[^\\s@]+", email)):
+                raise ConnectorConfigurationError("Invalid contact email selector")
+        if status is not None:
+            if request.context.capability != CONTACTS_SEARCH or status not in {"all", "active", "unsubscribed"}:
+                raise ConnectorConfigurationError("Invalid contact status filter")
+        if include is not None:
+            if request.context.capability != CONTACTS_SEARCH or include != "list_memberships":
+                raise ConnectorConfigurationError("Invalid contact subresource selector")
         params: dict[str, Any] = {"limit": limit}
+        if email is not None:
+            params["email"] = email.strip().casefold()
+        if status is not None:
+            params["status"] = status
+        if include is not None:
+            params["include"] = include
         if cursor is not None:
             params["cursor"] = cursor
         self._audit.record("connector.requested", request.context, {
