@@ -51,3 +51,21 @@ def test_invalid_token_payload_and_key_rejected(tmp_path):
     store = make_store(tmp_path)
     with pytest.raises(OAuthStorageError, match="missing"):
         store.save_tokens({"access_token": "only-one"})
+
+
+def test_expired_oauth_state_is_rejected(tmp_path):
+    store = make_store(tmp_path)
+    state = store.issue_state()
+    with sqlite3.connect(store.path) as con:
+        con.execute("UPDATE pending SET expires = 1")
+    with pytest.raises(OAuthStorageError, match="expired"):
+        store.consume_state(state)
+
+
+def test_oauth_state_symlink_is_rejected(tmp_path):
+    original = make_store(tmp_path)
+    original.issue_state()
+    link = tmp_path / "linked.sqlite3"
+    link.symlink_to(original.path)
+    with pytest.raises(OAuthStorageError, match="symlink"):
+        EncryptedOAuthStore(link, b"x" * 32).load_tokens()
