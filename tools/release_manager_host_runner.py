@@ -1190,8 +1190,14 @@ def stage_mobile_release_approval_policy(
     backup = transition_root / (str(record["release_id"]) + ".prior-policy.json")
     if backup.exists():
         existing = _validated_mobile_release_policy(backup)
-        if prior["digest"] not in {existing["digest"], candidate["digest"]}:
-            raise ReleaseManagerError("existing release approval policy backup conflicts with live baseline")
+        previous = record.get("mobile_release_policy_transition")
+        if (not isinstance(previous, dict)
+                or previous.get("backup_path") != str(backup)
+                or previous.get("prior_digest") != existing["digest"]
+                or previous.get("candidate_digest") != candidate["digest"]
+                or previous.get("candidate_mode") != candidate["mode"]
+                or prior["digest"] not in {existing["digest"], candidate["digest"]}):
+            raise ReleaseManagerError("existing release approval policy backup conflicts with immutable prior baseline")
         baseline = existing
     else:
         fd = os.open(backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
