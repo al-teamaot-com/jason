@@ -256,6 +256,25 @@ and the new V5 source cannot approve a release on its own. This requires an
 independently reviewed Owner policy transition, not an ordinary Teams
 notification or a code-only edit.
 
+## Read-only existing host release-consumer attestation (2026-11-09)
+
+`tools/verify_browser_release_evidence.py` now adds a pure, non-activated
+verification function usable by the **existing** host Release Manager consumer
+once a distinct reviewed V5 root policy exists. It requires exact
+`policy_version=5.0`, currently PENDING `ApprovalRequest` from the
+native release manager, one governed Owner identity, exact reviewed policy
+hash, candidate SHA, rollback SHA, manifest, scope, request TTL, and
+`entra_browser_admin` channel metadata. It independently loads only the
+root-reviewed mode-0600 Ed25519 trust manifest and verifies the browser
+signature and exact administrative Entra OID. The result remains
+`release_authorized=False`; no approval ledger mutation, CCC review,
+release unlock, or signed Teams impersonation is performed.
+
+20 host negative/positive tests are mandatory in the protected SEC-007
+security workflow. This verifier is **NOT** invoked by the live V4
+signed-Teams-only consumer, because a genuine, independently reviewed V5
+policy migration and browser decision ledger integration are still required.
+
 ## Unimplemented integration — release gates
 
 **Do not treat these source helpers as a working approval flow yet.**
