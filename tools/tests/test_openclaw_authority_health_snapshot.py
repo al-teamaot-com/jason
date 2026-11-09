@@ -36,7 +36,7 @@ def test_snapshot_uses_bounded_timeout_for_full_integrity_checks(monkeypatch, tm
     monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "--output", str(tmp_path / "health.json")])
 
     assert module.main() == 0
-    assert observed["timeout"] == 3600
+    assert observed["timeout"] == 5400
     assert json.loads((tmp_path / "health.json").read_text())["status"] == "pass"
 
 
@@ -58,7 +58,7 @@ def test_timeout_records_explicit_failure_and_replaces_stale_pass(monkeypatch, t
     result = json.loads(output.read_text(encoding="utf-8"))
     assert result["status"] == "fail"
     assert result["failures"] == ["operational_health_timeout"]
-    assert result["snapshot_timeout_seconds"] == 3600
+    assert result["snapshot_timeout_seconds"] == 5400
     assert result["snapshot_source_exit_code"] == 124
     assert "stale" not in result
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
@@ -76,7 +76,7 @@ def test_systemd_timeout_exceeds_checker_deadline():
         if line.startswith("TimeoutStartSec=")
     ]
     assert len(timeouts) == 1, "Full-integrity systemd job requires one bounded timeout"
-    assert 3600 <= module.SOURCE_HEALTH_TIMEOUT_SECONDS < timeouts[0] <= 4200
+    assert 5400 <= module.SOURCE_HEALTH_TIMEOUT_SECONDS < timeouts[0] <= 6000
 
 
 
