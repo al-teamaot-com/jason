@@ -280,6 +280,22 @@ def consume_mobile_release_decisions(
     from jason_openclaw.key_registry import FileBackedTrustedKeyRegistry
 
     policy = read_mobile_release_policy(policy_file)
+    # One existing host consumer and one immutable approval ledger. A reviewed
+    # v5 root policy selects exact-admin Entra browser evidence instead of
+    # Teams Submit; the old v1-v4 host path remains byte-for-byte unchanged.
+    if policy.schema_version == "5.0":
+        from tools.release_v5_browser_consumer import (
+            consume_v5_browser_release_decisions,
+        )
+        return consume_v5_browser_release_decisions(
+            repo=repo, state_root=state_root,
+            approve_release=approve_release,
+            record_initial_unfreeze=record_initial_unfreeze,
+            database=database, policy_file=policy_file,
+            ccc_root=ccc_root, bindings_db=bindings_db,
+            authority_db=authority_db,
+            protected_main_sha_reader=protected_main_sha_reader,
+        )
     containment = read_release_approval_containment(state_root)
     if containment.active:
         print('OWNER_RELEASE_APPROVAL_HOLD_ACTIVE=' + containment.hold_id, flush=True)

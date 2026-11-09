@@ -106,6 +106,10 @@ class OneTimeBrowserLoginStore:
             raise EntraStepUpDenied("BROWSER_SESSION_MISSING_OR_REPLAYED")
         return str(row[0])
 
+    def peek_approval_id(self, *, cookie_value: str) -> str:
+        """Compatibility alias for reviewed browser adapter; no elevation."""
+        return self.lookup_release_id(cookie_value=cookie_value)
+
     def consume(
         self, *, cookie_value: str, returned_state: str,
         approval: ExactRelease, now: datetime,
