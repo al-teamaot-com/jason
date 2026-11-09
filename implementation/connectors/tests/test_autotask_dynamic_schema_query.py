@@ -343,7 +343,8 @@ class ContractScopedTransport(Transport):
         if url.endswith(("/ContractServices/query", "/ContractServiceUnits/query",
                          "/ContractServiceBundles/query", "/ContractServiceBundleUnits/query")):
             self.requests.append((url, kwargs.get("params")))
-            return {"items": [{"id": 9, "contractID": 99 if self.cross_contract else 42, "serviceID": 48}]}
+            return {"items": [{"id": 9, "contractID": 99 if self.cross_contract else 42,
+                                "serviceID": 48, "unitPrice": 12345, "unitCost": 1234}]}
         return super().request(**kwargs)
 
 
@@ -408,3 +409,18 @@ def test_restricted_contract_malformed_parent_does_not_allow_child_query():
     with pytest.raises(PermissionError, match="PARENT_UNVERIFIED"):
         connector(t).execute(request("ContractServices", filters={"contractID":42}))
     assert not any(url.endswith("/ContractServices/query") for url, _ in t.requests)
+
+
+def test_restricted_contract_redacts_financial_fields_without_explicit_projection():
+    t = ContractScopedTransport()
+    r = connector(t).execute(request("ContractServices", filters={"contractID":42}))
+    assert r.data["items"] == [{"id":9,"contractID":42,"serviceID":48}]
+    assert "unitPrice" not in json.dumps(r.data)
+
+
+def test_restricted_contract_financial_selection_denied_before_native_query():
+    t = ContractScopedTransport()
+    with pytest.raises(PermissionError, match="QUERY_NOT_AUTHORIZED"):
+        connector(t).execute(request("ContractServices", filters={"contractID":42},
+                                     select=["contractID","unitCost"]))
+    assert not any(url.endswith("/query") for url, _ in t.requests)

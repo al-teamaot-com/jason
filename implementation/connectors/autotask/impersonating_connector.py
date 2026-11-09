@@ -15,6 +15,7 @@ from .dynamic_schema_read import (
     dynamic_generic_entity_eligible,
     proven_queryable_fields,
     restricted_contract_id,
+    restricted_contract_visible_fields,
 )
 from .operations import APPROVED_AUTOTASK_ENTITIES
 
@@ -655,12 +656,21 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         rows = result.data.get("items") if isinstance(result.data, Mapping) else None
         if not isinstance(rows, list) or any(
             not isinstance(row, Mapping)
+            or type(row.get("id")) is not int
             or type(row.get("contractID")) is not int
             or row["contractID"] != parent
             for row in rows
         ):
             raise PermissionError("AUTOTASK_RESTRICTED_CONTRACT_ROW_SCOPE_MISMATCH")
-        return result
+        # This conditional path is for dependency inventory, not customer
+        # pricing/cost data. Redact even when the provider ignores projection.
+        allowed = restricted_contract_visible_fields(entity)
+        projected = [{k: v for k, v in row.items() if k in allowed} for row in rows]
+        return type(result)(
+            capability=result.capability, provider=result.provider,
+            data={**result.data, "items": projected},
+            evidence_ids=result.evidence_ids, warnings=result.warnings,
+        )
 
     def _verify_dynamic_schema_query(
         self,

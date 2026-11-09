@@ -40,12 +40,15 @@ filtered subset; there is no retry under write credentials and no alternate
 provider transport. Unexpected child contract IDs fail closed.
 
 **Financial/PII exposure:** Child records may carry cost, price, unit quantity,
-and invoice descriptors. AOT-wide requester read grants must be expressly
-reviewed; do not assume contract-parent readability grants all technicians
-financial-disclosure authority. Before release, require a reviewer to confirm
-whether existing JKD-001 `service.entity.search`/read grants and information
-sensitivity classification are sufficient. If not, add a governed
-field-minimization/Owner-only guard and rerun regressions rather than promoting.
+and invoice descriptors. The conditional Restricted path now projects only
+contract relationship identifiers, unit counts, and start/end dates; cost,
+price, invoice descriptions and internal currency fields are suppressed even
+when the provider ignores field selection. An explicit sensitive-field
+selection is rejected before a provider record query. AOT-wide requester
+access is NOT implied by the parent query; existing JKD-001 observe grants
+and internal-only information-release authorization remain mandatory.
+A reviewer must verify actual production grants before promoting this
+AOT-internal cross-client capability.
 
 **Residual risks:** Provider `Restricted` meaning may differ by entity and
 may still deny actual record queries. The parent proof does not make the
@@ -57,3 +60,21 @@ No live/production acceptability claim is made from synthetic transport tests.
 independent code/security review, live provider record proof through a governed
 preproduction environment, exact immutable release candidate, signed Teams
 Owner decision, current breaker remediation and protected rollback evidence.
+
+## Verified production baseline / release boundaries
+
+- Source candidate is NOT the current production release and is not a rollback.
+- Protected origin/main at review: 65e2f18b051e3dda54c4cbb4411b9aae27831602.
+- Live host `/opt/jason/current` on 2026-11-09: aa6fa38a29b803e11ada63afb3cf25d17b7daf44.
+- Read-only protected control readback reports last-known-good release-aa6fa38a29b803e1; the true release rollback must be pinned and revalidated against the native manager's protected LKG and artifact digests before a release record is prepared.
+- Production deployment freeze is active. On 2026-11-09 at 19:00 UTC the production drift watchdog opened the circuit breaker (`continuous_production_drift_detected`, problem_count=4). Native protected drift evidence is not accessible to the unprivileged reviewer; no bypass or blind reset is permitted.
+- Nine CI workflows passed on the preceding candidate. The final amended SHA must rerun all required checks.
+- An actual release candidate must be the immutable PROTECTED MAIN SHA (not the PR branch SHA), with pinned rollback, immutable runtime/MCP images, reviewed full merged scope, baseline, native preproduction, signed Teams approval and authorized one-transaction freeze exception.
+- Teams Graph discovery via the connected account returns no teams and list_chats returned HTTP 403 (Microsoft reports missing Office 365 license). Do not confuse an ordinary Teams message with a signed Jason release approval.
+
+## Audit acceptance plan
+
+1. Use only the governed service.entity.search path under an authorized AOT human to query an exact test contractID for each of the four permitted relationship entities. No raw provider credentials, direct transport, or write identity.
+2. Prove positive provider access or bounded denial on each; verify parent companyID and all child contractID values; resolve serviceID/serviceBundleID and paginate to a complete count.
+3. Run negative cases: wrong company/requester, missing parent, malformed rows, mismatched contractID, unexpected prices in responses, repeated/omitted pages and loss of binding. Continue no mutation.
+4. Verify prior runtime/host/MCP health, freeze restoration, approved release candidate vs immutable artifact, complete operational smoke and ticket continuity; rollback on failed gates.

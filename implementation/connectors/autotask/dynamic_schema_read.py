@@ -50,6 +50,17 @@ _CONTRACT_SCOPED_ENTITIES = frozenset({
     "ContractServiceBundles", "ContractServiceBundleUnits",
 })
 
+_CONTRACT_SCOPED_READ_FIELDS = {
+    "ContractServices": frozenset({"id", "contractID", "serviceID"}),
+    "ContractServiceUnits": frozenset({"id", "contractID", "contractServiceID", "serviceID", "units", "startDate", "endDate"}),
+    "ContractServiceBundles": frozenset({"id", "contractID", "serviceBundleID"}),
+    "ContractServiceBundleUnits": frozenset({"id", "contractID", "contractServiceBundleID", "serviceBundleID", "units", "startDate", "endDate"}),
+}
+
+
+def restricted_contract_visible_fields(entity: str) -> frozenset[str]:
+    return _CONTRACT_SCOPED_READ_FIELDS.get(entity, frozenset())
+
 
 def restricted_contract_id(*, entity: str, info: Mapping[str, Any],
                            query: Mapping[str, Any]) -> int | None:
@@ -62,6 +73,7 @@ def restricted_contract_id(*, entity: str, info: Mapping[str, Any],
     selected = query.get("IncludeFields")
     if selected is not None and (
         not isinstance(selected, list) or "contractID" not in selected
+        or not set(selected).issubset(restricted_contract_visible_fields(entity))
     ):
         return None
     clauses = query.get("filter")
