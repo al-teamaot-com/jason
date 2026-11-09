@@ -1601,18 +1601,20 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     routine_autotask_write_enabled = configured_aot_routine_autotask_write()
     staff_internal_note_enabled = configured_aot_staff_internal_note_write()
     privileged_admin_principals = frozenset()
-    if settings.release_mobile_approval_mode == "admin_approver_separated":
+    if settings.release_mobile_approval_mode in {
+        "admin_approver_separated", "service_requester_regular_owner_teams"
+    }:
         from uuid import UUID
         from .mobile_release_approval import read_mobile_release_policy
         privileged_policy = read_mobile_release_policy(
             settings.release_mobile_approval_policy
         )
         if (
-            privileged_policy.schema_version != "4.0"
+            privileged_policy.schema_version not in {"4.0", "5.0"}
             or privileged_policy.admin_approver_binding is None
             or privileged_policy.regular_requester_binding is None
         ):
-            raise PermissionError("privileged admin separation requires V4 approval policy")
+            raise PermissionError("privileged administration needs reviewed V4/V5 policy")
         privileged_admin_principals = frozenset({
             "person-entra-" + UUID(
                 privileged_policy.admin_approver_binding[1]
