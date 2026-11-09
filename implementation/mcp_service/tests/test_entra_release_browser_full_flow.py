@@ -251,3 +251,52 @@ async def test_ca_revoked_before_explicit_submit_refuses(tmp_path):
     response=await choose(adapter,cookie,csrf)
     assert response.status_code==403
     assert not received
+
+@run_async
+async def test_signer_sink_failure_preserves_exact_signed_evidence_for_reconciliation(tmp_path):
+    adapter,key,received=harness(tmp_path)
+    callback=await sign_in(adapter)
+    cookie=cookie_value(callback,"__Host-jason-admin-decision")
+    csrf=await consent(adapter,cookie)
+    def fail(_):
+        raise RuntimeError("protected approval ledger temporarily unavailable")
+    adapter.signed_decision_sink=fail
+    response=await choose(adapter,cookie,csrf)
+    assert response.status_code==403
+    # Signed immutable evidence is safely stored BEFORE sending.
+    reopened=OneTimeAdminDecisionStore(tmp_path/"decision.db")
+    pending=reopened.pending_signed_decisions()
+    assert len(pending)==1
+    verified=verify_browser_decision_envelope(
+        pending[0],approval=RELEASE,route=ROUTE,
+        trusted_public_keys={"reviewed-v5-test-key":key.public_key()},
+        now=datetime.now(timezone.utc),
+    )
+    assert verified["release_authorized"] is False
+    assert verified["decision"]=="approve"
+    # No second browser click can re-sign or overwrite the same approval.
+    assert (await choose(adapter,cookie,csrf)).status_code==403
+    digest=verified["signed_evidence_sha256"]
+    reopened.mark_signed_delivered(
+        approval_id=RELEASE.approval_id,signed_sha256=digest,
+    )
+    assert reopened.pending_signed_decisions()==()
+    # Duplicate acknowledgement is safe and does not regenerate authority.
+    reopened.mark_signed_delivered(
+        approval_id=RELEASE.approval_id,signed_sha256=digest,
+    )
+
+
+@run_async
+async def test_one_exact_approval_cannot_record_two_parallel_browser_sessions(tmp_path):
+    adapter,key,received=harness(tmp_path)
+    callback1=await sign_in(adapter)
+    callback2=await sign_in(adapter)
+    cookie1=cookie_value(callback1,"__Host-jason-admin-decision")
+    cookie2=cookie_value(callback2,"__Host-jason-admin-decision")
+    csrf1=await consent(adapter,cookie1)
+    csrf2=await consent(adapter,cookie2)
+    assert (await choose(adapter,cookie1,csrf1,"approve")).status_code==200
+    assert (await choose(adapter,cookie2,csrf2,"deny")).status_code==403
+    assert len(received)==1
+    assert len(adapter.decision_store.pending_signed_decisions())==0

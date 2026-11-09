@@ -312,7 +312,7 @@ class AdminReleaseBrowserAdapter:
             # user's one-time decision if the signer is unavailable.
             signing_key = self.signing_key_loader()
             now = datetime.now(timezone.utc)
-            proof = self.decision_store.consume_explicit_decision(
+            proof = self.decision_store.preview_explicit_decision(
                 cookie_value=cookie, csrf_token=form["csrf"][0],
                 decision=form["decision"][0],
                 approval=approval, route=self.route, now=now,
@@ -322,9 +322,21 @@ class AdminReleaseBrowserAdapter:
                 verified_login_proof=proof, decision=form["decision"][0],
                 signing_key=signing_key, key_id=self.signing_key_id, now=now,
             )
-            # Protected source must persist to the existing approval ledger;
-            # no synthetic host owner approval from the browser adapter.
+            # Consume the consent AND retain its exact signed evidence in one
+            # durable SQLite transaction BEFORE communicating with a sink.
+            # A failed/ambiguous send is safely replayable with identical
+            # evidence by a governed outbox reconciler (no new signature).
+            proof_sha = self.decision_store.record_signed_decision(
+                cookie_value=cookie, csrf_token=form["csrf"][0],
+                decision=form["decision"][0], approval=approval,
+                route=self.route, signed_envelope=signed, now=now,
+            )
+            # This injected consumer must be idempotent by approval ID+digest;
+            # it is not a direct Release Manager approval endpoint.
             self.signed_decision_sink(signed)
+            self.decision_store.mark_signed_delivered(
+                approval_id=approval.approval_id, signed_sha256=proof_sha,
+            )
             accepted = PlainTextResponse(
                 "Signed decision recorded for independent governed verification. "
                 "No release has been deployed.",

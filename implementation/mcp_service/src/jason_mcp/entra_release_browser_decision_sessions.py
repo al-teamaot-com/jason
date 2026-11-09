@@ -53,6 +53,16 @@ class OneTimeAdminDecisionStore:
                     issued_at TEXT NOT NULL
                 )
             """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS admin_release_decision_outbox(
+                    approval_id TEXT PRIMARY KEY,
+                    release_fingerprint TEXT NOT NULL,
+                    signed_envelope TEXT NOT NULL,
+                    signed_sha256 TEXT NOT NULL,
+                    state TEXT NOT NULL CHECK(state IN ('pending','delivered')),
+                    recorded_at TEXT NOT NULL
+                )
+            """)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.path), timeout=5)
@@ -157,3 +167,123 @@ class OneTimeAdminDecisionStore:
             if deleted.rowcount != 1:
                 raise EntraStepUpDenied("DECISION_SESSION_REPLAYED_OR_MISSING")
         return proof
+
+    def preview_explicit_decision(
+        self, *, cookie_value: str, csrf_token: str, decision: str,
+        approval: ExactRelease, route: ReleaseIdentityRoute, now: datetime,
+    ) -> Mapping[str, Any]:
+        """Read-only verified proof: signer can prepare before atomic consume."""
+        if decision not in ("approve", "deny") or type(csrf_token) is not str:
+            raise EntraStepUpDenied("DECISION_SESSION_EXPLICIT_CHOICE_REQUIRED")
+        route.validate()
+        _, row = self._read(cookie_value, approval, now)
+        if not hmac.compare_digest(row[2], csrf_token):
+            raise EntraStepUpDenied("DECISION_SESSION_CSRF_MISMATCH")
+        try:
+            proof = json.loads(row[3])
+        except (TypeError, ValueError) as exc:
+            raise EntraStepUpDenied("DECISION_SESSION_PROOF_INVALID") from exc
+        _validate_proof(proof, approval=approval, route=route, now=now)
+        return proof
+
+    def record_signed_decision(
+        self, *, cookie_value: str, csrf_token: str, decision: str,
+        approval: ExactRelease, route: ReleaseIdentityRoute,
+        signed_envelope: Mapping[str, Any], now: datetime,
+    ) -> str:
+        """Atomically consume consent and durably store signed decision.
+
+        A crash before commit leaves consent pending. A crash afterwards leaves
+        an immutable signed outbox record for idempotent delivery to the
+        existing approval consumer, rather than losing the user's decision.
+        """
+        self.preview_explicit_decision(
+            cookie_value=cookie_value, csrf_token=csrf_token,
+            decision=decision, approval=approval, route=route, now=now,
+        )
+        if not isinstance(signed_envelope, Mapping) or set(signed_envelope) != {
+            "payload", "key_id", "signature",
+        }:
+            raise EntraStepUpDenied("DECISION_OUTBOX_SIGNED_EVIDENCE_REQUIRED")
+        payload = signed_envelope.get("payload")
+        if (not isinstance(payload, dict)
+                or payload.get("schema_version") != "5.0"
+                or payload.get("channel") != "entra_browser_admin"
+                or payload.get("decision") != decision
+                or payload.get("approval_id") != approval.approval_id
+                or payload.get("release_fingerprint") != approval.fingerprint()
+                or payload.get("authenticated_admin_oid") != route.admin_approver_oid
+                or payload.get("tenant_id") != route.tenant_id):
+            raise EntraStepUpDenied("DECISION_OUTBOX_SIGNED_SCOPE_MISMATCH")
+        from .entra_release_browser_decision import _canonical
+        serialized = _canonical(dict(signed_envelope))
+        if len(serialized) > 16384:
+            raise EntraStepUpDenied("DECISION_OUTBOX_EVIDENCE_TOO_LARGE")
+        fingerprint = sha256(serialized).hexdigest()
+        key = sha256(cookie_value.encode("utf-8")).hexdigest()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT approval_id,release_fingerprint,csrf_token,login_proof,issued_at "
+                "FROM admin_release_decision_sessions WHERE cookie_sha256=?",
+                (key,),
+            ).fetchone()
+            if row is None or row[0] != approval.approval_id or (
+                not hmac.compare_digest(row[1], approval.fingerprint())
+            ) or not hmac.compare_digest(row[2], csrf_token):
+                raise EntraStepUpDenied("DECISION_SESSION_REPLAYED_OR_MISSING")
+            # A second browser session can never replace a recorded decision.
+            if db.execute(
+                "SELECT 1 FROM admin_release_decision_outbox WHERE approval_id=?",
+                (approval.approval_id,),
+            ).fetchone() is not None:
+                raise EntraStepUpDenied("DECISION_OUTBOX_ALREADY_RECORDED")
+            deleted = db.execute(
+                "DELETE FROM admin_release_decision_sessions WHERE cookie_sha256=? "
+                "AND release_fingerprint=? AND csrf_token=?",
+                (key, approval.fingerprint(), csrf_token),
+            )
+            if deleted.rowcount != 1:
+                raise EntraStepUpDenied("DECISION_SESSION_REPLAYED_OR_MISSING")
+            db.execute(
+                "INSERT INTO admin_release_decision_outbox VALUES(?,?,?,?,?,?)",
+                (approval.approval_id, approval.fingerprint(),
+                 serialized.decode("utf-8"), fingerprint, "pending",
+                 now.isoformat()),
+            )
+        return fingerprint
+
+    def pending_signed_decisions(self, *, limit: int = 20) -> tuple[Mapping[str, Any], ...]:
+        """Read-only bounded pending delivery. Does not authorize release."""
+        if type(limit) is not int or not 1 <= limit <= 20:
+            raise EntraStepUpDenied("DECISION_OUTBOX_LIMIT_INVALID")
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT signed_envelope,signed_sha256 FROM admin_release_decision_outbox "
+                "WHERE state='pending' ORDER BY recorded_at LIMIT ?",
+                (limit,),
+            ).fetchall()
+        documents = []
+        for source, expected in rows:
+            if sha256(source.encode("utf-8")).hexdigest() != expected:
+                raise EntraStepUpDenied("DECISION_OUTBOX_EVIDENCE_TAMPERED")
+            documents.append(json.loads(source))
+        return tuple(documents)
+
+    def mark_signed_delivered(self, *, approval_id: str, signed_sha256: str) -> None:
+        """Idempotent acknowledgement after protected consumer accepts evidence."""
+        if not isinstance(signed_sha256, str) or len(signed_sha256) != 64:
+            raise EntraStepUpDenied("DECISION_OUTBOX_ACK_INVALID")
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT signed_sha256,state FROM admin_release_decision_outbox WHERE approval_id=?",
+                (approval_id,),
+            ).fetchone()
+            if row is None or not hmac.compare_digest(row[0], signed_sha256):
+                raise EntraStepUpDenied("DECISION_OUTBOX_ACK_CONFLICT")
+            if row[1] == "pending":
+                db.execute(
+                    "UPDATE admin_release_decision_outbox SET state='delivered' "
+                    "WHERE approval_id=? AND signed_sha256=?",
+                    (approval_id,signed_sha256),
+                )

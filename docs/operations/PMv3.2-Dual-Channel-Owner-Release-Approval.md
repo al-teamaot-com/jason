@@ -186,6 +186,17 @@ in production, or provided with this PR. The actual signer and public key
 must be enrolled through governed OpenBao/root policy only after explicit
 approval, not from an environment-supplied or arbitrary user key.
 
+The explicit decision hand-off now uses a **private SQLite signed-evidence
+outbox**: signing precedes one atomic transaction that consumes the
+one-use consent and stores the exact signed envelope/digest. A sink failure
+does not lose the user's authenticated decision; a separate governed,
+idempotent ledger reconciler may re-deliver exactly the SAME signed envelope
+and acknowledge its SHA-256, without issuing another approval or duplicating
+authority. Concurrent browser sessions for the same immutable approval ID
+cannot record contradictory decisions. The browser itself does not run
+background recovery: a protected native worker must be wired into the
+existing ApprovalRequestService before activation.
+
 The V5 browser decision is still **not accepted by the existing V4
 Release Manager consumer**. It must be incorporated into the *existing*
 `ApprovalRequestService` signed decision lifecycle, with atomic
