@@ -60,3 +60,17 @@ def test_native_policy_rejects_extra_approval_switch(tmp_path):
     p.write_text(json.dumps(data))
     with pytest.raises(ReleaseManagerError):
         _validated_mobile_release_policy(p, source_v2_required=True)
+
+
+def test_staged_v5_candidate_exact_source_is_not_active_v4(tmp_path):
+    repo = Path(__file__).resolve().parents[2]
+    active_source = json.loads((repo / "config/mobile-release-approval-policy.json").read_text())
+    proposed = json.loads((repo / "config/mobile-release-approval-policy-v5-candidate.json").read_text())
+    assert active_source["schema_version"] == "4.0"
+    assert active_source["policy_mode"] == "admin_approver_separated"
+    assert proposed["schema_version"] == "5.0"
+    assert proposed["policy_mode"] == "service_requester_regular_owner_teams"
+    assert proposed["release_requester_principal_id"] == "svc-jason-release-manager"
+    target = tmp_path / "reviewed-v5.json"
+    target.write_text(json.dumps(proposed))
+    assert _validated_mobile_release_policy(target, source_v2_required=True)["mode"] == "service_requester_regular_owner_teams"
