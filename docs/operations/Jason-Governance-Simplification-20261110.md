@@ -106,3 +106,9 @@ The simplification is production-ready only when all of the following are true:
 - no CCC-only or second-unfreeze Owner prompt is generated for a new normal release;
 - autonomous ticket-processing regression remains green;
 - Teams V5 reconciliation preserves the one-decision contract.
+
+## Active integration coordination
+
+Integration coordination: #2398 #2395 #2378 #2393 #2382 #2377 #2373 #2279
+
+Later integration of these active overlapping branches must preserve the one-Owner-decision transaction contract. In particular, Teams identity/routing work may change who receives or authenticates the exact Owner decision, but it must not restore duplicate CCC, unfreeze, replacement-unfreeze, or renewal approvals. Orthogonal Workboard, client-notification, reachability, and superseded-approval recovery behavior must be rebased and regression-tested rather than discarded.
