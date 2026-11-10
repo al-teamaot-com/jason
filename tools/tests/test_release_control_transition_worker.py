@@ -211,3 +211,103 @@ def test_root_drift_refresh_timeout_remains_fail_closed(tmp_path):
             with pytest.raises(ValueError, match="refresh timed out"):
                 m.verify_drift()
     write.assert_not_called()
+
+
+
+def _prior_recovery_fixture(tmp_path):
+    older='a'*40
+    newer='b'*40
+    old_manifest=verified_lkg()
+    current_manifest={**old_manifest,
+        'revision':newer,'runtime_revision':newer,
+        'mcp_revision':newer,'host_revision':newer,
+        'host_release':'/opt/jason/releases/'+newer,
+        'release_manager_source_revision':newer,
+        'runtime_image_id':'sha256:'+'1'*64,
+        'mcp_image_id':'sha256:'+'2'*64,
+    }
+    state={
+        'schema_version':'1.0',
+        'circuit_breaker':{'state':'open',
+            'source':'production_drift_watchdog',
+            'reason':'continuous_production_drift_detected'},
+        'last_known_good':{'release_id':'release-'+newer[:16], 'manifest':current_manifest},
+        'previous_last_known_good':{'release_id':'release-'+older[:16], 'manifest':old_manifest},
+    }
+    request={
+        'action':'restore_previous_verified_lkg',
+        'revision':older,
+        'release_id':'release-'+older[:16],
+    }
+    drift={'schema_version':'1.0','status':'drift_detected','problems':[
+        {'kind':'failed_system_unit','state':'failed','unit':'jason-ccc.service'}
+    ]}
+    records=tmp_path/'records'; records.mkdir()
+    record={'state':'closed','release_candidate':{'candidate_sha':older},
+            'owner_approval':{'approved':True,'candidate_sha':older},
+            'production':{'live_sha':older,'verified_at':'2026-11-08T13:06:37+00:00'}}
+    (records/(request['release_id']+'.json')).write_text(json.dumps(record))
+    (records/(request['release_id']+'.json')).chmod(0o600)
+    return request,state,drift,record,old_manifest
+
+
+def test_prior_lkg_recovery_preserves_breaker_and_immutable_newer_backup(tmp_path):
+    request,state,drift,record,observed=_prior_recovery_fixture(tmp_path)
+    original_breaker=state['circuit_breaker'].copy()
+    former_newer=state['last_known_good'].copy()
+    with patch.object(m,'ROOT',tmp_path), \
+         patch.object(m,'protected_read',return_value=drift), \
+         patch.object(m,'verify_health',return_value=observed.copy()):
+        updated=m.restore_previous_verified_lkg(request,state)
+    assert updated['circuit_breaker']==original_breaker
+    assert updated['last_known_good']['manifest']['revision']==REV
+    assert updated['previous_last_known_good']==former_newer
+    assert updated['last_revalidation']==observed
+
+
+@pytest.mark.parametrize('mutation',[
+    ('breaker',{'state':'closed','source':'production_drift_watchdog','reason':'continuous_production_drift_detected'}),
+    ('breaker',{'state':'open','source':'root_governed_transition','reason':'manual'}),
+    ('drift',{'schema_version':'1.0','status':'pass','problems':[]}),
+    ('drift',{'schema_version':'1.0','status':'drift_detected','problems':[
+        {'kind':'failed_system_unit','state':'failed','unit':'jason-ccc.service'},
+        {'kind':'failed_system_unit','state':'failed','unit':'jason-openclaw-authority-health.service'}]}),
+    ('previous',{'manifest':{'complete':False,'revision':REV}}),
+    ('request',{'release_id':'release-'+'b'*16}),
+])
+def test_prior_lkg_recovery_fail_closed_on_wrong_evidence(tmp_path,mutation):
+    request,state,drift,record,observed=_prior_recovery_fixture(tmp_path)
+    name,value=mutation
+    if name=='breaker':state['circuit_breaker']=value
+    if name=='drift':drift=value
+    if name=='previous':state['previous_last_known_good']=value
+    if name=='request':request.update(value)
+    before=json.dumps(state,sort_keys=True)
+    with patch.object(m,'ROOT',tmp_path), \
+         patch.object(m,'protected_read',return_value=drift), \
+         patch.object(m,'verify_health',return_value=observed):
+        with pytest.raises((ValueError,PermissionError)):
+            m.restore_previous_verified_lkg(request,state)
+    assert json.dumps(state,sort_keys=True)==before
+
+
+def test_prior_lkg_recovery_invalid_historical_approval_denied(tmp_path):
+    request,state,drift,record,observed=_prior_recovery_fixture(tmp_path)
+    path=tmp_path/'records'/(request['release_id']+'.json')
+    record['owner_approval']['approved']=False
+    path.write_text(json.dumps(record))
+    with patch.object(m,'ROOT',tmp_path), \
+         patch.object(m,'protected_read',return_value=drift), \
+         patch.object(m,'verify_health',return_value=observed):
+        with pytest.raises(ValueError,match='verified approval'):
+            m.restore_previous_verified_lkg(request,state)
+
+
+def test_prior_lkg_recovery_image_id_drift_denied(tmp_path):
+    request,state,drift,record,observed=_prior_recovery_fixture(tmp_path)
+    observed={**observed,'mcp_image_id':'sha256:'+'f'*64}
+    with patch.object(m,'ROOT',tmp_path), \
+         patch.object(m,'protected_read',return_value=drift), \
+         patch.object(m,'verify_health',return_value=observed):
+        with pytest.raises(ValueError,match='immutable last-known-good mismatch'):
+            m.restore_previous_verified_lkg(request,state)
