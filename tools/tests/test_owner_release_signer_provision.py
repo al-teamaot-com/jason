@@ -79,7 +79,7 @@ def test_canonical_provision_paths_match_native_mcp_mount():
     assert str(module.PRIVATE_DIR / module.PRIVATE_NAME) == (
         "/var/lib/jason/runtime-secrets/owner-release/private_key")
     assert str(module.TRUST_DIR / module.PUBLIC_NAME) == (
-        "/etc/jason/owner-release/verified-owner-public-key.json")
+        "/etc/jason-owner-release/verified-owner-public-key.json")
 
 
 def test_allowlisted_owner_binding_matches_kernel():
@@ -90,3 +90,21 @@ def test_allowlisted_owner_binding_matches_kernel():
         {"owner_oid": oid, "owner_principal": principal}
         for oid, principal in sorted(EXACT_OWNER_OAUTH_SUBJECTS.items())
     ]
+
+
+
+def test_root_provisioner_does_not_widen_existing_private_etc_jason_directory():
+    script = SCRIPT.read_text()
+    assert 'TRUST_DIR = Path("/etc/jason-owner-release")' in script
+    assert 'os.chmod(trust_dir.parent, 0o711)' not in script
+    assert 'stat.S_IMODE(info.st_mode) != 0o755' in script
+    assert 'existing_root_private_directories_unchanged' in script
+    assert "OWNER_SIGNER_INDIVIDUAL_SUDO_AUTHENTICATION_REQUIRED" in script
+    assert 'PROVISION OWNER RELEASE SIGNER' in script
+
+
+def test_direct_non_sudo_provisioning_is_denied_before_creating_keys():
+    r = subprocess.run([sys.executable, str(SCRIPT), "--provision"],
+                       capture_output=True, text=True, timeout=10)
+    assert r.returncode != 0
+    assert "OWNER_SIGNER_INDIVIDUAL_SUDO_AUTHENTICATION_REQUIRED" in r.stderr

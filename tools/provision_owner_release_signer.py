@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 PRIVATE_DIR = Path("/var/lib/jason/runtime-secrets/owner-release")
-TRUST_DIR = Path("/etc/jason/owner-release")
+TRUST_DIR = Path("/etc/jason-owner-release")
 PRIVATE_NAME = "private_key"
 PUBLIC_NAME = "verified-owner-public-key.json"
 TENANT = "f7054323-d52b-4863-8c2f-1898f0b6077c"
@@ -107,8 +107,8 @@ def provision(private_dir: Path, trust_dir: Path, uid: int, gid: int,
         info = base.lstat()
         if (base.is_symlink() or info.st_uid != 0
                 or not stat.S_ISDIR(info.st_mode)
-                or stat.S_IMODE(info.st_mode) not in (0o700, 0o711)):
-            raise PermissionError("OWNER_SIGNER_ETC_JASON_BASE_MODE_UNEXPECTED")
+                or stat.S_IMODE(info.st_mode) != 0o755):
+            raise PermissionError("OWNER_SIGNER_PUBLIC_ETC_BASE_MODE_UNEXPECTED")
     ensure_directory(private_dir, 0o750 if root else 0o700,
                      0 if root else uid, gid)
     ensure_directory(trust_dir, 0o755 if root else 0o700,
@@ -140,9 +140,9 @@ def provision(private_dir: Path, trust_dir: Path, uid: int, gid: int,
             raise
         status = "PROVISIONED"
     if root:
-        # Search/execute only; do not expose directory listings or change
-        # existing root-owned secrets. Needed for unprivileged public-key check.
-        os.chmod(trust_dir.parent, 0o711)
+        # Dedicated public trust directory under /etc/0755 allows only
+        # the Ed25519 public policy to be independently read by Jason.
+        # NEVER chmod /etc/jason, which is root-only 0700.
         receipt = trust_dir / "provision-receipt.json"
         if not receipt.exists():
             record = {
@@ -153,7 +153,8 @@ def provision(private_dir: Path, trust_dir: Path, uid: int, gid: int,
                 "private_key_exported": False,
                 "standing_release_authority": False,
                 "production_services_changed": False,
-                "etc_jason_directory_mode": "0711",
+                "existing_root_private_directories_unchanged": True,
+                "public_trust_directory_mode": "0755",
             }
             save_exclusive(receipt,
                            (json.dumps(record, sort_keys=True) + "\n").encode(),
@@ -181,6 +182,20 @@ def main() -> None:
             print("OWNER_SIGNER_SELF_TEST=PASS")
         return
     al = pwd.getpwnam("al")
+    if (os.geteuid() != 0 or os.environ.get("SUDO_USER") != "al"
+            or os.environ.get("SUDO_UID") != str(al.pw_uid)
+            or not os.isatty(0) or not os.isatty(1)):
+        raise PermissionError("OWNER_SIGNER_INDIVIDUAL_SUDO_AUTHENTICATION_REQUIRED")
+    # A root-boundary check before any entropy or file creation. This is
+    # the one-time Owner decision for key provisioning, never a standing
+    # authority to approve arbitrary production releases.
+    print("ONE-TIME EXACT OWNER SIGNER PROVISIONING")
+    print("Private key: /var/lib/jason/runtime-secrets/owner-release/private_key")
+    print("Root public trust: /etc/jason-owner-release/verified-owner-public-key.json")
+    print("No runtime/MCP restart, freeze, breaker or ticket mutation.")
+    print("Type exactly: PROVISION OWNER RELEASE SIGNER", flush=True)
+    if input("> ").strip() != "PROVISION OWNER RELEASE SIGNER":
+        raise PermissionError("OWNER_SIGNER_EXACT_ACTION_NOT_CONFIRMED")
     result, digest = provision(PRIVATE_DIR, TRUST_DIR, al.pw_uid, al.pw_gid, True)
     print("OWNER_SIGNER_STATUS=" + result)
     print("OWNER_SIGNER_PUBLIC_SHA256=" + digest)
