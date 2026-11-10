@@ -110,11 +110,11 @@ def test_restore_units_rebuilds_exact_archived_files_only(tmp_path):
          patch.object(m, "command", side_effect=lambda *args, **kwargs:
                       calls.append(args) or type("R", (), {"returncode":0})()), \
          patch.object(m.rootctl, "write_json") as update:
-        m.restore_units(archive, True, {"schema_version":"1.0"})
+        m.restore_units(archive, True)
     assert all((installed/u).read_bytes() == (archive/u).read_bytes() for u in m.UNITS)
     assert ("systemctl","daemon-reload") in calls
     assert ("systemctl","enable","--now","jason-ccc.timer") in calls
-    update.assert_called_once()
+    update.assert_not_called()
 
 
 def test_do_not_accept_production_release_or_silent_breaker_bypass():
@@ -127,3 +127,47 @@ def test_do_not_accept_production_release_or_silent_breaker_bypass():
     assert 'no_standing_authority' in content or 'no_standing_authority' in content.lower()
     assert 'release_manager.promote' not in content
     assert 'jason-runtime' not in content or "runtime_or_mcp_restarted" in content
+
+
+def test_restore_units_refreshes_actual_drift_not_old_snapshot(tmp_path):
+    m = load()
+    installed = tmp_path / "system"
+    archive = tmp_path / "archive"
+    installed.mkdir()
+    archive.mkdir()
+    for name in m.UNITS:
+        (archive/name).write_bytes(("OLD_"+name).encode())
+    calls=[]
+    with patch.object(m,"SYSTEM_UNITS",installed), \
+         patch.object(m.os,"chown"), \
+         patch.object(m,"command",side_effect=lambda *args,**kw:
+                      calls.append(args) or type("R",(),{"returncode":0})()), \
+         patch.object(m.rootctl,"refresh_stale_drift") as refresh, \
+         patch.object(m.rootctl,"write_json") as write:
+        m.restore_units(archive,True)
+    refresh.assert_called_once_with()
+    write.assert_not_called()
+    assert all((installed/u).read_bytes()==(archive/u).read_bytes() for u in m.UNITS)
+
+
+def test_restore_units_never_overwrites_drift_when_refresh_fails(tmp_path):
+    m = load()
+    installed = tmp_path / "system"
+    archive = tmp_path / "archive"
+    installed.mkdir()
+    archive.mkdir()
+    drift = {"schema_version":"1.0","status":"drift_detected",
+             "problems":[{"kind":"failed_system_unit","unit":"jason-ccc.service","state":"failed"}]}
+    for name in m.UNITS:
+        (archive/name).write_bytes(("OLD_"+name).encode())
+    calls=[]
+    with patch.object(m,"SYSTEM_UNITS",installed), \
+         patch.object(m.os,"chown"), \
+         patch.object(m,"command",side_effect=lambda *args,**kw:
+                      calls.append(args) or type("R",(),{"returncode":0})()), \
+         patch.object(m.rootctl,"refresh_stale_drift",side_effect=RuntimeError("other drift")), \
+         patch.object(m.rootctl,"write_json") as write:
+        m.restore_units(archive,True)
+    write.assert_not_called()
+    assert drift["status"]=="drift_detected"
+    assert all((installed/u).read_bytes()==(archive/u).read_bytes() for u in m.UNITS)
