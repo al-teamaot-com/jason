@@ -79,12 +79,14 @@ def start(session):
     return params["state"][0]
 
 
-def login(session,*,state=None):
+def login(session,*,state=None,session_state=None):
     expected=state if state is not None else start(session)
+    params={"code":"synthetic-auth-code-from-microsoft-1234567890",
+            "state":expected}
+    if session_state is not None:
+        params["session_state"]=session_state
     response=session.client.get(
-        "/admin/release-approval/callback",
-        params={"code":"synthetic-auth-code-from-microsoft-1234567890",
-                "state":expected},
+        "/admin/release-approval/callback",params=params,
     )
     return response
 
@@ -119,6 +121,37 @@ def test_entire_browser_approval_records_one_existing_exact_signed_receipt(tmp_p
         data={"csrf":csrf,"decision":"approve"},
     )
     assert repeated.status_code==403
+    assert len(s.calls)==1
+
+
+def test_real_entra_optional_session_state_completes_browser_login(tmp_path):
+    # Microsoft Graph documents session_state in a query-mode callback.
+    s=harness(tmp_path)
+    state=start(s)
+    page=login(s,state=state,
+               session_state="fe1540c3-a69a-469a-9fa3-8a2470936421")
+    assert page.status_code==200
+    assert "Administrator release decision" in page.text
+    assert s.repo.get(s.request.approval_id).status.value=="pending"
+    assert len(s.calls)==1
+
+
+def test_duplicate_or_extra_entra_callback_params_rejected_without_consuming(tmp_path):
+    s=harness(tmp_path)
+    state=start(s)
+    code="synthetic-auth-code-from-microsoft-1234567890"
+    bad_urls=[
+        f"/admin/release-approval/callback?code={code}&code={code}&state={state}",
+        f"/admin/release-approval/callback?code={code}&state={state}&state={state}",
+        f"/admin/release-approval/callback?code={code}&state={state}&unexpected=1",
+        f"/admin/release-approval/callback?code={code}&state={state}&session_state=",
+    ]
+    for url in bad_urls:
+        response=s.client.get(url)
+        assert response.status_code==403
+        assert s.calls==[]
+        assert s.repo.get(s.request.approval_id).status.value=="pending"
+    assert login(s,state=state,session_state="valid-session-opaque").status_code==200
     assert len(s.calls)==1
 
 

@@ -222,11 +222,22 @@ class AdminReleaseBrowserWeb:
             return _failure()
         try:
             now=self.clock()
-            if (len(request.query_params)!=2
-                    or request.query_params.get("error") is not None):
+            # Microsoft Entra may include session_state with an otherwise
+            # ordinary query-mode authorization-code response. Keep the
+            # strict allowlist, reject duplicate parameters, and never use
+            # session_state as identity or approval evidence.
+            params=request.query_params
+            keys=set(params.keys())
+            if (keys not in ({"code","state"},
+                             {"code","state","session_state"})
+                    or any(len(params.getlist(k))!=1 for k in keys)
+                    or not 1<=len(params["code"])<=8192
+                    or not 1<=len(params["state"])<=256
+                    or ("session_state" in keys
+                        and not 1<=len(params["session_state"])<=256)):
                 raise EntraStepUpDenied("V5_BROWSER_CALLBACK_FIELDS_INVALID")
-            code=request.query_params.get("code","")
-            state=request.query_params.get("state","")
+            code=params["code"]
+            state=params["state"]
             cookie=request.cookies.get(LOGIN_COOKIE,"")
             login_store=OneTimeBrowserLoginStore(self.session_db)
             approval_id=login_store.peek_approval_id(cookie_value=cookie)
