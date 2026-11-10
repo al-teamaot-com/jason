@@ -25,4 +25,5 @@ def test_end_to_end_acceptance(tmp_path):
     assert result["receipts"] == 6
     assert result["transient_attempts"] == 2
     assert result["approval_channel"] == "teams"
+    assert result["authenticated_owner_isolated_acceptance"] == "pass"
     assert result["validation_attempts"] == 2

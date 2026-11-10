@@ -278,3 +278,164 @@ def test_validation_failure_is_bounded_retryable():
     module.execute_cycle(state, facts={}, handler=handler, now=due)
     assert state["items"]["PMV3-17"]["phase"] == "complete"
     assert len(calls) == 2
+
+
+# Owner-directed retirement of the mandatory Teams approval channel. These
+# tests exercise the trusted-adapter boundary without accepting raw chat text.
+def _owner_verification(item, *, decision="approve", **overrides):
+    proof = {
+        "issuer": "jason_entra_owner_authority",
+        "authentication": "entra_oauth_bearer",
+        "identity_status": "active",
+        "owner_identity_id": "person-al",
+        "microsoft_tenant_id": module.OWNER_TENANT_ID,
+        "microsoft_object_id": module.OWNER_ENTRA_OBJECT_ID,
+        "request_id": item["approval_request_id"],
+        "action_scope_sha256": module.owner_approval_scope(item),
+        "decision": decision,
+        "receipt_id": "entra-verified-receipt-" + item["id"],
+        "proof_sha256": "a" * 64,
+    }
+    proof.update(overrides)
+    return proof
+
+
+def test_verified_authenticated_owner_not_teams_can_release_exact_work():
+    state = module.empty_state()
+    module.admit(state, module.make_item(
+        "OWNER-A1", "read-only-release-pilot", approval_required=True,
+        approval_request_id="owner-req-A1"))
+    item = state["items"]["OWNER-A1"]
+    module.record_authenticated_owner_approval(
+        state, "OWNER-A1",
+        presented_evidence={"opaque_signed_decision_reference": "test"},
+        verified_decision=lambda ignored: _owner_verification(item),
+    )
+    assert module.approval_satisfied(item) is True
+    executed = []
+    module.execute_cycle(
+        state, facts={},
+        handler=lambda work, key: (
+            executed.append(key) or module.Outcome("complete", receipt="test")
+        ),
+        now=NOW,
+    )
+    assert len(executed) == 1
+    assert item["phase"] == "complete"
+    assert item["approval"]["channel"] == "authenticated_owner"
+
+
+def test_authenticated_owner_requires_separate_trusted_verifier():
+    state = module.empty_state()
+    module.admit(state, module.make_item(
+        "OWNER-A2", "release", approval_required=True, approval_request_id="A2"))
+    try:
+        module.record_authenticated_owner_approval(
+            state, "OWNER-A2", presented_evidence={"verified": True},
+            verified_decision=None,
+        )
+    except ValueError as exc:
+        assert "verifier" in str(exc)
+    else:
+        raise AssertionError("missing verifier accepted")
+    assert not module.approval_satisfied(state["items"]["OWNER-A2"])
+
+
+def test_authenticated_owner_rejects_wrong_identity_tenant_scope_and_unverified():
+    for field, invalid in (
+        ("issuer", "untrusted_chat"),
+        ("authentication", "chat_text"),
+        ("identity_status", "inactive"),
+        ("owner_identity_id", "person-anyone"),
+        ("microsoft_object_id", "c848022d-e13b-4457-84b0-e2f5c00dcaf6"),
+        ("microsoft_tenant_id", "00000000-0000-0000-0000-000000000000"),
+        ("request_id", "different"),
+        ("action_scope_sha256", "f" * 64),
+        ("proof_sha256", "not-a-digest"),
+        ("decision", "maybe"),
+    ):
+        state = module.empty_state()
+        module.admit(state, module.make_item(
+            "OWNER-A3", "release", approval_required=True, approval_request_id="A3"))
+        item = state["items"]["OWNER-A3"]
+        try:
+            module.record_authenticated_owner_approval(
+                state, "OWNER-A3",
+                presented_evidence={"untrusted": "raw"},
+                verified_decision=lambda ignored: _owner_verification(
+                    item, **{field: invalid}),
+            )
+        except ValueError as exc:
+            assert "not exact" in str(exc)
+        else:
+            raise AssertionError(field + " was unexpectedly accepted")
+        assert not module.approval_satisfied(item)
+
+
+def test_authenticated_owner_deny_never_dispatches():
+    state = module.empty_state()
+    module.admit(state, module.make_item(
+        "OWNER-A4", "release", approval_required=True, approval_request_id="A4"))
+    item = state["items"]["OWNER-A4"]
+    module.record_authenticated_owner_approval(
+        state, "OWNER-A4", presented_evidence={},
+        verified_decision=lambda ignored: _owner_verification(item, decision="deny"))
+    assert module.approval_satisfied(item) is False
+    called = []
+    module.execute_cycle(
+        state, facts={},
+        handler=lambda work, key: (
+            called.append(key) or module.Outcome("complete", receipt="invalid")),
+        now=NOW)
+    assert not called
+
+
+def test_authenticated_owner_approval_replay_across_work_items_is_rejected():
+    state = module.empty_state()
+    module.admit(state, module.make_item(
+        "OWNER-A5", "release", approval_required=True, approval_request_id="A5"))
+    module.admit(state, module.make_item(
+        "OWNER-A6", "release", approval_required=True, approval_request_id="A6"))
+    one, two = state["items"]["OWNER-A5"], state["items"]["OWNER-A6"]
+    module.record_authenticated_owner_approval(
+        state, "OWNER-A5", presented_evidence={},
+        verified_decision=lambda _: _owner_verification(one, receipt_id="same-receipt"))
+    try:
+        module.record_authenticated_owner_approval(
+            state, "OWNER-A6", presented_evidence={},
+            verified_decision=lambda _: _owner_verification(two, receipt_id="same-receipt"))
+    except ValueError as exc:
+        assert "replay" in str(exc)
+    else:
+        raise AssertionError("duplicate verified receipt accepted")
+    assert not module.approval_satisfied(two)
+
+
+def test_authenticated_owner_approval_invalidated_by_action_change():
+    state = module.empty_state()
+    module.admit(state, module.make_item(
+        "OWNER-A7", "action-1", approval_required=True, approval_request_id="A7"))
+    item = state["items"]["OWNER-A7"]
+    module.record_authenticated_owner_approval(
+        state, "OWNER-A7", presented_evidence={},
+        verified_decision=lambda _: _owner_verification(item))
+    assert module.approval_satisfied(item) is True
+    item["action"] = "action-2"
+    assert module.approval_satisfied(item) is False
+    item["action"] = "action-1"
+    item["generation"] = 2
+    assert module.approval_satisfied(item) is False
+
+
+def test_authenticated_owner_rejects_unsafe_owner_evidence_without_request():
+    state = module.empty_state()
+    module.admit(state, module.make_item(
+        "OWNER-A8", "release", approval_required=True))
+    try:
+        module.record_authenticated_owner_approval(
+            state, "OWNER-A8", presented_evidence={},
+            verified_decision=lambda _: {"verified": True})
+    except ValueError as exc:
+        assert "request id" in str(exc)
+    else:
+        raise AssertionError("missing request ID accepted")

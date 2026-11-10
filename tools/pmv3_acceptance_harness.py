@@ -114,8 +114,43 @@ def run_acceptance(root: Path) -> dict[str, object]:
     assert state["items"]["VALIDATION"]["attempts"] == 2
     assert len(state["receipts"]) == 6
 
+    # Independent source-only acceptance: simulate an authenticated Entra
+    # Owner adapter, with an exact-request verified decision. This never reads
+    # a chat message or turns a locally written approval JSON into authority.
+    owner_state = engine.empty_state()
+    engine.admit(owner_state, engine.make_item(
+        "OWNER-CHANNEL", "reviewed-read-only-pilot", approval_required=True,
+        approval_request_id="PMV3-UAT-OWNER-AUTHENTICATED",
+    ))
+    owner_item = owner_state["items"]["OWNER-CHANNEL"]
+    assert engine.runnable_items(owner_state, capacity=1) == []
+    engine.record_authenticated_owner_approval(
+        owner_state, "OWNER-CHANNEL",
+        presented_evidence={"opaque_signed_receipt_ref": "isolated-test"},
+        verified_decision=lambda _: {
+            "issuer": "jason_entra_owner_authority",
+            "authentication": "entra_oauth_bearer",
+            "identity_status": "active",
+            "owner_identity_id": "person-al",
+            "microsoft_tenant_id": engine.OWNER_TENANT_ID,
+            "microsoft_object_id": engine.OWNER_ENTRA_OBJECT_ID,
+            "request_id": owner_item["approval_request_id"],
+            "action_scope_sha256": engine.owner_approval_scope(owner_item),
+            "decision": "approve",
+            "receipt_id": "isolated-owner-verified-receipt",
+            "proof_sha256": "a" * 64,
+        },
+    )
+    engine.execute_cycle(
+        owner_state, facts={},
+        handler=lambda item, key: engine.Outcome("complete", receipt="owner-channel-ok"),
+    )
+    assert owner_item["phase"] == "complete"
+    assert owner_item["approval"]["channel"] == "authenticated_owner"
+
     return {
         "status": "pass",
+        "authenticated_owner_isolated_acceptance": "pass",
         "progress_percent": engine.progress_percent(state),
         "cycles": state["cycle"],
         "phases": phases,
