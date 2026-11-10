@@ -120,7 +120,13 @@ def validate_and_archive() -> tuple[Path, bool]:
     return archive, timer_enabled
 
 
-def restore_units(archive: Path, timer_enabled: bool, original_drift: dict) -> None:
+def restore_units(archive: Path, timer_enabled: bool) -> None:
+    """Restore only archived unit bytes and refresh evidence from live systemd.
+
+    Never rewrite a stale pre-mutation drift report after systemd state changed.
+    The breaker remains open; if fresh drift evaluation cannot pass, the prior
+    report remains only until the normal watchdog can publish newer evidence.
+    """
     for unit in UNITS:
         original = (archive / unit).read_bytes()
         path = SYSTEM_UNITS / unit
@@ -137,7 +143,12 @@ def restore_units(archive: Path, timer_enabled: bool, original_drift: dict) -> N
     command("systemctl", "daemon-reload")
     if timer_enabled:
         command("systemctl", "enable", "--now", UNITS[0])
-    rootctl.write_json(DRIFT, original_drift, 0, 0)
+    try:
+        rootctl.refresh_stale_drift()
+        print("ROLLBACK_DRIFT_READBACK=FRESH")
+    except Exception as exc:
+        print("ROLLBACK_DRIFT_READBACK=NOT_REFRESHED:" + type(exc).__name__)
+        print("ROOT_BREAKER_REMAINS_OPEN=TRUE")
 
 
 def recover_ccc() -> None:
@@ -159,7 +170,7 @@ def recover_ccc() -> None:
         # only during its atomic write. Acquire it again for the maintenance.
         with rootctl.LOCK.open("a+") as root_lock:
             fcntl.flock(root_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            _, original_drift = validate_baseline()
+            validate_baseline()
             archive, timer_enabled = validate_and_archive()
             mutation_started = False
             breaker_committed = False
@@ -237,7 +248,7 @@ def recover_ccc() -> None:
                     if breaker_committed and preclose_state is not None:
                         rootctl.write_json(CONTROL, preclose_state, 0, 0)
                     if mutation_started:
-                        restore_units(archive, timer_enabled, original_drift)
+                        restore_units(archive, timer_enabled)
                 except Exception as rollback_error:
                     raise RuntimeError("CCC maintenance and unit rollback both failed") from rollback_error
                 raise
