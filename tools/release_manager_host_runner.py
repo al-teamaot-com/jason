@@ -6654,6 +6654,31 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
 
 
 
+def require_unmasked_release_timer_for_postacceptance_rollback(
+    state_root: Path, *, unit_path: Path | None = None,
+) -> None:
+    """Reject a masked promotion timer BEFORE any rollback changes production.
+
+    A legacy LKG installer copies its timer file with shutil.copy2 which
+    follows a /dev/null systemd-mask symlink. A rollback must not touch
+    source, production control, container images or the original freeze
+    until a separately reviewed incident-handling procedure has prepared
+    the timer under the same governed change boundary.
+    """
+    if state_root.resolve() != DEFAULT_STATE.resolve() and unit_path is None:
+        return  # Isolated preproduction state has no user systemd units.
+    target = unit_path or (Path.home() / ".config/systemd/user/jason-release-manager.timer")
+    if target.is_symlink():
+        raise ReleaseManagerError(
+            "post-acceptance rollback blocked: release-manager timer is "
+            "masked/symlinked; require governed preflight remediation"
+        )
+    if target.exists() and not target.is_file():
+        raise ReleaseManagerError(
+            "post-acceptance rollback blocked: release-manager timer is not a regular file"
+        )
+
+
 def rollback_closed_release(
     repo: Path,
     state_root: Path,
@@ -6717,6 +6742,9 @@ def rollback_closed_release(
         ) from exc
     if freeze.get("sha256") != explicit.get("freeze_sha256_after"):
         raise ReleaseManagerError("production freeze is not restored to the authorized bytes")
+    # Run the user-timer symlink guard before a receipt, production lock,
+    # one-time freeze exception or any container/service mutation.
+    require_unmasked_release_timer_for_postacceptance_rollback(state_root)
 
     receipt_path = state_root / "owner-postacceptance-rollback-receipts" / (release_id + ".json")
     receipt_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

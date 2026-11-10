@@ -6523,3 +6523,55 @@ def test_postacceptance_rollback_failure_restores_freeze_and_fails_receipt(tmp_p
     assert receipt['freeze_restored'] is True
     assert receipt['freeze_sha256_before'] == receipt['freeze_sha256_after']
     assert receipt['standing_authority'] is False
+
+
+def test_masked_timer_preflight_prevents_postacceptance_rollback_before_any_write(
+    tmp_path, monkeypatch,
+):
+    import pytest
+    release_id, _record, _baseline, marker = (
+        _closed_postacceptance_release_fixture(tmp_path)
+    )
+    before = marker.read_bytes()
+    masked = tmp_path / "jason-release-manager.timer"
+    masked.symlink_to("/dev/null")
+    # Use an exact-scope fixture of the canonical production root, with
+    # an explicitly provided masked unit; do not touch real systemd.
+    monkeypatch.setattr(runner, "DEFAULT_STATE", tmp_path)
+    original = runner.require_unmasked_release_timer_for_postacceptance_rollback
+    monkeypatch.setattr(
+        runner, "require_unmasked_release_timer_for_postacceptance_rollback",
+        lambda state: original(state, unit_path=masked),
+    )
+    calls = []
+    monkeypatch.setattr(
+        runner, "acquire_production_transaction_lock",
+        lambda *a, **kw: calls.append("lock"),
+    )
+    with pytest.raises(runner.ReleaseManagerError, match="masked/symlinked"):
+        runner.rollback_closed_release(
+            ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+            scope_sha256="d" * 64, rollback_sha=SHA_B,
+            reason="signed rollback preflight only",
+        )
+    assert calls == []
+    assert marker.read_bytes() == before
+    assert not (tmp_path / "owner-postacceptance-rollback-receipts").exists()
+    assert masked.is_symlink()
+
+
+def test_mask_guard_rejects_nonregular_and_accepts_unmasked_file(
+    tmp_path,
+):
+    import pytest
+    path = tmp_path / "timer"
+    path.mkdir()
+    with pytest.raises(runner.ReleaseManagerError, match="not a regular"):
+        runner.require_unmasked_release_timer_for_postacceptance_rollback(
+            tmp_path, unit_path=path,
+        )
+    path.rmdir()
+    path.write_text("[Timer]\nOnUnitActiveSec=300\n")
+    runner.require_unmasked_release_timer_for_postacceptance_rollback(
+        tmp_path, unit_path=path,
+    )
