@@ -73,3 +73,40 @@ production policy remains unchanged. The owner must still approve one
 exact-release Teams-governed bootstrap; the alternative removes the
 unnecessary new CA configuration and license dependency, not the
 bootstrap authority boundary.
+
+
+### Exact no-license Microsoft Entra Web app registration template
+
+Upon separately signed Teams approval for this tenant configuration, create
+**one new** single-tenant confidential OIDC Web app. The callback must be
+exactly `https://mcp-jason.teamaot.com/admin/release-approval/callback`.
+Do **not** add API/Graph permissions to the app or reuse any existing Jason
+client credentials. Configure the new registration's **ID token optional
+claims** (not access tokens) as follows, retaining no other optional claims
+unless separately reviewed:
+
+```json
+{
+  "optionalClaims": {
+    "idToken": [
+      {"name": "amr", "essential": false},
+      {"name": "auth_time", "essential": false}
+    ]
+  }
+}
+```
+
+Microsoft's documented v2 OIDC optional-claims interface supports `amr`
+and `auth_time`; an MFA-complete token may contain `mfa` in the `amr`
+array. Server policy strictly denies approval if either optional claim is
+absent or the token's cryptographically verified tenant, privileged admin,
+MFA and authentication time do not match its exact immutable release.
+
+Provider references:
+- https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims
+- https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference
+
+The confidential client secret is stored only through an approved OpenBao
+secret provisioning transaction, never copied into Teams, Git, chat, scripts,
+commit output or general diagnostics. Any app and policy configuration must be
+read back and reviewed before V5 root activation.
