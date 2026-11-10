@@ -196,6 +196,7 @@ def _build_create_command(
     harden: bool,
     set_env: tuple[str, ...] = (),
     additional_readonly_binds: tuple[str, ...] = (),
+    omit_readonly_bind_destinations: tuple[str, ...] = (),
 ):
     src = _inspect(live)
     config = src["Config"]
@@ -266,6 +267,10 @@ def _build_create_command(
         source = str(mount["Source"])
         destination = str(mount["Destination"])
         writable = bool(mount.get("RW", False))
+        if destination in omit_readonly_bind_destinations:
+            if writable or mount_type != "bind":
+                raise ValueError("cannot omit writable or non-bind mount during rollback")
+            continue
         existing_mounts[destination] = (source, writable)
         spec = f"type={mount_type},src={source},dst={destination}"
         if not writable:
@@ -368,6 +373,11 @@ def main() -> int:
         help="Add one read-only bind mount as absolute SOURCE:DESTINATION.",
     )
     parser.add_argument(
+        "--omit-owner-release-signer-bind-on-rollback",
+        action="store_true",
+        help="Remove only the exact owner signer private mount when deploying the rollback image.",
+    )
+    parser.add_argument(
         "--promote-image-tag",
         action="append",
         default=[],
@@ -378,6 +388,13 @@ def main() -> int:
         help="Image tag to retarget to the actual pre-deployment live image after successful verification.",
     )
     args = parser.parse_args()
+    SIGNER_DESTINATION = "/run/jason-secrets/owner-release/private_key"
+    if args.omit_owner_release_signer_bind_on_rollback and (
+        args.live != "jason-mcp-pilot"
+        or args.image != "jason-mcp:rollback-current"
+        or "JASON_OWNER_RELEASE_ED25519_KEY_PATH=" not in args.set_env
+    ):
+        parser.error("Owner signer mount may be omitted only for exact MCP rollback")
 
     promote_tags = list(dict.fromkeys(tag.strip() for tag in args.promote_image_tag if tag.strip()))
     rollback_image_tag = str(args.rollback_image_tag or "").strip() or None
@@ -402,6 +419,9 @@ def main() -> int:
         harden=args.harden,
         set_env=tuple(args.set_env),
         additional_readonly_binds=tuple(args.add_readonly_bind),
+        omit_readonly_bind_destinations=(
+            (SIGNER_DESTINATION,) if args.omit_owner_release_signer_bind_on_rollback else ()
+        ),
     )
 
     print("PREFLIGHT=PASS")
@@ -417,6 +437,7 @@ def main() -> int:
     print(f"HARDENING_REQUESTED={args.harden}")
     print(f"SET_ENV_COUNT={len(args.set_env)}")
     print(f"ADDITIONAL_READONLY_BIND_COUNT={len(args.add_readonly_bind)}")
+    print(f"OWNER_SIGNER_BIND_OMITTED={args.omit_owner_release_signer_bind_on_rollback}")
     print(f"PROMOTE_IMAGE_TAG_COUNT={len(promote_tags)}")
     print(f"ROLLBACK_IMAGE_TAG={rollback_image_tag or ''}")
     if args.preflight:

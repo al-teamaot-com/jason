@@ -4008,7 +4008,7 @@ def consume_owner_approval_requests(repo: Path, state_root: Path) -> int:
             sys.path.insert(0, str(module_root))
         from kernel.signed_owner_release import read_pinned_root_owner_public_key
         key = read_pinned_root_owner_public_key(
-            Path("/etc/jason/owner-release/verified-owner-public-key.json")
+            Path("/etc/jason-owner-release/verified-owner-public-key.json")
         )
         record = load_record(state_root, release_id)
         proof = verify_signed_mcp_owner_request(
@@ -6441,7 +6441,7 @@ def signed_mcp_owner_one_transaction_freeze_context(
             sys.path.insert(0, str(module_root))
         from kernel.signed_owner_release import read_pinned_root_owner_public_key
         key = read_pinned_root_owner_public_key(
-            Path("/etc/jason/owner-release/verified-owner-public-key.json")
+            Path("/etc/jason-owner-release/verified-owner-public-key.json")
         )
         proof = verify_signed_mcp_owner_request(
             state_root, record, request, public_key=key,
