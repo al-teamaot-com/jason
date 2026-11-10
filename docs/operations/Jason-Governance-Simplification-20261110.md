@@ -116,3 +116,9 @@ The simplification is production-ready only when all of the following are true:
 Integration coordination: #2398 #2395 #2378 #2393 #2382 #2377 #2373 #2279
 
 Later integration of these active overlapping branches must preserve the one-Owner-decision transaction contract. In particular, Teams identity/routing work may change who receives or authenticates the exact Owner decision, but it must not restore duplicate CCC, unfreeze, replacement-unfreeze, or renewal approvals. Orthogonal Workboard, client-notification, reachability, and superseded-approval recovery behavior must be rebased and regression-tested rather than discarded.
+
+### Standing-pause integration coordination
+
+Integration coordination: #2386 #2391
+
+Preserve #2386 second-drive worktree placement and fail-closed storage headroom behavior when isolated-service units are reconciled. Preserve #2391 isolated-service topology, migration/ticket-continuity evidence and rollback contract, but supersede its standing Owner-pause receipt/drop-in requirement with the technical legacy-controller quiescence invariant defined here.
