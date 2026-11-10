@@ -172,27 +172,6 @@ if [ -f "$QBO_PROD_ROLE_HOST" ] && [ -f "$QBO_PROD_SECRET_HOST" ]; then
   )
 fi
 
-# The V3.1 release signer is a separately provisioned, root-controlled host
-# secret. Only the exact reviewed Owner-release policy enables this mount.
-# V2 rollback remains compatible and never requires new signing material.
-OWNER_RELEASE_SIGNER_ARGS=()
-if [ "$IMAGE" != "jason-mcp:rollback-current" ]; then
-  OWNER_RELEASE_POLICY_VERSION="$(python3 - "$REPO_ROOT/config/mobile-release-approval-policy.json" <<'PY_OWNER_POLICY'
-import json,sys
-with open(sys.argv[1],encoding="utf-8") as fh:
-    print(json.load(fh)["schema_version"])
-PY_OWNER_POLICY
-)"
-  if [ "$OWNER_RELEASE_POLICY_VERSION" = "3.1" ]; then
-    OWNER_RELEASE_SIGNER_HOST="/etc/jason/owner-release/service-ed25519.private"
-    OWNER_RELEASE_SIGNER_CONTAINER="/run/jason-secrets/owner-release/service-ed25519.private"
-    OWNER_RELEASE_SIGNER_ARGS=(
-      --set-env "JASON_OWNER_RELEASE_ED25519_KEY_PATH=$OWNER_RELEASE_SIGNER_CONTAINER"
-      --add-readonly-bind "$OWNER_RELEASE_SIGNER_HOST:$OWNER_RELEASE_SIGNER_CONTAINER"
-    )
-  fi
-fi
-
 PREFLIGHT=false
 for arg in "$@"; do
   if [ "$arg" = "--preflight" ]; then
@@ -215,7 +194,6 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --add-readonly-bind "$QBO_DEV_ROLE_HOST:/run/jason-secrets/openbao/quickbooks-development/role_id" \
   --add-readonly-bind "$QBO_DEV_SECRET_HOST:/run/jason-secrets/openbao/quickbooks-development/secret_id" \
   "${QBO_PROD_ARGS[@]}" \
-  "${OWNER_RELEASE_SIGNER_ARGS[@]}" \
   --promote-image-tag jason-mcp:production \
   --rollback-image-tag jason-mcp:rollback-current \
   --health-url http://127.0.0.1:8000/healthz   "$@"

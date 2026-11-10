@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-time root-authorized Owner release signer provisioning; no deployment."""
+"""One-time root-only provision of the reviewed non-Teams Owner release signer."""
 from __future__ import annotations
 
 import argparse
@@ -12,15 +12,15 @@ import stat
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-HOST_DIR = Path("/etc/jason/owner-release")
-PRIVATE_NAME = "service-ed25519.private"
+PRIVATE_DIR = Path("/var/lib/jason/runtime-secrets/owner-release")
+TRUST_DIR = Path("/etc/jason/owner-release")
+PRIVATE_NAME = "private_key"
 PUBLIC_NAME = "verified-owner-public-key.json"
 TENANT = "f7054323-d52b-4863-8c2f-1898f0b6077c"
-OWNER_SUBJECTS = [
+SUBJECTS = [
     {"owner_oid": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
      "owner_principal": "person-entra-bee80bdcffb04c50b453c09d4d411f5f"},
     {"owner_oid": "c848022d-e13b-4457-84b0-e2f5c00dcaf6",
@@ -28,140 +28,163 @@ OWNER_SUBJECTS = [
 ]
 
 
-def canonical_public(private: Ed25519PrivateKey) -> tuple[dict, str]:
-    public_bytes = private.public_key().public_bytes(
+def policy_for(key: Ed25519PrivateKey) -> tuple[dict, str]:
+    pub = key.public_key().public_bytes(
         encoding=serialization.Encoding.Raw,
         format=serialization.PublicFormat.Raw,
     )
-    fingerprint = hashlib.sha256(public_bytes).hexdigest()
+    digest = hashlib.sha256(pub).hexdigest()
     return {
         "schema_version": "1.0",
         "authorization": "authenticated_entra_owner_exact_release",
         "organization_id": "aot",
         "tenant_id": TENANT,
-        "authorized_owner_subjects": OWNER_SUBJECTS,
-        "public_key_base64": base64.b64encode(public_bytes).decode("ascii"),
-        "public_key_sha256": fingerprint,
+        "authorized_owner_subjects": SUBJECTS,
+        "public_key_base64": base64.b64encode(pub).decode("ascii"),
+        "public_key_sha256": digest,
         "standing_authority": False,
-    }, fingerprint
+    }, digest
 
 
-def private_bytes(private: Ed25519PrivateKey) -> bytes:
-    return private.private_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PrivateFormat.Raw,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-
-
-def exclusive_file(path: Path, content: bytes, mode: int, uid: int, gid: int) -> None:
-    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY |
+def save_exclusive(path: Path, value: bytes, mode: int, uid: int, gid: int) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
                  getattr(os, "O_NOFOLLOW", 0), mode)
     try:
         os.fchown(fd, uid, gid)
         os.fchmod(fd, mode)
-        with os.fdopen(fd, "wb", closefd=False) as out:
-            out.write(content)
-            out.flush()
+        with os.fdopen(fd, "wb", closefd=False) as stream:
+            stream.write(value)
+            stream.flush()
             os.fsync(fd)
     finally:
         os.close(fd)
 
 
-def validate(dirpath: Path, uid: int, root_required: bool) -> str:
-    priv = dirpath / PRIVATE_NAME
-    pub = dirpath / PUBLIC_NAME
-    meta = dirpath.lstat()
-    private_meta = priv.lstat()
-    public_meta = pub.lstat()
-    if (dirpath.is_symlink() or not stat.S_ISDIR(meta.st_mode)
-            or stat.S_IMODE(meta.st_mode) & 0o022
-            or priv.is_symlink() or pub.is_symlink()
-            or not stat.S_ISREG(private_meta.st_mode)
-            or not stat.S_ISREG(public_meta.st_mode)
-            or private_meta.st_uid != uid
-            or stat.S_IMODE(private_meta.st_mode) != 0o400
-            or stat.S_IMODE(public_meta.st_mode) & 0o022
-            or (root_required and (meta.st_uid != 0 or public_meta.st_uid != 0))):
+def validate(private_dir: Path, trust_dir: Path, uid: int, root: bool) -> str:
+    priv, pub = private_dir / PRIVATE_NAME, trust_dir / PUBLIC_NAME
+    d_priv, d_pub = private_dir.lstat(), trust_dir.lstat()
+    s_priv, s_pub = priv.lstat(), pub.lstat()
+    if (any(x.is_symlink() for x in (private_dir, trust_dir, priv, pub))
+            or any(not stat.S_ISDIR(x.st_mode) for x in (d_priv, d_pub))
+            or any(x.st_mode & 0o022 for x in (d_priv, d_pub))
+            or not stat.S_ISREG(s_priv.st_mode)
+            or not stat.S_ISREG(s_pub.st_mode)
+            or s_priv.st_uid != uid
+            or stat.S_IMODE(s_priv.st_mode) != 0o400
+            or stat.S_IMODE(s_pub.st_mode) & 0o022
+            or (root and (d_priv.st_uid != 0 or d_pub.st_uid != 0
+                          or s_pub.st_uid != 0))):
         raise PermissionError("OWNER_SIGNER_FILE_SECURITY_INVALID")
     raw = priv.read_bytes()
     if len(raw) != 32:
         raise ValueError("OWNER_SIGNER_PRIVATE_KEY_LENGTH_INVALID")
-    private = Ed25519PrivateKey.from_private_bytes(raw)
-    expected, fingerprint = canonical_public(private)
+    expected, digest = policy_for(Ed25519PrivateKey.from_private_bytes(raw))
     if json.loads(pub.read_text(encoding="utf-8")) != expected:
-        raise ValueError("OWNER_SIGNER_TRUST_POLICY_MISMATCH")
-    return fingerprint
+        raise ValueError("OWNER_SIGNER_ROOT_TRUST_MISMATCH")
+    return digest
 
 
-def provision(dirpath: Path, uid: int, gid: int, root_required: bool) -> tuple[str, str]:
-    if root_required and os.geteuid() != 0:
-        raise PermissionError("OWNER_SIGNER_REQUIRES_INTERACTIVE_ROOT")
-    if dirpath.is_symlink():
+def ensure_directory(directory: Path, mode: int, uid: int, gid: int) -> None:
+    if directory.is_symlink():
         raise PermissionError("OWNER_SIGNER_DIRECTORY_SYMLINK")
-    if dirpath.exists():
-        meta = dirpath.lstat()
-        if not stat.S_ISDIR(meta.st_mode) or stat.S_IMODE(meta.st_mode) & 0o022:
+    if directory.exists():
+        info = directory.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o022
+                or info.st_uid != uid):
             raise PermissionError("OWNER_SIGNER_DIRECTORY_UNSAFE")
-        if root_required and meta.st_uid != 0:
-            raise PermissionError("OWNER_SIGNER_DIRECTORY_NOT_ROOT_OWNED")
     else:
-        dirpath.mkdir(mode=0o700, parents=False)
-    priv = dirpath / PRIVATE_NAME
-    pub = dirpath / PUBLIC_NAME
-    if priv.exists() or pub.exists() or priv.is_symlink() or pub.is_symlink():
+        directory.mkdir(mode=mode)
+        os.chown(directory, uid, gid)
+        os.chmod(directory, mode)
+
+
+def provision(private_dir: Path, trust_dir: Path, uid: int, gid: int,
+              root: bool) -> tuple[str, str]:
+    if root and os.geteuid() != 0:
+        raise PermissionError("OWNER_SIGNER_ROOT_REQUIRED")
+    if root:
+        base = trust_dir.parent
+        info = base.lstat()
+        if (base.is_symlink() or info.st_uid != 0
+                or not stat.S_ISDIR(info.st_mode)
+                or stat.S_IMODE(info.st_mode) not in (0o700, 0o711)):
+            raise PermissionError("OWNER_SIGNER_ETC_JASON_BASE_MODE_UNEXPECTED")
+    ensure_directory(private_dir, 0o750 if root else 0o700,
+                     0 if root else uid, gid)
+    ensure_directory(trust_dir, 0o755 if root else 0o700,
+                     0 if root else uid, 0 if root else gid)
+    priv, pub = private_dir / PRIVATE_NAME, trust_dir / PUBLIC_NAME
+    if (priv.exists() or pub.exists() or priv.is_symlink()
+            or pub.is_symlink()):
         if not (priv.exists() and pub.exists()):
-            raise PermissionError("OWNER_SIGNER_INCOMPLETE_PRIOR_PROVISION")
-        return "ALREADY_PROVISIONED", validate(dirpath, uid, root_required)
-    private = Ed25519PrivateKey.generate()
-    policy, fingerprint = canonical_public(private)
-    payload = (json.dumps(policy, sort_keys=True, indent=2) + "\n").encode()
-    exclusive_file(priv, private_bytes(private), 0o400, uid, gid)
-    try:
-        exclusive_file(pub, payload, 0o644, 0 if root_required else uid, 0 if root_required else gid)
-        validate(dirpath, uid, root_required)
-        receipt = {
-            "schema_version": "1.0",
-            "status": "provisioned",
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-            "owner_signer_public_key_sha256": fingerprint,
-            "action": "provision_exact_owner_oauth_release_signer_only",
-            "private_key_exported": False,
-            "production_services_modified": False,
-            "standing_release_authority": False,
-        }
-        exclusive_file(dirpath / "provision-receipt.json",
-                       (json.dumps(receipt, sort_keys=True) + "\n").encode(),
-                       0o600, 0 if root_required else uid, 0 if root_required else gid)
-    except Exception:
-        if not pub.exists():
-            priv.unlink()
-        raise
-    return "PROVISIONED", fingerprint
+            raise PermissionError("OWNER_SIGNER_INCOMPLETE_PREVIOUS_PROVISION")
+        status = "ALREADY_PROVISIONED"
+        digest = validate(private_dir, trust_dir, uid, root)
+    else:
+        key = Ed25519PrivateKey.generate()
+        policy, digest = policy_for(key)
+        secret = key.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        save_exclusive(priv, secret, 0o400, uid, gid)
+        try:
+            save_exclusive(pub,
+                           (json.dumps(policy, sort_keys=True, indent=2) + "\n").encode(),
+                           0o644, 0 if root else uid, 0 if root else gid)
+            validate(private_dir, trust_dir, uid, root)
+        except Exception:
+            if not pub.exists():
+                priv.unlink()
+            raise
+        status = "PROVISIONED"
+    if root:
+        # Search/execute only; do not expose directory listings or change
+        # existing root-owned secrets. Needed for unprivileged public-key check.
+        os.chmod(trust_dir.parent, 0o711)
+        receipt = trust_dir / "provision-receipt.json"
+        if not receipt.exists():
+            record = {
+                "schema_version": "1.0",
+                "status": "provisioned",
+                "when_utc": datetime.now(timezone.utc).isoformat(),
+                "owner_release_signer_public_sha256": digest,
+                "private_key_exported": False,
+                "standing_release_authority": False,
+                "production_services_changed": False,
+                "etc_jason_directory_mode": "0711",
+            }
+            save_exclusive(receipt,
+                           (json.dumps(record, sort_keys=True) + "\n").encode(),
+                           0o600, 0, 0)
+    return status, digest
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--self-test", action="store_true")
-    mode.add_argument("--provision", action="store_true")
-    options = parser.parse_args()
-    if options.self_test:
-        with tempfile.TemporaryDirectory(prefix="jason-owner-signer-test-") as tmp:
-            root = Path(tmp) / "owner-release"
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--self-test", action="store_true")
+    group.add_argument("--provision", action="store_true")
+    args = parser.parse_args()
+    if args.self_test:
+        with tempfile.TemporaryDirectory(prefix="jason-signer-selftest-") as tmp:
+            parent = Path(tmp)
+            priv = parent / "private"
+            trust = parent / "trust"
             uid, gid = os.getuid(), os.getgid()
-            result, fingerprint = provision(root, uid, gid, False)
-            assert result == "PROVISIONED"
-            result2, fingerprint2 = provision(root, uid, gid, False)
-            assert result2 == "ALREADY_PROVISIONED" and fingerprint == fingerprint2
-            assert json.loads((root / PUBLIC_NAME).read_text())["standing_authority"] is False
+            first, h = provision(priv, trust, uid, gid, False)
+            again, h2 = provision(priv, trust, uid, gid, False)
+            assert first == "PROVISIONED" and again == "ALREADY_PROVISIONED"
+            assert h == h2
+            assert not json.loads((trust / PUBLIC_NAME).read_text())["standing_authority"]
             print("OWNER_SIGNER_SELF_TEST=PASS")
         return
     al = pwd.getpwnam("al")
-    result, fingerprint = provision(HOST_DIR, al.pw_uid, al.pw_gid, True)
-    print("OWNER_SIGNER_PROVISION_STATUS=" + result)
-    print("OWNER_SIGNER_PUBLIC_SHA256=" + fingerprint)
-    print("ROOT_TRUST_POLICY_VERIFIED=PASS")
+    result, digest = provision(PRIVATE_DIR, TRUST_DIR, al.pw_uid, al.pw_gid, True)
+    print("OWNER_SIGNER_STATUS=" + result)
+    print("OWNER_SIGNER_PUBLIC_SHA256=" + digest)
+    print("ROOT_TRUST_READBACK=PASS")
     print("PRODUCTION_SERVICES_CHANGED=NO")
 
 
