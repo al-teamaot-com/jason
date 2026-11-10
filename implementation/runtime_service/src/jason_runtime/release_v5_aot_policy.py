@@ -63,17 +63,29 @@ class AotV5BrowserPolicy:
     requester_oid: str
     owner_identity_id: str
     organization_id: str
+    # The existing-role-MFA alternative is OFF unless an exact V5 root
+    # policy explicitly selects it after independent security review.
+    mfa_profile: str = "auth_context"
 
     @classmethod
     def parse(cls, data: Any, *, admin: tuple[str, str],
               regular: tuple[str, str], owner_identity_id: str,
               organization_id: str) -> "AotV5BrowserPolicy":
-        if not isinstance(data, dict) or set(data) != {
+        base_fields={
             "browser_client_id", "auth_context_id",
             "ca_enforcement_receipt_sha256", "signer_public_key_sha256",
             "callback_uri", "notice_uri", "channel", "teams_notice_only",
             "separate_admin_browser_login", "owner_role", "no_admin_teams_license",
-        }:
+        }
+        # Opt-in alternative: reuse independently attested, existing admin
+        # role MFA without creating any new Conditional Access policy or
+        # licensing the separated administrator for Teams.
+        profile=(data.get("mfa_profile") if isinstance(data,dict)
+                 else None) or "auth_context"
+        expected=(base_fields if profile=="auth_context"
+                  else (base_fields-{"auth_context_id"}|{"mfa_profile"})
+                  if profile=="existing_admin_role_mfa" else set())
+        if not isinstance(data, dict) or set(data) != expected:
             raise PermissionError("V5_REVIEWED_POLICY_FIELDS_INVALID")
         if (data.get("channel") != CHANNEL
                 or data.get("owner_role") != owner_identity_id
@@ -94,9 +106,12 @@ class AotV5BrowserPolicy:
             client = str(uuid.UUID(data["browser_client_id"]))
         except (ValueError, TypeError, AttributeError) as exc:
             raise PermissionError("V5_REVIEWED_BROWSER_CLIENT_REQUIRED") from exc
+        context=data.get("auth_context_id")
         if (client != data["browser_client_id"]
-                or not isinstance(data["auth_context_id"], str)
-                or not AUTH_CONTEXT.fullmatch(data["auth_context_id"])
+                or (profile=="auth_context" and
+                    (not isinstance(context,str)
+                     or not AUTH_CONTEXT.fullmatch(context)))
+                or (profile=="existing_admin_role_mfa" and context is not None)
                 or any(not isinstance(data[key], str)
                        or not SHA256.fullmatch(data[key])
                        or data[key] == "0" * 64
@@ -107,10 +122,10 @@ class AotV5BrowserPolicy:
                 != _reviewed_origin(data["notice_uri"], NOTICE_PATH)):
             raise PermissionError("V5_REVIEWED_APPROVAL_ORIGIN_MISMATCH")
         return cls(
-            client, data["auth_context_id"],
+            client, context,
             data["ca_enforcement_receipt_sha256"],
             data["signer_public_key_sha256"],
             data["callback_uri"], data["notice_uri"],
             admin[0], admin[1], regular[1],
-            owner_identity_id, organization_id,
+            owner_identity_id, organization_id, profile,
         )

@@ -34,3 +34,42 @@ PRODUCTION BOOTSTRAP: final immutable release SHA, reviewed manifest and scope S
 ROLLBACK: restore byte-identical V4 policy, prior runtime approval mode, and production freeze through the native transaction; independently review and reverse only newly created Entra objects if unused, without touching existing app credentials, Conditional Access policies, or immutable evidence.
 
 No approval request has been issued by this document. No existing governance is weakened.
+
+
+## 2026-11-10 no-license existing-Entra-MFA alternative (SOURCE ONLY)
+
+The Owner explicitly rejected assigning any license to the separate
+al_admin@teamaot.com account. Preserve this constraint. Reusing or rotating
+the existing AOT_OpenClaw app is also excluded.
+
+Independent Microsoft Graph delegated READ (no tenant writes) found that
+the existing enabled Conditional Access policy **Require multifactor
+authentication for admins** (policy ID
+12c939c7-b1d9-4573-b4b5-a0ff74d95e4e) targets **All** cloud
+applications and all client application types, requires MFA as the only
+grant control, and has no user, role, application, location or platform
+exceptions. Read-only directory role data establishes that the exact admin
+OID c848022d-e13b-4457-84b0-e2f5c00dcaf6 has an assigned global
+administrator role (62e90394-69f5-4237-9190-012177145e10), among seven
+matching roles. Live read-only preflight printed
+EXISTING_ROLE_MFA_POLICY_CANDIDATE=PASS and LICENSE_CHANGE=NONE.
+
+A new, separately root-reviewed opt-in V5 source policy profile
+existing_admin_role_mfa permits a **proposed** route that does not create
+an authentication context or new CA rule. It still requires the same
+separate admin Entra OIDC/PKCE login, **fresh signed ID token with an actual
+amr=mfa claim and recent auth_time**, fixed admin OID and tenant, 24-hour
+maximum independently pinned root receipt of the exact existing CA
+policy plus role assignment, distinct existing ApprovalRequest ledger,
+one-use signed decision, signed host consumer and original root gates.
+The application registration must request optional ID-token claims
+auth_time and amr; missing claims fail closed. Every policy and receipt
+input is SHA-pinned and read back independently.
+
+This is NOT proof that a real admin-browser sign-in has succeeded.
+It is not approval to change tenant, activate either V5 policy profile,
+change root policy, remove holds, merge or deploy. The existing V4
+production policy remains unchanged. The owner must still approve one
+exact-release Teams-governed bootstrap; the alternative removes the
+unnecessary new CA configuration and license dependency, not the
+bootstrap authority boundary.

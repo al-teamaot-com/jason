@@ -112,6 +112,34 @@ def test_admin_signin_pkce_tenant_scoped_not_admin_teams(fixture):
     assert ADMIN not in url and REGULAR not in url
 
 
+def test_existing_admin_role_mfa_pkce_requires_signed_recent_mfa(fixture):
+    url=login_authorization_url(
+        route=ROUTE,login=fixture.login,client_id=CLIENT,
+        redirect_uri=REDIRECT,required_auth_context=None,
+    )
+    import json
+    claims=json.loads(parse_qs(urlsplit(url).query)["claims"][0])
+    assert claims=={"id_token":{
+        "amr":{"essential":True},"auth_time":{"essential":True},
+    }}
+    def authenticate(token):
+        return verified_admin_signin(
+            id_token=token,login=fixture.login,returned_state=fixture.login.state,
+            approval=APPROVAL,route=ROUTE,app_client_id=CLIENT,
+            required_auth_context=None,now=NOW+timedelta(seconds=20),
+            jwk_client=fixture.key,
+        )
+    proof=authenticate(fixture.mint(amr=["pwd","mfa"],acrs=[]))
+    assert proof["authenticated_admin_oid"]==ADMIN
+    assert proof["release_authorized"] is False
+    for methods in ([],["pwd"],["otp"],"mfa",None):
+        with pytest.raises(EntraStepUpDenied,match="PRIVILEGED_ADMIN_SESSION"):
+            authenticate(fixture.mint(amr=methods,acrs=[]))
+    with pytest.raises(EntraStepUpDenied,match="PRIVILEGED_ADMIN_SESSION"):
+        authenticate(fixture.mint(amr=["mfa"],
+                    auth_time=int((NOW-timedelta(hours=1)).timestamp())))
+
+
 def test_verified_admin_token_is_only_identity_evidence_not_release_authority(fixture):
     proof=fixture.verify()
     assert proof["authenticated_admin_oid"] == ADMIN

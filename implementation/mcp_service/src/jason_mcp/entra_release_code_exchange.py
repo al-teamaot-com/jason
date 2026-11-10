@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import re
 from typing import Mapping
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -55,7 +56,10 @@ def redeem_admin_browser_code(
     if (not UUID.fullmatch(app_client_id)
             or not _session_is_valid(approval, login, now)
             or not hmac.compare_digest(login.state, returned_state)
-            or not required_auth_context):
+            or (required_auth_context is not None
+                and (type(required_auth_context) is not str
+                     or not re.fullmatch(r"c[1-9][0-9]?",
+                                         required_auth_context)))):
         raise EntraStepUpDenied("ADMIN_OAUTH_SESSION_OR_POLICY_INVALID")
     endpoint=(
         "https://login.microsoftonline.com/"

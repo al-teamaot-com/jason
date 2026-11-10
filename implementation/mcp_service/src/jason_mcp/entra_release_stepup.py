@@ -188,10 +188,19 @@ def login_authorization_url(
     login.validate()
     if not UUID.fullmatch(client_id) or redirect_uri != route.registered_redirect_uri:
         raise EntraStepUpDenied("REVIEWED_ENTRA_APP_REDIRECT_REQUIRED")
-    if (not isinstance(required_auth_context, str)
-            or not re.fullmatch(r"c[1-9][0-9]?", required_auth_context)):
+    if (required_auth_context is not None
+            and (not isinstance(required_auth_context,str)
+                 or not re.fullmatch(r"c[1-9][0-9]?",required_auth_context))):
         raise EntraStepUpDenied("REVIEWED_ADMIN_STEP_UP_POLICY_MISSING")
     challenge = _base64url(sha256(login.code_verifier.encode("ascii")).digest())
+    # The root-reviewed existing-role-MFA option requests Microsoft-signed
+    # amr/auth_time rather than a tenant auth-context that does not exist.
+    # The token validator MUST require an actual MFA claim in this mode.
+    id_token_claims=(
+        {"acrs":{"essential":True,"value":required_auth_context}}
+        if required_auth_context is not None else
+        {"amr":{"essential":True},"auth_time":{"essential":True}}
+    )
     return (
         f"https://login.microsoftonline.com/{route.tenant_id}/oauth2/v2.0/authorize?"
         + urlencode({
@@ -206,14 +215,10 @@ def login_authorization_url(
             "code_challenge_method": "S256",
             "prompt": "login",
             "max_age": "300",
-            "claims": json.dumps({
-                "id_token": {
-                    "acrs": {
-                        "essential": True,
-                        "value": required_auth_context,
-                    },
-                },
-            }, separators=(",", ":"), sort_keys=True),
+            "claims": json.dumps(
+                {"id_token":id_token_claims},
+                separators=(",", ":"), sort_keys=True,
+            ),
         })
     )
 
@@ -269,8 +274,9 @@ def verified_admin_signin(
         raise EntraStepUpDenied("RELEASE_BROWSER_SESSION_OR_STATE_MISMATCH")
     if not UUID.fullmatch(app_client_id):
         raise EntraStepUpDenied("ENTRA_CLIENT_ID_INVALID")
-    if (not isinstance(required_auth_context, str)
-            or not re.fullmatch(r"c[1-9][0-9]?", required_auth_context)):
+    if (required_auth_context is not None
+            and (not isinstance(required_auth_context,str)
+                 or not re.fullmatch(r"c[1-9][0-9]?",required_auth_context))):
         raise EntraStepUpDenied("REVIEWED_ADMIN_STEP_UP_POLICY_MISSING")
     if not isinstance(id_token, str) or not 40 <= len(id_token) <= 16000:
         raise EntraStepUpDenied("ENTRA_ID_TOKEN_INVALID")
@@ -298,8 +304,12 @@ def verified_admin_signin(
             or not hmac.compare_digest(str(claims.get("nonce") or ""), login.nonce)
             or type(auth_time) is not int
             or not 0 <= int(now.timestamp()) - auth_time <= 300
-            or not isinstance(claims.get("acrs"), list)
-            or required_auth_context not in claims["acrs"]):
+            or (required_auth_context is not None and
+                (not isinstance(claims.get("acrs"),list)
+                 or required_auth_context not in claims["acrs"]))
+            or (required_auth_context is None and
+                (not isinstance(claims.get("amr"),list)
+                 or "mfa" not in claims["amr"]))):
         raise EntraStepUpDenied("PRIVILEGED_ADMIN_SESSION_NOT_VERIFIED")
     return {
         "authenticated_admin_oid": route.admin_approver_oid,

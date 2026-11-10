@@ -29,6 +29,23 @@ def real_mfa_policy():
     }
 
 
+def test_raw_microsoft_graph_grant_controls_supported():
+    p=real_mfa_policy()
+    p["grantControls"]=p.pop("grant_controls")
+    candidate=assess_exact_admin_auth_context_mfa(
+        policies=[p], admin_oid=ADMIN, auth_context_id="c1")
+    assert candidate["provider_policy_id"]==POLICY
+    assert candidate["approval_authorized"] is False
+
+
+def test_conflicting_graph_and_legacy_grants_rejected():
+    p=real_mfa_policy()
+    p["grantControls"]={"operator":"OR","builtInControls":[]}
+    with pytest.raises(PermissionError, match="V5_CA_POLICY_READ_NOT_VERIFIABLE"):
+        assess_exact_admin_auth_context_mfa(
+            policies=[p], admin_oid=ADMIN, auth_context_id="c1")
+
+
 def test_exact_context_mfa_candidate_is_not_release_approval():
     candidate = assess_exact_admin_auth_context_mfa(
         policies=[real_mfa_policy()], admin_oid=ADMIN, auth_context_id="c1")
