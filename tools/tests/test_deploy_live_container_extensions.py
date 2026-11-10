@@ -236,3 +236,101 @@ def test_unknown_health_runtime_refuses_without_execution(monkeypatch):
     with pytest.raises(ValueError,match="unsupported"):
         deploy._health("jason-teams-gateway","http://127.0.0.1:3979/healthz",1,0,"shell")
     assert calls==[]
+
+
+def test_owner_private_signer_bind_is_readonly_and_removed_from_v2_rollback(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    prior = tmp_path / "existing"
+    prior.write_text("ordinary existing bind")
+    signer = tmp_path / "private_key"
+    signer.write_bytes(b"x" * 32)
+    current = _live(prior)
+    current["Mounts"].append({
+        "Type": "bind",
+        "Source": str(signer),
+        "Destination": "/run/jason-secrets/owner-release/private_key",
+        "RW": False,
+    })
+    monkeypatch.setattr(deploy, "_inspect", lambda name: current)
+    command, _, _, _ = deploy._build_create_command(
+        live="jason-mcp-pilot",
+        image="jason-mcp:rollback-current",
+        source_revision="v2",
+        harden=True,
+        set_env=("JASON_OWNER_RELEASE_ED25519_KEY_PATH=",),
+        omit_readonly_bind_destinations=(
+            "/run/jason-secrets/owner-release/private_key",
+        ),
+    )
+    assert f"type=bind,src={prior},dst=/run/existing,readonly" in command
+    assert not any(str(signer) in part for part in command)
+    assert not any("/owner-release/private_key" in part for part in command)
+
+
+def test_cannot_omit_owner_signer_if_mount_is_writable(monkeypatch, tmp_path):
+    prior = tmp_path / "existing"
+    prior.write_text("data")
+    current = _live(prior)
+    current["Mounts"].append({
+        "Type": "bind",
+        "Source": str(prior),
+        "Destination": "/run/jason-secrets/owner-release/private_key",
+        "RW": True,
+    })
+    monkeypatch.setattr(deploy, "_inspect", lambda name: current)
+    with pytest.raises(ValueError, match="cannot omit writable"):
+        deploy._build_create_command(
+            live="jason-mcp-pilot",
+            image="jason-mcp:rollback-current",
+            source_revision="v2",
+            harden=True,
+            omit_readonly_bind_destinations=(
+                "/run/jason-secrets/owner-release/private_key",
+            ),
+        )
+
+
+@pytest.mark.parametrize("live,image,env", [
+    ("jason-runtime", "jason-mcp:rollback-current",
+     ["JASON_OWNER_RELEASE_ED25519_KEY_PATH="]),
+    ("jason-mcp-pilot", "jason-mcp:production",
+     ["JASON_OWNER_RELEASE_ED25519_KEY_PATH="]),
+    ("jason-mcp-pilot", "jason-mcp:rollback-current", []),
+])
+def test_secret_mount_can_only_be_omitted_for_exact_unprivileged_mcp_rollback(
+    monkeypatch, live, image, env,
+):
+    import sys
+
+    cmd = [
+        "deploy_live_container.py",
+        "--live", live, "--image", image,
+        "--rollback", "some-rollback-container",
+        "--source-revision", "b" * 40,
+        "--health-url", "http://127.0.0.1:8000/healthz",
+        "--omit-owner-release-signer-bind-on-rollback",
+    ]
+    for item in env:
+        cmd.extend(["--set-env", item])
+    monkeypatch.setattr(sys, "argv", cmd)
+    with pytest.raises(SystemExit) as error:
+        deploy.main()
+    assert error.value.code == 2
+
+
+def test_native_mcp_source_requires_immutable_signer_and_root_trust():
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "infrastructure/jason-mcp/production-deploy.sh"
+    ).read_text()
+    assert 'OWNER_SIGNER_HOST="/var/lib/jason/runtime-secrets/owner-release/private_key"' in source
+    assert 'OWNER_SIGNER_PUBLIC_POLICY="/etc/jason/owner-release/verified-owner-public-key.json"' in source
+    assert 'OWNER_SIGNER_OWNER_MODE' in source
+    assert 'MCP_OWNER_SIGNER_ROOT_TRUST_PRECHECK=PASS' in source
+    assert 'MCP_OWNER_RELEASE_SIGNER_MOUNT=PASS' in source
+    assert '--omit-owner-release-signer-bind-on-rollback' in source
+    assert '--add-readonly-bind "$OWNER_SIGNER_HOST:$OWNER_SIGNER_CONTAINER"' in source
+    assert 'JASON_OWNER_RELEASE_ED25519_KEY_PATH=' in source
+    assert "read_service_owner_signing_key" in source
+    assert "read_pinned_root_owner_public_key" in source

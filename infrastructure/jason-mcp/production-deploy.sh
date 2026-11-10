@@ -172,6 +172,51 @@ if [ -f "$QBO_PROD_ROLE_HOST" ] && [ -f "$QBO_PROD_SECRET_HOST" ]; then
   )
 fi
 
+# The independently approved Owner signing secret is provisioned OUTSIDE
+# Git and Docker builds. A missing or unsafe signer denies activation.
+OWNER_SIGNER_HOST="/var/lib/jason/runtime-secrets/owner-release/private_key"
+OWNER_SIGNER_CONTAINER="/run/jason-secrets/owner-release/private_key"
+OWNER_SIGNER_ARGS=()
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  # A V2 rollback must not retain the new signing secret or live auth path.
+  OWNER_SIGNER_ARGS=(
+    --set-env "JASON_OWNER_RELEASE_ED25519_KEY_PATH="
+    --omit-owner-release-signer-bind-on-rollback
+  )
+else
+  if [ -L "$OWNER_SIGNER_HOST" ] || [ ! -f "$OWNER_SIGNER_HOST" ]; then
+    echo "DENIED: Owner release signing key has not been provisioned" >&2
+    exit 2
+  fi
+  OWNER_SIGNER_OWNER_MODE="$(stat -c '%u:%g:%a' "$OWNER_SIGNER_HOST")"
+  if [ "$OWNER_SIGNER_OWNER_MODE" != "1000:1000:400" ] ||
+     [ "$(stat -c '%s' "$OWNER_SIGNER_HOST")" != "32" ]; then
+    echo "DENIED: Owner signing key mode, UID or exact Ed25519 length invalid" >&2
+    exit 2
+  fi
+  # Source-key must match the separately root-owned policy's pinned
+  # public key. This is a non-mutating proof before Docker replacement,
+  # including during --preflight. Never print private bytes.
+  OWNER_SIGNER_PUBLIC_POLICY="/etc/jason/owner-release/verified-owner-public-key.json"
+  PYTHONPATH="$REPO_ROOT/implementation" python3 - "$OWNER_SIGNER_HOST" "$OWNER_SIGNER_PUBLIC_POLICY" <<'PY_OWNER_SIGNER'
+import sys
+from pathlib import Path
+from kernel.signed_owner_release import (
+    read_pinned_root_owner_public_key, read_service_owner_signing_key,
+    public_key_sha256,
+)
+private = read_service_owner_signing_key(Path(sys.argv[1]))
+trusted = read_pinned_root_owner_public_key(Path(sys.argv[2]))
+if public_key_sha256(private.public_key()) != public_key_sha256(trusted):
+    raise SystemExit("DENIED: Owner signer differs from root-approved public key")
+print("MCP_OWNER_SIGNER_ROOT_TRUST_PRECHECK=PASS")
+PY_OWNER_SIGNER
+  OWNER_SIGNER_ARGS=(
+    --set-env "JASON_OWNER_RELEASE_ED25519_KEY_PATH=$OWNER_SIGNER_CONTAINER"
+    --add-readonly-bind "$OWNER_SIGNER_HOST:$OWNER_SIGNER_CONTAINER"
+  )
+fi
+
 PREFLIGHT=false
 for arg in "$@"; do
   if [ "$arg" = "--preflight" ]; then
@@ -194,10 +239,15 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --add-readonly-bind "$QBO_DEV_ROLE_HOST:/run/jason-secrets/openbao/quickbooks-development/role_id" \
   --add-readonly-bind "$QBO_DEV_SECRET_HOST:/run/jason-secrets/openbao/quickbooks-development/secret_id" \
   "${QBO_PROD_ARGS[@]}" \
+  "${OWNER_SIGNER_ARGS[@]}" \
   --promote-image-tag jason-mcp:production \
   --rollback-image-tag jason-mcp:rollback-current \
   --health-url http://127.0.0.1:8000/healthz   "$@"
 
 if [ "$PREFLIGHT" != "true" ]; then
   docker exec -i jason-mcp-pilot python -c 'import jason_mcp.server as s; x=s.jason_mcp_status(); assert x["status"]=="ok"; assert x["governed_execution"]=="central-orchestrator"; assert x["generic_execution_tool"] is True; assert x["direct_provider_access"] is False; print("MCP_GOVERNANCE_POSTCHECK=PASS")'
+  if [ "$IMAGE" != "jason-mcp:rollback-current" ]; then
+    # Verify the 0400 mount in the unprivileged MCP process without logging bytes.
+    docker exec -i jason-mcp-pilot python -c 'import os,stat;from pathlib import Path;from kernel.signed_owner_release import read_service_owner_signing_key;p=Path(os.environ["JASON_OWNER_RELEASE_ED25519_KEY_PATH"]);s=p.lstat();assert not p.is_symlink() and stat.S_ISREG(s.st_mode) and stat.S_IMODE(s.st_mode)==0o400 and s.st_uid==os.geteuid()==1000;read_service_owner_signing_key(p);print("MCP_OWNER_RELEASE_SIGNER_MOUNT=PASS")'
+  fi
 fi
