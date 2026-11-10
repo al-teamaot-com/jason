@@ -5233,9 +5233,22 @@ def _component_approval_owner() -> tuple[str, str]:
 
 
 def _release_approval_owner() -> tuple[str, str]:
-    principal, organization, _, _ = _authenticated_write_identity()
-    owners = approval_owner_identities()
-    if not owners or principal not in owners:
+    # Unlike global authority-grant administration, release approval may be
+    # performed by the exact licensed Owner's active Entra OAuth subject. The
+    # Entra/Jason identity middleware above independently verifies bearer
+    # signature, tenant, expiry and active binding before this decision.
+    from jason_mcp.release_owner_identity import authorized_release_owner
+
+    principal, organization, assurance, _ = _authenticated_write_identity()
+    token = get_access_token()
+    claims = (token.claims or {}) if token is not None else None
+    if not authorized_release_owner(
+        principal=principal,
+        organization_id=organization,
+        assurance=assurance,
+        verified_token_claims=claims,
+        existing_owner_identities=approval_owner_identities(),
+    ):
         raise PermissionError("RELEASE_APPROVAL_OWNER_REQUIRED")
     return principal, organization
 
