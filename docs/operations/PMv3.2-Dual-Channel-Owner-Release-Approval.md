@@ -530,3 +530,35 @@ URL/action rendering, no admin/regular OIDs or other identities in the card,
 regular-account-only delivery, immutable request validation, and rejection
 of synthetic or mismatched delivery receipts. Actual card appearance and
 admin-sign-in acceptance require a separately approved production activation.
+
+
+## 2026-11-10 source integration and live CA preflight (non-activating)
+
+The protected V5 correction is being consolidated under draft PR #2395, with the
+already-built browser authentication and protected host signed-decision path,
+plus the independent SQLite integrity timeout recovery. PR #2378 is incorporated
+as a source prerequisite; PR #2390 provides the same bounded integrity work.
+The alternative service-originated regular-Teams-signer design in PR #2393 is
+**not** silently adopted: under the current Owner-reviewed architecture the
+regular licensed account receives a NONAPPROVING notice while the independent
+unlicensed Entra administrator authenticates in a browser to make the exact
+privileged decision. Versioned approval policy and production freeze remain
+untouched. Active parallel source work needs exact final-merge reconciliation.
+
+2026-11-10 governed Microsoft Entra Conditional Access read
+`identity.conditional.access.search` completed with 18 live policies. **Zero**
+had any `includeAuthenticationContextClassReferences` target. Six of seven
+enabled MFA policies explicitly excluded the privileged admin object; the
+remaining role-targeted policy was not proven applicable to an exact live
+sign-in and does not protect an authentication context. Accordingly the
+independent CA/MFA V5 attestation must remain **denied** and no live V5 browser
+approval or root policy migration can be claimed. Do not infer enforcement
+from an `acrs` claim, a policy name, or an unsuccessful provider read.
+
+Focused current-source browser/CA/Teams-notice/host/SQLite tests passed
+with an isolated previously provisioned test dependency path and no
+provider mutation. The mandatory GitHub integration check separately
+requires explicit overlap coordination in PR metadata; overlapping edits
+must never be applied blindly or used as a pretext to bypass release locks.
+No Teams-licensing, production policy, customer, tenant, freeze, or signed
+approval state was changed by this source review.
