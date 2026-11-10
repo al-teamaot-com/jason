@@ -21,7 +21,6 @@ from implementation.runtime_service.tests.test_admin_separated_release_roles imp
     role_binding, separated_policy_file,
 )
 from implementation.runtime_service.tests.test_mobile_release_approval import click
-from release_mobile_approval_consumer import _authorized_policy_owner_identity
 
 
 def owner_teams_policy_file(tmp_path):
@@ -104,6 +103,13 @@ def test_regular_owner_card_routes_by_exact_object_id_not_email(tmp_path):
 
 
 def test_host_rechecks_exact_normal_owner_and_does_not_trust_mutable_email(tmp_path):
+    # The host source is not on the runtime-only CI PYTHONPATH.
+    import sys
+    from pathlib import Path
+    tools_dir = str(Path(__file__).resolve().parents[3] / "tools")
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    from release_mobile_approval_consumer import _authorized_policy_owner_identity
     policy = read_mobile_release_policy(owner_teams_policy_file(tmp_path))
     regular = binding(REGULAR)
     regular.email_address = "changed-alias@teamaot.com"
@@ -157,6 +163,11 @@ def test_runtime_keeps_admin_grants_but_sends_to_regular_owner(tmp_path):
 
 
 def test_host_and_runtime_validate_same_policy_and_reject_mutation(tmp_path):
+    import sys
+    from pathlib import Path
+    tools_dir = str(Path(__file__).resolve().parents[3] / "tools")
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
     from release_manager_host_runner import (
         ReleaseManagerError, _validated_mobile_release_policy,
         _reviewed_mobile_release_mode,
