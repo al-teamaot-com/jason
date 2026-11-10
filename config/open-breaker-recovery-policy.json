@@ -30,7 +30,7 @@
       "id": "provider_identity_and_authority_recovery",
       "change_class": "release_blocker",
       "risk_profile": "production_control_core",
-      "max_changed_files": 40,
+      "max_changed_files": 48,
       "drift_problems": [
         {
           "kind": "failed_system_unit",
@@ -50,26 +50,18 @@
         }
       ],
       "required_changed_files": [
+        "config/mobile-release-approval-policy.json",
+        "implementation/runtime_service/src/jason_runtime/composition.py",
+        "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
+        "infrastructure/jason-runtime/production-deploy.sh",
         "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service",
         "tools/openclaw_authority_health_snapshot.py",
-        "tools/openclaw_authority_operational_health.py",
-        "tools/reconcile_production_host_services.sh",
+        "tools/production_drift_guard.py",
         "tools/release_manager_host_runner.py",
-        "implementation/orchestrator/governed_execution_ledger.py",
-        "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
-        "implementation/runtime_service/src/jason_runtime/autonomy_worker_supervisor.py",
-        "implementation/runtime_service/src/jason_runtime/composition.py",
-        "implementation/runtime_service/src/jason_runtime/teams_message_send.py",
-        "tools/engineering_pipeline.py"
+        "tools/release_mobile_approval_consumer.py"
       ],
       "runtime_health": {
-        "mode": "healthy_or_ticket_worker_provider_auth_degraded",
-        "docker_health": "unhealthy",
-        "http_status": 503,
-        "component_status": "degraded",
-        "ticket_worker_status": "degraded",
-        "ticket_worker": "process_not_alive",
-        "last_restart_reason": "restart_budget_exhausted:missing_process"
+        "mode": "healthy"
       }
     }
   ]

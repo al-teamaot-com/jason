@@ -1968,7 +1968,7 @@ def precreate_open_breaker_recovery_alignment(
         return None
     try:
         policy = _open_breaker_recovery_policy(repo, candidate_sha)
-        actual = _drift_problem_identities(drift)
+        actual = _drift_problem_identities(drift, state_root=state_root)
     except ReleaseManagerError:
         return None
     changed = set(str(value) for value in files)
@@ -7248,7 +7248,27 @@ def _open_breaker_recovery_policy(repo: Path, candidate_sha: str) -> dict[str, A
     return policy
 
 
-def _drift_problem_identities(drift: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+def _intentional_masked_release_hold(state_root: Path) -> bool:
+    """Recognize only the exact live freeze+masked-timer state as non-failure drift."""
+    try:
+        _freeze_marker_snapshot(state_root)
+        completed = subprocess.run(
+            ["systemctl", "--user", "is-enabled", "jason-release-manager.timer"],
+            env=user_systemd_env(),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=10,
+        )
+        return completed.stdout.strip() == "masked"
+    except (OSError, subprocess.SubprocessError, ReleaseManagerError):
+        return False
+
+
+def _drift_problem_identities(
+    drift: Mapping[str, Any], *, state_root: Path | None = None,
+) -> tuple[tuple[str, str], ...]:
     problems = drift.get("problems")
     if not isinstance(problems, list) or not problems or len(problems) > 16:
         raise ReleaseManagerError("open-breaker recovery requires bounded nonempty drift")
@@ -7258,11 +7278,22 @@ def _drift_problem_identities(drift: Mapping[str, Any]) -> tuple[tuple[str, str]
             raise ReleaseManagerError("open-breaker recovery drift entry is invalid")
         kind = str(problem.get("kind") or "")
         unit = str(problem.get("unit") or "")
+        state = str(problem.get("state") or "")
+        if (
+            kind == "required_user_unit_not_active"
+            and unit == "jason-release-manager.timer"
+            and state == "inactive"
+            and state_root is not None
+            and _intentional_masked_release_hold(state_root)
+        ):
+            continue
         if (re.fullmatch(r"failed_(?:system|user)_unit", kind) is None
                 or re.fullmatch(r"jason-[a-z0-9_.@-]{1,120}", unit) is None
-                or str(problem.get("state") or "") != "failed"):
+                or state != "failed"):
             raise ReleaseManagerError("open-breaker recovery drift is outside reviewed unit-failure scope")
         result.append((kind, unit))
+    if not result:
+        raise ReleaseManagerError("open-breaker recovery requires at least one real failed unit")
     if len(set(result)) != len(result):
         raise ReleaseManagerError("open-breaker recovery drift contains duplicate identity")
     return tuple(sorted(result))
@@ -7432,7 +7463,7 @@ def governed_open_breaker_recovery_context(
     if require_manual_scope_review:
         require_current_manual_scope_review(repo, state_root, record)
     policy = _open_breaker_recovery_policy(repo, candidate)
-    actual = () if clean_provider_probe else _drift_problem_identities(drift_doc)
+    actual = () if clean_provider_probe else _drift_problem_identities(drift_doc, state_root=state_root)
     changed = set(str(value) for value in (record.get("changed_files") or []))
     matches: list[dict[str, Any]] = []
     for profile in policy["profiles"]:

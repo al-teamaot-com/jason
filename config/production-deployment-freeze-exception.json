@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "status": "requested",
+  "purpose": "ONE-TIME PRODUCTION FREEZE EXCEPTION for the licensed-Owner Teams routing repair, one-decision release simplification, and authority-integrity timeout recovery. Approval authorizes exactly one governed deployment transaction for the exact approved SHA; the production freeze is restored automatically afterward.",
+  "required_recovery_profile_id": "provider_identity_and_authority_recovery",
+  "rollback_sha": "aa6fa38a29b803e11ada63afb3cf25d17b7daf44",
+  "expires_at": "2026-11-11T15:05:58+00:00",
+  "standing_authority": false,
+  "restore_freeze_after_transaction": true,
+  "signed_teams_release_approval_required": true
+}
