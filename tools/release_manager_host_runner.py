@@ -2381,24 +2381,33 @@ def verified_mcp_preproduction_base(state_root: Path) -> tuple[str, str]:
     The fallback cannot be used until the independent root breaker is closed.
     """
     canonical = "jason-mcp:generic-governed-8f1e864947a2"
+    canonical_expected = "sha256:d709ca54b66d41e22bd1f67782cd5f6d681c4337bffb359b632523762a27788a"
     try:
-        return canonical, image_id(canonical)
+        canonical_observed = image_id(canonical)
     except subprocess.CalledProcessError:
-        pass
+        canonical_observed = ""
+    if canonical_observed:
+        if canonical_observed != canonical_expected:
+            raise ReleaseManagerError("historical MCP base tag differs from pinned immutable digest")
+        return canonical, canonical_observed
     known_sha = "c43e88e072c0b35c5b342d5e712fe34565b3e0cd"
     known_image = "sha256:013c3f6dc5ef566978960f026b475264c0e358fe3c8e86564986b017bcc3449d"
+    known_runtime = "sha256:66606ecec03a094ac9de2dc794a6c063698f2e6e6d088e890fabbb479e0b18d7"
     control = _read_protected_snapshot(state_root, "production-control-state.json")
     breaker = control.get("circuit_breaker") or {}
     root_lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
     if (breaker.get("state") != "closed"
             or root_lkg.get("complete") is not True
             or root_lkg.get("revision") != known_sha
-            or root_lkg.get("mcp_image_id") != known_image):
+            or root_lkg.get("mcp_image_id") != known_image
+            or root_lkg.get("runtime_image_id") != known_runtime):
         raise ReleaseManagerError("missing MCP builder base and no root-attested V2 recovery base")
     alignment = live_production_alignment(known_sha)
     live = live_mcp()
+    current_runtime = live_runtime()
     if (alignment["mcp_revision"] != known_sha
             or live["image_id"] != known_image
+            or current_runtime["image_id"] != known_runtime
             or image_id(known_image) != known_image):
         raise ReleaseManagerError("root-attested recovery base differs from live immutable V2 MCP")
     recovery = "jason-mcp:attested-v2-c43e88e072c0-013c3f6dc5ef"

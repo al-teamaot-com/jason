@@ -213,7 +213,9 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                   "111111111111", "222222222222", "333333333333", "444444444444"]),
               patch.object(runner, "worktree", return_value=checkout),
               patch.object(runner, "run"),
-              patch.object(runner, "image_id", return_value="sha256:verified"),
+              patch.object(runner, "image_id", side_effect=lambda ref: (
+                  "sha256:d709ca54b66d41e22bd1f67782cd5f6d681c4337bffb359b632523762a27788a"
+                  if ref == "jason-mcp:generic-governed-8f1e864947a2" else "sha256:verified")),
               patch.object(runner, "remove_worktree")):
             runtime1, _ = runner.build_candidate(repo, state, SHA_A)
             runtime2, _ = runner.build_candidate(repo, state, SHA_A)
