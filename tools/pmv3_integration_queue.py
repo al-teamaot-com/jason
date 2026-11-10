@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """PMV3 governed integration queue and production-candidate merge lock.
 
-Development remains concurrent. Integration to protected ``main`` is serialized
-through a required GitHub status context. PMV3 admits only Owner-approved
+Development remains concurrent. PMV3's optional integration queue records
+advisory status and never writes protected-branch requirements. The Owner
+retired its required status context on 2026-11-10; normal GitHub branch
+protection and release governance remain. PMV3 admits only Owner-approved
 development evidence (or an explicit integration-ready label), builds a bounded
 non-overlapping release train, merges one PR at a time after all existing
 required checks pass, then locks further integration until the exact resulting
@@ -153,7 +155,6 @@ def _priority(pr: Mapping[str, Any]) -> tuple[int, str, int]:
 
 
 class IntegrationApi(Protocol):
-    def ensure_gate_required(self) -> None: ...
     def main_sha(self) -> str: ...
     def open_pull_requests(self) -> list[dict[str, Any]]: ...
     def pull_request(self, number: int) -> dict[str, Any]: ...
@@ -183,17 +184,6 @@ class GhApi:
     def _api_json(self, path: str) -> Any:
         raw = self._run(["api", path])
         return json.loads(raw)
-
-    def ensure_gate_required(self) -> None:
-        path = f"repos/{self.repository}/branches/main/protection/required_status_checks"
-        required = self._api_json(path)
-        contexts = [str(x) for x in required.get("contexts") or []]
-        if GATE_CONTEXT in contexts:
-            return
-        self._run([
-            "api", "--method", "POST", path + "/contexts",
-            "-f", f"contexts[]={GATE_CONTEXT}", "--silent",
-        ])
 
     def main_sha(self) -> str:
         value = self._api_json(f"repos/{self.repository}/branches/main")
@@ -472,7 +462,9 @@ def reconcile(
 ) -> dict[str, Any]:
     state_path = state_path or (spool / "pmv3-integration-queue-state.json")
     state = load_state(state_path)
-    api.ensure_gate_required()
+    # Owner retired the PMV3 GitHub required-status context on 2026-11-10.
+    # This queue may still publish advisory status, but must never reconfigure
+    # protected-branch requirements or restore that self-imposed merge gate.
     main_sha = api.main_sha()
     lkg_sha = production_lkg_revision(release_state)
     prs = api.open_pull_requests()
