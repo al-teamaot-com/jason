@@ -8,6 +8,8 @@ on:
   push:
     branches:
       - main
+  issues:
+    types: [opened, edited, reopened, closed, labeled, unlabeled]
   pull_request_target:
     types:
       - opened
@@ -48,3 +50,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 -B tools/development_release_coordinator.py --publish
+
+      - name: Reconcile canonical Jason WIP register
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -B tools/project_wip_register.py
