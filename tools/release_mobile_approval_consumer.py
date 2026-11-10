@@ -217,7 +217,10 @@ def consume_mobile_release_decisions(
     trusted_keys: Path = DEFAULT_TRUSTED_KEYS,
     protected_main_sha_reader: Callable[[Path], str] = _protected_main_sha,
 ) -> int:
-    """Reauthenticate signed evidence, then record exact CCC and owner approval.
+    """Reauthenticate signed evidence, then record the exact Owner decision.
+
+    Legacy CCC/unfreeze decision types remain readable for historical recovery,
+    but new normal releases use one exact Owner release transaction authority.
 
     The existing Release Manager still verifies GitHub main, candidate digest,
     protected baseline, preproduction, fresh CCC, rollback and operational
