@@ -637,10 +637,10 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
                 "whose prior unfreeze was consumed BEFORE mutation. It does not add standing "
                 "authority, modify the earlier approval, or bypass preflight/rollback."
                 if replacement else
-                "ONE signed click approves the exact release and a SEPARATE, bounded "
-                "one-transaction unfreeze bound to SHA, reviewed scope, rollback and "
-                "freeze fingerprint. Independent gates and rollback remain mandatory; "
-                "the original freeze is restored after success or failure. No standing authority."
+                "ONE signed click approves the exact release transaction bound to SHA, "
+                "reviewed scope, rollback and freeze fingerprint. Production Manager "
+                "serializes the mutation and restores the legacy freeze after success or "
+                "failure. No second Owner unfreeze decision or standing authority."
                 if frozen else
                 "Review this exact immutable release. Approve authorizes only this SHA's "
                 "release and CCC material review; independent checks, deployment and rollback remain mandatory."

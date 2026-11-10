@@ -3770,11 +3770,31 @@ def approve_release(
         approval_source = str(approval.get("source") or source or "explicit_owner_instruction")
     else:
         approval_source = str(source or "explicit_owner_instruction")
+        scope_review = record.get("manual_scope_review") or {}
+        release_manifest = record.get("release_manifest") or {}
+        transaction_binding = None
+        if (scope_review.get("candidate_sha") == candidate_sha
+                and scope_review.get("baseline_sha") == record.get("rollback_sha")
+                and re.fullmatch(r"[0-9a-f]{64}", str(scope_review.get("scope_sha256") or ""))
+                and isinstance(release_manifest, dict)
+                and release_manifest.get("candidate_sha") == candidate_sha
+                and release_manifest.get("rollback_sha") == record.get("rollback_sha")):
+            transaction_binding = {
+                "candidate_sha": candidate_sha,
+                "rollback_sha": str(record["rollback_sha"]),
+                "scope_sha256": str(scope_review["scope_sha256"]),
+                "manifest_sha256": hashlib.sha256(json.dumps(
+                    release_manifest, sort_keys=True, separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")).hexdigest(),
+            }
         record["owner_approval"] = {
             "approved": True,
             "candidate_sha": candidate_sha,
             "source": approval_source,
             "recorded_at": now(),
+            **({"transaction_binding": transaction_binding}
+               if transaction_binding is not None else {}),
         }
         record.setdefault("history", []).append(
             {"at": now(), "state": "production_eligible", "gate": "owner_approval_recorded"}
@@ -6170,6 +6190,78 @@ def owner_unfreeze_release(
     return receipt
 
 
+def owner_release_transaction_context(
+    state_root: Path, record: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Use the exact Owner release decision as the one production transaction authority.
+
+    This deliberately removes the former second human unfreeze decision. The
+    legacy freeze marker remains a compatibility/safety mechanism during the
+    transition, but the serialized Production Manager transaction may open it
+    only when the same exact candidate, rollback, reviewed scope and signed
+    Owner release approval still match. No standing authority is created.
+    """
+    if str(record.get("state") or "") != "production_eligible":
+        return None
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    rollback = str(record.get("rollback_sha") or "")
+    release_id = str(record.get("release_id") or "")
+    scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
+    owner = record.get("owner_approval") or {}
+    source = str(owner.get("source") or "")
+    manifest = record.get("release_manifest") or {}
+    manifest_sha256 = hashlib.sha256(json.dumps(
+        manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")).hexdigest() if isinstance(manifest, dict) else ""
+    transaction_binding = owner.get("transaction_binding") or {}
+    if (not SHA.fullmatch(candidate) or not SHA.fullmatch(rollback)
+            or not one_transaction_release_id_matches_candidate(release_id, candidate)
+            or not isinstance(scope, str) or re.fullmatch(r"[0-9a-f]{64}", scope) is None
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate
+            or transaction_binding.get("candidate_sha") != candidate
+            or transaction_binding.get("rollback_sha") != rollback
+            or transaction_binding.get("scope_sha256") != scope
+            or transaction_binding.get("manifest_sha256") != manifest_sha256
+            or not (source == "explicit_owner_instruction" or source.startswith("governed_mcp_owner:")
+                    or re.fullmatch(r"authenticated_mobile_teams_owner:relapproval-[0-9a-f]{32}", source))):
+        return None
+    try:
+        binding = current_initial_freeze_binding(state_root, record)
+    except (OSError, ValueError, TypeError, ReleaseManagerError):
+        return None
+    if (binding.get("candidate_sha") != candidate
+            or binding.get("rollback_sha") != rollback
+            or binding.get("scope_sha256") != scope):
+        return None
+    subject = {
+        "schema_version": "1.0",
+        "authorization": "owner_exact_release_transaction",
+        "release_id": release_id,
+        "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": scope,
+        "freeze_sha256": binding["freeze_sha256"],
+        "manifest_sha256": binding["manifest_sha256"],
+        "owner_approval_source": source,
+    }
+    digest = "sha256:" + hashlib.sha256(json.dumps(
+        subject, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")).hexdigest()
+    return {
+        "authorization": "signed_teams_one_transaction_unfreeze",
+        "release_id": release_id,
+        "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": scope,
+        "recovery_profile_id": "owner_exact_release_transaction",
+        "declaration_sha256": digest,
+        "owner_approval_source": source,
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+    }
+
+
 def explicit_owner_one_transaction_freeze_context(
     state_root: Path, record: Mapping[str, Any], *, max_age_seconds: int = 900,
 ) -> dict[str, Any] | None:
@@ -6515,9 +6607,16 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                         # breaker-CLOSED normal deployment, not an open-breaker
                         # recovery exception or an indefinite global unfreeze.
                         revalidate_circuit_breaker(state_root)
-                        exception_context = explicit_owner_one_transaction_freeze_context(
+                        exception_context = owner_release_transaction_context(
                             state_root, record,
                         )
+                        if exception_context is None:
+                            # Compatibility only for approvals recorded before
+                            # transaction_binding existed. No new workflow
+                            # should mint a separate unfreeze receipt.
+                            exception_context = explicit_owner_one_transaction_freeze_context(
+                                state_root, record,
+                            )
                     if exception_context is None:
                         require_owner_production_deployment_unfrozen(state_root)
                         raise ReleaseManagerError("production freeze exception evidence is incomplete")
@@ -7399,12 +7498,12 @@ def signed_owner_offer_purpose(
     live_mode: str, *, ccc_root: Path,
     state_root: Path | None = None,
 ) -> str | None:
-    """Return narrow actionable Teams purpose or None. No authority mutation.
+    """Return the single actionable Owner release purpose, or None.
 
-    V1 remains normal-risk and can only offer a full unapproved release.
-    V2 can offer a CCC-only card for an ALREADY approved exact release whose
-    separately authenticated CCC material review is missing. A fully reviewed
-    release gets no redundant card. Neither case certifies CCC or deploys.
+    The exact Owner release decision is the only human release authorization.
+    CCC remains technical evidence only and the legacy production-freeze marker
+    is handled internally by the serialized transaction. No CCC-only, initial
+    unfreeze-renewal, or replacement-unfreeze card is generated.
     """
     expected_mode = _reviewed_mobile_release_mode(reviewed_policy)
     if live_mode != expected_mode:
@@ -7414,46 +7513,9 @@ def signed_owner_offer_purpose(
     owner = record.get("owner_approval") or {}
     if owner.get("approved") is not True:
         return "release_and_ccc"
-    if (reviewed_policy.schema_version not in {"2.0", "3.0", "4.0"}
-            or owner.get("candidate_sha") != candidate_sha):
+    if owner.get("candidate_sha") != candidate_sha:
         return None
-    named = ccc_root / ("material-review-" + candidate_sha[:16] + ".json")
-    if named.is_file():
-        prior = json.loads(named.read_text(encoding="utf-8"))
-        if (prior.get("source_revision") == candidate_sha
-                and prior.get("recorded_by") == "person-al"
-                and prior.get("status") == "approved"):
-            # The already-authorized release/CCC card is not reused. A
-            # consumed pre-mutation freeze may instead need a distinct,
-            # authenticated one-transaction replacement card.
-            if (state_root is not None
-                    and record.get("replacement_unfreeze_authorization") is None
-                    and (state_root / "owner-explicit-unfreeze-receipts"
-                         / (str(record.get("release_id")) + ".json")).is_file()):
-                try:
-                    attest_consumed_pre_mutation_unfreeze_for_replacement(
-                        state_root, record)
-                except (ReleaseManagerError, OSError, ValueError):
-                    return None
-                return "replacement_unfreeze_only"
-            if (state_root is not None
-                    and record.get("signed_initial_unfreeze_authorization") is not None
-                    and record.get("renewed_initial_unfreeze_authorization") is None):
-                from jason_runtime.mobile_release_approval import (
-                    read_expired_initial_unfreeze_predecessor,
-                )
-                try:
-                    read_expired_initial_unfreeze_predecessor(
-                        state_root, str(record.get("release_id") or ""), record,
-                    )
-                except (PermissionError, OSError, ValueError, TypeError):
-                    return None
-                return "initial_unfreeze_renewal_only"
-            return None
-        # A conflicting stored review is an authority problem, not an
-        # invitation to issue a new card that would overwrite audit evidence.
-        raise ReleaseManagerError("existing CCC material review conflicts with exact release")
-    return "ccc_material_review_only"
+    return None
 
 
 @contextmanager

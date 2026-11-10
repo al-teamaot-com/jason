@@ -590,52 +590,15 @@ def consume_mobile_release_decisions(
                     "authority_mutated": False,
                 })
                 continue
-            named = ccc_root / ("material-review-" + request.metadata["candidate_sha"][:16] + ".json")
             if (prior_source != exact_prior_source
                     or prior_approval.get("candidate_sha") != request.metadata["candidate_sha"]
-                    or digest(manifest) != request.metadata["manifest_sha256"]
-                    or not named.is_file()):
-                raise PermissionError("existing owner approval was not from this exact signed Teams decision")
-            review = json.loads(named.read_text(encoding="utf-8"))
-            if (review.get("source_revision") != request.metadata["candidate_sha"]
-                    or review.get("recorded_by") != policy_owner_identity
-                    or review.get("signed_evidence_sha256") != evidence_sha
-                    or review.get("mobile_approval_id") != approval_id):
-                raise PermissionError("prior CCC review is not the same signed Teams decision")
-            if request.metadata.get("initial_freeze_binding") is not None:
-                if record_initial_unfreeze is None:
-                    raise PermissionError("signed frozen release cannot record both grants")
-                # Crash between release approval and the second receipt:
-                # rebuild the original signed card, never mint a new decision.
-                from dataclasses import replace
-                original = read_eligible_release(
-                    state_root, release_id, policy,
-                    allow_existing_owner_approval=True,
+                    or digest(manifest) != request.metadata["manifest_sha256"]):
+                raise PermissionError(
+                    "existing owner approval was not from this exact signed Teams decision"
                 )
-                original = replace(
-                    original, review_only=False,
-                    initial_freeze_binding=tuple(sorted(
-                        request.metadata["initial_freeze_binding"].items())),
-                )
-                expected = create_mobile_release_request(
-                    original, policy, now=request.requested_at,
-                    card_challenge=request.metadata.get("card_instance_challenge"),
-                )
-                if (request.metadata != {**expected.metadata, **{
-                        key: value for key, value in request.metadata.items()
-                        if key == "delivery_message_ids"}}
-                        or request.presentation != expected.presentation
-                        or request.expires_at != expected.expires_at):
-                    raise PermissionError("crash recovery signed frozen card intent differs")
-                record_initial_unfreeze(
-                    repo, state_root, release_id=release_id,
-                    candidate_sha=request.metadata["candidate_sha"],
-                    approval_id=approval_id,
-                    signed_evidence_sha256=evidence_sha,
-                    request_metadata=request.metadata,
-                    decided_at=timestamp,
-                    expires_at=request.expires_at,
-                )
+            # Crash recovery no longer depends on a separately materialized CCC
+            # review or unfreeze receipt. The immutable signed decision, exact
+            # candidate and manifest are the complete human authority record.
             _private_atomic(marker, {
                 "schema_version": "1.0", "approval_id": approval_id,
                 "release_id": release_id, "candidate_sha": request.metadata["candidate_sha"],
@@ -644,8 +607,7 @@ def consume_mobile_release_decisions(
                 "signed_evidence_sha256": evidence_sha, "decision": "approve",
                 "processed_at": datetime.now(timezone.utc).isoformat(),
                 "recovery": "previous_exact_owner_approval_verified",
-                **({"initial_unfreeze_receipt_recorded": True}
-                   if request.metadata.get("initial_freeze_binding") is not None else {}),
+                "release_transaction_authority": "owner_exact_release_approval",
             })
             continue
         candidate = read_eligible_release(
@@ -654,8 +616,6 @@ def consume_mobile_release_decisions(
         )
         if candidate.review_only != review_only:
             raise PermissionError("CCC-only Teams decision changed release approval state")
-        if candidate.initial_freeze_binding is not None and record_initial_unfreeze is None:
-            raise PermissionError("one signed Teams approval requires BOTH release and freeze receipts")
         renewal_nonce = request.metadata.get("renewal_nonce")
         renewed_from = request.metadata.get("renewed_from_approval_id")
         if renewal_nonce is not None or renewed_from is not None:
@@ -747,52 +707,36 @@ def consume_mobile_release_decisions(
                         != candidate.manifest_sha256
                     or just_before.get("state") != "production_eligible"):
                 raise PermissionError("exact prior owner release grant changed before CCC write")
-        # All trusted evidence is now independently reverified. CCC is an
-        # *owner material review*, not a CCC PASS; fresh CCC must still run.
         sha = candidate.candidate_sha
-        material_review = {
-            "schema_version": "1.0", "status": "approved", "source_revision": sha,
-            "recorded_by": policy_owner_identity,
-            "recorded_at": timestamp.astimezone(timezone.utc).isoformat(),
-            "reason": "Authenticated Teams owner decision " + approval_id,
-            "mobile_approval_id": approval_id,
-            "signed_evidence_sha256": evidence_sha,
-            "release_manifest_sha256": candidate.manifest_sha256,
-            "mobile_policy_sha256": policy.policy_sha256,
-        }
-        named = ccc_root / ("material-review-" + sha[:16] + ".json")
-        if named.exists():
-            prior = json.loads(named.read_text(encoding="utf-8"))
-            if prior.get("source_revision") != sha or prior.get("recorded_by") != policy_owner_identity:
-                raise PermissionError("conflicting CCC owner review for exact SHA")
-            if review_only and (prior.get("signed_evidence_sha256") != evidence_sha
-                                or prior.get("mobile_approval_id") != approval_id):
-                raise PermissionError("CCC-only Teams review conflicts with an existing owner review")
-            if prior.get("signed_evidence_sha256") != evidence_sha:
-                # An older manual owner review is valid provenance, but it is
-                # not the signed mobile receipt. Archive it without deletion
-                # and preserve the newly authorized signed per-SHA review.
-                archived = ccc_root / (
-                    "material-review-" + sha[:16] + "-previous-" + digest(prior)[:12] + ".json"
-                )
-                if not archived.exists():
-                    _private_atomic(archived, prior)
+        # New releases have one human authorization only: the exact signed
+        # Owner release decision. Legacy CCC-only requests remain consumable
+        # for backward compatibility, but ordinary approvals do not create a
+        # second human-review artifact.
+        if review_only:
+            material_review = {
+                "schema_version": "1.0", "status": "approved", "source_revision": sha,
+                "recorded_by": policy_owner_identity,
+                "recorded_at": timestamp.astimezone(timezone.utc).isoformat(),
+                "reason": "Legacy CCC-only authenticated Teams decision " + approval_id,
+                "mobile_approval_id": approval_id,
+                "signed_evidence_sha256": evidence_sha,
+                "release_manifest_sha256": candidate.manifest_sha256,
+                "mobile_policy_sha256": policy.policy_sha256,
+            }
+            named = ccc_root / ("material-review-" + sha[:16] + ".json")
+            if named.exists():
+                prior = json.loads(named.read_text(encoding="utf-8"))
+                if (prior.get("source_revision") != sha
+                        or prior.get("recorded_by") != policy_owner_identity):
+                    raise PermissionError("conflicting CCC owner review for exact SHA")
+                if (prior.get("signed_evidence_sha256") != evidence_sha
+                        or prior.get("mobile_approval_id") != approval_id):
+                    raise PermissionError(
+                        "CCC-only Teams review conflicts with an existing owner review"
+                    )
+            else:
                 _private_atomic(named, material_review)
-        else:
-            _private_atomic(named, material_review)
-        current = ccc_root / "material-review.json"
-        if current.exists():
-            old = json.loads(current.read_text(encoding="utf-8"))
-            if old.get("source_revision") != sha:
-                # A new authenticated exact-SHA decision allows replacing the
-                # canonical pointer; keep the old named review as audit evidence.
-                previous = str(old.get("source_revision") or "")
-                if not re_full_sha(previous):
-                    raise PermissionError("existing CCC owner review has invalid revision")
-                prior_named = ccc_root / ("material-review-" + previous[:16] + ".json")
-                if not prior_named.exists():
-                    _private_atomic(prior_named, old)
-        _private_atomic(current, material_review)
+            _private_atomic(ccc_root / "material-review.json", material_review)
 
         # Exact released artifacts and protected main are verified by existing
         # approve_release; this call never starts production itself.
@@ -806,16 +750,6 @@ def consume_mobile_release_decisions(
                 repo, state_root, release_id=candidate.release_id,
                 candidate_sha=sha, source="authenticated_mobile_teams_owner:" + approval_id,
             )
-            if candidate.initial_freeze_binding is not None:
-                # Independently bound second permission, SAME authenticated
-                # click; it cannot deploy or modify the live freeze marker.
-                record_initial_unfreeze(
-                    repo, state_root, release_id=candidate.release_id,
-                    candidate_sha=sha, approval_id=approval_id,
-                    signed_evidence_sha256=evidence_sha,
-                    request_metadata=request.metadata,
-                    decided_at=timestamp, expires_at=request.expires_at,
-                )
         else:
             # Only the existing owner release grant is valid. A signed CCC
             # review cannot add, modify or resurrect release execution scope.
@@ -832,8 +766,8 @@ def consume_mobile_release_decisions(
                 "signed_evidence_sha256": evidence_sha,
                 "decision": "approve",
                 **({"review_only": True} if review_only else {}),
-                **({"initial_unfreeze_receipt_recorded": True}
-                   if candidate.initial_freeze_binding is not None else {}),
+                **({"release_transaction_authority": "owner_exact_release_approval"}
+                   if not review_only else {}),
                 "processed_at": datetime.now(timezone.utc).isoformat(),
             })
         completed += 1
