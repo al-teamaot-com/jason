@@ -507,7 +507,9 @@ def test_mcp_candidate_uses_established_governed_base_not_production():
     source = (ROOT / "tools" / "release_manager_host_runner.py").read_text(
         encoding="utf-8"
     )
-    assert 'base = "jason-mcp:generic-governed-8f1e864947a2"' in source
+    assert 'canonical = "jason-mcp:generic-governed-8f1e864947a2"' in source
+    assert "verified_mcp_preproduction_base(state_root)" in source
+    assert "root-attested V2 recovery base" in source
     assert 'base = "jason-mcp:production"' not in source
 
 

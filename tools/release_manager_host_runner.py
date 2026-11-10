@@ -2370,6 +2370,52 @@ def build_candidate(repo: Path, state_root: Path, candidate_sha: str) -> tuple[s
         remove_worktree(repo, path)
 
 
+def verified_mcp_preproduction_base(state_root: Path) -> tuple[str, str]:
+    """Prefer the canonical historical base; recover only one known V2 LKG base.
+
+    The historical generic image was lost during incident cleanup. Retagging
+    any random or mutable 'rollback-current' image as that historical base
+    would counterfeit the production artifact digest. Instead, a first-cutover
+    build may *explicitly* use a different, immutable root-attested LKG image,
+    recorded as the distinct MCP base digest in its new release manifest.
+    The fallback cannot be used until the independent root breaker is closed.
+    """
+    canonical = "jason-mcp:generic-governed-8f1e864947a2"
+    try:
+        return canonical, image_id(canonical)
+    except subprocess.CalledProcessError:
+        pass
+    known_sha = "c43e88e072c0b35c5b342d5e712fe34565b3e0cd"
+    known_image = "sha256:013c3f6dc5ef566978960f026b475264c0e358fe3c8e86564986b017bcc3449d"
+    control = _read_protected_snapshot(state_root, "production-control-state.json")
+    breaker = control.get("circuit_breaker") or {}
+    root_lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
+    if (breaker.get("state") != "closed"
+            or root_lkg.get("complete") is not True
+            or root_lkg.get("revision") != known_sha
+            or root_lkg.get("mcp_image_id") != known_image):
+        raise ReleaseManagerError("missing MCP builder base and no root-attested V2 recovery base")
+    alignment = live_production_alignment(known_sha)
+    live = live_mcp()
+    if (alignment["mcp_revision"] != known_sha
+            or live["image_id"] != known_image
+            or image_id(known_image) != known_image):
+        raise ReleaseManagerError("root-attested recovery base differs from live immutable V2 MCP")
+    recovery = "jason-mcp:attested-v2-c43e88e072c0-013c3f6dc5ef"
+    try:
+        existing = image_id(recovery)
+    except subprocess.CalledProcessError:
+        existing = ""
+    if existing and existing != known_image:
+        raise ReleaseManagerError("immutable MCP recovery base tag was replaced")
+    if not existing:
+        # Non-production Docker tag only, no container or provider mutation.
+        run(["docker", "tag", known_image, recovery])
+    if image_id(recovery) != known_image:
+        raise ReleaseManagerError("MCP recovery base tag readback mismatch")
+    return recovery, known_image
+
+
 def build_mcp_candidate(
     repo: Path,
     state_root: Path,
@@ -2378,10 +2424,10 @@ def build_mcp_candidate(
     path = worktree(repo, state_root, candidate_sha)
     # Match runtime build isolation so MCP retries cannot retag accepted evidence.
     tag = f"jason-mcp:release-{candidate_sha[:12]}-{secrets.token_hex(6)}"
-    # Stable governed base prevents stale source files from inheriting from live production.
-    base = "jason-mcp:generic-governed-8f1e864947a2"
-    base_id = image_id(base)
     try:
+        # The default historical base is immutable; an incident-specific
+        # attested V2 fallback carries its *real* distinct image ID in manifest.
+        base, base_id = verified_mcp_preproduction_base(state_root)
         run(
             [
                 "docker", "build",
