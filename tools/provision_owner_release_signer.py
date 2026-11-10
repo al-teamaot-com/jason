@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 PRIVATE_DIR = Path("/var/lib/jason/runtime-secrets/owner-release")
-TRUST_DIR = Path("/etc/jason/owner-release")
+TRUST_DIR = Path("/etc/jason-owner-release")
 PRIVATE_NAME = "private_key"
 PUBLIC_NAME = "verified-owner-public-key.json"
 TENANT = "f7054323-d52b-4863-8c2f-1898f0b6077c"
@@ -107,8 +107,8 @@ def provision(private_dir: Path, trust_dir: Path, uid: int, gid: int,
         info = base.lstat()
         if (base.is_symlink() or info.st_uid != 0
                 or not stat.S_ISDIR(info.st_mode)
-                or stat.S_IMODE(info.st_mode) not in (0o700, 0o711)):
-            raise PermissionError("OWNER_SIGNER_ETC_JASON_BASE_MODE_UNEXPECTED")
+                or info.st_mode & 0o022):
+            raise PermissionError("OWNER_SIGNER_ETC_ROOT_DIRECTORY_UNSAFE")
     ensure_directory(private_dir, 0o750 if root else 0o700,
                      0 if root else uid, gid)
     ensure_directory(trust_dir, 0o755 if root else 0o700,
@@ -140,9 +140,6 @@ def provision(private_dir: Path, trust_dir: Path, uid: int, gid: int,
             raise
         status = "PROVISIONED"
     if root:
-        # Search/execute only; do not expose directory listings or change
-        # existing root-owned secrets. Needed for unprivileged public-key check.
-        os.chmod(trust_dir.parent, 0o711)
         receipt = trust_dir / "provision-receipt.json"
         if not receipt.exists():
             record = {
@@ -153,7 +150,7 @@ def provision(private_dir: Path, trust_dir: Path, uid: int, gid: int,
                 "private_key_exported": False,
                 "standing_release_authority": False,
                 "production_services_changed": False,
-                "etc_jason_directory_mode": "0711",
+                "existing_etc_directory_unchanged": True,
             }
             save_exclusive(receipt,
                            (json.dumps(record, sort_keys=True) + "\n").encode(),
