@@ -769,23 +769,15 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             }
             request_path = request_root / f"{release_id}.json"
             request_path.write_text(json.dumps(request), encoding="utf-8")
+            # Historical unsigned owner-al JSON is deliberately no longer
+            # sufficient production authorization. Even if the claimed Owner
+            # is named, the root-pinned independent signed OAuth proof is
+            # mandatory and no untrusted approval may reach approve_release.
             with patch.object(runner, "approve_release") as approve:
-                count = runner.consume_owner_approval_requests(ROOT, state_root)
-            self.assertEqual(count, 1)
-            approve.assert_called_once_with(
-                ROOT,
-                state_root,
-                release_id=release_id,
-                candidate_sha=SHA_A,
-                source="governed_mcp_owner:owner-al",
-            )
-            self.assertFalse(request_path.exists())
-            archived = (
-                state_root
-                / "owner-approval-requests-processed"
-                / f"{release_id}.json"
-            )
-            self.assertEqual(json.loads(archived.read_text(encoding="utf-8")), request)
+                with self.assertRaises((PermissionError, runner.ReleaseManagerError)):
+                    runner.consume_owner_approval_requests(ROOT, state_root)
+            approve.assert_not_called()
+            self.assertTrue(request_path.exists())
 
     def test_consume_owner_approval_request_rejects_release_sha_mismatch(self):
         import json

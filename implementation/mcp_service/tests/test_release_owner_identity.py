@@ -81,3 +81,13 @@ def test_server_uses_release_only_policy_without_changing_global_admin_owner():
     admin_begin = server.index("def _authority_admin_owner()")
     admin_end = server.index("\n\n", admin_begin)
     assert "authorized_release_owner" not in server[admin_begin:admin_end]
+
+
+def test_existing_authenticated_admin_owner_oauth_is_release_authorized_without_teams():
+    assert _decision(
+        principal=module.ADMIN_OWNER_PRINCIPAL,
+        verified_token_claims={
+            "tid": module.OWNER_TENANT_ID,
+            "oid": module.ADMIN_OWNER_OID,
+        },
+    ) is True

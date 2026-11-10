@@ -5274,6 +5274,18 @@ def approve_release_candidate(
                 "/var/lib/jason/openclaw/release-manager",
             )
         )
+        from kernel.signed_owner_release import read_service_owner_signing_key
+
+        # The MCP OAuth middleware has authenticated and resolved this exact
+        # Owner subject. No model/caller-supplied identity or private signing
+        # key is accepted. Absence of the separately provisioned signer denies.
+        signer_path = os.getenv("JASON_OWNER_RELEASE_ED25519_KEY_PATH", "").strip()
+        if not signer_path or not signer_path.startswith("/"):
+            raise PermissionError("RELEASE_APPROVAL_SIGNER_NOT_CONFIGURED")
+        signer = read_service_owner_signing_key(Path(signer_path))
+        token = get_access_token()
+        if token is None:
+            raise PermissionError("RELEASE_APPROVAL_AUTHENTICATED_SESSION_REQUIRED")
         request = queue_release_approval_request(
             state_root=state_root,
             release_id=release_id,
@@ -5281,6 +5293,8 @@ def approve_release_candidate(
             approved_by=principal,
             organization_id=organization,
             reason=reason,
+            verified_token_claims=token.claims or {},
+            service_signer=signer,
         )
     except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
         return {"status": "rejected", "error_code": str(exc)}

@@ -63,7 +63,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install pytest
+      - run: python -m pip install pytest cryptography
       - name: Verify shared Release Manager and Teams lifecycle
         env:
           PYTHONPATH: tools:implementation:implementation/runtime_service/src
