@@ -40,13 +40,15 @@ def run_validator(script: Path, marker: str, terminator: str, argument: Path):
 
 def test_source_restores_exact_prior_owner_reviewed_contract():
     doc = json.loads(SOURCE.read_text())
-    assert doc["schema_version"] == "2.0"
+    assert doc["schema_version"] == "3.1"
     assert doc["policy_mode"] == "owner_reviewed"
     assert doc["owner_identity_ids"] == ["person-al"]
     assert set(doc["allowed_risk_profiles"]) == {"normal", "production_control_core"}
     assert "admin_approver_binding" not in doc
     assert "regular_requester_binding" not in doc
-    assert doc["high_impact_review"]["signed_teams_identity_required"] is True
+    assert doc["high_impact_review"]["authenticated_entra_owner_decision_required"] is True
+    assert doc["high_impact_review"]["independent_native_release_health_required"] is True
+    assert "signed_teams_identity_required" not in doc["high_impact_review"]
 
 
 def test_runtime_native_shell_validator_restores_existing_owner_reviewed_mode():
