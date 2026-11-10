@@ -50,11 +50,15 @@ The following are never approval:
 - copied, expired, mismatched, replayed or unverified approval payloads.
 
 A denied decision on either channel leaves work non-runnable. Do not prompt
-the Owner to obtain an impossible Teams approval. No production adapter or
-approval channel is activated by this source-only policy/engine update;
-the signed service-adapter and release-controller/root verification must
-be separately integrated and tested before deployment. Keep the current
-production freeze and breaker intact.
+the Owner to obtain an impossible Teams approval. The isolated scheduler now accepts this trusted verifier as an **injected
+Python callback** and an explicit opaque evidence envelope. Its CLI has no
+flag or file input for independently verified Owner decisions; untrusted
+local approval JSON remains Teams-only and rejects channel substitution.
+No production adapter or approval channel is activated by this
+source-only policy/engine update. The live service-side Entra OAuth adapter
+and release-controller/root verification must be separately integrated
+and tested before deployment. Keep the current production freeze and
+breaker intact.
 
 
 ## Governed engineering continuation controller
