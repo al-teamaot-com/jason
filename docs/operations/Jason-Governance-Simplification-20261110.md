@@ -89,6 +89,10 @@ After this contract is production-verified:
 1. retire issuance of obsolete CCC-only/unfreeze/replacement/renewal approval offers;
 2. remove dead compatibility code only after no retained in-flight record depends on it;
 3. convert standing Owner pause/freeze terminology to technical state controls where still required;
+
+### Source implementation checkpoint — standing engineering pause
+
+The standing Engineering Owner Pause is no longer part of the target replacement-lane authorization model. Replacement engineering lanes must instead prove the legacy monolithic engineering service is inactive and its timer is inactive plus disabled or masked before each run. The existing production-transaction lock and support-first lane serialization remain mandatory. The pause receipt/drop-in may remain in the currently installed production environment until this exact change is released; source readiness does not itself authorize removing installed controls.
 4. keep only one normal release path and one bounded recovery path;
 5. move independent security review to a risk-based rule (authorization/crypto/root/tenant/credential changes), not every routine release;
 6. replace exact-version autonomous playbook promotion with authority-envelope promotion only after separate non-interference validation.
