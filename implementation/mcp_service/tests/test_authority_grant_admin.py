@@ -172,14 +172,33 @@ def v4_admin_fixture(monkeypatch, tmp_path, *, tenant=ADMIN_TENANT,
     import json
     from pathlib import Path
     p=tmp_path / "root-owned-equivalent-v4.json"
-    repo=Path(__file__).resolve().parents[3]
-    source=repo / "config" / "mobile-release-approval-policy.json"
-    policy=json.loads(source.read_text())
-    assert policy["schema_version"] in {"4.0", "4.1"}
     assert schema_version in {"4.0", "4.1"}
-    # Preserve the historically reviewed V4 security tests as their own
-    # fixture even while the source policy moves to V4.1.
-    policy["schema_version"] = schema_version
+    # V4 is retired from the immutable deployed source, but remains
+    # supported for verified rollback and negative security regressions.
+    # Construct the historical contract only in the isolated test fixture.
+    policy = {
+        "schema_version": schema_version,
+        "organization_id": "aot",
+        "policy_mode": "admin_approver_separated",
+        "owner_identity_ids": ["person-al"],
+        "allowed_risk_profiles": ["normal", "production_control_core"],
+        "ttl_seconds": 900,
+        "capability": "release.production.approve",
+        "high_impact_review": {
+            "owner_exact_sha_required": True,
+            "signed_teams_identity_required": True,
+            "independent_ccc_required": True,
+            "protected_release_gates_unchanged": True,
+        },
+        "admin_approver_binding": {
+            "microsoft_tenant_id": ADMIN_TENANT,
+            "microsoft_object_id": ADMIN_OID,
+        },
+        "regular_requester_binding": {
+            "microsoft_tenant_id": ADMIN_TENANT,
+            "microsoft_object_id": NORMAL_OID,
+        },
+    }
     p.write_text(json.dumps(policy))
     p.chmod(0o600)
     runtime=app()
