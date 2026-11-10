@@ -232,7 +232,7 @@ elif version == "3.0":
     expected = {"schema_version", "organization_id", "policy_mode",
                 "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
                 "capability", "high_impact_review"}
-elif version == "4.0":
+elif version in {"4.0", "4.1"}:
     mode = "admin_approver_separated"
     risks = {"normal", "production_control_core"}
     expected = {"schema_version", "organization_id", "policy_mode",
@@ -257,7 +257,7 @@ if (set(d) != expected or d.get("organization_id") != "aot"
             "protected_release_gates_unchanged": True,
         }):
     raise SystemExit("DENIED: source mobile release approval policy is invalid")
-if version == "4.0":
+if version in {"4.0", "4.1"}:
     def exact_binding(field):
         binding=d.get(field)
         if not isinstance(binding, dict) or set(binding) != {
