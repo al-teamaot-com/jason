@@ -95,6 +95,38 @@ def write_approved(spool: Path, *prs: int):
     (spool / 'development-state.json').write_text(json.dumps({'items': items}))
 
 
+def test_gh_api_open_pr_discovery_uses_paginated_rest(monkeypatch):
+    api = queue.GhApi("al-teamaot-com/jason")
+    calls = []
+    pages = [[{
+        "number": 2399,
+        "title": "P0 recovery",
+        "draft": False,
+        "head": {"sha": "a" * 40, "ref": "feature/recovery"},
+        "created_at": "2026-11-10T15:00:00Z",
+        "labels": [{"name": queue.RECOVERY_LABEL}],
+        "state": "open",
+        "html_url": "https://github.com/al-teamaot-com/jason/pull/2399",
+    }]]
+
+    def fake_run(args, *, input_text=None):
+        calls.append(list(args))
+        return json.dumps(pages)
+
+    monkeypatch.setattr(api, "_run", fake_run)
+    result = api.open_pull_requests()
+    assert calls == [[
+        "api", "--paginate", "--slurp",
+        "repos/al-teamaot-com/jason/pulls?state=open&base=main&per_page=100",
+    ]]
+    assert len(result) == 1
+    assert result[0]["number"] == 2399
+    assert result[0]["headRefOid"] == "a" * 40
+    assert result[0]["mergeable"] == "UNKNOWN"
+    assert result[0]["mergeStateStatus"] == "UNKNOWN"
+    assert result[0]["labels"] == [{"name": queue.RECOVERY_LABEL}]
+
+
 def test_approved_pr_numbers_uses_durable_development_and_todo(tmp_path):
     spool = tmp_path / 'spool'
     spool.mkdir()

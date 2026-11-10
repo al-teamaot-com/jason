@@ -200,13 +200,45 @@ class GhApi:
         return str(((value.get("commit") or {}).get("sha")) or "")
 
     def open_pull_requests(self) -> list[dict[str, Any]]:
+        """List open main-targeted PRs through paginated REST, not GraphQL.
+
+        Bulk GraphQL discovery can fail independently of commit checks and
+        exact selected-PR REST reads. Discovery does not need mergeability;
+        the selected PR is refreshed immediately before any merge mutation.
+        """
         raw = self._run([
-            "pr", "list", "--repo", self.repository, "--state", "open",
-            "--base", "main", "--limit", "200", "--json",
-            "number,title,isDraft,headRefOid,headRefName,mergeable,mergeStateStatus,createdAt,labels,url",
+            "api", "--paginate", "--slurp",
+            f"repos/{self.repository}/pulls?state=open&base=main&per_page=100",
         ])
-        value = json.loads(raw)
-        return list(value) if isinstance(value, list) else []
+        pages = json.loads(raw)
+        if not isinstance(pages, list):
+            raise RuntimeError("GitHub open pull-request REST response is invalid")
+        result: list[dict[str, Any]] = []
+        for page in pages:
+            if not isinstance(page, list):
+                raise RuntimeError("GitHub paginated pull-request page is invalid")
+            for value in page:
+                if not isinstance(value, Mapping):
+                    raise RuntimeError("GitHub pull-request entry is invalid")
+                labels = [{"name": str(x.get("name") or "")}
+                          for x in value.get("labels") or []
+                          if isinstance(x, Mapping)]
+                result.append({
+                    "number": int(value.get("number") or 0),
+                    "title": str(value.get("title") or ""),
+                    "isDraft": bool(value.get("draft")),
+                    "headRefOid": str(((value.get("head") or {}).get("sha")) or ""),
+                    "headRefName": str(((value.get("head") or {}).get("ref")) or ""),
+                    "mergeable": "UNKNOWN",
+                    "mergeStateStatus": "UNKNOWN",
+                    "createdAt": str(value.get("created_at") or ""),
+                    "labels": labels,
+                    "state": str(value.get("state") or "open"),
+                    "merged": bool(value.get("merged")),
+                    "mergeCommitSha": str(value.get("merge_commit_sha") or ""),
+                    "url": str(value.get("html_url") or ""),
+                })
+        return result
 
     def pull_request(self, number: int) -> dict[str, Any]:
         value = self._api_json(f"repos/{self.repository}/pulls/{number}")
@@ -479,6 +511,18 @@ def reconcile(
         # active, and only with explicit PMV3 recovery labeling plus normal
         # durable admission and all existing required checks.
         recovery = _recovery_candidate(prs, durable)
+        if recovery is not None:
+            # Discovery carries no mergeability assertion. Re-read the exact
+            # selected recovery PR before setting its gate or merging it.
+            recovery = api.pull_request(int(recovery["number"]))
+            recovery_labels = _labels(recovery)
+            if (recovery.get("state") != "open"
+                    or bool(recovery.get("isDraft"))
+                    or RECOVERY_LABEL not in recovery_labels
+                    or not _is_admitted(recovery, durable)
+                    or str(recovery.get("mergeable") or "").upper() == "CONFLICTING"
+                    or str(recovery.get("mergeStateStatus") or "").upper() == "DIRTY"):
+                recovery = None
         if recovery is not None:
             rsha = str(recovery.get("headRefOid") or "")
             ready, missing = checks_ready(api, rsha)
