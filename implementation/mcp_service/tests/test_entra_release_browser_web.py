@@ -194,6 +194,7 @@ def test_missing_private_signing_key_is_not_a_release_approval(tmp_path):
     s=harness(tmp_path)
     state=start(s);page=login(s,state=state)
     csrf=re.search(r"name='csrf' value='([^']+)'",page.text).group(1)
+    original_signer=s.signing.read_bytes()
     s.signing.unlink()
     result=s.client.post(
         "/admin/release-approval/decision",headers={"origin":ORIGIN},
@@ -201,3 +202,14 @@ def test_missing_private_signing_key_is_not_a_release_approval(tmp_path):
     )
     assert result.status_code==403
     assert s.repo.get(s.request.approval_id).status.value=="pending"
+
+    # A missing signer is recoverable: do not consume the real Owner's
+    # one-use decision until the reviewed signing key is available.
+    s.signing.write_bytes(original_signer)
+    s.signing.chmod(0o600)
+    retried=s.client.post(
+        "/admin/release-approval/decision",headers={"origin":ORIGIN},
+        data={"csrf":csrf,"decision":"approve"},
+    )
+    assert retried.status_code==200
+    assert s.repo.get(s.request.approval_id).status.value=="approved"

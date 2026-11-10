@@ -313,15 +313,19 @@ class AdminReleaseBrowserWeb:
             decision_store=OneTimeAdminDecisionStore(self.session_db,route=self._route())
             approval_id=decision_store.peek_approval_id(cookie_value=cookie)
             policy,repo,req,exact,route=self._context(approval_id,now)
-            proof=decision_store.consume(
-                cookie_value=cookie,csrf_value=form["csrf"][0],
-                approval=exact,now=now,
-            )
+            # Fail before consuming the one-use human decision when the
+            # reviewed signing key is missing, unreadable or mismatched.
+            # A transient signer outage must not silently lose the Owner's
+            # unrecorded choice; the same consent remains retryable until TTL.
             raw=_secret(self.browser_signer_file,binary_size=32)
             key=Ed25519PrivateKey.from_private_bytes(raw)
             if public_key_fingerprint(key.public_key())!=(
                     policy.browser_policy.signer_public_key_sha256):
                 raise EntraStepUpDenied("V5_BROWSER_REVIEWED_SIGNER_INVALID")
+            proof=decision_store.consume(
+                cookie_value=cookie,csrf_value=form["csrf"][0],
+                approval=exact,now=now,
+            )
             service=ApprovalRequestService(
                 repo,MobileReleaseOwnerAuthority(self.policy_path),
             )
