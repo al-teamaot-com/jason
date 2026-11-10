@@ -20,8 +20,11 @@ receipt.
 - **MCP environment:** `JASON_OWNER_RELEASE_ED25519_KEY_PATH` points to
   the container path, not a secret string.
 - **Root-pinned public policy:**
-  `/etc/jason/owner-release/verified-owner-public-key.json`
-  (root-owned, non-symlink; parent and file not writable by group/others).
+  `/etc/jason-owner-release/verified-owner-public-key.json`
+  (root-owned, non-symlink; dedicated /etc/jason-owner-release directory
+  mode 0755, public file 0644, neither writable by group/others). The
+  existing /etc/jason directory is root-only mode 0700 and must never have
+  its permissions broadened just to make a public verification key readable.
 - **Preflight:** exact owner/mode/32-byte test plus independent Ed25519
   private/public matching; no key bytes printed. Missing, mismatched or
   substituted signer stops release before any Docker replacement.

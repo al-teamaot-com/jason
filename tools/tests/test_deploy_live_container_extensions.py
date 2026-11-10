@@ -325,7 +325,7 @@ def test_native_mcp_source_requires_immutable_signer_and_root_trust():
         / "infrastructure/jason-mcp/production-deploy.sh"
     ).read_text()
     assert 'OWNER_SIGNER_HOST="/var/lib/jason/runtime-secrets/owner-release/private_key"' in source
-    assert 'OWNER_SIGNER_PUBLIC_POLICY="/etc/jason/owner-release/verified-owner-public-key.json"' in source
+    assert 'OWNER_SIGNER_PUBLIC_POLICY="/etc/jason-owner-release/verified-owner-public-key.json"' in source
     assert 'OWNER_SIGNER_OWNER_MODE' in source
     assert 'MCP_OWNER_SIGNER_ROOT_TRUST_PRECHECK=PASS' in source
     assert 'MCP_OWNER_RELEASE_SIGNER_MOUNT=PASS' in source

@@ -197,7 +197,7 @@ else
   # Source-key must match the separately root-owned policy's pinned
   # public key. This is a non-mutating proof before Docker replacement,
   # including during --preflight. Never print private bytes.
-  OWNER_SIGNER_PUBLIC_POLICY="/etc/jason/owner-release/verified-owner-public-key.json"
+  OWNER_SIGNER_PUBLIC_POLICY="/etc/jason-owner-release/verified-owner-public-key.json"
   PYTHONPATH="$REPO_ROOT/implementation" python3 - "$OWNER_SIGNER_HOST" "$OWNER_SIGNER_PUBLIC_POLICY" <<'PY_OWNER_SIGNER'
 import sys
 from pathlib import Path
