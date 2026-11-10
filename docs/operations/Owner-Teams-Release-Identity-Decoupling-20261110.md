@@ -76,3 +76,15 @@ This is a coordination record, not a merge/release authorization.
   standing-safe DRMM diagnostics and DRMM job-output pagination all modify
   the shared MCP server. Their logic is separate from the exact admin-grant
   version guard; preserve and reconcile it on the final reviewed candidate.
+
+## Duplicate preparation branch #2403 coordination
+
+PR #2403 is an explicitly draft, source-only reconciliation of this same
+licensed-Teams Owner approval patch onto protected main after the single-Owner-
+decision release simplification (#2399). Its overlapping implementation files
+and intended V4.1 release/card/privileged-admin actor semantics have been
+compared with PR #2398. This is **one repair**, not two independently
+approved approval frameworks. Do not merge or deploy both; preserve one chosen
+source lineage and revalidate the exact final protected candidate SHA. The
+separate draft is not a production approval or an excuse to bypass immutable
+release/Teams authorization. This note records overlap coordination only.
