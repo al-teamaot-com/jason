@@ -116,3 +116,9 @@ The simplification is production-ready only when all of the following are true:
 Integration coordination: #2398 #2395 #2378 #2393 #2382 #2377 #2373 #2279
 
 Later integration of these active overlapping branches must preserve the one-Owner-decision transaction contract. In particular, Teams identity/routing work may change who receives or authenticates the exact Owner decision, but it must not restore duplicate CCC, unfreeze, replacement-unfreeze, or renewal approvals. Orthogonal Workboard, client-notification, reachability, and superseded-approval recovery behavior must be rebased and regression-tested rather than discarded.
+
+### Authority-envelope integration coordination
+
+Integration coordination: #2395 #2377
+
+Preserve #2395 selected V5/browser Owner-release notice/authentication and integrity-recovery behavior if that branch remains active. Preserve #2377 fail-closed V4 release-delivery reachability preflight where applicable. These release-Teams sender changes are orthogonal to the playbook-autonomy authority-envelope maintenance introduced here; later rebases must retain both and rerun their respective negative/regression suites.
