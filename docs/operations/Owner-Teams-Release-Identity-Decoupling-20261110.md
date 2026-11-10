@@ -72,3 +72,7 @@ not a synthesis or silent merge of their unapproved changes.
   reconcile on the final protected-main SHA rather than guessing current head.
 
 This is a coordination record, not a merge/release authorization.
+- #2343/#2333/#2305/#2304: procurement intake, endpoint security assessment,
+  standing-safe DRMM diagnostics and DRMM job-output pagination all modify
+  the shared MCP server. Their logic is separate from the exact admin-grant
+  version guard; preserve and reconcile it on the final reviewed candidate.
