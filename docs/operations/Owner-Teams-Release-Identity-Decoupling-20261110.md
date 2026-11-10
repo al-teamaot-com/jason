@@ -76,3 +76,9 @@ This is a coordination record, not a merge/release authorization.
   standing-safe DRMM diagnostics and DRMM job-output pagination all modify
   the shared MCP server. Their logic is separate from the exact admin-grant
   version guard; preserve and reconcile it on the final reviewed candidate.
+
+## 2026-11-10 reconciliation onto simplified release control
+
+This prepared branch is rebased onto protected main after #2399. V4.1 licensed-Owner Teams routing and separate privileged grant administration are preserved, while the exact Owner release decision is now the complete human authority for one serialized production transaction. No CCC-only, second-unfreeze, replacement-unfreeze, or renewal Owner approval is reintroduced.
+
+Integration coordination: #2398 #2395 #2378 #2393 #2336 #2384 #2382 #2377 #2373 #2355 #2343 #2333 #2305 #2304 #2279 #2282
