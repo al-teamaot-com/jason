@@ -79,7 +79,7 @@ def test_canonical_provision_paths_match_native_mcp_mount():
     assert str(module.PRIVATE_DIR / module.PRIVATE_NAME) == (
         "/var/lib/jason/runtime-secrets/owner-release/private_key")
     assert str(module.TRUST_DIR / module.PUBLIC_NAME) == (
-        "/etc/jason/owner-release/verified-owner-public-key.json")
+        "/etc/jason-owner-release/verified-owner-public-key.json")
 
 
 def test_allowlisted_owner_binding_matches_kernel():
@@ -90,3 +90,10 @@ def test_allowlisted_owner_binding_matches_kernel():
         {"owner_oid": oid, "owner_principal": principal}
         for oid, principal in sorted(EXACT_OWNER_OAUTH_SUBJECTS.items())
     ]
+
+
+def test_dedicated_root_trust_never_changes_etc_jason_directory_mode():
+    content = SCRIPT.read_text()
+    assert 'TRUST_DIR = Path("/etc/jason-owner-release")' in content
+    assert 'os.chmod(trust_dir.parent' not in content
+    assert 'existing_etc_directory_unchanged' in content
