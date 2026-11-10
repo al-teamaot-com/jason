@@ -1,4 +1,4 @@
-"""Verify both real native deployment scripts attest the source V4 policy.
+"""Verify existing native deployment scripts enforce retired V4 source policy.
 
 Only the validators embedded in the shell scripts are executed.  The shell
 scripts themselves, Docker, release state, providers and production are NEVER
@@ -38,31 +38,31 @@ def run_validator(script: Path, marker: str, terminator: str, argument: Path):
     )
 
 
-def test_source_declares_exact_separate_normal_and_admin_roles():
+def test_source_restores_exact_prior_owner_reviewed_contract():
     doc = json.loads(SOURCE.read_text())
-    assert doc["schema_version"] == "4.1"
-    assert doc["policy_mode"] == "admin_approver_separated"
-    admin = doc["admin_approver_binding"]
-    normal = doc["regular_requester_binding"]
-    assert admin["microsoft_tenant_id"] == normal["microsoft_tenant_id"]
-    assert admin["microsoft_object_id"] != normal["microsoft_object_id"]
+    assert doc["schema_version"] == "2.0"
+    assert doc["policy_mode"] == "owner_reviewed"
     assert doc["owner_identity_ids"] == ["person-al"]
+    assert set(doc["allowed_risk_profiles"]) == {"normal", "production_control_core"}
+    assert "admin_approver_binding" not in doc
+    assert "regular_requester_binding" not in doc
+    assert doc["high_impact_review"]["signed_teams_identity_required"] is True
 
 
-def test_runtime_native_shell_validator_accepts_exact_v4_source():
+def test_runtime_native_shell_validator_restores_existing_owner_reviewed_mode():
     run = run_validator(
         RUNTIME, 'SOURCE_RELEASE_APPROVAL_MODE="$(python3', 'PY2', SOURCE,
     )
     assert run.returncode == 0, run.stderr
-    assert run.stdout.strip() == "admin_approver_separated"
+    assert run.stdout.strip() == "owner_reviewed"
 
 
-def test_mcp_native_shell_validator_returns_admin_profile_from_exact_source():
+def test_mcp_native_shell_validator_does_not_activate_v4_admin_profile():
     run = run_validator(
         MCP, 'SOURCE_ADMIN_APPROVER_PROFILE="$(python3', 'PY_ADMIN_ROLE', ROOT,
     )
     assert run.returncode == 0, run.stderr
-    assert run.stdout.strip() == "admin-separated-v1"
+    assert run.stdout.strip() == ""
 
 
 @pytest.mark.parametrize("bad", [
@@ -70,7 +70,7 @@ def test_mcp_native_shell_validator_returns_admin_profile_from_exact_source():
         "microsoft_tenant_id":"f7054323-d52b-4863-8c2f-1898f0b6077c",
         "microsoft_object_id":"bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
     }},
-    {"policy_mode":"owner_reviewed"},
+    {"policy_mode":"admin_approver_separated"},
     {"admin_approver_binding":{
         "microsoft_tenant_id":"f7054323-d52b-4863-8c2f-1898f0b6077c",
         "microsoft_object_id":"INVALID",
@@ -78,7 +78,7 @@ def test_mcp_native_shell_validator_returns_admin_profile_from_exact_source():
     {"owner_identity_ids":["person-entra-bee80bdcffb04c50b453c09d4d411f5f"]},
     {"high_impact_review":{"owner_exact_sha_required":True}},
 ])
-def test_native_runtime_rejects_invalid_admin_separation_before_execution(tmp_path,bad):
+def test_native_runtime_rejects_invalid_or_restored_v4_fields_before_execution(tmp_path,bad):
     payload=json.loads(SOURCE.read_text())
     payload.update(bad)
     p=tmp_path/"tampered.json"
@@ -95,7 +95,7 @@ def test_native_scripts_do_not_contain_unreviewed_environment_shortcuts():
     mcp=MCP.read_text()
     assert "JASON_RELEASE_MOBILE_APPROVAL_MODE" in runtime
     assert "SOURCE_RELEASE_APPROVAL_MODE" in runtime
-    assert "admin_approver_separated" in runtime
+    assert "owner_reviewed" in runtime
     assert 'JASON_AOT_ADMIN_APPROVER_PROFILE' in mcp
     assert 'SOURCE_ADMIN_APPROVER_PROFILE' in mcp
     assert "rollback-current" in mcp
