@@ -1607,7 +1607,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             settings.release_mobile_approval_policy
         )
         if (
-            privileged_policy.schema_version != "4.0"
+            privileged_policy.schema_version not in {"4.0", "4.1"}
             or privileged_policy.admin_approver_binding is None
             or privileged_policy.regular_requester_binding is None
         ):
@@ -2645,19 +2645,25 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             if owner_policy.schema_version != "1.0":
                 raise PermissionError("active release approval mode and reviewed policy version do not match")
         elif settings.release_mobile_approval_mode == "admin_approver_separated":
-            if owner_policy.schema_version != "4.0":
+            if owner_policy.schema_version not in {"4.0", "4.1"}:
                 raise PermissionError("admin-separated release mode requires reviewed V4 policy")
         elif owner_policy.schema_version not in {"2.0", "3.0"}:
             raise PermissionError("active release approval mode and reviewed policy version do not match")
         expected_version = owner_policy.schema_version
-        # V4 has no email-based Owner delegation or preexisting Owner alias
-        # lookup. Both card routing and callback use the same exact Entra OID
-        # selected by the root-owned versioned policy.
-        separate_admin = expected_version == "4.0"
-        owner_fallback = {} if separate_admin else {"person-al": "al@teamaot.com"}
+        # V4/V4.1 never use mutable email or a symbolic Owner alias for
+        # release decisions. Card delivery and the signed callback both bind
+        # to the precise Entra object selected by the versioned policy.
+        exact_owner_binding = expected_version in {"4.0", "4.1"}
+        owner_fallback = {} if exact_owner_binding else {"person-al": "al@teamaot.com"}
+        # V4.1 delivers to the licensed Owner Teams account. The admin
+        # remains independently privileged for administrative capabilities.
+        target_binding = (
+            owner_policy.regular_requester_binding if expected_version == "4.1"
+            else owner_policy.admin_approver_binding
+        )
         owner_entra_bindings = (
-            {owner_policy.owner_identity_ids[0]: owner_policy.admin_approver_binding}
-            if separate_admin else {}
+            {owner_policy.owner_identity_ids[0]: target_binding}
+            if exact_owner_binding else {}
         )
         release_repo = SQLiteApprovalRequestRepository(settings.release_mobile_approval_db)
         release_approval_service = ApprovalRequestService(
@@ -2674,7 +2680,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                 authenticator=teams_authenticator,
                 allowed_machine_identities=settings.allowed_machine_identities,
                 allowed_approval_prefixes=("relapproval-",),
-                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0", "4.0"}
+                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0", "4.0", "4.1"}
                                         else frozenset()),
             ),
             signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),

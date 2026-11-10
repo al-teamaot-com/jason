@@ -1,5 +1,5 @@
 {
-  "schema_version": "4.0",
+  "schema_version": "4.1",
   "organization_id": "aot",
   "policy_mode": "admin_approver_separated",
   "owner_identity_ids": [
