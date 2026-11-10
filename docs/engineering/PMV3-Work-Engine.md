@@ -30,22 +30,31 @@ to this engine until the scheduler/recovery acceptance suite passes.
 
 ## Approval channel
 
-Teams is the only human approval channel for PMV3.
-
-Approval-required work is not runnable unless PMV3 receives a verified approval
-decision from Jason's authenticated Teams Approval Service / Universal Teams
-Approval path and the decision is bound to the exact approval request.
+Teams is no longer the only accepted human approval channel. The Owner
+directed removal of the mandatory Teams dependency on 2026-11-10. This
+source-level work-engine contract accepts either a verified Teams approval
+or an **independently verified authenticated Entra Owner decision** bound to
+the exact request, work item, action and generation. The Owner identity is
+`person-al` and the licensed regular Entra account, not the unlicensed
+admin Teams account. An injected trusted service adapter must verify the
+OAuth bearer, active Jason authority, and signed decision evidence **before**
+calling `record_authenticated_owner_approval`; this isolated engine does
+not itself verify OAuth tokens.
 
 The following are never approval:
-- SSH or shell commands;
-- local files or environment variables;
+- bare SSH or shell commands;
+- local files or environment variables without independent verification;
 - GitHub comments or repository access;
 - typed chat text such as "approve";
 - direct state/database edits;
 - copied, expired, mismatched, replayed or unverified approval payloads.
 
-Teams Deny leaves the work non-runnable. PMV3 must never instruct the Owner to
-SSH to Jason to approve work.
+A denied decision on either channel leaves work non-runnable. Do not prompt
+the Owner to obtain an impossible Teams approval. No production adapter or
+approval channel is activated by this source-only policy/engine update;
+the signed service-adapter and release-controller/root verification must
+be separately integrated and tested before deployment. Keep the current
+production freeze and breaker intact.
 
 
 ## Governed engineering continuation controller
