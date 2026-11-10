@@ -13,8 +13,8 @@
   "capability": "release.production.approve",
   "high_impact_review": {
     "owner_exact_sha_required": true,
-    "independent_ccc_required": true,
     "protected_release_gates_unchanged": true,
-    "authenticated_entra_owner_decision_required": true
+    "authenticated_entra_owner_decision_required": true,
+    "independent_native_release_health_required": true
   }
 }

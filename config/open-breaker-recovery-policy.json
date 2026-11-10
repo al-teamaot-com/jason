@@ -71,6 +71,26 @@
         "ticket_worker": "process_not_alive",
         "last_restart_reason": "restart_budget_exhausted:missing_process"
       }
+    },
+    {
+      "id": "retire_obsolete_ccc_scheduler",
+      "change_class": "release_blocker",
+      "risk_profile": "production_control_core",
+      "max_changed_files": 16,
+      "drift_problems": [
+        {
+          "kind": "failed_system_unit",
+          "unit": "jason-ccc.service"
+        }
+      ],
+      "required_changed_files": [
+        "config/production-desired-state.json",
+        "tools/reconcile_managed_unit_delta.py",
+        "config/mobile-release-approval-policy.json"
+      ],
+      "runtime_health": {
+        "mode": "healthy"
+      }
     }
   ]
 }

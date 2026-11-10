@@ -261,7 +261,9 @@ if (set(d) != expected or d.get("organization_id") != "aot"
             **({"authenticated_entra_owner_decision_required": True}
                if version == "3.1"
                else {"signed_teams_identity_required": True}),
-            "independent_ccc_required": True,
+            **({"independent_native_release_health_required": True}
+                       if version == "3.1"
+                       else {"independent_ccc_required": True}),
             "protected_release_gates_unchanged": True,
         }):
     raise SystemExit("DENIED: source mobile release approval policy is invalid")

@@ -143,7 +143,9 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
             "owner_exact_sha_required": True,
             **({"authenticated_entra_owner_decision_required": True}
                if version == "3.1" else {"signed_teams_identity_required": True}),
-            "independent_ccc_required": True,
+            **({"independent_native_release_health_required": True}
+                       if version == "3.1"
+                       else {"independent_ccc_required": True}),
             "protected_release_gates_unchanged": True,
         }
         if (not isinstance(review, dict)
