@@ -1,0 +1,29 @@
+{
+  "schema_version": "5.0",
+  "organization_id": "aot",
+  "policy_mode": "service_requester_regular_owner_teams",
+  "owner_identity_ids": [
+    "person-al"
+  ],
+  "allowed_risk_profiles": [
+    "normal",
+    "production_control_core"
+  ],
+  "ttl_seconds": 900,
+  "capability": "release.production.approve",
+  "high_impact_review": {
+    "owner_exact_sha_required": true,
+    "signed_teams_identity_required": true,
+    "independent_ccc_required": true,
+    "protected_release_gates_unchanged": true
+  },
+  "admin_approver_binding": {
+    "microsoft_tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+    "microsoft_object_id": "c848022d-e13b-4457-84b0-e2f5c00dcaf6"
+  },
+  "regular_requester_binding": {
+    "microsoft_tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+    "microsoft_object_id": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+  },
+  "release_requester_principal_id": "svc-jason-release-manager"
+}

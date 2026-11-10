@@ -232,13 +232,16 @@ elif version == "3.0":
     expected = {"schema_version", "organization_id", "policy_mode",
                 "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
                 "capability", "high_impact_review"}
-elif version == "4.0":
-    mode = "admin_approver_separated"
+elif version in {"4.0", "5.0"}:
+    mode = ("admin_approver_separated" if version == "4.0"
+            else "service_requester_regular_owner_teams")
     risks = {"normal", "production_control_core"}
     expected = {"schema_version", "organization_id", "policy_mode",
                 "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
                 "capability", "high_impact_review", "admin_approver_binding",
                 "regular_requester_binding"}
+    if version == "5.0":
+        expected |= {"release_requester_principal_id"}
 else:
     raise SystemExit("DENIED: source mobile release approval policy version unreviewed")
 actual_risks=d.get("allowed_risk_profiles")
@@ -257,7 +260,7 @@ if (set(d) != expected or d.get("organization_id") != "aot"
             "protected_release_gates_unchanged": True,
         }):
     raise SystemExit("DENIED: source mobile release approval policy is invalid")
-if version == "4.0":
+if version in {"4.0", "5.0"}:
     def exact_binding(field):
         binding=d.get(field)
         if not isinstance(binding, dict) or set(binding) != {
@@ -276,6 +279,8 @@ if version == "4.0":
     regular=exact_binding("regular_requester_binding")
     if admin[0] != regular[0] or admin[1] == regular[1]:
         raise SystemExit("DENIED: approver cannot be normal requester")
+    if version == "5.0" and d.get("release_requester_principal_id") != "svc-jason-release-manager":
+        raise SystemExit("DENIED: V5 request must originate from native release service")
 print(mode)
 PY2
 )" || exit 2
@@ -283,7 +288,7 @@ if [ ${#UAT_PREFLIGHT[@]} -gt 0 ]; then
   RELEASE_APPROVAL_MODE="off"
 elif [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
   RELEASE_APPROVAL_MODE="${JASON_RELEASE_MOBILE_APPROVAL_ROLLBACK_MODE:-off}"
-  case "$RELEASE_APPROVAL_MODE" in owner_only_pilot|owner_reviewed|admin_approver_separated|off) ;; *) echo "DENIED: invalid rollback release approval mode" >&2; exit 2;; esac
+  case "$RELEASE_APPROVAL_MODE" in owner_only_pilot|owner_reviewed|admin_approver_separated|service_requester_regular_owner_teams|off) ;; *) echo "DENIED: invalid rollback release approval mode" >&2; exit 2;; esac
 else
   if [ "${JASON_RELEASE_MOBILE_APPROVAL_MODE:-}" != "$SOURCE_RELEASE_APPROVAL_MODE" ]; then
     echo "DENIED: invoking release approval mode differs from reviewed source" >&2
