@@ -3842,7 +3842,7 @@ def test_scheduled_promotion_defers_exact_material_owner_review_without_deployin
     assert saved["owner_approval"] == record["owner_approval"]
     assert saved["rollback_sha"] == SHA_B
 
-def test_reviewed_owner_offer_can_request_only_missing_ccc_review(tmp_path):
+def test_reviewed_owner_offer_needs_no_separate_ccc_review(tmp_path):
     from types import SimpleNamespace
     import json
     policy = SimpleNamespace(
@@ -3858,7 +3858,7 @@ def test_reviewed_owner_offer_can_request_only_missing_ccc_review(tmp_path):
     }
     assert runner.signed_owner_offer_purpose(
         approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
-    ) == "ccc_material_review_only"
+    ) is None
     # The exact already-approved release needs no second release grant.
     original_approval = dict(approved["owner_approval"])
     assert approved["owner_approval"] == original_approval
@@ -3905,7 +3905,7 @@ def test_reviewed_offer_policy_mode_risk_and_identity_do_not_widen(tmp_path):
     ) is None
 
 
-def test_reviewed_offer_rejects_conflicting_ccc_evidence_not_overwrite(tmp_path):
+def test_reviewed_offer_ignores_legacy_ccc_evidence_for_release_authority(tmp_path):
     from types import SimpleNamespace
     import json
     import pytest
@@ -3923,10 +3923,9 @@ def test_reviewed_offer_rejects_conflicting_ccc_evidence_not_overwrite(tmp_path)
         {"status": "approved", "source_revision": SHA_A, "recorded_by": "person-other"},
     ):
         named.write_text(json.dumps(bad))
-        with pytest.raises(runner.ReleaseManagerError, match="conflicts"):
-            runner.signed_owner_offer_purpose(
-                approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
-            )
+        assert runner.signed_owner_offer_purpose(
+            approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
+        ) is None
         assert json.loads(named.read_text()) == bad
 
 
