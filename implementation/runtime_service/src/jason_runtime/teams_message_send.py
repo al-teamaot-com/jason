@@ -133,6 +133,23 @@ class TeamsMessageSendInvoker:
         if card is not None:
             if not isinstance(card, dict) or card.get("type") != "AdaptiveCard":
                 raise ValueError("invalid Teams adaptive card")
+            # Generic outbound messaging is NOT the signed ApprovalRequest
+            # sender. Reject all interactive submit/execute actions, even when
+            # nested in an Action.ShowCard; only the canonical signed Teams
+            # approval pipeline may present a human approval decision.
+            pending = [card]
+            visited = 0
+            while pending:
+                value = pending.pop()
+                visited += 1
+                if visited > 4096:
+                    raise ValueError("Teams card exceeds validation bound")
+                if isinstance(value, dict):
+                    if value.get("type") in ("Action.Submit", "Action.Execute", "Action.Http"):
+                        raise PermissionError("interactive Teams decisions require canonical approval")
+                    pending.extend(value.values())
+                elif isinstance(value, list):
+                    pending.extend(value)
             payload["card"] = card
         return aad, tenant, payload
 

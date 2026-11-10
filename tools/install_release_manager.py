@@ -10,6 +10,7 @@ import re
 import shutil
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,9 +23,34 @@ APPROVAL_OVERRIDE = "10-canonical-release-scope.conf"
 
 
 def copy_mode(source: Path, destination: Path, mode: int) -> None:
+    """Atomic, no-symlink file install; a systemd mask is a safety hold.
+
+    shutil.copy2 follows a destination symlink to /dev/null when a timer
+    is masked. Never write to a device or silently remove an operator's
+    deliberate release hold. Require separately governed unmasking first.
+    """
+    source = Path(source)
+    destination = Path(destination)
+    if source.is_symlink() or not source.is_file():
+        raise PermissionError("release-manager installer source must be a regular file")
+    if destination.is_symlink():
+        raise PermissionError("masked/symlinked release-manager unit requires governed recovery")
+    if destination.exists() and not destination.is_file():
+        raise PermissionError("release-manager installer destination is not a file")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination)
-    os.chmod(destination, mode)
+    fd, name = tempfile.mkstemp(prefix=".release-manager-install-", dir=destination.parent)
+    try:
+        with os.fdopen(fd, "wb") as output, source.open("rb") as payload:
+            shutil.copyfileobj(payload, output)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(name, mode)
+        # Atomic replacement does not dereference an unexpected destination
+        # symlink even if one appears after the initial guard.
+        os.replace(name, destination)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
 
 
 
@@ -208,6 +234,15 @@ def main() -> int:
         print("JASON_APPROVAL_UNITS_INSTALL=" + ("PASS" if installed else "NOT_DECLARED"))
         return 0
 
+    # Reject an intentional systemd mask BEFORE touching any installed
+    # release-manager executable, source link, user unit or service.
+    # A masked timer may exist during a guarded production incident.
+    timer_path = UNIT_DIR / "jason-release-manager.timer"
+    if timer_path.is_symlink():
+        raise PermissionError(
+            "release-manager timer is masked or symlinked; "
+            "governed incident recovery is required before installation"
+        )
     LIB.mkdir(parents=True, exist_ok=True)
     UNIT_DIR.mkdir(parents=True, exist_ok=True)
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)

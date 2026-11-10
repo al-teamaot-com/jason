@@ -178,6 +178,70 @@ def _private_atomic(path: Path, doc: dict) -> None:
             os.unlink(temp)
 
 
+
+def verify_protected_v5_browser_ledger(
+    *, repo: Path, database: Path, approval_id: str,
+    exact_release, route, policy_version: str,
+    policy_sha256: str, organization_id: str,
+    owner_identity_ids: tuple[str, ...],
+    root_trust_path: Path, now: datetime,
+) -> dict:
+    """Read the REAL protected approval ledger; never authorize/deploy.
+
+    This is deliberately separate from V4's signed-Teams promotion path until
+    a root-approved V5 policy, CCC integration and native release candidate
+    have been independently verified. The DB is opened in read-only mode and
+    no action is taken if the request is undecided, altered, or V4-derived.
+    """
+    if policy_version != "5.0":
+        raise PermissionError("reviewed V5 browser root policy required")
+    if (not isinstance(approval_id, str)
+            or re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None
+            or exact_release.approval_id != approval_id):
+        raise PermissionError("V5 host consumer requires exact pending release identity")
+    _install_repo_modules(Path(repo))
+    from connectors.src.jason_connectors.approval_requests import SQLiteApprovalRequestRepository
+    from tools.v5_browser_release_host_consumer import verify_v5_browser_release_receipt
+    try:
+        conn = _read_only_db(database)
+        try:
+            row = conn.execute("""
+                SELECT a.payload, r.response_json, e.signed_envelope_json,
+                       e.evidence_sha256
+                FROM approval_requests AS a
+                INNER JOIN approval_decision_receipts AS r
+                   ON r.approval_id=a.approval_id
+                INNER JOIN mobile_release_signed_evidence AS e
+                   ON e.approval_id=a.approval_id
+                WHERE a.approval_id=?
+            """, (approval_id,)).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as exc:
+        if _sqlite_busy(exc):
+            raise MobileReleaseEvidenceBusy("V5 protected approval ledger busy") from exc
+        raise PermissionError("V5 protected ledger unavailable or missing") from exc
+    if row is None:
+        raise PermissionError("V5 approved request or signed evidence unavailable")
+    try:
+        request = SQLiteApprovalRequestRepository._decode(row[0])
+        response = json.loads(row[1])
+        envelope = json.loads(row[2])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise PermissionError("V5 protected approval ledger malformed") from exc
+    result = verify_v5_browser_release_receipt(
+        request=request, response=response,
+        envelope=envelope, evidence_sha256=row[3],
+        exact_release=exact_release, route=route,
+        policy_version=policy_version, policy_sha256=policy_sha256,
+        organization_id=organization_id, owner_identity_ids=owner_identity_ids,
+        root_trust_path=root_trust_path, now=now,
+    )
+    if result.get("release_authorized") is not False:
+        raise PermissionError("V5 ledger verification cannot grant release")
+    return result
+
+
 def consume_mobile_release_decisions(
     *, repo: Path, state_root: Path,
     approve_release: Callable,
@@ -216,6 +280,22 @@ def consume_mobile_release_decisions(
     from jason_openclaw.key_registry import FileBackedTrustedKeyRegistry
 
     policy = read_mobile_release_policy(policy_file)
+    # One existing host consumer and one immutable approval ledger. A reviewed
+    # v5 root policy selects exact-admin Entra browser evidence instead of
+    # Teams Submit; the old v1-v4 host path remains byte-for-byte unchanged.
+    if policy.schema_version == "5.0":
+        from tools.release_v5_browser_consumer import (
+            consume_v5_browser_release_decisions,
+        )
+        return consume_v5_browser_release_decisions(
+            repo=repo, state_root=state_root,
+            approve_release=approve_release,
+            record_initial_unfreeze=record_initial_unfreeze,
+            database=database, policy_file=policy_file,
+            ccc_root=ccc_root, bindings_db=bindings_db,
+            authority_db=authority_db,
+            protected_main_sha_reader=protected_main_sha_reader,
+        )
     containment = read_release_approval_containment(state_root)
     if containment.active:
         print('OWNER_RELEASE_APPROVAL_HOLD_ACTIVE=' + containment.hold_id, flush=True)

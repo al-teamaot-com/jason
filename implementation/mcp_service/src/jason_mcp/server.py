@@ -101,7 +101,7 @@ from pydantic import AnyHttpUrl
 from jason_mcp.release_approval_request import queue_release_approval_request
 from jason_mcp.production_read_acceptance import record_authenticated_owner_read
 from starlette.requests import Request as StarletteRequest
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, PlainTextResponse
 
 from jason_runtime.autotask_ticket_create import (
     SERVICE_TICKET_CREATE,
@@ -8655,6 +8655,68 @@ app.add_route(
     "/component-control/bulk",
     grafana_component_control_bulk,
     methods=["POST"],
+)
+
+# Dormant V5 owner browser approval. Source-only registration is never an
+# authorization. The route becomes active only under exact reviewed Runtime
+# profile + V5 root 0600 policy + independent signed host verification.
+@lru_cache(maxsize=1)
+def _aot_v5_browser_approval_web():
+    if (
+        os.environ.get("JASON_ENTRA_BROWSER_RELEASE_PROFILE", "").strip()
+            != "owner-aot-unlicensed-admin-v5"
+        or os.environ.get("JASON_RELEASE_MOBILE_APPROVAL_MODE", "").strip()
+            != "admin_browser_stepup_regular_teams_notice"
+    ):
+        return None
+    from jason_mcp.entra_release_browser_web import AdminReleaseBrowserWeb
+    return AdminReleaseBrowserWeb(
+        policy_path=Path("/var/lib/jason/authority/mobile-release-approval-policy.json"),
+        state_root=Path("/var/lib/jason/openclaw/release-manager"),
+        approval_db=Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3"),
+        session_db=Path("/var/lib/jason/openclaw/owner-browser-v5.sqlite3"),
+        ca_attestation_path=Path(
+            "/var/lib/jason/openclaw/release-manager/v5-entra-ca-enforcement.json"
+        ),
+        oauth_secret_file=Path(
+            "/run/jason-secrets/entra-owner-browser/client_secret"
+        ),
+        browser_signer_file=Path(
+            "/run/jason-secrets/entra-owner-browser/owner_signing_ed25519"
+        ),
+        enabled=True,
+    )
+
+
+async def _v5_browser_begin(request: StarletteRequest):
+    handler=_aot_v5_browser_approval_web()
+    if handler is None:
+        return PlainTextResponse("Not Found",status_code=404)
+    return await handler.begin(request)
+
+
+async def _v5_browser_callback(request: StarletteRequest):
+    handler=_aot_v5_browser_approval_web()
+    if handler is None:
+        return PlainTextResponse("Not Found",status_code=404)
+    return await handler.callback(request)
+
+
+async def _v5_browser_decide(request: StarletteRequest):
+    handler=_aot_v5_browser_approval_web()
+    if handler is None:
+        return PlainTextResponse("Not Found",status_code=404)
+    return await handler.decide(request)
+
+
+app.add_route(
+    "/admin/release-approval", _v5_browser_begin,methods=["GET"],
+)
+app.add_route(
+    "/admin/release-approval/callback", _v5_browser_callback,methods=["GET"],
+)
+app.add_route(
+    "/admin/release-approval/decision", _v5_browser_decide,methods=["POST"],
 )
 
 app.add_route(
