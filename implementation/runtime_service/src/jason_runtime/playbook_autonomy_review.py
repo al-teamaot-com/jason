@@ -498,6 +498,28 @@ class PlaybookAutonomyReviewMaintenance:
             ) is not None:
                 continue
 
+            envelope_root = self.promotion_store.find_envelope_approved(
+                playbook_id=scope.playbook_id,
+                policy_id=scope.policy_id,
+                required_capabilities=scope.allowed_capabilities,
+                authority_envelope_sha256=scope.authority_envelope_sha256,
+            )
+            if envelope_root is not None:
+                derived = self.promotion_store.derive_exact_version_from_envelope(
+                    root=envelope_root,
+                    playbook_version=scope.playbook_version,
+                    required_capabilities=scope.allowed_capabilities,
+                    authority_envelope_sha256=scope.authority_envelope_sha256,
+                    now=current,
+                )
+                self.review_service.audit_envelope_inheritance(
+                    scope=scope,
+                    root=envelope_root,
+                    derived=derived,
+                )
+                handled = True
+                continue
+
             exact = [
                 request
                 for request in requests

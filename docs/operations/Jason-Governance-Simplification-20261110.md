@@ -93,6 +93,10 @@ After this contract is production-verified:
 5. move independent security review to a risk-based rule (authorization/crypto/root/tenant/credential changes), not every routine release;
 6. replace exact-version autonomous playbook promotion with authority-envelope promotion only after separate non-interference validation.
 
+### Source implementation checkpoint — playbook authority envelopes
+
+The target autonomy model keeps exact-version execution promotions but removes repeated Owner review for version-only revisions inside an already-approved authority envelope. The envelope fingerprint is the entire registry entry with only `version` removed. Therefore any change to triggers, gates, capabilities, source, review status, remediation metadata, human-review boundaries, branch policy, or any other registry field changes the envelope and requires a new Owner approval. Derived exact-version promotions retain the root approval ID and become invalid if that root approval is revoked or expires. Existing legacy exact promotions are not silently converted into envelopes; the first new Owner promotion under this model seeds the envelope.
+
 ## Acceptance
 
 The simplification is production-ready only when all of the following are true:

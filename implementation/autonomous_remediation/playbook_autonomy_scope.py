@@ -28,6 +28,7 @@ class RegisteredAutonomyScope:
     review_status: str
     source: str
     entry_sha256: str
+    authority_envelope_sha256: str
 
     def requested_mode(self) -> str:
         return f"promote:{self.playbook_id}@{self.playbook_version}"
@@ -89,6 +90,20 @@ def registered_autonomy_scope(
     ).encode("utf-8")
     fingerprint = sha256(canonical_entry).hexdigest()
 
+    # Authority inheritance is deliberately conservative: only a version bump
+    # may reuse an already-approved autonomy envelope. Any change to trigger,
+    # gates, capabilities, remediation/human-review metadata, source, policy,
+    # review status, or any other registry field changes this fingerprint.
+    envelope_entry = dict(entry)
+    envelope_entry.pop("version", None)
+    canonical_envelope = json.dumps(
+        envelope_entry,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    authority_envelope_sha256 = sha256(canonical_envelope).hexdigest()
+
     return RegisteredAutonomyScope(
         playbook_id=normalized_id,
         name=str(entry.get("name") or normalized_id).strip(),
@@ -98,4 +113,5 @@ def registered_autonomy_scope(
         review_status=str(entry.get("review_status") or "").strip(),
         source=str(entry.get("source") or "").strip(),
         entry_sha256=fingerprint,
+        authority_envelope_sha256=authority_envelope_sha256,
     )

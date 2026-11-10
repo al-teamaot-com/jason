@@ -174,7 +174,7 @@ As of 2026-09-26, items 1-10 have been completed for the current production auto
 
 ## Autonomous workload identity
 
-Unattended execution must not impersonate the interactive technician who originally discussed a ticket. Jason uses a dedicated non-human workload identity (`jason-autonomy-worker`) evaluated by JKD-001. The identity receives only exact capability grants. Approval-required actions additionally require a separate durable owner promotion for the exact playbook version and capability, followed by a short-lived exact-action reservation in the governed execution ledger. The Central Orchestrator still binds and consumes the concrete execution plan once.
+Unattended execution must not impersonate the interactive technician who originally discussed a ticket. Jason uses a dedicated non-human workload identity (`jason-autonomy-worker`) evaluated by JKD-001. The identity receives only exact capability grants. Approval-required actions additionally require an exact-version durable playbook promotion followed by a short-lived exact-action reservation in the governed execution ledger. The promotion may be directly Owner-approved or mechanically inherited from an active Owner-approved authority envelope when the only registry difference is the version field. The Central Orchestrator still binds and consumes the concrete execution plan once.
 
 Source metadata is not authority. Setting `autonomy.activation=autonomous` in the playbook catalog is only an eligibility declaration. Standing execution requires a separate durable `PlaybookAutonomyApproval`; absence, expiration, revocation, version drift, capability drift, or duplicate active promotion records fail closed.
 
@@ -319,7 +319,7 @@ Each operational playbook must still provide, for its exact version and capabili
 9. red-team acceptance;
 10. explicit suspension/revocation behavior.
 
-The production model is therefore **per-playbook-version and per-safe-branch testing and promotion**, not generic autonomy enablement. The current ten production playbooks all have a promoted safe branch, but each retains explicit non-autonomous boundaries where remediation, disruptive action, automatic closure, or another higher-risk capability has not been accepted.
+The production model therefore remains **per-playbook-version and per-safe-branch execution**, not generic autonomy enablement. Owner review is per authority envelope: the first envelope requires Owner promotion, while a version-only revision with an identical registry authority envelope may inherit that approval and receive a new exact-version durable promotion. The current ten production playbooks all have a promoted safe branch, but each retains explicit non-autonomous boundaries where remediation, disruptive action, automatic closure, or another higher-risk capability has not been accepted.
 
 ## Production worker activation - 2026-09-25
 
@@ -345,7 +345,7 @@ The current production registry has autonomous activation for the following exac
 - `disk_bad_block_event_7@1.0.0`
 - `idle_log_off@1.0.0`
 
-This list means each playbook has at least one unattended branch that has passed source review, runtime tests, durable owner promotion, and production deployment. It does **not** mean the whole playbook is autonomous.
+This list means each playbook has at least one unattended branch that has passed source review, runtime tests, durable exact-version promotion (directly Owner-approved or envelope-inherited), and production deployment. It does **not** mean the whole playbook is autonomous.
 
 Examples of intentionally retained hard boundaries:
 
