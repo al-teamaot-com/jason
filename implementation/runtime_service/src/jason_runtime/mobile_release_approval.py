@@ -104,7 +104,7 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
     if version == "1.0":
         expected = shared
         mode = "owner_only_pilot"
-    elif version in {"2.0", "3.0"}:
+    elif version in {"2.0", "3.0", "3.1"}:
         expected = shared | {"high_impact_review"}
         mode = "owner_reviewed"
     elif version in {"4.0", "4.1"}:
@@ -136,17 +136,19 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
     else:
         review = doc["high_impact_review"]
         required_risks = (
-            {"normal", "production_control_core"} if version in {"2.0", "4.0", "4.1"}
+            {"normal", "production_control_core"} if version in {"2.0", "3.1", "4.0", "4.1"}
             else {"normal", "production_control_core", "production_repair"}
         )
+        expected_review = {
+            "owner_exact_sha_required": True,
+            **({"authenticated_entra_owner_decision_required": True}
+               if version == "3.1" else {"signed_teams_identity_required": True}),
+            "independent_ccc_required": True,
+            "protected_release_gates_unchanged": True,
+        }
         if (not isinstance(review, dict)
-                or review != {
-                    "owner_exact_sha_required": True,
-                    "signed_teams_identity_required": True,
-                    "independent_ccc_required": True,
-                    "protected_release_gates_unchanged": True,
-                } or set(risks) != required_risks):
-            raise PermissionError("high-impact Teams release policy requires exact reviewed controls")
+                or review != expected_review or set(risks) != required_risks):
+            raise PermissionError("high-impact release policy requires exact reviewed controls")
         # Even V3 only authorizes the Teams review *channel*, never a standing
         # class-wide release grant or a production unfreeze. Root gates remain.
     admin_binding = None

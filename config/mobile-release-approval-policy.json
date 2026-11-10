@@ -1,5 +1,5 @@
 {
-  "schema_version": "2.0",
+  "schema_version": "3.1",
   "organization_id": "aot",
   "policy_mode": "owner_reviewed",
   "owner_identity_ids": [
@@ -13,8 +13,8 @@
   "capability": "release.production.approve",
   "high_impact_review": {
     "owner_exact_sha_required": true,
-    "signed_teams_identity_required": true,
     "independent_ccc_required": true,
-    "protected_release_gates_unchanged": true
+    "protected_release_gates_unchanged": true,
+    "authenticated_entra_owner_decision_required": true
   }
 }

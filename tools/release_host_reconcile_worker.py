@@ -64,6 +64,10 @@ CURRENT_LKG_FULL_EVIDENCE = Path("/var/lib/jason/openclaw/operational-full-healt
 # execution directory. Never grant group access to the candidate script spool.
 CURRENT_LKG_EXEC_ROOT = Path("/usr/local/lib/jason/lkg-health-" + CURRENT_LKG_RECOVERY_SHA)
 MOBILE_APPROVAL_LEDGER = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
+ROOT_OWNER_PROOF_VERIFIER = Path("/usr/local/lib/jason/owner_signed_release.py")
+ROOT_OWNER_TRUST_POLICY = Path("/etc/jason/owner-release/verified-owner-public-key.json")
+ROOT_OWNER_BINDINGS = Path("/var/lib/jason/openclaw/teams-identity-bindings.sqlite3")
+ROOT_OWNER_AUTHORITY = Path("/var/lib/jason/authority/authority.sqlite3")
 CCC_MATERIAL_REVIEW_ROOT = Path("/var/lib/jason/ccc")
 
 
@@ -292,6 +296,19 @@ def _forward_recovery_release_authorized(
     owner = record.get("owner_approval") or {}
     manifest = record.get("release_manifest") or {}
     exception = record.get("one_transaction_freeze_exception") or {}
+    source = str(owner.get("source") or "")
+    signed_mcp = source.startswith("authenticated_signed_mcp_owner:")
+    owner_is_verified = (
+        _signed_mcp_owner_release_authorized(
+            source_revision, lkg_revision, record,
+        ) if signed_mcp else
+        source.startswith("authenticated_mobile_teams_owner:relapproval-")
+    )
+    permission_is_reviewed = (
+        exception.get("authenticated_owner_release_required") is True
+        if signed_mcp else
+        exception.get("signed_teams_release_approval_required") is True
+    )
     if (
         record.get("state") != "production"
         or record.get("risk_profile") != "production_control_core"
@@ -302,18 +319,29 @@ def _forward_recovery_release_authorized(
         or manifest.get("rollback_sha") != lkg_revision
         or owner.get("approved") is not True
         or owner.get("candidate_sha") != source_revision
-        or not str(owner.get("source") or "").startswith(
-            "authenticated_mobile_teams_owner:relapproval-"
-        )
+        or not owner_is_verified
         or exception.get("required_recovery_profile_id")
             != "provider_identity_and_authority_recovery"
         or exception.get("rollback_sha") != lkg_revision
         or exception.get("standing_authority") is not False
-        or exception.get("signed_teams_release_approval_required") is not True
+        or not permission_is_reviewed
         or exception.get("restore_freeze_after_transaction") is not True
     ):
         return False
 
+    if signed_mcp:
+        receipt = (RELEASE_STATE / "owner-unfreeze-receipts"
+                   / ("release-" + source_revision[:16] + ".json"))
+        try:
+            native = json.loads(receipt.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return False
+        if (not _release_transaction_held()
+                or (RELEASE_STATE / "production-deployment-freeze").exists()
+                or native.get("authorization") !=
+                   "authenticated_signed_mcp_owner_one_transaction_unfreeze"
+                or native.get("status") != "unfrozen_active"):
+            return False
     try:
         raw = subprocess.check_output(
             _git("show", f"{source_revision}:{SOURCE_DRIFT_POLICY}"),
@@ -449,6 +477,172 @@ def _release_transaction_held() -> bool:
         os.close(fd)
 
 
+def _trusted_owner_proof_module():
+    """Import only the root-installed, immutable source-reviewed verifier."""
+    path = ROOT_OWNER_PROOF_VERIFIER
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise HostReconcileError("root owner verifier not installed") from exc
+    if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != 0 or info.st_mode & 0o022):
+        raise HostReconcileError("root owner verifier is not independently trusted")
+    spec = importlib.util.spec_from_file_location(
+        "jason_root_verified_owner_release", path,
+    )
+    if spec is None or spec.loader is None:
+        raise HostReconcileError("root owner verifier cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _root_owner_identity_is_active(oid: str, subject: str) -> bool:
+    """Recheck exact licensed/privileged Entra OAuth Owner subject binding."""
+    tenant = "f7054323-d52b-4863-8c2f-1898f0b6077c"
+    allowed = {
+        "bee80bdc-ffb0-4c50-b453-c09d4d411f5f":
+            "person-entra-bee80bdcffb04c50b453c09d4d411f5f",
+        "c848022d-e13b-4457-84b0-e2f5c00dcaf6":
+            "person-entra-c848022de13b445784b0e2f5c00dcaf6",
+    }
+    if oid not in allowed or subject != allowed[oid]:
+        return False
+    try:
+        con = sqlite3.connect(
+            "file:" + ROOT_OWNER_BINDINGS.as_posix() + "?mode=ro",
+            uri=True, timeout=2,
+        )
+        try:
+            row = con.execute(
+                """SELECT jason_identity_id,client_id,status FROM
+                   microsoft_identity_bindings WHERE
+                   microsoft_tenant_id=? AND microsoft_object_id=?""",
+                (tenant, oid),
+            ).fetchone()
+        finally:
+            con.close()
+        if row != (subject, None, "active"):
+            return False
+        con = sqlite3.connect(
+            "file:" + ROOT_OWNER_AUTHORITY.as_posix() + "?mode=ro",
+            uri=True, timeout=2,
+        )
+        try:
+            raw = con.execute(
+                "SELECT payload FROM identities WHERE identity_id=?",
+                (subject,),
+            ).fetchone()
+        finally:
+            con.close()
+        if raw is None:
+            return False
+        identity = json.loads(raw[0])
+        return (identity.get("identity_id") == subject
+                and identity.get("organization_id") == "aot"
+                and identity.get("status") == "active"
+                and identity.get("identity_type") in {"human", "person"})
+    except (OSError, TypeError, ValueError, sqlite3.Error):
+        return False
+
+
+def _signed_mcp_owner_release_authorized(
+    candidate: str, rollback: str, record: dict[str, object],
+) -> bool:
+    """Root verification of an exact one-use OAuth Owner decision, sans Teams.
+
+    A mutable owner_approval boolean is insufficient. The real signed
+    attestation must exist in the original MCP request, be pinned to a
+    separately root-protected public key, match current release/freeze/manifest,
+    and agree with the independently active Entra/Jason Owner identity.
+    """
+    owner = record.get("owner_approval") or {}
+    source = str(owner.get("source") or "")
+    if (not re.fullmatch(
+            r"authenticated_signed_mcp_owner:owner-mcp-[0-9a-f]{32}", source)
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate
+            or record.get("rollback_sha") != rollback
+            or (record.get("release_candidate") or {}).get("candidate_sha") != candidate
+            or not SHA.fullmatch(candidate) or not SHA.fullmatch(rollback)):
+        return False
+    release_id = "release-" + candidate[:16]
+    path = (RELEASE_STATE / "owner-approval-requests-processed"
+            / (release_id + ".json"))
+    backup = RELEASE_STATE / "production-deployment-freeze.pmv3-one-release-backup"
+    freeze = RELEASE_STATE / "production-deployment-freeze"
+    try:
+        al = _host_operator_uid()
+        info = path.lstat()
+        raw = path.read_bytes()
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != al or stat.S_IMODE(info.st_mode) != 0o600
+                or len(raw) > 16384):
+            return False
+        request = json.loads(raw)
+        freeze_path = backup if not freeze.exists() else freeze
+        freeze_info = freeze_path.lstat()
+        if (freeze_path.is_symlink()
+                or not stat.S_ISREG(freeze_info.st_mode)
+                or freeze_info.st_uid != al
+                or stat.S_IMODE(freeze_info.st_mode) != 0o600):
+            return False
+        manifest = record.get("release_manifest") or {}
+        review = record.get("manual_scope_review") or {}
+        scope = str(review.get("scope_sha256") or "")
+        manifest_digest = hashlib.sha256(json.dumps(
+            manifest, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")).hexdigest()
+        if (not re.fullmatch(r"[0-9a-f]{64}", scope)
+                or review.get("baseline_sha") != rollback
+                or review.get("candidate_sha") != candidate
+                or manifest.get("candidate_sha") != candidate
+                or manifest.get("rollback_sha") != rollback
+                or request.get("release_id") != release_id
+                or request.get("candidate_sha") != candidate
+                or request.get("approved_by") not in {
+                    "person-entra-bee80bdcffb04c50b453c09d4d411f5f",
+                    "person-entra-c848022de13b445784b0e2f5c00dcaf6",
+                }
+                or request.get("organization_id") != "aot"):
+            return False
+        module = _trusted_owner_proof_module()
+        public = module.read_pinned_root_owner_public_key(
+            ROOT_OWNER_TRUST_POLICY,
+        )
+        proof = module.verify_exact_owner_release(
+            request.get("signed_owner_proof"),
+            public_key=public,
+            expected_candidate_sha=candidate,
+            expected_rollback_sha=rollback,
+            expected_release_id=release_id,
+            expected_scope_sha256=scope,
+            expected_manifest_sha256=manifest_digest,
+            expected_freeze_sha256=hashlib.sha256(
+                freeze_path.read_bytes()
+            ).hexdigest(),
+            at=datetime.now(timezone.utc),
+        )
+        if (source != "authenticated_signed_mcp_owner:" + proof["approval_id"]
+                or request.get("source") !=
+                    "authenticated_jason_mcp_owner:" + proof["approval_id"]
+                or request.get("approved_by") != proof["owner_principal"]):
+            return False
+        tx = owner.get("transaction_binding") or {}
+        if (tx.get("candidate_sha") != candidate
+                or tx.get("rollback_sha") != rollback
+                or tx.get("scope_sha256") != scope
+                or tx.get("manifest_sha256") != manifest_digest):
+            return False
+        return _root_owner_identity_is_active(
+            proof["owner_oid"], proof["owner_principal"],
+        )
+    except (OSError, TypeError, ValueError, KeyError, PermissionError,
+            sqlite3.Error, HostReconcileError):
+        return False
+
+
 def _authenticated_rollback_evidence(
     candidate: str, rollback: str, record: dict[str, object]
 ) -> bool:
@@ -460,6 +654,10 @@ def _authenticated_rollback_evidence(
     """
     owner = record.get("owner_approval") or {}
     source = str(owner.get("source") or "")
+    if source.startswith("authenticated_signed_mcp_owner:"):
+        return _signed_mcp_owner_release_authorized(
+            candidate, rollback, record,
+        )
     prefix = "authenticated_mobile_teams_owner:"
     if not source.startswith(prefix):
         return False
@@ -617,9 +815,11 @@ def _exact_signed_inflight_lkg_rollback_authorized(
             or manifest.get("rollback_sha") != source_revision
             or owner.get("approved") is not True
             or owner.get("candidate_sha") != candidate
-            or not str(owner.get("source") or "").startswith(
+            or not (str(owner.get("source") or "").startswith(
                 "authenticated_mobile_teams_owner:relapproval-"
-            )
+            ) or str(owner.get("source") or "").startswith(
+                "authenticated_signed_mcp_owner:owner-mcp-"
+            ))
             or previous.get("complete") is not True
             or previous.get("revision") != source_revision
             or pre_mutation.get("passed") is not True
@@ -639,7 +839,10 @@ def _exact_signed_inflight_lkg_rollback_authorized(
             and exception.get("required_recovery_profile_id")
                 == "provider_identity_and_authority_recovery"
             and exception.get("standing_authority") is False
-            and exception.get("signed_teams_release_approval_required") is True
+            and (
+                exception.get("signed_teams_release_approval_required") is True
+                or exception.get("authenticated_owner_release_required") is True
+            )
             and exception.get("restore_freeze_after_transaction") is True
         )
         explicit_unfreeze = _distinct_owner_unfreeze_rollback_authorized(

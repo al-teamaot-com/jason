@@ -13,6 +13,12 @@ from collections.abc import Mapping
 OWNER_TENANT_ID = "f7054323-d52b-4863-8c2f-1898f0b6077c"
 LICENSED_OWNER_OID = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
 LICENSED_OWNER_PRINCIPAL = "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
+ADMIN_OWNER_OID = "c848022d-e13b-4457-84b0-e2f5c00dcaf6"
+ADMIN_OWNER_PRINCIPAL = "person-entra-c848022de13b445784b0e2f5c00dcaf6"
+EXACT_RELEASE_OWNER_SUBJECTS = {
+    LICENSED_OWNER_OID: LICENSED_OWNER_PRINCIPAL,
+    ADMIN_OWNER_OID: ADMIN_OWNER_PRINCIPAL,
+}
 
 
 def authorized_release_owner(
@@ -44,6 +50,6 @@ def authorized_release_owner(
             "person-entra-" + oid.replace("-", "").lower()
         )
     return (
-        oid == LICENSED_OWNER_OID
-        and principal == LICENSED_OWNER_PRINCIPAL
+        oid in EXACT_RELEASE_OWNER_SUBJECTS
+        and principal == EXACT_RELEASE_OWNER_SUBJECTS[oid]
     )
