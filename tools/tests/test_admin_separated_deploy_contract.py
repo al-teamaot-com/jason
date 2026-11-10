@@ -40,7 +40,7 @@ def run_validator(script: Path, marker: str, terminator: str, argument: Path):
 
 def test_source_declares_exact_separate_normal_and_admin_roles():
     doc = json.loads(SOURCE.read_text())
-    assert doc["schema_version"] == "4.0"
+    assert doc["schema_version"] == "4.1"
     assert doc["policy_mode"] == "admin_approver_separated"
     admin = doc["admin_approver_binding"]
     normal = doc["regular_requester_binding"]

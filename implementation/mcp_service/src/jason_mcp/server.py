@@ -4302,7 +4302,7 @@ _UNSUPERVISED_COMPONENT_BLOCK_PATTERNS = (
 def _authority_admin_owner() -> tuple[str, str]:
     """Administer exact grants with the authenticated privileged account only.
 
-    V4 is a distinct *opt-in* release policy. It does not remap the admin
+    V4/V4.1 is a distinct *opt-in* release policy. It does not remap the admin
     Entra identity into the routine technician account or write identity
     bindings. An enabled profile must be attested by source-controlled release
     input and the exact root-owned private policy; unknown profiles fail closed.
@@ -4320,7 +4320,7 @@ def _authority_admin_owner() -> tuple[str, str]:
             "/var/lib/jason/authority/mobile-release-approval-policy.json",
         )))
         if (
-            policy.schema_version != "4.0"
+            policy.schema_version not in {"4.0", "4.1"}
             or policy.admin_approver_binding is None
             or policy.regular_requester_binding is None
         ):

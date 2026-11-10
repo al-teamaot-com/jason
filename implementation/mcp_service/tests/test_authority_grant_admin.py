@@ -168,14 +168,18 @@ NORMAL_PRINCIPAL = "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
 
 def v4_admin_fixture(monkeypatch, tmp_path, *, tenant=ADMIN_TENANT,
                      oid=ADMIN_OID, principal=ADMIN_PRINCIPAL,
-                     client_id=None, enable=True):
+                     client_id=None, enable=True, schema_version="4.0"):
     import json
     from pathlib import Path
     p=tmp_path / "root-owned-equivalent-v4.json"
     repo=Path(__file__).resolve().parents[3]
     source=repo / "config" / "mobile-release-approval-policy.json"
     policy=json.loads(source.read_text())
-    assert policy["schema_version"] == "4.0"
+    assert policy["schema_version"] in {"4.0", "4.1"}
+    assert schema_version in {"4.0", "4.1"}
+    # Preserve the historically reviewed V4 security tests as their own
+    # fixture even while the source policy moves to V4.1.
+    policy["schema_version"] = schema_version
     p.write_text(json.dumps(policy))
     p.chmod(0o600)
     runtime=app()
@@ -293,4 +297,56 @@ def test_v4_privileged_admin_cannot_issue_unsafe_exact_grant(
         permission=permission,approval_required=approve,client_id=client,
     )
     assert result["status"]=="rejected"
+    assert not runtime.identity_authority.grants.list_for_subject(NORMAL_PRINCIPAL)
+
+
+
+def test_v41_release_recipient_never_inherits_privileged_grant_authority(monkeypatch, tmp_path):
+    runtime, _ = v4_admin_fixture(monkeypatch, tmp_path, schema_version="4.1")
+    result = server.grant_exact_authority(
+        subject_id=NORMAL_PRINCIPAL,
+        capability="service.ticket.client.notification.create",
+        permission="execute", approval_required=True, client_id="1158",
+    )
+    assert result["status"] == "succeeded"
+    assert result["subject_id"] == NORMAL_PRINCIPAL
+    assert runtime.identity_authority.grants.get(result["grant_id"]).approval_required is True
+    # The same approved Teams recipient (normal Entra account) must NOT administer.
+    monkeypatch.setattr(
+        server, "_authenticated_write_identity",
+        lambda: (NORMAL_PRINCIPAL, "aot", "entra-oauth-bearer", None),
+    )
+    monkeypatch.setattr(
+        server, "get_access_token",
+        lambda: SimpleNamespace(claims={"tid": ADMIN_TENANT, "oid": NORMAL_OID}),
+    )
+    result = server.grant_exact_authority(
+        subject_id=NORMAL_PRINCIPAL,
+        capability="service.ticket.update",
+        permission="execute", approval_required=True, client_id="1158",
+    )
+    assert result == {"status": "rejected", "error_code": "AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED"}
+    grants = runtime.identity_authority.grants.list_for_subject(NORMAL_PRINCIPAL)
+    assert len(grants) == 1
+
+
+@pytest.mark.parametrize("tenant,oid,principal,client", [
+    (ADMIN_TENANT, NORMAL_OID, NORMAL_PRINCIPAL, None),
+    ("00000000-0000-4000-8000-000000000000", ADMIN_OID, ADMIN_PRINCIPAL, None),
+    (ADMIN_TENANT, ADMIN_OID, NORMAL_PRINCIPAL, None),
+    (ADMIN_TENANT, ADMIN_OID, ADMIN_PRINCIPAL, "1158"),
+])
+def test_v41_privileged_grant_wrong_claims_fail_closed(
+    monkeypatch, tmp_path, tenant, oid, principal, client,
+):
+    runtime, _ = v4_admin_fixture(
+        monkeypatch, tmp_path, schema_version="4.1",
+        tenant=tenant, oid=oid, principal=principal, client_id=client,
+    )
+    result = server.grant_exact_authority(
+        subject_id=NORMAL_PRINCIPAL,
+        capability="service.ticket.update",
+        permission="execute", approval_required=True, client_id="1158",
+    )
+    assert result == {"status": "rejected", "error_code": "AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED"}
     assert not runtime.identity_authority.grants.list_for_subject(NORMAL_PRINCIPAL)

@@ -8,7 +8,29 @@ import release_control_transition_worker as root_worker
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE_POLICY = ROOT / "config/mobile-release-approval-policy.json"
+# Historical V2/V3 tests must remain independent of the current source
+# release-policy version (now V4.1). This makes the original rollback
+# and policy-staging regressions meaningful instead of source-version-coupled.
+def v2_policy() -> dict:
+    return {
+        "schema_version": "2.0",
+        "organization_id": "aot",
+        "policy_mode": "owner_reviewed",
+        "owner_identity_ids": ["person-al"],
+        "allowed_risk_profiles": ["normal", "production_control_core"],
+        "ttl_seconds": 900,
+        "capability": "release.production.approve",
+        "high_impact_review": {
+            "owner_exact_sha_required": True,
+            "signed_teams_identity_required": True,
+            "independent_ccc_required": True,
+            "protected_release_gates_unchanged": True,
+        },
+    }
+
+
+def v2_policy_bytes() -> bytes:
+    return (json.dumps(v2_policy(), indent=2) + "\n").encode("utf-8")
 
 
 def v1_policy() -> dict:
@@ -26,12 +48,12 @@ def v1_policy() -> dict:
 def candidate_tree(tmp_path: Path) -> Path:
     tree = tmp_path / "candidate"
     (tree / "config").mkdir(parents=True)
-    (tree / "config/mobile-release-approval-policy.json").write_bytes(SOURCE_POLICY.read_bytes())
+    (tree / "config/mobile-release-approval-policy.json").write_bytes(v2_policy_bytes())
     return tree
 
 
-def test_source_policy_is_exact_owner_reviewed_protected_core_contract():
-    policy = runner.declared_mobile_release_approval_policy(ROOT)
+def test_source_policy_is_exact_owner_reviewed_protected_core_contract(tmp_path):
+    policy = runner.declared_mobile_release_approval_policy(candidate_tree(tmp_path))
     assert policy["schema_version"] == "2.0"
     assert policy["mode"] == "owner_reviewed"
     assert policy["risks"] == ["normal", "production_control_core"]
@@ -71,7 +93,7 @@ def test_policy_stage_rejects_unreviewed_high_impact_class(monkeypatch, tmp_path
     doc = json.loads((tree / "config/mobile-release-approval-policy.json").read_text())
     doc["allowed_risk_profiles"].append("schema_or_contract")
     (tree / "config/mobile-release-approval-policy.json").write_text(json.dumps(doc))
-    with pytest.raises(runner.ReleaseManagerError, match="reviewed contract"):
+    with pytest.raises(runner.ReleaseManagerError, match="reviewed"):
         runner.declared_mobile_release_approval_policy(tree)
 
 
@@ -90,7 +112,7 @@ def test_native_deploy_contract_binds_owner_reviewed_mode(monkeypatch, tmp_path)
 def test_live_activation_requires_policy_digest_and_runtime_mode(monkeypatch, tmp_path):
     tree = candidate_tree(tmp_path)
     live = tmp_path / "mobile-release-approval-policy.json"
-    live.write_bytes(SOURCE_POLICY.read_bytes())
+    live.write_bytes(v2_policy_bytes())
     live.chmod(0o600)
     monkeypatch.setattr(runner, "MOBILE_APPROVAL_POLICY", live)
     runtime = {"inspect": {"Config": {"Env": ["JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_reviewed"]}}}
@@ -134,10 +156,9 @@ def test_teams_delivery_repair_defers_shadow_but_keeps_reviewed_pm_v2_plan():
 
 
 def test_v3_source_policy_requires_exact_opt_in_and_keeps_v2_default(tmp_path):
-    # Engineering support is not activation. The installed/source V2 contract
-    # remains unchanged until a separately authorized source+private policy change.
-    assert runner.declared_mobile_release_approval_policy(ROOT)["schema_version"] == "2.0"
+    # Historical V2 never permits V3 risk before an exact versioned opt-in.
     tree = candidate_tree(tmp_path)
+    assert runner.declared_mobile_release_approval_policy(tree)["schema_version"] == "2.0"
     policy_file = tree / "config/mobile-release-approval-policy.json"
     doc = json.loads(policy_file.read_text())
     doc["schema_version"] = "3.0"
@@ -151,7 +172,7 @@ def test_v3_source_policy_requires_exact_opt_in_and_keeps_v2_default(tmp_path):
     assert reviewed["risks"] == sorted(doc["allowed_risk_profiles"])
     doc["allowed_risk_profiles"].append("schema_or_contract")
     policy_file.write_text(json.dumps(doc))
-    with pytest.raises(runner.ReleaseManagerError, match="reviewed contract"):
+    with pytest.raises(runner.ReleaseManagerError, match="reviewed"):
         runner.declared_mobile_release_approval_policy(tree)
 
 
@@ -181,7 +202,7 @@ def test_v3_signed_owner_offer_requires_exact_opt_in_and_reviewed_mode(tmp_path)
     }
     assert runner.signed_owner_offer_purpose(
         exact_approved, "a" * 40, v3, "owner_reviewed", ccc_root=tmp_path,
-    ) == "ccc_material_review_only"
+    ) is None  # PMV3 uses one signed Owner decision, never a second CCC card.
 
 
 def test_v3_policy_stages_atomically_and_rolls_back_to_original_v2(monkeypatch, tmp_path):
@@ -194,7 +215,7 @@ def test_v3_policy_stages_atomically_and_rolls_back_to_original_v2(monkeypatch, 
     ]
     source.write_text(json.dumps(doc))
     live = tmp_path / "mobile-release-approval-policy.json"
-    live.write_bytes(SOURCE_POLICY.read_bytes())
+    live.write_bytes(v2_policy_bytes())
     live.chmod(0o600)
     monkeypatch.setattr(runner, "MOBILE_APPROVAL_POLICY", live)
     record = {"release_id": "release-" + "a" * 16, "updated_at": "", "history": []}

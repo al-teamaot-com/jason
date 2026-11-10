@@ -1082,7 +1082,7 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
     elif version in {"2.0", "3.0"}:
         expected = shared | {"high_impact_review"}
         mode = "owner_reviewed"
-    elif version == "4.0":
+    elif version in {"4.0", "4.1"}:
         expected = shared | {
             "high_impact_review", "admin_approver_binding",
             "regular_requester_binding",
@@ -1090,7 +1090,7 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
         mode = "admin_approver_separated"
     else:
         raise ReleaseManagerError("mobile release approval policy version is unsupported")
-    if source_v2_required and version not in {"2.0", "3.0", "4.0"}:
+    if source_v2_required and version not in {"2.0", "3.0", "4.0", "4.1"}:
         raise ReleaseManagerError("candidate source must declare an owner-reviewed release policy")
     risks = doc.get("allowed_risk_profiles")
     ttl = doc.get("ttl_seconds")
@@ -1106,7 +1106,7 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
             raise ReleaseManagerError("V1 release approval policy must remain normal-risk only")
     else:
         exact_risks = (
-            {"normal", "production_control_core"} if version in {"2.0", "4.0"}
+            {"normal", "production_control_core"} if version in {"2.0", "4.0", "4.1"}
             else {"normal", "production_control_core", "production_repair"}
         )
         if (set(risks) != exact_risks
@@ -1118,7 +1118,7 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
                     "protected_release_gates_unchanged": True,
                 }):
             raise ReleaseManagerError("reviewed high-impact release policy is invalid")
-    if version == "4.0":
+    if version in {"4.0", "4.1"}:
         def exact_enrolled_user(field):
             role = doc.get(field)
             if not isinstance(role, dict) or set(role) != {
@@ -7486,7 +7486,7 @@ def governed_open_breaker_recovery_context(
 def _reviewed_mobile_release_mode(policy: Any) -> str:
     if policy.schema_version == "1.0":
         return "owner_only_pilot"
-    if policy.schema_version == "4.0":
+    if policy.schema_version in {"4.0", "4.1"}:
         return "admin_approver_separated"
     if policy.schema_version in {"2.0", "3.0", "4.0"}:
         return "owner_reviewed"
@@ -7756,7 +7756,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
     initial_freeze_binding = None
     if (ordinary_safe and not review_only_offer and not replacement_offer
             and (state_root / PRODUCTION_FREEZE_MARKER).exists()):
-        if reviewed_policy.schema_version not in {"2.0", "3.0", "4.0"}:
+        if reviewed_policy.schema_version not in {"2.0", "3.0", "4.0", "4.1"}:
             print("RELEASE_APPROVAL_ONLY=FROZEN_RELEASE_REQUIRES_REVIEWED_OWNER_MODE", flush=True)
             return False
         try:
