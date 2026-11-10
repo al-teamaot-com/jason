@@ -202,7 +202,7 @@ def test_v3_signed_owner_offer_requires_exact_opt_in_and_reviewed_mode(tmp_path)
     }
     assert runner.signed_owner_offer_purpose(
         exact_approved, "a" * 40, v3, "owner_reviewed", ccc_root=tmp_path,
-    ) == "ccc_material_review_only"
+    ) is None  # PMV3 uses one signed Owner decision, never a second CCC card.
 
 
 def test_v3_policy_stages_atomically_and_rolls_back_to_original_v2(monkeypatch, tmp_path):
