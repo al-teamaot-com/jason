@@ -53,3 +53,22 @@ supported for rollback without silently upgrading the existing 0600 policy.
 - Administrative authority profiles stay unchanged; regular Teams approval
   never supplies a privileged grant
 - Release freeze, timer, drift, CCC, LKG and rollback gates remain intact
+
+## Concurrent integration evidence
+
+The following PRs were inspected for overlapping source paths and described
+in PR #2398's Integration coordination field. The implementation is intentionally
+not a synthesis or silent merge of their unapproved changes.
+
+- #2395/#2378: separate admin-browser step-up for ordinary release review;
+  not adopted under the Owner's simpler licensed Teams delivery directive.
+  Their unrelated protected integrity work remains independent.
+- #2393: separate service-originated approval-role proposal; not adopted.
+- #2377: existing admin Teams reachability negative gate remains valid;
+  an integration must keep no-message-on-unlicensed-admin behavior.
+- #2279: superseded-release checks remain authoritative.
+- #2336/#2384/#2382/#2373/#2355/#2282: shared file overlaps from financial,
+  Constant Contact, Workboard, client notifications, internal notes and KFS;
+  reconcile on the final protected-main SHA rather than guessing current head.
+
+This is a coordination record, not a merge/release authorization.
