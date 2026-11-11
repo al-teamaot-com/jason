@@ -112,3 +112,12 @@ later integrity failure is never ignored. If no valid recent success exists,
 the existing full proof is required and a timeout remains a failure; no
 unverified result is marked PASS. Owner-approved emergency recovery policy
 would require a separate, explicit reviewed release change.
+
+### Concurrent-change integration note
+
+PR #2424 overlaps the full-proof snapshot writer and its tests with PRs
+#2404, #2395 and #2390, which adjust timeout and temporary backup cleanup.
+Combine scoped temporary cleanup with last-success proof retention when those
+branches are subsequently integrated; neither supersedes the other. PR #2391
+changes a separate later provider-shadow stage in host reconciliation and must
+preserve the 24-hour full-proof reuse contract.
