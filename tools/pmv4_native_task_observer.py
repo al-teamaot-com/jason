@@ -16,6 +16,7 @@ from typing import Any, Callable, Mapping
 from pmv4_workboard_reconciliation import (
     native_task_terminal_evidence, assess_governed_stale_recovery,
 )
+from pmv4_subscription_capacity import assess_live_subscription_capacity
 
 # Native task run IDs are UUIDs. Reject options, whitespace, shell syntax,
 # paths and ambiguous strings before invoking a fixed argv.
@@ -128,6 +129,60 @@ def assess_native_stale_recovery(
         authorized_readonly_actions=authorized_readonly_actions,
         native_task=task,
     )
+
+
+def probe_native_subscription_capacity(
+    *,
+    agent_id: str,
+    cli: str = "/usr/local/bin/openclaw",
+    runner: Callable[..., Any] = subprocess.run,
+    timeout_seconds: float = 15,
+) -> dict[str, Any]:
+    """Read native subscription capacity with a bounded OAuth-only probe.
+
+    Intended for an already-governed trusted adapter. The native CLI controls
+    credentials and model selection. This function never starts a Workboard
+    task, edits auth settings, or permits a separately billed API fallback.
+    """
+    denied = {
+        "status": "HOLD_UNVERIFIED",
+        "reason": "trusted_subscription_probe_unavailable",
+        "metered_fallback_permitted": False,
+        "automatic_replay_authorized": False,
+        "subscription_capacity_verified": False,
+    }
+    if agent_id not in ("j-man", "j-dev"):
+        return denied
+    if (not isinstance(cli, str) or not cli.startswith("/")
+            or not cli.endswith("/openclaw")
+            or any(piece in ("", ".", "..") for piece in cli.split("/")[1:])):
+        return denied
+    if (not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or not 0 < timeout_seconds <= 30):
+        return denied
+    argv = [
+        cli, "models", "status", "--agent", agent_id,
+        "--probe", "--probe-concurrency", "1",
+        "--probe-max-tokens", "8", "--probe-timeout", "9000",
+        "--json",
+    ]
+    try:
+        process = runner(
+            argv, shell=False, capture_output=True, text=True,
+            timeout=timeout_seconds, check=False,
+        )
+        if process.returncode != 0:
+            return denied
+        stdout = process.stdout
+        if not isinstance(stdout, str) or len(stdout.encode("utf-8")) > MAX_JSON_BYTES:
+            return denied
+        status = json.loads(stdout)
+        if not isinstance(status, dict):
+            return denied
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError):
+        return denied
+    return assess_live_subscription_capacity(status)
 
 
 if __name__ == "__main__":

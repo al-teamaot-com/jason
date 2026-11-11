@@ -185,3 +185,39 @@ class CapacityProbeTests(unittest.TestCase):
         for bad in (None, {}, "bad", [], {"auth": {"probes": {"results": []}}}):
             with self.subTest(bad=bad):
                 self.assertEqual(assess_live_subscription_capacity(bad)["status"], "HOLD_UNVERIFIED")
+
+
+class TrustedNativeProbeTests(unittest.TestCase):
+    def test_native_probe_uses_pinned_subscription_only_cli(self):
+        import json
+        import subprocess
+        from pmv4_native_task_observer import probe_native_subscription_capacity
+        data = copy.deepcopy(MODEL_STATUS)
+        data["auth"]["probes"] = {"results": [{
+            "provider": "openai", "model": "openai/gpt-5.6-sol",
+            "source": "profile", "mode": "oauth", "status": "rate_limit",
+            "profileId": "openai:user@example.com",
+        }]}
+        def runner(argv, **kwargs):
+            self.assertEqual(argv, [
+                "/usr/local/bin/openclaw", "models", "status", "--agent", "j-man",
+                "--probe", "--probe-concurrency", "1",
+                "--probe-max-tokens", "8", "--probe-timeout", "9000", "--json"])
+            self.assertFalse(kwargs["shell"])
+            self.assertTrue(kwargs["capture_output"])
+            self.assertLessEqual(kwargs["timeout"], 30)
+            return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
+        decision = probe_native_subscription_capacity(agent_id="j-man", runner=runner)
+        self.assertEqual(decision["status"], "WAIT_QUOTA_RESET")
+        self.assertFalse(decision["automatic_replay_authorized"])
+
+    def test_native_probe_rejects_untrusted_agent_and_invalid_cli(self):
+        from pmv4_native_task_observer import probe_native_subscription_capacity
+        def fail(*_args, **_kwargs):
+            self.fail("native CLI executed despite invalid trust boundary")
+        for agent in ("root", "main", "j-man --force", "", None):
+            self.assertEqual(probe_native_subscription_capacity(
+                agent_id=agent, runner=fail)["status"], "HOLD_UNVERIFIED")
+        for cli in ("openclaw", "/tmp/../bin/openclaw", "/tmp/openclaw/"):
+            self.assertEqual(probe_native_subscription_capacity(
+                agent_id="j-man", cli=cli, runner=fail)["status"], "HOLD_UNVERIFIED")

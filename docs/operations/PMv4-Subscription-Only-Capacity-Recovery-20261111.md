@@ -28,7 +28,8 @@ Current OpenClaw and OpenAI documentation distinguish Codex OAuth and Sign in wi
 - It classifies a verified native subscription-usage failure separately from generic failed work, preserves the provider reset time strictly as a hint, and deduplicates CLI/subagent ledger views by agent and run ID.
 - tools/pmv4_workboard_reconciliation.py now holds quota-exhausted native work rather than converting it into generic terminated-work recovery eligibility.
 - A trusted fresh native OpenClaw model probe can be interpreted as capacity available or rate limited only when the OAuth-only route matches. It never grants replay authority. An isolated read of the actual November 11 probe returned SUBSCRIPTION_OAUTH + WAIT_QUOTA_RESET.
-- Focused PMv4 acceptance: 53 passed, 5 skipped, 25 subtests passed; no existing production services or configuration modified.
+- The existing native task observer offers a fixed-argument, allowlisted J-Man/J-Dev OAuth-only model probe for a separately governed trusted adapter, with strict timeout and JSON limits and no task replay authority.
+- Focused PMv4 acceptance: 55 passed, 5 skipped, 25 subtests passed; no existing production services or configuration modified.
 - The correction intentionally **does not** mutate OpenClaw configuration, claim work, retry native tasks, call a provider, or decide that model capacity is available without a successful fresh provider probe.
 
 ## Integration and release acceptance still required
