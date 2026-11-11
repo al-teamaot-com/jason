@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "environment": "network-disabled isolated OpenClaw Gateway, no external port bindings",
+  "observed_at": "2026-11-11T12:26:49.130146+00:00",
+  "native_workboard_card_id": "deb3ff51-2030-4d3c-9482-702266c0cafc",
+  "starting_agent": "j-dev",
+  "initial_gateway_dispatch": {
+    "started": 1,
+    "failures": 0,
+    "workboard_session_created": true
+  },
+  "after_isolated_gateway_restart": {
+    "started": 0,
+    "count": 0,
+    "original_run_preserved": true
+  },
+  "after_injected_expired_claim": {
+    "blocked": 1,
+    "started": 0,
+    "claim_cleared": true,
+    "execution_status": "blocked",
+    "failure_count": 1
+  },
+  "repeat_dispatch": {
+    "count": 0,
+    "started": 0,
+    "failures": 0
+  },
+  "agent_model_completion_verified": false,
+  "independent_operational_completion_verified": false,
+  "production_changed": false,
+  "control_plane_dispatch_recovery_verified": true,
+  "unattended_auto_retry_verified": false,
+  "gateway_application_version": "OpenClaw 2026.7.1",
+  "run_id_sha256": "f5a2f87f1eb7085af7f6c1120196c4eb83b9669f0d45a9953d82b8a69e5511d5"
+}
