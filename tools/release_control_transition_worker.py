@@ -182,11 +182,17 @@ def restore_previous_verified_lkg(req: dict, state: dict) -> dict:
             or breaker.get('reason') != 'continuous_production_drift_detected'):
         raise ValueError('root prior-LKG recovery requires an open CCC drift breaker')
     drift = protected_read(DRIFT)
-    if (drift.get('status') != 'drift_detected'
-            or drift.get('problems') != [
-                {'kind':'failed_system_unit','state':'failed','unit':'jason-ccc.service'}
-            ]):
-        raise ValueError('root prior-LKG recovery drift is not exact CCC-only failure')
+    # Following approved CCC retirement, the independent evaluator may have
+    # already cleared the exact obsolete-unit failure. Retain the previously
+    # reviewed CCC-only incident case, but also accept a real root-owned PASS.
+    # Never accept any other failed, stale, or caller-provided drift report.
+    clean = drift.get('status') == 'pass' and drift.get('problems') == []
+    historical_ccc = (drift.get('status') == 'drift_detected'
+        and drift.get('problems') == [
+            {'kind':'failed_system_unit','state':'failed','unit':'jason-ccc.service'}
+        ])
+    if not (clean or historical_ccc):
+        raise ValueError('root prior-LKG recovery requires independent PASS or exact legacy CCC-only failure')
     previous = state.get('previous_last_known_good') or {}
     current = state.get('last_known_good') or {}
     prior_manifest = previous.get('manifest') or {}
