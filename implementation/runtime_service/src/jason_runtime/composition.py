@@ -2647,7 +2647,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         elif settings.release_mobile_approval_mode == "admin_approver_separated":
             if owner_policy.schema_version not in {"4.0", "4.1"}:
                 raise PermissionError("admin-separated release mode requires reviewed V4 policy")
-        elif owner_policy.schema_version not in {"2.0", "3.0"}:
+        elif owner_policy.schema_version not in {"2.0", "3.0", "3.1"}:
             raise PermissionError("active release approval mode and reviewed policy version do not match")
         expected_version = owner_policy.schema_version
         # V4/V4.1 never use mutable email or a symbolic Owner alias for
@@ -2687,7 +2687,10 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             required_policy_version=expected_version,
             owner_identity_email_fallbacks=owner_fallback,
         )
-        if settings.release_mobile_approval_worker_enabled:
+        # V3.1 uses independently authenticated, signed MCP Owner decisions.
+        # Keep the legacy Teams callback flow for compatibility, but do not
+        # emit new mandatory Teams release cards or run its approval scanner.
+        if settings.release_mobile_approval_worker_enabled and expected_version != "3.1":
             release_mobile_maintenance = MobileReleaseApprovalMaintenance(
                 enabled=True,
                 policy_path=settings.release_mobile_approval_policy,
