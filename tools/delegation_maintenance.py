@@ -4,11 +4,31 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import time
+from contextlib import closing
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_DB = Path('/var/lib/jason/authority/authority.sqlite3')
+
+# A bounded resilience allowance for unrelated short-lived concurrent writes
+# to the authority store. Never disable database locking or grant an approval.
+SQLITE_BUSY_MAX_ATTEMPTS = 5
+SQLITE_CONNECT_TIMEOUT_SECONDS = 5.0
+SQLITE_BUSY_BACKOFF_SECONDS = (1.0, 2.0, 4.0, 6.0)
+
+
+def _busy_error(exc: sqlite3.OperationalError) -> bool:
+    code = getattr(exc, "sqlite_errorcode", None)
+    if isinstance(code, int):
+        return code & 0xff in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+    return str(exc).strip().casefold() in (
+        "database is locked",
+        "database table is locked",
+        "database schema is locked",
+    )
+
 
 
 def parse_payload(value: str) -> dict:
@@ -45,41 +65,63 @@ def list_delegations(database: Path) -> int:
     return 0
 
 
-def deactivate_expired(database: Path, recorded_by: str, correlation_id: str | None) -> int:
+def _deactivate_expired_once(
+    database: Path, recorded_by: str, correlation: str,
+) -> list[str]:
     now = now_utc()
-    correlation = correlation_id or f'delegation-maintenance-{uuid.uuid4()}'
     changed: list[str] = []
-    with sqlite3.connect(database) as connection:
-        rows = connection.execute('SELECT delegation_id,payload FROM delegations').fetchall()
-        for delegation_id, payload in rows:
-            data = parse_payload(payload)
-            if data.get('status') != 'active':
-                continue
-            until = datetime.fromisoformat(data['effective_until'])
-            if until.tzinfo is None:
-                until = until.replace(tzinfo=timezone.utc)
-            if until > now:
-                continue
-            data['status'] = 'expired'
-            connection.execute(
-                'UPDATE delegations SET payload=? WHERE delegation_id=?',
-                (json.dumps(data, sort_keys=True, separators=(',', ':')), delegation_id),
-            )
-            connection.execute(
-                '''INSERT INTO authority_audit(event_type,correlation_id,principal_id,organization_id,capability,outcome,reason_codes)
-                   VALUES (?,?,?,?,?,?,?)''',
-                (
-                    'authority.delegation.expired',
-                    correlation,
-                    recorded_by,
-                    str(data['organization_id']),
-                    str(data['capability']),
-                    'expired',
-                    json.dumps(('delegation_effective_until_elapsed',)),
-                ),
-            )
-            changed.append(str(delegation_id))
-        connection.commit()
+    # Close the connection after every attempt, including errors. A SQLite
+    # transaction which fails during UPDATE or audit insertion is rolled
+    # back before retrying. No duplicate expiry audit can be committed.
+    with closing(sqlite3.connect(database, timeout=SQLITE_CONNECT_TIMEOUT_SECONDS)) as connection:
+        with connection:
+            rows = connection.execute(
+                'SELECT delegation_id,payload FROM delegations'
+            ).fetchall()
+            for delegation_id, payload in rows:
+                data = parse_payload(payload)
+                if data.get('status') != 'active':
+                    continue
+                until = datetime.fromisoformat(data['effective_until'])
+                if until.tzinfo is None:
+                    until = until.replace(tzinfo=timezone.utc)
+                if until > now:
+                    continue
+                data['status'] = 'expired'
+                connection.execute(
+                    'UPDATE delegations SET payload=? WHERE delegation_id=?',
+                    (json.dumps(data, sort_keys=True, separators=(',', ':')), delegation_id),
+                )
+                connection.execute(
+                    '''INSERT INTO authority_audit(event_type,correlation_id,principal_id,organization_id,capability,outcome,reason_codes)
+                       VALUES (?,?,?,?,?,?,?)''',
+                    (
+                        'authority.delegation.expired',
+                        correlation,
+                        recorded_by,
+                        str(data['organization_id']),
+                        str(data['capability']),
+                        'expired',
+                        json.dumps(('delegation_effective_until_elapsed',)),
+                    ),
+                )
+                changed.append(str(delegation_id))
+    return changed
+
+
+def deactivate_expired(database: Path, recorded_by: str, correlation_id: str | None) -> int:
+    correlation = correlation_id or f'delegation-maintenance-{uuid.uuid4()}'
+    for attempt in range(SQLITE_BUSY_MAX_ATTEMPTS):
+        try:
+            changed = _deactivate_expired_once(database, recorded_by, correlation)
+            break
+        except sqlite3.OperationalError as exc:
+            if not _busy_error(exc) or attempt == SQLITE_BUSY_MAX_ATTEMPTS - 1:
+                # A persistent busy writer or any unrelated database failure
+                # MUST remain visible to systemd, drift and the breaker.
+                raise
+            time.sleep(SQLITE_BUSY_BACKOFF_SECONDS[attempt])
+
     print(json.dumps({
         'status': 'pass',
         'action': 'deactivate_expired_delegations',
