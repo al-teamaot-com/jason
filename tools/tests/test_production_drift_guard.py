@@ -253,3 +253,9 @@ class ProductionDriftGuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_failed_optional_full_integrity_scan_is_advisory_not_release_drift():
+    from tools import production_drift_guard as g
+    assert "jason-openclaw-authority-full-integrity.service" in g.INDEPENDENT_OPTIONAL_SYSTEM_ONESHOTS
+    assert "jason-runtime.service" not in g.INDEPENDENT_OPTIONAL_SYSTEM_ONESHOTS

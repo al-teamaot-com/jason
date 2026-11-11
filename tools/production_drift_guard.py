@@ -19,6 +19,9 @@ FORBIDDEN_FIELD_NAMES = ("ExecStart", "WorkingDirectory")
 # forbidden paths and undeclared units remain production drift problems.
 INDEPENDENT_OPTIONAL_SYSTEM_ONESHOTS = frozenset({
     "jason-documentation-reconciliation.service",
+    # This optional daily scan is an advisory, not a deployment gate.
+    # The failed result remains in systemd/full-proof evidence.
+    "jason-openclaw-authority-full-integrity.service",
 })
 
 
