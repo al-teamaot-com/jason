@@ -268,7 +268,6 @@ def test_prior_lkg_recovery_preserves_breaker_and_immutable_newer_backup(tmp_pat
 @pytest.mark.parametrize('mutation',[
     ('breaker',{'state':'closed','source':'production_drift_watchdog','reason':'continuous_production_drift_detected'}),
     ('breaker',{'state':'open','source':'root_governed_transition','reason':'manual'}),
-    ('drift',{'schema_version':'1.0','status':'pass','problems':[]}),
     ('drift',{'schema_version':'1.0','status':'drift_detected','problems':[
         {'kind':'failed_system_unit','state':'failed','unit':'jason-ccc.service'},
         {'kind':'failed_system_unit','state':'failed','unit':'jason-openclaw-authority-health.service'}]}),
@@ -310,4 +309,27 @@ def test_prior_lkg_recovery_image_id_drift_denied(tmp_path):
          patch.object(m,'protected_read',return_value=drift), \
          patch.object(m,'verify_health',return_value=observed):
         with pytest.raises(ValueError,match='immutable last-known-good mismatch'):
+            m.restore_previous_verified_lkg(request,state)
+
+
+def test_prior_lkg_recovery_after_ccc_removed_with_independent_clean_drift(tmp_path):
+    request,state,drift,record,observed=_prior_recovery_fixture(tmp_path)
+    drift={"schema_version":"1.0","status":"pass","problems":[]}
+    with patch.object(m,"ROOT",tmp_path), \
+         patch.object(m,"protected_read",return_value=drift), \
+         patch.object(m,"verify_health",return_value=observed.copy()):
+        updated=m.restore_previous_verified_lkg(request,state)
+    assert updated["last_known_good"]["manifest"]["revision"]==REV
+    assert updated["circuit_breaker"]["state"]=="open"
+
+
+def test_prior_lkg_recovery_with_unrelated_drift_remains_denied(tmp_path):
+    request,state,drift,record,observed=_prior_recovery_fixture(tmp_path)
+    drift={"schema_version":"1.0","status":"drift_detected","problems":[
+        {"kind":"failed_system_unit","state":"failed",
+         "unit":"jason-unrelated-security.service"}]}
+    with patch.object(m,"ROOT",tmp_path), \
+         patch.object(m,"protected_read",return_value=drift), \
+         patch.object(m,"verify_health",return_value=observed.copy()):
+        with pytest.raises(ValueError,match="independent PASS"):
             m.restore_previous_verified_lkg(request,state)
