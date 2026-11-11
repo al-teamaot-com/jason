@@ -121,3 +121,20 @@ Combine scoped temporary cleanup with last-success proof retention when those
 branches are subsequently integrated; neither supersedes the other. PR #2391
 changes a separate later provider-shadow stage in host reconciliation and must
 preserve the 24-hour full-proof reuse contract.
+
+### Owner emergency: do not block release on SQL full scan
+
+The full SQLite integrity scan is no longer a synchronous release gate. Its
+existing failure evidence is retained, and the daily scanner remains separate.
+The optional full-scan systemd failure is an advisory to the production drift
+watchdog, not a reason to stop all releases. This does **not** waive native
+Owner identity, exact scope authorization, rollback, or checks of runtime/MCP
+health and required production units.
+
+Reviewed overlapping development: PR #2404 changes production drift handling
+for a masked release timer and does not intersect this optional full-scan
+advisory branch. PR #2391 stages disabled provider-shadow units in a later
+host reconcile stage; this does not supersede the full-proof skip. Both must
+preserve these emergency changes when eventually integrated.
+
+Integration coordination: #2424 #2404 #2391
