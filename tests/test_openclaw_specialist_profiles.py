@@ -21,6 +21,8 @@ class SpecialistProfileTests(unittest.TestCase):
         self.assertEqual(self.manifest["activation"], "disabled")
         self.assertEqual(self.manifest["coordinator"], "j-man")
         self.assertEqual(self.manifest["production_release_controller"], "existing-pmv3.2-release-manager")
+        self.assertEqual(self.manifest["target_shadow_release_controller"],
+                         "standalone-pmv4-shadow-release-preproduction-only")
         self.assertFalse(self.manifest["api_fallback_allowed"])
         self.assertEqual(self.manifest["existing_agents_unchanged"], ["main", "j-man", "j-dev"])
         self.assertEqual({p["id"] for p in self.profiles}, REQUIRED)
