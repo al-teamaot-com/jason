@@ -16,9 +16,14 @@ import subprocess
 import time
 from typing import Any, Callable, Mapping
 
-from pmv4_shadow_release import (
-    EMPTY_BASELINE, ShadowReleaseDenied, PRODUCTION_ROOT, read_json,
-)
+if __package__:
+    from .pmv4_shadow_release import (
+        EMPTY_BASELINE, ShadowReleaseDenied, PRODUCTION_ROOT, read_json,
+    )
+else:
+    from pmv4_shadow_release import (
+        EMPTY_BASELINE, ShadowReleaseDenied, PRODUCTION_ROOT, read_json,
+    )
 
 IMAGE = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
 SHADOW_NAME = "jason-pmv4-shadow-gateway"
