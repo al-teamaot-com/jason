@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
@@ -59,6 +60,17 @@ class SQLitePlaybookRegistry:
     );
     INSERT OR IGNORE INTO json_playbook_registry_meta(singleton,generation)
       VALUES(1,0);
+    CREATE TABLE IF NOT EXISTS json_playbook_lifecycle_events (
+        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        occurred_at TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        playbook_id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        generation_before INTEGER NOT NULL,
+        generation_after INTEGER NOT NULL
+    );
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -72,6 +84,48 @@ class SQLitePlaybookRegistry:
         self._connection.execute("PRAGMA synchronous=FULL")
         self._connection.executescript(self._SCHEMA)
         os.chmod(self.path, 0o600)
+
+    @contextmanager
+    def _atomic_change(self):
+        """Make version + active selection + generation + audit indivisible.
+
+        In isolation_level=None SQLite's regular connection context manager
+        does NOT open a transaction; each statement would autocommit. Explicit
+        BEGIN IMMEDIATE serializes competing writers and rolls back on failure.
+        This is the EXISTING JSON playbook registry, not a PM release journal.
+        """
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+            self._connection.execute("COMMIT")
+        except BaseException:
+            self._connection.execute("ROLLBACK")
+            raise
+
+    def _audit_event(
+        self, *, event_type: str, document: PlaybookDocument,
+        actor: str, occurred_at: str, previous_generation: int,
+    ) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO json_playbook_lifecycle_events(
+                occurred_at,event_type,playbook_id,version,fingerprint,
+                actor,generation_before,generation_after
+            ) VALUES(?,?,?,?,?,?,?,?)
+            """,
+            (occurred_at, event_type, document.playbook_id,
+             document.version, document.fingerprint, actor,
+             previous_generation, previous_generation + 1),
+        )
+
+    def lifecycle_events(self) -> tuple[dict[str, Any], ...]:
+        """Read-only durable config-change receipts, independent of PM."""
+        rows = self._connection.execute(
+            """SELECT event_id,occurred_at,event_type,playbook_id,version,
+                      fingerprint,actor,generation_before,generation_after
+               FROM json_playbook_lifecycle_events ORDER BY event_id"""
+        ).fetchall()
+        return tuple(dict(row) for row in rows)
 
     def stage(
         self,
@@ -87,17 +141,17 @@ class SQLitePlaybookRegistry:
             payload,
             known_capabilities=known_capabilities,
         )
-        existing = self._connection.execute(
-            "SELECT * FROM json_playbooks WHERE playbook_id=? AND version=?",
-            (document.playbook_id, document.version),
-        ).fetchone()
-        if existing is not None:
-            if str(existing["fingerprint"]) != document.fingerprint:
-                raise ValueError("PLAYBOOK_VERSION_IMMUTABLE")
-            return self._row(existing)
-
         now = datetime.now(timezone.utc).isoformat()
-        with self._connection:
+        with self._atomic_change():
+            existing = self._connection.execute(
+                "SELECT * FROM json_playbooks WHERE playbook_id=? AND version=?",
+                (document.playbook_id, document.version),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["fingerprint"]) != document.fingerprint:
+                    raise ValueError("PLAYBOOK_VERSION_IMMUTABLE")
+                return self._row(existing)
+            previous_generation = self.generation()
             self._connection.execute(
                 """
                 INSERT INTO json_playbooks(
@@ -119,6 +173,10 @@ class SQLitePlaybookRegistry:
                 ),
             )
             self._bump_generation()
+            self._audit_event(
+                event_type="staged", document=document, actor=principal,
+                occurred_at=now, previous_generation=previous_generation,
+            )
         return self.get(document.playbook_id, document.version)
 
     def activate(
@@ -132,13 +190,14 @@ class SQLitePlaybookRegistry:
         principal = str(actor or "").strip()
         if not principal:
             raise ValueError("PLAYBOOK_ACTIVATE_ACTOR_REQUIRED")
-        current = self.get(playbook_id, version)
-        if expected_fingerprint and current.document.fingerprint != expected_fingerprint:
-            raise ValueError("PLAYBOOK_ACTIVATION_FINGERPRINT_MISMATCH")
-        if current.state == "active":
-            return current
         now = datetime.now(timezone.utc).isoformat()
-        with self._connection:
+        with self._atomic_change():
+            current = self.get(playbook_id, version)
+            if expected_fingerprint and current.document.fingerprint != expected_fingerprint:
+                raise ValueError("PLAYBOOK_ACTIVATION_FINGERPRINT_MISMATCH")
+            if current.state == "active":
+                return current
+            previous_generation = self.generation()
             self._connection.execute(
                 """
                 UPDATE json_playbooks
@@ -153,33 +212,41 @@ class SQLitePlaybookRegistry:
                    SET state='active', activated_by=?, activated_at=?, retired_at=NULL
                  WHERE playbook_id=? AND version=?
                 """,
-                (
-                    principal,
-                    now,
-                    current.document.playbook_id,
-                    current.document.version,
-                ),
+                (principal, now, current.document.playbook_id, current.document.version),
             )
             self._bump_generation()
+            self._audit_event(
+                event_type="activated", document=current.document, actor=principal,
+                occurred_at=now, previous_generation=previous_generation,
+            )
         return self.get(current.document.playbook_id, current.document.version)
 
     def retire(self, playbook_id: str, *, actor: str) -> bool:
-        if not str(actor or "").strip():
+        principal = str(actor or "").strip()
+        if not principal:
             raise ValueError("PLAYBOOK_RETIRE_ACTOR_REQUIRED")
         now = datetime.now(timezone.utc).isoformat()
-        with self._connection:
+        with self._atomic_change():
+            current = self.active(playbook_id)
+            if current is None:
+                return False
+            previous_generation = self.generation()
             cursor = self._connection.execute(
                 """
                 UPDATE json_playbooks
                    SET state='retired', retired_at=?
                  WHERE playbook_id=? AND state='active'
                 """,
-                (now, str(playbook_id).strip()),
+                (now, current.document.playbook_id),
             )
-            changed = cursor.rowcount > 0
-            if changed:
-                self._bump_generation()
-        return changed
+            if cursor.rowcount != 1:
+                raise RuntimeError("PLAYBOOK_RETIRE_RACE")
+            self._bump_generation()
+            self._audit_event(
+                event_type="retired", document=current.document, actor=principal,
+                occurred_at=now, previous_generation=previous_generation,
+            )
+        return True
 
     def get(self, playbook_id: str, version: str) -> StoredPlaybook:
         row = self._connection.execute(
