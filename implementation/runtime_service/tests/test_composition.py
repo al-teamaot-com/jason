@@ -121,6 +121,16 @@ def test_production_composition_builds_and_serves_internal_health(tmp_path):
     application = build_runtime_application(settings)
     response = application.dispatch(method="GET", path="/healthz", headers={}, body=b"")
 
+    # Constant Contact import is a separately activated capability and must
+    # remain absent from the default runtime, especially the ticket worker.
+    assert application.constant_contact_import_workflow is None
+    assert application.capabilities.get(
+        capability_name="marketing.contact.import", version="1.0",
+    ).lifecycle_status.value == "building"
+    assert "marketing.contact.import" not in set(
+        application.governed_orchestrator._invoker.registered_capabilities()
+    )
+
     assert response.status_code == 200
     assert response.body["authority"] == "central-orchestrator"
     assert (tmp_path / "authority.sqlite3").stat().st_mode & 0o777 == 0o600

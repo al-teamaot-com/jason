@@ -25,7 +25,7 @@ def test_authorization_url_uses_exact_scope_and_registered_host():
         "client_id": [CLIENT_ID],
         "redirect_uri": [REDIRECT_URI],
         "response_type": ["code"],
-        "scope": ["contact_data offline_access"],
+        "scope": ["account_read contact_data offline_access"],
         "state": [STATE],
     }
 

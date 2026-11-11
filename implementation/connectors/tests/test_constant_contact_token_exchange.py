@@ -20,7 +20,7 @@ class Response:
 
 def valid_response():
     return {"token_type": "Bearer", "access_token": "access-secret",
-            "refresh_token": "refresh-secret", "scope": "contact_data offline_access",
+            "refresh_token": "refresh-secret", "scope": "account_read contact_data offline_access",
             "expires_in": 28800}
 
 

@@ -16,7 +16,7 @@ from urllib.request import Request, urlopen
 
 from .oauth import REDIRECT_URI, TOKEN_URL
 
-REQUIRED_SCOPES = frozenset({"contact_data", "offline_access"})
+REQUIRED_SCOPES = frozenset({"account_read", "contact_data", "offline_access"})
 
 
 class OAuthTokenError(RuntimeError):
@@ -52,7 +52,7 @@ def _token_request(
             raise OAuthTokenError("OAuth response missing tokens")
         scopes = set(str(result.get("scope") or "").split())
         if not REQUIRED_SCOPES <= scopes:
-            raise OAuthTokenError("OAuth authorization missing contact or refresh scope")
+            raise OAuthTokenError("OAuth authorization missing account, contact or refresh scope")
         expires_in = int(result.get("expires_in") or 0)
         if not 1 <= expires_in <= 86400 * 2:
             raise OAuthTokenError("Invalid OAuth token lifetime")
