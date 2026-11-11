@@ -45,3 +45,20 @@ The existing live J-Man `status_report.py` includes dated, static claims about e
 The candidate `config/openclaw-specialists/reporting/status_report.py` is an intended **replacement of that existing script**, not an additional service. It continues to read the existing task register and use the existing OpenClaw Teams message path. It removes hard-coded Owner routing, requires a configured private `JMAN_TEAMS_TARGET` for delivery, refuses unconfirmed sends, detects missing/stale records, exposes blocked outcomes ahead of positives, and does not turn a self-reported `COMPLETE` into an operational completion assertion without independent evidence. Unknown percentages are not invented. The proposed replacement remains offline, with targeted negative tests. It **does not independently verify** provider, ticket-worker, production or Workboard operational outcomes and must not be represented as doing so.
 
 Acceptance before replacing the current reporter: verify the existing scheduled invocation flags, configured Owner recipient, receipt parsing and human-readable message; review the current task register's status and percentages; preserve the original reporting schedule and Teams destination; test a delivered message in an authorized sandbox; deploy only under the appropriate component-scoped release.
+
+## Workboard / PMV3 read-only reconciliation preproduction prototype
+
+The candidate `tools/pmv4_workboard_reconciliation.py` is a **pure read-only decision function** on the existing Workboard card schema and the existing PMV3 work-engine state. It does not create a Workboard replacement, a new scheduler, a new release/approval path, a background process, or a bridge that mutates either state store. It does not activate agents or production capabilities.
+
+The reconciliation contract:
+
+1. Accept only existing approved specialist agent IDs and valid Workboard lifecycle states. Never create a privileged or unbounded executor from a card.
+2. Require an existing PMV3 work record for an incoming card; do **not** auto-admit, auto-authorize, or call the provider from a Workboard record.
+3. Defer execution/retries to the **existing** PMV3 work engine. If uncertain non-idempotent work is waiting for reconciliation, preserve that halt.
+4. A Workboard `done` state alone does not mean the PMV3 engine completed; a PMV3 `complete` state without a durable action receipt does not mean the work finished.
+5. Even if the Workboard card contains a `passed` proof reference and the PMV3 engine has a durable receipt, require **separate independent operational acceptance** before calling a PMv4 objective complete.
+6. Missing, malformed or unrecognized records fail closed with no provider writes, authority elevation, dispatch, or automatic retry.
+
+Seven focused tests verify missing records, unauthorized agent IDs, divergent status, missing receipts, unverified proof, indeterminate non-idempotent work and read-only idempotence.
+
+**Not yet proven:** a live Workboard card actually flowing into the existing PMV3 engine, creation of a correctly governed work record, J-Man subscription-backed dispatch, worker execution, crash/restart recovery, completion-proof readback, scheduler continuity and final communication. This module is an interface and reconciliation proof, **not a functioning deployed adapter**. A future accepted implementation should use the **existing** Central Orchestrator and work engine instead of granting Workboard its own provider authority.
