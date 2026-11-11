@@ -32,6 +32,10 @@ PROTECTED_DRIFT = Path(
     "/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json"
 )
 SHA = re.compile(r"\A[0-9a-f]{40}\Z")
+# Live legacy PMv3 release manager is the non-root 'al' UID=1000; its
+# existing transaction lock is UID 1000, mode 0664. New PMv4 host controls
+# are independently root-owned 0600. Never assume both locks share an owner.
+LEGACY_MANAGER_UID = 1000
 
 
 class HostGateDenied(PermissionError):
@@ -86,16 +90,35 @@ class IndependentHostGuard:
         self._held = False
 
     @staticmethod
-    def _open_lock(path: Path) -> int:
+    def _trusted_lock_metadata(meta: Any, *, expected_uid: int,
+                               pmv4_root_lock: bool) -> bool:
+        mode = stat.S_IMODE(meta.st_mode)
+        return (
+            stat.S_ISREG(meta.st_mode) and meta.st_nlink == 1
+            and meta.st_uid == expected_uid
+            and not (mode & 0o002)
+            and (not pmv4_root_lock or mode == 0o600)
+        )
+
+    def _open_lock(self, path: Path) -> int:
         # Never create either control file during preflight/observability.
+        # Current legacy host lock: owned by 'al' (UID1000), mode 0664.
+        # New independent PMv4 root lock: root owned, exact mode 0600.
+        if path not in (self.old_lock, self.new_lock):
+            raise HostGateDenied("PMV4_HOST_TRANSACTION_LOCK_NOT_ALLOWLISTED")
         if path.is_symlink() or not path.is_file():
             raise HostGateDenied("PMV4_HOST_TRANSACTION_LOCK_NOT_PROVISIONED")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(path, flags)
         meta = os.fstat(fd)
-        if (not stat.S_ISREG(meta.st_mode) or meta.st_nlink != 1
-            or meta.st_uid not in (0, os.geteuid())
-            or stat.S_IMODE(meta.st_mode) & 0o002):
+        expected_uid = (
+            (LEGACY_MANAGER_UID if path == self.old_lock else 0)
+            if self.production else os.geteuid()
+        )
+        if not self._trusted_lock_metadata(
+            meta, expected_uid=expected_uid,
+            pmv4_root_lock=self.production and path == self.new_lock,
+        ):
             os.close(fd)
             raise HostGateDenied("PMV4_HOST_TRANSACTION_LOCK_UNTRUSTED")
         return fd

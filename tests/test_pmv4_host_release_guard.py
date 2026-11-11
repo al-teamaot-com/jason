@@ -274,3 +274,30 @@ def test_trusted_host_assembly_rechecks_breaker_after_shadow_activation(monkeypa
     assert checker(Path("/synthetic-shadow")) is True
     state["breaker_ok"] = False
     assert checker(Path("/synthetic-shadow")) is False
+
+
+def test_live_legacy_and_new_root_lock_ownership_policies_differ():
+    import stat as statmod
+    from tools.pmv4_host_release_guard import LEGACY_MANAGER_UID
+    legacy = SimpleNamespace(
+        st_mode=statmod.S_IFREG | 0o664, st_nlink=1, st_uid=LEGACY_MANAGER_UID
+    )
+    assert IndependentHostGuard._trusted_lock_metadata(
+        legacy, expected_uid=LEGACY_MANAGER_UID, pmv4_root_lock=False
+    )
+    assert not IndependentHostGuard._trusted_lock_metadata(
+        legacy, expected_uid=0, pmv4_root_lock=True
+    )
+    root = SimpleNamespace(
+        st_mode=statmod.S_IFREG | 0o600, st_nlink=1, st_uid=0
+    )
+    assert IndependentHostGuard._trusted_lock_metadata(
+        root, expected_uid=0, pmv4_root_lock=True
+    )
+    for untrusted_mode in (0o664, 0o666, 0o644):
+        untrusted = SimpleNamespace(
+            st_mode=statmod.S_IFREG | untrusted_mode, st_nlink=1, st_uid=0
+        )
+        assert not IndependentHostGuard._trusted_lock_metadata(
+            untrusted, expected_uid=0, pmv4_root_lock=True
+        )
