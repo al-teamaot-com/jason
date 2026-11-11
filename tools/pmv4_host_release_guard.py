@@ -25,6 +25,12 @@ RELEASES = Path("/opt/jason/releases")
 OLD_RELEASE_LOCK = Path("/var/lib/jason/openclaw/release-manager/production-transaction.lock")
 NEW_RELEASE_LOCK = Path("/var/lib/jason/pmv4-shadow/control/host-mutation.lock")
 LEDGER = Path("/var/lib/jason/openclaw/autonomy-operational-work.sqlite3")
+PROTECTED_CONTROL = Path(
+    "/var/lib/jason/openclaw/release-manager/protected-readback/production-control-state.json"
+)
+PROTECTED_DRIFT = Path(
+    "/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json"
+)
 SHA = re.compile(r"\A[0-9a-f]{40}\Z")
 
 
@@ -44,15 +50,18 @@ class IndependentHostGuard:
         self, *, current: Path = CURRENT, releases: Path = RELEASES,
         ledger: Path = LEDGER,
         old_lock: Path = OLD_RELEASE_LOCK, new_lock: Path = NEW_RELEASE_LOCK,
+        control_path: Path = PROTECTED_CONTROL, drift_path: Path = PROTECTED_DRIFT,
         runner: Callable[..., Any] = subprocess.run,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         production: bool = True,
         max_scan_age_seconds: int = 360,
+        enforce_protected_control: bool | None = None,
     ):
         if production and (
             Path(current) != CURRENT or Path(releases) != RELEASES
             or Path(ledger) != LEDGER
             or Path(old_lock) != OLD_RELEASE_LOCK or Path(new_lock) != NEW_RELEASE_LOCK
+            or Path(control_path) != PROTECTED_CONTROL or Path(drift_path) != PROTECTED_DRIFT
         ):
             raise HostGateDenied("PMV4_TRUSTED_HOST_PATH_OVERRIDE")
         if not 60 <= max_scan_age_seconds <= 900:
@@ -62,9 +71,17 @@ class IndependentHostGuard:
         self.ledger = Path(ledger)
         self.old_lock = Path(old_lock)
         self.new_lock = Path(new_lock)
+        self.control_path = Path(control_path)
+        self.drift_path = Path(drift_path)
         self.runner = runner
         self.now = now
         self.production = production
+        if production and enforce_protected_control is False:
+            raise HostGateDenied("PMV4_PROTECTED_BREAKER_CANNOT_BE_DISABLED")
+        self.enforce_protected_control = (
+            production if enforce_protected_control is None
+            else bool(enforce_protected_control)
+        )
         self.max_scan_age_seconds = max_scan_age_seconds
         self._held = False
 
@@ -114,14 +131,72 @@ class IndependentHostGuard:
                 os.close(fd)
 
     def host_mutation_quiescent(self) -> bool:
-        """Called within the full lease; independent preflight can probe too."""
-        if self._held:
-            return True
+        """Require both the shared host lease and a CLOSED protected breaker.
+
+        Fresh drift PASS alone is NOT proof that the prior incident breaker
+        has been revalidated. Never permit a parallel PMv4 release through
+        an open PMv3 protected circuit breaker.
+        """
         try:
-            with self.host_release_transaction():
+            if self._held:
+                self._assert_protected_release_state()
                 return True
-        except (HostGateDenied, OSError):
+            with self.host_release_transaction():
+                self._assert_protected_release_state()
+                return True
+        except (HostGateDenied, OSError, ValueError, TypeError):
             return False
+
+    def _assert_protected_release_state(self) -> None:
+        if not self.enforce_protected_control:
+            return
+        for path in (self.control_path, self.drift_path):
+            if path.is_symlink() or not path.is_file():
+                raise HostGateDenied("PMV4_PROTECTED_RELEASE_READBACK_MISSING")
+        try:
+            control = json.loads(self.control_path.read_text(encoding="utf-8"))
+            drift = json.loads(self.drift_path.read_text(encoding="utf-8"))
+        except (OSError, TypeError, ValueError) as exc:
+            raise HostGateDenied("PMV4_PROTECTED_RELEASE_READBACK_UNAVAILABLE") from exc
+        if not isinstance(control, dict) or not isinstance(drift, dict):
+            raise HostGateDenied("PMV4_PROTECTED_RELEASE_READBACK_INVALID")
+        source = self._source_sha()
+        manifest = (control.get("last_known_good") or {}).get("manifest") or {}
+        breaker = control.get("circuit_breaker") or {}
+        if (
+            manifest.get("revision") != source
+            or manifest.get("runtime_revision") != source
+            or manifest.get("mcp_revision") != source
+            or manifest.get("complete") is not True
+        ):
+            raise HostGateDenied("PMV4_ROOT_LAST_KNOWN_GOOD_NOT_VERIFIED")
+        if (
+            breaker.get("state") != "closed"
+            or breaker.get("revalidated_revision") != source
+        ):
+            raise HostGateDenied("PMV4_PROTECTED_PRODUCTION_BREAKER_OPEN")
+        if drift.get("status") != "pass" or drift.get("problems") != []:
+            raise HostGateDenied("PMV4_PRODUCTION_DRIFT_NOT_CLEAR")
+        try:
+            observed = datetime.fromisoformat(
+                str(drift["observed_at"]).replace("Z", "+00:00")
+            )
+            now = self.now()
+            if observed.tzinfo is None or now.tzinfo is None:
+                raise ValueError("timezone")
+            age = (now - observed).total_seconds()
+            if not 0 <= age <= 120:
+                raise ValueError("stale")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HostGateDenied("PMV4_PRODUCTION_DRIFT_NOT_FRESH") from exc
+
+    def protected_release_status(self) -> dict[str, Any]:
+        """Safe, read-only breaker readiness report without private payload."""
+        try:
+            self._assert_protected_release_state()
+            return {"ready": True, "reason": "verified"}
+        except (HostGateDenied, OSError, TypeError, ValueError) as exc:
+            return {"ready": False, "reason": str(exc)}
 
     def _source_sha(self) -> str:
         if not self.current.is_symlink():

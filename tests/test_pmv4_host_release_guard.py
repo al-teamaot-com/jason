@@ -176,3 +176,101 @@ def test_baseline_recovery_checks_both_absence_and_ticket_core(tmp_path):
     assert pending_rollback_acceptance(adapter, guard, prior)
     adapter = SimpleNamespace(_owned_or_absent=lambda: {"Name": "stale-shadow"})
     assert not pending_rollback_acceptance(adapter, guard, prior)
+
+
+def test_open_root_breaker_blocks_release_even_with_fresh_clean_drift(tmp_path):
+    guard, _, _, now = _fixture(tmp_path)
+    control = tmp_path / "protected-control.json"
+    drift = tmp_path / "protected-drift.json"
+    control.write_text(json.dumps({
+        "last_known_good": {"manifest": {
+            "revision": SHA, "runtime_revision": SHA,
+            "mcp_revision": SHA, "complete": True,
+        }},
+        "circuit_breaker": {"state": "open", "revalidated_revision": None},
+    }))
+    drift.write_text(json.dumps({
+        "status": "pass", "problems": [], "observed_at": now.isoformat(),
+    }))
+    guard.control_path = control
+    guard.drift_path = drift
+    guard.enforce_protected_control = True
+    assert guard.preexisting_core_health() is True
+    assert guard.protected_release_status() == {
+        "ready": False, "reason": "PMV4_PROTECTED_PRODUCTION_BREAKER_OPEN",
+    }
+    assert not guard.host_mutation_quiescent()
+    with guard.host_release_transaction():
+        assert not guard.host_mutation_quiescent()
+
+    # Only a *separately governed*, recorded breaker revalidation can
+    # change this root evidence. This simulated fixture is NOT host repair.
+    doc = json.loads(control.read_text())
+    doc["circuit_breaker"] = {
+        "state": "closed", "revalidated_revision": SHA,
+    }
+    control.write_text(json.dumps(doc))
+    assert guard.host_mutation_quiescent()
+    assert guard.protected_release_status()["ready"] is True
+
+    bad_drift = json.loads(drift.read_text())
+    bad_drift["status"] = "fail"
+    drift.write_text(json.dumps(bad_drift))
+    assert not guard.host_mutation_quiescent()
+    assert guard.protected_release_status()["reason"] == "PMV4_PRODUCTION_DRIFT_NOT_CLEAR"
+
+
+def test_production_guard_cannot_disable_breaker_review():
+    with pytest.raises(HostGateDenied, match="PROTECTED_BREAKER_CANNOT_BE_DISABLED"):
+        IndependentHostGuard(production=True, enforce_protected_control=False)
+
+
+def test_stale_protected_drift_denies_even_with_closed_breaker(tmp_path):
+    guard, _, _, now = _fixture(tmp_path)
+    guard.control_path = tmp_path / "control.json"
+    guard.drift_path = tmp_path / "drift.json"
+    guard.enforce_protected_control = True
+    guard.control_path.write_text(json.dumps({
+        "last_known_good": {"manifest": {
+            "revision": SHA, "runtime_revision": SHA,
+            "mcp_revision": SHA, "complete": True,
+        }},
+        "circuit_breaker": {"state": "closed", "revalidated_revision": SHA},
+    }))
+    guard.drift_path.write_text(json.dumps({
+        "status": "pass", "problems": [],
+        "observed_at": (now - timedelta(minutes=5)).isoformat(),
+    }))
+    assert guard.host_mutation_quiescent() is False
+    assert guard.protected_release_status()["reason"] == "PMV4_PRODUCTION_DRIFT_NOT_FRESH"
+
+
+def test_trusted_host_assembly_rechecks_breaker_after_shadow_activation(monkeypatch):
+    from tools import pmv4_shadow_host_runtime as host
+    state = {"breaker_ok": True}
+    assembled = {}
+
+    class FakeGuard:
+        def preexisting_core_health(self): return True
+        def host_mutation_quiescent(self): return state["breaker_ok"]
+        def host_release_transaction(self): return None
+
+    class FakeAdapter:
+        def __init__(self, **kwargs):
+            assert callable(kwargs["core_continuity_probe"])
+        def activate_shadow(self, path): pass
+        def restore_shadow(self, path): pass
+        def verify_shadow_and_core(self, path): return True
+
+    class FakeController:
+        def __init__(self, *args, **kwargs):
+            assembled.update(kwargs)
+
+    monkeypatch.setattr(host, "IndependentHostGuard", FakeGuard)
+    monkeypatch.setattr(host, "DockerShadowAdapter", FakeAdapter)
+    monkeypatch.setattr(host, "ShadowController", FakeController)
+    host.trusted_controller()
+    checker = assembled["verify_shadow_and_core"]
+    assert checker(Path("/synthetic-shadow")) is True
+    state["breaker_ok"] = False
+    assert checker(Path("/synthetic-shadow")) is False

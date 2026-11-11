@@ -26,6 +26,16 @@ Docker namespace, audit receipts, activation and crash-safe rollback.
   until independent shadow promotion/recovery, verification and rollback finish.
   This is a bounded compatibility lock for avoiding parallel PMv3/PMv4 host
   mutation, **not an execution dependency on the PMv3 controller or AI**.
+  **Important fail-closed release gate:** During this transition the independent
+  host guard also requires the protected Last Known Good manifest to match the
+  live runtime and MCP source, the protected circuit breaker to be **closed**
+  with the same revalidated revision, and a fresh zero-problem drift
+  readback. A fresh drift PASS does not automatically clear a prior open breaker.
+  On November 11 the live production breaker remained OPEN with an old
+  `undeclared_running_container` reason; `inspect` correctly reported
+  `protected_release_control.ready=false` and
+  `shadow_promotion_ready=false`. No direct or automatic breaker closure is
+  implemented.
   The PMv3 lock must be removed from the contract *only after* proving no
   legacy writer remains; removal before then would permit a split-brain release.
 - `pmv4_shadow_release.py` invokes the shared host lock over the complete

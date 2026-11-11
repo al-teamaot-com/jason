@@ -32,11 +32,20 @@ def trusted_controller():
         root=PRODUCTION_ROOT,
         core_continuity_probe=guard.preexisting_core_health,
     )
+    def verify_shadow_with_protected_controls(path: Path) -> bool:
+        # Re-verify both the unrelated Ticket Core and the root breaker AFTER
+        # activation. A breaker opened during the deployment is a rollback
+        # condition, even when the earlier preflight was clean.
+        return (
+            adapter.verify_shadow_and_core(path) is True
+            and guard.host_mutation_quiescent() is True
+        )
+
     controller = ShadowController(
         PRODUCTION_ROOT, public_key_path=TRUST_PATH,
         protected_ci_check=protected_main_ci_verified,
         activate_shadow=adapter.activate_shadow,
-        verify_shadow_and_core=adapter.verify_shadow_and_core,
+        verify_shadow_and_core=verify_shadow_with_protected_controls,
         restore_shadow=adapter.restore_shadow,
         host_mutation_quiescent=guard.host_mutation_quiescent,
         preexisting_core_health=guard.preexisting_core_health,
@@ -99,11 +108,18 @@ def main(argv: list[str] | None = None) -> int:
             report = guard.core_health_evidence()
             # The future PMv4 control lock is not provisioned until a governed
             # installer runs. That is a readiness blocker, not host mutation.
+            control_state = guard.protected_release_status()
+            report["protected_release_control"] = control_state
             report["cross_release_lock_ready"] = guard.host_mutation_quiescent()
             report["production_mutation"] = False
             report["independent_release_installed"] = (
                 PRODUCTION_ROOT.is_dir()
                 and (PRODUCTION_ROOT / "control" / "host-mutation.lock").is_file()
+            )
+            report["shadow_promotion_ready"] = (
+                control_state["ready"] is True
+                and report["cross_release_lock_ready"] is True
+                and report["independent_release_installed"] is True
             )
             print(json.dumps(report, sort_keys=True))
             return 0
