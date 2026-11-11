@@ -141,6 +141,13 @@ the complete synthetic issuer -> signature -> standalone release transaction.
 They prove the deterministic verifier enforces signature, expiry, scope and
 replay binding; they do NOT authenticate the Owner in a live session. Synthetic Docker
 runners assert fixed commands, project isolation, rollback and health gates.
+The hardened adapter also independently inspects the actual container user,
+capability drop, no-new-privileges, init, restart policy, CPU/PID/memory limits,
+absent privileged host bindings, precise shadow-only named volume, and denial
+of separately billed AI or production provider credential environment variables.
+This is **preproduction simulated inspection**, not a claim that a deployed
+shadow container has passed live readback. It does not change or pause the
+protected Ticket Processing Core.
 No live gateway restart, production Docker Compose activation, provider
 action, real token, production public/private signer or root change has
 been attempted by these source changes.
