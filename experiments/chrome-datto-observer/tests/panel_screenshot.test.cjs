@@ -7,9 +7,9 @@ const path=require("node:path");
 const panelCode=fs.readFileSync(path.join(__dirname,"..","panel.js"),"utf8");
 const tinyImage="data:image/jpeg;base64,/9j/2Q==";
 function harness(){
-  const ids=["start","stop","status","stamp","frame","scope","screenshot","copy-for-chatgpt","download","evidence-frame","evidence-status","test-entra-signin","entra-status"];
+  const ids=["start","stop","status","stamp","frame","scope","screenshot","copy-for-chatgpt","download","evidence-frame","evidence-status","test-entra-signin","entra-status","send-to-jason","send-status"];
   const nodes=new Map(ids.map(id=>[id,{id,disabled:false,hidden:true,textContent:"",src:"",href:"",download:"",listeners:{},addEventListener(type,handler){this.listeners[type]=handler;},removeAttribute(name){delete this[name];}}]));
-  nodes.get("stop").disabled=true;nodes.get("screenshot").disabled=true;nodes.get("copy-for-chatgpt").disabled=true;
+  nodes.get("send-to-jason").disabled=true;nodes.get("stop").disabled=true;nodes.get("screenshot").disabled=true;nodes.get("copy-for-chatgpt").disabled=true;
   const calls=[];
   let activeTab=42;
   const handlers={};

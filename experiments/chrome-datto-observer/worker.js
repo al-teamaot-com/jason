@@ -1,8 +1,9 @@
 "use strict";
 // Explicitly isolated interactive AOT Entra sign-in pilot. This worker
 // never sends screen content or returns access tokens to a panel/page.
-if (typeof importScripts === "function") importScripts("entra_pkce.js");
+if (typeof importScripts === "function") importScripts("entra_pkce.js","send_once.js","authenticated_transport.js");
 let signInInProgress = false;
+let sendInProgress = false;
 const sessions = new Map();
 let nextSessionId = 0;
 const allowed = url => /^https:\/\/[a-z0-9-]+\.rmm\.datto\.com\//i.test(url || "");
@@ -42,6 +43,36 @@ chrome.runtime.onMessage.addListener((msg,sender,respond) => {
       } finally {
         signInInProgress = false;
       }
+    }
+    if (msg?.type === "send-readiness" || msg?.type === "send-to-jason") {
+      // Only a technician's extension panel may request a send. Never accept
+      // identity, device, a token, a destination or image bytes from the panel.
+      if (sender?.id !== chrome.runtime.id ||
+          sender?.url !== chrome.runtime.getURL("panel.html")) {
+        throw Error("Only the J-Assist panel can request evidence delivery.");
+      }
+      const session=sessions.get(msg.tabId);
+      if (!session || session.id !== msg.sessionId) {
+        throw Error("Start an authorized Datto assistance session first.");
+      }
+      const live=globalThis.JAssistLiveSendBridge;
+      if (!live || typeof live.readiness !== "function" ||
+          typeof live.dependencies !== "function" ||
+          !globalThis.JAssistOneClick?.sendOnce) {
+        return {ok:false,ready:false,error:"Governed Jason send service is not connected."};
+      }
+      // A readiness response is advisory; sendOnce independently rechecks
+      // all authority before capturing any image.
+      if (msg.type === "send-readiness") {
+        const ready=await live.readiness({tabId:msg.tabId,sessionId:session.id});
+        return {ok:ready===true,ready:ready===true};
+      }
+      if (sendInProgress) throw Error("A J-Assist send is already in progress.");
+      sendInProgress=true;
+      try {
+        const deps=await live.dependencies({tabId:msg.tabId,sessionId:session.id});
+        return await globalThis.JAssistOneClick.sendOnce(deps);
+      } finally { sendInProgress=false; }
     }
     if (msg.type === "start") {
       const tab = await chrome.tabs.get(msg.tabId);

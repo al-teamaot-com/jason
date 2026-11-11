@@ -201,3 +201,27 @@ To smoke-test without altering the existing v0.1.8 extension:
 
 The older v0.1.8 folder/extension may remain installed unchanged.
 No main merge, production release, or user-wide deployment is authorized.
+
+
+## 2026-11-11 guarded Send UI integration (development branch)
+
+The extension panel now has an explicit Send click handler and a backend worker
+dispatcher. The worker demands the exact extension-origin panel, matching
+locally started session, and a separately installed, verified
+`JAssistLiveSendBridge` service with `readiness` and `dependencies`
+functions. It then invokes existing `JAssistOneClick.sendOnce` so
+authorization preflight, active-tab continuity, image digest and signed
+receipt requirements cannot be bypassed from the panel.
+
+**Not operational or deployed:** There is deliberately no implementation
+of `JAssistLiveSendBridge` in this branch; readiness fails closed and the
+button remains disabled. No production endpoint, secure storage, Datto
+provider authorization, DLP reviewer or registered MCP image retrieval
+has been established. Do not inject a synthetic adapter into a user browser
+or expose the existing 127.0.0.1 test receiver to remote clients.
+
+Next verified development acceptance must provide the real server-side
+Entra/Datto bound, auditable HTTPS session and durable screened evidence
+service, wire the bridge to it, and prove upload and subsequent
+same-technician Jason MCP receipt retrieval. Release requires an exact
+candidate SHA and independently approved production authorization.

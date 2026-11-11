@@ -7,6 +7,46 @@ const clearEvidence=()=>{copyForChatGPT.disabled=true;download.removeAttribute("
 const clearCapture=()=>{screenshot.disabled=true;clearEvidence();};
 const evidenceFilename=timestamp=>"j-assist-evidence-"+timestamp.replace(/[:.]/g,"-")+".jpg";
 const request=m=>chrome.runtime.sendMessage(m);
+const sendButton=document.querySelector("#send-to-jason");
+const sendStatus=document.querySelector("#send-status");
+let sending=false;
+async function updateSendReadiness(){
+  sendButton.disabled=true;
+  if(!running || sending || sessionId===null){
+    sendStatus.textContent="Start assisting to check Jason connectivity.";return;
+  }
+  const currentSession=sessionId,currentTab=tabId;
+  try {
+    const response=await request({type:"send-readiness",tabId:currentTab,sessionId:currentSession});
+    if(!running || sending || sessionId!==currentSession || tabId!==currentTab)return;
+    sendButton.disabled=response?.ready!==true;
+    sendStatus.textContent=response?.ready===true
+      ?"Authorized Jason evidence delivery is available. Click to send a fresh screenshot."
+      :"Governed Jason sender is not connected. No screenshot will be uploaded.";
+  }catch{
+    sendButton.disabled=true;
+    sendStatus.textContent="Unable to verify Jason delivery readiness.";
+  }
+}
+sendButton.addEventListener("click",async()=>{
+  if(sending || sendButton.disabled || !running || sessionId===null)return;
+  const currentSession=sessionId,currentTab=tabId;
+  sending=true;sendButton.disabled=true;
+  sendStatus.textContent="Checking authorization and sending a fresh screenshot...";
+  try{
+    const r=await request({type:"send-to-jason",tabId:currentTab,sessionId:currentSession});
+    if(!running || sessionId!==currentSession || tabId!==currentTab)return;
+    sendStatus.textContent=r?.ok===true && r.sent===true && typeof r.receipt_id==="string"
+      ?"Jason received the screenshot. Receipt: "+r.receipt_id+" (analysis not yet confirmed)."
+      :"No verified delivery: "+String(r?.error||"Jason did not confirm receipt.");
+  }catch{
+    sendStatus.textContent="No verified delivery. Jason connection failed.";
+  }finally{
+    sending=false;
+    // Keep the issued receipt or failure visible; reset only the button.
+    if(running && sessionId===currentSession)sendButton.disabled=true;
+  }
+});
 const signInButton=document.querySelector("#test-entra-signin");
 const signInStatus=document.querySelector("#entra-status");
 signInButton.addEventListener("click",async()=>{
@@ -27,7 +67,7 @@ signInButton.addEventListener("click",async()=>{
 const setStatus=s=>{status.textContent=s;};
 const clearPreview=()=>{frame.removeAttribute("src");frame.hidden=true;stamp.textContent="No retained frame";};
 function endLocally(message){
-  running=false;clearInterval(timer);timer=null;sessionId=null;
+  running=false;sendButton.disabled=true;sendStatus.textContent="No active Jason delivery session.";clearInterval(timer);timer=null;sessionId=null;
   start.disabled=false;stop.disabled=true;clearCapture();clearPreview();scope.textContent="No active assistance session";setStatus(message);
 }
 async function capture(){
@@ -61,7 +101,7 @@ start.addEventListener("click",async()=>{
     const r=await request({type:"start",tabId});
     if(!r.ok)throw Error(r.error);
     sessionId=r.sessionId;running=true;stop.disabled=false;clearEvidence();
-    await capture();if(running)timer=setInterval(capture,2000);
+    await capture();if(running){await updateSendReadiness();timer=setInterval(capture,2000);}
   }catch(e){endLocally("Cannot start: "+e.message);}
 });
 stop.addEventListener("click",halt);
