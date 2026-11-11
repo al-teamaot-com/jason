@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/"tools"))
 import pmv3_work_engine as engine
-from pmv4_workboard_reconciliation import reconciled_card, assess_governed_stale_recovery
+from pmv4_workboard_reconciliation import reconciled_card, assess_governed_stale_recovery, native_task_terminal_evidence
 
 NOW = datetime(2026, 11, 11, 12, 0, tzinfo=timezone.utc)
 CARD={"id":"workboard-staged-uuid-001","status":"ready","agentId":"j-dev",
@@ -107,6 +107,23 @@ STALE_NATIVE_CARD = {
 }
 
 
+
+def native_task_for(card=STALE_NATIVE_CARD, *, status="failed"):
+    # Native OpenClaw tasks-show JSON field contract; identity values are
+    # synthetic and no real OpenClaw run is created in this unit test.
+    return {
+        "taskId": "offline-task-ledger-uuid",
+        "runtime": "subagent",
+        "sourceId": card["runId"],
+        "runId": card["runId"],
+        "childSessionKey": card["sessionKey"],
+        "agentId": card["agentId"],
+        "status": status,
+        "startedAt": 1794398639402,
+        "endedAt": 1794398728854,
+    }
+
+
 def interrupted_engine_state(*, idempotent=True, approved=True, approval_required=False):
     state = engine.empty_state()
     from hashlib import sha256
@@ -129,8 +146,7 @@ def advice(card, state, **kwargs):
     return assess_governed_stale_recovery(
         card, state,
         authorized_readonly_actions=frozenset({"offline_readonly_review"}),
-        worker_termination_verified=True,
-        termination_evidence_id="trusted-runtime-observer:synthetic-test",
+        native_task=kwargs.pop("native_task", native_task_for(card)),
         **kwargs,
     )
 
@@ -167,23 +183,65 @@ class PMV4NativeRecoveryDecisionTests(unittest.TestCase):
         state, _ = interrupted_engine_state()
         result = assess_governed_stale_recovery(
             STALE_NATIVE_CARD, state,
-            worker_termination_verified=True,
-            termination_evidence_id="trusted-runtime-observer:test",
+            native_task=native_task_for(STALE_NATIVE_CARD),
         )
         self.assertEqual(result["disposition"], "HOLD")
         self.assertEqual(result["reason"], "read_only_action_not_authorized_by_runtime")
 
-    def test_no_worker_termination_readback_means_hold(self):
+    def test_unverified_or_active_native_ledger_never_allows_recovery(self):
         state, _ = interrupted_engine_state()
-        for verified, evidence in ((False, "proof"), (True, ""), (False, "")):
+        for task, expected in (
+            (None, "native_openclaw_task_status_unavailable"),
+            (native_task_for(status="running"), "native_agent_not_terminal_failed"),
+            (native_task_for(status="queued"), "native_agent_not_terminal_failed"),
+            (native_task_for(status="lost"), "native_task_lost_is_not_verified_termination"),
+            ({**native_task_for(), "endedAt": None}, "native_task_terminal_timestamp_invalid"),
+            ({**native_task_for(), "runId": "different-run"}, "native_task_workboard_identity_mismatch"),
+            ({**native_task_for(), "sourceId": "different-source"}, "native_task_workboard_identity_mismatch"),
+            ({**native_task_for(), "childSessionKey": "another-session"}, "native_task_workboard_identity_mismatch"),
+            ({**native_task_for(), "agentId": "j-qa"}, "native_task_workboard_identity_mismatch"),
+            ({**native_task_for(), "runtime": "cron"}, "native_task_workboard_identity_mismatch"),
+        ):
             result = assess_governed_stale_recovery(
                 STALE_NATIVE_CARD, state,
                 authorized_readonly_actions=frozenset({"offline_readonly_review"}),
-                worker_termination_verified=verified,
-                termination_evidence_id=evidence,
+                native_task=task,
             )
             self.assertEqual(result["disposition"], "HOLD")
-            self.assertEqual(result["reason"], "independent_worker_termination_not_verified")
+            self.assertEqual(result["reason"], expected)
+
+    def test_native_task_succeeded_requires_readback_instead_of_replay(self):
+        state, _ = interrupted_engine_state()
+        task=native_task_for(status="succeeded")
+        observed=native_task_terminal_evidence(STALE_NATIVE_CARD,task)
+        self.assertEqual(observed["disposition"],"RECONCILE")
+        self.assertTrue(observed["native_termination_confirmed"])
+        self.assertFalse(observed["independent_operational_completion_verified"])
+        result=assess_governed_stale_recovery(
+            STALE_NATIVE_CARD,state,
+            authorized_readonly_actions=frozenset({"offline_readonly_review"}),
+            native_task=task,
+        )
+        self.assertEqual(result["disposition"],"RECONCILE")
+        self.assertEqual(result["reason"],"native_agent_succeeded_but_workboard_blocked")
+        self.assertFalse(result["governed_engine_recovery_candidate"])
+
+    def test_native_terminal_failures_are_candidates_only_not_automatic_execution(self):
+        state, _ = interrupted_engine_state()
+        for status in ("failed", "timed_out", "cancelled"):
+            task=native_task_for(status=status)
+            native=native_task_terminal_evidence(STALE_NATIVE_CARD,task)
+            self.assertEqual(native["disposition"],"TERMINATED")
+            self.assertFalse(native["independent_operational_completion_verified"])
+            decision=assess_governed_stale_recovery(
+                STALE_NATIVE_CARD,state,
+                authorized_readonly_actions=frozenset({"offline_readonly_review"}),
+                native_task=task,
+            )
+            self.assertEqual(decision["disposition"],"GOVERNED_ENGINE_CANDIDATE")
+            self.assertFalse(decision["workboard_auto_reset_allowed"])
+            self.assertFalse(decision["provider_action_authorized"])
+            self.assertEqual(decision["native_terminal_task_id"],task["taskId"])
 
     def test_active_claim_cannot_replay_even_with_readonly_action(self):
         state, _ = interrupted_engine_state()
@@ -272,8 +330,12 @@ card=json.loads(Path(card_file).read_text())
 decision=assess_governed_stale_recovery(
     card, state,
     authorized_readonly_actions=frozenset({"offline_readonly_review"}),
-    worker_termination_verified=True,
-    termination_evidence_id="trusted-runtime-observer:offline-test",
+    native_task={
+        "taskId":"isolated-ledger-task","runtime":"subagent",
+        "sourceId":card["runId"],"runId":card["runId"],
+        "childSessionKey":card["sessionKey"],"agentId":card["agentId"],
+        "status":"failed","startedAt":1794398639402,"endedAt":1794398728854,
+    },
 )
 if step == "recover":
     assert decision["disposition"] == "GOVERNED_ENGINE_CANDIDATE",decision
@@ -322,8 +384,12 @@ state=engine.load_state(Path(sys.argv[1]))
 card=json.loads(Path(sys.argv[2]).read_text())
 decision=assess_governed_stale_recovery(
     card,state,authorized_readonly_actions=frozenset({"offline_readonly_review"}),
-    worker_termination_verified=True,
-    termination_evidence_id="trusted-runtime-observer:offline-test",
+    native_task={
+        "taskId":"isolated-ledger-task","runtime":"subagent",
+        "sourceId":card["runId"],"runId":card["runId"],
+        "childSessionKey":card["sessionKey"],"agentId":card["agentId"],
+        "status":"failed","startedAt":1794398639402,"endedAt":1794398728854,
+    },
 )
 assert decision["disposition"]=="HOLD",decision
 assert decision["reason"]=="non_idempotent_action_must_be_reconciled",decision

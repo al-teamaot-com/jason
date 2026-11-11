@@ -107,19 +107,89 @@ def reconciled_card(card: Mapping[str, Any], state: Mapping[str, Any]) -> dict[s
     return result
 
 
+def native_task_terminal_evidence(
+    card: Mapping[str, Any], task: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """Cross-check a Workboard run with the EXISTING OpenClaw task ledger.
+
+    Only a trusted caller that just read native `openclaw tasks show <runId>
+    --json` may use a positive result; self-supplied JSON is NOT provenance.
+    A terminal task proves a run ended, not that its objective succeeded.
+    """
+    held = {
+        "disposition": "HOLD",
+        "reason": "native_openclaw_task_status_unavailable",
+        "native_termination_confirmed": False,
+        "independent_operational_completion_verified": False,
+    }
+    if not isinstance(task, Mapping):
+        return held
+    run_id = card.get("runId")
+    session_key = card.get("sessionKey")
+    agent_id = card.get("agentId")
+    if (
+        not isinstance(run_id, str) or not run_id
+        or not isinstance(session_key, str) or not session_key
+        or not isinstance(agent_id, str) or not agent_id
+    ):
+        held["reason"] = "workboard_native_run_identity_incomplete"
+        return held
+    if (
+        task.get("runtime") != "subagent"
+        or task.get("runId") != run_id
+        or task.get("sourceId") != run_id
+        or task.get("childSessionKey") != session_key
+        or task.get("agentId") != agent_id
+        or not isinstance(task.get("taskId"), str)
+        or not task["taskId"].strip()
+    ):
+        held["reason"] = "native_task_workboard_identity_mismatch"
+        return held
+
+    started, ended = task.get("startedAt"), task.get("endedAt")
+    if not (
+        isinstance(started, int) and not isinstance(started, bool) and started > 0
+        and isinstance(ended, int) and not isinstance(ended, bool) and ended >= started
+    ):
+        held["reason"] = "native_task_terminal_timestamp_invalid"
+        return held
+    status = task.get("status")
+    if status == "succeeded":
+        return {
+            "disposition": "RECONCILE",
+            "reason": "native_agent_succeeded_but_workboard_blocked",
+            "native_termination_confirmed": True,
+            "independent_operational_completion_verified": False,
+            "native_task_id": task["taskId"],
+        }
+    if status == "lost":
+        held["reason"] = "native_task_lost_is_not_verified_termination"
+        return held
+    if status not in ("failed", "timed_out", "cancelled"):
+        held["reason"] = "native_agent_not_terminal_failed"
+        return held
+    return {
+        "disposition": "TERMINATED",
+        "reason": "native_terminal_agent_run_bound_to_workboard",
+        "native_termination_confirmed": True,
+        "independent_operational_completion_verified": False,
+        "native_task_id": task["taskId"],
+    }
+
+
 def assess_governed_stale_recovery(
     card: Mapping[str, Any],
     state: Mapping[str, Any],
     *,
     authorized_readonly_actions: frozenset[str] = frozenset(),
-    worker_termination_verified: bool = False,
-    termination_evidence_id: str = "",
+    native_task: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Pure, fail-closed advice for existing PMV3 worker; never resumes Workboard.
 
-    Caller MUST obtain termination evidence through a trusted runtime observer
-    and supply an already-authorized read-only action allowlist. Neither a
-    Workboard card nor a local caller flag confers provider or Owner authority.
+    The existing OpenClaw background-task ledger must be queried by a trusted
+    read-only runtime adapter for the exact native Workboard runId. Never accept
+    task text or self-supplied JSON as authority; only the trusted caller may
+    supply the fresh ledger record. Existing action approval is also required.
     """
     import pmv3_work_engine as engine
 
@@ -231,8 +301,13 @@ def assess_governed_stale_recovery(
         result["reason"] = "existing_durable_receipt_requires_readback_not_replay"
         return result
 
-    if worker_termination_verified is not True or not isinstance(termination_evidence_id, str) or not termination_evidence_id.strip():
-        result["reason"] = "independent_worker_termination_not_verified"
+    termination = native_task_terminal_evidence(card, native_task)
+    if termination["disposition"] == "RECONCILE":
+        result["disposition"] = "RECONCILE"
+        result["reason"] = str(termination["reason"])
+        return result
+    if termination["disposition"] != "TERMINATED":
+        result["reason"] = str(termination["reason"])
         return result
 
     result.update({
@@ -240,7 +315,7 @@ def assess_governed_stale_recovery(
         "reason": "idempotent_readonly_task_may_be_recovered_by_existing_governed_worker",
         "work_item_id": item_id,
         "action_key": key,
-        "termination_evidence_id": termination_evidence_id.strip(),
+        "native_terminal_task_id": str(termination["native_task_id"]),
         "governed_engine_recovery_candidate": True,
     })
     # Candidate is NOT authority to reset the Workboard card or automatically
