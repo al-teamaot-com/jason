@@ -306,3 +306,33 @@ Jason queue lifecycle is an operational invariant: `New` is an intake state, not
 Operational status reporting uses the same slot semantics as the worker: only genuinely runnable/executing phases count as active. `waiting_device_access:*`, `waiting_recheck:*`, `approval_pending`, `waiting_patch_approval`, `waiting_patch_window`, and `waiting_client_notification_authority` are waiting states and do not consume one of the two active-work slots.
 
 Scan-level REFLECT-001 events use the canonical orchestration audit shape, including execution/correlation IDs, organization, `jason-autonomy-worker` principal, capability name, and terminal stage, so the durable orchestration store can mirror each completed scan into Reflection Memory.
+
+## 2026-11-11 GAI-specific VulScan notification retirement (release candidate)
+
+The Owner removed the GAI/Gromelski-only VulScan disposition policy in
+favor of the ordinary, evidence-driven VulScan process. This source change
+does not activate the separate TODO-COMM-001 client-facing workflow.
+
+After separately governed production deployment, company 597 receives no
+special Close Pending/contact assignment and no mandatory client email.
+VulScan still re-reads exact endpoint/KB/reboot evidence: installed with
+no pending reboot may complete with verified Autotask readback; patches
+awaiting approval/window remain in their usual non-slot-consuming states;
+ambiguous, failed, or reboot-gated cases follow existing escalation rules.
+
+Four pre-existing GAI records (T20261030.0069, T20261030.0072,
+T20261031.0003, T20261031.0004) have a legacy
+vulscan_client_notification_verify_complete phase. The worker must
+transition those persisted rows through a fresh standard VulScan
+investigation without resending notifications or marking any unknown
+delivery as verified. Historical dispatch-pending intent/baseline and
+earlier NOT_APPROVED timestamps are retained for audit and ten-day
+escalation. The four active slots should be released according to the
+resulting patch state, allowing eligible new tickets to be admitted.
+
+Keep the legacy provider compatibility registration only until the
+separate shared-client-communications migration is accepted. The current
+retirement makes no provider notification attempt and does not relax
+approval/patch/install/reboot authority, ticket association, release
+freeze, or other customer communication controls. Actual production
+recovery and ticket closure require post-release readback verification.

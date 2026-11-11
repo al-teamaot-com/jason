@@ -3624,6 +3624,35 @@ def test_vulscan_core_scope_remains_eligible_without_client_disposition_promotio
     store.close()
 
 
+@pytest.fixture
+def legacy_gai_vulscan_policy(monkeypatch):
+    """Exercise preserved receipt safety with an explicit test-only override."""
+    import jason_runtime.autonomy_worker_runtime as worker_module
+    from jason_runtime.vulscan_client_policy import (
+        VulScanDispositionPolicy, VulScanPolicyOverride, resolve_vulscan_policy,
+    )
+
+    legacy = VulScanDispositionPolicy(
+        terminal_status="Close Pending",
+        primary_contact_id=30684489,
+        client_notification_required=True,
+        client_notification_template_id="vulscan-approved-or-installed-v1",
+        continue_patch_monitoring=True,
+    )
+    override = VulScanPolicyOverride("client", "597", legacy)
+
+    def isolated(*, client_id=None, site_id=None, device_id=None, user_id=None,
+                 ticket_id=None):
+        return resolve_vulscan_policy(
+            client_id=client_id, site_id=site_id, device_id=device_id,
+            user_id=user_id, ticket_id=ticket_id,
+            overrides=(override,),
+        )
+
+    monkeypatch.setattr(worker_module, "resolve_vulscan_policy", isolated)
+
+
+@pytest.mark.usefixtures("legacy_gai_vulscan_policy")
 def test_vulscan_client_disposition_waits_then_resumes_on_exact_v11_promotion(
     tmp_path: Path,
 ):
@@ -3705,6 +3734,7 @@ def test_vulscan_notification_baseline_parser_handles_numeric_receipt_id() -> No
         )
 
 
+@pytest.mark.usefixtures("legacy_gai_vulscan_policy")
 def test_vulscan_notification_read_requires_promotion_and_dedicated_port(
     tmp_path: Path,
 ) -> None:
@@ -3794,11 +3824,12 @@ def test_vulscan_invalid_exact_kb_selector_recovers_via_governed_endpoint_collec
     assert len([x for x in reads.patch_queries if "kb" in x]) == 2
     assert len([x for x in reads.patch_queries if "kb" not in x]) == 2
     updates = [args["payload"] for _, cap, args in actions.calls if cap == "service.ticket.update"]
-    assert updates[-1]["status"] == "Close Pending"
-    assert not any(u.get("status") == "Complete" for u in updates)
+    assert updates[-1]["status"] == "Complete"
+    assert not any(u.get("status") == "Close Pending" for u in updates)
     store.close()
 
 
+@pytest.mark.usefixtures("legacy_gai_vulscan_policy")
 def test_vulscan_prior_notification_does_not_complete_without_receipt(
     tmp_path: Path,
 ) -> None:
@@ -4265,22 +4296,13 @@ def test_vulscan_all_exact_kbs_installed_without_reboot_completes(tmp_path: Path
     assert final is not None
     assert final.phase == "complete"
     updates = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.update"]
-    assert updates[-1] == {
-        "id": 141183,
-        "contactID": 30684489,
-        "status": "Close Pending",
-    }
-    assert {"id": 141183, "status": "Complete"} not in updates
+    assert updates[-1] == {"id": 141183, "status": "Complete"}
     assert {"id": 141183, "queueID": "Help Desk I", "status": "New"} not in updates
-    notifications = [
-        args for _, capability, args in actions.calls
-        if capability == "service.ticket.client.notification.create"
-    ]
-    assert len(notifications) == 1
-    assert notifications[0]["workflow_id"] == "vulscan_missing_patch"
-    assert notifications[0]["template_id"] == "vulscan-approved-or-installed-v1"
-    assert notifications[0]["payload"] == {"ticketID": 141183}
-    assert "recipient" not in notifications[0]
+    assert not any(u.get("status") == "Close Pending" for u in updates)
+    assert not any(
+        capability == "service.ticket.client.notification.create"
+        for _, capability, _ in actions.calls
+    )
     notes = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.note.create"]
     assert len(notes) == 1
     assert "verified stale/recovered VulScan finding" in notes[0]["description"]
@@ -6993,6 +7015,7 @@ def test_vulscan_notification_dispatch_intent_persists_atomically_across_restart
     restarted.close()
 
 
+@pytest.mark.usefixtures("legacy_gai_vulscan_policy")
 def test_vulscan_provider_accepted_then_worker_crashed_does_not_resend(
     tmp_path: Path,
 ) -> None:
@@ -7099,3 +7122,183 @@ def test_vulscan_provider_accepted_then_worker_crashed_does_not_resend(
         and x[2].get("payload", {}).get("status") == "Close Pending"
     ]) == 1
     restarted_store.close()
+
+
+@pytest.mark.parametrize(
+    ("patch_status", "expected_phase", "expected_ticket_status"),
+    (
+        ("INSTALLED", "complete", "Complete"),
+        ("APPROVED_PENDING", "waiting_patch_window", "On Hold"),
+        ("NOT_APPROVED", "waiting_patch_approval", "Waiting Patch Approval"),
+    ),
+)
+def test_retired_gai_notification_phase_rechecks_patches_without_send(
+    tmp_path: Path, patch_status: str, expected_phase: str, expected_ticket_status: str,
+) -> None:
+    """Old GAI receipts are not a requirement once the client override is retired."""
+    from jason_runtime.vulscan_client_policy import resolve_vulscan_policy
+
+    assert not resolve_vulscan_policy(client_id=597).client_notification_required
+    ticket = vulscan_candidate()
+    store = SQLiteOperationalWorkStore(tmp_path / "old-notification.sqlite3")
+    first_not_approved = (
+        datetime.now(timezone.utc) - timedelta(days=2)
+    ).isoformat()
+    original = OperationalWork(
+        ticket_id=141183,
+        ticket_number="T20260925.0001",
+        title=ticket.context["title"],
+        playbook_id="vulscan_missing_patch",
+        source_queue="Jason",
+        company_id=597,
+        configuration_item_id=68,
+        device_uid="vul-device-1",
+        hostname="GAI-DT2850",
+        phase="waiting_patch_approval",
+        last_reason=f"first_not_approved_at={first_not_approved}; prior exact KB state",
+    )
+    store.put(original)
+    store.put(replace(
+        original,
+        phase="vulscan_client_notification_verify_complete",
+        last_reason="notification_baseline_id=0",
+    ))
+    note = "Client - Approved Communication - vulscan-approved-or-installed-v1"
+    baseline = f"{note} :: notification receipt baseline"
+    assert store.claim_client_notification_send(
+        141183, "vulscan_missing_patch", note, baseline, "old-pilot-fingerprint", 0,
+    )
+
+    class NoNotificationReads:
+        def execute(self, capability, arguments):
+            raise AssertionError("retired pilot must not query notification history")
+
+    reads = VulscanBranchReads(patch_status)
+    actions = Actions()
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(ticket),
+        reads=reads,
+        vulscan_notification_reads=NoNotificationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        max_active_work_items=4,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    current = store.get(141183)
+    assert current is not None
+    assert current.phase == expected_phase
+    assert store.list_open() == ()
+    assert store.last_note_fingerprint(
+        141183, "vulscan_missing_patch", note,
+    ) == "dispatch-pending:old-pilot-fingerprint"
+    assert store.last_note_fingerprint(
+        141183, "vulscan_missing_patch", baseline,
+    ) == "0"
+    assert reads.notification_history_reads == 0
+    assert not any(
+        capability == "service.ticket.client.notification.create"
+        for _, capability, _ in actions.calls
+    )
+    updates = [
+        args["payload"] for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert any(u.get("status") == expected_ticket_status for u in updates)
+    assert not any(u.get("status") == "Close Pending" for u in updates)
+    if expected_phase == "waiting_patch_approval":
+        assert f"first_not_approved_at={first_not_approved}" in current.last_reason
+    assert any(
+        "prior dispatch intent retained without resend" in row["reason"]
+        for row in store.ticket_activity(141183)
+    )
+    store.close()
+
+
+def test_retiring_four_gai_notification_slots_allows_new_ticket_admission(
+    tmp_path: Path,
+) -> None:
+    """Four legacy waiters cannot monopolize admission after policy retirement."""
+    from jason_runtime.vulscan_client_policy import resolve_vulscan_policy
+
+    assert resolve_vulscan_policy(client_id=597).client_notification_required is False
+    original = vulscan_candidate()
+    stuck_ids = (143448, 143451, 143481, 143482)
+    new_id = 143999
+    candidates = []
+    for ticket_id in (*stuck_ids, new_id):
+        candidates.append(replace(
+            original,
+            resource_id=str(ticket_id),
+            context={
+                **original.context,
+                "id": ticket_id,
+                "ticketNumber": f"T20261111.{ticket_id}",
+                "_jason_source_status_label": (
+                    "In Progress" if ticket_id in stuck_ids else "New"
+                ),
+            },
+        ))
+
+    class AllTickets:
+        def reconcile_candidates(self):
+            return tuple(candidates)
+
+    class NoNotificationReads:
+        def execute(self, capability, arguments):
+            raise AssertionError("cannot query retired client notification receipts")
+
+    store = SQLiteOperationalWorkStore(tmp_path / "four-stalled.sqlite3")
+    note = "Client - Approved Communication - vulscan-approved-or-installed-v1"
+    baseline = f"{note} :: notification receipt baseline"
+    for item in candidates[:4]:
+        ticket_id = int(item.resource_id)
+        store.put(OperationalWork(
+            ticket_id=ticket_id,
+            ticket_number=item.context["ticketNumber"],
+            title=item.context["title"],
+            playbook_id="vulscan_missing_patch",
+            source_queue="Jason",
+            company_id=597,
+            configuration_item_id=68,
+            device_uid="vul-device-1",
+            hostname="GAI-DT2850",
+            phase="vulscan_client_notification_verify_complete",
+            last_reason="notification_baseline_id=0",
+        ))
+        assert store.claim_client_notification_send(
+            ticket_id, "vulscan_missing_patch", note, baseline,
+            f"old-pilot-fingerprint-{ticket_id}", 0,
+        )
+    assert len(store.list_open()) == 4
+
+    reads = VulscanBranchReads("INSTALLED")
+    actions = Actions()
+    worker = OperationalAutonomyMaintenance(
+        queue_source=AllTickets(),
+        reads=reads,
+        vulscan_notification_reads=NoNotificationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        max_active_work_items=4,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    for ticket_id in stuck_ids:
+        assert store.get(ticket_id).phase == "complete"
+        assert store.last_note_fingerprint(
+            ticket_id, "vulscan_missing_patch", note,
+        ) == f"dispatch-pending:old-pilot-fingerprint-{ticket_id}"
+    assert store.get(new_id) is not None, "fifth ticket must be admitted"
+    assert store.get(new_id).phase == "complete"
+    assert len(store.list_open()) == 0
+    assert not any(
+        cap == "service.ticket.client.notification.create"
+        for _, cap, _ in actions.calls
+    )
+    assert reads.notification_history_reads == 0
+    store.close()
