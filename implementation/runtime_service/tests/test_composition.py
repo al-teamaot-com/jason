@@ -860,6 +860,41 @@ def test_v3_production_repair_is_a_separately_opted_in_reviewed_runtime(tmp_path
         build_runtime_application(replace(cfg, release_mobile_approval_mode="owner_only_pilot"))
 
 
+def test_v31_signed_owner_release_runtime_starts_without_teams_card_worker(tmp_path):
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        reviewed_policy_file,
+    )
+    from jason_runtime.mobile_release_approval import MobileReleaseApprovalMaintenance
+
+    v31 = reviewed_policy_file(
+        tmp_path,
+        schema_version="3.1",
+        high_impact_review={
+            "owner_exact_sha_required": True,
+            "authenticated_entra_owner_decision_required": True,
+            "independent_native_release_health_required": True,
+            "protected_release_gates_unchanged": True,
+        },
+    )
+    cfg = replace(
+        _settings(tmp_path),
+        release_mobile_approval_mode="owner_reviewed",
+        release_mobile_approval_worker_enabled=True,
+        release_mobile_approval_policy=v31,
+        release_mobile_approval_db=tmp_path / "v31-approvals.sqlite3",
+        release_mobile_state_root=tmp_path / "v31-release-root",
+    )
+    cfg.validate()
+    app = build_runtime_application(cfg)
+    assert app is not None
+    assert cfg.universal_approval_mode == "off"
+    assert not any(
+        isinstance(service, MobileReleaseApprovalMaintenance)
+        for service in app.maintenance.services
+    )
+    assert not (cfg.release_mobile_state_root / "mobile-release-offers").exists()
+
+
 def test_legacy_owner_pilot_refuses_silent_v2_risk_policy_upgrade(tmp_path):
     import pytest
     from implementation.runtime_service.tests.test_mobile_release_approval import (
