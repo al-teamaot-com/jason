@@ -7766,7 +7766,7 @@ def _reviewed_mobile_release_mode(policy: Any) -> str:
         return "owner_only_pilot"
     if policy.schema_version in {"4.0", "4.1"}:
         return "admin_approver_separated"
-    if policy.schema_version in {"2.0", "3.0", "4.0"}:
+    if policy.schema_version in {"2.0", "3.0", "3.1"}:
         return "owner_reviewed"
     raise ReleaseManagerError("unreviewed Teams Owner release policy mode")
 
