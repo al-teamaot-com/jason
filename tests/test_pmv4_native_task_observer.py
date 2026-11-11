@@ -103,3 +103,56 @@ class ObserverTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# The shared observer must feed fresh native evidence into the existing
+# PMV3 *advisory* gate, never directly into an executor.
+class IntegratedObservationTests(unittest.TestCase):
+    def test_approved_stale_readonly_is_only_candidate(self):
+        from test_pmv4_workboard_reconciliation import (
+            STALE_NATIVE_CARD, interrupted_engine_state, native_task_for,
+        )
+        from pmv4_native_task_observer import assess_native_stale_recovery
+        card = copy.deepcopy(STALE_NATIVE_CARD)
+        # The canonical test fixture uses a synthetic non-UUID run label.
+        # The native CLI adapter intentionally requires an actual UUID shape.
+        card["runId"] = RUN
+        card["execution"]["runId"] = RUN
+        card["metadata"]["attempts"][-1]["runId"] = RUN
+        state, _ = interrupted_engine_state()
+        before = copy.deepcopy((card, state))
+        native = native_task_for(card)
+        def runner(argv, **kwargs):
+            self.assertEqual(argv[3], card["runId"])
+            return subprocess.CompletedProcess(argv, 0, json.dumps(native), "")
+        # Synthetic Workboard fixture uses UUID-form native run ID.
+        result = assess_native_stale_recovery(
+            card, state, runner=runner,
+            authorized_readonly_actions=frozenset({"offline_readonly_review"}),
+        )
+        self.assertEqual(result["disposition"], "GOVERNED_ENGINE_CANDIDATE")
+        self.assertFalse(result["provider_action_authorized"])
+        self.assertFalse(result["workboard_auto_reset_allowed"])
+        self.assertFalse(result["operational_completion_verified"])
+        self.assertEqual((card, state), before)
+
+    def test_untrusted_or_incomplete_evidence_does_not_reach_execution(self):
+        from test_pmv4_workboard_reconciliation import (
+            STALE_NATIVE_CARD, interrupted_engine_state, native_task_for,
+        )
+        from pmv4_native_task_observer import assess_native_stale_recovery
+        card = copy.deepcopy(STALE_NATIVE_CARD)
+        state, _ = interrupted_engine_state()
+        native = native_task_for(card)
+        for data in (None, {**native, "status": "running"}, {**native, "agentId": "j-root"}):
+            if data is None:
+                def runner(*args, **kwargs):
+                    raise OSError("unavailable")
+            else:
+                def runner(argv, **kwargs):
+                    return subprocess.CompletedProcess(argv, 0, json.dumps(data), "")
+            result = assess_native_stale_recovery(
+                card, state, runner=runner,
+                authorized_readonly_actions=frozenset({"offline_readonly_review"}),
+            )
+            self.assertEqual(result["disposition"], "HOLD")
+            self.assertFalse(result["provider_action_authorized"])

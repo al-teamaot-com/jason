@@ -44,3 +44,13 @@ No production service, gateway, configuration, scheduler, repository main,
 ticket worker, freeze, root breaker, secrets or provider was changed. This
 is not a production readiness claim, replacement of the existing work engine,
 or authorization to bypass Teams/Owner release requirements.
+
+## Read-only integration extension
+`assess_native_stale_recovery(card, pmv3_state, authorized_readonly_actions=...)`
+now queries the exact native ledger once and feeds the fresh matching record
+directly into the **existing** `assess_governed_stale_recovery` pure decision
+function. It returns only `HOLD`, `RECONCILE`, or a
+`GOVERNED_ENGINE_CANDIDATE` advisory; it never executes a provider action.
+Two additional tests cover this handoff: a synthetic authorized idempotent
+candidate with immutable input states, and nonterminal/unavailable/mismatched
+ledger results held without execution. The integration is still source-only.

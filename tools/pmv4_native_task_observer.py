@@ -13,7 +13,9 @@ import re
 import subprocess
 from typing import Any, Callable, Mapping
 
-from pmv4_workboard_reconciliation import native_task_terminal_evidence
+from pmv4_workboard_reconciliation import (
+    native_task_terminal_evidence, assess_governed_stale_recovery,
+)
 
 # Native task run IDs are UUIDs. Reject options, whitespace, shell syntax,
 # paths and ambiguous strings before invoking a fixed argv.
@@ -24,36 +26,29 @@ RUN_ID = re.compile(
 MAX_JSON_BYTES = 128 * 1024
 
 
-def observe_native_task(
+def _read_native_task(
     card: Mapping[str, Any],
     *,
     cli: str = "/usr/local/bin/openclaw",
     runner: Callable[..., Any] = subprocess.run,
     timeout_seconds: float = 10,
-) -> dict[str, Any]:
-    """Fetch a native task by exact Workboard runId and advise; never replay.
+) -> tuple[dict[str, Any] | None, str]:
+    """Fetch exact runId; return task only when read was trusted and well formed.
 
     The absolute CLI path must be pinned by trusted integration configuration,
     not by an end-user/card value. Test runner injection is test-only.
     """
-    held = {
-        "disposition": "HOLD",
-        "reason": "native_task_observation_unavailable",
-        "native_termination_confirmed": False,
-        "independent_operational_completion_verified": False,
-        "provider_action_authorized": False,
-    }
     if not isinstance(card, Mapping):
-        return dict(held, reason="invalid_workboard_card")
+        return None, "invalid_workboard_card"
     run_id = card.get("runId")
     if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
-        return dict(held, reason="invalid_native_run_identifier")
+        return None, "invalid_native_run_identifier"
     if not isinstance(cli, str) or not cli.startswith("/") or any(
         part in ("", ".", "..") for part in cli.split("/")[1:]
     ) or not cli.endswith("/openclaw"):
-        return dict(held, reason="native_cli_path_not_trusted")
+        return None, "native_cli_path_not_trusted"
     if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or not 0 < timeout_seconds <= 30:
-        return dict(held, reason="invalid_observer_timeout")
+        return None, "invalid_observer_timeout"
     try:
         process = runner(
             [cli, "tasks", "show", run_id, "--json"],
@@ -61,22 +56,78 @@ def observe_native_task(
             timeout=timeout_seconds, check=False,
         )
     except (OSError, subprocess.TimeoutExpired, ValueError, TypeError):
-        return dict(held, reason="native_task_query_failed")
+        return None, "native_task_query_failed"
     if process.returncode != 0:
-        return dict(held, reason="native_task_query_failed")
+        return None, "native_task_query_failed"
     stdout = process.stdout
     if not isinstance(stdout, str) or len(stdout.encode("utf-8")) > MAX_JSON_BYTES:
-        return dict(held, reason="native_task_response_invalid")
+        return None, "native_task_response_invalid"
     try:
         task = json.loads(stdout)
     except (ValueError, TypeError):
-        return dict(held, reason="native_task_response_invalid")
+        return None, "native_task_response_invalid"
     if not isinstance(task, dict):
-        return dict(held, reason="native_task_response_invalid")
-    decision = native_task_terminal_evidence(card, task)
-    # Keep this observer deliberately narrower than the recovery assessor:
-    # terminal evidence is not independent completion or authority to execute.
-    return {**decision, "provider_action_authorized": False}
+        return None, "native_task_response_invalid"
+    return task, ""
+
+
+def observe_native_task(
+    card: Mapping[str, Any],
+    *,
+    cli: str = "/usr/local/bin/openclaw",
+    runner: Callable[..., Any] = subprocess.run,
+    timeout_seconds: float = 10,
+) -> dict[str, Any]:
+    """Read only native task status; no authorization or recovery is granted."""
+    task, problem = _read_native_task(
+        card, cli=cli, runner=runner, timeout_seconds=timeout_seconds,
+    )
+    if task is None:
+        return {
+            "disposition": "HOLD",
+            "reason": problem,
+            "native_termination_confirmed": False,
+            "independent_operational_completion_verified": False,
+            "provider_action_authorized": False,
+        }
+    return {
+        **native_task_terminal_evidence(card, task),
+        "provider_action_authorized": False,
+    }
+
+
+def assess_native_stale_recovery(
+    card: Mapping[str, Any],
+    state: Mapping[str, Any],
+    *,
+    authorized_readonly_actions: frozenset[str] = frozenset(),
+    cli: str = "/usr/local/bin/openclaw",
+    runner: Callable[..., Any] = subprocess.run,
+    timeout_seconds: float = 10,
+) -> dict[str, Any]:
+    """Read native ledger, then call EXISTING PMV3 advisor without execution.
+
+    This is neither authorization nor a state-replay interface. The trusted
+    integration must independently re-read Workboard/PMV3 authority and receipts
+    before handing a candidate to the existing governed worker.
+    """
+    task, problem = _read_native_task(
+        card, cli=cli, runner=runner, timeout_seconds=timeout_seconds,
+    )
+    if task is None:
+        return {
+            "disposition": "HOLD",
+            "reason": problem,
+            "governed_engine_recovery_candidate": False,
+            "provider_action_authorized": False,
+            "workboard_auto_reset_allowed": False,
+            "operational_completion_verified": False,
+        }
+    return assess_governed_stale_recovery(
+        card, state,
+        authorized_readonly_actions=authorized_readonly_actions,
+        native_task=task,
+    )
 
 
 if __name__ == "__main__":
