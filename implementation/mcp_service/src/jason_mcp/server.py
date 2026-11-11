@@ -1563,6 +1563,7 @@ def _governed_read_for_identity(
     capability_name: str,
     arguments: Mapping[str, Any],
     preauthorized_context: ExecutionContext | None = None,
+    trusted_output_projection: Any | None = None,
 ) -> dict[str, Any]:
     app = _runtime()
 
@@ -1652,6 +1653,30 @@ def _governed_read_for_identity(
     )
 
     result = app.governed_orchestrator.execute(request)
+
+    if trusted_output_projection is not None:
+        if result.status.value != "succeeded":
+            return {
+                "status": result.status.value,
+                "capability": capability_name,
+                "error_code": result.error_code,
+                "reason_codes": list(result.reason_codes),
+                "correlation_id": result.correlation_id,
+            }
+        # Only feature-gated, internal read-only projections may consume
+        # unbounded pre-projection evidence. All source collection still
+        # passed the same requester-bound Central Orchestrator authorization.
+        projected = trusted_output_projection(result.output)
+        return {
+            "status": result.status.value,
+            "stage": result.stage.value,
+            "capability": result.capability_name,
+            "provider": result.provider_id,
+            "reason_codes": list(result.reason_codes),
+            "error_code": result.error_code,
+            "correlation_id": result.correlation_id,
+            "evidence": projected,
+        }
 
     return {
         "status": result.status.value,
@@ -8726,6 +8751,169 @@ class JasonMcpOuterTransportGuard:
             receive,
             send,
         )
+
+
+# Endpoint Security Assessment is intentionally *off* by default. An exact
+# production release, live provider acceptance and Owner-approved activation
+# are required before these tools become visible in the MCP catalog.
+_ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED = os.getenv(
+    "JASON_ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED", ""
+).strip().casefold() in {"1", "true", "yes"}
+
+if _ENDPOINT_SECURITY_ASSESSMENT_MCP_ENABLED:
+    from base64 import b64encode
+    from jason_mcp.endpoint_security_assessment_adapter import (
+        BoundTechnician,
+        EndpointSecurityAssessmentMcpAdapter,
+    )
+    from jason_mcp.endpoint_security_assessment_pages import (
+        FindingPageError,
+        project_finding_page,
+    )
+
+    def _governed_assessment_finding_page(
+        *, job_uid: str, device_uid: str, component_uid: str,
+        hostname: str, page_index: int, page_size: int,
+    ) -> dict[str, Any]:
+        # No direct Datto request or broader provider identity here. The
+        # authenticated requester undergoes the ordinary exact-capability
+        # OBSERVE authorization and Central Orchestrator execution.
+        if component_uid != "8ff72744-cb29-4cad-a11b-7a1c2a199f06":
+            return {"status": "rejected", "error_code": "ASSESSMENT_COMPONENT_NOT_ALLOWED"}
+        principal, organization, assurance, client_id = _authenticated_identity()
+        try:
+            return _governed_read_for_identity(
+                principal=principal,
+                organization=organization,
+                assurance=assurance,
+                client_id=client_id,
+                capability_name="automation.job.output.read",
+                arguments={
+                    "resource_id": job_uid,
+                    "device_uid": device_uid,
+                    "component_uid": component_uid,
+                    "stream": "stdout",
+                },
+                trusted_output_projection=lambda source: project_finding_page(
+                    source, job_uid=job_uid, device_uid=device_uid,
+                    component_uid=component_uid, hostname=hostname,
+                    page_index=page_index, page_size=page_size,
+                ),
+            )
+        except FindingPageError as exc:
+            return {"status": "rejected", "error_code": str(exc)[:120],
+                    "do_not_redispatch": True}
+
+    @lru_cache(maxsize=1)
+    def _endpoint_security_assessment_adapter() -> EndpointSecurityAssessmentMcpAdapter:
+        base = Path(os.getenv(
+            "JASON_ENDPOINT_SECURITY_ASSESSMENT_STATE_DIR",
+            "/var/lib/jason/openclaw/endpoint-security-assessment",
+        )).resolve()
+        base.mkdir(parents=True, exist_ok=True, mode=0o700)
+        base.chmod(0o700)
+        return EndpointSecurityAssessmentMcpAdapter(
+            db_path=base / "assessments.sqlite3",
+            artifact_dir=base / "artifacts",
+            read=lambda capability, arguments: execute_read_capability(
+                capability=capability, arguments=arguments),
+            action=lambda capability, arguments: execute_governed_capability(
+                capability=capability, arguments=arguments),
+            finding_page=_governed_assessment_finding_page,
+        )
+
+    def _endpoint_security_technician() -> BoundTechnician:
+        principal, organization, _, _ = _authenticated_identity()
+        return BoundTechnician(identity=principal, organization_id=organization)
+
+    @mcp.tool()
+    def request_endpoint_security_assessment(
+        hostname: str,
+        direct_technician_approval: bool = False,
+    ) -> dict[str, Any]:
+        """Begin one technician-requested AOT read-only security assessment.
+
+        Set direct_technician_approval=True ONLY when the authenticated
+        technician directly requested this exact component workflow for this
+        exact hostname in the current turn. It never creates standing
+        authority; the existing governed action rechecks authorization.
+        The resulting request_id is used to continue the *same* job without
+        resubmitting. No endpoint changes or client notifications.
+        """
+        try:
+            req, progress = _endpoint_security_assessment_adapter().start(
+                technician=_endpoint_security_technician(),
+                hostname=hostname,
+                direct_technician_approval=direct_technician_approval,
+            )
+        except (PermissionError, RuntimeError, LookupError, ValueError) as exc:
+            return {
+                "status": "rejected",
+                "error_code": str(exc)[:120],
+                "endpoint_modified": False,
+            }
+        return {
+            "status": progress.state,
+            "request_id": req.request_id,
+            "job_uid": progress.job_uid,
+            "next_action": progress.next_action,
+            "endpoint_modified": False,
+            "report_ready": progress.client_pdf_allowed,
+        }
+
+    @mcp.tool()
+    def continue_endpoint_security_assessment(request_id: str) -> dict[str, Any]:
+        """Resume one exact already-submitted assessment (no new scan)."""
+        try:
+            _, progress = _endpoint_security_assessment_adapter().resume(
+                technician=_endpoint_security_technician(), request_id=request_id)
+        except (PermissionError, RuntimeError, LookupError, ValueError) as exc:
+            return {"status": "rejected", "error_code": str(exc)[:120],
+                    "do_not_redispatch": True}
+        return {
+            "status": progress.state,
+            "request_id": request_id,
+            "job_uid": progress.job_uid,
+            "next_action": progress.next_action,
+            "report_ready": progress.client_pdf_allowed,
+            "pending_investigation_jobs": len(progress.pending_probe_jobs),
+            "do_not_redispatch": True,
+        }
+
+    @mcp.tool()
+    def view_endpoint_security_assessment_pdf(
+        request_id: str,
+        audience: str = "technician",
+    ) -> list[TextContent | EmbeddedResource]:
+        """Retrieve the authorized, integrity-checked assessment PDF.
+
+        This does NOT send a file to a customer. Unverified findings permit
+        only an internal technician draft labeled not a client all-clear.
+        """
+        try:
+            ref, content = _endpoint_security_assessment_adapter().artifact(
+                technician=_endpoint_security_technician(),
+                request_id=request_id, audience=audience,
+            )
+        except (PermissionError, RuntimeError, LookupError, ValueError) as exc:
+            return [TextContent(type="text",
+                                text="Assessment report unavailable: "+str(exc)[:160])]
+        return [
+            TextContent(
+                type="text",
+                text=("AOT endpoint security assessment; audience="+ref.audience+
+                      "; sha256="+ref.sha256+"; bytes="+str(len(content))+
+                      "; expires_at="+ref.expires_at)),
+            EmbeddedResource(
+                type="resource",
+                resource=BlobResourceContents(
+                    uri="jason://endpoint-security-assessments/"+ref.request_id+
+                        "/"+ref.sha256+".pdf",
+                    mimeType="application/pdf",
+                    blob=b64encode(content).decode("ascii"),
+                ),
+            ),
+        ]
 
 
 app = mcp.streamable_http_app(
