@@ -108,5 +108,15 @@
     "explicit_agent_id_required": true,
     "no_channel_bindings": true,
     "no_production_activation": true
+  },
+  "design_baseline": {
+    "name": "PMv4.11112026.1",
+    "source": "Project Jason PMv4_outline.docx (Project sources)",
+    "governing_handbook": "Project_Jason_Governance_Handbook_Updated.docx, 2026-11-03",
+    "shared_contract": "shared/PMV4-DEVELOPMENT-CONTRACT.md",
+    "communication_agreement": "Governance Handbook Part III",
+    "authority": "preproduction_design_only; current PMV3.2 remains live",
+    "existing_platform_reuse": true,
+    "no_production_activation": true
   }
 }

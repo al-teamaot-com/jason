@@ -33,6 +33,23 @@ class SpecialistProfileTests(unittest.TestCase):
             self.assertIs(p["auto_dispatch"], False)
             self.assertIs(p["production_write_authority"], False)
 
+    def test_pmv4_required_governance_and_communication(self):
+        baseline = self.manifest["design_baseline"]
+        self.assertEqual(baseline["name"], "PMv4.11112026.1")
+        self.assertTrue(baseline["existing_platform_reuse"])
+        self.assertTrue(baseline["no_production_activation"])
+        contract = (SOURCE / baseline["shared_contract"]).read_text()
+        for key in (
+            "PMV3 exact-immutable-revision approval remains authoritative",
+            "System Registry", "declarative JSON playbook", "reuse is mandatory",
+            "Overall Status", "Verified", "Problems/Blockers", "Next Action",
+            "Needed From Me", "Whole-Task Completion", "no production activation",
+            "Communication Agreement",
+        ):
+            self.assertIn(key.lower(), contract.lower())
+        for profile in self.profiles:
+            self.assertIn("PMV4-DEVELOPMENT-CONTRACT.md", (SOURCE/profile["agent_instructions"]).read_text())
+
     def test_role_profiles_and_reused_contract(self):
         shared = (SOURCE / "shared/AGENT-CONTRACT.md").read_text()
         self.assertIn("no new approval requirement", shared)
@@ -59,6 +76,24 @@ class SpecialistProfileTests(unittest.TestCase):
             self.assertFalse(p["production_write_authority"])
         # Configuration activates nothing and cannot grant new release authority.
         self.assertNotIn("approval", self.manifest.get("production_release_controller", "").split("-")[:1])
+
+    def test_pmv4_preflight_rejects_missing_status_contract(self):
+        import sys
+        import tempfile
+        import shutil
+        sys.path.insert(0, str(ROOT / "tools"))
+        from verify_openclaw_specialists import verify
+        loc = os.environ.get("JASON_OPENCLAW_OFFLINE_STATE")
+        if not loc:
+            self.skipTest("Only run with verified isolated state")
+        with tempfile.TemporaryDirectory() as temp:
+            temp = Path(temp)
+            shutil.copytree(SOURCE, temp/"config/openclaw-specialists")
+            (temp/"config/openclaw-specialists/shared/PMV4-DEVELOPMENT-CONTRACT.md").write_text("No status contract")
+            shutil.copytree(Path(loc), temp/"state")
+            result = verify(temp,temp/"state")
+            self.assertEqual(result["status"], "FAIL")
+            self.assertTrue(any(x.startswith("communication_field_missing:") for x in result["problems"]))
 
     def test_preflight_rejects_unsafe_config(self):
         import copy

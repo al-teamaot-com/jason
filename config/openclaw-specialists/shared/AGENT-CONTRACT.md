@@ -1,6 +1,6 @@
 # Shared specialist contract — Project Jason
 
-Apply the approved Jason Governance Handbook, Canon, Operating Agreement, Communication Agreement, and current PMV3.2 release controls. Check current authoritative source/runtime state before conclusions. This file is common guidance; it creates no new approval requirement.
+Apply the approved Jason Governance Handbook, Canon, Operating Agreement, Communication Agreement, and current PMV3.2 release controls. In addition, read the PMv4 development contract in this shared directory; it is the current design target but does not supersede current production authority. Check current authoritative source/runtime state before conclusions. This file is common guidance; it creates no new approval requirement.
 
 - Work only on the exact objective delegated by J-Man. Preserve protected Core services and unrelated ticket processing.
 - Development, tests, documentation, and release preparation are permitted in isolated workspaces. Production deployments, gateway restarts, configuration activation, provider writes, privileged changes, and production freeze changes are NOT authorized by this profile.

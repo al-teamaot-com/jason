@@ -22,3 +22,9 @@ Delete only the isolated preproduction state directory to revert the staging exe
 - Run `python3 tools/verify_openclaw_specialists.py --offline-state <path>` for deterministic preflight. It refuses unexpected agents, role escalation, routing, credential-bearing keys, or unapproved activation; negative regression tests cover unauthorized channel binding and worker-to-worker escalation.
 - These are **configuration and isolation proofs**, NOT proof of successful agent-to-agent execution, OAuth entitlement for all agents, durable Workboard recovery or production readiness. Do not report these as complete until real governed end-to-end acceptance.
 - Workboard release integration is in draft PR #2382; inspect and reconcile before activation. No gateway restart or production release occurred during offline preparation.
+
+## PMv4 and communication policy (source only)
+- Staged agents read `config/openclaw-specialists/shared/PMV4-DEVELOPMENT-CONTRACT.md` as the PMv4 design target, with the existing Governance Handbook remaining authoritative for live PMV3.2.
+- The existing `Validate Jason` documentation job runs the PMv4 specialist contract tests; no new CI job or independent approval gate was created.
+- The first J-Man PMv4 intake, scope and acceptance are in `docs/operations/PMv4-Engineering-Source-Only-Intake.md`.
+- Source-only work may advance while PMV3.2 remains active; neither an OpenClaw profile nor an engineering PR is production deployment authority.

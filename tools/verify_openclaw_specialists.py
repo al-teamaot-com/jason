@@ -16,6 +16,38 @@ EXISTING = ("main", "j-man", "j-dev")
 def verify(source: Path, state: Path) -> dict:
     problems = []
     manifest = json.loads((source / "config/openclaw-specialists/manifest.json").read_text())
+    baseline = manifest.get("design_baseline", {})
+    governance_file = source / "config/openclaw-specialists/shared/PMV4-DEVELOPMENT-CONTRACT.md"
+    if not governance_file.is_file():
+        problems.append("missing_pmv4_contract")
+    else:
+        content = governance_file.read_text()
+        for heading in (
+            "Modular architecture", "Protected Core services", "Configuration-driven playbooks",
+            "Single Owner approval", "Emergency access", "Subscription funding",
+            "Continuation and reliability", "Evidence-first communication", "Production protection"
+        ):
+            if heading not in content:
+                problems.append("pmv4_topic_missing:" + heading)
+        for field in (
+            "Overall Status", "Verified", "Problems/Blockers", "Next Action",
+            "Needed From Me", "Whole-Task Completion",
+        ):
+            if field not in content:
+                problems.append("communication_field_missing:" + field)
+        if "PMV3 exact-immutable-revision approval remains authoritative" not in content:
+            problems.append("current_release_authority_boundary_missing")
+        if "existing" not in content.lower() or "no production activation" not in content.lower():
+            problems.append("reuse_or_production_scope_unverified")
+    if baseline.get("name") != "PMv4.11112026.1" or baseline.get("existing_platform_reuse") is not True:
+        problems.append("incorrect_pmv4_baseline")
+    if baseline.get("no_production_activation") is not True:
+        problems.append("pmv4_unapproved_activation")
+    for profile in manifest.get("agents", []):
+        agent_file = source / "config/openclaw-specialists" / profile["agent_instructions"]
+        if not agent_file.is_file() or "PMV4-DEVELOPMENT-CONTRACT.md" not in agent_file.read_text():
+            problems.append("pmv4_not_in_specialist_instructions:" + profile["id"])
+
     config_path = state / "openclaw.json"
     config = json.loads(config_path.read_text())
     agents = config.get("agents", {}).get("list", [])
@@ -49,6 +81,9 @@ def verify(source: Path, state: Path) -> dict:
     shared = state / "workspaces/_shared/AGENT-CONTRACT.md"
     if not shared.is_file():
         problems.append("shared_contract_missing")
+    if not (state / "workspaces/_shared/PMV4-DEVELOPMENT-CONTRACT.md").is_file():
+        problems.append("offline_pmv4_contract_missing")
+
     if config_path.stat().st_mode & 0o077:
         problems.append("offline_config_permissions_unsafe")
     if any(k in config_path.read_text() for k in ('"accessToken"', '"refreshToken"', '"apiKey"', '"api_key"')):
