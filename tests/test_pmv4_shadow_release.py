@@ -390,6 +390,78 @@ class StandaloneReleaseTests(unittest.TestCase):
                              restore_shadow=lambda _: None,
                              production=True)
 
+    def test_full_host_transaction_lease_encloses_promotion_and_verification(self):
+        from contextlib import contextmanager
+        events = []
+        in_lease = {"value": False}
+
+        @contextmanager
+        def host_transaction():
+            events.append("host_acquired")
+            in_lease["value"] = True
+            try:
+                yield
+            finally:
+                in_lease["value"] = False
+                events.append("host_released")
+
+        self.controller.host_release_transaction = host_transaction
+        self.controller.host_mutation_quiescent = lambda: in_lease["value"]
+        self.controller.preexisting_core_health = lambda: in_lease["value"]
+        original_activate = self.controller.activate_shadow
+        original_verify = self.controller.verify_shadow_and_core
+
+        def active(path):
+            self.assertTrue(in_lease["value"])
+            events.append("activate")
+            original_activate(path)
+
+        def verify(path):
+            self.assertTrue(in_lease["value"])
+            events.append("verified")
+            return original_verify(path)
+
+        self.controller.activate_shadow = active
+        self.controller.verify_shadow_and_core = verify
+        self.assertEqual(self.promote()["status"], "shadow_accepted")
+        self.assertEqual(
+            events, ["host_acquired", "activate", "verified", "host_released"]
+        )
+
+    def test_full_host_transaction_lease_encloses_crash_reconciliation(self):
+        from contextlib import contextmanager
+        held = {"value": False}
+        events = []
+
+        @contextmanager
+        def host_transaction():
+            self.assertFalse(held["value"])
+            held["value"] = True
+            events.append("acquired")
+            try:
+                yield
+            finally:
+                events.append("released")
+                held["value"] = False
+
+        self.controller.host_release_transaction = host_transaction
+        self.controller.host_mutation_quiescent = lambda: held["value"]
+        self.fail_activation = True
+        self.controller.restore_shadow = lambda _: (
+            (_ for _ in ()).throw(RuntimeError("test interrupted restore"))
+        )
+        with self.assertRaises(RuntimeError):
+            self.promote()
+        events.clear()
+        self.controller.restore_shadow = lambda _: (
+            self.assertTrue(held["value"]), events.append("restored")
+        )
+        result = self.controller.reconcile_pending_rollback(
+            rollback_acceptance=lambda _: held["value"],
+        )
+        self.assertEqual(result["status"], "shadow_rollback_verified")
+        self.assertEqual(events, ["acquired", "restored", "released"])
+
     def test_missing_pinned_trust_fails(self):
         self.trust.unlink()
         with self.assertRaises(PermissionError):

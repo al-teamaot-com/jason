@@ -12,6 +12,7 @@ performed by importing this module or running its read-only inspector.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import fcntl
@@ -22,7 +23,7 @@ from pathlib import Path
 import re
 import stat
 import sys
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, ContextManager, Mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from implementation.kernel.signed_owner_release import (
@@ -190,7 +191,8 @@ class ShadowController:
                  restore_shadow: Callable[[Path], None],
                  production: bool = True,
                  host_mutation_quiescent: Callable[[], bool] | None = None,
-                 preexisting_core_health: Callable[[], bool] | None = None):
+                 preexisting_core_health: Callable[[], bool] | None = None,
+                 host_release_transaction: Callable[[], ContextManager[None]] | None = None):
         self.root = safe_root(root, production=production)
         self.public_key_path = Path(public_key_path)
         if production and self.public_key_path != TRUST_PATH:
@@ -210,6 +212,9 @@ class ShadowController:
             raise ShadowReleaseDenied("SHADOW_HOST_AND_CORE_PROBES_NOT_PROVISIONED")
         self.host_mutation_quiescent = host_mutation_quiescent
         self.preexisting_core_health = preexisting_core_health
+        if production and not callable(host_release_transaction):
+            raise ShadowReleaseDenied("SHADOW_CROSS_RELEASE_LOCK_NOT_PROVISIONED")
+        self.host_release_transaction = host_release_transaction or nullcontext
 
     def _paths(self) -> tuple[Path, Path, Path, Path]:
         for name in ("releases", "receipts", "control"):
@@ -372,6 +377,16 @@ class ShadowController:
     def reconcile_pending_rollback(
         self, *, rollback_acceptance: Callable[[Path], bool],
     ) -> dict[str, Any]:
+        # Hold the same host mutation lock used by legacy PMv3 for the ENTIRE
+        # recovery transaction, not just a race-prone preflight instant.
+        with self.host_release_transaction():
+            return self._reconcile_pending_rollback_locked(
+                rollback_acceptance=rollback_acceptance
+            )
+
+    def _reconcile_pending_rollback_locked(
+        self, *, rollback_acceptance: Callable[[Path], bool],
+    ) -> dict[str, Any]:
         """Only restore an interrupted *previously authorized* transaction.
 
         No new release, no new Owner grant, no PMV3 state touch. Missing
@@ -444,6 +459,16 @@ class ShadowController:
 
     def promote(self, manifest: Mapping[str, Any], approval: Mapping[str, Any],
                 *, at: datetime | None = None) -> dict[str, Any]:
+        # The legacy Release Manager and independent PMv4 cannot both mutate
+        # the shared host while holding different lock inodes. This trusted
+        # root-provisioned shared transaction encloses preflight, activation,
+        # acceptance and rollback.
+        with self.host_release_transaction():
+            return self._promote_locked(manifest, approval, at=at)
+
+    def _promote_locked(self, manifest: Mapping[str, Any],
+                        approval: Mapping[str, Any],
+                        *, at: datetime | None = None) -> dict[str, Any]:
         """One Owner-signed, single shadow transaction, with rollback on failure."""
         _, receipts, _, current = self._paths()
         lockfile = self.root / "control" / "shadow-release.lock"
