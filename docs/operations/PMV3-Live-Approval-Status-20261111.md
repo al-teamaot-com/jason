@@ -46,3 +46,15 @@ Teams-free release merely to change an indicator.
 Operationally: **the release manager's protected LKG and current MCP
 `release_approval_policy` field are the sources of truth for present
 approvals; dated engineering artifacts are historical context.**
+
+### Concurrent-change review
+
+Reviewed overlap with #2384 (Constant Contact callback), #2343
+(procurement quote/invoice), #2333 (gated security assessment), and #2305
+(passive diagnostics) in the large MCP server module. Their source hunks
+do not intersect this read-only PMV3 approval status function. Reviewed
+#2296, which changes only PMV3 recoverable-failure classification and
+does not touch the historical status field. This fix does not import,
+reimplement or authorize any of those independent features.
+
+Integration coordination: #2384 #2343 #2333 #2296 #2305 #2427 #2428 #2404 #2395 #2393 #2382 #2373
