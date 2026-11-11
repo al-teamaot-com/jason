@@ -138,3 +138,37 @@ host reconcile stage; this does not supersede the full-proof skip. Both must
 preserve these emergency changes when eventually integrated.
 
 Integration coordination: #2424 #2404 #2391
+
+## November 11 root receipt recovery and release reissue boundary
+
+The exact Teams-free candidate `b16e1cbdf47c63058f3d5e95bb139fc826e3fa3b`
+failed during root host reconciliation because an earlier interrupted
+`35936e859a4eed7ccd700e03f401189726042a80` CCC-retirement transaction
+left an audited root receipt in `rollback_prepared` while the installed V2
+root helper did not recognize that removal-only plan. The native attempt
+restored Runtime/MCP and its original production freeze but could not verify
+host rollback. A failed release must not be recast as production-complete.
+
+The Owner performed a **separate locally authenticated root-maintenance
+action**, verifying the candidate-bound recorded receipt and full predecessor
+chain, restoring the original protected policy bytes, archiving the old
+receipt, and atomically installing the independently Git-verified CCC-aware
+root helper. The helper bytes have SHA256
+`d30e0bdcabb9d7e1aa9691465c1d52402a75253ffff737d4998d3b25df855828`.
+The original freeze SHA256 remains
+`bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f`.
+Native readback then confirmed V2 Runtime, MCP and host alignment, clean
+production drift and a **closed** circuit breaker. No database deletion,
+service restart, or additional provider grant was part of this repair.
+
+Root migration regression coverage now reproduces the exact interrupted
+`rollback_prepared` phase, verifies byte-exact archival and restoration, and
+proves that a different reviewed source SHA can stage the same closed-world
+CCC-removal delta without overwriting an existing audit receipt. A forged
+or changed unit delta still fails before protected policy modification.
+
+This is evidence of **recovered production baseline only**, not deployment of
+the Teams-free candidate. A future exact release requires fresh preproduction,
+updated scope review, newly authenticated Owner authorization and final
+production acceptance. Never reuse an approval consumed by a failed release,
+and never treat a missing full SQLite proof as successful.
