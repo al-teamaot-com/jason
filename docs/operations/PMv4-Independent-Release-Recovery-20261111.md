@@ -26,6 +26,11 @@ Docker namespace, audit receipts, activation and crash-safe rollback.
   until independent shadow promotion/recovery, verification and rollback finish.
   This is a bounded compatibility lock for avoiding parallel PMv3/PMv4 host
   mutation, **not an execution dependency on the PMv3 controller or AI**.
+  Verified host metadata: the *existing* PMv3 transaction lock is owned by
+  non-root UID `1000`, mode `0664`; a separately provisioned PMv4
+  host lock must be root-owned, mode `0600`. The guard intentionally
+  authenticates these two different known owners; treating both as root-owned
+  would permanently block this migration.
   **Important fail-closed release gate:** During this transition the independent
   host guard also requires the protected Last Known Good manifest to match the
   live runtime and MCP source, the protected circuit breaker to be **closed**
