@@ -26,4 +26,14 @@ Perform **read-only discovery plus a written PMv4 gap-and-reuse review**, using 
 - PMv4 single-approval / Owner emergency access requirements are design targets needing formal governance review and tested implementation, not current authority.
 - OpenClaw agent subscription OAuth was verified usable for J-Man on Nov 11, but long-lived session continuity, specialist OAuth and concurrency need tests.
 
+## Verified existing PMV3 durable-engine reuse (2026-11-11)
+
+A disposable, nonproduction test in `tests/test_pmv4_reuse_durable_recovery.py` exercises **the existing** `tools/pmv3_work_engine.py` across different Python processes, without another scheduler, production work record, provider, API call or gateway restart:
+
+- A deliberately interrupted **idempotent** development work item is persisted as `running`, picked up by a later fresh engine process, completed with receipt, and not executed again on a subsequent process.
+- A persisted item with independently recorded completion receipt is marked complete without repeating any action.
+- A deliberately interrupted **non-idempotent** action without a receipt remains waiting for reconciliation and is **not** retried or incorrectly claimed complete.
+
+These tests demonstrate a reusable PMV3 execution primitive. **They do not** demonstrate that OpenClaw Workboard currently dispatches into that primitive, that J-Man is scheduled to drive it, or that a real agent can recover from an interruption and finish unattended. Workboard-to-engine handoff requires a governed adapter or equivalent supported dispatch, durable correlation/receipt contract, targeted tests, and actual preproduction end-to-end acceptance before PMv4's autonomous continuation can be called operational. No second work manager is proposed.
+
 **Stop condition:** Only production activation requires further release authorization; J-Man may complete all independently authorized engineering and nonproduction tests in the meantime.
