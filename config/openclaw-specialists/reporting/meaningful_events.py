@@ -27,6 +27,7 @@ ALLOWED_STAGES = frozenset({
 })
 RECEIPT_MARKER = "- PMV4_TEAMS_EVENT_RECEIPT: "
 OWNER_TARGET = re.compile(r"\Auser:[a-zA-Z0-9-]{8,128}\Z")
+LICENSED_OWNER_TARGET = "user:bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
 EVENT_ID = re.compile(r"\A[a-zA-Z0-9][a-zA-Z0-9:._-]{3,119}\Z")
 
 
@@ -189,7 +190,8 @@ def publish_once(
 
 def existing_teams_sender(message: str, *, target: str, runner: Callable[..., Any] = subprocess.run) -> str:
     """Reuse J-Man's configured OpenClaw msteams sender, not approval cards."""
-    if not isinstance(target, str) or not OWNER_TARGET.fullmatch(target):
+    if (not isinstance(target, str) or not OWNER_TARGET.fullmatch(target)
+        or target != LICENSED_OWNER_TARGET):
         raise EventRejected("licensed_owner_teams_route_unverified")
     result = runner(
         ["openclaw", "message", "send", "--channel", "msteams", "--target", target,

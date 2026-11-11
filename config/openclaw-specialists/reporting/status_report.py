@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 
 def _latest_pmv4_section(text: str) -> str:
-    matches = list(re.finditer(r"^## PMv4\.x\b[^\n]*", text, flags=re.M | re.I))
+    matches = list(re.finditer(r"^## PMv4\.(?:x|[0-9]{8}\.[0-9]+)\b[^\n]*", text, flags=re.M | re.I))
     if not matches:
         return ""
     start = matches[-1]
@@ -125,7 +125,7 @@ def send_meaningful_event(
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     target = os.environ.get("JMAN_TEAMS_TARGET", "").strip()
-    if not module.OWNER_TARGET.fullmatch(target):
+    if not module.OWNER_TARGET.fullmatch(target) or target != module.LICENSED_OWNER_TARGET:
         raise module.EventRejected("licensed_owner_teams_route_unverified")
     if sender is None:
         sender = lambda msg: module.existing_teams_sender(msg, target=target)

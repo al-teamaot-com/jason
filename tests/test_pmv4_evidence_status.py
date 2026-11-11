@@ -114,6 +114,16 @@ class EvidenceFirstTests(unittest.TestCase):
             self.assertIn("25% (J-Man task-record estimate;",report)
             self.assertNotIn("UNVERIFIED COMPLETION CLAIM",report)
 
+    def test_current_dated_pmv4_objective_is_recognized(self):
+        with tempfile.TemporaryDirectory() as temp:
+            p=Path(temp)/"TASKS.md"
+            p.write_text("## PMv4.11112026.1 — active drive\n"
+                         "- Current status: in progress\n"
+                         "- Whole PMv4 program completion: estimated 20%\n")
+            report=module.build_report(p,when=NOW)
+            self.assertIn("Overall Status: IN PROGRESS",report)
+            self.assertIn("20% (J-Man task-record estimate",report)
+
     def test_missing_percentage_not_fabricated(self):
         with tempfile.TemporaryDirectory() as temp:
             p=Path(temp)/"TASKS.md"

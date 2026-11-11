@@ -182,6 +182,8 @@ class PMv4MeaningfulTeamsEvents(unittest.TestCase):
         runner = Mock(return_value=Mock(returncode=0, stdout=json.dumps({"payload": {"deliveryStatus": "accepted"}})))
         with self.assertRaisesRegex(mod.EventRejected, "route_unverified"):
             mod.existing_teams_sender("text", target="al_admin@teamaot.com", runner=runner)
+        with self.assertRaisesRegex(mod.EventRejected, "route_unverified"):
+            mod.existing_teams_sender("text", target="user:00000000-0000-0000-0000-000000000001", runner=runner)
         with self.assertRaisesRegex(mod.EventRejected, "delivery_unverified"):
             mod.existing_teams_sender("text", target="user:bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
                                       runner=runner)
