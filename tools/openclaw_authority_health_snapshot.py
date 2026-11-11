@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_OUTPUT = Path('/var/lib/jason/openclaw/operational-health.json')
+LAST_SUCCESS = Path('/var/lib/jason/openclaw/operational-full-health-last-pass.json')
 # Full SQLite checks now cover a >28 GB orchestration audit and multi-GB
 # authority backup/restore. Retain a strict bound, but allow one 60-minute
 # overnight attempt; never convert a timeout into a passing proof.
@@ -91,6 +92,14 @@ def main() -> int:
         report['failures'] = failures
 
     write_atomic_snapshot(args.output, report)
+    # Keep the last verified PASS separately, so a later timeout cannot erase
+    # the proof of a completed scan. Never archive a nonzero/partial result.
+    if (report.get('status') == 'pass'
+            and completed.returncode == 0
+            and report.get('failures') == []
+            and report.get('provider_contacted') is False
+            and report.get('provider_credentials_used') is False):
+        write_atomic_snapshot(LAST_SUCCESS, report)
 
     print(json.dumps({
         'status': report.get('status', 'fail'),

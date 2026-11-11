@@ -71,3 +71,53 @@ Do not delete archive `/var/lib/jason/ccc` or
 `/home/al/Jason-Evidence/CCC` as part of this retirement. Do not disable
 any independent integrity, audit or drift checks. Do not remove the installed
 units via ad hoc shell commands outside the governed transaction.
+
+
+## November 11 emergency host-migration follow-up (source-only)
+
+The November 11 attempted rollout of candidate
+`7000e725361d8bd0c5627cc839278eeff11ca9be` failed at the independent
+root-owned host policy migration because the historical root helper still
+demanded `/var/lib/jason/ccc/material-review.json`. The candidate already
+retired that duplicate Owner review and removed only the exact obsolete
+`jason-ccc.service` and `jason-ccc.timer` allowed declarations. This
+mismatch, not missing Owner authorization, was the host-stage failure.
+
+The replacement source permits exactly the two-unit CCC allowance removal,
+keeps old protected policy bytes during staging, records a root-owned
+hash-bound undo receipt, removes only the exact pair at final commit, and
+restores the original bytes on rollback. A different/partial removal or
+other desired-state change fails closed. For source-pinned V3.1 approval
+policy, the root helper independently rechecks the native release Owner
+binding to candidate, rollback, reviewed scope and manifest digest, with
+no CCC-only attestation. Historical predecessor releases still use their
+original CCC checks.
+
+This engineering change is **not deployed or independently accepted** until
+the native, frozen production transaction succeeds. The emergency attempt
+also exposed a separate full-SQLite-integrity health bottleneck: the
+full proof takes up to an hour and the root host reconciler synchronously
+waits for it when the prior proof evidence is failed. Do not silently
+replace the full integrity check with a quick scan or call it PASS.
+Preserve the production freeze, rollback and drift controls until the
+health and exact Owner-release gates are satisfied.
+
+## Verified 24-hour full SQLite proof reuse
+
+A full authority and audit SQLite integrity plus backup/restore proof is reusable
+for 24 hours if the complete result passed, is ownership/mode-validated, and
+contains the required evidence. The writer separately retains the most recent
+successful full proof, so a later timeout does not erase that proof. A confirmed
+later integrity failure is never ignored. If no valid recent success exists,
+the existing full proof is required and a timeout remains a failure; no
+unverified result is marked PASS. Owner-approved emergency recovery policy
+would require a separate, explicit reviewed release change.
+
+### Concurrent-change integration note
+
+PR #2424 overlaps the full-proof snapshot writer and its tests with PRs
+#2404, #2395 and #2390, which adjust timeout and temporary backup cleanup.
+Combine scoped temporary cleanup with last-success proof retention when those
+branches are subsequently integrated; neither supersedes the other. PR #2391
+changes a separate later provider-shadow stage in host reconciliation and must
+preserve the 24-hour full-proof reuse contract.
