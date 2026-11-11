@@ -38,6 +38,8 @@ class Provider:
         self.memberships = []
         self.activity_counts = True
         self.fail_post = False
+        self.saved_fields = {}
+        self.drop_metadata = False
 
     def request(self, **kw):
         self.calls.append(kw)
@@ -58,6 +60,7 @@ class Provider:
                             "permission_to_send": self.permission,
                         },
                         "list_memberships": list(self.memberships),
+                        **({} if self.drop_metadata else dict(self.saved_fields)),
                     }] if self.exists else []),
                 }
             if path.endswith("/activities/" + ACTIVITY):
@@ -78,6 +81,10 @@ class Provider:
         assert kw["json"]["import_data"][0]["email"] == "one@example.com"
         if self.fail_post:
             raise ConnectionError("simulated ambiguous POST response")
+        self.saved_fields = {
+            key: value for key, value in kw["json"]["import_data"][0].items()
+            if key != "email"
+        }
         self.exists = True
         self.memberships = [LIST_ID]
         return {"activity_id": ACTIVITY, "state": "initialized"}
@@ -222,3 +229,73 @@ def test_missing_activity_counts_or_list_membership_does_not_claim_success(tmp_p
     assert engine.reconcile(work_id=work.work_id, requester_id="aot-technician")["status"] == "incomplete_provider_readback"
     digest = canonical_import_arguments(work)["intent_digest"]
     assert claims.read_verification(intent_digest=digest) is None
+
+
+def test_native_connector_execution_plan_is_secret_free_and_non_bypassable(tmp_path):
+    """Import uses Jason's provider binding, never read-only/direct invoke."""
+    from decimal import Decimal
+    from types import SimpleNamespace
+    from connectors.core.contracts import ConnectorAuthorizationError
+    from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
+    from orchestrator.connector_invoker import GovernedConnectorCapabilityInvoker
+    from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
+
+    engine, transport, store, claims, approval = make_service(tmp_path)
+    work = prepare_work(engine, store)
+    bound = GovernedConnectorCapabilityInvoker(
+        connectors={"constant_contact": engine},
+        provider_capability_map={
+            ("constant_contact", CAPABILITY): CAPABILITY,
+        },
+    )
+    request = OrchestrationRequest(
+        execution_id="import-exec", correlation_id="import-correlation",
+        principal_id="aot-technician", organization_id="aot",
+        capability_name=CAPABILITY, capability_version="1.0",
+        requested_mode="deterministic", orchestration_mode=OrchestrationMode.EXECUTE,
+        authority_allowed=True, approval_present=True,
+        risk="high", data_handling=DataHandlingPolicy("confidential", False),
+        budget=ExecutionBudget(Decimal("0")),
+        arguments=canonical_import_arguments(work),
+        permission_mode="execute",
+        authority_context_id="authorized-context",
+        approval_id="trusted-governed-planstep",
+    )
+    resolution = SimpleNamespace(
+        selected_provider_id="constant_contact", capability_name=CAPABILITY,
+        metadata={},
+    )
+    with pytest.raises(ConnectorAuthorizationError, match="prepared execution plan"):
+        bound.invoke(request=request, resolution=resolution)
+    assert post_count(transport) == 0
+    prepared_a = bound.prepare_execution_plan(request=request, resolution=resolution)
+    prepared_b = bound.prepare_execution_plan(request=request, resolution=resolution)
+    assert prepared_a.plan.fingerprint == prepared_b.plan.fingerprint
+    assert prepared_a.plan.action_method == "POST"
+    assert prepared_a.plan.resource_identifier == work.account_binding_sha256
+    assert prepared_a.plan.normalized_path == "/v3/activities/contacts_json_import"
+    assert "one@example.com" not in str(prepared_a.plan.canonical_material())
+    assert "token-for-isolated-test" not in str(prepared_a.plan.canonical_material())
+    result = bound.invoke_execution_plan(
+        request=request, resolution=resolution, prepared=prepared_b,
+    )
+    assert result.output["data"]["status"] == "pending_unverified"
+    assert result.attempts == 1
+    assert post_count(transport) == 1
+
+
+
+def test_provider_readback_rejects_missing_imported_fields(tmp_path):
+    engine, transport, store, claims, approval = make_service(tmp_path)
+    work = prepare_work(engine, store)
+    prepared = engine.prepare_governed_execution(make_request(work))
+    engine.execute_governed_execution(prepared)
+    transport.drop_metadata = True
+    result = engine.reconcile(
+        work_id=work.work_id, requester_id="aot-technician",
+    )
+    assert result["status"] == "incomplete_provider_readback"
+    assert result["per_record"][0]["status"] == "not_verified"
+    assert claims.read_verification(
+        intent_digest=canonical_import_arguments(work)["intent_digest"],
+    ) is None

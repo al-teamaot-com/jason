@@ -94,14 +94,20 @@ class ConstantContactProviderEvidence:
                     or str(found.get("status", "active")).lower() != "active"):
                 raise ImportAuthorizationError("Destination contact list not verified")
 
-    def exact_contact(self, email: str) -> ObservedContact:
-        response = self._get("/contacts", params={
+    def _exact_response(self, email: str) -> Mapping[str, object]:
+        return self._get("/contacts", params={
             "email": email, "status": "all", "include": "list_memberships", "limit": 2,
         })
+
+    @staticmethod
+    def _observe_email(email: str, response: Mapping[str, object]) -> ObservedContact:
         try:
             return evaluate_exact_contact_lookup(expected_email=email, response=response)
         except ProviderContactEvidenceError:
             raise ImportAuthorizationError("Exact contact evidence incomplete") from None
+
+    def exact_contact(self, email: str) -> ObservedContact:
+        return self._observe_email(email, self._exact_response(email))
 
     @staticmethod
     def _emails(specification: ImportSpecification) -> list[str]:
@@ -170,10 +176,23 @@ class ConstantContactProviderEvidence:
         self.require_account()
         self.require_lists(specification.list_ids)
         results = []
-        for email in self._emails(specification):
-            observed = self.exact_contact(email)
+        self._emails(specification)
+        for expected in specification.payload["import_data"]:
+            email = expected["email"]
+            response = self._exact_response(email)
+            observed = self._observe_email(email, response)
             confirmed = (observed.exists and observed.safe_for_import
                          and set(specification.list_ids) <= set(observed.list_memberships))
+            # A verified import must include the intended field updates, not
+            # merely the contact's existence and list membership. Fail closed
+            # if the provider omitted an expected field or normalized it
+            # incompatibly, without exposing contact PII in readback receipts.
+            if confirmed:
+                contact = response["contacts"][0]
+                for field in ("first_name", "last_name", "company_name", "job_title"):
+                    if field in expected and str(contact.get(field, "")).strip() != expected[field].strip():
+                        confirmed = False
+                        break
             results.append({
                 "email_sha256": sha256(email.encode("utf-8")).hexdigest(),
                 "status": "verified" if confirmed else "not_verified",
