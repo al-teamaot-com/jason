@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "production-desired-state.json"
+PRODUCTION_FREEZE_MARKER = Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
+HELD_RELEASE_TIMER = "jason-release-manager.timer"
 FORBIDDEN_FIELD_NAMES = ("ExecStart", "WorkingDirectory")
 # This separately scheduled documentation writer is optional for production.
 # Only a DECLARED, NON-REQUIRED instance is advisory. All other failed units,
@@ -88,6 +91,29 @@ def active_state(unit: str, *, user: bool) -> str:
     return run(args, env=env).strip()
 
 
+def enabled_state(unit: str, *, user: bool) -> str:
+    args, env = systemctl_command(["is-enabled", unit], user=user)
+    return run(args, env=env).strip()
+
+
+def intentional_release_hold(unit: str, state: str) -> bool:
+    """Treat only the exact, protected freeze+mask combination as intentional."""
+    if unit != HELD_RELEASE_TIMER or state != "inactive":
+        return False
+    try:
+        info = PRODUCTION_FREEZE_MARKER.lstat()
+        if (
+            PRODUCTION_FREEZE_MARKER.is_symlink()
+            or not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or not 1 <= info.st_size <= 4096
+        ):
+            return False
+    except OSError:
+        return False
+    return enabled_state(unit, user=True) == "masked"
+
+
 def unit_properties(unit: str, *, user: bool) -> dict[str, str]:
     args, env = systemctl_command(
         ["show", unit, "-p", "ExecStart", "-p", "WorkingDirectory", "-p", "FragmentPath", "--no-pager"],
@@ -137,7 +163,15 @@ def evaluate(config: dict[str, Any]) -> dict[str, Any]:
     for unit in sorted(required_user):
         state = user_states.get(unit, active_state(unit, user=True))
         if state not in {"active", "activating"}:
-            problems.append({"kind": "required_user_unit_not_active", "unit": unit, "state": state})
+            if intentional_release_hold(unit, state):
+                advisories.append({
+                    "kind": "intentional_release_manager_hold",
+                    "unit": unit,
+                    "state": state,
+                    "enabled_state": "masked",
+                })
+            else:
+                problems.append({"kind": "required_user_unit_not_active", "unit": unit, "state": state})
 
     for unit, state in sorted(system_states.items()):
         if state == "failed":

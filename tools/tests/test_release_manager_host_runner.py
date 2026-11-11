@@ -5666,22 +5666,19 @@ def test_live_provider_recovery_profile_binds_current_reliability_repair():
         if item["id"] == "provider_identity_and_authority_recovery"
     )
     required = set(profile["required_changed_files"])
-    assert profile["max_changed_files"] == 40
-    assert {
-        "implementation/orchestrator/governed_execution_ledger.py",
-        "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
-        "implementation/runtime_service/src/jason_runtime/autonomy_worker_supervisor.py",
+    assert profile["max_changed_files"] == 48
+    assert required == {
+        "config/mobile-release-approval-policy.json",
         "implementation/runtime_service/src/jason_runtime/composition.py",
-        "implementation/runtime_service/src/jason_runtime/teams_message_send.py",
-        "tools/engineering_pipeline.py",
-        "tools/reconcile_production_host_services.sh",
+        "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
+        "infrastructure/jason-runtime/production-deploy.sh",
+        "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service",
+        "tools/openclaw_authority_health_snapshot.py",
+        "tools/production_drift_guard.py",
         "tools/release_manager_host_runner.py",
-    }.issubset(required)
-    assert not {
-        "tools/openbao_identity_lifecycle.py",
-        "tools/openbao_identity_lifecycle_worker.py",
-        "tools/install_openbao_identity_lifecycle.py",
-    } & required
+        "tools/release_mobile_approval_consumer.py",
+    }
+    assert profile["runtime_health"] == {"mode": "healthy"}
 
 
 def test_open_breaker_recovery_preflight_requires_live_root_forward_contract():
@@ -6516,3 +6513,59 @@ def test_postacceptance_rollback_failure_restores_freeze_and_fails_receipt(tmp_p
     assert receipt['freeze_restored'] is True
     assert receipt['freeze_sha256_before'] == receipt['freeze_sha256_after']
     assert receipt['standing_authority'] is False
+
+
+def test_open_breaker_drift_ignores_only_verified_masked_release_hold():
+    drift = {
+        "problems": [
+            {
+                "kind": "required_user_unit_not_active",
+                "unit": "jason-release-manager.timer",
+                "state": "inactive",
+            },
+            {
+                "kind": "failed_system_unit",
+                "unit": "jason-openclaw-authority-health.service",
+                "state": "failed",
+            },
+        ]
+    }
+    with patch.object(runner, "_intentional_masked_release_hold", return_value=True):
+        assert runner._drift_problem_identities(
+            drift, state_root=Path("/state")
+        ) == (("failed_system_unit", "jason-openclaw-authority-health.service"),)
+
+
+def test_open_breaker_drift_rejects_unverified_inactive_release_timer():
+    import pytest
+    drift = {
+        "problems": [
+            {
+                "kind": "required_user_unit_not_active",
+                "unit": "jason-release-manager.timer",
+                "state": "inactive",
+            },
+            {
+                "kind": "failed_system_unit",
+                "unit": "jason-openclaw-authority-health.service",
+                "state": "failed",
+            },
+        ]
+    }
+    with patch.object(runner, "_intentional_masked_release_hold", return_value=False):
+        with pytest.raises(runner.ReleaseManagerError, match="outside reviewed unit-failure scope"):
+            runner._drift_problem_identities(drift, state_root=Path("/state"))
+
+
+def test_open_breaker_drift_cannot_be_only_intentional_hold():
+    import pytest
+    drift = {
+        "problems": [{
+            "kind": "required_user_unit_not_active",
+            "unit": "jason-release-manager.timer",
+            "state": "inactive",
+        }]
+    }
+    with patch.object(runner, "_intentional_masked_release_hold", return_value=True):
+        with pytest.raises(runner.ReleaseManagerError, match="at least one real failed unit"):
+            runner._drift_problem_identities(drift, state_root=Path("/state"))

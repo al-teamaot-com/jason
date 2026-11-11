@@ -137,6 +137,80 @@ class ProductionDriftGuardTests(unittest.TestCase):
         self.assertEqual(env["HOME"], "/home/al")
         self.assertEqual(env["XDG_RUNTIME_DIR"], "/run/user/1000")
 
+
+
+    def test_intentional_masked_release_timer_hold_is_advisory(self):
+        def state(unit, user):
+            if user and unit == "jason-release-manager.timer":
+                return "inactive"
+            return "active"
+
+        with (
+            patch.object(guard, "unit_names", side_effect=[{"jason-core.service"}, {"jason-release-manager.timer", "jason-release-manager.service"}]),
+            patch.object(guard, "active_state", side_effect=state),
+            patch.object(guard, "intentional_release_hold", side_effect=lambda unit, state: unit == "jason-release-manager.timer" and state == "inactive"),
+            patch.object(guard, "unit_properties", return_value={"ExecStart": "/opt/jason/current/tool.py", "WorkingDirectory": "/opt/jason/current"}),
+            patch.object(guard, "running_containers", return_value={"jason-runtime", "jason-mcp-pilot"}),
+            patch.object(guard, "stopped_rollback_containers", return_value=[]),
+        ):
+            result = guard.evaluate(config())
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["advisories"], [{
+            "kind": "intentional_release_manager_hold",
+            "unit": "jason-release-manager.timer",
+            "state": "inactive",
+            "enabled_state": "masked",
+        }])
+
+    def test_release_timer_inactive_without_verified_hold_still_fails(self):
+        def state(unit, user):
+            return "inactive" if user and unit == "jason-release-manager.timer" else "active"
+
+        with (
+            patch.object(guard, "unit_names", side_effect=[{"jason-core.service"}, {"jason-release-manager.timer", "jason-release-manager.service"}]),
+            patch.object(guard, "active_state", side_effect=state),
+            patch.object(guard, "intentional_release_hold", return_value=False),
+            patch.object(guard, "unit_properties", return_value={"ExecStart": "/opt/jason/current/tool.py", "WorkingDirectory": "/opt/jason/current"}),
+            patch.object(guard, "running_containers", return_value={"jason-runtime", "jason-mcp-pilot"}),
+            patch.object(guard, "stopped_rollback_containers", return_value=[]),
+        ):
+            result = guard.evaluate(config())
+        self.assertTrue(any(
+            item["kind"] == "required_user_unit_not_active"
+            and item["unit"] == "jason-release-manager.timer"
+            for item in result["problems"]
+        ))
+
+    def test_intentional_release_hold_requires_safe_marker_and_masked_timer(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            marker = Path(td) / "production-deployment-freeze"
+            marker.write_text("held", encoding="utf-8")
+            marker.chmod(0o600)
+            with (
+                patch.object(guard, "PRODUCTION_FREEZE_MARKER", marker),
+                patch.object(guard, "enabled_state", return_value="masked"),
+            ):
+                self.assertTrue(guard.intentional_release_hold(
+                    "jason-release-manager.timer", "inactive"
+                ))
+            with (
+                patch.object(guard, "PRODUCTION_FREEZE_MARKER", marker),
+                patch.object(guard, "enabled_state", return_value="enabled"),
+            ):
+                self.assertFalse(guard.intentional_release_hold(
+                    "jason-release-manager.timer", "inactive"
+                ))
+            marker.chmod(0o644)
+            with (
+                patch.object(guard, "PRODUCTION_FREEZE_MARKER", marker),
+                patch.object(guard, "enabled_state", return_value="masked"),
+            ):
+                self.assertFalse(guard.intentional_release_hold(
+                    "jason-release-manager.timer", "inactive"
+                ))
+
     def test_clean_declared_state_passes(self):
         with (
             patch.object(guard, "unit_names", side_effect=[{"jason-core.service"}, {"jason-release-manager.timer", "jason-release-manager.service"}]),
