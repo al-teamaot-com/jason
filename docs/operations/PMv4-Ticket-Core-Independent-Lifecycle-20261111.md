@@ -45,3 +45,31 @@ Reviewed current open PR file patches on November 11, 2026:
 - #2393 and #2395 both change the release-mobile approval-mode enumeration and may conflict with *each other*; this Ticket Core change does not select or reconcile their competing governance behavior.
 
 The Ticket Core patch adds three distinct fields/guards (hosting default, environment parsing and validation) and does not modify the competing hunks. Rebase and rerun full composition regression after whichever active PR changes reach protected main. Do not merge if source changes break the single-owner guarantee.
+
+
+## Isolated-container acceptance evidence — 2026-11-11
+
+Executable, repeatable test: `python3 tools/pmv4_ticket_core_container_acceptance.py --acceptance`.
+It runs three **synthetic** scan recordings in throwaway Docker containers using the
+new source-only exclusive worker owner and shared temporary SQLite ledger, never
+any live Autotask/DRMM data. First two scans run under the initial owner; a
+second isolated container is rejected from taking the active lock; after the
+primary voluntarily stops, a new independent container acquires ownership and
+records a third scan without creating a duplicate ticket claim.
+
+Observed PASS: network `none`, read-only filesystem, dropped Linux capabilities,
+`no-new-privileges`, non-root UID 1000:1000, read-only source/script mounts,
+no provider secrets or metered AI keys, no production mounts or provider writes,
+three unique synthetic scan timestamps, one unique synthetic ticket claim,
+contender exit code 11, successful post-stop reacquisition.
+Runtime base image ID: `sha256:186977467897e6944f5c5f0d51c0d465b3515174c44fda1e390ccd5d2b18bff7`,
+label source `690250b4d21f32cce79cab9f5b4c18cf93e7e94a`.
+Tested new worker implementation fingerprint (two source modules concatenated):
+`8c0127bf074ef2ff61e8858411ab6bcd4e199ee375b622023cad15c835c5c07d`.
+
+Run `python3 -m pytest -q implementation/runtime_service/tests/test_ticket_core_lifecycle.py
+tests/test_pmv4_ticket_core_container_acceptance.py` to regression-check
+the cross-process lock and Docker isolation attestor. This evidence is offline
+acceptance only. **Production acceptance is still a NO-GO** until exact release
+authority, lock-aware embedded deployment, live worker migration and two
+post-cutover provider-backed scan/readback observations are completed.
