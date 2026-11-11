@@ -36,7 +36,8 @@ class RequesterBoundConstantContactInvoker:
 
     def invoke(self, *, request: OrchestrationRequest,
                resolution: CapabilityResolutionResult) -> InvocationResult:
-        invocation = self.delegate.invoke(request=request, resolution=resolution)
+        # Reject unauthorized requests before any connector invocation.  A
+        # post-fetch information-release decision is not a provider-access gate.
         binding = (
             self.bindings.find_active_by_jason_identity(
                 jason_identity_id=request.principal_id)
@@ -52,6 +53,9 @@ class RequesterBoundConstantContactInvoker:
             and request.orchestration_mode is OrchestrationMode.EXECUTE
             and binding is not None
         )
+        if not allowed:
+            raise PermissionError("Constant Contact requester is not authorized")
+        invocation = self.delegate.invoke(request=request, resolution=resolution)
         if allowed:
             handling = (
                 InformationHandlingClass.DERIVED_OUTPUT_ONLY

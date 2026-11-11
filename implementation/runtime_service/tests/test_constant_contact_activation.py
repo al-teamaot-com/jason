@@ -52,3 +52,34 @@ def test_exact_profile_can_activate_only_reads():
     assert providers.get(PROVIDER).lifecycle_status is ProviderLifecycle.AVAILABLE
     for name in CAPABILITIES:
         assert caps.get(capability_name=name, version="1.0").lifecycle_status is CapabilityLifecycle.ACTIVE
+
+
+def test_read_invoker_denies_before_provider_execution():
+    """Unauthorized requester must never cause a Constant Contact HTTP read."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from jason_runtime.constant_contact_reads import RequesterBoundConstantContactInvoker
+
+    delegate = Mock()
+    bindings = Mock()
+    bindings.find_active_by_jason_identity.return_value = None
+    invoker = RequesterBoundConstantContactInvoker(delegate=delegate, bindings=bindings)
+    request = SimpleNamespace(
+        principal_id="unapproved-technician", organization_id="aot",
+        authority_allowed=True, authority_context_id="valid-context",
+        permission_mode="observe", requester_kind="human",
+        orchestration_mode=__import__(
+            "orchestrator.contracts", fromlist=["OrchestrationMode"]
+        ).OrchestrationMode.EXECUTE,
+    )
+    resolution = SimpleNamespace(selected_provider_id="constant_contact")
+
+    with pytest.raises(PermissionError, match="not authorized"):
+        invoker.invoke(request=request, resolution=resolution)
+    delegate.invoke.assert_not_called()
+
+    bindings.find_active_by_jason_identity.return_value = object()
+    request.organization_id = "another-client"
+    with pytest.raises(PermissionError, match="not authorized"):
+        invoker.invoke(request=request, resolution=resolution)
+    delegate.invoke.assert_not_called()
