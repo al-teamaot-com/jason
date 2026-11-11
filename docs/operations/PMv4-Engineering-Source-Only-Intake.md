@@ -62,3 +62,11 @@ The reconciliation contract:
 Seven focused tests verify missing records, unauthorized agent IDs, divergent status, missing receipts, unverified proof, indeterminate non-idempotent work and read-only idempotence.
 
 **Not yet proven:** a live Workboard card actually flowing into the existing PMV3 engine, creation of a correctly governed work record, J-Man subscription-backed dispatch, worker execution, crash/restart recovery, completion-proof readback, scheduler continuity and final communication. This module is an interface and reconciliation proof, **not a functioning deployed adapter**. A future accepted implementation should use the **existing** Central Orchestrator and work engine instead of granting Workboard its own provider authority.
+
+## Real bundled Workboard card compatibility (network-isolated preproduction)
+
+On 2026-11-11, the bundled Workboard plugin in OpenClaw 2026.7.1 was enabled **only in a new offline, disconnected copy** of the previously isolated profile. No restart of the production gateway or changes to production plugin configuration were performed. The native `openclaw workboard create` CLI produced one disposable `ready` card assigned to `j-dev`; the native `workboard list --json` returned its full Workboard card schema.
+
+A read-only reconciliation check against **that real native card**, a disposable PMV3 engine work item and two deliberately diverging completion states passed: card ready+engine runnable -> `IN_PROGRESS`; card ready+engine completed with receipt -> `RECONCILE`; card `done` with a reported proof and engine receipt -> `REVIEW` pending independent acceptance. All paths explicitly state `operational_completion_verified=false`. A nonsecret metadata-only evidence receipt is kept in the isolated staging directory, not in the production state.
+
+`tests/test_pmv4_native_workboard_card.py` can repeat this test with `JASON_PMV4_NATIVE_WORKBOARD_OFFLINE_STATE` pointing to the isolated staging profile; it is deliberately skipped in GitHub CI where the private native profile does not exist. It never starts a Gateway, triggers dispatch, or changes Workboard card status. This validates real native card schema compatibility, **not a completed end-to-end agent workflow, a resumed real worker, or any production-readiness claim**.

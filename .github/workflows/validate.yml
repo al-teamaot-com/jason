@@ -176,6 +176,8 @@ jobs:
         run: python3 -B -m unittest discover -s tests -p test_pmv4_reuse_durable_recovery.py
       - name: Verify PMv4 Workboard-to-PMV3 reconciliation contract (source only)
         run: PYTHONPATH=tools python3 -B -m unittest discover -s tests -p test_pmv4_workboard_reconciliation.py
+      - name: Check optional native Workboard schema acceptance contract (source only)
+        run: PYTHONPATH=tools python3 -B -m unittest discover -s tests -p test_pmv4_native_workboard_card.py
       - name: Check evidence-first status-report replacement (source only)
         run: python3 -B -m unittest discover -s tests -p test_pmv4_evidence_status.py
       - name: Test documentation single-flight publisher
