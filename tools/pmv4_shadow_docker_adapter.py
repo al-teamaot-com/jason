@@ -174,9 +174,11 @@ class DockerShadowAdapter:
             return
         self._up(previous_dir)
 
-    def verify_shadow_and_core(self, _candidate_dir: Path) -> bool:
+    def verify_shadow_and_core(self, candidate_dir: Path) -> bool:
+        # Healthy is not enough if Docker kept an older/unreviewed image.
+        image = self._manifest_image(candidate_dir)
         info = self._owned_or_absent()
-        if info is None:
+        if info is None or info.get("Image") != image:
             return False
         state = info.get("State")
         if not isinstance(state, dict) or state.get("Running") is not True:

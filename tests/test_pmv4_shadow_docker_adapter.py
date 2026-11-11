@@ -18,6 +18,7 @@ from pmv4_shadow_release import ShadowReleaseDenied
 
 DIGEST = "sha256:" + "a"*64
 RUNNING = {
+    "Image": DIGEST,
     "Config": {"Labels": {
         "com.aot.jason.component": "pmv4-shadow",
         "com.docker.compose.project": SHADOW_PROJECT,
@@ -91,6 +92,11 @@ class DockerAdapterTests(unittest.TestCase):
     def test_core_probe_must_confirm(self):
         self.adapter.activate_shadow(self.release)
         self.core_ok = False
+        self.assertFalse(self.adapter.verify_shadow_and_core(self.release))
+
+    def test_healthy_wrong_image_is_not_accepted(self):
+        self.adapter.activate_shadow(self.release)
+        self.inspect_data["Image"] = "sha256:" + "f"*64
         self.assertFalse(self.adapter.verify_shadow_and_core(self.release))
 
     def test_unhealthy_gateway_does_not_pass(self):
