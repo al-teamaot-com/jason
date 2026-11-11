@@ -47,26 +47,15 @@ _SCOPE_ORDER = {
 }
 
 
-GROMELSKI_VULSCAN_POLICY = VulScanDispositionPolicy(
-    terminal_status="Close Pending",
-    primary_contact_id=GROMELSKI_PRIMARY_CONTACT_ID,
-    client_notification_required=True,
-    client_notification_template_id=VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
-    continue_patch_monitoring=True,
-)
-
-
+# Legacy GAI identifiers remain for existing notification evidence and the
+# independently gated provider; they do not grant outbound communication.
+# All clients now receive the same default VulScan ticket disposition.
 DEFAULT_VULSCAN_POLICY = VulScanDispositionPolicy()
 
 
 def configured_vulscan_overrides() -> tuple[VulScanPolicyOverride, ...]:
-    return (
-        VulScanPolicyOverride(
-            scope="client",
-            scope_id=str(GROMELSKI_COMPANY_ID),
-            policy=GROMELSKI_VULSCAN_POLICY,
-        ),
-    )
+    """No client-specific VulScan disposition or mandatory outbound send."""
+    return ()
 
 
 def resolve_vulscan_policy(

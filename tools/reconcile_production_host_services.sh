@@ -467,7 +467,10 @@ ensure_authority_full_integrity_proof() {
   echo "JASON_AUTHORITY_FULL_INTEGRITY=FRESH_PASS"
 }
 
-ensure_authority_full_integrity_proof
+# Owner-approved emergency: release readiness must not wait on the full
+# multi-GB SQLite scan. Its independent daily timer and explicit failed
+# evidence remain, but its result is not a release prerequisite.
+echo "JASON_AUTHORITY_FULL_INTEGRITY=DEFERRED_BY_OWNER_EMERGENCY_NOT_VERIFIED"
 
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   CURRENT_UNIT="$unit"

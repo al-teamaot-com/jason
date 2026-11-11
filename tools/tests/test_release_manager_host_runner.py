@@ -6516,3 +6516,17 @@ def test_postacceptance_rollback_failure_restores_freeze_and_fails_receipt(tmp_p
     assert receipt['freeze_restored'] is True
     assert receipt['freeze_sha256_before'] == receipt['freeze_sha256_after']
     assert receipt['standing_authority'] is False
+
+
+
+def test_v31_owner_release_mode_is_not_treated_as_legacy_teams_pilot():
+    import pytest
+    from types import SimpleNamespace
+    assert runner._reviewed_mobile_release_mode(
+        SimpleNamespace(schema_version="3.1")
+    ) == "owner_reviewed"
+    assert runner._reviewed_mobile_release_mode(
+        SimpleNamespace(schema_version="4.1")
+    ) == "admin_approver_separated"
+    with pytest.raises(runner.ReleaseManagerError):
+        runner._reviewed_mobile_release_mode(SimpleNamespace(schema_version="9.0"))

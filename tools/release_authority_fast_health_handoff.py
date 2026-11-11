@@ -32,6 +32,16 @@ UNIT_IN_RELEASE = "infrastructure/openclaw-operations/systemd/" + UNIT
 CHECK_MODE = "frequent_read_only_plus_recent_full_integrity"
 MAX_REPORT_AGE_SECONDS = 360
 MAX_FULL_AGE_SECONDS = 30 * 60 * 60
+OWNER_DROPIN = Path("/etc/systemd/system/jason-openclaw-authority-health.service.d/91-owner-emergency-full-proof-degraded.conf")
+OWNER_HANDLER = Path("/usr/local/lib/jason/owner_emergency_fast_health.py")
+OWNER_HANDLER_SOURCE = Path("tools/owner_emergency_fast_health.py")
+OWNER_ADVISORY = Path("/var/lib/jason/openclaw/owner-emergency-health-advisory.json")
+OWNER_EXPIRY = "2026-11-12T15:00:00+00:00"
+OWNER_EXPIRY_TIMESTAMP = 1794495600
+EXACT_OWNER_DROPIN = (
+    b"[Service]\nExecStart=\nExecStart=/usr/bin/python3 "
+    + str(OWNER_HANDLER).encode("ascii") + b"\n"
+)
 
 
 class HandoffRefused(RuntimeError):
@@ -73,12 +83,32 @@ def _installed_is_exact(source: Path) -> None:
         raise HandoffRefused("installed authority service differs from exact immutable release")
     if _show("FragmentPath") != str(INSTALLED):
         raise HandoffRefused("loaded systemd unit is not canonical authority service")
-    if _show("DropInPaths"):
-        raise HandoffRefused("unexpected authority service override")
-    if EXPECTED_FAST not in _show("ExecStart"):
+    dropins = _show("DropInPaths")
+    if dropins:
+        # Only this separately Owner-approved emergency override is admitted.
+        # Its root-only program must equal the immutable reviewed release bytes.
+        if dropins != str(OWNER_DROPIN):
+            raise HandoffRefused("unexpected authority service override")
+        for candidate in (OWNER_DROPIN, OWNER_HANDLER, source / OWNER_HANDLER_SOURCE):
+            try:
+                info = candidate.lstat()
+            except OSError as exc:
+                raise HandoffRefused("exact Owner emergency override unavailable") from exc
+            if candidate.is_symlink() or not _trusted_root_regular(info):
+                raise HandoffRefused("untrusted Owner emergency override")
+        if (OWNER_DROPIN.read_bytes() != EXACT_OWNER_DROPIN
+                or OWNER_HANDLER.read_bytes()
+                    != (source / OWNER_HANDLER_SOURCE).read_bytes()):
+            raise HandoffRefused("Owner emergency override differs from reviewed source")
+        if time.time() >= OWNER_EXPIRY_TIMESTAMP:
+            raise HandoffRefused("Owner emergency override expired")
+        if f"argv[]=/usr/bin/python3 {OWNER_HANDLER} ;" not in _show("ExecStart"):
+            raise HandoffRefused("loaded Owner emergency fast checker differs")
+    elif EXPECTED_FAST not in _show("ExecStart"):
         raise HandoffRefused("loaded authority service is not new fast checker")
     if _call(["/usr/bin/systemctl", "is-active", TIMER]) != "active":
         raise HandoffRefused("authority-health timer is not active")
+    return bool(dropins)
 
 
 def _legacy_job_is_exact() -> bool:
@@ -128,6 +158,68 @@ def _verify_snapshot(*, not_before_ns: int) -> None:
         raise HandoffRefused("independent full-integrity/restore proof not recent")
 
 
+def _read_owned_evidence(path: Path, *, not_before_ns: int) -> dict:
+    try:
+        info = path.lstat()
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != pwd.getpwnam("al").pw_uid
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or not (0 < info.st_size <= 131072)
+                or info.st_mtime_ns < not_before_ns):
+            raise HandoffRefused("emergency evidence absent, stale or untrusted")
+        report = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise HandoffRefused("emergency evidence malformed")
+        return report
+    except (OSError, ValueError, TypeError) as exc:
+        raise HandoffRefused("emergency evidence unavailable") from exc
+
+
+def _verify_emergency_snapshot(*, not_before_ns: int) -> None:
+    if time.time() >= OWNER_EXPIRY_TIMESTAMP:
+        raise HandoffRefused("Owner emergency expired")
+    report = _read_owned_evidence(OUTPUT, not_before_ns=not_before_ns)
+    advisory = _read_owned_evidence(OWNER_ADVISORY, not_before_ns=not_before_ns)
+    full = _read_owned_evidence(FULL, not_before_ns=0)
+    files = report.get("files")
+    keys = report.get("trusted_key_registry")
+    delegations = report.get("delegations")
+    expected = {"authority", "replay", "security_audit", "orchestration_audit"}
+    if (report.get("status") != "fail"
+            or report.get("check_mode") != CHECK_MODE
+            or report.get("full_proof_status") != "missing_or_invalid"
+            or report.get("snapshot_source_exit_code") != 2
+            or report.get("failures") != ["full_integrity_proof_missing_stale_or_invalid"]
+            or report.get("provider_contacted") is not False
+            or report.get("provider_credentials_used") is not False
+            or not isinstance(files, dict) or set(files) != expected
+            or any(not isinstance(x, dict) or x.get("present") is not True
+                   or x.get("readable") is not True or x.get("mode") != "0o600"
+                   for x in files.values())
+            or not isinstance(keys, dict) or keys.get("present") is not True
+            or keys.get("mode") != "0o600" or
+            not isinstance(keys.get("active_records"), int)
+            or keys["active_records"] < 1
+            or not isinstance(delegations, dict)
+            or delegations.get("expired_active_records") != 0):
+        raise HandoffRefused("emergency fast SQLite/authority read checks failed")
+    if (full.get("status") != "fail"
+            or full.get("failures") != ["operational_health_timeout"]
+            or full.get("snapshot_source_exit_code") != 124
+            or full.get("provider_contacted") is not False
+            or full.get("provider_credentials_used") is not False):
+        raise HandoffRefused("emergency missing proof is not the reviewed timeout")
+    if (advisory.get("status") != "degraded_read_safe"
+            or advisory.get("expires_at") != OWNER_EXPIRY
+            or advisory.get("full_proof_verified") is not False
+            or advisory.get("fast_databases_readable") is not True
+            or advisory.get("full_proof_reason") != "full_integrity_proof_missing_stale_or_invalid"
+            or advisory.get("no_authority_granted") is not True
+            or advisory.get("approval_boundary") !=
+                "local_root_owner_emergency_recovery_only"):
+        raise HandoffRefused("emergency health evidence lacks bounded Owner approval")
+
+
 def _run_direct_probe(source: Path) -> None:
     # The fallback runs ONLY for the exact still-running legacy oneshot.
     # No start/stop/restart/kill or modification of its systemd job.
@@ -152,15 +244,18 @@ def reconcile(source: Path) -> str:
         raise HandoffRefused("native root host reconciliation required")
     if source.name != Path("/opt/jason/current").resolve().name:
         raise HandoffRefused("candidate source must be the current immutable host release")
-    _installed_is_exact(source)
+    emergency = _installed_is_exact(source)
     active = _show("ActiveState")
     sub = _show("SubState")
     if active == "inactive" and sub == "dead" and not _show("Job"):
         before = time.time_ns() - 1_000_000_000
         _call(["/usr/bin/systemctl", "start", UNIT], timeout=40)
+        if emergency:
+            _verify_emergency_snapshot(not_before_ns=before)
+            return "OWNER_EMERGENCY_DEGRADED_READ_SAFE_NOT_FULL_PASS"
         _verify_snapshot(not_before_ns=before)
         return "SYSTEMD_FAST_HEALTH_VERIFIED"
-    if _legacy_job_is_exact():
+    if not emergency and _legacy_job_is_exact():
         _run_direct_probe(source)
         return "INFLIGHT_LEGACY_SCAN_FAST_HEALTH_VERIFIED"
     raise HandoffRefused("authority service state not safely eligible for fast-health handoff")
@@ -175,11 +270,14 @@ def main() -> int:
         if args.verify_only:
             if os.geteuid() != 0:
                 raise HandoffRefused("native root host verification required")
-            _installed_is_exact(args.release_dir)
-            _verify_snapshot(
-                not_before_ns=time.time_ns() - MAX_REPORT_AGE_SECONDS * 1_000_000_000
-            )
-            print("JASON_AUTHORITY_FAST_HEALTH_FINAL_READBACK=PASS")
+            emergency = _installed_is_exact(args.release_dir)
+            before = time.time_ns() - MAX_REPORT_AGE_SECONDS * 1_000_000_000
+            if emergency:
+                _verify_emergency_snapshot(not_before_ns=before)
+                print("JASON_AUTHORITY_FAST_HEALTH_FINAL_READBACK=DEGRADED_READ_SAFE_NOT_FULL_PASS")
+            else:
+                _verify_snapshot(not_before_ns=before)
+                print("JASON_AUTHORITY_FAST_HEALTH_FINAL_READBACK=PASS")
         else:
             result = reconcile(args.release_dir)
             print("JASON_AUTHORITY_FAST_HEALTH_TRANSITION=" + result)

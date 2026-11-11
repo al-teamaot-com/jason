@@ -2,21 +2,19 @@ from __future__ import annotations
 
 from jason_runtime.vulscan_client_policy import (
     GROMELSKI_COMPANY_ID,
-    GROMELSKI_PRIMARY_CONTACT_ID,
-    VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
     VulScanDispositionPolicy,
     VulScanPolicyOverride,
     resolve_vulscan_policy,
 )
 
 
-def test_gromelski_client_policy_requires_close_pending_primary_contact_and_note():
+def test_gromelski_now_uses_standard_vulscan_disposition():
     policy = resolve_vulscan_policy(client_id=GROMELSKI_COMPANY_ID)
-    assert policy.terminal_status == "Close Pending"
-    assert policy.primary_contact_id == GROMELSKI_PRIMARY_CONTACT_ID
-    assert policy.client_notification_required is True
-    assert policy.client_notification_template_id == VULSCAN_CLIENT_NOTE_TEMPLATE_ID
-    assert policy.continue_patch_monitoring is True
+    assert policy.terminal_status == "Complete"
+    assert policy.primary_contact_id is None
+    assert policy.client_notification_required is False
+    assert policy.client_notification_template_id is None
+    assert policy.continue_patch_monitoring is False
 
 
 def test_non_gromelski_uses_global_default():
