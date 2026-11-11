@@ -118,5 +118,6 @@
     "authority": "preproduction_design_only; current PMV3.2 remains live",
     "existing_platform_reuse": true,
     "no_production_activation": true
-  }
+  },
+  "target_shadow_release_controller": "standalone-pmv4-shadow-release-preproduction-only"
 }
