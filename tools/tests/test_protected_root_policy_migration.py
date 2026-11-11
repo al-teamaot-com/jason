@@ -214,6 +214,10 @@ def test_exact_owner_approval_and_ccc_reviewer_are_checked(monkeypatch, tmp_path
         "circuit_breaker": {"state": "closed"}}
     monkeypatch.setattr(m, "ROOT", root)
     monkeypatch.setattr(m, "CCC_REVIEW", ccc)
+    monkeypatch.setattr(
+        m.subprocess, "check_output",
+        lambda *args, **kwargs: b'{"schema_version":"2.0"}',
+    )
     monkeypatch.setattr(m, "_root_only", lambda p: Path(p).read_bytes())
     def write():
         release.write_text(json.dumps(record))
@@ -940,3 +944,147 @@ def test_pmv31_third_migration_rejects_tamper_on_rollback_without_policy_write(
         m.restore_for_baseline(second)
     assert policy.read_bytes()==applied
     assert not (m.LEDGER_DIR / ("restored-"+third+".json")).exists()
+
+
+
+def test_ccc_retirement_stages_old_allowances_then_removes_exact_pair(monkeypatch, tmp_path):
+    old = source()
+    old["allowed_system_units"].extend(["jason-ccc.timer", "jason-ccc.service"])
+    candidate = source()
+    policy, original, _ = configure(
+        monkeypatch, tmp_path, policy=old, old=old, candidate=candidate,
+    )
+    assert m.preview_exact_migration(CANDIDATE, BASE) == (
+        "OWNER_EXACT_RELEASE_REVIEWED_CCC_RETIREMENT"
+    )
+    assert policy.read_bytes() == original
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    assert policy.read_bytes() == original
+    receipt = json.loads(m.ACTIVE.read_text())
+    assert receipt["authorized_by"] == "exact_owner_bound_native_release_ccc_retirement"
+    assert receipt["reviewed_delta"] == {
+        name: sorted(values) for name, values in m.APPROVED_CCC_RETIREMENT_DELTA.items()
+    }
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    applied = json.loads(policy.read_text())
+    assert not set(("jason-ccc.timer", "jason-ccc.service")).intersection(
+        applied["allowed_system_units"]
+    )
+    assert set(applied["allowed_system_units"]) == set(candidate["allowed_system_units"])
+    # Native rollback re-admits OLD units before the host reinstalls them.
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    assert policy.read_bytes() == original
+    assert m.complete_rollback(BASE) == "RESTORED"
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
+
+
+@pytest.mark.parametrize("removed", [
+    ["jason-ccc.service"], ["jason-ccc.timer"],
+    ["jason-ccc.timer", "jason-ccc.service", "jason-openclaw-authority-health.service"],
+])
+def test_unreviewed_or_partial_ccc_removal_fails_closed(monkeypatch, tmp_path, removed):
+    old = source()
+    old["allowed_system_units"].extend([
+        "jason-ccc.timer", "jason-ccc.service",
+    ])
+    candidate = source()
+    for value in set(old["allowed_system_units"]) - set(removed):
+        if value not in candidate["allowed_system_units"]:
+            candidate["allowed_system_units"].append(value)
+    candidate["allowed_system_units"] = [
+        v for v in candidate["allowed_system_units"] if v not in removed
+    ]
+    policy, before, _ = configure(monkeypatch, tmp_path, policy=old, old=old,
+                                  candidate=candidate)
+    with pytest.raises(m.MigrationRefused, match="unapproved desired-state unit removal"):
+        m.stage_for_candidate(CANDIDATE, BASE)
+    assert policy.read_bytes() == before
+    assert not m.ACTIVE.exists()
+
+
+def test_v31_root_migration_uses_exact_owner_transaction_without_ccc(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    (root / "records").mkdir(parents=True)
+    path = root / "records" / ("release-" + CANDIDATE[:16] + ".json")
+    policy = {
+        "schema_version": "3.1", "policy_mode": "owner_reviewed",
+        "organization_id": "aot", "capability": "release.production.approve",
+        "high_impact_review": {
+            "owner_exact_sha_required": True,
+            "protected_release_gates_unchanged": True,
+            "authenticated_entra_owner_decision_required": True,
+            "independent_native_release_health_required": True,
+        },
+    }
+    raw = (json.dumps(policy, sort_keys=True) + "\n").encode()
+    manifest = {
+        "candidate_sha": CANDIDATE,
+        "rollback_sha": BASE,
+        "mobile_release_approval_policy_digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
+    }
+    digest_manifest = hashlib.sha256(json.dumps(
+        manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode()).hexdigest()
+    scope = "c" * 64
+    record = {
+        "state": "production", "risk_profile": "production_control_core",
+        "owner_approval": {
+            "approved": True, "candidate_sha": CANDIDATE,
+            "source": "explicit_owner_instruction",
+            "transaction_binding": {
+                "candidate_sha": CANDIDATE, "rollback_sha": BASE,
+                "scope_sha256": scope, "manifest_sha256": digest_manifest,
+            },
+        },
+        "manual_scope_review": {
+            "candidate_sha": CANDIDATE, "baseline_sha": BASE,
+            "scope_sha256": scope,
+        },
+        "release_manifest": manifest,
+    }
+    control = {
+        "schema_version": "1.0",
+        "last_known_good": {"manifest": {"revision": BASE, "complete": True}},
+        "circuit_breaker": {"state": "closed"},
+    }
+    monkeypatch.setattr(m, "ROOT", root)
+    monkeypatch.setattr(m, "_root_only", lambda path: Path(path).read_bytes())
+    monkeypatch.setattr(m.subprocess, "check_output", lambda *a, **kw: raw)
+    def write():
+        path.write_text(json.dumps(record))
+        (root / "production-control-state.json").write_text(json.dumps(control))
+    write()
+    # No historical CCC file is present or required.
+    m._approval(CANDIDATE, BASE)
+    for field, value in (
+        ("scope_sha256", "f" * 64),
+        ("manifest_sha256", "f" * 64),
+        ("rollback_sha", "d" * 40),
+    ):
+        good = record["owner_approval"]["transaction_binding"][field]
+        record["owner_approval"]["transaction_binding"][field] = value
+        write()
+        with pytest.raises(m.MigrationRefused, match="Owner-bound"):
+            m._approval(CANDIDATE, BASE)
+        record["owner_approval"]["transaction_binding"][field] = good
+    record["owner_approval"]["approved"] = False
+    write()
+    with pytest.raises(m.MigrationRefused, match="exact owner-approved"):
+        m._approval(CANDIDATE, BASE)
+    record["owner_approval"]["approved"] = True
+    wrong = dict(policy)
+    wrong["high_impact_review"] = dict(policy["high_impact_review"])
+    wrong["high_impact_review"]["authenticated_entra_owner_decision_required"] = False
+    monkeypatch.setattr(
+        m.subprocess, "check_output",
+        lambda *a, **kw: (json.dumps(wrong, sort_keys=True) + "\n").encode(),
+    )
+    write()
+    with pytest.raises(m.MigrationRefused, match="Owner-bound"):
+        m._approval(CANDIDATE, BASE)
+    monkeypatch.setattr(m.subprocess, "check_output", lambda *a, **kw: raw)
+    control["circuit_breaker"]["state"] = "open"
+    write()
+    with pytest.raises(m.MigrationRefused, match="breaker"):
+        m._approval(CANDIDATE, BASE)

@@ -35,6 +35,9 @@ def test_stage_only_installs_exact_rollback_files_before_reviewed_policy(
     tools.mkdir(parents=True)
     (tools / "protected_root_policy_migration.py").write_text("trusted migration helper")
     (tools / "release_host_reconcile_worker.py").write_text("trusted root worker")
+    kernel = source / "implementation" / "kernel"
+    kernel.mkdir(parents=True)
+    (kernel / "signed_owner_release.py").write_text("trusted Owner verifier")
     dest = tmp_path / "local-lib"
     spool = tmp_path / "host-reconcile"
     config = tmp_path / "root-control"
@@ -96,6 +99,9 @@ def test_stage_only_does_not_mutate_root_policy_for_no_new_required_timer(
     (candidate / "tools").mkdir(parents=True)
     (candidate / "tools" / "protected_root_policy_migration.py").write_text("fixed helper")
     (candidate / "tools" / "release_host_reconcile_worker.py").write_text("fixed worker")
+    kernel = candidate / "implementation" / "kernel"
+    kernel.mkdir(parents=True)
+    (kernel / "signed_owner_release.py").write_text("fixed Owner verifier")
     checks = []
     fake = SimpleNamespace(
         ROOT=tmp_path,
