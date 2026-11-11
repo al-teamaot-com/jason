@@ -78,3 +78,47 @@ def test_invalid_digest_or_source_label_rejected(monkeypatch):
     }])
     with pytest.raises(migration.MigrationEvidenceDenied, match="IMAGE_PROVENANCE"):
         migration._image("jason-runtime:production")
+
+
+def test_protected_readback_distinguishes_current_lkg_previous_and_open_breaker(tmp_path):
+    file = tmp_path / "protected-control-state.json"
+    file.write_text(__import__("json").dumps({
+        "schema_version": "1.0", "updated_at": "2026-11-11T20:24:42+00:00",
+        "last_known_good": {
+            "manifest": {"revision": "a" * 40,
+                         "mobile_release_approval_mode": "owner_reviewed"}
+        },
+        "previous_last_known_good": {"manifest": {"revision": "b" * 40}},
+        "circuit_breaker": {
+            "state": "open", "reason": "continuous_production_drift_detected",
+            "problem_kinds": ["undeclared_running_container"],
+            "revalidated_revision": None,
+        },
+    }))
+    result = migration._control_summary(str(file))
+    assert result["status"] == "readable"
+    assert result["last_known_good_sha"] == "a" * 40
+    assert result["previous_last_known_good_sha"] == "b" * 40
+    assert result["breaker_state"] == "open"
+    assert result["breaker_revalidated_revision"] is None
+
+    drift = tmp_path / "drift.json"
+    drift.write_text(__import__("json").dumps({
+        "status": "pass", "observed_at": "2026-11-11T20:33:44+00:00",
+        "problems": [],
+    }))
+    now = migration._drift_summary(str(drift))
+    assert now["status"] == "pass"
+    assert now["problem_count"] == 0
+    # A fresh zero-drift report never changes the root control breaker.
+    assert result["breaker_state"] == "open"
+
+
+def test_invalid_root_lkg_readback_is_not_treated_as_verified(tmp_path):
+    file = tmp_path / "bad-control-state.json"
+    file.write_text(__import__("json").dumps({
+        "last_known_good": {"manifest": {"revision": "a" * 40}},
+        "previous_last_known_good": {},
+        "circuit_breaker": {"state": "closed"},
+    }))
+    assert migration._control_summary(str(file))["status"] == "unavailable_or_invalid"

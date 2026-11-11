@@ -32,7 +32,9 @@ HASHED_HOLDS = {
     "automatic_promotion_hold":
         "/var/lib/jason/openclaw/release-manager/auto-promotion-incident-hold",
     "protected_production_control_state":
-        "/var/lib/jason/openclaw/release-manager/production-control-state.json",
+        "/var/lib/jason/openclaw/release-manager/protected-readback/production-control-state.json",
+    "protected_production_drift":
+        "/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json",
 }
 SHA = re.compile(r"\A[0-9a-f]{40}\Z")
 REQUIRED_SOURCE_CHECKS = frozenset((
@@ -135,6 +137,53 @@ def _file_status(name: str, path: str) -> dict[str, Any]:
         return {"name": name, "status": "restricted_root_readback_needed"}
 
 
+def _control_summary(path: str) -> dict[str, Any]:
+    """Source-bound root-protected readback; never assume an open breaker is OK."""
+    try:
+        file = Path(path)
+        if file.is_symlink() or not file.is_file():
+            return {"status": "unavailable"}
+        doc = json.loads(file.read_text(encoding="utf-8"))
+        known = (doc.get("last_known_good") or {}).get("manifest") or {}
+        previous = (doc.get("previous_last_known_good") or {}).get("manifest") or {}
+        breaker = doc.get("circuit_breaker") or {}
+        current_rev = known.get("revision")
+        previous_rev = previous.get("revision")
+        if (not isinstance(current_rev, str) or not SHA.fullmatch(current_rev)
+            or not isinstance(previous_rev, str) or not SHA.fullmatch(previous_rev)
+            or breaker.get("state") not in ("open", "closed")):
+            raise ValueError("control state not verified")
+        return {
+            "status": "readable", "updated_at": doc.get("updated_at"),
+            "last_known_good_sha": current_rev,
+            "previous_last_known_good_sha": previous_rev,
+            "owner_release_mode": known.get("mobile_release_approval_mode"),
+            "breaker_state": breaker["state"],
+            "breaker_reason": breaker.get("reason"),
+            "breaker_problem_kinds": breaker.get("problem_kinds"),
+            "breaker_revalidated_revision": breaker.get("revalidated_revision"),
+        }
+    except (OSError, TypeError, ValueError, KeyError):
+        return {"status": "unavailable_or_invalid"}
+
+
+def _drift_summary(path: str) -> dict[str, Any]:
+    try:
+        file = Path(path)
+        if file.is_symlink() or not file.is_file():
+            return {"status": "unavailable"}
+        doc = json.loads(file.read_text(encoding="utf-8"))
+        problems = doc.get("problems")
+        if not isinstance(problems, list) or doc.get("status") not in ("pass", "fail"):
+            raise ValueError("invalid")
+        return {
+            "status": doc["status"], "observed_at": doc.get("observed_at"),
+            "problem_count": len(problems),
+        }
+    except (OSError, ValueError, TypeError):
+        return {"status": "unavailable_or_invalid"}
+
+
 def _main_sha() -> str:
     obj = _call(["/usr/bin/gh", "api", f"repos/{REPO}/branches/main"])
     rev = (obj.get("commit") or {}).get("sha")
@@ -163,6 +212,21 @@ def build_packet() -> dict[str, Any]:
         raise MigrationEvidenceDenied("PMV4_MIGRATION_RUNTIME_OR_ROLLBACK_DRIFT")
     candidates = {name: _github_pr(pr) for name, pr in EXPECTED_PRS.items()}
     holds = {name: _file_status(name, path) for name, path in HASHED_HOLDS.items()}
+    control = _control_summary(HASHED_HOLDS["protected_production_control_state"])
+    drift = _drift_summary(HASHED_HOLDS["protected_production_drift"])
+    previous_tag = images["jason-runtime:rollback-current"]["source_revision"]
+    root_consistent = (
+        control.get("status") == "readable"
+        and control.get("last_known_good_sha") == installed_sha
+        and control.get("previous_last_known_good_sha") == previous_tag
+    )
+    breaker_revalidated = (
+        root_consistent
+        and control.get("breaker_state") == "closed"
+        and control.get("breaker_revalidated_revision") == installed_sha
+        and drift.get("status") == "pass"
+        and drift.get("problem_count") == 0
+    )
     # These are immutable SOURCE candidates, not a combined release SHA.
     # The protected-main SHA changes after merges and must be re-attested.
     controls_root = Path("/var/lib/jason/pmv4-shadow/control")
@@ -185,6 +249,10 @@ def build_packet() -> dict[str, Any]:
             images["jason-runtime:rollback-current"]["source_revision"],
         "source_candidates": candidates,
         "protected_control_files": holds,
+        "protected_release_state": control,
+        "current_production_drift": drift,
+        "protected_source_and_rollback_lineage_consistent": root_consistent,
+        "root_breaker_revalidated_and_closed": breaker_revalidated,
         "independent_host_control_provisioned": controls_provisioned,
         "exact_production_release_candidate_sha": None,
         "owner_exact_action_approval_recorded": False,
@@ -200,7 +268,8 @@ def build_packet() -> dict[str, Any]:
             "candidate PRs must merge through protected main and receive new exact SHA/CI",
             "trusted Owner Entra issuer and exact signed release scope not provisioned",
             "PMv4 host-control lock, independent signed trust and adapter not installed",
-            "root-protected production control/readback evidence required",
+            "root-protected LKG/previous rollback lineage must match live images",
+            "protected circuit breaker must be closed after governed revalidation; fresh drift PASS alone cannot close it",
             "legacy embedded worker does not honor new lock until governed M2 bootstrap",
             "two live post-cutover ticket scans and controlled provider readback not yet verified",
             "component-scoped live PMv4 release/rollback parity not yet accepted",

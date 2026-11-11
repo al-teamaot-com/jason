@@ -126,13 +126,24 @@ At the November 11 live readback, protected `main` and the deployed
 The locally tagged `jason-runtime:rollback-current` and
 `jason-mcp:rollback-current` images both identify source
 `ee46ef631e04678a16f2543c76a8ee08ec974265` (image labels);
-this is the **available rollback-image SHA**, not an independently
-verified root-protected Last Known Good record.
+this is the **available previous rollback-image SHA**, independently
+corroborated by the root-protected **previous Last Known Good** record.
+The root-protected *current* Last Known Good remains the deployed
+`690250b4...` source.
 The Owner PMv3 engineering pause and automatic-promotion hold were
-present. The protected production control-state file was **not
-readable by the non-root inspection identity**, so root-signed
-readback remains a release NO-GO until separately verified.
-The new PMv4 host control lock and Owner trust installation are absent.
+present. A further check located the authoritative protected readback at
+`/var/lib/jason/openclaw/release-manager/protected-readback/production-control-state.json`,
+not the unprotected directory root. That file is readable by the current
+inspection identity and reports **Last Known Good source 690250b4...** and
+**previous Last Known Good ee46ef63...** (matching the tagged rollback images).
+The production **circuit breaker is open** due to an earlier
+`continuous_production_drift_detected` event with problem
+`undeclared_running_container`. A fresh
+`protected-readback/production-drift.json` scan was **PASS with zero
+current problems**, but the breaker has not been revalidated and closed.
+That is a real release NO-GO; do not treat the fresh drift PASS as Owner or
+recovery approval. The new PMv4 host control lock and Owner trust
+installation are also absent.
 
 The packet explicitly reports
 `exact_production_release_candidate_sha=null`,
