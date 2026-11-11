@@ -124,3 +124,38 @@ def test_full_sqlite_integrity_and_authority_restore_checks_remain_enabled():
     assert "backup_restore_proof(args.authority_database, args.backup_temp_root)" in source
     assert "sqlite_integrity(backup)" in source
     assert "sqlite_integrity(restored)" in source
+
+
+def test_success_snapshot_archived_and_timeout_does_not_erase_pass(monkeypatch, tmp_path):
+    module = _load_module()
+    current = tmp_path / "current.json"
+    saved = tmp_path / "saved.json"
+    monkeypatch.setattr(module, "LAST_SUCCESS", saved)
+    full = {
+        "status": "pass", "failures": [],
+        "provider_contacted": False, "provider_credentials_used": False,
+        "files": {name: {"integrity": "ok"} for name in (
+            "authority", "replay", "security_audit", "orchestration_audit")},
+        "backup_restore_proof": {
+            "backup_integrity": "ok", "restore_integrity": "ok",
+            "counts_match": True,
+        },
+    }
+
+    class Completed:
+        stdout = json.dumps(full)
+        returncode = 0
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kw: Completed())
+    monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "--output", str(current)])
+    assert module.main() == 0
+    assert json.loads(saved.read_text())["status"] == "pass"
+    prior = saved.read_bytes()
+
+    def expire(*args, **kw):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kw["timeout"])
+
+    monkeypatch.setattr(module.subprocess, "run", expire)
+    assert module.main() == 124
+    assert json.loads(current.read_text())["status"] == "fail"
+    assert saved.read_bytes() == prior
