@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 AUTHORIZE_URL = "https://authz.constantcontact.com/oauth2/default/v1/authorize"
 TOKEN_URL = "https://authz.constantcontact.com/oauth2/default/v1/token"
 REDIRECT_URI = "https://mcp-jason.teamaot.com/oauth/constant-contact/callback"
-SCOPES = ("contact_data", "offline_access")
+SCOPES = ("account_read", "contact_data", "offline_access")
 
 
 class ConstantContactOAuthError(ValueError):

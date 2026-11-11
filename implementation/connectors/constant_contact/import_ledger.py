@@ -6,6 +6,7 @@ require explicit reconciliation rather than automatic redispatch.
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import stat
@@ -35,6 +36,11 @@ class SQLiteImportActivityLedger:
             "claimed_at INTEGER NOT NULL,"
             "activity_id TEXT,"
             "state TEXT NOT NULL CHECK(state IN ('pending','dispatched')))"
+        )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS verifications("
+            "intent_digest TEXT PRIMARY KEY, activity_id TEXT NOT NULL,"
+            "verified_at INTEGER NOT NULL, result_json TEXT NOT NULL)"
         )
         return con
 
@@ -86,3 +92,54 @@ class SQLiteImportActivityLedger:
         if row is None:
             return None
         return {"state": row[0], "activity_id": row[1], "claimed_at": row[2]}
+
+
+    def record_verified(self, *, intent_digest: str, activity_id: str,
+                        item_results: tuple[dict[str, str], ...]) -> None:
+        """Durably record only successful provider readback; no raw emails."""
+        self._check_digest(intent_digest)
+        if (not isinstance(activity_id, str) or len(activity_id) != 36
+                or not 1 <= len(item_results) <= 25
+                or any(set(row) != {"email_sha256", "status"}
+                       or row.get("status") != "verified"
+                       or not isinstance(row.get("email_sha256"), str)
+                       or len(row["email_sha256"]) != 64 for row in item_results)):
+            raise ImportAuthorizationError("Verified import evidence incomplete")
+        evidence = json.dumps(
+            list(item_results), sort_keys=True, separators=(",", ":")
+        )
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT state,activity_id FROM claims WHERE intent_digest=?",
+                (intent_digest,),
+            ).fetchone()
+            if row is None or row != ("dispatched", activity_id):
+                raise ImportAuthorizationError("Import dispatch receipt missing or changed")
+            prior = db.execute(
+                "SELECT activity_id,result_json FROM verifications WHERE intent_digest=?",
+                (intent_digest,),
+            ).fetchone()
+            if prior is not None:
+                if prior != (activity_id, evidence):
+                    raise ImportAuthorizationError("Import verification is immutable")
+                db.execute("COMMIT")
+                return
+            db.execute(
+                "INSERT INTO verifications VALUES (?,?,?,?)",
+                (intent_digest, activity_id, int(time.time()), evidence),
+            )
+            db.execute("COMMIT")
+
+    def read_verification(self, *, intent_digest: str) -> dict[str, object] | None:
+        self._check_digest(intent_digest)
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT activity_id,verified_at,result_json FROM verifications "
+                "WHERE intent_digest=?",
+                (intent_digest,),
+            ).fetchone()
+        return ({
+            "activity_id": row[0], "verified_at": row[1],
+            "item_results": json.loads(row[2]),
+        } if row else None)

@@ -15,7 +15,7 @@ class FakeResponse:
         return False
     def read(self, n):
         return (b'{"token_type":"Bearer","access_token":"a","refresh_token":"r",'
-                b'"scope":"contact_data offline_access","expires_in":3600}')
+                b'"scope":"account_read contact_data offline_access","expires_in":3600}')
 
 
 def test_callback_consumes_state_and_saves_encrypted_tokens(tmp_path):

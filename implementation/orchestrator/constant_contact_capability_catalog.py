@@ -13,11 +13,16 @@ from kernel.execution_providers import (
     ProviderStewardship, ProviderType,
 )
 
+from .constant_contact_import_capability import (
+    MARKETING_CONTACT_IMPORT, import_capability,
+)
+
 PROVIDER = "constant_contact"
 CONTACTS_SEARCH = "marketing.contact.search"
 LISTS_SEARCH = "marketing.contact.list.search"
 FIELDS_SEARCH = "marketing.contact.field.search"
-CAPABILITIES = frozenset({CONTACTS_SEARCH, LISTS_SEARCH, FIELDS_SEARCH})
+READ_CAPABILITIES = frozenset({CONTACTS_SEARCH, LISTS_SEARCH, FIELDS_SEARCH})
+CAPABILITIES = READ_CAPABILITIES | {MARKETING_CONTACT_IMPORT}
 
 
 def definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
@@ -88,8 +93,8 @@ def provider(now: datetime) -> ExecutionProvider:
         supported_classifications=frozenset({"internal", "confidential"}),
         regions=frozenset({"US"}),
         limits=ProviderLimits(
-            maximum_concurrent_executions=2,
-            maximum_requests_per_minute=20,
+            maximum_concurrent_executions=1,
+            maximum_requests_per_minute=180,
             maximum_execution_seconds=30,
         ),
         features=ProviderFeatures(structured_output=True),
@@ -109,7 +114,7 @@ def provider(now: datetime) -> ExecutionProvider:
             "connector_id": PROVIDER,
             "resource_authority": "aot_contacts",
             "live_enablement": "disabled_pending_explicit_profile_and_acceptance",
-            "oauth_scope": "contact_data offline_access",
+            "oauth_scope": "account_read contact_data offline_access",
         },
     )
 
@@ -118,4 +123,5 @@ def register_foundation(*, capabilities: CapabilityRegistryService,
                         providers: ExecutionProviderRegistryService, now: datetime) -> None:
     for capability in definitions(now):
         capabilities.register(capability)
+    capabilities.register(import_capability(now))
     providers.register(provider(now))

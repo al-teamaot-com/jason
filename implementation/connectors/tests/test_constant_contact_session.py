@@ -14,7 +14,7 @@ class Response:
         return False
     def read(self, size):
         return json.dumps({"access_token": "rotated-access", "refresh_token": "rotated-refresh",
-                           "expires_in": 3600, "scope": "contact_data offline_access",
+                           "expires_in": 3600, "scope": "account_read contact_data offline_access",
                            "token_type": "Bearer"}).encode()
 
 

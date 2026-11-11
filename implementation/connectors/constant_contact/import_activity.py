@@ -75,12 +75,24 @@ def classify_activity(activity: Mapping[str, Any], *, expected_activity_id: str)
         raise ImportContractError("Activity progress is invalid") from None
     if not 0 <= progress <= 100:
         raise ImportContractError("Activity progress out of range")
+    raw_counts = activity.get("status")
+    counts = None
+    if isinstance(raw_counts, Mapping):
+        expected_keys = ("items_total_count", "items_completed_count",
+                         "error_count", "cannot_add_to_list_count")
+        if all(key in raw_counts for key in expected_keys):
+            counts = {}
+            for key in expected_keys:
+                value = raw_counts[key]
+                if type(value) is not int or value < 0:
+                    raise ImportContractError("Provider activity counters invalid")
+                counts[key] = value
     if errors:
         return {"state": "failed", "activity_id": expected_activity_id, "error_count": len(errors),
-                "provider_readback_required": True}
+                "provider_counts": counts, "provider_readback_required": True}
     if progress == 100 and state in {"completed", "finished"} and activity.get("completed_at"):
         return {"state": "activity_complete_unverified", "activity_id": expected_activity_id,
-                "provider_readback_required": True}
+                "provider_counts": counts, "provider_readback_required": True}
     if state in {"initialized", "processing", "running", "queued", "in_progress"}:
         return {"state": "pending", "activity_id": expected_activity_id,
                 "provider_readback_required": True}

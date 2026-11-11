@@ -24,7 +24,7 @@ def import_capability(now: datetime) -> CapabilityDefinition:
         lifecycle_status=CapabilityLifecycle.BUILDING,
         business_purpose=(
             "Import consent-verified AOT Excel contacts into exact Constant "
-            "Contact list IDs following fresh provider evidence and Teams approval."
+            "Contact list IDs following fresh provider evidence and exact authenticated Owner approval."
         ),
         owner_service="Jason Contact Management",
         architectural_capability_ids=frozenset({"JAC-005", "JAC-006", "JAC-013"}),
@@ -42,7 +42,7 @@ def import_capability(now: datetime) -> CapabilityDefinition:
                 "original Excel content and consent evidence digest",
                 "fresh OAuth-bound Constant Contact account and target list identity",
                 "complete provider suppression checks for every target contact",
-                "exact signed Teams approval for immutable import plan",
+                "exact verified Owner approval for immutable import plan",
                 "durable one-time claim and provider activity ID",
             ),
             verification_requirements=(
@@ -75,7 +75,7 @@ def import_capability(now: datetime) -> CapabilityDefinition:
             "resource_types": "marketing_contact",
             "operation": "import",
             "selector_keys": "list_ids,preview_digest,account_binding,consent_evidence",
-            "approval_channel": "microsoft_teams",
+            "approval_channel": "canonical_verified_owner",
             "live_enablement": "blocked_until_governed_provider_acceptance",
         },
     )
