@@ -106,3 +106,40 @@ PMv3 is not one daemon. It is a coupled collection of the engineering controller
 - Subscription-only recovery: draft PR #2434; Codex-backed agents optional, not a PMv4 release dependency.
 
 **Decision needed to start planning/preproduction:** None. **Production retirement authority:** Not yet requested; must name exact candidate SHA, rollback, reviewed scope, test evidence and root-control compatibility when deployment-ready.
+
+
+## Exact source/rollback evidence packet (read-only, repeatable)
+
+Run `python3 tools/pmv4_migration_evidence.py` from the PMv4
+retirement-plan source tree on the Jason host. It interrogates current
+protected GitHub main, fixed PMv4 PRs #2436 (plan), #2437 (runbooks),
+#2438 (ticket Core), #2440 (independent shadow release/recovery), each
+PR's exact head SHA, reviewed changed file list/sha256 and **all required
+baseline check names**, plus pinned production/rollback Docker image
+revisions and hashes of readable Owner hold files. It makes no
+production/service/provider mutations, generates no approval and
+does not silently turn a draft PR into production release authority.
+
+At the November 11 live readback, protected `main` and the deployed
+`jason-runtime`/`jason-mcp-pilot` both had source
+`690250b4d21f32cce79cab9f5b4c18cf93e7e94a`.
+The locally tagged `jason-runtime:rollback-current` and
+`jason-mcp:rollback-current` images both identify source
+`ee46ef631e04678a16f2543c76a8ee08ec974265` (image labels);
+this is the **available rollback-image SHA**, not an independently
+verified root-protected Last Known Good record.
+The Owner PMv3 engineering pause and automatic-promotion hold were
+present. The protected production control-state file was **not
+readable by the non-root inspection identity**, so root-signed
+readback remains a release NO-GO until separately verified.
+The new PMv4 host control lock and Owner trust installation are absent.
+
+The packet explicitly reports
+`exact_production_release_candidate_sha=null`,
+`owner_exact_action_approval_recorded=false` and
+`production_changes_made=false`. After the component PRs merge,
+rerun the packet and bind the resulting single protected-main release SHA,
+exact file-scope digest, final image IDs, proven rollback/Last Known Good,
+freeze bytes and verified Owner authorization into the formal governed
+release record. Do not present any source-branch SHA as the actual
+released production revision.
