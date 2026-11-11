@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "scope": "source-controlled preproduction specialists; not active gateway configuration",
+  "existing_agents_unchanged": [
+    "main",
+    "j-man",
+    "j-dev"
+  ],
+  "coordinator": "j-man",
+  "activation": "disabled",
+  "openai_authentication": "existing-chatgpt-codex-oauth-only",
+  "api_fallback_allowed": false,
+  "production_release_controller": "existing-pmv3.2-release-manager",
+  "agents": [
+    {
+      "id": "j-compliance",
+      "display_name": "Compliance",
+      "role": "Compliance",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-compliance",
+      "agent_instructions": "agents/j-compliance/AGENTS.md",
+      "identity": "agents/j-compliance/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    },
+    {
+      "id": "j-docs",
+      "display_name": "Documentation",
+      "role": "Documentation",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-docs",
+      "agent_instructions": "agents/j-docs/AGENTS.md",
+      "identity": "agents/j-docs/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    },
+    {
+      "id": "j-observe",
+      "display_name": "Grafana and Observability",
+      "role": "Grafana and Observability",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-observe",
+      "agent_instructions": "agents/j-observe/AGENTS.md",
+      "identity": "agents/j-observe/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    },
+    {
+      "id": "j-qa",
+      "display_name": "Testing and Reliability",
+      "role": "Testing and Reliability",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-qa",
+      "agent_instructions": "agents/j-qa/AGENTS.md",
+      "identity": "agents/j-qa/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    },
+    {
+      "id": "j-integrations",
+      "display_name": "Integration Engineering",
+      "role": "Integration Engineering",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-integrations",
+      "agent_instructions": "agents/j-integrations/AGENTS.md",
+      "identity": "agents/j-integrations/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    },
+    {
+      "id": "j-release",
+      "display_name": "Release Preparation",
+      "role": "Release Preparation",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-release",
+      "agent_instructions": "agents/j-release/AGENTS.md",
+      "identity": "agents/j-release/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    }
+  ]
+}
