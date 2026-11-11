@@ -1088,3 +1088,66 @@ def test_v31_root_migration_uses_exact_owner_transaction_without_ccc(monkeypatch
     write()
     with pytest.raises(m.MigrationRefused, match="breaker"):
         m._approval(CANDIDATE, BASE)
+
+
+@pytest.mark.parametrize("candidate_phase", ["staged", "applied"])
+def test_ccc_rollback_prepared_receipt_restores_for_next_exact_release(
+        monkeypatch, tmp_path, candidate_phase):
+    """Regression: interrupted native rollback followed by audited Owner repair.
+
+    The new attempt uses a different SHA, preventing collision with the
+    archived original transaction; the old root-policy bytes are restored.
+    """
+    old = source()
+    old["allowed_system_units"] += ["jason-ccc.service", "jason-ccc.timer"]
+    candidate = source()
+    policy, original, ledger = configure(
+        monkeypatch, tmp_path, policy=old, old=old, candidate=candidate,
+    )
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    if candidate_phase == "applied":
+        assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    receipt = json.loads(m.ACTIVE.read_text())
+    assert receipt["phase"] == "rollback_prepared"
+    assert receipt["reviewed_delta"] == {
+        name: sorted(values)
+        for name, values in m.APPROVED_CCC_RETIREMENT_DELTA.items()
+    }
+
+    assert m.restore_for_baseline(BASE) == "RESTORED"
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
+    archived = ledger / ("restored-" + CANDIDATE + ".json")
+    assert json.loads(archived.read_text())["phase"] == "restored"
+
+    # A *new exact source SHA* may stage the same reviewed CCC-removal delta.
+    new_sha = "d" * 40
+    monkeypatch.setattr(
+        m, "_source_policy",
+        lambda sha: old if sha == BASE else candidate if sha == new_sha
+        else (_ for _ in ()).throw(KeyError(sha)),
+    )
+    assert m.stage_for_candidate(new_sha, BASE) == "STAGED_ALLOWED_ONLY"
+    assert policy.read_bytes() == original
+    assert m.ACTIVE.is_file()
+    assert json.loads(m.ACTIVE.read_text())["candidate_sha"] == new_sha
+    assert json.loads(archived.read_text())["candidate_sha"] == CANDIDATE
+
+
+def test_unreviewed_prepared_ccc_receipt_cannot_be_restored(monkeypatch, tmp_path):
+    old = source()
+    old["allowed_system_units"] += ["jason-ccc.service", "jason-ccc.timer"]
+    candidate = source()
+    policy, original, _ = configure(
+        monkeypatch, tmp_path, policy=old, old=old, candidate=candidate,
+    )
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    receipt = json.loads(m.ACTIVE.read_text())
+    receipt["reviewed_delta"]["allowed_system_units"] = ["jason-unknown.service"]
+    m.ACTIVE.write_text(json.dumps(receipt))
+    with pytest.raises(m.MigrationRefused, match="unreviewed unit delta"):
+        m.restore_for_baseline(BASE)
+    assert policy.read_bytes() == original
+    assert m.ACTIVE.exists()
