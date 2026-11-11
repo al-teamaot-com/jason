@@ -102,6 +102,8 @@ jobs:
           PY
       - name: Validate production topology and bounded observation plan
         run: python tools/system_registry_verify.py --validate-only
+      - name: Check PMv4 reliability safeguards using existing registry and work controls
+        run: PYTHONPATH=implementation:tools python3 -B -m unittest discover -s tests -p test_pmv4_reliability_acceptance.py
       - name: Verify generated operational-state documentation
         run: python tools/system_registry_docs.py --check
       - name: Test constitutional System Registry behavior and governed query surface

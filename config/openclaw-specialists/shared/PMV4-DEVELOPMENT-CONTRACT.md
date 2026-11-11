@@ -23,6 +23,17 @@ Use the **existing** OpenClaw / J-Man / J-Dev delegation, PMV3.2 manager, govern
 12. **Production protection** — Component isolation, exact scoped authority, immutable audit, live health checks, rollback, and no collateral regression. No unauthorized interruption to ticket or MSP processes.
 13. **Incremental implementation** — First strengthen existing OpenClaw coordination, then persistence/delegation, modularity, protected Core scope, configuration-driven workflows, release simplification, and evidence; no broad rewrite.
 
+## Four minimum reliability safeguards (Owner accepted 2026-11-11)
+
+These are acceptance criteria for **existing** components, not authorization to introduce four more services, approval gates, dashboards or release pipelines.
+
+1. **Guaranteed task ownership** — An accepted objective must be durably tied to one accountable J-Man/worker owner, with scope, status, next action and evidence in the existing J-Man/PMV3/Workboard work record. If no approved work-engine record or valid assigned specialist exists, do not silently execute, drop or mark it complete; surface it for admission/assignment. Prove duplicate intakes are idempotent and existing scope/authority is preserved.
+2. **Automatic stall recovery** — Reuse `tools/engineering_supervisor.py` for evidence-based stall detection and `tools/pmv3_work_engine.py` for bounded, idempotent retry/recovery. Distinguish recoverable internal stalls from genuine external or approval holds. The existing **governed native worker**, not the supervisor or a new daemon, owns any authorized retry. Demonstrate actual unattended agent recovery before claiming automatic end-to-end reliability.
+3. **Dependency and impact checks** — Consult `implementation/kernel/system_registry/` and the existing change-integration gate before changing a component. State affected components and their reverse dependents, preserve protected Core services and verify that unknown/missing dependencies fail closed. Reuse the Registry; do not create another component inventory or an unrelated deployment blocker.
+4. **Operational readiness verification** — Reuse existing tests, Release Manager, evidence ledger, rollback and post-deployment health. A source change, passing test, PR merge or deployed container is **not** completion. Verify actual acceptance criteria, independent observable results, rollback readiness and unaffected Core services. If proof is absent, status remains unverified; do not invent a percentage, approve a release, or send a positive status.
+
+For every safeguard, keep the first implementation **source-only** with focused tests, and preserve PMV3.2. No authorization for production changes, provider writes, gateway restart, scheduler activation or changed approval rules is conferred by this design section.
+
 ## Enforced status contract for staged agent reports
 
 Required reporting fields at any stop: `Overall Status`, `Verified`, `Problems/Blockers`, `Next Action`, `Needed From Me`, `Whole-Task Completion`. They must be supported by evidence. The last field is a percentage measured against the Owner's **whole goal**, not code completion. At the beginning, state NOT VERIFIED when acceptance is outstanding. Reports may be concise; never gloss over a material problem. Unknown or inaccessible evidence remains unknown.
