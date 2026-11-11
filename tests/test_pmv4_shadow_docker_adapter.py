@@ -76,6 +76,7 @@ class DockerAdapterTests(unittest.TestCase):
         self.adapter = DockerShadowAdapter(
             root=self.root, core_continuity_probe=lambda: self.core_ok,
             runner=fake_runner, production=False,
+            health_wait_seconds=0,
         )
 
     def test_activates_only_own_isolated_project(self):
@@ -102,6 +103,42 @@ class DockerAdapterTests(unittest.TestCase):
     def test_unhealthy_gateway_does_not_pass(self):
         self.adapter.activate_shadow(self.release)
         self.inspect_data["State"]["Health"]["Status"] = "starting"
+        self.assertFalse(self.adapter.verify_shadow_and_core(self.release))
+
+    def test_starting_gateway_waits_until_healthy_then_checks_core(self):
+        self.adapter.activate_shadow(self.release)
+        self.inspect_data["State"]["Health"]["Status"] = "starting"
+        time_elapsed = [0.0]
+        probes = [0]
+        def sleeper(seconds):
+            time_elapsed[0] += seconds
+            if time_elapsed[0] >= 2:
+                self.inspect_data["State"]["Health"]["Status"] = "healthy"
+        self.adapter.clock = lambda: time_elapsed[0]
+        self.adapter.sleeper = sleeper
+        self.adapter.health_wait_seconds = 10
+        self.adapter.core_continuity_probe = lambda: probes.__setitem__(0, probes[0]+1) or True
+        self.assertTrue(self.adapter.verify_shadow_and_core(self.release))
+        self.assertEqual(probes[0], 1)
+        self.assertEqual(time_elapsed[0], 2.0)
+
+    def test_wait_is_bounded_and_does_not_reboot_or_restart(self):
+        self.adapter.activate_shadow(self.release)
+        self.inspect_data["State"]["Health"]["Status"] = "starting"
+        time_elapsed = [0.0]
+        self.adapter.clock = lambda: time_elapsed[0]
+        self.adapter.sleeper = lambda seconds: time_elapsed.__setitem__(0, time_elapsed[0]+seconds)
+        self.adapter.health_wait_seconds = 3
+        self.assertFalse(self.adapter.verify_shadow_and_core(self.release))
+        self.assertEqual(time_elapsed[0], 3.0)
+        self.assertFalse(any("restart" in a or "stop" in a for a,_ in self.commands))
+
+    def test_wrong_image_does_not_wait_even_when_gateway_starting(self):
+        self.adapter.activate_shadow(self.release)
+        self.inspect_data["Image"] = "sha256:"+"e"*64
+        self.inspect_data["State"]["Health"]["Status"] = "starting"
+        self.adapter.health_wait_seconds = 120
+        self.adapter.sleeper = lambda _: self.fail("waited on untrusted image")
         self.assertFalse(self.adapter.verify_shadow_and_core(self.release))
 
     def test_other_project_collision_refused_before_activation(self):

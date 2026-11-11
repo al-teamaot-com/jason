@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import time
 from typing import Any, Callable, Mapping
 
 from pmv4_shadow_release import (
@@ -32,6 +33,9 @@ class DockerShadowAdapter:
         core_continuity_probe: Callable[[], bool],
         runner: Callable[..., Any] = subprocess.run,
         production: bool = True,
+        health_wait_seconds: float = 90,
+        clock: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
     ):
         self.root = Path(root)
         if production and self.root != PRODUCTION_ROOT:
@@ -41,6 +45,14 @@ class DockerShadowAdapter:
         self.core_continuity_probe = core_continuity_probe
         self.runner = runner
         self.production = production
+        if (not isinstance(health_wait_seconds, (int, float))
+            or isinstance(health_wait_seconds, bool)
+            or not 0 <= health_wait_seconds <= 120
+            or not callable(clock) or not callable(sleeper)):
+            raise ShadowReleaseDenied("SHADOW_HEALTH_WAIT_INVALID")
+        self.health_wait_seconds = float(health_wait_seconds)
+        self.clock = clock
+        self.sleeper = sleeper
         if not callable(core_continuity_probe):
             raise ShadowReleaseDenied("SHADOW_CORE_CONTINUITY_PROBE_REQUIRED")
 
@@ -175,20 +187,31 @@ class DockerShadowAdapter:
         self._up(previous_dir)
 
     def verify_shadow_and_core(self, candidate_dir: Path) -> bool:
-        # Healthy is not enough if Docker kept an older/unreviewed image.
+        # Compose up --detach completes *before* a healthy probe. Wait only for
+        # the isolated shadow, for a bounded period, and never restart or
+        # change any service to make the test pass. Wrong identity fails fast.
         image = self._manifest_image(candidate_dir)
-        info = self._owned_or_absent()
-        if info is None or info.get("Image") != image:
-            return False
-        state = info.get("State")
-        if not isinstance(state, dict) or state.get("Running") is not True:
-            return False
-        health = state.get("Health")
-        if not isinstance(health, dict) or health.get("Status") != "healthy":
-            return False
-        # No fallback to a local self-reported "PASS" file. A trusted host
-        # installer must attach an independently verified ticket-Core probe.
-        return self.core_continuity_probe() is True
+        deadline = self.clock() + self.health_wait_seconds
+        while True:
+            info = self._owned_or_absent()
+            if info is None or info.get("Image") != image:
+                return False
+            state = info.get("State")
+            if not isinstance(state, dict) or state.get("Running") is not True:
+                return False
+            health = state.get("Health")
+            if not isinstance(health, dict):
+                return False
+            status = health.get("Status")
+            if status == "healthy":
+                # No fallback to self-reported PASS. Trusted installer must
+                # connect independent fresh ticket Core verification.
+                return self.core_continuity_probe() is True
+            if status != "starting":
+                return False
+            if self.clock() >= deadline:
+                return False
+            self.sleeper(min(2.0, max(0, deadline - self.clock())))
 
 
 if __name__ == "__main__":
