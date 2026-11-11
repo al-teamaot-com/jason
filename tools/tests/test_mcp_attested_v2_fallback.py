@@ -133,3 +133,122 @@ def test_root_runtime_digest_substitution_denied():
         with pytest.raises(m.ReleaseManagerError, match="no root-attested V2"):
             m.verified_mcp_preproduction_base(Path("/tmp"))
     mutation.assert_not_called()
+
+
+CURRENT_SHA = "e" * 40
+CURRENT_MCP = "sha256:" + "b" * 64
+CURRENT_RUNTIME = "sha256:" + "c" * 64
+CURRENT_TAG = "jason-mcp:attested-lkg-" + CURRENT_SHA[:12] + "-" + CURRENT_MCP[7:19]
+
+
+def current_control(*, state="closed", revalidated=True, mcp_id=CURRENT_MCP,
+                    runtime_id=CURRENT_RUNTIME, mode="owner_reviewed"):
+    return {
+        "circuit_breaker": {
+            "state": state,
+            "revalidated_revision": CURRENT_SHA if revalidated else "a"*40,
+        },
+        "last_known_good": {"manifest": {
+            "complete": True, "revision": CURRENT_SHA,
+            "mcp_image_id": mcp_id, "runtime_image_id": runtime_id,
+            "mobile_release_approval_mode": mode,
+        }},
+    }
+
+
+def test_current_production_lkg_mcp_is_exact_pinned_preproduction_base():
+    tagged = {"yes": False}
+    changes = []
+
+    def inspect(ref):
+        if ref == ORIGINAL:
+            raise subprocess.CalledProcessError(1, ["docker", "inspect", ref])
+        if ref == CURRENT_TAG:
+            if not tagged["yes"]:
+                raise subprocess.CalledProcessError(1, ["docker", "inspect", ref])
+            return CURRENT_MCP
+        if ref in {CURRENT_MCP, CURRENT_RUNTIME}:
+            return ref
+        raise AssertionError("unexpected Docker image reference: " + ref)
+
+    def tag(command):
+        assert command == ["docker", "tag", CURRENT_MCP, CURRENT_TAG]
+        tagged["yes"] = True
+        changes.append(command)
+
+    with patch.object(m, "image_id", side_effect=inspect), \
+         patch.object(m, "_read_protected_snapshot", return_value=current_control()), \
+         patch.object(m, "live_production_alignment", return_value={
+             "mcp_revision": CURRENT_SHA, "runtime_revision": CURRENT_SHA,
+         }), \
+         patch.object(m, "live_mcp", return_value={"image_id": CURRENT_MCP}), \
+         patch.object(m, "live_runtime", return_value={"image_id": CURRENT_RUNTIME}), \
+         patch.object(m, "run", side_effect=tag):
+        ref, digest = m.verified_mcp_preproduction_base(Path("/tmp"))
+
+    assert (ref, digest) == (CURRENT_TAG, CURRENT_MCP)
+    assert changes == [["docker", "tag", CURRENT_MCP, CURRENT_TAG]]
+
+
+@pytest.mark.parametrize("change", [
+    {"state": "open"}, {"revalidated": False},
+    {"mcp_id": "invalid"}, {"runtime_id": "invalid"},
+    {"mode": "teams_only"},
+])
+def test_current_production_base_requires_verified_closed_owner_lkg(change):
+    with patch.object(m, "image_id", side_effect=missing), \
+         patch.object(m, "_read_protected_snapshot",
+                      return_value=current_control(**change)), \
+         patch.object(m, "live_mcp") as mcp_read, \
+         patch.object(m, "run") as mutation:
+        with pytest.raises(m.ReleaseManagerError):
+            m.verified_mcp_preproduction_base(Path("/tmp"))
+    mcp_read.assert_not_called()
+    mutation.assert_not_called()
+
+
+@pytest.mark.parametrize("variant", ["wrong_current_mcp", "wrong_current_runtime", "wrong_alignment"])
+def test_current_base_refuses_protected_vs_live_mismatch(variant):
+    mcp_id = "sha256:" + "d" * 64 if variant == "wrong_current_mcp" else CURRENT_MCP
+    runtime_id = "sha256:" + "d" * 64 if variant == "wrong_current_runtime" else CURRENT_RUNTIME
+    align = {
+        "mcp_revision": "a" * 40 if variant == "wrong_alignment" else CURRENT_SHA,
+        "runtime_revision": CURRENT_SHA,
+    }
+    def inspect(ref):
+        if ref == ORIGINAL:
+            raise subprocess.CalledProcessError(1, ["docker", "inspect", ref])
+        if ref in {CURRENT_MCP, CURRENT_RUNTIME}:
+            return ref
+        raise AssertionError(ref)
+    with patch.object(m, "image_id", side_effect=inspect), \
+         patch.object(m, "_read_protected_snapshot", return_value=current_control()), \
+         patch.object(m, "live_production_alignment", return_value=align), \
+         patch.object(m, "live_mcp", return_value={"image_id": mcp_id}), \
+         patch.object(m, "live_runtime", return_value={"image_id": runtime_id}), \
+         patch.object(m, "run") as mutation:
+        with pytest.raises(m.ReleaseManagerError, match="differs from live"):
+            m.verified_mcp_preproduction_base(Path("/tmp"))
+    mutation.assert_not_called()
+
+
+def test_current_lkg_attested_tag_substitution_fail_closed():
+    def inspect(ref):
+        if ref == ORIGINAL:
+            raise subprocess.CalledProcessError(1, ["docker", "inspect", ref])
+        if ref == CURRENT_TAG:
+            return "sha256:" + "f"*64
+        if ref in {CURRENT_MCP, CURRENT_RUNTIME}:
+            return ref
+        raise AssertionError(ref)
+    with patch.object(m, "image_id", side_effect=inspect), \
+         patch.object(m, "_read_protected_snapshot", return_value=current_control()), \
+         patch.object(m, "live_production_alignment", return_value={
+             "mcp_revision": CURRENT_SHA, "runtime_revision": CURRENT_SHA,
+         }), \
+         patch.object(m, "live_mcp", return_value={"image_id": CURRENT_MCP}), \
+         patch.object(m, "live_runtime", return_value={"image_id": CURRENT_RUNTIME}), \
+         patch.object(m, "run") as mutation:
+        with pytest.raises(m.ReleaseManagerError, match="tag was replaced"):
+            m.verified_mcp_preproduction_base(Path("/tmp"))
+    mutation.assert_not_called()
