@@ -10,6 +10,7 @@ from datto_administrator_authority import (
     DattoAdministratorEvidence, DattoAdministratorScreenAuthorizer,
 )
 from session_gate import VerifiedTechnician
+from jassist_access_policy import JAssistDattoAccessPolicy
 
 
 class DattoAdministratorAuthorityTests(unittest.TestCase):
@@ -20,16 +21,24 @@ class DattoAdministratorAuthorityTests(unittest.TestCase):
             technician_tenant=self.person.tenant_id,
             account_uid="aot-native-datto-account",
             datto_username="aot.tech@example.test",
-            assigned_security_level="Administrator",
-            administrator_assigned=True,
+            assigned_security_levels=("Administrator",),
+            assignment_verified=True,
             user_enabled=True,
             provider_verified=True,
             verified_at=1000.0,
         )
+        self.policy=JAssistDattoAccessPolicy.from_mapping({
+            "schema_version": 1, "revision": 1, "enabled": True,
+            "access_source": "datto_rmm_assigned_security_level",
+            "aot_account_uid": self.proof.account_uid,
+            "required_security_level": "Administrator",
+            "scope": "screen_assistance", "approval_record": "AOT-JASSIST-20261111",
+        })
         self.current=self.proof
         self.owned={"1717088"}
         self.auth=DattoAdministratorScreenAuthorizer(
             aot_account_uid=self.proof.account_uid,
+            access_policy_for=lambda:self.policy,
             evidence_for=lambda person:self.current,
             device_in_account=lambda account, device:device in self.owned,
             clock=lambda:1010.0,
@@ -46,11 +55,11 @@ class DattoAdministratorAuthorityTests(unittest.TestCase):
 
     def test_nonmember_disabled_user_missing_provider_proof_rejected(self):
         for change in (
-            {"administrator_assigned":False},
+            {"assignment_verified":False},
             {"user_enabled":False},
             {"provider_verified":False},
-            {"assigned_security_level":"Technician"},
-            {"assigned_security_level":"Administrators"},
+            {"assigned_security_levels":("Technician",)},
+            {"assigned_security_levels":("Administrators",)},
             {"datto_username":""},
             {"datto_username":" "},
         ):
@@ -88,6 +97,7 @@ class DattoAdministratorAuthorityTests(unittest.TestCase):
         self.assertFalse(self.auth(self.person,"1717088"))
         self.auth=DattoAdministratorScreenAuthorizer(
             aot_account_uid="aot-native-datto-account",
+            access_policy_for=lambda:self.policy,
             evidence_for=lambda person:(_ for _ in ()).throw(RuntimeError("Datto unavailable")),
             device_in_account=lambda a,b:True,
         )
@@ -97,6 +107,7 @@ class DattoAdministratorAuthorityTests(unittest.TestCase):
         for result in (False,None,1):
             checker=DattoAdministratorScreenAuthorizer(
                 aot_account_uid="aot-native-datto-account",
+                access_policy_for=lambda:self.policy,
                 evidence_for=lambda person:self.proof,
                 device_in_account=lambda a,b:result,
                 clock=lambda:1010.0,
@@ -104,6 +115,7 @@ class DattoAdministratorAuthorityTests(unittest.TestCase):
             self.assertFalse(checker(self.person,"1717088"))
         checker=DattoAdministratorScreenAuthorizer(
             aot_account_uid="aot-native-datto-account",
+            access_policy_for=lambda:self.policy,
             evidence_for=lambda person:self.proof,
             device_in_account=lambda a,b:(_ for _ in ()).throw(RuntimeError("offline")),
             clock=lambda:1010.0,
@@ -112,12 +124,56 @@ class DattoAdministratorAuthorityTests(unittest.TestCase):
 
     def test_missing_authoritative_providers_constructor_fail_closed(self):
         for args in (
-            {"aot_account_uid":"","evidence_for":lambda p:self.proof,"device_in_account":lambda a,b:True},
-            {"aot_account_uid":"account","evidence_for":None,"device_in_account":lambda a,b:True},
-            {"aot_account_uid":"account","evidence_for":lambda p:self.proof,"device_in_account":None},
+            {"aot_account_uid":"","access_policy_for":lambda:self.policy,"evidence_for":lambda p:self.proof,"device_in_account":lambda a,b:True},
+            {"aot_account_uid":"account","access_policy_for":lambda:self.policy,"evidence_for":None,"device_in_account":lambda a,b:True},
+            {"aot_account_uid":"account","access_policy_for":None,"evidence_for":lambda p:self.proof,"device_in_account":lambda a,b:True},
+            {"aot_account_uid":"account","access_policy_for":lambda:self.policy,"evidence_for":lambda p:self.proof,"device_in_account":None},
         ):
             with self.subTest(args=args),self.assertRaises(ValueError):
                 DattoAdministratorScreenAuthorizer(**args)
+
+    def test_access_level_is_configuration_not_code_and_revocation_is_immediate(self):
+        # The same running authorizer reads a changed configuration
+        # on its next authorization. Provider assignment still must match.
+        self.policy=replace(self.policy,revision=2,required_security_level="Field Technician",
+                            approval_record="AOT-JASSIST-20261111-B")
+        self.assertFalse(self.auth(self.person,"1717088"))
+        self.current=replace(self.proof,assigned_security_levels=("Field Technician",))
+        self.assertTrue(self.auth(self.person,"1717088"))
+        self.policy=replace(self.policy,revision=3,required_security_level="Administrator",
+                            approval_record="AOT-JASSIST-20261111-C")
+        self.assertFalse(self.auth(self.person,"1717088"))
+        self.current=replace(self.proof,assigned_security_levels=("Administrator","Field Technician"))
+        self.assertTrue(self.auth(self.person,"1717088"))
+
+    def test_disabled_cross_account_or_invalid_configuration_fails_closed(self):
+        for changed in (
+            {"enabled":False}, {"aot_account_uid":"other-account"},
+            {"access_source":"browser_supplied"}, {"scope":"powershell"},
+            {"approval_record":""}, {"required_security_level":"*"},
+        ):
+            with self.subTest(changed=changed):
+                self.policy=replace(JAssistDattoAccessPolicy.from_mapping({
+                    "schema_version":1,"revision":1,"enabled":True,
+                    "access_source":"datto_rmm_assigned_security_level",
+                    "aot_account_uid":self.proof.account_uid,
+                    "required_security_level":"Administrator",
+                    "scope":"screen_assistance",
+                    "approval_record":"AOT-JASSIST-20261111",
+                }),**changed)
+                self.assertFalse(self.auth(self.person,"1717088"))
+
+    def test_policy_reader_failure_rejects_without_native_provider_calls(self):
+        invoked=[]
+        auth=DattoAdministratorScreenAuthorizer(
+            aot_account_uid=self.proof.account_uid,
+            access_policy_for=lambda:(_ for _ in ()).throw(OSError("config unavailable")),
+            evidence_for=lambda p:invoked.append(p) or self.proof,
+            device_in_account=lambda a,b:True,
+        )
+        self.assertFalse(auth(self.person,"1717088"))
+        self.assertEqual(invoked,[])
+
 
 
 if __name__ == "__main__":

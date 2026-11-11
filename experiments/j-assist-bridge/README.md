@@ -475,3 +475,50 @@ Entra sign-in alone or group membership alone cannot enable data intake:
 per-device Datto evidence, consent, DLP, encrypted evidence, receipt,
 ChatGPT identity coupling and exact-revision production release gates
 are still required. No runtime registration or external image upload.
+
+
+## J-Assist Datto security-level eligibility is configurable (2026-11-11)
+
+The Owner confirmed that *membership in an assigned Datto RMM security
+level* determines which authenticated technicians are eligible for J-Assist.
+The initial configured level is Datto RMM's built-in **Administrator**.
+**This value must not be a string constant in the authorization engine.**
+Do not mistake the Entra identity/group pilot or the Datto UI's *currently
+active* security level for this provider-verified assigned-level membership.
+
+Configuration item: `jassist.screen_access.required_security_level`.
+Schema: `config/jassist-screen-access.example.json`; the server-side
+`FileBackedJAssistPolicyReader` parses a trusted *external runtime*
+JSON configuration record with `schema_version`, `revision`,
+`enabled`, `access_source`, `aot_account_uid`,
+`required_security_level`, `scope` and `approval_record`. The
+example is deliberately **disabled** and must never be copied into
+production as an approved policy. The actual AOT Datto account UID
+must be verified before configuration.
+
+`DattoSecurityLevelScreenAuthorizer` reads the latest trusted
+configuration **on each request**, rather than pinning a security-level
+name in source or keeping an indefinite cache. Changes become effective
+without building or redeploying code, and revoked assignments, disabled
+policies, unreadable/invalid configuration, account mismatch and provider
+outages deny access. If a session is already open, the normal session
+read/revalidation path checks the current configuration before granting
+further access. The setting can allow **screen assistance only**, never
+endpoint execution, Datto API operations or other technician authority.
+
+The trusted configuration *publisher* must authorize each exact setting
+change, log immutable before/after revisions and proof of Owner approval,
+make changes atomically, and support rollback. The file reader validates
+structure, limits, and non-world-writable file permissions; a JSON
+`approval_record` value **does not by itself prove approval**. In
+production, wire it only to Jason's governed settings publisher and verified
+provider adapter. Do not supply config from a browser, Datto webpage, user
+profile or untrusted upload. The approved updates are not yet served by
+a running production settings service; this is a preproduction policy
+contract, not a live entitlement.
+
+**Separate external dependency:** Datto's documented account-users API
+does not expose assigned security-level membership. Before enabling the
+real `Send to Jason` button, integrate a verified authoritative
+membership source. Until then the authorization check remains fail-closed.
+No production behavior has changed.
