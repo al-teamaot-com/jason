@@ -2371,7 +2371,7 @@ def build_candidate(repo: Path, state_root: Path, candidate_sha: str) -> tuple[s
 
 
 def verified_mcp_preproduction_base(state_root: Path) -> tuple[str, str]:
-    """Prefer the canonical historical base; recover only one known V2 LKG base.
+    """Prefer pinned historical base; otherwise use root-attested current LKG.
 
     The historical generic image was lost during incident cleanup. Retagging
     any random or mutable 'rollback-current' image as that historical base
@@ -2397,9 +2397,53 @@ def verified_mcp_preproduction_base(state_root: Path) -> tuple[str, str]:
     breaker = control.get("circuit_breaker") or {}
     root_lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
     if (breaker.get("state") != "closed"
-            or root_lkg.get("complete") is not True
-            or root_lkg.get("revision") != known_sha
-            or root_lkg.get("mcp_image_id") != known_image
+            or root_lkg.get("complete") is not True):
+        raise ReleaseManagerError("missing MCP builder base and no root-attested V2 recovery base")
+
+    # Normal releases after the Teams-free cutover no longer have V2 as the
+    # production LKG. Take the *exact digest* and source revision from root's
+    # independently validated, closed-breaker production manifest; never a
+    # mutable Docker 'production' tag or an arbitrary image offered by a user.
+    if root_lkg.get("revision") != known_sha:
+        revision = str(root_lkg.get("revision") or "")
+        mcp_digest = str(root_lkg.get("mcp_image_id") or "")
+        runtime_digest = str(root_lkg.get("runtime_image_id") or "")
+        if (not re.fullmatch(r"[0-9a-f]{40}", revision)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", mcp_digest)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", runtime_digest)
+                or breaker.get("revalidated_revision") != revision
+                or root_lkg.get("mobile_release_approval_mode") != "owner_reviewed"):
+            raise ReleaseManagerError(
+                "missing MCP builder base and no root-attested current production base"
+            )
+        alignment = live_production_alignment(revision)
+        mcp = live_mcp()
+        runtime = live_runtime()
+        if (alignment["mcp_revision"] != revision
+                or alignment["runtime_revision"] != revision
+                or mcp["image_id"] != mcp_digest
+                or runtime["image_id"] != runtime_digest
+                or image_id(mcp_digest) != mcp_digest
+                or image_id(runtime_digest) != runtime_digest):
+            raise ReleaseManagerError(
+                "root-attested current MCP base differs from live production"
+            )
+        exact_tag = f"jason-mcp:attested-lkg-{revision[:12]}-{mcp_digest[7:19]}"
+        try:
+            tagged = image_id(exact_tag)
+        except subprocess.CalledProcessError:
+            tagged = ""
+        if tagged and tagged != mcp_digest:
+            raise ReleaseManagerError("immutable current MCP base tag was replaced")
+        if not tagged:
+            # Adds one non-production label only. Does not stop services,
+            # retag the running image or write to root's protected LKG.
+            run(["docker", "tag", mcp_digest, exact_tag])
+        if image_id(exact_tag) != mcp_digest:
+            raise ReleaseManagerError("current MCP base image tag readback mismatch")
+        return exact_tag, mcp_digest
+
+    if (root_lkg.get("mcp_image_id") != known_image
             or root_lkg.get("runtime_image_id") != known_runtime):
         raise ReleaseManagerError("missing MCP builder base and no root-attested V2 recovery base")
     alignment = live_production_alignment(known_sha)
