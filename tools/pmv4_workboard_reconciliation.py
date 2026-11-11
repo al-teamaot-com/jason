@@ -154,6 +154,16 @@ def native_task_terminal_evidence(
         held["reason"] = "native_task_terminal_timestamp_invalid"
         return held
     status = task.get("status")
+    # Subscription exhaustion is a capacity pause, never generic failed-work
+    # replay authority. The native identity/timestamps above must match first.
+    if status == "failed":
+        from pmv4_subscription_capacity import quota_hold_for_native_task
+        quota_hold = quota_hold_for_native_task(task)
+        if quota_hold is not None:
+            # A trusted native record proves the run ended, not that its
+            # objective succeeded or that it is safe to retry.
+            return {**quota_hold, "native_termination_confirmed": True,
+                    "native_task_id": task["taskId"]}
     if status == "succeeded":
         return {
             "disposition": "RECONCILE",
