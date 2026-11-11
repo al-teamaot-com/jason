@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 
 def _latest_pmv4_section(text: str) -> str:
-    matches = list(re.finditer(r"^## PMv4\.x\b[^\n]*", text, flags=re.M | re.I))
+    matches = list(re.finditer(r"^## PMv4\.(?:x|[0-9]{8}\.[0-9]+)\b[^\n]*", text, flags=re.M | re.I))
     if not matches:
         return ""
     start = matches[-1]
@@ -106,6 +106,37 @@ def build_report(task_file: Path, *, when: dt.datetime) -> str:
             f"Whole-Task Completion: {_whole_percent(section)}.\n")
 
 
+def send_meaningful_event(
+    event: dict,
+    *, trusted_evidence_check,
+    task_file: Path | None = None,
+    sender=None,
+) -> str:
+    """PMv4 J-Man event hook: source-only until trusted native dispatch is bound.
+
+    Called by the existing approved J-Man/work-engine controller after fresh
+    independent source observation. No user/chat-supplied verification callback
+    may be installed; the trusted runtime must own that dependency.
+    """
+    import importlib.util
+    source = Path(__file__).resolve().with_name("meaningful_events.py")
+    spec = importlib.util.spec_from_file_location("pmv4_meaningful_events", source)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    target = os.environ.get("JMAN_TEAMS_TARGET", "").strip()
+    if not module.OWNER_TARGET.fullmatch(target) or target != module.LICENSED_OWNER_TARGET:
+        raise module.EventRejected("licensed_owner_teams_route_unverified")
+    if sender is None:
+        sender = lambda msg: module.existing_teams_sender(msg, target=target)
+    return module.publish_once(
+        event,
+        task_register=task_file or Path.home() / ".openclaw/workspaces/j-man/TASKS.md",
+        independent_evidence_check=trusted_evidence_check,
+        sender=sender,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--send", action="store_true", help="use existing OpenClaw Teams channel; requires configured target")
@@ -115,28 +146,10 @@ def main(argv: list[str] | None = None) -> int:
     if not args.send:
         print(text, end="")
         return 0
-    target = os.environ.get("JMAN_TEAMS_TARGET", "").strip()
-    if not target or not target.startswith("user:"):
-        print("DELIVERY_BLOCKED: current owner routing is not configured", flush=True)
-        return 2
-    try:
-        result = subprocess.run(
-            ["openclaw", "message", "send", "--channel", "msteams", "--target", target,
-             "--message", text, "--json"],
-            capture_output=True, text=True, timeout=45, check=False,
-        )
-        if result.returncode != 0:
-            print("DELIVERY_UNVERIFIED: provider returned a failure", flush=True)
-            return 1
-        payload = json.loads(result.stdout)
-        sent = payload.get("payload", {}).get("deliveryStatus") == "sent"
-        if not sent:
-            print("DELIVERY_UNVERIFIED: no positive provider receipt", flush=True)
-            return 1
-    except (ValueError, OSError, subprocess.SubprocessError):
-        print("DELIVERY_UNVERIFIED: provider receipt unavailable", flush=True)
-        return 1
-    print("DELIVERY_SENT_WITH_RECEIPT")
+    # PMv4 Owner preference: no routine scheduled status spam.
+    # Native task/work-engine terminal events call send_meaningful_event with
+    # fresh independent evidence; the legacy scheduled --send remains harmless.
+    print("ROUTINE_STATUS_SUPPRESSED: meaningful events only", flush=True)
     return 0
 
 
