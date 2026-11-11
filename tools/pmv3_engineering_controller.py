@@ -235,7 +235,6 @@ def controller_run(
         "finished_at": None,
         "status": "running",
         "passes": [],
-        "teams_only_approval": True,
     }
     # Check the production lock BEFORE touching the integration queue. Queue
     # reconciliation can perform governed source integration and must not run
@@ -361,7 +360,6 @@ def main() -> int:
         "status": state["status"],
         "reason": state.get("reason"),
         "pass_count": state.get("pass_count"),
-        "teams_only_approval": True,
     }, sort_keys=True))
     return service_exit_code(state)
 
