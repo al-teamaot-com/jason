@@ -19,16 +19,30 @@ from pmv4_shadow_release import ShadowReleaseDenied
 DIGEST = "sha256:" + "a"*64
 RUNNING = {
     "Image": DIGEST,
-    "Config": {"Labels": {
-        "com.aot.jason.component": "pmv4-shadow",
-        "com.docker.compose.project": SHADOW_PROJECT,
-        "com.docker.compose.service": SERVICE,
-    }},
+    "Config": {
+        "Labels": {
+            "com.aot.jason.component": "pmv4-shadow",
+            "com.docker.compose.project": SHADOW_PROJECT,
+            "com.docker.compose.service": SERVICE,
+        },
+        "User": "1000:1000",
+        "Env": ["HOME=/home/node", "OPENCLAW_GATEWAY_TOKEN=synthetic-only"],
+    },
     "HostConfig": {
         "NetworkMode": "none", "ReadonlyRootfs": True,
         "Privileged": False, "PortBindings": {},
+        "CapDrop": ["ALL"], "CapAdd": None,
+        "SecurityOpt": ["no-new-privileges:true"],
+        "Init": True, "RestartPolicy": {"Name": "no"},
+        "PidsLimit": 64, "Memory": 512 * 1024 * 1024,
+        "NanoCpus": 500_000_000, "PublishAllPorts": False,
+        "Devices": None, "Binds": None,
     },
-    "Mounts": [{"Type": "volume", "Destination": "/home/node/.openclaw"}],
+    "Mounts": [
+        {"Type": "volume", "Name": "jason-pmv4-shadow-state",
+         "Destination": "/home/node/.openclaw"},
+        {"Type": "tmpfs", "Destination": "/tmp"},
+    ],
     "State": {"Running": True, "Health": {"Status": "healthy"}},
 }
 
@@ -191,6 +205,64 @@ class DockerAdapterTests(unittest.TestCase):
         }))
         with self.assertRaisesRegex(PermissionError, "SHADOW_IMAGE_NOT_PINNED"):
             self.adapter.activate_shadow(self.release)
+
+    def test_inspect_requires_readback_of_effective_security_restrictions(self):
+        from copy import deepcopy
+
+        mutations = {
+            "privileged_user": lambda d: d["Config"].__setitem__("User", "root"),
+            "caps": lambda d: d["HostConfig"].__setitem__("CapDrop", []),
+            "extra_cap": lambda d: d["HostConfig"].__setitem__("CapAdd", ["NET_ADMIN"]),
+            "security": lambda d: d["HostConfig"].__setitem__("SecurityOpt", []),
+            "init": lambda d: d["HostConfig"].__setitem__("Init", False),
+            "restart": lambda d: d["HostConfig"]["RestartPolicy"].__setitem__("Name", "always"),
+            "pids": lambda d: d["HostConfig"].__setitem__("PidsLimit", 200),
+            "memory": lambda d: d["HostConfig"].__setitem__("Memory", 0),
+            "cpus": lambda d: d["HostConfig"].__setitem__("NanoCpus", 0),
+            "published_ports": lambda d: d["HostConfig"].__setitem__("PublishAllPorts", True),
+            "devices": lambda d: d["HostConfig"].__setitem__("Devices", [{"PathOnHost": "/dev/sda"}]),
+            "binds": lambda d: d["HostConfig"].__setitem__("Binds", ["/etc:/etc:ro"]),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                self.inspect_data = deepcopy(RUNNING)
+                mutate(self.inspect_data)
+                self.commands.clear()
+                with self.assertRaisesRegex(PermissionError, "SECURITY_PROFILE_DRIFT"):
+                    self.adapter.activate_shadow(self.release)
+                self.assertFalse(any("up" in argv for argv, _ in self.commands))
+
+    def test_shadow_mount_name_and_type_must_match_actual_runtime(self):
+        from copy import deepcopy
+        for name, edit in {
+            "wrong_volume": lambda d: d["Mounts"][0].__setitem__("Name", "jason-production-openclaw"),
+            "bind_home": lambda d: d["Mounts"][0].__setitem__("Type", "bind"),
+            "missing_home": lambda d: d["Mounts"].pop(0),
+            "extra_volume": lambda d: d["Mounts"].append(
+                {"Type": "volume", "Destination": "/var/lib/jason"}),
+            "bind_tmp": lambda d: d["Mounts"][1].__setitem__("Type", "bind"),
+        }.items():
+            with self.subTest(name=name):
+                self.inspect_data = deepcopy(RUNNING)
+                edit(self.inspect_data)
+                self.commands.clear()
+                with self.assertRaisesRegex(PermissionError, "UNAPPROVED_HOST_MOUNT"):
+                    self.adapter.activate_shadow(self.release)
+                self.assertFalse(any("up" in argv for argv, _ in self.commands))
+
+    def test_no_separately_billed_api_key_or_provider_secrets_in_shadow(self):
+        from copy import deepcopy
+        for name in ("OPENAI_API_KEY", "AZURE_OPENAI_API_KEY",
+                     "ANTHROPIC_API_KEY", "AUTOTASK_API_KEY",
+                     "AWS_ACCESS_KEY_ID"):
+            with self.subTest(name=name):
+                self.inspect_data = deepcopy(RUNNING)
+                self.inspect_data["Config"]["Env"].append(name + "=fake-placeholder")
+                self.commands.clear()
+                with self.assertRaisesRegex(PermissionError, "PROHIBITED_PROVIDER_CREDENTIAL_ENV"):
+                    self.adapter.activate_shadow(self.release)
+                self.assertFalse(any("up" in argv for argv, _ in self.commands))
+
 
 
 if __name__ == "__main__":

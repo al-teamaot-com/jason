@@ -111,12 +111,67 @@ class DockerShadowAdapter:
         mounts = data.get("Mounts")
         if not isinstance(mounts, list):
             raise ShadowReleaseDenied("SHADOW_MOUNTS_UNKNOWN")
+        # Docker Compose source review is necessary but cannot prove the
+        # *actual* running container has the same isolation. Independently
+        # read back the immutable container security boundaries after start,
+        # including restrictions previously checked only in the YAML file.
+        caps = host.get("CapDrop")
+        additions = host.get("CapAdd")
+        security = host.get("SecurityOpt")
+        restart = host.get("RestartPolicy")
+        user = config.get("User")
+        if (
+            user != "1000:1000"
+            or not isinstance(caps, list) or "ALL" not in caps
+            or additions not in (None, [])
+            or not isinstance(security, list)
+            or "no-new-privileges:true" not in security
+            or host.get("Init") is not True
+            or not isinstance(restart, dict)
+            or restart.get("Name") not in ("no", "")
+            or host.get("PidsLimit") != 64
+            or host.get("Memory") != 512 * 1024 * 1024
+            or host.get("NanoCpus") != 500_000_000
+            or host.get("PublishAllPorts") not in (None, False)
+            or host.get("Devices") not in (None, [])
+            or host.get("Binds") not in (None, [])
+        ):
+            raise ShadowReleaseDenied("SHADOW_RUNTIME_SECURITY_PROFILE_DRIFT")
+        # The reserved volume is the only persistent mount; a private tmpfs
+        # at /tmp is optional (Docker inspect may represent it separately).
+        actual_volumes = 0
         for mount in mounts:
-            if not isinstance(mount, dict) or (
-                mount.get("Type") == "bind"
-                or mount.get("Destination") not in ("/home/node/.openclaw", "/tmp")
-            ):
+            if not isinstance(mount, dict):
                 raise ShadowReleaseDenied("SHADOW_UNAPPROVED_HOST_MOUNT")
+            if mount.get("Destination") == "/home/node/.openclaw":
+                if (mount.get("Type") != "volume"
+                    or mount.get("Name") != "jason-pmv4-shadow-state"):
+                    raise ShadowReleaseDenied("SHADOW_UNAPPROVED_HOST_MOUNT")
+                actual_volumes += 1
+            elif mount.get("Destination") == "/tmp":
+                if mount.get("Type") != "tmpfs":
+                    raise ShadowReleaseDenied("SHADOW_UNAPPROVED_HOST_MOUNT")
+            else:
+                raise ShadowReleaseDenied("SHADOW_UNAPPROVED_HOST_MOUNT")
+        if actual_volumes != 1:
+            raise ShadowReleaseDenied("SHADOW_UNAPPROVED_HOST_MOUNT")
+        # The isolated shadow must never inherit separately billed AI keys
+        # or production provider credentials through the image environment.
+        env = config.get("Env")
+        if not isinstance(env, list):
+            raise ShadowReleaseDenied("SHADOW_CONTAINER_ENV_UNVERIFIED")
+        denied_keys = (
+            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY",
+            "GOOGLE_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY",
+            "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+            "DATTO_API_KEY", "AUTOTASK_API_KEY",
+        )
+        if any(
+            not isinstance(entry, str)
+            or any(entry.startswith(key + "=") for key in denied_keys)
+            for entry in env
+        ):
+            raise ShadowReleaseDenied("SHADOW_PROHIBITED_PROVIDER_CREDENTIAL_ENV")
 
     def _owned_or_absent(self) -> dict[str, Any] | None:
         existing = self._inspect()
