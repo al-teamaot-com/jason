@@ -20,6 +20,14 @@ REQUIRED_WORKFLOWS = frozenset((
     "Validate Jason Teams Gateway",
     "Validate Conversation Experience Foundation",
 ))
+# Actual protected-main required checks verified against GitHub on Nov 11.
+# Changes may ADD checks, but removing the baseline requires reviewed source.
+BASELINE_REQUIRED_CHECKS = frozenset((
+    "cap-001", "cap-003", "cap-007", "system-registry",
+    "runtime-service", "repository-hygiene",
+    "conversation-experience", "teams-gateway",
+))
+GITHUB_ACTIONS_APP_ID = 15368
 MAX_RESPONSE = 2 * 1024 * 1024
 
 
@@ -92,8 +100,70 @@ def protected_main_ci_verified(candidate_sha: str, *,
                 latest[name] = (timestamp, latest[name][1] and ok)
             elif name not in latest or timestamp > latest[name][0]:
                 latest[name] = (timestamp, ok)
-        return (set(latest) == REQUIRED_WORKFLOWS
-                and all(ok for _, ok in latest.values()))
+        if not (set(latest) == REQUIRED_WORKFLOWS
+                and all(ok for _, ok in latest.values())):
+            return False
+        # Workflow-success summaries alone do NOT satisfy the real required
+        # check run contexts on protected main. Inspect the native branch
+        # policy and each exact-SHA GitHub Actions check run independently.
+        protection = github_json(
+            f"/repos/{REPO}/branches/main/protection/required_status_checks",
+            runner=runner,
+        )
+        required = protection.get("checks")
+        if (protection.get("strict") is not True
+            or not isinstance(required, list)
+            or len(required) < len(BASELINE_REQUIRED_CHECKS)
+            or len(required) > 60):
+            return False
+        expected: dict[str, int] = {}
+        for requirement in required:
+            if (not isinstance(requirement, dict)
+                or not isinstance(requirement.get("context"), str)
+                or not isinstance(requirement.get("app_id"), int)
+                or isinstance(requirement.get("app_id"), bool)
+                or requirement["app_id"] <= 0
+                or requirement["context"] in expected):
+                return False
+            expected[requirement["context"]] = requirement["app_id"]
+        if (not BASELINE_REQUIRED_CHECKS.issubset(expected)
+            or any(expected[name] != GITHUB_ACTIONS_APP_ID
+                   for name in BASELINE_REQUIRED_CHECKS)):
+            return False
+        checks = github_json(
+            f"/repos/{REPO}/commits/{candidate_sha}/check-runs?per_page=100",
+            runner=runner,
+        )
+        all_runs = checks.get("check_runs")
+        total = checks.get("total_count")
+        if (not isinstance(all_runs, list)
+            or not isinstance(total, int) or isinstance(total, bool)
+            or total > 100 or total != len(all_runs)):
+            return False
+        observed: dict[str, tuple[datetime, bool]] = {}
+        for check in all_runs:
+            if not isinstance(check, dict) or check.get("name") not in expected:
+                continue
+            name = check["name"]
+            app = check.get("app")
+            if (check.get("head_sha") != candidate_sha
+                or not isinstance(app, dict)
+                or app.get("id") != expected[name]):
+                continue
+            finished = check.get("completed_at")
+            if not isinstance(finished, str):
+                return False
+            timestamp = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+            if timestamp.tzinfo is None or not now - timedelta(hours=24) <= timestamp <= now:
+                return False
+            ok = check.get("status") == "completed" and check.get("conclusion") == "success"
+            if name in observed and timestamp == observed[name][0]:
+                observed[name] = (timestamp, observed[name][1] and ok)
+            elif name not in observed or timestamp > observed[name][0]:
+                observed[name] = (timestamp, ok)
+        return set(observed) == set(expected) and all(
+            ok for _, ok in observed.values()
+        )
     except (RuntimeError, AttributeError, TypeError, ValueError, OverflowError):
         return False
 

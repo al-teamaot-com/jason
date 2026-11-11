@@ -24,7 +24,7 @@ project-specific PMv4 shadow-lane authorization/amendment is necessary.
   Compose project, runtime/MCP images, or production OpenClaw data.
 - **Source:** protected GitHub al-teamaot-com/jason main at one exact
   40-character SHA. Fetch fresh *live* API results for protected branch and
-  all four required CI workflows. A PR-only passing run or local JSON
+  the four required workflow summaries and the actual eight protected-branch required CI job contexts. A PR-only passing run or local JSON
   claiming success cannot authorize release.
 - **Owner authority:** reuse only the *provider-neutral cryptographic*
   implementation/kernel/signed_owner_release.py verifier. The issuer must
