@@ -90,5 +90,23 @@
       "auto_dispatch": false,
       "production_write_authority": false
     }
-  ]
+  ],
+  "staged_coordinator_policy": {
+    "main_allowed": [
+      "j-man"
+    ],
+    "j_man_allowed": [
+      "j-dev",
+      "j-compliance",
+      "j-docs",
+      "j-observe",
+      "j-qa",
+      "j-integrations",
+      "j-release"
+    ],
+    "worker_allowed": [],
+    "explicit_agent_id_required": true,
+    "no_channel_bindings": true,
+    "no_production_activation": true
+  }
 }
