@@ -34,3 +34,14 @@
 The new source tests verify the default embedded hosting path, illegal mode rejection, an exclusive kernel lock across independent OS processes, rejection of untrusted lockfiles, absence of duplicated ticket supervisor in external HTTP mode, and a standalone supervisor that starts only in explicitly selected external mode.
 
 **Not yet accepted:** Live host/container separation, two-scan functional continuity, governed cutover, host-level release evidence or any production deployment.
+
+
+## Concurrent development review (source-only)
+
+Reviewed current open PR file patches on November 11, 2026:
+- #2405 and #2373 add unrelated runtime composition behavior.
+- #2336 adds financial-statement maintenance settings and validation near, but not on, the Ticket Core hosting insertion points.
+- #2384 adds Constant Contact credential wiring outside the Ticket Core worker-hosting boundaries.
+- #2393 and #2395 both change the release-mobile approval-mode enumeration and may conflict with *each other*; this Ticket Core change does not select or reconcile their competing governance behavior.
+
+The Ticket Core patch adds three distinct fields/guards (hosting default, environment parsing and validation) and does not modify the competing hunks. Rebase and rerun full composition regression after whichever active PR changes reach protected main. Do not merge if source changes break the single-owner guarantee.
