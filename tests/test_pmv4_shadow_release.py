@@ -166,6 +166,22 @@ class StandaloneReleaseTests(unittest.TestCase):
             self.promote()
         self.assertEqual(len(self.calls), 2)
 
+    def test_shared_host_production_transaction_must_be_quiescent(self):
+        self.controller.host_mutation_quiescent = lambda: False
+        self.assert_denied("SHADOW_SHARED_HOST_MUTATION_NOT_QUIESCENT")
+
+    def test_existing_ticket_core_must_have_independent_preflight(self):
+        self.controller.preexisting_core_health = lambda: False
+        self.assert_denied("SHADOW_EXISTING_TICKET_CORE_UNVERIFIED")
+
+    def test_host_and_core_probes_are_evaluated_before_any_activation(self):
+        calls = []
+        self.controller.host_mutation_quiescent = lambda: calls.append("host") or True
+        self.controller.preexisting_core_health = lambda: calls.append("core") or True
+        status = self.promote()
+        self.assertEqual(status["status"], "shadow_accepted")
+        self.assertEqual(calls, ["host", "core"])
+
     def test_invalid_ci_prevents_mutation(self):
         self.ci_accepted = False
         self.assert_denied("SHADOW_PROTECTED_SOURCE_OR_CI_UNVERIFIED")

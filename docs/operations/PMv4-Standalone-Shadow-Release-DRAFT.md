@@ -42,6 +42,13 @@ project-specific PMv4 shadow-lane authorization/amendment is necessary.
   pointer, and scoped Docker Compose project. The trusted image is locally
   present (--pull never) and launched without network, host ports, host
   binds, Docker socket, extra Linux capabilities or production credentials.
+- **Host interlock:** before each release, trusted root-installed read-only
+  attestors MUST independently verify the shared host has no overlapping
+  production mutation transaction and that the existing Ticket Processing Core
+  has a fresh acceptable baseline. If PMv4 uses a physically independent host,
+  the quiescence attestor must prove its infrastructure independence rather
+  than relying on the troubled PMv3 release manager. Both attestors fail closed
+  when absent, unhealthy, or unknown.
 - **Acceptance and rollback:** independently verify shadow gateway healthy,
   compare a trusted fresh Ticket Processing Core health baseline/readback,
   verify current pointer, approval receipt and freeze unchanged. On failed
@@ -111,9 +118,11 @@ target_shadow_release_controller indicates only planned source authority.
   This source code alone cannot mint a production-valid Owner decision.
 - **No installed root-owned host adapter or official OCI release artifact.**
   DockerShadowAdapter is tested with a fake command runner, not yet activated.
-- **No trusted live Ticket Processing continuity probe wired to the
-  independent host runner.** Passing source tests does not establish Core
-  health or protect against a production regression.
+- **No trusted live host-quiescence or Ticket Processing continuity probes
+  wired to the independent host runner.** Source now REQUIRES both in a
+  production controller and tests prove false/missing probes fail closed.
+  Read-only host provenance and fresh Core provider readback are still needed;
+  passing synthetic tests does not establish operational continuity.
 - **No end-to-end independent shadow gateway startup/restart and automatic
   interrupted-agent recovery acceptance.** A restricted isolated CLI
   container returned OpenClaw 2026.7.1 successfully. That is NOT a

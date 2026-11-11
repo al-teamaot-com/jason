@@ -188,7 +188,9 @@ class ShadowController:
                  activate_shadow: Callable[[Path], None],
                  verify_shadow_and_core: Callable[[Path], bool],
                  restore_shadow: Callable[[Path], None],
-                 production: bool = True):
+                 production: bool = True,
+                 host_mutation_quiescent: Callable[[], bool] | None = None,
+                 preexisting_core_health: Callable[[], bool] | None = None):
         self.root = safe_root(root, production=production)
         self.public_key_path = Path(public_key_path)
         if production and self.public_key_path != TRUST_PATH:
@@ -198,6 +200,16 @@ class ShadowController:
         self.verify_shadow_and_core = verify_shadow_and_core
         self.restore_shadow = restore_shadow
         self.production = production
+        # Both are mandatory for real production, including a separate host:
+        # its isolation attestor may return true for host quiescence only
+        # after independently verifying no shared control plane exists.
+        if production and (
+            not callable(host_mutation_quiescent)
+            or not callable(preexisting_core_health)
+        ):
+            raise ShadowReleaseDenied("SHADOW_HOST_AND_CORE_PROBES_NOT_PROVISIONED")
+        self.host_mutation_quiescent = host_mutation_quiescent
+        self.preexisting_core_health = preexisting_core_health
 
     def _paths(self) -> tuple[Path, Path, Path, Path]:
         for name in ("releases", "receipts", "control"):
@@ -247,6 +259,15 @@ class ShadowController:
         """All checks independently rerun under the transaction lock."""
         manifest_check(manifest)
         releases, receipts, freeze, current = self._paths()
+        # This is not PMV3 release execution: callbacks are independent
+        # *read-only* attestors installed outside the candidate. No shared
+        # production control may be modified while unsafe or in flight.
+        if (self.host_mutation_quiescent is not None
+            and self.host_mutation_quiescent() is not True):
+            raise ShadowReleaseDenied("SHADOW_SHARED_HOST_MUTATION_NOT_QUIESCENT")
+        if (self.preexisting_core_health is not None
+            and self.preexisting_core_health() is not True):
+            raise ShadowReleaseDenied("SHADOW_EXISTING_TICKET_CORE_UNVERIFIED")
         candidate, rollback = manifest["candidate_sha"], manifest["rollback_sha"]
         if self._active_sha(current, releases) != rollback:
             raise ShadowReleaseDenied("SHADOW_ROLLBACK_NOT_CURRENT")
