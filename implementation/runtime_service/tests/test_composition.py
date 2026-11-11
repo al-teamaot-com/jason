@@ -893,6 +893,11 @@ def test_v31_signed_owner_release_runtime_starts_without_teams_card_worker(tmp_p
         for service in app.maintenance.services
     )
     assert not (cfg.release_mobile_state_root / "mobile-release-offers").exists()
+    import pytest
+    with pytest.raises(PermissionError, match="mode and reviewed policy version"):
+        build_runtime_application(replace(cfg, release_mobile_approval_mode="owner_only_pilot"))
+    with pytest.raises(PermissionError, match="privileged admin separation requires V4 approval policy"):
+        build_runtime_application(replace(cfg, release_mobile_approval_mode="admin_approver_separated"))
 
 
 def test_legacy_owner_pilot_refuses_silent_v2_risk_policy_upgrade(tmp_path):
