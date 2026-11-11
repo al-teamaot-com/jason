@@ -59,6 +59,7 @@ replacement or autonomous release promoter is added by this work.
 | tools/pmv4_shadow_release.py | Independent release transaction, exact proof, journal, rollback |
 | tools/pmv4_shadow_ci.py | Live GitHub main and protected CI verifier |
 | tools/pmv4_shadow_docker_adapter.py | Shadow project-only container deployment/health/rollback |
+| tools/pmv4_shadow_owner_issuer.py | Source-only exact Owner issuer adapter; requires independently verified Entra middleware |
 | config/pmv4-shadow/docker-compose.yml | Source-only, disconnected, limited gateway profile |
 | tests/test_pmv4_shadow_*.py | Offline positive and fail-closed acceptance |
 | .github/workflows/validate.yml | Protected CI regression step |
@@ -101,9 +102,13 @@ target_shadow_release_controller indicates only planned source authority.
 
 - **No approved root trust/key provisioning for PMv4.** A public key
   provisioned for another release lane cannot be copied unilaterally.
-- **No live separately authenticated Entra Owner PMv4 issuer.** The source
-  verifies a properly issued decision but cannot mint a production-valid
-  PMv4 decision by itself.
+- **No live separately authenticated Entra Owner PMv4 issuer.** A source-only
+  issuer adapter now reads root-reviewed shadow scope and signs the same exact
+  Entra Owner release proof ONLY after a trusted OAuth JWT-verifier callback
+  and exact Owner consent callback return valid evidence. The isolated tests
+  use synthetic callbacks and an ephemeral key; no actual Entra bearer or
+  browser consent route, audience registration or signer is provisioned.
+  This source code alone cannot mint a production-valid Owner decision.
 - **No installed root-owned host adapter or official OCI release artifact.**
   DockerShadowAdapter is tested with a fake command runner, not yet activated.
 - **No trusted live Ticket Processing continuity probe wired to the
@@ -122,9 +127,10 @@ target_shadow_release_controller indicates only planned source authority.
 ## What the preproduction tests prove
 
 Source tests generate ephemeral private keys only in disposable temporary
-directories and simulate authenticated proof issuance. They prove the
-deterministic verifier enforces signature, expiry, scope and replay binding;
-they do NOT authenticate the Owner in a live session. Synthetic Docker
+directories and simulate authenticated proof issuance. The tests now include
+the complete synthetic issuer -> signature -> standalone release transaction.
+They prove the deterministic verifier enforces signature, expiry, scope and
+replay binding; they do NOT authenticate the Owner in a live session. Synthetic Docker
 runners assert fixed commands, project isolation, rollback and health gates.
 No live gateway restart, production Docker Compose activation, provider
 action, real token, production public/private signer or root change has
