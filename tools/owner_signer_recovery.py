@@ -364,6 +364,8 @@ def write_root_record(path: Path, record: dict) -> None:
 def execute() -> None:
     if os.geteuid() != 0:
         raise RecoveryDenied("ROOT_NATIVE_EXECUTION_REQUIRED")
+    if sys.flags.isolated != 1:
+        raise RecoveryDenied("ISOLATED_PYTHON_ROOT_EXECUTION_REQUIRED")
     if SCRIPT_INSTALLED.resolve() != Path(__file__).resolve():
         raise RecoveryDenied("MUST_RUN_INSTALLED_ROOT_TRUSTED_SCRIPT")
     installed_source = root_file(SCRIPT_INSTALLED, maximum=100000)

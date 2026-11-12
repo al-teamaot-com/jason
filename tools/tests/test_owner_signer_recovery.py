@@ -237,3 +237,12 @@ def test_owner_jwt_rejects_wrong_audience(monkeypatch):
     }, private, algorithm="RS256")
     with pytest.raises(jwt.PyJWTError):
         m.jwt_owner(token)
+
+
+
+def test_root_helper_requires_isolated_python_interpreter(monkeypatch):
+    m = load()
+    monkeypatch.setattr(m.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(m, "sys", SimpleNamespace(flags=SimpleNamespace(isolated=0)))
+    with pytest.raises(m.RecoveryDenied, match="ISOLATED_PYTHON_ROOT_EXECUTION_REQUIRED"):
+        m.execute()
