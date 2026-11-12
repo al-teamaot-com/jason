@@ -121,7 +121,8 @@ def _check_container(name: str) -> None:
         and "ALL" in host["CapDrop"]
         and "no-new-privileges:true" in host["SecurityOpt"]
         and host["PortBindings"] in (None, {})
-        and config["User"] == "1000:1000"
+        and config["User"] == f"{os.geteuid()}:{os.getegid()}"
+        and os.geteuid() != 0
         and {item["Destination"] for item in obj["Mounts"]}
             == {"/lab", "/src", "/opt/lab-worker.py"}
         and isinstance(host.get("Tmpfs"), dict)
@@ -170,7 +171,7 @@ def _acceptance() -> dict[str, Any]:
                 "--name", container_name, "--network", "none",
                 "--read-only", "--cap-drop", "ALL",
                 "--security-opt", "no-new-privileges:true",
-                "--user", "1000:1000", "--pids-limit", "32",
+                "--user", f"{os.geteuid()}:{os.getegid()}", "--pids-limit", "32",
                 "--memory", "256m", "--cpus", "0.5",
                 "--tmpfs", "/tmp:rw,nosuid,noexec,size=8m",
                 "--mount", "type=bind,src=" + str(folder) + ",dst=/lab",

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +17,7 @@ RUNNING = {
         "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true"],
         "PortBindings": {}, "Tmpfs": {"/tmp": "rw,nosuid,noexec,size=8m"},
     },
-    "Config": {"User": "1000:1000", "Env": [
+    "Config": {"User": f"{os.geteuid()}:{os.getegid()}", "Env": [
         "HOME=/home/node", "PYTHONPATH=/src",
     ]},
     "Mounts": [

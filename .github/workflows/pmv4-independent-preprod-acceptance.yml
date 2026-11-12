@@ -1,0 +1,63 @@
+name: PMv4 Independent Component Preproduction Acceptance
+
+on:
+  pull_request:
+    paths:
+      - "tools/pmv4_*"
+      - "tests/test_pmv4_*"
+      - "implementation/runtime_service/src/jason_runtime/ticket_worker_*"
+      - "implementation/runtime_service/src/jason_runtime/main.py"
+      - "implementation/autonomous_remediation/playbook_*"
+      - "implementation/mcp_service/src/jason_mcp/pmv4_*"
+      - "implementation/mcp_service/src/jason_mcp/server.py"
+      - ".github/workflows/pmv4-independent-preprod-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pmv4-preprod-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runbook-standalone:
+    name: Isolated JSON runbook lifecycle (no production state)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify six independent lifecycle processes in offline containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/pmv4_runbook_lifecycle_acceptance.py --acceptance docker
+
+  ticket-core-embedded-bootstrap:
+    name: Lock-aware embedded Ticket Core and contender rejection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build candidate runtime image for disposable acceptance only
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --label "com.teamaot.jason.source_revision=${GITHUB_SHA}" \
+            -t jason-runtime:production \
+            -f infrastructure/jason-runtime/Dockerfile .
+      - name: Run three-scan single-owner container acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/pmv4_ticket_core_container_acceptance.py --acceptance
+      - name: Assert this CI job did not touch actual Jason production
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY}" = "al-teamaot-com/jason"
+          test ! -e /var/lib/jason/openclaw/autonomy-operational-work.sqlite3

@@ -43,7 +43,7 @@ ROOT_FORBIDDEN = Path("/var/lib/jason/openclaw")
 # This is the ONLY permitted live root for a future separately approved
 # installer; deliberately distinct from PMV3 production state.
 PRODUCTION_ROOT = Path("/var/lib/jason/pmv4-shadow")
-TRUST_PATH = Path("/etc/jason/pmv4-shadow/owner-release-trust.json")
+TRUST_PATH = Path("/etc/jason-owner-release/verified-owner-public-key.json")
 REPO = "al-teamaot-com/jason"
 MANIFEST_FIELDS = {
     "schema_version", "service", "release_mode", "repository",

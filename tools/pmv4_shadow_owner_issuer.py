@@ -35,7 +35,7 @@ ISSUER = "https://login.microsoftonline.com/" + TID + "/v2.0"
 # The real audience comes ONLY from a root-owned, separately approved
 # authentication configuration. No default client-ID or bypass is provided.
 AUDIENCE_PATH = Path("/etc/jason/pmv4-shadow/entra-audience.json")
-SIGNER_PATH = Path("/etc/jason/pmv4-shadow/owner-release-signer.key")
+SIGNER_PATH = Path("/run/jason-secrets/owner-release/private_key")
 
 
 def issue_shadow_owner_proof(

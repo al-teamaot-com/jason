@@ -29,3 +29,24 @@ This fixes a concrete atomicity defect: the previous connection used `isolation_
 7. **Live change boundary:** An actual production runtime rollout, new service packaging, activation of a real playbook, or authority policy change still requires the separately governed release or Owner action appropriate to that exact change.
 
 This is intentionally not a second runbook database, new authorization system, replacement for the existing JSON engine, or automatic production rollout.
+
+## November 12 independent JSON registry acceptance (source-only)
+
+`tools/pmv4_runbook_lifecycle_acceptance.py --acceptance local` executes
+six independent local processes against one disposable SQLite database:
+`stage`, `activate`, `upgrade`, `deny_mutation`, `retire`, and
+`verify`. All six succeeded. Readback proved final generation 5, unique
+transactional lifecycle receipts, immutable version enforcement, retained
+version history and SQLite integrity. No production runbooks, provider
+credentials, authority receipts or tickets were accessed.
+
+`.github/workflows/pmv4-independent-preprod-acceptance.yml` repeats the
+lifecycle in six disposable no-network, non-root, read-only-root Docker
+processes on GitHub CI. Ordinary JSON version operations reuse the existing
+MCP-authenticated SQLite registry rather than invoking PM development or
+release. This is independent **configuration lifecycle acceptance**, NOT
+a claim that an independent production service was installed. Separating
+the future host service, its identity projection and rollback requires a
+protected component-specific deployment and real readback. The current
+source intentionally does not create another runbook registry or approval
+authority.

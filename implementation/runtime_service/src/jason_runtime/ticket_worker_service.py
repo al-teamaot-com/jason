@@ -13,7 +13,6 @@ from threading import Event
 from .autonomy_worker_supervisor import TicketWorkerSupervisor, read_worker_heartbeat
 from .composition import RuntimeSettings
 from .maintenance_process import run_autonomy_maintenance_process, ticket_worker_runtime_settings
-from .ticket_worker_ownership import exclusive_ticket_worker_owner
 
 
 def standalone_ticket_worker(settings: RuntimeSettings, *, stop: Event | None = None) -> None:
@@ -33,18 +32,19 @@ def standalone_ticket_worker(settings: RuntimeSettings, *, stop: Event | None = 
             daemon=True,
         )
 
-    with exclusive_ticket_worker_owner(settings.autonomy_worker_db):
-        supervisor = TicketWorkerSupervisor(
-            process_factory=factory,
-            heartbeat_reader=lambda: read_worker_heartbeat(settings.autonomy_worker_db),
-            interval_seconds=settings.autonomy_worker_interval_seconds,
-        )
-        shutdown = stop or Event()
-        supervisor.start()
-        try:
-            supervisor.monitor_forever(shutdown)
-        finally:
-            supervisor.stop()
+    # The child locks the canonical ledger before application construction.
+    # A crashed supervisor cannot release another still-running child's lock.
+    supervisor = TicketWorkerSupervisor(
+        process_factory=factory,
+        heartbeat_reader=lambda: read_worker_heartbeat(settings.autonomy_worker_db),
+        interval_seconds=settings.autonomy_worker_interval_seconds,
+    )
+    shutdown = stop or Event()
+    supervisor.start()
+    try:
+        supervisor.monitor_forever(shutdown)
+    finally:
+        supervisor.stop()
 
 
 def main() -> None:

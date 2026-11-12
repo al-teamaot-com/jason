@@ -94,26 +94,108 @@ def test_untrusted_lockfile_and_invalid_paths_rejected(tmp_path):
         ticket_worker_lock_path(Path("relative.sqlite3"))
 
 
-def test_main_owns_embedded_lock_but_external_never_claims(monkeypatch, tmp_path):
+def test_http_parent_never_claims_dispatch_lock(monkeypatch, tmp_path):
     calls = []
-    @contextmanager
-    def owner(path):
-        calls.append(("claim", str(path)))
-        yield
-        calls.append(("release", str(path)))
-
-    monkeypatch.setattr(main_module, "exclusive_ticket_worker_owner", owner)
-    monkeypatch.setattr(main_module, "_run_hosted_runtime", lambda s: calls.append(("run", s.ticket_worker_hosting)))
+    monkeypatch.setattr(
+        main_module, "_run_hosted_runtime",
+        lambda s: calls.append(("run", s.ticket_worker_hosting)),
+    )
     embedded = _settings(monkeypatch, tmp_path)
     monkeypatch.setattr(main_module.RuntimeSettings, "from_env", lambda: embedded)
     main_module.main()
-    assert [row[0] for row in calls] == ["claim", "run", "release"]
+    assert calls == [("run", "embedded")]
+    # Kernel flock ownership is inside the actual ticket child. No parent
+    # lock may disappear while an orphaned child is still dispatching.
+    assert not ticket_worker_lock_path(embedded.autonomy_worker_db).exists()
 
     calls.clear()
     external = replace(embedded, ticket_worker_hosting="external")
     monkeypatch.setattr(main_module.RuntimeSettings, "from_env", lambda: external)
     main_module.main()
     assert calls == [("run", "external")]
+
+
+
+
+def test_dispatch_child_keeps_ownership_after_original_parent_exits(tmp_path):
+    """Synthetic orphan regression: no split-brain if HTTP supervisor dies.
+
+    A parent starts the ticket dispatch child then exits via os._exit(0).
+    The child acquires the *same* kernel owner inode inside the real
+    run_autonomy_maintenance_process entrypoint. Another would-be owner
+    must fail closed until the child finishes its synthetic maintenance.
+    """
+    import signal
+    import time
+
+    db = tmp_path / "orphaned-worker-work.sqlite3"
+    ready = tmp_path / "child-ready"
+    stop = tmp_path / "child-stop"
+    child_pid = tmp_path / "child-pid"
+    script = r'''
+import os, sys, time
+from pathlib import Path
+from types import SimpleNamespace
+from jason_runtime import maintenance_process as service
+db, ready, stop, child_pid = map(Path, sys.argv[1:])
+parent_pid = os.fork()
+if parent_pid:
+    os._exit(0)
+child_pid.write_text(str(os.getpid()))
+
+def build_app(settings, *, maintenance_profile):
+    assert maintenance_profile == "ticket_worker"
+    assert (db.with_name(db.name + ".owner.lock")).is_file()
+    ready.write_text("running")
+    def tick():
+        if stop.exists():
+            raise SystemExit(0)
+    return SimpleNamespace(maintenance=SimpleNamespace(tick=tick))
+service.build_runtime_application = build_app
+service.run_autonomy_maintenance_process(
+    SimpleNamespace(autonomy_worker_db=db),
+    maintenance_profile="ticket_worker", idle_sleep_seconds=0.05,
+)
+'''
+    pythonpath = str(Path(__file__).parents[1] / "src")
+    parent = subprocess.Popen(
+        [sys.executable, "-c", script, str(db), str(ready), str(stop),
+         str(child_pid)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env={**os.environ, "PYTHONPATH": pythonpath},
+    )
+    orphan_pid = None
+    try:
+        assert parent.wait(timeout=6) == 0
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert ready.exists(), "synthetic dispatch child did not enter runtime"
+        orphan_pid = int(child_pid.read_text())
+        os.kill(orphan_pid, 0)
+        assert parent.pid != orphan_pid
+        with pytest.raises(TicketWorkerOwnershipError, match="ALREADY_OWNED"):
+            with exclusive_ticket_worker_owner(db):
+                pytest.fail("competing dispatch process obtained orphan lock")
+        stop.touch()
+        released = False
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                with exclusive_ticket_worker_owner(db):
+                    released = True
+                    break
+            except TicketWorkerOwnershipError:
+                time.sleep(0.05)
+        assert released, "dispatch owner was not safely released on child exit"
+        assert ticket_worker_lock_path(db).is_file()
+    finally:
+        stop.touch(exist_ok=True)
+        if orphan_pid is not None:
+            try:
+                os.kill(orphan_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_external_http_lifecycle_never_spawns_ticket_worker(monkeypatch, tmp_path):
@@ -161,4 +243,59 @@ def test_standalone_supervises_only_one_ticket_process_without_http(monkeypatch,
     assert lifecycle == ["supervisor_init", "start", "monitor", "stop"]
     # Factory is configured by the supervisor but no HTTP/server or PM starts.
     assert spawned == []
-    assert (tmp_path / "ticket-work.sqlite3.owner.lock").exists()
+    # The fake supervisor never starts its child; therefore no ownership
+    # lock is spuriously acquired by this external service parent.
+    assert not (tmp_path / "ticket-work.sqlite3.owner.lock").exists()
+
+
+def test_real_ticket_dispatch_child_keeps_exclusive_lock_across_entire_tick(
+    monkeypatch, tmp_path,
+):
+    from jason_runtime import maintenance_process as maintenance
+    settings = _settings(monkeypatch, tmp_path)
+    checked = []
+
+    class ExitWorker(BaseException):
+        pass
+
+    def tick():
+        with pytest.raises(TicketWorkerOwnershipError, match="ALREADY_OWNED"):
+            with exclusive_ticket_worker_owner(settings.autonomy_worker_db):
+                pytest.fail("secondary dispatcher was admitted")
+        checked.append("lock_held_during_provider_tick")
+        raise ExitWorker
+
+    monkeypatch.setattr(
+        maintenance, "build_runtime_application",
+        lambda *args, **kwargs: SimpleNamespace(
+            maintenance=SimpleNamespace(tick=tick),
+        ),
+    )
+    with pytest.raises(ExitWorker):
+        maintenance.run_autonomy_maintenance_process(
+            settings, maintenance_profile="ticket_worker",
+        )
+    assert checked == ["lock_held_during_provider_tick"]
+    # Only process exit releases flock; its inode persists across takeover.
+    lock_path = ticket_worker_lock_path(settings.autonomy_worker_db)
+    assert lock_path.is_file()
+    with exclusive_ticket_worker_owner(settings.autonomy_worker_db):
+        assert lock_path.exists()
+
+
+def test_second_child_rejected_before_runtime_construction(
+    monkeypatch, tmp_path,
+):
+    from jason_runtime import maintenance_process as maintenance
+    settings = _settings(monkeypatch, tmp_path)
+    called = []
+    monkeypatch.setattr(
+        maintenance, "build_runtime_application",
+        lambda *args, **kwargs: called.append("unexpected") or None,
+    )
+    with exclusive_ticket_worker_owner(settings.autonomy_worker_db):
+        with pytest.raises(TicketWorkerOwnershipError, match="ALREADY_OWNED"):
+            maintenance.run_autonomy_maintenance_process(
+                settings, maintenance_profile="ticket_worker",
+            )
+    assert called == []

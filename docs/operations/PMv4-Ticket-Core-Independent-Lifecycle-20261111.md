@@ -13,7 +13,7 @@
 ## Source-only additions
 
 - `JASON_TICKET_WORKER_HOSTING` defaults to `embedded` and accepts only `embedded` or `external`; default installation remains unchanged.
-- The embedded supervisor claims a persistent, non-blocking exclusive OS file lock beside the canonical SQLite ledger. Another instrumented worker using that **same underlying inode** is rejected before dispatch.
+- The **actual ticket-dispatch child process** (in embedded or external hosting mode) claims a persistent, non-blocking exclusive OS file lock beside the canonical SQLite ledger **before constructing its runtime**. The supervisor/HTTP parent never owns the lock. This prevents an orphaned child from continuing to dispatch after its supervisor dies while a new owner acquires the lock. Another instrumented worker using that **same underlying inode** is rejected before dispatch.
 - `python -m jason_runtime.ticket_worker_service` provides an independent non-HTTP supervisor entrypoint, requiring `JASON_AUTONOMY_WORKER_ENABLED=true` and explicitly selected `JASON_TICKET_WORKER_HOSTING=external`.
 - In external hosting mode, `jason_runtime.main` does not spawn its own ticket worker; it continues serving HTTP and auxiliary maintenance.
 - No PMv3 engineering controller, release runner or Teams approval is invoked by the ticket-only entrypoint.
@@ -73,3 +73,30 @@ the cross-process lock and Docker isolation attestor. This evidence is offline
 acceptance only. **Production acceptance is still a NO-GO** until exact release
 authority, lock-aware embedded deployment, live worker migration and two
 post-cutover provider-backed scan/readback observations are completed.
+
+## November 12 child-owned lock and preproduction bootstrap acceptance
+
+The earlier parent-owned lock had a split-brain risk if the supervisor failed
+but its spawned dispatch process survived. This source revision moves the
+exclusive kernel flock into `run_autonomy_maintenance_process` for the
+`ticket_worker` profile. Both embedded and standalone modes construct the
+same worker under that lock. The lock is never unlinked; a terminated child
+releases only its file descriptor and a legitimate replacement may reclaim
+the same inode. HTTP and auxiliary maintenance do not hold or acquire the
+ticket lock. A competing child fails **before application construction**.
+
+Local tests verify lock ownership during an actual synthetic worker tick,
+rejection of the competing process before runtime setup, no duplicate
+embedded dispatch when hosting is external, and supervisor lifecycle.
+The reviewed GitHub Actions preproduction workflow separately builds the
+candidate runtime image and performs three synthetic Docker scan cycles,
+competing-owner rejection and reacquisition **on a disposable GitHub runner**.
+Do not run undeclared acceptance containers on the protected Jason host:
+its live desired-state watchdog may open a production circuit breaker.
+
+**Still required before a live Ticket Core claim:** Exact Owner-authorized
+protected release B, verified production LKG and root breaker, existing
+embedded worker quiescence, unchanged durable SQLite ledger and notifications,
+the new child lock held through the real scheduled scan, no parallel external
+service, two separate provider-backed readbacks and exact image rollback.
+An offline child-lock test is not proof of production admission or release.

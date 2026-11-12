@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
 from multiprocessing import get_context
 from threading import Event, Thread
 
@@ -13,23 +12,16 @@ from .maintenance_process import (
     ticket_worker_runtime_settings,
 )
 from .autonomy_worker_supervisor import TicketWorkerSupervisor, read_worker_heartbeat
-from .ticket_worker_ownership import exclusive_ticket_worker_owner
 from .server import serve
 
 
 def main() -> None:
     settings = RuntimeSettings.from_env()
     settings.validate()
-    # The default embedded worker preserves existing production behavior.
-    # An external worker is supervised by its OWN service; the HTTP/PM
-    # lifecycle must never spawn a second ticket-dispatch owner.
-    ownership = (
-        exclusive_ticket_worker_owner(settings.autonomy_worker_db)
-        if settings.autonomy_worker_enabled and settings.ticket_worker_hosting == "embedded"
-        else nullcontext()
-    )
-    with ownership:
-        _run_hosted_runtime(settings)
+    # Embedded dispatch owns its exclusive kernel lock inside the worker
+    # process, not here in the HTTP/supervisor parent. Orphaned children must
+    # never outlive the lock. External mode never spawns embedded dispatch.
+    _run_hosted_runtime(settings)
 
 
 def _run_hosted_runtime(settings: RuntimeSettings) -> None:

@@ -231,7 +231,7 @@ def build_packet() -> dict[str, Any]:
     # The protected-main SHA changes after merges and must be re-attested.
     controls_root = Path("/var/lib/jason/pmv4-shadow/control")
     control_lock = controls_root / "host-mutation.lock"
-    owner_trust = Path("/etc/jason/pmv4-shadow/owner-release-trust.json")
+    owner_trust = Path("/etc/jason-owner-release/verified-owner-public-key.json")
     controls_provisioned = (
         controls_root.is_dir() and control_lock.is_file()
         and owner_trust.is_file()
