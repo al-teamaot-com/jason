@@ -522,3 +522,36 @@ does not expose assigned security-level membership. Before enabling the
 real `Send to Jason` button, integrate a verified authoritative
 membership source. Until then the authorization check remains fail-closed.
 No production behavior has changed.
+
+## 2026-11-12 service binding and HTTP-to-MCP shadow acceptance
+
+`jassist_service_bindings.py` composes the existing versioned
+server-side J-Assist policy reader, independent native Datto assigned
+security-level evidence resolver, provider device-ownership reader,
+trusted identity resolver and existing `SessionGate`. Missing or
+unmatched services refuse initialization and current membership/settings
+are re-evaluated before session creation, image acceptance and retrieval.
+
+Local preproduction HTTP-to-MCP integration acceptance:
+`test_jassist_config_http_e2e.py` opens a real localhost HTTP listener,
+sends a signed synthetic Entra JWT and non-sensitive synthetic JPEG,
+receives the server-issued hash-bound receipt, retrieves identical image
+bytes through the read-side tool, and verifies replay denial and both
+configuration and membership revocation. This is an intentionally
+SYNTHETIC acceptance harness: no live Datto user permission lookup, no
+actual Chrome extension click, no public HTTPS ingress, no approved
+production DLP/encrypted storage, and no registered production MCP tool.
+A passing synthetic test MUST NOT be reported as a live end-to-end test.
+
+Current production integration prerequisite: a governed settings
+publisher/source for the policy file, and a Datto-supported
+*provider-verifiable* assigned-security-level membership read tied to
+the same AOT technician's identity. The official account/users API
+does not document the assigned user security-level membership needed
+to establish that fact. Do not infer it from an API key's security level,
+Entra group membership, the currently selected UI level, browser data,
+or a test stub. Independently verify before enabling real screenshots.
+
+This development branch never modifies the protected ticket-processing
+service or production runtime. Owner exact-revision release authorization
+and real technician acceptance remain required separately.
