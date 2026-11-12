@@ -64,8 +64,14 @@ def source_scope(repo, baseline, candidate):
     if not SHA.fullmatch(baseline) or not SHA.fullmatch(candidate):
         raise ScopeBlocked("exact SHA required")
     remote = command(["git", "ls-remote", "origin", "refs/heads/main"], repo).split()
-    if len(remote) != 2 or remote != [candidate, "refs/heads/main"]:
-        raise ScopeBlocked("candidate differs from current protected main")
+    if (len(remote) != 2 or remote[1] != "refs/heads/main"
+            or not SHA.fullmatch(remote[0])):
+        raise ScopeBlocked("current protected main is not verifiable")
+    # Owner-approved JES-005: the exact reviewed candidate may be a protected
+    # ancestor. Read the actual remote tip, never a possibly stale tracking ref.
+    # Missing objects/rewritten history fail closed; this read-only reviewer
+    # never fetches, rewrites history, changes checkout or grants deployment.
+    command(["git", "merge-base", "--is-ancestor", candidate, remote[0]], repo)
     command(["git", "merge-base", "--is-ancestor", baseline, candidate], repo)
     commits = []
     lines = command(["git", "log", "--first-parent", "--reverse",
