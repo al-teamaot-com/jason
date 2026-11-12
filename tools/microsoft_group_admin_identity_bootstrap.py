@@ -64,6 +64,10 @@ EVENT_LOG = Path("/var/lib/jason/authority/m365-group-identity-bootstrap-2026111
 OPENBAO = "http://127.0.0.1:8200"
 PRODUCTION_RUNTIME_SHA = "d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 APPROVAL = "owner-chat-2026-11-12-aot-group-read-and-write-secret-and-boundary-only"
+RUNTIME_ACCESS_APPROVAL = "aot-m365-group-app-role-runtime-files-four-only"
+RUNTIME_ACCESS_RECEIPT = Path(
+    "/var/lib/jason/authority/m365-group-runtime-approle-access-20261112.json"
+)
 
 
 class BootstrapDenied(RuntimeError):
@@ -388,13 +392,157 @@ def _persist_boundaries_as_owner() -> dict[str, str]:
         store.close()
 
 
+def _verify_bootstrap_receipt() -> None:
+    """Require exact prior owner-authenticated bootstrap evidence; no Graph action."""
+    if RECEIPT.is_symlink() or not RECEIPT.is_file():
+        raise BootstrapDenied("M365_RUNTIME_ACCESS_BOOTSTRAP_RECEIPT_MISSING")
+    info = RECEIPT.stat()
+    if info.st_uid != 0 or info.st_mode & 0o077:
+        raise BootstrapDenied("M365_RUNTIME_ACCESS_BOOTSTRAP_RECEIPT_UNTRUSTED")
+    try:
+        doc = json.loads(RECEIPT.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise BootstrapDenied("M365_RUNTIME_ACCESS_BOOTSTRAP_RECEIPT_MALFORMED") from error
+    if (doc.get("approval_reference") != APPROVAL
+            or doc.get("client_id") != CLIENT
+            or doc.get("tenant_id") != TENANT
+            or doc.get("token_and_graph_read_preflight") != "pass"
+            or doc.get("production_deployment") is not False
+            or doc.get("graph_mutation") is not False
+            or doc.get("app_ids") != {
+                role: PROFILES[role]["application_id"] for role in PROFILES
+            }):
+        raise BootstrapDenied("M365_RUNTIME_ACCESS_BOOTSTRAP_RECEIPT_SCOPE_DRIFT")
+
+
+def _runtime_access_sources() -> list[tuple[Path, int, int]]:
+    """Return exact root-owned AppRole sources and original metadata; no content."""
+    import stat
+    result = []
+    for role in ("read", "write"):
+        directory = Path(PROVIDERS["microsoft_graph_group_" + role]["credential_dir"])
+        if directory.is_symlink() or not directory.is_dir():
+            raise BootstrapDenied("M365_RUNTIME_ACCESS_APPROLE_DIR_UNTRUSTED")
+        meta = directory.stat()
+        if meta.st_uid != 0 or meta.st_mode & 0o077:
+            raise BootstrapDenied("M365_RUNTIME_ACCESS_APPROLE_DIR_UNTRUSTED")
+        for name in ("role-id", "secret-id"):
+            path = directory / name
+            if path.is_symlink():
+                raise BootstrapDenied("M365_RUNTIME_ACCESS_APPROLE_SYMLINK_DENIED")
+            try:
+                info = path.lstat()
+            except OSError as error:
+                raise BootstrapDenied("M365_RUNTIME_ACCESS_APPROLE_FILE_MISSING") from error
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                    or (info.st_gid, stat.S_IMODE(info.st_mode))
+                        not in {(0, 0o600), (1000, 0o640)}
+                    or info.st_size < 10 or info.st_size > 2048):
+                raise BootstrapDenied("M365_RUNTIME_ACCESS_APPROLE_FILE_UNTRUSTED")
+            result.append((path, info.st_gid, stat.S_IMODE(info.st_mode)))
+    if len(result) != 4:
+        raise BootstrapDenied("M365_RUNTIME_ACCESS_APPROLE_COUNT_INVALID")
+    return result
+
+
+def prepare_runtime_approle_access(*, apply: bool, approval_scope: str) -> None:
+    """Owner-authenticated exact four-file permission projection. No key rotation."""
+    import stat
+    if os.geteuid() != 0 or os.environ.get("SUDO_USER") != "al":
+        raise BootstrapDenied("M365_RUNTIME_ACCESS_REQUIRES_AUTHENTICATED_AL_SUDO")
+    _verify_bootstrap_receipt()
+    _check_runtime_unchanged()
+    _check_existing_rows()
+    items = _runtime_access_sources()
+    if RUNTIME_ACCESS_RECEIPT.exists() or RUNTIME_ACCESS_RECEIPT.is_symlink():
+        raise BootstrapDenied("M365_RUNTIME_ACCESS_ONE_SHOT_RECEIPT_EXISTS")
+    print("RUNTIME_ACCESS_SCOPE=" + RUNTIME_ACCESS_APPROVAL)
+    print("FILE_COUNT=4; EXCLUDES=GRAPH_POST,APP_CONSENT,OPENBAO_MUTATION,SERVICE_RESTART,PRODUCTION_UNFREEZE")
+    if not apply:
+        print("RUNTIME_ACCESS_PREFLIGHT=PASS; CHANGES=NONE")
+        return
+    if approval_scope != RUNTIME_ACCESS_APPROVAL:
+        raise BootstrapDenied("M365_RUNTIME_ACCESS_EXACT_OWNER_APPROVAL_REQUIRED")
+    if RUNTIME_ACCESS_RECEIPT.parent.is_symlink():
+        raise BootstrapDenied("M365_RUNTIME_ACCESS_RECEIPT_PARENT_SYMLINK")
+    # Open no-follow descriptors; validate all before changing any. Each descriptor
+    # refers to the same inode across the bounded operation.
+    opened = []
+    changed = []
+    try:
+        for path, old_gid, old_mode in items:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                    or info.st_gid != old_gid
+                    or stat.S_IMODE(info.st_mode) != old_mode):
+                os.close(fd)
+                raise BootstrapDenied("M365_RUNTIME_ACCESS_FILE_RACED")
+            opened.append((fd, path, old_gid, old_mode))
+        for fd, path, old_gid, old_mode in opened:
+            if (old_gid, old_mode) != (1000, 0o640):
+                # Record rollback BEFORE the first metadata mutation, so a
+                # chgrp succeeding but a later chmod failing never leaves
+                # behind partially widened access.
+                changed.append((fd, old_gid, old_mode))
+                os.fchown(fd, 0, 1000)
+                os.fchmod(fd, 0o640)
+        _check_runtime_unchanged()
+        if any((os.fstat(fd).st_uid, os.fstat(fd).st_gid,
+                stat.S_IMODE(os.fstat(fd).st_mode)) != (0, 1000, 0o640)
+               for fd, _, _, _ in opened):
+            raise BootstrapDenied("M365_RUNTIME_ACCESS_READBACK_FAILED")
+        payload = {
+            "schema_version": "1.0",
+            "approved_scope": RUNTIME_ACCESS_APPROVAL,
+            "operator_user": "al", "os_authentication": "sudo",
+            "source_sha": source_sha(), "tenant_id": TENANT,
+            "client_id": CLIENT, "file_count": 4,
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "production_deployment": False, "service_restart": False,
+            "graph_mutation": False, "production_unfreeze": False,
+        }
+        fd = os.open(RUNTIME_ACCESS_RECEIPT,
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                json.dump(payload, output, indent=2, sort_keys=True)
+                output.write("\n")
+                output.flush()
+                os.fsync(output.fileno())
+        except BaseException:
+            RUNTIME_ACCESS_RECEIPT.unlink(missing_ok=True)
+            raise
+    except BaseException:
+        # No partial widening: restore all changed descriptors if audit fails.
+        for fd, old_gid, old_mode in reversed(changed):
+            os.fchmod(fd, old_mode)
+            os.fchown(fd, 0, old_gid)
+        raise
+    finally:
+        for fd, _, _, _ in opened:
+            os.close(fd)
+    print("M365_RUNTIME_ACCESS_PROJECTION=VERIFIED")
+    print("READONLY_APPROLE_FILES=4; NO_CONTAINER_REPLACED=true")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="AOT approved group credential + boundary operator bootstrap")
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--prepare-runtime-access", action="store_true")
+    parser.add_argument("--approval-scope", default="")
     parser.add_argument("--source-sha", required=True)
     args = parser.parse_args()
     if args.source_sha != source_sha():
         raise BootstrapDenied("SOURCE_SHA_NOT_EXACT")
+    if args.prepare_runtime_access:
+        prepare_runtime_approle_access(
+            apply=args.apply,
+            approval_scope=args.approval_scope,
+        )
+        return 0
+    if args.approval_scope:
+        raise BootstrapDenied("RUNTIME_ACCESS_SCOPE_NOT_VALID_FOR_ORIGINAL_BOOTSTRAP")
     _manifest()
     _check_runtime_unchanged()
     _check_existing_rows()

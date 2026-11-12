@@ -172,7 +172,7 @@ if [ -z "$M365_GROUP_PROFILE" ] && [ "$IMAGE" = "jason-runtime:rollback-current"
 fi
 if [ -n "$M365_GROUP_PROFILE" ]; then
   for group_role in read write; do
-    host_base="/var/lib/jason/runtime-secrets/openbao/microsoft-graph-group-${group_role}-approle"
+    host_base="/opt/jason/bootstrap/secrets/openbao/microsoft-graph-group-${group_role}-approle"
     mount_base="/run/jason-secrets/openbao/microsoft-group-${group_role}"
     for key_file in role-id secret-id; do
       host_file="$host_base/$key_file"

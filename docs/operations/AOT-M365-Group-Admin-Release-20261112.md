@@ -44,7 +44,7 @@ Write: microsoft_graph_group_write / group-write; AppID
 6583ee4b-5aa7-4c82-a46e-472f03a4c467.
 
 Source-controlled deployment adds exactly four read-only binds from
-`/var/lib/jason/runtime-secrets/openbao/microsoft-graph-group-{read,write}-approle`
+`/opt/jason/bootstrap/secrets/openbao/microsoft-graph-group-{read,write}-approle`
 into
 `/run/jason-secrets/openbao/microsoft-group-{read,write}` for the role and
 secret ID. Those host projections must be established using already-approved
@@ -130,3 +130,41 @@ granted.
 
 Do not replace the placeholders or request this approval until source
 review, CI, rollback availability and native preproduction checks pass.
+
+## Fresh operational blockers found during controlled release preparation
+
+- Existing **group-read** and **group-write** OpenBao credential material is
+  already provisioned, but the four ID files in protected bootstrap paths are
+  root:root 0600. The run-as-1000 production containers cannot read them as-is.
+  The source-only addition to the existing
+  `tools/microsoft_group_admin_identity_bootstrap.py` prepares precisely those
+  four file permissions to root:1000 0640, using authenticated local Owner
+  elevation, a prior verified root-owned bootstrap receipt, an explicit
+  `aot-m365-group-app-role-runtime-files-four-only` scope, descriptor-bound
+  no-follow validation, partial-failure restoration and a root-protected audit
+  receipt. It changes **no secret bytes, KV roles, existing mounts, group data,
+  application grants or running services**. It remains **UNEXECUTED**.
+- Root-protected live control readback at preparation time reported
+  `circuit_breaker.state=open` and `production-drift.status=drift_detected`
+  with a failed `jason-openclaw-authority-health.service` unit. Do not bypass
+  this blocker, hide the failed service, or substitute ordinary container
+  health for the required root health proof. The independently governed
+  recovery process must return fresh closed-breaker/clean-drift evidence.
+- The exact protected-main source includes unrelated PMv4 Stage A0
+  `config/pmv4-stage-a0-issuer-activation.json` `mode=on`, while current
+  `jason-mcp-pilot` reports `JASON_PMV4_STAGE_A0_ISSUER_ENABLED=false`.
+  Therefore a broad production main promotion is **not** only a Microsoft
+  group operation. The additional activation requires its own authorization
+  or a separately vetted and source-bound compartmentalized release that
+  leaves the existing runtime behavior unchanged.
+- Until those gates are satisfied, do not seek an unconditional release
+  approval or run either Graph mutation. Source-only CI, staging images
+  and pilot plans do not prove live operational readiness.
+
+A reviewed exact action after code merge is `--prepare-runtime-access` with
+the exact source SHA, authenticated local Owner privilege, and
+`--approval-scope aot-m365-group-app-role-runtime-files-four-only`.
+Run it **only after an appropriate exact-action authorization** and before the
+nonmutating native production release preflight. Afterwards verify four
+root:1000 0640 files and the new auditable receipt, with both running
+container IDs unchanged.

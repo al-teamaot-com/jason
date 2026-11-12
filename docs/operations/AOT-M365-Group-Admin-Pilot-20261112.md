@@ -1,6 +1,6 @@
 # AOT Microsoft 365 Group Administration Pilot — Consent and Release Handoff
 
-**Current status (2026-11-12):** AOT administrator created and consented two applications and enrolled both public signing certificates, verifying the exact DER public certificates by single-application Microsoft Graph readback. Source-only isolated live preflight acquired tokens for both apps, performed authorized Graph group/user GETs, verified the AOT group owner and confirmed no alias collision. **Production OpenBao secrets and durable boundary records remain unprovisioned, no group/membership POST was performed, no production release is authorized.**
+**Current status (2026-11-12):** AOT administrator created and consented two applications and enrolled both public signing certificates, verifying the exact DER public certificates by single-application Microsoft Graph readback. Source-only isolated live preflight acquired tokens for both apps, performed authorized Graph group/user GETs, verified the AOT group owner and confirmed no alias collision. **Subsequent separately approved configuration-only provisioning completed both production OpenBao AppRoles and the durable AOT group boundaries; no group/membership POST was performed, no production release is authorized.**
 
 ## Verified AOT facts (2026-11-12)
 
@@ -43,7 +43,7 @@ After registration, obtain the two **application IDs**, approved **service-princ
 
 **This is the first external action for which administrator consent or approval is required.** Do not silently create apps, modify a customer's directory or reuse the existing directory-read app to avoid consent.
 
-### Certificate registration — complete; production credential provisioning pending
+### Certificate enrollment — complete; see later configuration-only bootstrap acceptance for current status
 
 On the Jason host two RSA-3072 self-signed pilot key/certificate pairs were generated with private mode 0600 inside a private mode-0700 staging directory. Only public DER certificates were copied to `C:\Users\AlDavis\Documents\Jason-M365-Public-Certs`.
 
@@ -51,7 +51,7 @@ On the Jason host two RSA-3072 self-signed pilot key/certificate pairs were gene
 - Write public SHA-1: `C020401DAB7CF05BFEFE84024AA323913D903885`.
 - Validity: November 12, 2026 through November 12, 2027 (pilot self-signed).
 - Enrollment script: `C:\Users\AlDavis\Documents\Jason-M365-Certificate-Upload.ps1`. Ran in authorized AOT admin session, followed by corrected read-only verifier `Jason-M365-Verify-Certificates.ps1` confirming matching DER certificates and `CERTIFICATE_READBACK_VERIFIED=YES`.
-- The private keys are *not* in production OpenBao, in Git or on the Owner's PC. Remove the restricted staging files after controlled vault transfer and verification.
+- The private keys were initially not in production OpenBao; a subsequent separately approved bootstrap stored them under restricted matching production KV secrets. They were never transferred to Git or the Owner's PC. Stage-file cleanup remains a separate credential-hygiene task.
 
 ## Post-consent automated acceptance
 
@@ -72,7 +72,7 @@ The previous dormant group-membership source branch `feature/governed-entra-grou
 
 ## Required human action
 
-AOT administrator app-role consent and certificate enrollment are complete. Next requires separately governed production secret provisioning and creation/validation of the two durable client-boundary records, followed by an authorized exact-SHA controlled release. Without that, the source-only group creation/membership capability cannot safely execute in production.
+AOT administrator app-role consent and certificate enrollment are complete. Those OpenBao secrets and durable client-boundary records were subsequently provisioned and verified; next requires a narrowly approved runtime AppRole file-access preparation, safe production control readiness and an authorized exact-SHA code release. Without that, the source-only group creation/membership capability cannot safely execute in production.
 
 No technician should be asked to paste credentials or hand-assemble Microsoft access tokens.
 

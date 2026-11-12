@@ -51,6 +51,8 @@ def test_release_scripts_mount_distinct_group_secrets_only_under_exact_source_ac
         assert 'tools/microsoft_group_admin_release_profile.py' in text
         assert 'JASON_M365_GROUP_ADMIN_PROFILE=$M365_GROUP_PROFILE' in text
         assert '--omit-microsoft-group-binds-on-rollback' in text
+        assert '/opt/jason/bootstrap/secrets/openbao/microsoft-graph-group-' in text
+        assert '/var/lib/jason/runtime-secrets/openbao/microsoft-graph-group-' not in text
         assert 'stat -c' in text and '0:1000:640' in text
         assert '"$M365_GROUP_PROFILE"' in text
         assert text.count("--add-readonly-bind") >= 1
