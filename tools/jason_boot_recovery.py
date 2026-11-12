@@ -9,6 +9,7 @@ This script is intentionally secret-safe:
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
 from pathlib import Path
@@ -25,8 +26,15 @@ OPENBAO_CONTAINER = "openbao"
 OPENBAO_HEALTH_URL = "http://127.0.0.1:8200/v1/sys/health"
 OPENBAO_UNSEAL_URL = "http://127.0.0.1:8200/v1/sys/unseal"
 INIT_FILE = Path("/opt/jason/bootstrap/secrets/openbao/init.json")
-REPO_ROOT = Path("/home/al/projects/jason")
-STAGER = REPO_ROOT / "tools/stage_provider_read_runtime_credentials.py"
+CURRENT_ROOT = Path("/opt/jason/current")
+STAGER = CURRENT_ROOT / "tools/stage_provider_read_runtime_credentials.py"
+LIVE_DEPLOY = CURRENT_ROOT / "tools/deploy_live_container.py"
+BOOTSTRAP_TO_STAGED = (
+    (Path("/opt/jason/bootstrap/secrets/openbao/autotask-read-approle/role-id"), Path("/run/jason-runtime-credentials/openbao/autotask/role_id")),
+    (Path("/opt/jason/bootstrap/secrets/openbao/autotask-read-approle/secret-id"), Path("/run/jason-runtime-credentials/openbao/autotask/secret_id")),
+    (Path("/opt/jason/bootstrap/secrets/openbao/itglue-read-approle/role-id"), Path("/run/jason-runtime-credentials/openbao/it-glue/role_id")),
+    (Path("/opt/jason/bootstrap/secrets/openbao/itglue-read-approle/secret-id"), Path("/run/jason-runtime-credentials/openbao/it-glue/secret_id")),
+)
 STAGED_FILES = (
     Path("/run/jason-runtime-credentials/openbao/autotask/role_id"),
     Path("/run/jason-runtime-credentials/openbao/autotask/secret_id"),
@@ -158,6 +166,67 @@ def unseal_if_needed(health: dict[str, Any]) -> None:
     raise RecoveryError("OpenBao remained sealed after the configured threshold")
 
 
+def _read_private_bounded(path: Path, *, expected_uid: int, expected_mode: int) -> bytes:
+    info = os.lstat(path)
+    if (not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)
+            or info.st_uid != expected_uid
+            or stat.S_IMODE(info.st_mode) != expected_mode
+            or info.st_size <= 0 or info.st_size > 16384):
+        raise RecoveryError(f"credential metadata is invalid: {path}")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if opened.st_ino != info.st_ino or opened.st_dev != info.st_dev:
+            raise RecoveryError(f"credential file changed during verification: {path}")
+        value = os.read(fd, 16385)
+    finally:
+        os.close(fd)
+    if not value or len(value) > 16384:
+        raise RecoveryError(f"credential content length is invalid: {path}")
+    return value
+
+
+def staged_credentials_current() -> bool:
+    """Compare protected sources to staged copies without printing or hashing values."""
+    if not staged_credentials_ready():
+        return False
+    for source, staged in BOOTSTRAP_TO_STAGED:
+        source_value = _read_private_bounded(source, expected_uid=0, expected_mode=0o600)
+        staged_value = _read_private_bounded(staged, expected_uid=1000, expected_mode=0o400)
+        if not hmac.compare_digest(source_value, staged_value):
+            return False
+    return True
+
+
+def recreate_runtime_for_credential_refresh() -> None:
+    if not LIVE_DEPLOY.is_file():
+        raise RecoveryError("live container replacement helper is missing")
+    inspect = json.loads(run(["docker", "inspect", RUNTIME_CONTAINER]).stdout or "[]")
+    if len(inspect) != 1:
+        raise RecoveryError("live runtime inspection failed")
+    live = inspect[0]
+    image_id = str(live.get("Image") or "")
+    labels = (live.get("Config") or {}).get("Labels") or {}
+    revision = str(labels.get("com.teamaot.jason.source_revision") or "")
+    if not image_id.startswith("sha256:") or len(revision) != 40:
+        raise RecoveryError("live runtime image/revision identity is invalid")
+    rollback = "jason-runtime-credential-refresh-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    result = run([
+        sys.executable, str(LIVE_DEPLOY),
+        "--live", RUNTIME_CONTAINER,
+        "--image", image_id,
+        "--rollback", rollback,
+        "--source-revision", revision,
+        "--health-url", "http://127.0.0.1:8080/healthz",
+        "--harden",
+    ], quiet=True)
+    require_ok(result, "runtime credential remount failed")
+    cleanup = run(["docker", "rm", rollback], quiet=True)
+    require_ok(cleanup, "credential-refresh rollback container cleanup failed")
+    print("RUNTIME_CREDENTIAL_REMOUNT=PASS")
+
+
 def staged_credentials_ready() -> bool:
     for path in STAGED_FILES:
         try:
@@ -176,19 +245,22 @@ def staged_credentials_ready() -> bool:
     return True
 
 
-def stage_runtime_credentials() -> None:
-    if staged_credentials_ready():
-        print("RUNTIME_CREDENTIAL_STAGING=ALREADY_READY")
-        return
-    if any(path.exists() for path in STAGED_FILES):
-        raise RecoveryError("runtime credential staging is incomplete; refusing implicit replacement")
+def stage_runtime_credentials() -> bool:
+    if staged_credentials_ready() and staged_credentials_current():
+        print("RUNTIME_CREDENTIAL_STAGING=ALREADY_CURRENT")
+        return False
     if not STAGER.is_file():
         raise RecoveryError(f"credential staging tool is missing: {STAGER}")
-    result = run([sys.executable, str(STAGER), "--stage"], quiet=True)
+    replace = any(path.exists() for path in STAGED_FILES)
+    args = [sys.executable, str(STAGER), "--stage"]
+    if replace:
+        args.append("--replace-existing")
+    result = run(args, quiet=True)
     require_ok(result, "provider runtime credential staging failed")
-    if not staged_credentials_ready():
-        raise RecoveryError("provider runtime credential staging did not produce the expected files")
-    print("RUNTIME_CREDENTIAL_STAGING=PASS")
+    if not staged_credentials_ready() or not staged_credentials_current():
+        raise RecoveryError("provider runtime credential staging did not converge to authoritative source")
+    print("RUNTIME_CREDENTIAL_STAGING=" + ("REFRESHED" if replace else "PASS"))
+    return True
 
 
 def wait_container_health(name: str, timeout_seconds: int = 120) -> None:
@@ -246,7 +318,9 @@ def main() -> int:
             raise RecoveryError("OpenBao is not initialized and unsealed after recovery")
         print("OPENBAO_READY=PASS")
 
-        stage_runtime_credentials()
+        credentials_changed = stage_runtime_credentials()
+        if credentials_changed:
+            recreate_runtime_for_credential_refresh()
 
         require_ok(
             run(["docker", "update", "--restart", "unless-stopped", RUNTIME_CONTAINER], quiet=True),
