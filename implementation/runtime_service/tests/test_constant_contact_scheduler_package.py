@@ -28,8 +28,10 @@ def test_independent_timer_never_installs_enabled():
     assert "Persistent=false" in timer
     assert "systemctl --user enable" not in installer
     assert "systemctl --user start" not in installer
-    assert "jason-constant-contact-reconcile.timer" in desired["allowed_user_units"]
+    assert "jason-constant-contact-reconcile.timer" not in desired["allowed_user_units"]
+    assert "jason-constant-contact-reconcile.service" not in desired["allowed_user_units"]
     assert "jason-constant-contact-reconcile.timer" not in desired["required_user_units"]
+    assert "jason-constant-contact-reconcile.service" not in desired["required_user_units"]
 
 
 def test_production_runtime_declares_excel_dependency():
