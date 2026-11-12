@@ -83,7 +83,9 @@
     "jason-release-approval-only.service",
     "jason-release-manager.service",
     "jason-self-heal-watchdog.service",
-    "jason-support-repair-worker.service"
+    "jason-support-repair-worker.service",
+    "jason-constant-contact-reconcile.service",
+    "jason-constant-contact-reconcile.timer"
   ],
   "rollback_container_prefixes": [
     "jason-runtime-rollback-",
