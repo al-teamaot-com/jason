@@ -105,6 +105,42 @@ else
   fi
 fi
 
+
+# Shared source-controlled activation for qualified, authenticated AOT human
+# technicians using approved client-notification templates only. This is a new
+# organization grant requiring its own release review; never enable by an SSH
+# environment override or carry it through an older-image rollback.
+SOURCE_CLIENT_NOTIFICATION_TECH_PROFILE="$(python3 - "$REPO_ROOT/config/aot-client-notification-technician-profile.json" <<'PY_NOTIFICATION_TECH'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+if path.is_symlink():
+    raise SystemExit("DENIED: notification technician policy symlink")
+if not path.exists():
+    print("")  # Historical source has no client-notification technician grant.
+    raise SystemExit(0)
+try:
+    doc = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, ValueError):
+    raise SystemExit("DENIED: unreadable notification technician policy")
+if (not isinstance(doc, dict)
+        or set(doc) != {"schema_version", "profile"}
+        or doc.get("schema_version") != "1.0"
+        or doc.get("profile") not in ("off", "approved-workflow-technician-v1")):
+    raise SystemExit("DENIED: unreviewed notification technician policy")
+print("" if doc["profile"] == "off" else doc["profile"])
+PY_NOTIFICATION_TECH
+)" || exit 2
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  CLIENT_NOTIFICATION_TECH_PROFILE=""
+else
+  CLIENT_NOTIFICATION_TECH_PROFILE="$SOURCE_CLIENT_NOTIFICATION_TECH_PROFILE"
+  if [ "${JASON_AOT_CLIENT_NOTIFICATION_TECH_PROFILE:-}" != "$CLIENT_NOTIFICATION_TECH_PROFILE" ]; then
+    echo "DENIED: client-notification technician authority differs from immutable source" >&2
+    exit 2
+  fi
+fi
+
 if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
 fi
@@ -232,6 +268,7 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --set-env JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH="$QBO_ACTIVE_SECRET_CONTAINER" \
   --set-env JASON_QUICKBOOKS_OAUTH_DB="$QBO_ACTIVE_DB" \
   --set-env "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE=$STAFF_NOTE_PROFILE" \
+  --set-env "JASON_AOT_CLIENT_NOTIFICATION_TECH_PROFILE=$CLIENT_NOTIFICATION_TECH_PROFILE" \
   --set-env "JASON_AOT_ADMIN_APPROVER_PROFILE=$ADMIN_APPROVER_PROFILE" \
   --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \

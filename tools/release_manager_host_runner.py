@@ -50,6 +50,7 @@ MUTATION_ENV_OVERRIDES = {
     "JASON_AUTOTASK_TICKET_UPDATE_MCP_PROFILE": "",
     "JASON_AUTOTASK_INTERNAL_NOTE_MCP_PROFILE": "",
     "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE": "",
+    "JASON_AOT_CLIENT_NOTIFICATION_TECH_PROFILE": "",
     "JASON_AOT_ADMIN_APPROVER_PROFILE": "",
     "JASON_AUTOTASK_CLIENT_NOTIFICATION_PROFILE": "",
     "JASON_AUTOTASK_PROCUREMENT_MCP_PROFILE": "",
@@ -232,6 +233,26 @@ def declared_aot_staff_note_profile(candidate_worktree: Path) -> str:
             or obj.get("profile") not in {"off", "internal-note-v1"}):
         raise ReleaseManagerError("staff-note activation declaration invalid")
     return "" if obj["profile"] == "off" else "internal-note-v1"
+
+
+def declared_aot_client_notification_tech_profile(candidate_worktree: Path) -> str:
+    """Source-controlled opt-in; no host switch or legacy rollback can elevate."""
+    path = candidate_worktree / "config" / "aot-client-notification-technician-profile.json"
+    if path.is_symlink():
+        raise ReleaseManagerError("client-notification technician profile cannot be symlinked")
+    if not path.exists():
+        # Last-known-good revisions have no such authority profile.
+        return ""
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ReleaseManagerError("client-notification technician profile unreadable") from error
+    if (not isinstance(obj, dict)
+            or set(obj) != {"schema_version", "profile"}
+            or obj.get("schema_version") != "1.0"
+            or obj.get("profile") not in ("off", "approved-workflow-technician-v1")):
+        raise ReleaseManagerError("client-notification technician profile invalid")
+    return "" if obj["profile"] == "off" else obj["profile"]
 
 
 def declared_autotask_read_profile(candidate_worktree: Path) -> str | None:
@@ -3329,6 +3350,14 @@ def native_deploy_environment(
     ):
         raise ReleaseManagerError("host staff-note override differs from immutable source")
     env["JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE"] = staff_note_profile
+    notification_tech_profile = declared_aot_client_notification_tech_profile(candidate_tree)
+    if os.environ.get("JASON_AOT_CLIENT_NOTIFICATION_TECH_PROFILE") not in (
+        None, notification_tech_profile,
+    ):
+        raise ReleaseManagerError(
+            "host notification-technician override differs from immutable source"
+        )
+    env["JASON_AOT_CLIENT_NOTIFICATION_TECH_PROFILE"] = notification_tech_profile
     mobile_policy = declared_mobile_release_approval_policy(candidate_tree)
     if os.environ.get("JASON_RELEASE_MOBILE_APPROVAL_MODE") not in (None, mobile_policy["mode"]):
         raise ReleaseManagerError("invoking release approval mode conflicts with immutable candidate")
@@ -3355,6 +3384,7 @@ _NATIVE_DEPLOY_CONTRACT_KEYS = (
     "JASON_RELEASE_MOBILE_APPROVAL_MODE",
     "JASON_AOT_ADMIN_APPROVER_PROFILE",
     "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE",
+    "JASON_AOT_CLIENT_NOTIFICATION_TECH_PROFILE",
 )
 
 
