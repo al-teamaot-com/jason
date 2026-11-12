@@ -323,9 +323,14 @@ def test_runtime_access_four_file_exact_change_and_audit_receipt(monkeypatch, tm
     overrides = {}
     def fake_fstat(fd):
         x = real_fstat(fd)
-        return SimpleNamespace(
-            st_uid=0, st_gid=overrides.get(fd, (0, 0o600))[0],
-            st_mode=(x.st_mode & ~0o777) | overrides.get(fd, (0, 0o600))[1])
+        # Preserve the complete os.stat_result ABI. Pytest and CPython may
+        # consult st_size/st_ino on unrelated file descriptors during capture.
+        import os
+        fields=list(x)
+        fields[0]=(x.st_mode & ~0o777) | overrides.get(fd, (0, 0o600))[1]
+        fields[4]=0
+        fields[5]=overrides.get(fd, (0, 0o600))[0]
+        return os.stat_result(fields)
     monkeypatch.setattr(mod.os, "fstat", fake_fstat)
     def fake_chown(fd, uid, gid):
         assert uid == 0 and gid in {0,1000}
@@ -367,8 +372,12 @@ def test_runtime_access_failed_mode_change_restores_original_descriptor_metadata
     def fake_fstat(fd):
         x=real_fstat(fd)
         gid,mode=state.get(fd,(0,0o600))
-        return SimpleNamespace(st_uid=0,st_gid=gid,
-                               st_mode=(x.st_mode & ~0o777)|mode)
+        import os
+        fields=list(x)
+        fields[0]=(x.st_mode & ~0o777)|mode
+        fields[4]=0
+        fields[5]=gid
+        return os.stat_result(fields)
     monkeypatch.setattr(mod.os,"fstat",fake_fstat)
     def fchown(fd,uid,gid):
         state[fd]=(gid,state.get(fd,(0,0o600))[1])
