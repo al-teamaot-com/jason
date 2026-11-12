@@ -1,6 +1,14 @@
 # AOT Microsoft 365 group administration — controlled release packet
 
-**Status: final-source CI / release approval preparation. NOT DEPLOYED.**
+**Status: pilot authorization preparation only; NOT DEPLOYED.**
+
+**Current source-isolation notice (2026-11-12):** The separate PMv4 issuer
+release preparation detected that the protected pilot AppRole runtime mounts
+are not preflight-ready. A distinct source-only release candidate deliberately
+sets `config/microsoft_graph/group-admin-release.json` to the exact OFF profile,
+leaving this future pilot **unactivated**. The ON scope described below is a
+later, separately approved M365 production project, not part of that PMv4
+candidate. See `PMv4-Stage-A0-M365-Group-Pilot-Activation-Isolation-20261112.md`.
 
 ## Governance and scope
 

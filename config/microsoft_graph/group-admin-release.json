@@ -1,7 +1,5 @@
 {
   "schema_version": "1.0",
   "service": "aot-microsoft-group-admin",
-  "profile": "aot-group-admin-exact-pilot-v1",
-  "client_id": "client-aot-internal",
-  "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c"
+  "profile": "off"
 }

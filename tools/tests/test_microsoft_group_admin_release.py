@@ -5,7 +5,7 @@ import sys
 import pytest
 
 from tools import deploy_live_container
-from tools.microsoft_group_admin_release_profile import ALLOWED, read_profile
+from tools.microsoft_group_admin_release_profile import ALLOWED, ALLOWED_OFF, read_profile
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = ROOT / "config/microsoft_graph/group-admin-release.json"
@@ -17,10 +17,30 @@ DESTINATIONS = tuple(
 )
 
 
-def test_approved_source_profile_is_explicit_and_exact():
-    assert read_profile(PROFILE) == ALLOWED["profile"]
+def test_default_source_profile_is_explicitly_off_for_independent_release():
+    assert json.loads(PROFILE.read_text()) == ALLOWED_OFF
+    assert read_profile(PROFILE) == ""
     assert ALLOWED["client_id"] == "client-aot-internal"
     assert ALLOWED["tenant_id"] == "f7054323-d52b-4863-8c2f-1898f0b6077c"
+
+
+def test_only_exact_separate_pilot_source_can_enable_profile(tmp_path):
+    source = tmp_path / "active-reviewed-pilot.json"
+    source.write_text(json.dumps(ALLOWED))
+    assert read_profile(source) == ALLOWED["profile"]
+
+
+def test_default_off_rejects_drifted_or_injected_role_bindings(tmp_path):
+    source = tmp_path / "off-drift.json"
+    for mutation in ({"client_id": "client-aot-internal"},
+                     {"tenant_id": ALLOWED["tenant_id"]},
+                     {"profile": "aot-group-admin-exact-pilot-v1"},
+                     {"unexpected": True}):
+        data = dict(ALLOWED_OFF)
+        data.update(mutation)
+        source.write_text(json.dumps(data))
+        with pytest.raises(PermissionError, match="NOT_APPROVED"):
+            read_profile(source)
 
 
 @pytest.mark.parametrize("change", (
