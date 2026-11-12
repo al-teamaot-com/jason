@@ -129,6 +129,32 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-mail-read-approle"
         ),
     },
+    "microsoft_graph_sharepoint_write": {
+        "logical_name": "microsoft_graph.sharepoint_write",
+        "secret_path": "secret/data/connectors/microsoft-graph/production/sharepoint-write",
+        "fields": (
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        ),
+        "required_fields": (
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        ),
+        "policy_name": "jason-microsoft-graph-sharepoint-write",
+        "role_name": "jason-microsoft-graph-sharepoint-write",
+        "connector_identity": "microsoft-graph-sharepoint-write",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/microsoft-sharepoint-write-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
     "kyocera_kfs": {
         "logical_name": "kyocera_kfs.readonly",
         "secret_path": "secret/data/connectors/kyocera-kfs/production/read-only",

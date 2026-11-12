@@ -929,6 +929,20 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / Finance/Operations Owner
 - **Review trigger:** Implement before declaring TODO-OPS-007 end-to-end complete.
 
+### TODO-FIN-001 — Daily 5:00 AM financial statement organizer and reconciliation intake
+
+- **Priority:** P1
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-11-05
+- **Autonomous engineering readiness:** Approved
+- **Risk level:** High
+- **Idea:** Run a Jason-side scheduled maintenance job every day at 05:00 America/New_York that recursively scans the AOT SharePoint `Bank Checking Accounts Register` intake boundary, identifies new bank, line-of-credit, and credit-card statements from authoritative document content, and moves verified statements into the canonical organized hierarchy.
+- **Approved scope:** Reuse Jason's existing scheduler/orchestrator and Microsoft/SharePoint connector architecture. Add the reusable governed SharePoint read/move/rename primitives needed by this workflow rather than a one-off shell cron. Canonical filename is `BankName-Last4-MMYYYY.pdf`. Exact duplicates are reported and left intact; ambiguous/conflicting items remain in place; unrelated PDFs are excluded.
+- **Authority boundary:** No QuickBooks writes, no automatic deletion, no unmanaged external scheduler, and no silent permission expansion. Provider mutation requires explicit Microsoft permission plus Jason authority and readback verification. Production deployment remains subject to PMV3 exact-revision approval.
+- **Acceptance criteria:** Actual Jason scheduler evidence proves a 05:00 America/New_York run; representative bank, LOC, and credit-card statements are classified/moved/renamed correctly; duplicates and ambiguous documents remain untouched and reported; a second run is idempotent; throttling uses bounded Retry-After handling; final SharePoint state and run evidence are read back.
+- **Tracking issue:** #2294
+- **Decision owner:** AOT Owner / Finance Operations
+- **Review trigger:** Do not call this complete until the production scheduler is enabled and a real run is verified.
+
 ### TODO-FIN-002 — QuickBooks Online integration with provider-native financial authorization
 
 - **Priority:** P1

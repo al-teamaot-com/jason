@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 def autonomy_maintenance_enabled(settings: RuntimeSettings) -> bool:
     return bool(
         settings.autonomy_worker_enabled
+        or settings.financial_statement_maintenance_enabled
         or settings.autonomy_shadow_enabled
         or settings.autonomy_review_enabled
         or settings.support_repair_autonomy_enabled
@@ -34,6 +35,7 @@ def http_runtime_settings(settings: RuntimeSettings) -> RuntimeSettings:
             settings.autonomy_review_enabled or settings.playbook_approval_ingress_enabled
         ),
         autonomy_review_enabled=False,
+        financial_statement_maintenance_enabled=False,
         support_repair_autonomy_enabled=False,
         universal_approval_worker_enabled=False,
         release_mobile_approval_worker_enabled=False,
@@ -45,7 +47,8 @@ def ticket_worker_runtime_settings(settings: RuntimeSettings) -> RuntimeSettings
     """Ticket process owns one ticket-admission ledger and no auxiliary loops."""
     return replace(
         settings, autonomy_worker_enabled=True, autonomy_shadow_enabled=False,
-        autonomy_review_enabled=False, support_repair_autonomy_enabled=False,
+        autonomy_review_enabled=False, financial_statement_maintenance_enabled=False,
+        support_repair_autonomy_enabled=False,
     )
 
 
