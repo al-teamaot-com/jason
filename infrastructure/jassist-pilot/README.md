@@ -182,3 +182,86 @@ between report and independently reproducible evidence. The older sections
 above describe the *earlier* state before CloudShell access succeeded.
 The proposed route is not applied; the disabled pilot and production hold
 remain unchanged.
+
+## Strict pilot activation admission candidate — not activated
+
+The exact, static **`activation-candidate.json`** scopes the source to
+the AOT Entra tenant/group, the AOT-managed **Al-Samsung** Datto UI
+ID `1717088` and independently verified native UUID
+`710e63d6-caca-d830-697a-81250b0a8321`, and the existing relay
+`mcp-jason.teamaot.com/v1/jassist/*`. Its status is explicitly
+`prepared_no_go`, production deployment authorization is false,
+and unverified release/rollback and 13 independent evidence references
+remain null. It carries **no tokens or key material**.
+
+The offline **`pilot_activation_admission.py`** denies unless an
+*independently authenticated governance evidence verifier* validates
+all 13 scoped gates, including exact protected-main candidate and
+rollback, Owner route approval, healthy release breaker, Entra/Datto
+provider proof, OpenBao key separation, content review, private HTTPS,
+Caddy evidence, retention and same-principal MCP read. Supplying a
+local JSON approval string or a true boolean does not authorize action.
+The CLI **always returns NO-GO or DENIED** and performs no writes.
+Positive cases in source tests use only explicitly synthetic trusted
+verifier callbacks; they are not deployed authority.
+
+Offline complete acceptance:
+`python3 -m unittest discover -s infrastructure/jassist-pilot/tests -p 'test_*.py'`.
+Current live service/readback findings, exactly scoped activation sequence
+and mandatory separate approval boundaries are recorded in
+`docs/engineering/JAssist-Pilot-Activation-Readiness-20261112.md`.
+
+The Caddy adapted-JSON preflight now *safely alpha-normalizes*
+only Caddy-generated `group[0-9]+` route labels; it preserves all
+group-sharing relationships, route order, TLS, auth/upstreams and
+existing routes. This matches the Work-reported semantic equivalence
+without discarding meaningful routing changes. Live adapted config
+artifacts are not available in this chat; do not substitute synthetic
+regressions for the completed Work-mode report or immutable hashes.
+
+
+## Docker base-image read-only digest pin — November 12
+
+The authorized development host used read-only Docker Registry metadata
+(`docker buildx imagetools inspect`) to resolve Python
+`3.12-slim-bookworm` for **linux/amd64** to the immutable OCI image
+digest `sha256:0f086103b026048cc50cb5da25ec435c023c5241a83fc44daea593377abc61c4`
+(Python 3.12.16). The source-only Dockerfile now pins that exact
+amd64 manifest rather than following a floating tag. No Docker image
+was pulled, built, started or deployed during this read-only inspection.
+Transitive Python package-hash lock and current dependency security
+review remain separate release admission checks.
+
+## Exact but inactive provider and dependency manifests
+
+The `openbao-scope.PROPOSED.hcl` and
+`openbao-mapping.PROPOSED.json` pair specifies a separate
+`jason-jassist-pilot-read` AppRole with read-only access to only
+two nonproduction KV-v2 keys; **do not install without exact-action
+vault authorization and governance review**. The
+`entra-consent.PROPOSED.json` is a readback/administrator-review
+contract, not permission to create an app or grant Graph roles.
+Disabled AOT group and fixture-review JSON policies are source
+examples only. All proposed scopes are covered by negative tests.
+
+For image reproducibility, the source Dockerfile pins the linux/amd64
+Python base OCI digest and installs exclusively from
+`requirements.lock.txt` with `pip --require-hashes
+--only-binary=:all:`. The lock contains seven exact CPython 3.12 /
+Linux amd64 wheel hashes resolved and revalidated on November 12.
+Do not confuse a source-only dependency lock with an already built,
+signed, scanned, running or authorized image.
+
+## Patched, locked dependency audit
+
+The initial read-only security audit found 15 advisories on proposed
+PyJWT 2.13.0. The pilot-only dependency is now pinned to **PyJWT
+2.15.1**. Its exact wheel SHA-256 is
+`42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193`.
+The seven-package `requirements.lock.txt` digest is
+`73ae29d49d51a6c95b6ca33de4cc91e13a3be20bc463d390a5d4853126f195ca`.
+`pip-audit 2.10.1` returned **zero known advisories** for these
+version-pinned packages on November 12. All 176 Python integration
+tests passed with the patched PyJWT 2.15.1 wheel on the Python import
+path. The unrelated running MCP 2.13.0 security review is tracked
+separately in issue #2464; no production image or library was touched.

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 from pathlib import Path
 
 MCP_HOST="mcp-jason.teamaot.com"
@@ -61,6 +62,38 @@ def _verify_pilot_route(node):
         raise RelayPreflightDenied("pilot Caddy route missing exact proxy")
 
 
+_CADDY_GENERATED_GROUP = re.compile(r"^group[0-9]+$")
+
+
+def _canonicalize_generated_groups(value):
+    """Normalize ONLY Caddy-generated route group numeric labels.
+
+    Different labels must remain different, and the same label must
+    remain shared across exactly the same routes. Preserve route order,
+    matcher, host, upstream, TLS, routes, terminal and all other fields.
+    Unknown/custom group names are never rewritten.
+    """
+    copy_of_value = copy.deepcopy(value)
+    group_map = {}
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, child in node.items():
+                if (key == "group" and isinstance(child, str)
+                        and _CADDY_GENERATED_GROUP.fullmatch(child)):
+                    if child not in group_map:
+                        group_map[child] = f"normalized-caddy-group-{len(group_map)}"
+                    node[key] = group_map[child]
+                else:
+                    walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+
+    walk(copy_of_value)
+    return copy_of_value
+
+
 def verified_single_route_delta(baseline: dict,candidate: dict) -> bool:
     if not isinstance(baseline,dict) or not isinstance(candidate,dict):
         raise RelayPreflightDenied("adapted Caddy configurations must be objects")
@@ -87,9 +120,9 @@ def verified_single_route_delta(baseline: dict,candidate: dict) -> bool:
     visit(trial)
     if len(found)!=1:
         raise RelayPreflightDenied("exactly one J-Assist route must be added")
-    if trial!=baseline:
+    if _canonicalize_generated_groups(trial) != _canonicalize_generated_groups(baseline):
         raise RelayPreflightDenied(
-            "candidate changes existing Caddy routes, TLS, proxy or global settings")
+            "candidate changes existing Caddy routes, group relationships, TLS, proxy or global settings")
     return True
 
 

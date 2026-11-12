@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "enabled": false,
+  "policy_version": "AOT-PILOT-FRAME-REVIEW-UNAPPROVED",
+  "reviewer_id": "AOT-PILOT-REVIEWER-UNASSIGNED",
+  "approved_sha256": []
+}

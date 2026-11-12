@@ -88,3 +88,34 @@ one delegated Jason API permission. No client secret.
 See ENTRA_APPROVAL_PACKET.md for the exact administrator actions and the
 one new Application (client) ID to return. The existing ChatGPT OAuth
 client remains untouched. Production freeze stays in place.
+
+## Current state — November 12, 2026 (supersedes historical v0.1.8 notes)
+
+J-Assist extension **v0.2.2** loads the guarded send coordinator, PKCE
+transport and live-readiness worker modules. The fixed pilot app ID in
+source is `d1cc801b-13ba-4d44-bea6-e7f08186e4d5`; this is **not proof
+that the corresponding SPA registration, redirect or delegated scope
+has been granted in Entra**. The exact extension redirect remains
+`https://pihjpgplfhmpenlghbcdbgdkadleflfi.chromiumapp.org/jassist`.
+
+Technician eligibility now uses the configurable existing Entra
+`AOT-Jason-JAssist-Users` security group
+`5273dd8a-1456-4985-b0a3-c00061267e26`. Native Datto
+device/site authorization is separate; a technician's Datto
+Administrator security level is **not** a fixed enrollment prerequisite.
+The verified provider numeric browser device ID -> native UUID lookup
+is a separately governed dependency in draft PR #2456.
+
+The current Jason live receiver is **not registered** and its HTTPS
+readiness returns HTTP 404; the Chrome send button must remain disabled.
+The Owner approved only a controlled AOT nonproduction screenshot
+pilot with content screening, encryption, 120-second expiry and no
+automatic endpoint commands; no production deployment or relay change
+was authorized. The current exact-frame hash allowlist is suitable
+only for independently preapproved synthetic/non-sensitive fixtures,
+not arbitrary live screenshots. See
+`docs/engineering/JAssist-Pilot-Activation-Readiness-20261112.md`
+for current consent, group, vault, DLP, release and activation gates.
+
+Historical sections above are retained to preserve provenance; do
+not treat their v0.1.8 implementation state as current.

@@ -247,3 +247,34 @@ Pilot service installation, live Entra/Datto/OpenBao/DLP acceptance and
 production-relevant exact-action activation authorization are **still
 pending**. No change to Caddy, AWS permissions, or production ticket
 processing has been approved in this turn.
+
+## November 12 activation candidate preflight: source prepared, **NO-GO**
+
+Current scoped manifest and independent 13-gate admission verifier live
+in `infrastructure/jassist-pilot/activation-candidate.json` and
+`pilot_activation_admission.py`. Separate detailed read-only
+provider checks and exact follow-on approval requirements are recorded
+in `docs/engineering/JAssist-Pilot-Activation-Readiness-20261112.md`.
+
+OpenBao is running/unsealed but the J-Assist-only AppRole/key mapping
+is not proven; Graph user-directory capability works but live group
+read and scoped JAssist.Send SPA consent are not proven; the numeric
+Datto Web Remote ID remains a production HTTP 404 until PR #2456 is
+separately integrated. Pilot policy files and encrypted store are not
+provisioned; DLP supports preapproved fixtures only; the readiness
+receiver is absent. Most importantly, root-protected production
+release breaker currently reports **OPEN** from a failed system
+unit. **No pilot route or production change may be applied.**
+
+## Pilot source security scan after activation preparation
+
+The source-only pilot image base is pinned to a specific linux/amd64
+Python 3.12 OCI digest, and a seven-wheel hashed requirements lock
+was verified. Piloted JWT validation moved from PyJWT 2.13.0
+(15 reported advisories) to **2.15.1 (0 known advisories in the
+seven-package pilot lock)**, without changing the running MCP
+container. Separate MCP production security issue **#2464** records
+the observed old version for independently governed remediation.
+The exact gate and preproduction status remain **NO-GO** until
+the 13 independent activation attestations and production health
+checks are satisfied.

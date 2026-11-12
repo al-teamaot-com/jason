@@ -1,5 +1,5 @@
 # The versions match the existing Jason MCP proven constraints, not floating.
 # Pin base-image digest and full transitive hashes before any deployment.
 cryptography==50.0.2
-PyJWT==2.13.0
+PyJWT==2.15.1
 uvicorn==0.52.4

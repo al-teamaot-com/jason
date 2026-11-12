@@ -63,14 +63,17 @@ class JAssistReusePilotTests(unittest.TestCase):
     def test_reviewed_build_has_no_activation_or_secrets(self):
         dockerfile=(ROOT/"Dockerfile").read_text()
         requirements=(ROOT/"requirements.pilot.txt").read_text()
+        self.assertIn("--require-hashes --only-binary=:all:",dockerfile)
+        self.assertIn("requirements.lock.txt",dockerfile)
         self.assertIn("USER 10001:10001",dockerfile)
+        self.assertIn("sha256:0f086103b026048cc50cb5da25ec435c023c5241a83fc44daea593377abc61c4",dockerfile)
         self.assertIn("disabled_app:app",dockerfile)
         self.assertNotIn("docker.sock",dockerfile)
         self.assertNotIn("jason-runtime:",dockerfile)
         self.assertNotIn("/var/lib/jason/openclaw",dockerfile)
         self.assertNotIn("ADD https:",dockerfile)
         self.assertIn("cryptography==50.0.2",requirements)
-        self.assertIn("PyJWT==2.13.0",requirements)
+        self.assertIn("PyJWT==2.15.1",requirements)
         self.assertIn("uvicorn==0.52.4",requirements)
 
     def test_same_existing_hostname_and_proposed_route_only(self):

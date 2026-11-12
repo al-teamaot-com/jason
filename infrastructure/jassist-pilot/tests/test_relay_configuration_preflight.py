@@ -56,6 +56,38 @@ class RelayDeltaTests(unittest.TestCase):
                 with self.assertRaises(v.RelayPreflightDenied):
                     v.verified_single_route_delta(self.baseline,changed)
 
+    def test_generated_caddy_group_label_renumbering_preserves_semantics(self):
+        baseline=copy.deepcopy(self.baseline)
+        candidate=copy.deepcopy(self.candidate)
+        original=baseline["apps"]["http"]["servers"]["srvr0"]["routes"]
+        updated=candidate["apps"]["http"]["servers"]["srvr0"]["routes"]
+        original[0]["group"]="group1"
+        original[1]["group"]="group3"
+        updated[0]["group"]="group21"
+        updated[1]["group"]="group23"
+        self.assertTrue(v.verified_single_route_delta(baseline,candidate))
+        # Do not accept arbitrary custom group names or structural mutations.
+        updated[0]["group"]="custom-authorizer-group"
+        with self.assertRaises(v.RelayPreflightDenied):
+            v.verified_single_route_delta(baseline,candidate)
+
+    def test_group_aliasing_change_and_order_change_must_fail(self):
+        baseline=copy.deepcopy(self.baseline)
+        candidate=copy.deepcopy(self.candidate)
+        existing=baseline["apps"]["http"]["servers"]["srvr0"]["routes"]
+        proposed=candidate["apps"]["http"]["servers"]["srvr0"]["routes"]
+        existing[0]["group"]="group0"
+        existing[1]["group"]="group0"
+        proposed[0]["group"]="group11"
+        proposed[1]["group"]="group12"
+        with self.assertRaises(v.RelayPreflightDenied):
+            v.verified_single_route_delta(baseline,candidate)
+        # This is an exact route-order-preservation check, not just a multiset.
+        swapped=copy.deepcopy(self.candidate)
+        swapped["apps"]["http"]["servers"]["srvr0"]["routes"].reverse()
+        with self.assertRaises(v.RelayPreflightDenied):
+            v.verified_single_route_delta(self.baseline,swapped)
+
     def test_wrong_peer_unscoped_route_or_duplicate_pilot_rejected(self):
         changed=copy.deepcopy(self.candidate)
         changed["apps"]["http"]["servers"]["srvr0"]["routes"][0]["handle"][0]["routes"][-1]["handle"][0]["routes"][0]["handle"][0]["upstreams"][0]["dial"]="0.0.0.0:3981"

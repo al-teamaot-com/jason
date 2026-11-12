@@ -14,6 +14,11 @@ host:
   pilot_pid_limit: 64
   pilot_tmpfs_limit_mib: 64
   pilot_state_disk_budget_mib: 1024
+  base_image_platform: linux/amd64
+  base_image_digest: sha256:0f086103b026048cc50cb5da25ec435c023c5241a83fc44daea593377abc61c4
+  requirements_lock_sha256: 73ae29d49d51a6c95b6ca33de4cc91e13a3be20bc463d390a5d4853126f195ca
+  verified_wheel_count: 7
+  image_built_or_deployed: false
   planned_uid: 10001
   planned_gid: 10001
   filesystem_read_only: true
