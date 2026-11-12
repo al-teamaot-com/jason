@@ -81,6 +81,8 @@ from connectors.dnsfilter.mcp_oauth import (
     DnsFilterMcpOAuthStore,
     complete_dnsfilter_oauth,
 )
+from connectors.constant_contact.callback import complete_authorization as complete_constant_contact_oauth
+from connectors.constant_contact.oauth_store import EncryptedOAuthStore
 from connectors.quickbooks.connector import (
     QUICKBOOKS_LOGICAL_SECRET,
     QUICKBOOKS_PRODUCTION_LOGICAL_SECRET,
@@ -234,6 +236,19 @@ JASON_QUICKBOOKS_PRODUCTION_OPENBAO_SECRET_ID_PATH = Path(
         "/run/jason-secrets/openbao/quickbooks-production/secret_id",
     )
 )
+
+JASON_CONSTANT_CONTACT_OAUTH_DB = Path(os.environ.get(
+    "JASON_CONSTANT_CONTACT_OAUTH_DB",
+    "/var/lib/jason/openclaw/constant-contact/oauth.sqlite3",
+))
+JASON_CONSTANT_CONTACT_OPENBAO_ROLE_ID_PATH = Path(os.environ.get(
+    "JASON_CONSTANT_CONTACT_OPENBAO_ROLE_ID_PATH",
+    "/run/jason-secrets/openbao/constant-contact/role_id",
+))
+JASON_CONSTANT_CONTACT_OPENBAO_SECRET_ID_PATH = Path(os.environ.get(
+    "JASON_CONSTANT_CONTACT_OPENBAO_SECRET_ID_PATH",
+    "/run/jason-secrets/openbao/constant-contact/secret_id",
+))
 
 JASON_AUTOENROLL_DOMAINS = frozenset(
     item.strip().casefold()
@@ -7890,6 +7905,84 @@ def _send_procurement_review_to_teams(
     return tuple(message_ids)
 
 
+def _constant_contact_import_workflow():
+    # Disabled unless the reviewed, separately opt-in pilot is activated.
+    flow = getattr(_runtime(), "constant_contact_import_workflow", None)
+    if flow is None:
+        raise PermissionError("CONSTANT_CONTACT_IMPORT_PILOT_INACTIVE")
+    return flow
+
+
+def _constant_contact_mcp_identity():
+    from types import SimpleNamespace
+    tenant_id, object_id = _authenticated_microsoft_transport_identity()
+    # Assurance is independently derived from validated MCP Entra bearer
+    # evidence; no caller-supplied identity or approval is accepted.
+    return SimpleNamespace(
+        authentication_assurance="entra-oauth-bearer",
+        microsoft_tenant_id=tenant_id,
+        microsoft_object_id=object_id,
+    )
+
+
+@mcp.tool()
+def constant_contact_excel_preview(
+    workbook_base64: str,
+    source_sha256: str,
+    source_reference: str,
+    filename: str,
+    list_ids: list[str],
+) -> dict[str, Any]:
+    """Preview a SHA-verified XLSX attachment in the disabled-by-default pilot.
+
+    Supply exact original XLSX bytes as base64, not reconstructed contact rows.
+    This is a provider-read preview, NOT an upload or write authorization.
+    """
+    identity = _constant_contact_mcp_identity()
+    try:
+        flow = _constant_contact_import_workflow()
+        return flow.preview_attachment(
+            identity=identity,
+            workbook_base64=workbook_base64,
+            source_sha256=source_sha256,
+            source_reference=source_reference,
+            filename=filename,
+            list_ids=tuple(list_ids),
+        )
+    except PermissionError:
+        return {"status": "denied", "error_code": "constant_contact_not_authorized"}
+    except Exception:
+        return {"status": "rejected", "error_code": "constant_contact_preview_unavailable"}
+
+
+@mcp.tool()
+def constant_contact_excel_request_approval(work_id: str) -> dict[str, Any]:
+    """Request existing canonical signed exact-plan approval; never import directly."""
+    identity = _constant_contact_mcp_identity()
+    try:
+        return _constant_contact_import_workflow().submit_approval(
+            identity=identity, work_id=work_id,
+        )
+    except PermissionError:
+        return {"status": "denied", "error_code": "constant_contact_not_authorized"}
+    except Exception:
+        return {"status": "rejected", "error_code": "constant_contact_approval_unavailable"}
+
+
+@mcp.tool()
+def constant_contact_excel_readback(work_id: str) -> dict[str, Any]:
+    """Read exact provider import activity and list membership; never POST."""
+    identity = _constant_contact_mcp_identity()
+    try:
+        return _constant_contact_import_workflow().readback(
+            identity=identity, work_id=work_id,
+        )
+    except PermissionError:
+        return {"status": "denied", "error_code": "constant_contact_not_authorized"}
+    except Exception:
+        return {"status": "rejected", "error_code": "constant_contact_readback_unavailable"}
+
+
 @mcp.tool()
 def process_procurement_invoice(
     vendor_name: str,
@@ -8629,6 +8722,54 @@ async def _complete_quickbooks_oauth_callback(
     )
 
 
+def _constant_contact_credentials() -> Mapping[str, str]:
+    resolver = OpenBaoSecretResolver(
+        base_url=os.environ.get("JASON_OPENBAO_URL", "http://openbao:8200"),
+        role_id_path=JASON_CONSTANT_CONTACT_OPENBAO_ROLE_ID_PATH,
+        secret_id_path=JASON_CONSTANT_CONTACT_OPENBAO_SECRET_ID_PATH,
+    )
+    return resolver.resolve(
+        "constant_contact.oauth_client",
+        ConnectorContext(
+            correlation_id="constant-contact-oauth-callback",
+            principal_id="svc-jason-mcp-oauth",
+            organization_id="aot",
+            client_id=None,
+            capability="constant_contact.oauth.complete",
+            mode="execute",
+        ),
+    )
+
+
+def _complete_constant_contact_callback(query_string: str) -> dict[str, object]:
+    import base64
+    credentials = _constant_contact_credentials()
+    try:
+        key = base64.b64decode(credentials["token_key_b64"], validate=True)
+    except (KeyError, ValueError):
+        raise ValueError("Constant Contact OAuth token encryption key unavailable") from None
+    return complete_constant_contact_oauth(
+        query_string=query_string,
+        store=EncryptedOAuthStore(JASON_CONSTANT_CONTACT_OAUTH_DB, key),
+        credentials=credentials,
+    )
+
+
+async def constant_contact_oauth_callback(request: StarletteRequest):
+    try:
+        result = await asyncio.to_thread(
+            _complete_constant_contact_callback, request.url.query,
+        )
+    except Exception:
+        logger.warning("Constant Contact OAuth authorization rejected without credential disclosure")
+        return JSONResponse(
+            {"status": "error", "message": "Constant Contact authorization could not be completed."},
+            status_code=400,
+            headers={"Cache-Control": "no-store"},
+        )
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
 async def quickbooks_oauth_callback(request: StarletteRequest):
     return await _complete_quickbooks_oauth_callback(
         request, environment="sandbox"
@@ -8781,6 +8922,11 @@ app.add_route(
 app.add_route(
     "/oauth/dnsfilter/callback",
     dnsfilter_oauth_callback,
+    methods=["GET"],
+)
+app.add_route(
+    "/oauth/constant-contact/callback",
+    constant_contact_oauth_callback,
     methods=["GET"],
 )
 app.add_route(

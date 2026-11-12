@@ -414,6 +414,16 @@ from .reflection_runtime import (
     register_reflection_runtime_foundation,
 )
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
+from .constant_contact_reads import (
+    build_read_invoker as build_constant_contact_read_invoker,
+    register_read_invokers as register_constant_contact_read_invokers,
+    register_runtime_foundation as register_constant_contact_runtime_foundation,
+)
+from .constant_contact_activation import apply_import_from_env as activate_constant_contact_import
+from .constant_contact_import_runtime import (
+    build_import_invoker as build_constant_contact_import_invoker,
+    register_import_invoker as register_constant_contact_import_invoker,
+)
 from .quickbooks_reads import (
     build_quickbooks_read_invoker,
     register_quickbooks_read_invokers,
@@ -512,6 +522,24 @@ class RuntimeSettings:
     dnsfilter_mcp_enabled: bool = False
     dnsfilter_mcp_oauth_db: Path = Path(
         "/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3"
+    )
+    constant_contact_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/constant-contact/role_id"
+    )
+    constant_contact_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/constant-contact/secret_id"
+    )
+    constant_contact_oauth_db: Path = Path(
+        "/var/lib/jason/openclaw/constant-contact/oauth.sqlite3"
+    )
+    constant_contact_import_work_db: Path = Path(
+        "/var/lib/jason/openclaw/constant-contact/import-work.sqlite3"
+    )
+    constant_contact_import_claims_db: Path = Path(
+        "/var/lib/jason/openclaw/constant-contact/import-claims.sqlite3"
+    )
+    constant_contact_account_binding_path: Path = Path(
+        "/run/jason-secrets/constant-contact/approved-account.json"
     )
     quickbooks_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/quickbooks/role_id"
@@ -874,6 +902,42 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_DNSFILTER_MCP_OAUTH_DB",
                     "/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3",
+                )
+            ),
+            constant_contact_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/constant-contact/role_id",
+                )
+            ),
+            constant_contact_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/constant-contact/secret_id",
+                )
+            ),
+            constant_contact_oauth_db=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_OAUTH_DB",
+                    "/var/lib/jason/openclaw/constant-contact/oauth.sqlite3",
+                )
+            ),
+            constant_contact_import_work_db=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_IMPORT_WORK_DB",
+                    "/var/lib/jason/openclaw/constant-contact/import-work.sqlite3",
+                )
+            ),
+            constant_contact_import_claims_db=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_IMPORT_CLAIMS_DB",
+                    "/var/lib/jason/openclaw/constant-contact/import-claims.sqlite3",
+                )
+            ),
+            constant_contact_account_binding_path=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_ACCOUNT_BINDING_PATH",
+                    "/run/jason-secrets/constant-contact/approved-account.json",
                 )
             ),
             quickbooks_openbao_role_id_path=Path(
@@ -1487,6 +1551,17 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         )
     )
     register_email_send(capabilities=capabilities, providers=providers)
+    constant_contact_activation = register_constant_contact_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
+    constant_contact_import_activation = activate_constant_contact_import(
+        capabilities=capabilities, providers=providers,
+        read_enabled=constant_contact_activation.enabled,
+    )
+    if constant_contact_import_activation.enabled and settings.universal_approval_mode != "enforced":
+        raise RuntimeError("Constant Contact imports require the trusted universal approval service")
     quickbooks_activation = register_quickbooks_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1848,6 +1923,35 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         # and turn all Autotask reads into service-only denials.
         bindings=source_authorization_bindings,
     )
+    constant_contact_read_invoker = (
+        build_constant_contact_read_invoker(
+            openbao_url=settings.openbao_url,
+            role_id_path=settings.constant_contact_openbao_role_id_path,
+            secret_id_path=settings.constant_contact_openbao_secret_id_path,
+            oauth_db=settings.constant_contact_oauth_db,
+            transport=http_transport,
+            audit=ConnectorEventAudit(orchestration_events),
+            bindings=source_authorization_bindings,
+        )
+        if constant_contact_activation.enabled
+        else None
+    )
+    constant_contact_import_invoker = (
+        build_constant_contact_import_invoker(
+            openbao_url=settings.openbao_url,
+            role_id_path=settings.constant_contact_openbao_role_id_path,
+            secret_id_path=settings.constant_contact_openbao_secret_id_path,
+            oauth_db=settings.constant_contact_oauth_db,
+            work_db=settings.constant_contact_import_work_db,
+            claims_db=settings.constant_contact_import_claims_db,
+            account_binding_path=settings.constant_contact_account_binding_path,
+            transport=http_transport,
+            bindings=source_authorization_bindings,
+            universal_handler=lambda: universal_approval_handler,
+        )
+        if constant_contact_import_activation.enabled
+        else None
+    )
     quickbooks_read_invoker = (
         build_quickbooks_read_invoker(
             openbao_url=settings.openbao_url,
@@ -2173,6 +2277,15 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         invokers=invokers,
         invoker=provider_read_invoker,
     )
+    if constant_contact_read_invoker is not None:
+        register_constant_contact_read_invokers(
+            invokers=invokers,
+            invoker=constant_contact_read_invoker,
+        )
+    if constant_contact_import_invoker is not None:
+        register_constant_contact_import_invoker(
+            invokers=invokers, invoker=constant_contact_import_invoker,
+        )
     if quickbooks_read_invoker is not None:
         register_quickbooks_read_invokers(
             invokers=invokers,
@@ -2374,6 +2487,28 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                     bindings=durable_bindings,
                 ),
             ),
+        )
+    constant_contact_import_workflow = None
+    if constant_contact_import_invoker is not None:
+        from .constant_contact_import_workflow import ConstantContactImportWorkflow
+        if universal_approval_handler is None or universal_approval_handler.issuer is None:
+            raise RuntimeError("Constant Contact pilot requires canonical plan issuance")
+        source_import_connector = constant_contact_import_invoker.connector
+        if source_import_connector is None:
+            raise RuntimeError("Constant Contact pilot provider adapter unavailable")
+        constant_contact_import_workflow = ConstantContactImportWorkflow(
+            connector=source_import_connector,
+            work_store=source_import_connector.work_store,
+            issuer=universal_approval_handler.issuer,
+        )
+    constant_contact_reconciliation_worker = None
+    if constant_contact_import_invoker is not None:
+        from connectors.constant_contact.import_reconcile import ConstantContactReadbackWorker
+        source_import_connector = constant_contact_import_invoker.connector
+        constant_contact_reconciliation_worker = ConstantContactReadbackWorker(
+            work_store=source_import_connector.work_store,
+            claims=source_import_connector.claims,
+            connector=source_import_connector,
         )
     request_factory = GovernedTeamsOrchestrationRequestFactory(
         authority=identity_authority,
@@ -3008,6 +3143,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         conversation_reasoning_client=hosted_conversation_client or ollama_client,
         governed_orchestrator=orchestrator,
         universal_approval_handler=universal_approval_handler,
+        constant_contact_import_workflow=constant_contact_import_workflow,
+        constant_contact_reconciliation_worker=constant_contact_reconciliation_worker,
         identity_authority=identity_authority,
         capabilities=capabilities,
         microsoft_identity_bindings=bindings,
