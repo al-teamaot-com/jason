@@ -424,11 +424,6 @@ def main() -> int:
         help="Remove only the exact owner signer private mount when deploying the rollback image.",
     )
     parser.add_argument(
-        "--omit-microsoft-group-binds-on-rollback",
-        action="store_true",
-        help="Remove only fixed AOT Microsoft group AppRole read/write mounts on the exact rollback image.",
-    )
-    parser.add_argument(
         "--promote-image-tag",
         action="append",
         default=[],
@@ -458,17 +453,6 @@ def main() -> int:
     ):
         parser.error("Owner signer mount may be omitted only for exact MCP rollback")
 
-    GROUP_MOUNT_DESTINATIONS = tuple(
-        f"/run/jason-secrets/openbao/microsoft-group-{role}/{field}"
-        for role in ("read", "write") for field in ("role_id", "secret_id")
-    )
-    if args.omit_microsoft_group_binds_on_rollback and (
-        (args.live, args.image) not in {
-            ("jason-runtime", "jason-runtime:rollback-current"),
-            ("jason-mcp-pilot", "jason-mcp:rollback-current"),
-        } or "JASON_M365_GROUP_ADMIN_PROFILE=" not in args.set_env
-    ):
-        parser.error("Microsoft group AppRole mounts may be omitted only for an exact disabled rollback")
     promote_tags = list(dict.fromkeys(tag.strip() for tag in args.promote_image_tag if tag.strip()))
     rollback_image_tag = str(args.rollback_image_tag or "").strip() or None
     if rollback_image_tag and not promote_tags:
@@ -493,8 +477,7 @@ def main() -> int:
         set_env=tuple(args.set_env),
         additional_readonly_binds=tuple(args.add_readonly_bind),
         omit_readonly_bind_destinations=(
-            ((SIGNER_DESTINATION,) if args.omit_owner_release_signer_bind_on_rollback else ())
-            + (GROUP_MOUNT_DESTINATIONS if args.omit_microsoft_group_binds_on_rollback else ())
+            (SIGNER_DESTINATION,) if args.omit_owner_release_signer_bind_on_rollback else ()
         ),
         pmv4_owner_projection=args.pmv4_owner_projection,
         omit_pmv4_owner_projection=args.omit_pmv4_owner_projection_on_rollback,
@@ -514,7 +497,6 @@ def main() -> int:
     print(f"SET_ENV_COUNT={len(args.set_env)}")
     print(f"ADDITIONAL_READONLY_BIND_COUNT={len(args.add_readonly_bind)}")
     print(f"OWNER_SIGNER_BIND_OMITTED={args.omit_owner_release_signer_bind_on_rollback}")
-    print(f"M365_GROUP_APPROLE_MOUNTS_REMOVED={args.omit_microsoft_group_binds_on_rollback}")
     print(f"PMV4_OWNER_PROJECTION_ENABLED={args.pmv4_owner_projection}")
     print(f"PMV4_OWNER_PROJECTION_REMOVED={args.omit_pmv4_owner_projection_on_rollback}")
     print(f"PROMOTE_IMAGE_TAG_COUNT={len(promote_tags)}")

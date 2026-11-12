@@ -824,34 +824,6 @@ else
 fi
 step_pass openbao_identity_lifecycle_install
 
-# Exact-SHA native release installation only. This installs two inert,
-# root-owned, reviewed files; it never changes provider credentials or
-# invokes the recovered identity. Local Owner action is a separate boundary.
-step_start itglue_read_owner_helper_install
-if [ -f "$RELEASE_DIR/tools/install_it_glue_approle_recovery.py" ]; then
-  for required in it_glue_approle_recovery.py provider_secret_provision.py; do
-    [ -f "$RELEASE_DIR/tools/$required" ] || {
-      echo "ERROR: IT Glue read recovery source incomplete" >&2
-      exit 9
-    }
-  done
-  /usr/bin/python3 "$RELEASE_DIR/tools/install_it_glue_approle_recovery.py" --source-revision "$SOURCE_REVISION"
-  for required in it_glue_approle_recovery.py provider_secret_provision.py; do
-    cmp -s "$RELEASE_DIR/tools/$required" "/usr/local/lib/jason/$required" || {
-      echo "ERROR: installed IT Glue helper differs from reviewed release" >&2
-      exit 9
-    }
-  done
-  echo "JASON_ITGLUE_READ_OWNER_HELPER_INSTALL=PASS"
-else
-  [ ! -e "$RELEASE_DIR/tools/it_glue_approle_recovery.py" ] || {
-    echo "ERROR: orphaned IT Glue helper requires root installer" >&2
-    exit 9
-  }
-  echo "JASON_ITGLUE_READ_OWNER_HELPER_INSTALL=NOT_DECLARED"
-fi
-step_pass itglue_read_owner_helper_install
-
 if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
   step_start provider_identity_release_recovery
   /usr/bin/python3 /usr/local/lib/jason/openbao_identity_lifecycle.py \
