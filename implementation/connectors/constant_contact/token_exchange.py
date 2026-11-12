@@ -37,6 +37,7 @@ def _token_request(
         "Authorization": "Basic " + basic,
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "application/json",
+        "User-Agent": "Jason/1.0 (+https://teamaot.com)",
     })
     try:
         with transport(req, timeout=15) as response:
