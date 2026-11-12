@@ -415,3 +415,31 @@ run separately with real root UID/GID in disposable GitHub Actions CI).
 Root-mode provenance also tests a genuine root-owned immutable copy,
 tampering, and source-hash mismatch. These results are evidence of
 source-only integration; they do not authorize production installation.
+
+
+## Concurrent protected-file PR reconciliation (nonblocking, verified scope)
+
+Six active PRs touch files also touched by this Stage A source package.
+Each has been inspected at its relevant diff hunk. Coordination is
+explicitly recorded in PR #2448's canonical
+`Integration coordination: #2443 #2441 #2395 #2373 #2355 #2343 #2333`
+line for Jason's concurrent-change gate:
+
+- **#2441** — broader PMv4 protected file categories. Stage A0 only
+  extends the existing protected list; no category is removed.
+- **#2395** — optional V5 web approval route in `server.py`. Stage A0
+  adds a separately disabled Owner tool in a different function.
+- **#2343** — quote/invoice intake in `server.py`. Stage A0 does not
+  change procurement normalization or client communications.
+- **#2333** — endpoint-security assessment tools and result projection
+  in `server.py`. Stage A0 adds no endpoint read/execution path.
+- **#2373** — approved technician client-notification activation in
+  `production-deploy.sh`. Stage A0 adds a separate Owner issuer
+  activation switch after the preexisting signer checks.
+- **#2355** — restore source-approved staff internal-note authority on
+  verified rollback. Stage A0 activation explicitly turns OFF for
+  older rollback images; it does not change internal-note activation.
+
+The scope and authorization for each concurrent PR remain distinct.
+This note is not blanket source/production approval or permission to
+merge a competing draft PR.
