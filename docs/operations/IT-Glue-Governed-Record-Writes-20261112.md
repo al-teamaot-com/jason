@@ -64,3 +64,5 @@ Integration coordination: #2454 #2441 #2438 #2405 #2395 #2393 #2336 #2373 #2439 
 PR #2454 adds Microsoft Graph group-read/group-write OpenBao mappings and provider profiles and extends only the Microsoft Graph credential-input dispatch. IT Glue writes use distinct it_glue.readwrite mapping and it_glue_write provisioner profile. The changes are additive, use different secret paths and logical names, and do not overwrite one another. Preserve both scopes at merge, and re-review if either PR changes. This coordination is not an activation approval.
 
 The exact installed rollback baseline must be re-read at release preparation; the former 690250b4 source has already been superseded in production by signed release d1b8c196. No code or production activation follows from this documentation acknowledgement.
+
+CI event binding: The reviewed unified Integration coordination line must be present in the PR description before the source synchronization event. Re-running a job from a prior event may retain the earlier PR-body snapshot; the post-review CI run must assess the final overlap set. This does not waive any repository-hygiene check.
