@@ -35,6 +35,10 @@ RECORDS = Path("/var/lib/jason/openclaw/release-manager/records")
 RECEIPT_DIR = Path("/var/lib/jason/openclaw/identity-lifecycle/it-glue-read")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 APPROVAL_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{15,159}\Z")
+OWNER_PROOF_VERIFIER = Path("/usr/local/lib/jason/owner_signed_release.py")
+OWNER_PUBLIC_KEY = Path("/etc/jason-owner-release/verified-owner-public-key.json")
+PROCESSED = Path("/var/lib/jason/openclaw/release-manager/owner-approval-requests-processed")
+FREEZE = Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
 CHALLENGE = "AUTHORIZE IT GLUE READ APPROLE ROTATION AND BOUNDED RUNTIME REFRESH"
 
 
@@ -124,18 +128,92 @@ def _verify_installed_source(expected_sha: str) -> Path:
     if record.is_symlink():
         raise ItGlueIdentityError("ROOT_RELEASE_RECORD_UNTRUSTED")
     info = record.stat()
-    if info.st_mode & 0o077:
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
         raise ItGlueIdentityError("ROOT_RELEASE_RECORD_PERMISSIONS_UNSAFE")
     data = json.loads(record.read_text(encoding="utf-8"))
-    signed = data.get("owner_approval") or {}
-    if (data.get("state") != "closed"
-            or (data.get("release_candidate") or {}).get("candidate_sha") != expected_sha
-            or not signed.get("approved")
-            or signed.get("candidate_sha") != expected_sha
-            or not str(signed.get("source") or "").startswith("authenticated_signed_mcp_owner:")
-            or "tools/it_glue_approle_recovery.py" not in (data.get("changed_files") or [])):
-        raise ItGlueIdentityError("EXACT_SIGNED_OWNER_RELEASE_NOT_PROVEN")
+    _verify_historical_signed_release(data, expected_sha)
     return record
+
+
+def _load_pinned_owner_verifier():
+    verifier_path = OWNER_PROOF_VERIFIER
+    rootmeta = os.lstat(verifier_path)
+    if (not stat.S_ISREG(rootmeta.st_mode) or rootmeta.st_uid != 0
+            or rootmeta.st_mode & 0o022 or verifier_path.is_symlink()):
+        raise ItGlueIdentityError("ROOT_OWNER_PROOF_VERIFIER_UNTRUSTED")
+    spec = importlib.util.spec_from_file_location(
+        "_jason_root_owner_release_proof", verifier_path)
+    if spec is None or spec.loader is None:
+        raise ItGlueIdentityError("ROOT_OWNER_PROOF_VERIFIER_UNAVAILABLE")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module, module.read_pinned_root_owner_public_key(OWNER_PUBLIC_KEY)
+
+
+def _verify_historical_signed_release(record: Mapping[str, Any],
+                                      expected_sha: str) -> None:
+    """Validate a consumed, signed *release*, not authority for a new action.
+
+    The release Owner signature is valid only for 15 minutes at issuance. We
+    independently verify it at its recorded acceptance time, and require the
+    current root-pinned freeze. A separate local Owner challenge gates the
+    later AppRole mutation. Mutable owner_approval text alone is never trusted.
+    """
+    if record.get("state") != "closed":
+        raise ItGlueIdentityError("RELEASE_NOT_CLOSED")
+    candidate = record.get("release_candidate") or {}
+    approval = record.get("owner_approval") or {}
+    review = record.get("manual_scope_review") or {}
+    manifest = record.get("release_manifest") or {}
+    rollback = record.get("rollback_sha")
+    release_id = "release-" + expected_sha[:16]
+    if (candidate.get("candidate_sha") != expected_sha
+            or approval.get("approved") is not True
+            or approval.get("candidate_sha") != expected_sha
+            or review.get("candidate_sha") != expected_sha
+            or review.get("baseline_sha") != rollback
+            or manifest.get("candidate_sha") != expected_sha
+            or manifest.get("rollback_sha") != rollback
+            or "tools/it_glue_approle_recovery.py" not in
+               (record.get("changed_files") or [])):
+        raise ItGlueIdentityError("EXACT_SIGNED_OWNER_RELEASE_NOT_PROVEN")
+    request_file = PROCESSED / (release_id + ".json")
+    if request_file.is_symlink():
+        raise ItGlueIdentityError("OWNER_PROOF_SOURCE_UNSAFE")
+    reqinfo = request_file.stat()
+    if (not stat.S_ISREG(reqinfo.st_mode)
+            or stat.S_IMODE(reqinfo.st_mode) != 0o600
+            or reqinfo.st_size > 16384):
+        raise ItGlueIdentityError("OWNER_PROOF_SOURCE_UNSAFE")
+    request = json.loads(request_file.read_text(encoding="utf-8"))
+    proof = request.get("signed_owner_proof") or {}
+    if (request.get("release_id") != release_id
+            or request.get("candidate_sha") != expected_sha
+            or request.get("organization_id") != "aot"):
+        raise ItGlueIdentityError("OWNER_PROOF_RELEASE_MISMATCH")
+    module, public = _load_pinned_owner_verifier()
+    scoped = {
+        "expected_candidate_sha": expected_sha,
+        "expected_rollback_sha": rollback,
+        "expected_release_id": release_id,
+        "expected_scope_sha256": review.get("scope_sha256"),
+        "expected_manifest_sha256": hashlib.sha256(json.dumps(
+            manifest, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False).encode("utf-8")).hexdigest(),
+        "expected_freeze_sha256": hashlib.sha256(FREEZE.read_bytes()).hexdigest(),
+    }
+    try:
+        recorded = datetime.fromisoformat(approval.get("recorded_at", ""))
+        signed = module.verify_exact_owner_release(
+            proof, public_key=public, at=recorded, **scoped)
+    except Exception:
+        raise ItGlueIdentityError("OWNER_PROOF_SIGNATURE_OR_BINDING_INVALID") from None
+    if (approval.get("source") !=
+            "authenticated_signed_mcp_owner:" + signed["approval_id"]
+            or request.get("source") !=
+            "authenticated_jason_mcp_owner:" + signed["approval_id"]
+            or request.get("approved_by") != signed["owner_principal"]):
+        raise ItGlueIdentityError("OWNER_PROOF_IDENTITY_MISMATCH")
 
 
 def _call(api: Callable[..., Mapping[str, Any]], path: str, *, method: str,
