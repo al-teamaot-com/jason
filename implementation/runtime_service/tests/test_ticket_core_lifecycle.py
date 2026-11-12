@@ -157,7 +157,12 @@ service.run_autonomy_maintenance_process(
     maintenance_profile="ticket_worker", idle_sleep_seconds=0.05,
 )
 '''
-    pythonpath = str(Path(__file__).parents[1] / "src")
+    pythonpath = os.pathsep.join((
+        str(Path(__file__).parents[1] / "src"),
+        str(Path(__file__).parents[2]),
+        str(Path(__file__).parents[2] / "cap-007/src"),
+        str(Path(__file__).parents[2] / "connectors/openclaw/src"),
+    ))
     parent = subprocess.Popen(
         [sys.executable, "-c", script, str(db), str(ready), str(stop),
          str(child_pid)],
