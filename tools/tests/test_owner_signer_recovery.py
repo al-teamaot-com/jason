@@ -46,6 +46,8 @@ def test_policy_exact_one_action_without_standing_authority():
     assert policy["signer_public_sha256"] == m.PUBLIC_SHA
     assert policy["owner_authentication"] == "fresh_verified_entra_device_code"
     assert policy["native_deployer"] == str(m.DEPLOYER)
+    assert m.DEPLOYER == Path("/usr/local/lib/jason/deploy_live_container_owner_signer_2450.py")
+    assert m.DEPLOYER.parent == m.SCRIPT_INSTALLED.parent
     assert str(m.LEDGER_DIR).startswith("/etc/jason-owner-release/")
     source = (ROOT / "tools/owner_signer_recovery.py").read_text()
     assert "get_access_token" not in source
@@ -246,3 +248,24 @@ def test_root_helper_requires_isolated_python_interpreter(monkeypatch):
     monkeypatch.setattr(m, "sys", SimpleNamespace(flags=SimpleNamespace(isolated=0)))
     with pytest.raises(m.RecoveryDenied, match="ISOLATED_PYTHON_ROOT_EXECUTION_REQUIRED"):
         m.execute()
+
+
+
+def test_group_writable_deployer_parent_is_refused_even_for_existing_file(tmp_path):
+    m = load()
+    live_style = tmp_path / "group-writable-tools"
+    live_style.mkdir()
+    live_style.chmod(0o775)
+    candidate = live_style / "deploy_live_container.py"
+    candidate.write_text("safe-looking content")
+    with pytest.raises(m.RecoveryDenied, match="ROOT_TRUST_PARENT_UNSAFE"):
+        m.root_file(candidate)
+
+
+def test_pinned_native_copy_is_not_the_group_writable_production_source():
+    m = load()
+    policy = json.loads((ROOT / "config/owner-signer-recovery-2450-policy.json").read_text())
+    assert m.DEPLOYER == Path("/usr/local/lib/jason/deploy_live_container_owner_signer_2450.py")
+    assert policy["native_deployer"] == str(m.DEPLOYER)
+    assert str(m.DEPLOYER) != "/opt/jason/current/tools/deploy_live_container.py"
+    assert policy["native_deployer_sha256"] == "2687a73e07d63693a057c3aa89cea0abb41d02cf1dcafb22df5ce82792c81eee"
