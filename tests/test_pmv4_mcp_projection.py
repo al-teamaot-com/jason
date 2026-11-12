@@ -147,3 +147,5 @@ def test_mcp_image_context_includes_only_reviewed_pmv4_issuer_modules():
     }
     image = (repo / "infrastructure/jason-mcp/Dockerfile").read_text()
     assert "COPY tools/pmv4_shadow_owner_issuer.py tools/pmv4_shadow_release.py" in image
+    assert "/opt/jason-src/implementation/connectors/openclaw" in image
+    assert "python -m pip check" in image
