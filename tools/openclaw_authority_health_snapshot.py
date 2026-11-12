@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,25 @@ LAST_SUCCESS = Path('/var/lib/jason/openclaw/operational-full-health-last-pass.j
 SOURCE_HEALTH_TIMEOUT_SECONDS = 3600
 BACKUP_TEMP_ROOT = Path('/srv/jason/archive')
 SOURCE_HEALTH_TIMEOUT_EXIT_CODE = 124
+
+# Stage progress is informational evidence on failure, never a replacement
+# for a completed full SQLite integrity + backup/restore proof.
+_STAGE_LINE = re.compile(
+    r'^JASON_FULL_INTEGRITY_STAGE_V1\|(authority|replay|security_audit|'
+    r'authority_backup_restore|orchestration_audit)\|([0-9]{1,7}(?:\.[0-9]{1,3})?)$'
+)
+
+
+def completed_timeout_stages(stderr: bytes | str | None) -> dict[str, float]:
+    if not stderr:
+        return {}
+    raw = stderr.decode('utf-8', errors='replace') if isinstance(stderr, bytes) else stderr
+    completed: dict[str, float] = {}
+    for line in raw.splitlines():
+        match = _STAGE_LINE.fullmatch(line.strip())
+        if match is not None:
+            completed[match.group(1)] = float(match.group(2))
+    return completed
 
 
 def write_atomic_snapshot(output: Path, report: dict[str, object]) -> None:
@@ -57,7 +77,7 @@ def main() -> int:
             # Keep the *complete* checks bounded, but do not truncate them.
             timeout=SOURCE_HEALTH_TIMEOUT_SECONDS,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         # A timeout must not leave a previously successful snapshot looking
         # current: publish explicit failure evidence and exit nonzero.
         report = {
@@ -65,6 +85,7 @@ def main() -> int:
             'failures': ['operational_health_timeout'],
             'snapshot_source_exit_code': SOURCE_HEALTH_TIMEOUT_EXIT_CODE,
             'snapshot_timeout_seconds': SOURCE_HEALTH_TIMEOUT_SECONDS,
+            'completed_stage_seconds': completed_timeout_stages(exc.stderr),
             'provider_contacted': False,
             'provider_credentials_used': False,
         }
@@ -76,10 +97,42 @@ def main() -> int:
             'source_exit_code': SOURCE_HEALTH_TIMEOUT_EXIT_CODE,
         }, sort_keys=True))
         return SOURCE_HEALTH_TIMEOUT_EXIT_CODE
+    except OSError:
+        report = {
+            'status': 'fail',
+            'failures': ['operational_health_launch_error'],
+            'provider_contacted': False,
+            'provider_credentials_used': False,
+        }
+        write_atomic_snapshot(args.output, report)
+        return 2
     if not completed.stdout.strip():
-        raise SystemExit('operational health tool returned no JSON output')
+        # A source exception can exit without producing JSON. Never leave an
+        # old PASS as the current full-integrity result.
+        report = {
+            'status': 'fail',
+            'failures': ['operational_health_missing_output'],
+            'snapshot_source_exit_code': completed.returncode,
+            'provider_contacted': False,
+            'provider_credentials_used': False,
+        }
+        write_atomic_snapshot(args.output, report)
+        return completed.returncode if completed.returncode != 0 else 2
 
-    report = json.loads(completed.stdout)
+    try:
+        report = json.loads(completed.stdout)
+    except (json.JSONDecodeError, ValueError):
+        report = None
+    if not isinstance(report, dict):
+        report = {
+            'status': 'fail',
+            'failures': ['operational_health_invalid_json'],
+            'snapshot_source_exit_code': completed.returncode,
+            'provider_contacted': False,
+            'provider_credentials_used': False,
+        }
+        write_atomic_snapshot(args.output, report)
+        return completed.returncode if completed.returncode != 0 else 2
     report['snapshot_source_exit_code'] = completed.returncode
     if completed.returncode != 0:
         # Even a contradictory source response must never publish PASS.

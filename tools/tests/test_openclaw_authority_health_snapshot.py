@@ -159,3 +159,105 @@ def test_success_snapshot_archived_and_timeout_does_not_erase_pass(monkeypatch, 
     assert module.main() == 124
     assert json.loads(current.read_text())["status"] == "fail"
     assert saved.read_bytes() == prior
+
+
+def test_timeout_retains_only_whitelisted_completed_stage_timings(
+        monkeypatch, tmp_path):
+    import subprocess
+    module = _load_module()
+    output = tmp_path / 'full-health.json'
+
+    def expired(*args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=args[0],
+            timeout=kwargs['timeout'],
+            stderr=(
+                b'JASON_FULL_INTEGRITY_STAGE_V1|authority|12.5\n'
+                b'JASON_FULL_INTEGRITY_STAGE_V1|replay|0.02\n'
+                b'JASON_FULL_INTEGRITY_STAGE_V1|authority_backup_restore|140.1\n'
+                b'JASON_FULL_INTEGRITY_STAGE_V1|owner_auth|1.0\n'
+                b'ACCESS_KEY=must_not_persist\n'
+                b'JASON_FULL_INTEGRITY_STAGE_V1|orchestration_audit|bad\n'
+            ),
+        )
+
+    monkeypatch.setattr(module.subprocess, 'run', expired)
+    monkeypatch.setattr(module.sys, 'argv', [
+        str(SCRIPT), '--output', str(output),
+    ])
+    assert module.main() == 124
+    report = json.loads(output.read_text())
+    assert report['status'] == 'fail'
+    assert report['failures'] == ['operational_health_timeout']
+    assert report['completed_stage_seconds'] == {
+        'authority': 12.5,
+        'replay': 0.02,
+        'authority_backup_restore': 140.1,
+    }
+    assert 'ACCESS_KEY' not in output.read_text()
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+
+
+def test_completed_timeout_stage_parser_rejects_untrusted_text():
+    module = _load_module()
+    assert module.completed_timeout_stages(
+        'JASON_FULL_INTEGRITY_STAGE_V1|orchestration_audit|120.126\n'
+        'JASON_FULL_INTEGRITY_STAGE_V1|orchestration_audit|nan\n'
+        'JASON_FULL_INTEGRITY_STAGE_V1|authority|1e6\n'
+        'JASON_FULL_INTEGRITY_STAGE_V1|forged|99\n'
+    ) == {'orchestration_audit': 120.126}
+    assert module.completed_timeout_stages(None) == {}
+
+
+def test_no_source_json_overwrites_stale_pass_and_fails_closed(
+        monkeypatch, tmp_path):
+    module = _load_module()
+    output = tmp_path / 'health.json'
+    output.write_text('{"status":"pass","stale":true}')
+    class Completed:
+        stdout = ''
+        returncode = 1
+    monkeypatch.setattr(module.subprocess, 'run', lambda *a, **k: Completed())
+    monkeypatch.setattr(module.sys, 'argv', [
+        str(SCRIPT), '--output', str(output),
+    ])
+    assert module.main() == 1
+    report = json.loads(output.read_text())
+    assert report['status'] == 'fail'
+    assert report['failures'] == ['operational_health_missing_output']
+    assert 'stale' not in report
+
+
+def test_malformed_source_json_never_reuses_old_pass(
+        monkeypatch, tmp_path):
+    module = _load_module()
+    output = tmp_path / 'health.json'
+    output.write_text('{"status":"pass","stale":true}')
+    class Completed:
+        stdout = '{"status":"pass"'
+        returncode = 0
+    monkeypatch.setattr(module.subprocess, 'run', lambda *a, **k: Completed())
+    monkeypatch.setattr(module.sys, 'argv', [
+        str(SCRIPT), '--output', str(output),
+    ])
+    assert module.main() == 2
+    report = json.loads(output.read_text())
+    assert report['status'] == 'fail'
+    assert report['failures'] == ['operational_health_invalid_json']
+
+
+def test_subprocess_launch_error_fails_closed_with_no_secret_text(
+        monkeypatch, tmp_path):
+    module = _load_module()
+    output = tmp_path / 'health.json'
+    def unavailable(*a, **k):
+        raise OSError('sensitive unexpected provider path')
+    monkeypatch.setattr(module.subprocess, 'run', unavailable)
+    monkeypatch.setattr(module.sys, 'argv', [
+        str(SCRIPT), '--output', str(output),
+    ])
+    assert module.main() == 2
+    report = json.loads(output.read_text())
+    assert report['status'] == 'fail'
+    assert report['failures'] == ['operational_health_launch_error']
+    assert 'sensitive' not in output.read_text()
