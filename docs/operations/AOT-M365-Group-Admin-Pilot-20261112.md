@@ -181,3 +181,42 @@ authorization to modify that running release.
    ticket workflows and release health.
 
 **No step above was executed as part of the read-only preflight.**
+
+## Authorized configuration-only operator bootstrap — prepared, not yet executed
+
+The Owner approved creation of two production OpenBao read-only AppRole
+identities plus **only** their AOT client boundary registrations. This
+authorization explicitly excludes source deployment, service restart,
+Microsoft Graph POST operations or any change to ticket processing.
+
+A reusable, audited operator bootstrap now lives at
+`tools/microsoft_group_admin_identity_bootstrap.py`. Its `--apply` mode
+requires a freshly authenticated `al` sudo operator on Jason, the OpenBao
+`al-admin` password entered **locally**, a clean exact pinned source SHA,
+the fixed AOT manifest and both matching certificate/private-key pairs.
+
+The procedure uses the existing provider-secret provisioner to create **only**
+the two allowlisted OpenBao policies, AppRoles and KV-v2 secrets with create-only
+CAS=0. It rejects conflicting preexisting secrets or role/policy definitions.
+Before any durable AOT boundary registration, it independently verifies vault
+AppRole credentials, certificate thumbprints, MSAL tenant/application tokens,
+and bounded Graph GET operations. Durable boundaries use the canonical SQLite
+client-boundary repository **as the existing DB file owner** so SQLite journal
+file ownership does not disrupt Jason's runtime. Exact readback and a
+root-private audit receipt are required.
+
+Only after this configuration transaction is proven may a separately
+governed production release candidate activate the group management engine,
+and only after subsequent exact-action approvals may a group be created or
+a member added.
+
+**Operator command (must pin the reviewed current commit SHA):**
+
+```bash
+sudo -H /home/al/projects/jason/.venv/bin/python /home/al/jason-worktrees/m365-governed-operation-catalog-20261112/tools/microsoft_group_admin_identity_bootstrap.py --apply --source-sha REPLACE_WITH_CANDIDATE_SHA
+```
+
+The operator should paste only the safe summary lines back to ChatGPT,
+never the OpenBao password or private certificate material. A failed check
+must be investigated; do not reissue broad production approvals or run
+provider REST/SQLite bypasses.
