@@ -51,26 +51,6 @@ jobs:
             implementation/tests/test_approval_continuation.py \
             implementation/tests/test_approval_recovery.py \
             implementation/tests/test_approval_recovery_retry.py
-      - name: Microsoft 365 group admin scoped-execution and consent-boundary regressions
-        run: |
-          python -m pytest -q \
-            implementation/connectors/microsoft_graph/test_governed_operations.py \
-            implementation/connectors/microsoft_graph/test_group_reader.py \
-            implementation/connectors/microsoft_graph/test_group_executor.py \
-            implementation/connectors/microsoft_graph/test_group_preflight.py \
-            implementation/connectors/microsoft_graph/test_group_pilot_manifest.py \
-            implementation/orchestrator/tests/test_microsoft_group_admin_catalog.py \
-            implementation/runtime_service/tests/test_microsoft_group_admin.py \
-            implementation/runtime_service/tests/test_microsoft_group_admin_activation.py \
-            implementation/mcp_service/tests/test_microsoft_group_admin_mcp.py \
-            tools/tests/test_microsoft_group_admin_release.py \
-            tools/tests/test_deploy_live_container_extensions.py \
-            implementation/connectors/tests/test_openbao_secrets.py \
-            tools/tests/test_provider_secret_provision.py \
-            tools/tests/test_microsoft_group_admin_identity_bootstrap.py
-      - name: Microsoft group dormant and exact AOT activation composition
-        run: |
-          python -m pytest -q implementation/runtime_service/tests/test_composition.py -k group_admin
       - name: Active write-provider execution-plan regressions
         run: |
           python -m pytest -q \

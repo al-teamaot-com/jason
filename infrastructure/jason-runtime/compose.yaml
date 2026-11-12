@@ -35,8 +35,6 @@ services:
       JASON_SES_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/aws-ses/secret_id
       JASON_MICROSOFT_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/microsoft-graph/role_id
       JASON_MICROSOFT_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/microsoft-graph/secret_id
-      # Group admin is always disabled until separately approved release activation.
-      JASON_M365_GROUP_ADMIN_PROFILE: ${JASON_M365_GROUP_ADMIN_PROFILE:-}
       JASON_MICROSOFT_MAIL_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/microsoft-mail/role_id
       JASON_MICROSOFT_MAIL_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/microsoft-mail/secret_id
       JASON_MICROSOFT_MAIL_APPROVED_MAILBOXES: ${JASON_MICROSOFT_MAIL_APPROVED_MAILBOXES:-}

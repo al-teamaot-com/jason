@@ -157,25 +157,6 @@ MICROSOFT_ENDPOINTS: dict[MicrosoftService, MicrosoftEndpointFamily] = {
 
 
 MICROSOFT_PERMISSION_PROFILES: dict[str, MicrosoftPermissionProfile] = {
-    "group-read": MicrosoftPermissionProfile(
-        name="group-read",
-        description="Read-only group properties, owners, members and active user identities for group administration prechecks and readback.",
-        services=frozenset({MicrosoftService.ENTRA, MicrosoftService.GRAPH}),
-        application_permissions=("Group.Read.All", "User.Read.All"),
-        maximum_mode=MicrosoftOperationMode.READ,
-    ),
-    "group-write": MicrosoftPermissionProfile(
-        name="group-write",
-        description=(
-            "Governed creation of assigned security/M365 groups with an owner, "
-            "and direct user membership changes only; no role-assignable groups."
-        ),
-        services=frozenset({MicrosoftService.ENTRA, MicrosoftService.GRAPH}),
-        application_permissions=(
-            "Group.Create", "GroupMember.ReadWrite.All", "User.Read.All",
-        ),
-        maximum_mode=MicrosoftOperationMode.WRITE_WITH_APPROVAL,
-    ),
     "directory-read": MicrosoftPermissionProfile(
         name="directory-read",
         description="Read-only Microsoft user profile lookup for authenticated identity enrichment.",
