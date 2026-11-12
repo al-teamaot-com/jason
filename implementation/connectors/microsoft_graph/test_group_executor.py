@@ -134,10 +134,14 @@ class FakeTransport:
 
 class FakeEntitlements:
     revoked = False
-    def require_entitled(self, *, context, operation_name, scope):
+    permitted_groups = None
+    def require_entitled(self, *, context, operation_name, scope, arguments):
         if (self.revoked or context.principal_id != "tech-17" or scope.client_id != "client-17"
                 or operation_name not in {
-                    "identity.group.create", "identity.group.member.add"}):
+                    "identity.group.create", "identity.group.member.add"}
+                or (operation_name == "identity.group.member.add"
+                    and self.permitted_groups is not None
+                    and arguments["verified_group_id"] not in self.permitted_groups)):
             raise ConnectorAuthorizationError("TECHNICIAN_NOT_ENTITLED")
 
 
@@ -584,3 +588,13 @@ def test_group_permission_profiles_are_separate_least_privilege_profiles():
     }
     assert "Directory.ReadWrite.All" not in write.application_permissions
     assert "RoleManagement.ReadWrite.Directory" not in write.application_permissions
+
+
+
+def test_technician_entitlement_may_restrict_exact_membership_target():
+    _, reader, transport, _, access, _, connector = harness()
+    connector.execute_governed_execution(connector.prepare_governed_execution(direct_request()))
+    access.permitted_groups = frozenset({"99999999-9999-4999-8999-999999999999"})
+    with pytest.raises(ConnectorAuthorizationError, match="NOT_ENTITLED"):
+        connector.prepare_governed_execution(member_request())
+    assert len(transport.calls) == 1

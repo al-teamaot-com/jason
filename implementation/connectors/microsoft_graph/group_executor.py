@@ -84,7 +84,7 @@ class MicrosoftWriteEntitlement(Protocol):
     """Existing policy/authority adapter, not a new human approval flow."""
     def require_entitled(
         self, *, context: ConnectorContext, operation_name: str,
-        scope: GroupWriteScope,
+        scope: GroupWriteScope, arguments: Mapping[str, str],
     ) -> None: ...
 
 
@@ -174,7 +174,10 @@ class MicrosoftGraphGovernedGroupConnector:
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
         raise ConnectorAuthorizationError("M365_CENTRAL_GOVERNED_EXECUTION_REQUIRED")
 
-    def _require(self, *, context: ConnectorContext, operation_name: str) -> GroupWriteScope:
+    def _require(
+        self, *, context: ConnectorContext, operation_name: str,
+        arguments: Mapping[str, str],
+    ) -> GroupWriteScope:
         if (context.organization_id != "aot" or context.capability != operation_name
                 or context.mode != "execute" or not context.principal_id
                 or not context.correlation_id or not context.client_id):
@@ -182,7 +185,8 @@ class MicrosoftGraphGovernedGroupConnector:
         operation(operation_name)  # fail closed on unknown capability
         scope = self.boundaries.require_scope(client_id=context.client_id)
         self.entitlement.require_entitled(
-            context=context, operation_name=operation_name, scope=scope)
+            context=context, operation_name=operation_name,
+            scope=scope, arguments=arguments)
         return scope
 
     def _material(self, *, scope: GroupWriteScope, operation_name: str,
@@ -242,8 +246,9 @@ class MicrosoftGraphGovernedGroupConnector:
 
     def prepare_governed_execution(self, request: ConnectorRequest) -> ProviderPreparedExecution:
         ctx = request.context
-        scope = self._require(context=ctx, operation_name=ctx.capability)
         args = operation(ctx.capability).validate_arguments(request.arguments)
+        scope = self._require(
+            context=ctx, operation_name=ctx.capability, arguments=args)
         self._precheck(scope=scope, operation_name=ctx.capability, args=args)
         route, target, payload = self._material(
             scope=scope, operation_name=ctx.capability, args=args)
@@ -271,10 +276,12 @@ class MicrosoftGraphGovernedGroupConnector:
         opaque = prepared.opaque
         if not isinstance(opaque, _PreparedGroupAction):
             raise ConnectorAuthorizationError("M365_GROUP_PREPARED_PLAN_REQUIRED")
-        scope = self._require(context=opaque.context, operation_name=opaque.operation_name)
+        args = operation(opaque.operation_name).validate_arguments(opaque.arguments)
+        scope = self._require(
+            context=opaque.context, operation_name=opaque.operation_name,
+            arguments=args)
         if scope != opaque.scope:
             raise ConnectorAuthorizationError("M365_GROUP_SCOPE_CHANGED")
-        args = operation(opaque.operation_name).validate_arguments(opaque.arguments)
         route, target, payload = self._material(
             scope=scope, operation_name=opaque.operation_name, args=args)
         expected_params = {

@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "status": "proposed_not_authorized",
+  "pilot_id": "aot-m365-group-admin-20261112",
+  "client_id": "client-aot-internal",
+  "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+  "primary_domain": "teamaot.com",
+  "existing_directory_read": {
+    "provider": "microsoft_graph",
+    "profile": "directory-read",
+    "application_id": "c94301b7-7194-46ab-aab7-94f9366f51a9",
+    "consent_verified_by": "existing_runtime_read_2026-11-12"
+  },
+  "required_group_read": {
+    "provider": "microsoft_graph_group_read",
+    "profile": "group-read",
+    "application_id": null,
+    "administrator_consent": "missing"
+  },
+  "required_group_write": {
+    "provider": "microsoft_graph_group_write",
+    "profile": "group-write",
+    "application_id": null,
+    "administrator_consent": "missing"
+  },
+  "owner_user": {
+    "object_id": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+    "mail": "al@teamaot.com",
+    "enabled_verified_by": "governed_identity_user_read_2026-11-12"
+  },
+  "create_group": {
+    "capability": "identity.group.create",
+    "group_type": "security",
+    "display_name": "Jason M365 Governed Pilot 2026-11-12",
+    "mail_nickname": "jason-m365-pilot-20261112",
+    "verified_owner_id": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+    "description": "AOT authorized Jason group administration acceptance pilot"
+  },
+  "add_member": {
+    "capability": "identity.group.member.add",
+    "verified_group_id": null,
+    "verified_member_id": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+    "requires_verified_creation_readback": true
+  },
+  "validation": {
+    "before": [
+      "consent_each_scoped_app_identity",
+      "verify_read_and_write_tenant_boundaries",
+      "verify_exact_technician_entitlement",
+      "verify_group_alias_absent",
+      "approve_exact_release_sha_and_rollback",
+      "approve_exact_group_create_and_member_add_actions"
+    ],
+    "after": [
+      "read_group_id_type_name_alias_security_enabled",
+      "read_group_owner_by_id",
+      "read_direct_group_membership",
+      "check_execution_ledger_dedupe",
+      "verify_ticket_processing_unchanged"
+    ]
+  },
+  "cleanup": {
+    "policy": "retain_test_group_until_separately_authorized_cleanup",
+    "no_automatic_group_deletion": true
+  }
+}
