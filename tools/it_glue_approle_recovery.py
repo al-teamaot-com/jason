@@ -142,9 +142,12 @@ def _call(api: Callable[..., Mapping[str, Any]], path: str, *, method: str,
           token: str | None = None, payload: Mapping[str, Any] | None = None,
           allow_empty: bool = False) -> Mapping[str, Any]:
     try:
-        return api(path, method=method, token=token, payload=payload,
-                   allow_empty=allow_empty)
-    except Exception as exc:
+        result = api(path, method=method, token=token, payload=payload,
+                     allow_empty=allow_empty)
+        if not isinstance(result, Mapping):
+            raise TypeError("invalid OpenBao result")
+        return result
+    except Exception:
         # Providers may return raw authorization errors; never emit them.
         raise ItGlueIdentityError("OPENBAO_" + method + "_FAILED") from None
 
@@ -276,8 +279,8 @@ def _complete(claim: Path, evidence: Mapping[str, Any]) -> None:
             original.get("provider") != PROVIDER):
         raise ItGlueIdentityError("RECOVERY_CLAIM_DRIFT")
     record = {
-        **original, **evidence, "status": "verified",
-        "verified_at": datetime.now(timezone.utc).isoformat(),
+        **original, **evidence, "status": "pending_governed_provider_read",
+        "root_stage_verified_at": datetime.now(timezone.utc).isoformat(),
     }
     fd, tmp = tempfile.mkstemp(prefix=".itglue-receipt-", dir=claim.parent)
     try:
