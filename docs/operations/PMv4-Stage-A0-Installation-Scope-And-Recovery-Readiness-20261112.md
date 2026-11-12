@@ -210,3 +210,31 @@ installer's *metadata contract* but are not evidence that live protected
 `/etc/jason` parent, native root release transaction, exact Owner-signed
 Stage A authorization, immutable journaling or real root rollback have
 been deployed. Those remain separate production acceptance gates.
+
+## Source-only signed Owner admission contract
+
+`tools/pmv4_stage_a_admission.py` supplies an independently testable,
+**non-mutating** signed Owner admission primitive to be used only by a
+future native root installer. It requires an exact protected-main and CI
+callback, a clean exact-source checkout, a canonical Stage A0 scope with
+all installations limited to declared new objects, the exact immutable
+Stage A0 manifest, and a verified short-lived one-use Ed25519 release
+decision bound to source SHA, zero rollback SHA, scope hash, manifest hash,
+freeze hash and Owner identity.
+
+It also requires independently root-verified current production health,
+a CLOSED current breaker, verified empty target baseline, and root-only
+target-parent metadata. Missing/altered signature, replayed proof, expired
+authority, changed freeze, unapproved source/CI, modified path inventory,
+or open breaker all reject. The immutable proof's public trust is read
+from the existing root-owned Owner pin in production; caller-provided
+test keys are allowed only in disposable tests. This is not a second
+signer or a parallel approval system.
+
+**Important:** This module cannot obtain an authenticated Owner session,
+mint a signed approval, acquire protected production locks, install files,
+write an authorization receipt, or satisfy root installation by itself.
+The future native release boundary must obtain trusted root health and
+the actual Owner decision independently, perform this check *while holding*
+the cross-release lock, journal exact actions before each write, then
+read back/rollback as necessary. Passing tests do not authorize deployment.

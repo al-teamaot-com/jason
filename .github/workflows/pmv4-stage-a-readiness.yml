@@ -30,7 +30,7 @@ jobs:
           PYTHONPATH: "implementation:."
         run: |
           set -euo pipefail
-          python3 -m pytest -q             tests/test_pmv4_stage_a_packet.py             tests/test_pmv4_host_install_contract.py             tests/test_pmv4_breaker_recovery_independence.py             tests/test_pmv4_shadow_owner_issuer.py             tools/tests/test_release_breaker_recovery_manager.py             tools/tests/test_root_revalidate_release_breaker.py
+          python3 -m pytest -q             tests/test_pmv4_stage_a_packet.py             tests/test_pmv4_stage_a_admission.py             tests/test_pmv4_host_install_contract.py             tests/test_pmv4_breaker_recovery_independence.py             tests/test_pmv4_shadow_owner_issuer.py             tools/tests/test_release_breaker_recovery_manager.py             tools/tests/test_root_revalidate_release_breaker.py
       - name: Verify UID/GID and empty rollback as root in disposable CI workspace
         env:
           PYTHONPATH: "implementation:."
