@@ -16,6 +16,13 @@ independent disconnected PMv4 shadow release/recovery, and PMv3 retirement inven
 | Host safety/recovery | `pmv4_host_release_guard.py`, `pmv4_shadow_host_runtime.py` | Both legacy host transaction lock and PMv4 root lock held through release; trusted direct Ticket Core health; protected root breaker must be closed; rollback of previously signed pending transaction only |
 | Migration evidence | `tools/pmv4_migration_evidence.py` | Read-only protected GitHub candidate/CI, file-scope digests, live/rollback image SHAs, root LKG, protected breaker and hold evidence; no unsigned activation |
 
+## Canonical System Registry and protected scope integration
+
+- Reuse `implementation/kernel/system_registry/production-registry.json` as the **single** Jason System Registry. Register `component.ticket-processing-core` and `component.runbook-management` as **proposed/preproduction/not_deployed**, not fictitious operational instances. Both have independent lifecycle ownership, canonical governance dependencies, documented verification methods and precise source globs; neither depends on PMv3.
+- `tools/pmv4_component_scope.py` reads the canonical registry and denies component-scoped release of unrelated protected Core files, shared runtime/composition/MCP entrypoints, untrusted source paths or missing/altered registry entries. It does **not** mint release/Owner authority and must be combined with the existing signed exact-scope gates.
+- While PMv3 remains authoritative for production, `config/release-manager-policy.json` now marks Ticket Core, JSON runbook and PMv4 host release-control files as protected source so legacy release admission cannot silently treat them as routine changes.
+- Production source, installed desired-state, active System Registry and live ticket worker are **unchanged**. Promotion of either new proposed component into active status needs its own governed lifecycle event and real deployment/readback proof.
+
 ## Source integration acceptance
 
 - Merged exact protected-main source into the PMv4 preproduction stack without merge conflicts.
