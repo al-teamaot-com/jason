@@ -67,6 +67,15 @@ def main(*, stage_only: bool = False) -> int:
         LIB / "owner_signed_release.py",
         0o644,
     )
+    # The optional Stage A0 root installer is a reviewed source module,
+    # not a second root daemon. It can only be invoked by the existing
+    # root reconciler with a signed exact Owner request. Stage it before
+    # exposing the upgraded root worker, preserving old release semantics.
+    install(
+        ROOT / "tools" / "pmv4_stage_a_native_install.py",
+        LIB / "pmv4_stage_a_native_install.py",
+        0o644,
+    )
     install(
         ROOT / "tools" / "release_host_reconcile_worker.py",
         LIB / "release_host_reconcile_worker.py",
