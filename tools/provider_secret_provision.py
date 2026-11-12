@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import hashlib
+import base64
 import json
 import os
 import ssl
@@ -407,6 +408,14 @@ def collect_values(provider: str) -> dict[str, str]:
     for field in tuple(spec["fields"]):
         if field.endswith("url"):
             value = input(f"{provider} {field}: ").strip()
+        elif provider == "constant_contact" and field == "token_key_b64":
+            value = getpass.getpass(
+                "constant_contact token_key_b64 (blank to generate AES-256 key): "
+            ).strip()
+            if not value:
+                # Generated material never goes to stdout, shell history or a
+                # local file. OpenBao is the only persisted copy.
+                value = base64.b64encode(os.urandom(32)).decode("ascii")
         else:
             value = getpass.getpass(f"{provider} {field}: ").strip()
         if not value and field in required_fields:
@@ -614,12 +623,28 @@ def write_provider_secret(
         raise ProvisionError("Missing provider fields: " + ", ".join(missing))
     if unexpected:
         raise ProvisionError("Unexpected provider fields: " + ", ".join(unexpected))
+
+    payload: dict[str, object] = {
+        "data": {field: values[field] for field in expected if field in values}
+    }
+    if provider == "constant_contact":
+        # The protected OpenBao KV-v2 mount has cas_required=true. A new
+        # Constant Contact OAuth secret must use CAS=0; do not silently
+        # overwrite an existing credential or reset its AES-GCM key.
+        try:
+            decoded = base64.b64decode(values["token_key_b64"], validate=True)
+        except (ValueError, KeyError) as exc:
+            raise ProvisionError("Constant Contact token key must be valid base64.") from exc
+        if len(decoded) != 32:
+            raise ProvisionError("Constant Contact token key must decode to 32 bytes.")
+        payload["options"] = {"cas": 0}
+
     api_request(
         address,
         str(spec["secret_path"]),
         method="POST",
         token=admin_token,
-        payload={"data": {field: values[field] for field in expected if field in values}},
+        payload=payload,
         allow_empty=True,
     )
 
