@@ -225,3 +225,32 @@ Entra/Datto bound, auditable HTTPS session and durable screened evidence
 service, wire the bridge to it, and prove upload and subsequent
 same-technician Jason MCP receipt retrieval. Release requires an exact
 candidate SHA and independently approved production authorization.
+
+## 0.2.1 guarded Entra-to-Jason send integration (2026-11-12)
+
+J-Assist now loads the formerly isolated send coordinator, authenticated
+transport and fail-closed service-worker bridge from the real Chrome MV3
+worker. The AOT Entra PKCE bearer remains in volatile worker memory only,
+never panel/Datto DOM or extension storage. A pinned AOT Jason HTTPS origin
+is added to manifest host permissions. A technician-initiated button click
+checks a current HTTPS Datto tab, derives an exact numeric device UID from
+the approved /device/{uid} or /web-remote/{uid} URL, and asks Jason to
+independently verify AOT user, configurable Entra group, native Datto
+device ownership and approved image-review readiness.
+
+Only after an affirmative server attestation does it open a scoped session,
+capture one fresh JPEG, hash the bytes, use a bearer plus unique nonce to
+post and verify the server's exact receipt. A changed tab, expired session,
+denied group/device, unavailable DLP or HTTPS service produces NO sent
+confirmation. Manual local screenshot/clipboard features remain available.
+
+IMPORTANT: This is *development source*, not a live operational upload. The
+server must first mount the reviewed gateway from implementation/jassist,
+bind actual governed Graph/Datto services, OpenBao-owned encryption keys,
+approved DLP and real HTTPS ingress. No generic API inference, Datto command
+execution or automatic model analysis is introduced. The extension should
+remain a controlled unpacked test build until approved release acceptance.
+
+Node tests exercise the real worker importScripts entrypoint and browser-shaped
+send orchestration with synthetic JWT/session responses. They are not evidence
+that a real Chrome Web Remote tab uploaded an image into deployed Jason.

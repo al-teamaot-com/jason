@@ -28,12 +28,12 @@ details>*{margin-top:10px}
 <img class="brand-header" src="brand/jassist-panel-header.svg" width="360" height="96" alt="J-Assist — Technician Copilot">
 <h1>Datto remote assistance</h1>
 <div id="scope" role="status">Choose an authorized Datto tab to begin.</div>
-<button id="send-to-jason" disabled title="Authenticated Jason screen delivery is not available yet">Send to Jason</button>
+<button id="send-to-jason" disabled title="Requires verified AOT sign-in, active Datto tab and authorized Jason HTTPS receiver">Send to Jason</button>
 <small id="send-status" role="status">Not connected to Jason. Automatic sending is unavailable in this build.</small>
 <details id="advanced">
-<summary>Advanced · AOT sign-in test, local preview and manual sharing</summary>
-<div class="controls"><button id="test-entra-signin" type="button">Test AOT Microsoft sign-in</button></div>
-<small id="entra-status" role="status">Not signed in to Jason. This test never uploads a screenshot or saves a token.</small>
+<summary>Advanced · AOT sign-in, local preview and manual sharing</summary>
+<div class="controls"><button id="test-entra-signin" type="button">Sign in to AOT for J-Assist</button></div>
+<small id="entra-status" role="status">Not signed in to Jason. AOT tokens stay in browser worker memory only.</small>
 <div class="warn">Full-tab screenshots can expose sensitive client data. Avoid passwords, patient records and restricted information. Nothing is sent automatically. Microsoft sign-in does not authorize Datto access.</div>
 <div class="controls"><button id="start">Start local preview</button><button id="stop" disabled>Stop preview</button></div>
 <div class="controls"><button id="screenshot" disabled>Capture screenshot</button><button id="copy-for-chatgpt" disabled>Copy reviewed screenshot</button><a id="download" hidden download="j-assist-evidence.jpg">Download reviewed screenshot</a></div>

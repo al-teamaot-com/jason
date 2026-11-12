@@ -601,3 +601,43 @@ November 12, a functioning Chrome extension send to Jason, public HTTPS,
 screen DLP/encryption, production MCP image retrieval or production
 release. Until all applicable live acceptance gates are satisfied,
 `Send to Jason` stays disabled and existing ticket processing untouched.
+
+## 2026-11-12 isolated production-capable component contracts (not activated)
+
+To avoid perpetual experimental code, the canonical implementation now lives
+in implementation/jassist. The old experimental bridge paths are thin
+compatibility imports so all previous tests execute the same canonical code.
+The new isolated implementation contains:
+
+- A versioned external-policy reader for the AOT-Jason-JAssist-Users group,
+  server-owned Graph membership checks and Datto account/device validation
+- Narrow, signed JAssist.Send Entra JWT verifier with canonical individual
+  identity binding and active user checks
+- An AES-256-GCM sealed, mode-0600 SQLite internal-session store with
+  revocation, expiry and server-held secrets surviving process restarts
+- An independently reviewed, bounded AES-GCM encrypted image evidence store
+  with nonces, hash-bound receipt, technician/device isolation, expiry/purge
+  and strict no-unreviewed-content policy
+- Explicit readiness/session/validation/upload/stop transaction engine
+  and an exact Chrome-origin, TLS-only bounded ASGI gateway
+- A ChatGPT MCP image-read adapter that invokes the existing trusted
+  Jason MCP identity boundary, returning image bytes without claiming that
+  the model analyzed them or a device command ran
+- A guarded release activation adapter that requires an exact deployed
+  protected-main SHA and auditable Owner approval reference before it will
+  register any intake route or image MCP read tool
+
+Registration is deliberately NOT wired into the currently deployed
+jason_mcp.server. No real Graph group-member authorization, native device
+read, DLP reviewer, managed encryption keys or TLS ingress is actually
+configured. Faked or synthetic readiness must never activate client data
+ingestion. A production release requires explicit safe content-scanning
+approval, governed configuration publication, server-owned vault keys,
+scope review, registered routes and real signed-in technician acceptance.
+
+The isolated preproduction integration exercises end-to-end capture-shaped
+HTTP/ASGI transactions and synthetic signed JWTs, simulates Graph membership
+and Datto device proof, verifies encryption and receipt through a process
+restart, and rejects replay, cross-user reads, expired/revoked sessions,
+wrong OAuth scope, wrong origin and missing DLP. These tests cannot substitute
+for the final browser-to-live-Jason acceptance.

@@ -1,8 +1,16 @@
 "use strict";
 // Explicitly isolated interactive AOT Entra sign-in pilot. This worker
 // never sends screen content or returns access tokens to a panel/page.
-if (typeof importScripts === "function") importScripts("entra_pkce.js","send_once.js","authenticated_transport.js");
+if (typeof importScripts === "function") importScripts("entra_pkce.js","send_once.js","authenticated_transport.js","live_send_bridge.js");
 let signInInProgress = false;
+let aotSendToken = null; // worker-memory only; never persisted in Chrome storage
+const liveSendFactory = globalThis.JAssistLiveBridgeFactory;
+if (liveSendFactory?.createLiveSendBridge) {
+  globalThis.JAssistLiveSendBridge = liveSendFactory.createLiveSendBridge({
+    chromeApi:chrome,
+    tokenForSend:async()=>aotSendToken,
+  });
+}
 let sendInProgress = false;
 const sessions = new Map();
 let nextSessionId = 0;
@@ -35,9 +43,18 @@ chrome.runtime.onMessage.addListener((msg,sender,respond) => {
           chromeIdentity:chrome.identity,
         });
         const signedIn = await auth.authorizeInteractive();
-        // Deliberately discard bearer token: no approved HTTPS Jason intake
-        // exists yet. Browser sign-in does not prove Jason/Datto authority.
+        // Bearer stays in the extension service-worker's volatile memory.
+        // Neither this result nor panel/Datto DOM receives it. Sign-in is
+        // not authority to capture or send; server readiness remains mandatory.
         if (!signedIn?.accessToken) throw Error("AOT sign-in was not completed.");
+        if (!Number.isFinite(signedIn.expiresIn) || signedIn.expiresIn < 60) {
+          // Old test stubs may omit lifetime; they may sign in for the
+          // isolated pilot but cannot unlock the live upload.
+          aotSendToken=null;
+        } else {
+          aotSendToken={token:signedIn.accessToken,
+                        expiresAt:Date.now()+signedIn.expiresIn*1000};
+        }
         return {ok:true,loginFlowCompleted:true,jasonAuthorizationVerified:false,
                 uploadEnabled:false};
       } finally {
@@ -84,7 +101,12 @@ chrome.runtime.onMessage.addListener((msg,sender,respond) => {
       return {ok:true,sessionId:id,tabTitle:tab.title};
     }
     if (msg.type === "stop") {
+      // Revoke server-side session as well as local capture. Revoke is
+      // best-effort; the server must always enforce short TTL and checks.
+      const existing=sessions.get(msg.tabId);
       sessions.delete(msg.tabId);
+      if(existing) await globalThis.JAssistLiveSendBridge?.revoke?.({
+        tabId:msg.tabId}).catch(()=>{});
       return {ok:true};
     }
     if (msg.type === "capture") {

@@ -56,7 +56,13 @@ signInButton.addEventListener("click",async()=>{
     const result=await request({type:"test-entra-signin"});
     if(result?.ok===true && result.loginFlowCompleted===true &&
        result.jasonAuthorizationVerified===false && result.uploadEnabled===false) {
-      signInStatus.textContent="Microsoft OAuth completed. Jason and Datto authorization have not been verified; sending remains disabled.";
+      signInStatus.textContent="Microsoft sign-in completed. Checking current Jason and Datto permissions...";
+      await updateSendReadiness();
+      if(sendButton.disabled) {
+        signInStatus.textContent="Sign-in completed. The Jason receiver or device authorization is not ready. Manual sharing remains available.";
+      } else {
+        signInStatus.textContent="Signed in. Server confirmed J-Assist eligibility and this Datto device.";
+      }
     } else {
       signInStatus.textContent="Sign-in test failed: "+String(result?.error||"No valid sign-in confirmation.");
     }

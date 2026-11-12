@@ -35,12 +35,15 @@ function rig(override={}) {
   {type:"test-entra-signin"},sender,resolve));
  return {send,calls:()=>calls,options:()=>args,auth:f=>authentication=f};
 }
-test("pilot build pins real admin-approved AOT SPA and has no screenshot transport permission",()=>{
- assert.equal(manifest.version,"0.2.0");
+test("pilot build pins reviewed AOT SPA and single Jason HTTPS origin",()=>{
+ assert.equal(manifest.version,"0.2.1");
  assert.ok(manifest.permissions.includes("identity"));
- assert.deepEqual(manifest.host_permissions,["https://login.microsoftonline.com/*"]);
+ assert.deepEqual(manifest.host_permissions,[
+   "https://login.microsoftonline.com/*",
+   "https://mcp-jason.teamaot.com/*",
+ ]);
  assert.ok(!manifest.permissions.includes("tabs"));
- assert.ok(!manifest.host_permissions.some(p=>/mcp-jason/.test(p)));
+ assert.ok(manifest.host_permissions.every(p=>p.startsWith("https://")));
 });
 test("only exact extension panel can start Entra sign-in, never Datto content or other panel",async()=>{
  const r=rig();

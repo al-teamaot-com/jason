@@ -67,4 +67,5 @@ async function sendOnce({getContext,checkReadiness,capture,deliver,isCurrent,dig
   }
 }
 const JAssistOneClick=Object.freeze({sendOnce,isReceipt});
+if(typeof globalThis!=="undefined")globalThis.JAssistOneClick=JAssistOneClick;
 if (typeof module!=="undefined"&&module.exports)module.exports=JAssistOneClick;

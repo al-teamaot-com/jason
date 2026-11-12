@@ -6,7 +6,7 @@ const path=require("node:path");
 const crypto=require("node:crypto");
 const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,"..","manifest.json"),"utf8"));
 test("preproduction Chrome ID is pinned by public manifest key and survives install path changes",()=>{
- assert.equal(manifest.version,"0.2.0");
+ assert.equal(manifest.version,"0.2.1");
  const publicDer=Buffer.from(manifest.key,"base64");
  assert.ok(publicDer.length>=250);
  const digest=crypto.createHash("sha256").update(publicDer).digest().subarray(0,16);
@@ -15,6 +15,10 @@ test("preproduction Chrome ID is pinned by public manifest key and survives inst
  assert.equal("https://"+extensionId+".chromiumapp.org/jassist",
               "https://pihjpgplfhmpenlghbcdbgdkadleflfi.chromiumapp.org/jassist");
  assert.ok(manifest.permissions.includes("identity")); // explicit sign-in only
- assert.deepEqual(manifest.host_permissions,["https://login.microsoftonline.com/*"]);
- assert.ok(!manifest.host_permissions.some(x=>x.includes("mcp-jason")));
+ assert.deepEqual(manifest.host_permissions,[
+   "https://login.microsoftonline.com/*",
+   "https://mcp-jason.teamaot.com/*",
+ ]);
+ assert.ok(!manifest.host_permissions.some(x=>x==="https://*/*"));
+ assert.ok(!manifest.host_permissions.some(x=>x.includes("rmm.datto.com")));
 });

@@ -66,4 +66,5 @@ function createImageSender({pinnedOrigin,tokenForSession,fetchImpl=fetch}) {
   };
 }
 const JAssistAuthenticatedTransport=Object.freeze({createImageSender});
+if(typeof globalThis!=="undefined")globalThis.JAssistAuthenticatedTransport=JAssistAuthenticatedTransport;
 if(typeof module!=="undefined"&&module.exports)module.exports=JAssistAuthenticatedTransport;
