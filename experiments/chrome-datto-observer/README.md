@@ -269,3 +269,22 @@ Datto site before accepting any screenshot.
 The Owner's controlled nonproduction pilot is approved; local Chrome
 installation is not automated. No real screenshots have yet been
 sent, and the production receiver is still disabled.
+
+
+## 0.2.2: Diagnostics and fail-closed readiness refresh
+
+The technician panel now identifies independently observable blockers:
+missing/expired AOT sign-in, unreachable HTTPS receiver, 401, 403,
+404 (receiver not deployed), 503 (image review unavailable), and
+invalid server authorization response. It rechecks readiness every
+15 seconds in an active assistance session. This is strictly
+read-only and never permits a screenshot on a failed check.
+The selected Datto browser device ID is verified separately from
+its provider-native UUID; **numeric UI IDs require PR #2456**
+governed `GET /v2/device/id/{id}` read evidence before sending.
+
+Do not confuse the updated UI with an enabled sender. The pinned
+production MCP HTTPS readiness URL still returns HTTP 404, and the
+Owner specifically did not authorize production deployment.
+A separate approved nonproduction receiving environment and real
+screenshot-review/identity provider checks remain required.

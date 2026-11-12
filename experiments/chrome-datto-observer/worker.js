@@ -81,8 +81,13 @@ chrome.runtime.onMessage.addListener((msg,sender,respond) => {
       // A readiness response is advisory; sendOnce independently rechecks
       // all authority before capturing any image.
       if (msg.type === "send-readiness") {
-        const ready=await live.readiness({tabId:msg.tabId,sessionId:session.id});
-        return {ok:ready===true,ready:ready===true};
+        const state=typeof live.readinessStatus==="function"
+          ? await live.readinessStatus({tabId:msg.tabId,sessionId:session.id})
+          : {ready:await live.readiness({tabId:msg.tabId,sessionId:session.id})};
+        const ready=state?.ready===true;
+        return {ok:ready,ready,
+                reason:typeof state?.reason==="string"?state.reason:
+                  "Jason authorization and screenshot review are not ready."};
       }
       if (sendInProgress) throw Error("A J-Assist send is already in progress.");
       sendInProgress=true;

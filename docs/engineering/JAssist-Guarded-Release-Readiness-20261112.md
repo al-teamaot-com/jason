@@ -113,3 +113,38 @@ MCP image reader. No real screenshot acceptance can be claimed.
 A Work-mode authorized technician browser session and approved live
 nonproduction ingress are required. Until then, the extension remains
 fail-closed and no client/user screenshot data leaves the machine.
+
+
+## Numeric Datto Web Remote device-ID dependency (2026-11-12)
+
+An additional live read-only check revealed that the **existing** governed
+`endpoint.device.read(resource_id=1717088)` returned HTTP **404** even
+though the Datto browser displayed `Al-Samsung` at
+`/web-remote/1717088`. Datto REST uses the distinct native UUID
+`710e63d6-caca-d830-697a-81250b0a8321`; the read response cannot
+ground the association between those identifiers by hostname alone.
+
+A new compartmentalized, governed read-by-ID adapter is prepared in
+**draft PR #2456**. It routes exact positive numeric device IDs to Datto's
+documented `GET /v2/device/id/{deviceId}`, verifies the exact ID and
+provider-issued UUID, and exposes a separate bounded
+`provider_device_id` in Jason's read evidence. The isolated J-Assist
+authorizer now requires that exact provider ID plus native UUID, pinned
+AOT site and device-state read before accepting any numeric browser
+selector. Numeric provider ID evidence is a *release dependency*, not
+a default exception. The by-ID route is not yet active in production.
+
+Additionally, `https://mcp-jason.teamaot.com/v1/jassist/readiness`
+was independently observed returning **HTTP 404** with a valid TLS
+certificate on the current production endpoint; no J-Assist HTTPS
+ingress was registered. The extension's readiness UI now gives a
+specific fail-closed reason for 401, 403, 404 and 503 and rechecks
+every 15 seconds. It never interprets a missing endpoint as permission
+to send. Production remains unchanged.
+
+The Owner approved **nonproduction** AOT screen sharing only, and did
+not approve activating either code path in production. The real
+browser-to-Jason test cannot pass until the separate by-ID governed
+capability and reviewed, encrypted, tenant-bound pilot receiver are
+installed in an authorized **nonproduction** environment and live
+accepted by a technician.

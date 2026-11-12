@@ -9,7 +9,7 @@ const evidenceFilename=timestamp=>"j-assist-evidence-"+timestamp.replace(/[:.]/g
 const request=m=>chrome.runtime.sendMessage(m);
 const sendButton=document.querySelector("#send-to-jason");
 const sendStatus=document.querySelector("#send-status");
-let sending=false;
+let sending=false,readinessTimer=null;
 async function updateSendReadiness(){
   sendButton.disabled=true;
   if(!running || sending || sessionId===null){
@@ -22,7 +22,9 @@ async function updateSendReadiness(){
     sendButton.disabled=response?.ready!==true;
     sendStatus.textContent=response?.ready===true
       ?"Authorized Jason evidence delivery is available. Click to send a fresh screenshot."
-      :"Governed Jason sender is not connected. No screenshot will be uploaded.";
+      :typeof response?.reason==="string"
+        ?response.reason+" No screenshot will be uploaded."
+        :"Jason receiver is unavailable. No screenshot will be uploaded.";
   }catch{
     sendButton.disabled=true;
     sendStatus.textContent="Unable to verify Jason delivery readiness.";
@@ -73,7 +75,7 @@ signInButton.addEventListener("click",async()=>{
 const setStatus=s=>{status.textContent=s;};
 const clearPreview=()=>{frame.removeAttribute("src");frame.hidden=true;stamp.textContent="No retained frame";};
 function endLocally(message){
-  running=false;sendButton.disabled=true;sendStatus.textContent="No active Jason delivery session.";clearInterval(timer);timer=null;sessionId=null;
+  running=false;sendButton.disabled=true;sendStatus.textContent="No active Jason delivery session.";clearInterval(timer);timer=null;clearInterval(readinessTimer);readinessTimer=null;sessionId=null;
   start.disabled=false;stop.disabled=true;clearCapture();clearPreview();scope.textContent="No active assistance session";setStatus(message);
 }
 async function capture(){
@@ -107,7 +109,13 @@ start.addEventListener("click",async()=>{
     const r=await request({type:"start",tabId});
     if(!r.ok)throw Error(r.error);
     sessionId=r.sessionId;running=true;stop.disabled=false;clearEvidence();
-    await capture();if(running){await updateSendReadiness();timer=setInterval(capture,2000);}
+    await capture();if(running){
+      await updateSendReadiness();
+      timer=setInterval(capture,2000);
+      // Status refresh is read-only. It never uploads screenshots or
+      // opens an authorized session on behalf of the technician.
+      readinessTimer=setInterval(updateSendReadiness,15000);
+    }
   }catch(e){endLocally("Cannot start: "+e.message);}
 });
 stop.addEventListener("click",halt);

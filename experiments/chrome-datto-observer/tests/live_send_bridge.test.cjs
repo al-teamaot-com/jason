@@ -15,7 +15,7 @@ const now=Date.now();
 function harness(deviceUid="1717088"){
  const tab={id:42,windowId:2,url:"https://vidal.rmm.datto.com/device/"+deviceUid+"/console"};
  const calls=[];
- let activeId=42,group=true,datto=true,review=true,expires=now+60000;
+ let activeId=42,group=true,datto=true,review=true,expires=now+60000,readinessCode=200;
  let token={token:goodBearer,expiresAt:now+3600000};
  const chromeApi={tabs:{
     get:async id=>id===42?tab:null,
@@ -30,7 +30,7 @@ function harness(deviceUid="1717088"){
    assert.match(opts.headers.Authorization,/^Bearer a+$/);
    const response=(status,body)=>({status,ok:status>=200&&status<300,json:async()=>body});
    if(path==="/v1/jassist/readiness"){
-     return response(200,{status:"ready",device_uid:deviceUid,
+     return response(readinessCode,{status:"ready",device_uid:deviceUid,
        technician_verified:true,entra_group_verified:group,
        datto_device_authorized:datto,image_review_ready:review,
        production_ingress:true});
@@ -69,7 +69,8 @@ function harness(deviceUid="1717088"){
    datto:x=>datto=x,
    review:x=>review=x,
    expires:x=>expires=x,
-   token:x=>token=x};
+   token:x=>token=x,
+   readinessCode:x=>readinessCode=x};
 }
 test("only exact device URLs from reviewed Datto RMM origin are accepted",()=>{
  for(const url of [
@@ -122,6 +123,30 @@ test("missing group, Datto ownership or reviewer rejects before capture",async()
    assert.equal(t.calls.filter(c=>c.path==="/v1/jassist/image").length,0);
  }
 });
+test("disabled button diagnostics distinguish missing login, receiver and authorization",async()=>{
+ const t=harness();
+ t.token(null);
+ let state=await t.live.readinessStatus({tabId:42,sessionId:7});
+ assert.equal(state.ready,false);
+ assert.match(state.reason,/sign-in/i);
+ t.token({token:goodBearer,expiresAt:now+3600000});
+ for(const [code,description] of [
+   [404,/not deployed.*404/i],
+   [401,/token was rejected/i],
+   [403,/denied.*Entra group or Datto/i],
+   [503,/review or intake service/i],
+ ]){
+   t.readinessCode(code);
+   state=await t.live.readinessStatus({tabId:42,sessionId:7});
+   assert.equal(state.ready,false);
+   assert.match(state.reason,description);
+ }
+ assert.equal(t.calls.filter(c=>c.path==="capture").length,0);
+ assert.equal(t.calls.filter(c=>c.path==="/v1/jassist/image").length,0);
+ t.readinessCode(200);
+ assert.equal((await t.live.readinessStatus({tabId:42,sessionId:7})).ready,true);
+});
+
 test("missing bearer, wrong tab and expired session fail before screenshot",async()=>{
  const t=harness();
  t.token(null);

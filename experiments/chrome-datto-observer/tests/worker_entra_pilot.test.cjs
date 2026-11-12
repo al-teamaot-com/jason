@@ -36,7 +36,7 @@ function rig(override={}) {
  return {send,calls:()=>calls,options:()=>args,auth:f=>authentication=f};
 }
 test("pilot build pins reviewed AOT SPA and single Jason HTTPS origin",()=>{
- assert.equal(manifest.version,"0.2.1");
+ assert.equal(manifest.version,"0.2.2");
  assert.ok(manifest.permissions.includes("identity"));
  assert.deepEqual(manifest.host_permissions,[
    "https://login.microsoftonline.com/*",

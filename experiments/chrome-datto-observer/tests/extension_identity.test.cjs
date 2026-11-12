@@ -6,7 +6,7 @@ const path=require("node:path");
 const crypto=require("node:crypto");
 const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,"..","manifest.json"),"utf8"));
 test("preproduction Chrome ID is pinned by public manifest key and survives install path changes",()=>{
- assert.equal(manifest.version,"0.2.1");
+ assert.equal(manifest.version,"0.2.2");
  const publicDer=Buffer.from(manifest.key,"base64");
  assert.ok(publicDer.length>=250);
  const digest=crypto.createHash("sha256").update(publicDer).digest().subarray(0,16);

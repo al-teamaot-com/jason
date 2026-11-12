@@ -45,8 +45,22 @@ class GovernedAotDattoDeviceProof:
             record=evidence.get("record")
             if not isinstance(record,Mapping):
                 return False
-            # Exact bound resource and site, not a match by display name.
-            if (canonical_device_uid(record.get("resource_id"))!=device_uid
+            # Datto's browser UI device ID is numeric; the provider v2 UID
+            # is a distinct UUID. A numeric browser selection is eligible
+            # ONLY when the governed by-ID read returns both identifiers
+            # independently from the provider. Never infer from hostname.
+            raw_provider_id = record.get("provider_device_id")
+            is_numeric = device_uid.isdecimal()
+            if is_numeric:
+                matched_id = (
+                    type(raw_provider_id) in (str, int)
+                    and str(raw_provider_id) == device_uid
+                    and canonical_device_uid(record.get("resource_id")) is not None
+                    and not str(record["resource_id"]).isdecimal()
+                )
+            else:
+                matched_id = canonical_device_uid(record.get("resource_id")) == device_uid
+            if (not matched_id
                     or record.get("site_id")!=self._site
                     or not isinstance(record.get("hostname"),str)
                     or not record["hostname"].strip()

@@ -196,6 +196,34 @@ class RuntimeWiringTests(unittest.TestCase):
             session_id=sid,device_uid=native_uid,receipt_id=receipt["receipt_id"])
         self.assertEqual(base64.b64decode(read["image"]["data"]),JPEG)
         self.assertGreaterEqual(calls.count(native_uid),4)
+        # Browser Web Remote uses a decimal UI ID. It is eligible only
+        # with the provider-returned exact by-ID proof from PR #2456.
+        numeric_uid="1717088"
+        record["provider_device_id"]=1717088
+        ready_numeric=service.api.readiness(
+            bearer=bearer,device_uid=numeric_uid)
+        self.assertEqual(ready_numeric["status"],"ready")
+        session_numeric=service.api.create_session(
+            bearer=bearer,device_uid=numeric_uid,consent=True)
+        sid_numeric=session_numeric["session_id"]
+        receipt_numeric=service.api.accept_image(
+            bearer=bearer,session_id=sid_numeric,device_uid=numeric_uid,
+            nonce="TestNumericDattoIdABC123",image=JPEG,
+            sha256=hashlib.sha256(JPEG).hexdigest())
+        returned=service.mcp_image_tool.read_reviewed_image(
+            authenticated_technician=self.person,
+            session_id=sid_numeric,device_uid=numeric_uid,
+            receipt_id=receipt_numeric["receipt_id"])
+        self.assertEqual(base64.b64decode(returned["image"]["data"]),JPEG)
+        self.assertGreaterEqual(calls.count(numeric_uid),4)
+        # Mismatched browser ID must revoke even when native UUID/site match.
+        record["provider_device_id"]=1111111
+        with self.assertRaises(Denied):
+            service.mcp_image_tool.read_reviewed_image(
+                authenticated_technician=self.person,
+                session_id=sid_numeric,device_uid=numeric_uid,
+                receipt_id=receipt_numeric["receipt_id"])
+        record["provider_device_id"]=1717088
         # Native site revalidation on every read; no caching by browser.
         record["site_id"]="11111111-1111-4111-8111-111111111111"
         with self.assertRaises(Denied):

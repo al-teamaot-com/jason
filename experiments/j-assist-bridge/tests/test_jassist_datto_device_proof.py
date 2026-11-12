@@ -35,6 +35,19 @@ class RealShapeDeviceTests(unittest.TestCase):
         self.assertFalse(self.auth("another-site",GUID))
         self.assertEqual(len(self.calls),1)
 
+    def test_numeric_web_remote_id_requires_independent_by_id_read_mapping(self):
+        self.record["provider_device_id"]=1717088
+        self.assertTrue(self.auth(SITE,"1717088"))
+        self.assertEqual(self.calls,["1717088"])
+        for wrong in (None,1717000,True,"AL-SAMSUNG",0):
+            with self.subTest(wrong=wrong):
+                self.record["provider_device_id"]=wrong
+                self.assertFalse(self.auth(SITE,"1717088"))
+        # Numeric UI selector is never allowed to masquerade as native UID.
+        self.record["provider_device_id"]=1717088
+        self.record["resource_id"]="1717088"
+        self.assertFalse(self.auth(SITE,"1717088"))
+
     def test_untrusted_device_or_site_proof_deny(self):
         for edit in (
             ("site_id",ELSEWHERE),("resource_id",ELSEWHERE),

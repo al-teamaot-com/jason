@@ -85,20 +85,48 @@ function createLiveSendBridge({chromeApi,tokenForSend,
     },
     fetchImpl,
   });
-  async function readiness({tabId,sessionId}) {
+  async function readinessStatus({tabId,sessionId}) {
+    const denied=reason=>({ready:false,reason});
     try{
       const tab=await boundTab(tabId,sessionId);
-      if(!tab)return false;
-      const data=await json(origin+"/v1/jassist/readiness?device_uid="+tab.deviceUid,
-        {method:"GET",headers:await headers()});
-      return data?.status==="ready" &&
+      if(!tab)return denied("Select the active Datto device or Web Remote tab.");
+      let authorization;
+      try {authorization=await headers();}
+      catch {return denied("Complete AOT Microsoft sign-in to check Jason access.");}
+      let result;
+      try {
+        result=await fetchImpl(origin+"/v1/jassist/readiness?device_uid="+tab.deviceUid,{
+          method:"GET",headers:authorization,credentials:"omit",
+          redirect:"error",cache:"no-store",mode:"cors",
+        });
+      }catch {
+        return denied("Jason HTTPS receiver is unreachable or blocked.");
+      }
+      if(result?.status===404)return denied("Jason image receiver is not deployed (HTTP 404).");
+      if(result?.status===401)return denied("AOT sign-in token was rejected by Jason.");
+      if(result?.status===403)return denied("Jason denied current Entra group or Datto device access.");
+      if(result?.status===503)return denied("Jason image review or intake service is unavailable.");
+      if(!result?.ok)return denied("Jason receiver readiness check did not succeed.");
+      let data;
+      try {data=await result.json();}
+      catch {return denied("Jason returned an invalid readiness response.");}
+      const ready=data?.status==="ready" &&
         data.device_uid===tab.deviceUid &&
         data.technician_verified===true &&
         data.entra_group_verified===true &&
         data.datto_device_authorized===true &&
         data.image_review_ready===true &&
         data.production_ingress===true;
-    }catch{return false;}
+      return ready
+        ? {ready:true,reason:"Jason verified Entra access, Datto device and content review."}
+        : denied("Jason has not verified this technician, device and image review.");
+    }catch {
+      return denied("J-Assist could not verify the receiving service.");
+    }
+  }
+  async function readiness(args){
+    const result=await readinessStatus(args);
+    return result.ready===true;
   }
   async function dependencies({tabId,sessionId}) {
     const tab=await boundTab(tabId,sessionId);
@@ -170,7 +198,7 @@ function createLiveSendBridge({chromeApi,tokenForSend,
       });
     }catch{/* Server TTL and per-read authorization remain mandatory. */}
   }
-  return Object.freeze({readiness,dependencies,revoke});
+  return Object.freeze({readiness,readinessStatus,dependencies,revoke});
 }
 const JAssistLiveBridgeFactory=Object.freeze({
   createLiveSendBridge,deviceFromDattoUrl,
