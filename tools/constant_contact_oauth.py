@@ -29,9 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     base = Path(args.approle_dir)
     resolver = OpenBaoSecretResolver(
         base_url=os.environ.get("JASON_OPENBAO_URL", "http://127.0.0.1:8200"),
-        # The root-managed provisioning tool creates hyphenated filenames.
-        # Do not create an alternate ungoverned credential layout.
-        role_id_path=base / "role-id", secret_id_path=base / "secret-id",
+        role_id_path=base / "role_id", secret_id_path=base / "secret_id",
     )
     credentials = resolver.resolve(
         "constant_contact.oauth_client",
