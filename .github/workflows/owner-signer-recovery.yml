@@ -1,0 +1,44 @@
+name: Owner signer recovery source-only safety
+on:
+  pull_request:
+    paths:
+      - 'tools/owner_signer_recovery.py'
+      - 'tools/tests/test_owner_signer_recovery.py'
+      - 'config/owner-signer-recovery-2450-policy.json'
+      - '.github/workflows/owner-signer-recovery.yml'
+  push:
+    paths:
+      - 'tools/owner_signer_recovery.py'
+      - 'tools/tests/test_owner_signer_recovery.py'
+      - 'config/owner-signer-recovery-2450-policy.json'
+      - '.github/workflows/owner-signer-recovery.yml'
+permissions:
+  contents: read
+jobs:
+  deny-by-default-recovery-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install strict test-only dependencies
+        run: python -m pip install 'pytest>=8.3,<10' 'cryptography>=50,<51' 'PyJWT>=2.8,<3'
+      - name: Compile and run synthetic security tests
+        run: |
+          python -m py_compile tools/owner_signer_recovery.py
+          PYTHONPATH=implementation python -m pytest -q tools/tests/test_owner_signer_recovery.py
+      - name: Verify one-shot policy and pinned script fingerprint
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          policy=json.loads(Path('config/owner-signer-recovery-2450-policy.json').read_text())
+          script=Path('tools/owner_signer_recovery.py').read_bytes()
+          assert policy['one_shot'] is True
+          assert policy['script_sha256']==hashlib.sha256(script).hexdigest()
+          assert policy['operation']=='owner-signer-reattach-690250b4-v1'
+          assert policy['owner_authentication']=='fresh_verified_entra_device_code'
+          print('EXACT_SOURCE_POLICY_FINGERPRINT=PASS')
+          PY
