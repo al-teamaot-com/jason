@@ -43,3 +43,18 @@ This reduces repeated sequential wall time without weakening integrity coverage.
 The expected unmodified baseline at diagnosis is `d1b8c196dadd4b672ec8ba47075f27bb61c98d63`; MCP image `sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477`, runtime image `sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132`. The production freeze SHA-256 is `bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f`, and hold SHA-256 `11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0`. These are snapshot values, not perpetual permissions. Prior source and immutable root helper rollback must be reverified against actual live state at the later approval boundary.
 
 **Current stop boundary:** No production root authority is available to apply a protected checker change under the OPEN breaker in this chat, and no exact Owner production-repair approval has been granted. No production commands in this source worktree install, unfreeze, restart, sign, deploy or activate anything.
+
+
+## Concurrent PR coordination
+
+Integration coordination: #2390 #2394 #2395 #2404 #2459
+
+The precise source hunks and differences were checked against all five
+active references. The independent archive-scratch cleanup from #2390
+was adopted without its separate 90-minute timeout extension; larger
+drafts #2395/#2404 carry that same cleanup plus unrelated Teams and
+release controls. The future second-drive audit selection in #2394
+remains its own explicitly governed dual-writer migration. #2459's
+PMv4 Owner issuer remains a distinct source promotion and activation.
+This technical coordination is not a production release, standing
+authorization, or permission to merge unrelated open PRs.
