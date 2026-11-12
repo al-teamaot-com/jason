@@ -59,6 +59,8 @@ Focused IT Glue connector and runtime composition/source tests have passed, incl
 
 ## Reviewed concurrent integration (2026-11-12)
 
-Integration coordination: #2454
+Integration coordination: #2454 #2441 #2438 #2405 #2395 #2393 #2336 #2373 #2439 #2445
 
 PR #2454 adds Microsoft Graph group-read/group-write OpenBao mappings and provider profiles and extends only the Microsoft Graph credential-input dispatch. IT Glue writes use distinct it_glue.readwrite mapping and it_glue_write provisioner profile. The changes are additive, use different secret paths and logical names, and do not overwrite one another. Preserve both scopes at merge, and re-review if either PR changes. This coordination is not an activation approval.
+
+The exact installed rollback baseline must be re-read at release preparation; the former 690250b4 source has already been superseded in production by signed release d1b8c196. No code or production activation follows from this documentation acknowledgement.
