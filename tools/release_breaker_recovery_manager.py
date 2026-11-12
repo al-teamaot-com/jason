@@ -287,6 +287,34 @@ def main() -> int:
     p.add_argument("--spool", type=Path, required=True)
     p.add_argument("--release-state", type=Path, required=True)
     args = p.parse_args()
+    # A separate PMv4 timer and the legacy PMv3 engineering pipeline can
+    # coexist during migration. Both must serialize recovery attempts against
+    # the same durable ledger; do not double-consume a bounded root permit.
+    lock_path = args.spool.resolve() / "release-breaker-recovery.lock"
+    fd = None
+    try:
+        fd = os.open(
+            lock_path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600
+        )
+        meta = os.fstat(fd)
+        if (not os.path.isfile(lock_path) or meta.st_nlink != 1
+                or meta.st_uid != os.geteuid() or meta.st_mode & 0o077):
+            raise ValueError("untrusted breaker recovery lock")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("RELEASE_BREAKER_RECOVERY=blocked action=existing_recovery_in_progress", flush=True)
+            return 0
+        return _run_once(args)
+    except (OSError, ValueError) as exc:
+        print("RELEASE_BREAKER_RECOVERY=FAILED " + type(exc).__name__, flush=True)
+        return 1
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _run_once(args: argparse.Namespace) -> int:
     root = args.release_state.resolve()
     track = args.spool.resolve() / "release-breaker-recovery-state.json"
     try:

@@ -591,6 +591,9 @@ class RuntimeSettings:
     autonomy_shadow_failure_retry_seconds: int = 300
     autonomy_targeted_wake_retry_seconds: int = 300
     autonomy_worker_enabled: bool = False
+    # Source-only migration seam. Historical installations default to the
+    # embedded owner until a separately governed external worker is ready.
+    ticket_worker_hosting: str = "embedded"
     autonomy_worker_db: Path = Path(
         "/var/lib/jason/openclaw/autonomy-operational-work.sqlite3"
     )
@@ -1059,6 +1062,9 @@ class RuntimeSettings:
             autonomy_worker_enabled=os.getenv(
                 "JASON_AUTONOMY_WORKER_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
+            ticket_worker_hosting=os.getenv(
+                "JASON_TICKET_WORKER_HOSTING", "embedded"
+            ).strip().casefold(),
             autonomy_worker_db=Path(
                 os.getenv(
                     "JASON_AUTONOMY_WORKER_DB",
@@ -1238,6 +1244,8 @@ class RuntimeSettings:
             raise ValueError(
                 "JASON_AUTONOMY_TARGETED_WAKE_RETRY_SECONDS must be at least 60"
             )
+        if self.ticket_worker_hosting not in {"embedded", "external"}:
+            raise ValueError("JASON_TICKET_WORKER_HOSTING must be embedded or external")
         if self.autonomy_worker_interval_seconds < 30:
             raise ValueError(
                 "JASON_AUTONOMY_WORKER_INTERVAL_SECONDS must be at least 30"

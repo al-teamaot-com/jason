@@ -101,6 +101,7 @@ from connectors.datto_edr.threat_correlation import (
 )
 from pydantic import AnyHttpUrl
 from jason_mcp.release_approval_request import queue_release_approval_request
+from jason_mcp.pmv4_entra_claims import verify_signed_entra_claims
 from jason_mcp.production_read_acceptance import record_authenticated_owner_read
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
@@ -290,52 +291,24 @@ class EntraTokenVerifier(TokenVerifier):
             cache_keys=True,
         )
 
-    async def verify_token(
-        self,
-        token: str,
-    ) -> AccessToken | None:
-        if not token:
+    def verify_signed_claims(self, token: str) -> Mapping[str, Any] | None:
+        """Revalidate signature and full Entra claims for exact Owner decisions.
+
+        Ordinary MCP AccessToken intentionally carries only tid/oid.
+        The PMv4 Owner issuer needs fresh signed issuer/audience/time claims,
+        not claims reconstructed from the minimized request context.
+        """
+        return verify_signed_entra_claims(
+            token,
+            signing_key_lookup=self._jwks.get_signing_key_from_jwt,
+            audience=JASON_ENTRA_CLIENT_ID,
+            issuer=JASON_ENTRA_ISSUER,
+        )
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        claims = self.verify_signed_claims(token)
+        if claims is None:
             return None
-
-        try:
-            signing_key = (
-                self._jwks.get_signing_key_from_jwt(
-                    token
-                )
-            )
-
-            claims = jwt.decode(
-                token,
-                signing_key.key,
-                algorithms=["RS256"],
-                audience=JASON_ENTRA_CLIENT_ID,
-                issuer=JASON_ENTRA_ISSUER,
-                leeway=60,
-                options={
-                    "require": [
-                        "exp",
-                        "iat",
-                        "nbf",
-                        "aud",
-                        "iss",
-                        "tid",
-                        "oid",
-                    ],
-                },
-            )
-
-        except (
-            PyJWTError,
-            ValueError,
-            TypeError,
-            KeyError,
-        ):
-            return None
-        except Exception:
-            # Authentication fails closed. Do not expose JWKS/provider
-            # transport or token-validation internals to the caller.
-            return None
-
         tenant_id = str(
             claims.get("tid") or ""
         ).strip()
@@ -407,6 +380,8 @@ _MCP_INTERNAL_NOTE_SURFACE_ENABLED = (
 logger = logging.getLogger("jason_mcp.server")
 
 
+_entra_token_verifier = EntraTokenVerifier()
+
 mcp = MCPServer(
     "Jason",
     instructions=(
@@ -421,7 +396,7 @@ mcp = MCPServer(
         "Jason identity, authority, policy and Central Orchestrator "
         "remain authoritative."
     ),
-    token_verifier=EntraTokenVerifier(),
+    token_verifier=_entra_token_verifier,
     auth=AuthSettings(
         issuer_url=AnyHttpUrl(
             JASON_OAUTH_ISSUER_URL
@@ -5322,6 +5297,51 @@ def approve_release_candidate(
         "approval_source": request.get("source", "authenticated_jason_mcp_owner"),
         "promotion": "separate_release_manager_transaction",
     }
+
+
+@mcp.tool()
+def authorize_pmv4_shadow_release(
+    candidate_sha: str,
+    rollback_sha: str,
+    scope_sha256: str,
+    manifest_sha256: str,
+    freeze_sha256: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Owner-only, one-use exact PMv4 shadow release authorization.
+
+    Requires active Entra OAuth and an explicit exact-action confirmation.
+    Does not install controls, deploy, restart, alter the freeze, or bypass
+    the independently privileged protected breaker / release transaction.
+    Disabled until the separately governed host trust installation.
+    """
+    try:
+        if os.environ.get("JASON_PMV4_OWNER_ISSUER_ENABLED") != "true":
+            raise PermissionError("PMV4_OWNER_ISSUER_NOT_INSTALLED")
+        principal, organization = _release_approval_owner()
+        access_token = get_access_token()
+        if access_token is None or not isinstance(access_token.token, str):
+            raise PermissionError("PMV4_ENTRA_OWNER_BEARER_REQUIRED")
+        from jason_mcp.pmv4_owner_bridge import authorize_exact_shadow_from_mcp
+        response = authorize_exact_shadow_from_mcp(
+            bearer_token=access_token.token,
+            verified_owner_principal=principal,
+            verified_organization=organization,
+            verify_entra_bearer=_entra_token_verifier.verify_signed_claims,
+            candidate_sha=candidate_sha,
+            rollback_sha=rollback_sha,
+            scope_sha256=scope_sha256,
+            manifest_sha256=manifest_sha256,
+            freeze_sha256=freeze_sha256,
+            affirmative_decision=affirmative_decision,
+        )
+        return {
+            "status": "succeeded", **response,
+            "production_deployment": False,
+            "next_stage": "separately_governed_host_release_transaction",
+        }
+    except (PermissionError, ValueError, RuntimeError, OSError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
 
 
 def _component_unsupervised_block_reason(
