@@ -164,3 +164,60 @@ def test_openbao_builder_rejects_same_credential_identity_for_read_and_write(tmp
             write_secret_id_path=tmp_path / "shared" / "secret_id",
             transport=BoundedGraphTransport(), entitlement=FakeEntitlements(), audit=FakeAudit(),
         )
+
+
+def test_exact_aot_pilot_entitlement_limits_name_owner_and_membership():
+    from jason_runtime.microsoft_group_admin import AotPilotGroupEntitlement
+    from orchestrator.microsoft_group_admin_catalog import (
+        AOT_PILOT_CLIENT_ID, AOT_PILOT_TENANT_ID, AOT_PILOT_OWNER_ID,
+        AOT_PILOT_OWNER_PRINCIPAL_ID, AOT_PILOT_GROUP_NAME, AOT_PILOT_GROUP_ALIAS,
+    )
+    from connectors.microsoft_graph.group_executor import GroupWriteScope
+    from connectors.core.contracts import ConnectorContext, ConnectorAuthorizationError
+    import pytest
+    r = FakeReader()
+    # FakeReader hardcodes a test tenant; use strict fixture to keep AOT IDs explicit.
+    class AotReader:
+        def __init__(self): self.group = None
+        def find_groups_by_alias(self, *, tenant_id, alias):
+            assert tenant_id == AOT_PILOT_TENANT_ID
+            return tuple([self.group] if self.group is not None and alias == AOT_PILOT_GROUP_ALIAS else [])
+        def read_group(self, *, tenant_id, group_id):
+            assert tenant_id == AOT_PILOT_TENANT_ID
+            assert self.group is not None and self.group["id"] == group_id
+            return self.group
+        def is_owner(self, *, tenant_id, group_id, user_id):
+            assert user_id == AOT_PILOT_OWNER_ID
+            return True
+    reader=AotReader()
+    entitlement=AotPilotGroupEntitlement(reader)
+    scope=GroupWriteScope(AOT_PILOT_CLIENT_ID,AOT_PILOT_TENANT_ID,
+                          "read-boundary",READ_APP,"write-boundary",WRITE_APP)
+    ctx=ConnectorContext("corr",AOT_PILOT_OWNER_PRINCIPAL_ID,"aot",
+                         AOT_PILOT_CLIENT_ID,"identity.group.create","execute")
+    args={"display_name":AOT_PILOT_GROUP_NAME,"mail_nickname":AOT_PILOT_GROUP_ALIAS,
+          "group_type":"security","verified_owner_id":AOT_PILOT_OWNER_ID}
+    entitlement.require_entitled(context=ctx,scope=scope,arguments=args,
+                                 operation_name="identity.group.create")
+    with pytest.raises(ConnectorAuthorizationError,match="ARGUMENTS_NOT_APPROVED"):
+        entitlement.require_entitled(context=ctx,scope=scope,
+            arguments={**args,"display_name":"Other Group"},
+            operation_name="identity.group.create")
+    with pytest.raises(ConnectorAuthorizationError,match="NOT_AUTHORIZED"):
+        entitlement.require_entitled(
+            context=replace(ctx,principal_id="person-unknown"),scope=scope,
+            arguments=args,operation_name="identity.group.create")
+    group_id="77777777-7777-4777-8777-777777777777"
+    reader.group={"id":group_id,"displayName":AOT_PILOT_GROUP_NAME,
+                  "mailNickname":AOT_PILOT_GROUP_ALIAS,"groupTypes":[],
+                  "mailEnabled":False,"securityEnabled":True,"isAssignableToRole":False,
+                  "onPremisesSyncEnabled":False}
+    entitlement.require_entitled(
+        context=replace(ctx,capability="identity.group.member.add"),scope=scope,
+        arguments={"verified_group_id":group_id,"verified_member_id":AOT_PILOT_OWNER_ID},
+        operation_name="identity.group.member.add")
+    with pytest.raises(ConnectorAuthorizationError):
+        entitlement.require_entitled(
+            context=replace(ctx,capability="identity.group.member.add"),scope=scope,
+            arguments={"verified_group_id":group_id,"verified_member_id":MEMBER_ID},
+            operation_name="identity.group.member.add")

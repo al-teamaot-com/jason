@@ -1013,3 +1013,28 @@ def test_auxiliary_process_sends_queued_ticket_owner_notifications_even_when_adm
         isinstance(m, TicketOwnerNotificationMaintenance)
         for m in http.maintenance.services
     )
+
+
+def test_group_admin_composition_disabled_without_exact_source_profile(tmp_path, monkeypatch):
+    monkeypatch.delenv("JASON_M365_GROUP_ADMIN_PROFILE", raising=False)
+    app = build_runtime_application(_settings(tmp_path))
+    for name in ("identity.group.create", "identity.group.member.add"):
+        assert app.capabilities.get(capability_name=name, version="1.0").lifecycle_status.value == "building"
+        assert name not in app.governed_orchestrator._invoker.registered_capabilities()
+
+
+def test_group_admin_composition_exact_activation_only_two_scoped_invokers(tmp_path, monkeypatch):
+    from jason_runtime.microsoft_group_admin_activation import PROFILE
+    monkeypatch.setenv("JASON_M365_GROUP_ADMIN_PROFILE", PROFILE)
+    app = build_runtime_application(_settings(tmp_path))
+    for name in ("identity.group.create", "identity.group.member.add"):
+        capability=app.capabilities.get_current(capability_name=name)
+        assert capability.lifecycle_status.value == "active"
+        assert capability.metadata["conversation_authenticated_imperative_is_approval"] == "false"
+        assert capability.metadata["mcp_action_enabled"] == "true"
+        assert name in app.governed_orchestrator._invoker.registered_capabilities()
+    assert app.capabilities.get(
+        capability_name="service.ticket.create", version="1.0"
+    ).capability_name == "service.ticket.create"
+    # Building the dormant executor cannot contact OpenBao/Graph, create
+    # tenant groups or modify ticket processing.

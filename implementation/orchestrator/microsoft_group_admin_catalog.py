@@ -8,6 +8,32 @@ from __future__ import annotations
 from datetime import datetime
 
 from connectors.microsoft_graph.governed_operations import MICROSOFT_GOVERNED_OPERATIONS
+AOT_PILOT_CLIENT_ID = "client-aot-internal"
+AOT_PILOT_TENANT_ID = "f7054323-d52b-4863-8c2f-1898f0b6077c"
+AOT_PILOT_OWNER_ID = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+AOT_PILOT_OWNER_PRINCIPAL_ID = "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
+AOT_PILOT_GROUP_NAME = "Jason M365 Governed Pilot 2026-11-12"
+AOT_PILOT_GROUP_ALIAS = "jason-m365-pilot-20261112"
+GROUP_ADMIN_PROVIDER = "microsoft_graph_group_write"
+GROUP_ADMIN_CAPABILITIES = frozenset({
+    "identity.group.create", "identity.group.member.add",
+})
+
+
+def require_group_pilot_client_scope(
+    *, capability_name: str, principal_id: str,
+    organization_id: str, bound_client_id: str | None,
+) -> str | None:
+    """Trusted AOT user/tenant maps to one approved pilot client, never caller data."""
+    if capability_name not in GROUP_ADMIN_CAPABILITIES:
+        return bound_client_id
+    if (organization_id != "aot"
+            or principal_id != AOT_PILOT_OWNER_PRINCIPAL_ID
+            or bound_client_id not in (None, AOT_PILOT_CLIENT_ID)):
+        raise PermissionError("M365_GROUP_PILOT_OWNER_OR_CLIENT_SCOPE_DENIED")
+    return AOT_PILOT_CLIENT_ID
+
+
 from kernel.capabilities import (
     CapabilityApproval, CapabilityDefinition, CapabilityEvidence,
     CapabilityLifecycle, CapabilityRisk, CapabilityStewardship,

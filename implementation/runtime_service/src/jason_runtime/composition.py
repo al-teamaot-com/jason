@@ -27,6 +27,13 @@ from connectors.dnsfilter.connector import DnsFilterConnector
 from connectors.dnsfilter.mcp_connector import DnsFilterMcpConnector
 from connectors.darkwebid.connector import DarkWebIdConnector
 from connectors.dnsfilter.mcp_oauth import DnsFilterMcpOAuthStore
+from jason_runtime.microsoft_group_admin_activation import (
+    register_group_admin_from_env,
+)
+from jason_runtime.microsoft_group_admin import (
+    build_microsoft_group_admin_openbao_invoker,
+    register_microsoft_group_admin_invoker,
+)
 from jason_runtime.dnsfilter_mcp_mutation import (
     build_dnsfilter_mcp_mutation_invoker,
     register_dnsfilter_mcp_mutation_invokers,
@@ -1550,6 +1557,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             now=now,
         )
     )
+    group_admin_activation = register_group_admin_from_env(
+        capabilities=capabilities, providers=providers, now=now,
+    )
     register_email_send(capabilities=capabilities, providers=providers)
     constant_contact_activation = register_constant_contact_runtime_foundation(
         capabilities=capabilities,
@@ -1966,6 +1976,23 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         if quickbooks_activation.enabled
         else None
     )
+    # Dormant unless the separately authorized exact AOT pilot profile is active.
+    # Existing Microsoft directory identity and ticket/core composition stay intact.
+    microsoft_group_admin_invoker = (
+        build_microsoft_group_admin_openbao_invoker(
+            boundaries=SQLiteClientBoundaryRepository(microsoft_directory.store),
+            openbao_url=settings.openbao_url,
+            read_role_id_path=Path("/run/jason-secrets/openbao/microsoft-group-read/role_id"),
+            read_secret_id_path=Path("/run/jason-secrets/openbao/microsoft-group-read/secret_id"),
+            write_role_id_path=Path("/run/jason-secrets/openbao/microsoft-group-write/role_id"),
+            write_secret_id_path=Path("/run/jason-secrets/openbao/microsoft-group-write/secret_id"),
+            transport=http_transport,
+            entitlement=None,  # exact active Owner/AOT pilot policy, never broad default
+            audit=ConnectorEventAudit(orchestration_events),
+        )
+        if group_admin_activation.enabled
+        else None
+    )
     ticket_create_invoker = build_autotask_ticket_create_invoker(
         openbao_url=settings.openbao_url,
         role_id_path=settings.autotask_write_openbao_role_id_path,
@@ -2290,6 +2317,11 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         register_quickbooks_read_invokers(
             invokers=invokers,
             invoker=quickbooks_read_invoker,
+        )
+    if microsoft_group_admin_invoker is not None:
+        register_microsoft_group_admin_invoker(
+            invokers=invokers,
+            invoker=microsoft_group_admin_invoker,
         )
     register_autotask_ticket_create_invoker(
         invokers=invokers,
