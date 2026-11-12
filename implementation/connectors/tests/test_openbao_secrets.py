@@ -285,17 +285,3 @@ def test_missing_correlation_id_is_denied_before_provider_access() -> None:
             )
 
     assert provider_called is False
-
-
-
-def test_microsoft_group_secrets_are_isolated_from_ordinary_directory_identity():
-    from connectors.core.openbao_secrets import DEFAULT_FIELDS, DEFAULT_MAPPINGS
-    names = (
-        "microsoft_graph.directory_read",
-        "microsoft_graph.group_read",
-        "microsoft_graph.group_write",
-    )
-    assert len({DEFAULT_MAPPINGS[n] for n in names}) == 3
-    assert DEFAULT_FIELDS[names[0]] == DEFAULT_FIELDS[names[1]] == DEFAULT_FIELDS[names[2]]
-    assert "production/group-write" in DEFAULT_MAPPINGS["microsoft_graph.group_write"]
-    assert "production/group-read" in DEFAULT_MAPPINGS["microsoft_graph.group_read"]

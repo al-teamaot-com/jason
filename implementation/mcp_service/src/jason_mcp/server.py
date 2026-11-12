@@ -51,9 +51,6 @@ from mcp.server.transport_security import (
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
-from orchestrator.microsoft_group_admin_catalog import (
-    GROUP_ADMIN_CAPABILITIES, require_group_pilot_client_scope,
-)
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 from autonomous_remediation.autonomous_principal import (
@@ -3370,10 +3367,6 @@ def _canonicalize_governed_action_arguments(
 
     raw = dict(arguments or {})
 
-    if capability_name in GROUP_ADMIN_CAPABILITIES:
-        from connectors.microsoft_graph.governed_operations import operation
-        return operation(capability_name).validate_arguments(raw)
-
     if capability_name == "service.ticket.create":
         if "payload" in raw:
             return raw
@@ -3787,20 +3780,6 @@ def _governed_execute(
         client_id,
     ) = _authenticated_write_identity()
 
-    # Only the verified AOT Owner can select the registered AOT internal pilot
-    # tenant. No target/client selector comes from model/provider arguments.
-    try:
-        client_id = require_group_pilot_client_scope(
-            capability_name=capability_name, principal_id=principal,
-            organization_id=organization, bound_client_id=client_id,
-        )
-    except PermissionError:
-        return {
-            "status": "denied",
-            "capability": capability_name,
-            "reason_codes": ["M365_GROUP_PILOT_OWNER_OR_CLIENT_SCOPE_DENIED"],
-        }
-
     try:
         capability = app.capabilities.get_current(
             capability_name=capability_name
@@ -3967,11 +3946,7 @@ def _governed_execute(
     if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
         approval_decided_by = principal
 
-        if capability_name in GROUP_ADMIN_CAPABILITIES:
-            # Separate exact-action approval: never infer an approval merely
-            # from discovery, a plan, or standing technician authority.
-            imperative_approval = explicit_approval is True
-        elif capability_name == "automation.component.execute":
+        if capability_name == "automation.component.execute":
             if datto_approval_mode == "standing_safe":
                 imperative_approval = True
 
@@ -6839,17 +6814,6 @@ def _annotate_requester_eligibility(
             else PermissionMode.EXECUTE
         )
 
-        try:
-            scoped_client = require_group_pilot_client_scope(
-                capability_name=str(projected.get("capability") or ""),
-                principal_id=principal, organization_id=organization,
-                bound_client_id=client_id,
-            )
-        except PermissionError:
-            projected["permission_mode"] = requested_mode.value
-            projected["authority_outcome"] = "denied"
-            projected["potentially_eligible"] = False
-            return projected
         decision = app.identity_authority.evaluate(
             AuthorityRequest(
                 request_id=(
@@ -6860,7 +6824,7 @@ def _annotate_requester_eligibility(
                 ),
                 principal_id=principal,
                 organization_id=organization,
-                client_id=scoped_client,
+                client_id=client_id,
                 capability=str(
                     projected.get("capability")
                     or ""

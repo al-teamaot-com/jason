@@ -138,42 +138,6 @@ else
   fi
 fi
 
-# Exact source-bound Microsoft group pilot; rollbacks always disable write access.
-# AppRole credentials are independent, read-only, and mounted ONLY when active.
-if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
-  M365_GROUP_PROFILE=""
-else
-  M365_GROUP_PROFILE="$(python3 "$REPO_ROOT/tools/microsoft_group_admin_release_profile.py" \
-    --source "$REPO_ROOT/config/microsoft_graph/group-admin-release.json")" || exit 2
-  if [ -n "${JASON_M365_GROUP_ADMIN_PROFILE:-}" ] &&
-     [ "$JASON_M365_GROUP_ADMIN_PROFILE" != "$M365_GROUP_PROFILE" ]; then
-    echo "DENIED: Microsoft group activation differs from reviewed source" >&2
-    exit 2
-  fi
-fi
-M365_GROUP_BIND_ARGS=()
-if [ -z "$M365_GROUP_PROFILE" ] && [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
-  M365_GROUP_BIND_ARGS=(--omit-microsoft-group-binds-on-rollback)
-fi
-if [ -n "$M365_GROUP_PROFILE" ]; then
-  for group_role in read write; do
-    host_base="/opt/jason/bootstrap/secrets/openbao/microsoft-graph-group-${group_role}-approle"
-    mount_base="/run/jason-secrets/openbao/microsoft-group-${group_role}"
-    for key_file in role-id secret-id; do
-      host_file="$host_base/$key_file"
-      if [ ! -f "$host_file" ] || [ -L "$host_file" ] ||
-         [ "$(stat -c '%u:%g:%a' "$host_file")" != "0:1000:640" ]; then
-        echo "DENIED: Microsoft group AppRole runtime projection unavailable or unsafe" >&2
-        exit 2
-      fi
-    done
-    M365_GROUP_BIND_ARGS+=(
-      --add-readonly-bind "$host_base/role-id:$mount_base/role_id"
-      --add-readonly-bind "$host_base/secret-id:$mount_base/secret_id"
-    )
-  done
-fi
-
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 ROLLBACK="jason-mcp-pilot-rollback-$STAMP"
 QBO_DEV_ROLE_HOST="${JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/quickbooks-development-oauth-client-approle/role-id}"
@@ -342,8 +306,6 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --set-env "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE=$STAFF_NOTE_PROFILE" \
   --set-env "JASON_AOT_ADMIN_APPROVER_PROFILE=$ADMIN_APPROVER_PROFILE" \
   --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
-  --set-env "JASON_M365_GROUP_ADMIN_PROFILE=$M365_GROUP_PROFILE" \
-  "${M365_GROUP_BIND_ARGS[@]}" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \
   --add-readonly-bind "$QBO_DEV_ROLE_HOST:/run/jason-secrets/openbao/quickbooks-development/role_id" \

@@ -12,9 +12,9 @@ from pathlib import Path
 DEFAULT_OUTPUT = Path('/var/lib/jason/openclaw/operational-health.json')
 LAST_SUCCESS = Path('/var/lib/jason/openclaw/operational-full-health-last-pass.json')
 # Full SQLite checks now cover a >28 GB orchestration audit and multi-GB
-# authority backup/restore. Retain a strict bound, but allow one 90-minute
+# authority backup/restore. Retain a strict bound, but allow one 60-minute
 # overnight attempt; never convert a timeout into a passing proof.
-SOURCE_HEALTH_TIMEOUT_SECONDS = 5400
+SOURCE_HEALTH_TIMEOUT_SECONDS = 3600
 BACKUP_TEMP_ROOT = Path('/srv/jason/archive')
 SOURCE_HEALTH_TIMEOUT_EXIT_CODE = 124
 
@@ -46,24 +46,17 @@ def main() -> int:
     args = parser.parse_args()
 
     tool = Path(__file__).with_name('openclaw_authority_operational_health.py')
-    # The worker's inner backup TemporaryDirectory cannot run its cleanup
-    # when the parent kills it on timeout. Parent-OWN one private staging
-    # directory so both timeout and normal completion remove only THIS run's
-    # temporary backup/restore copies, never any prior or unrelated files.
     try:
-        with tempfile.TemporaryDirectory(
-            prefix='jason-authority-integrity-run-', dir=BACKUP_TEMP_ROOT,
-        ) as scoped_backup_root:
-            completed = subprocess.run(
-                [sys.executable, str(tool), '--backup-temp-root', scoped_backup_root],
-                capture_output=True,
-                text=True,
-                check=False,
-                # Full PRAGMA integrity_check includes the multi-GB
-                # orchestration audit plus authority backup/restore.
-                # Never replace a full integrity proof with a quick check.
-                timeout=SOURCE_HEALTH_TIMEOUT_SECONDS,
-            )
+        completed = subprocess.run(
+            [sys.executable, str(tool), '--backup-temp-root', str(BACKUP_TEMP_ROOT)],
+            capture_output=True,
+            text=True,
+            check=False,
+            # Full PRAGMA integrity_check includes the multi-GB orchestration
+            # audit database, plus authority backup/restore verification.
+            # Keep the *complete* checks bounded, but do not truncate them.
+            timeout=SOURCE_HEALTH_TIMEOUT_SECONDS,
+        )
     except subprocess.TimeoutExpired:
         # A timeout must not leave a previously successful snapshot looking
         # current: publish explicit failure evidence and exit nonzero.
