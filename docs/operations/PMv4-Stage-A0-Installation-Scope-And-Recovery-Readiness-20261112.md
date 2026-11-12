@@ -339,3 +339,79 @@ PR #2448's `Integration coordination: #2443 #2441` entry. These
 branches cannot be promoted independently as substitutes for one another.
 Full change-integration CI must verify this exact relationship again
 on the final Stage A0 source SHA.
+
+
+## Root-owned immutable source boundary and existing Entra Owner request
+
+The native root reconciler previously staged a pinned helper but could
+still import that helper's dependent Python code from the operator-owned
+managed Git checkout. That is not a sufficiently independent privileged
+trust boundary. Stage A0 now **refuses** any developer/operator checkout
+as its production code source: the root worker checks its immutable
+candidate directory `/opt/jason/releases/<exact SHA>` and dependent
+modules are root:root, non-world-writable, never symlinks, and hash-match
+the precise protected Git commit. Root Python imports are explicitly
+pinned to the root-owned immutable release package namespace. The
+legacy `al` Git clone is used only to obtain object-hash evidence, not
+as root Python code or installation source. CI independently tests this
+source-pinning contract and tamper denial.
+
+The existing authenticated Jason MCP service also gains a separate
+`authorize_pmv4_stage_a0_install` Owner request tool, with source profile
+`config/pmv4-stage-a0-issuer-activation.json` **mode OFF**. Production
+deployment always sets
+`JASON_PMV4_STAGE_A0_ISSUER_ENABLED=false` until a separately reviewed,
+exactly authorized MCP release enables it; rollback forces it OFF.
+An enabled request reuses the current Entra bearer verifier, existing
+Owner identity and Ed25519 signer, enforces short-lived exact
+candidate/scope/manifest/freeze hashes and one affirmative Owner
+decision, then publishes **one** mode-0600 signed JSON request to
+Jason's existing governed root-reconcile request directory. The
+atomic Linux `renameat2(RENAME_NOREPLACE)` handoff prevents both a
+partial-request exposure and hardlink-count races with root's path
+worker. Missing signing key or root readiness always rejects.
+The root worker itself **independently** verifies signature, root-owned
+pinned trust, protected-main CI, root health and scope before any
+host write; MCP does not install or approve work on its own.
+
+The current production MCP is not running this new source tool and its
+private signer mount/activation must be independently verified after the
+separate authorized source/release. The existing
+`/var/lib/jason/openclaw` readonly/control mount is not modified by
+this source-only PR. No automatic Teams or CCC approval gate is
+introduced.
+
+**Separate authorization ordering is mandatory:** (1) reviewed PR
+source-only promotion; (2) separately governed exact native-root
+worker/source release/Owner signer attachment and source-profile
+activation, each with its exact reviewed scope; (3) fresh root parent
+and target verification plus exact one-use Owner decision for A0; (4)
+a single actual A0 installer transaction with immutable journal and
+rollback acceptance. No stage inherits authority from a previous one.
+
+
+### Final trust-boundary hardening acceptance
+
+The production root reconciler **does not import** from the operator-owned
+managed engineering Git source. It verifies the reviewed native helper's
+installed root-owned SHA, then verifies and imports every Stage A dependency
+from the root:root immutable candidate tree at
+`/opt/jason/releases/<source SHA>`. Each source file and parent must be
+root-owned, non-world-writable and free of symlink redirects, and must
+hash-match the exact committed source. Unknown Python namespace caching
+also fails closed.
+
+The MCP's one-use signed request now writes its temporary only in the
+**sibling host-reconcile spool**, outside the systemd
+`DirectoryNotEmpty=.../requests` watch. A Linux atomic
+`renameat2(RENAME_NOREPLACE)` publishes the complete mode-0600 JSON
+into the watched directory without a hardlink window. Isolated tests
+prove the watched directory is empty until publication and duplicate
+request IDs never overwrite existing evidence.
+
+The current local comprehensive Stage A0 regression evidence is
+**201 PASS, nine subtests, five root-only skips** (the latter are
+run separately with real root UID/GID in disposable GitHub Actions CI).
+Root-mode provenance also tests a genuine root-owned immutable copy,
+tampering, and source-hash mismatch. These results are evidence of
+source-only integration; they do not authorize production installation.

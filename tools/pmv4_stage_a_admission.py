@@ -83,7 +83,10 @@ def verify_admission(
         raise StageAAdmissionDenied("STAGE_A_TRUST_PATH_OVERRIDE")
     if production and test_public_key is not None:
         raise StageAAdmissionDenied("STAGE_A_CALLER_PUBLIC_KEY_OVERRIDE")
-    packet.verify_exact_repository_head(repo, candidate_sha)
+    if production:
+        packet.verify_immutable_host_release_source(repo, candidate_sha)
+    else:
+        packet.verify_exact_repository_head(repo, candidate_sha)
     independently_reviewed = packet.build_scope(repo, candidate_sha)
     if independently_reviewed != reviewed_scope:
         raise StageAAdmissionDenied("STAGE_A_REVIEWED_SCOPE_DRIFT")

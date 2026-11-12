@@ -77,3 +77,32 @@ def test_root_mode_synthetic_midinstall_crash_and_verified_recovery(tmp_path):
     )
     assert result["status"] == "empty_baseline_restored"
     assert result["rollback_sha"] == "0" * 40
+
+
+def test_root_owned_immutable_source_exact_commit_without_operator_checkout(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+    root = tmp_path / "staged"
+    release_root = root / "releases"
+    release_root.mkdir(parents=True)
+    source_sha = subprocess.check_output(
+        ["git", "-c", f"safe.directory={REPO}",
+         "-C", str(REPO), "rev-parse", "HEAD"], text=True,
+    ).strip()
+    installed = release_root / source_sha
+    installed.mkdir()
+    for rel in sorted(
+        set(packet.BUNDLE_FILES) | set(packet.ROOT_STAGE_A_REQUIRED_SOURCES)
+    ):
+        dest = installed / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPO / rel, dest)
+        dest.chmod(0o664)  # Group=root and no world write are admissible.
+        os.chown(dest, 0, 0)
+    monkeypatch.setattr(packet, "IMMUTABLE_RELEASES", release_root)
+    monkeypatch.setattr(packet, "MANAGED_GIT", REPO)
+    packet.verify_immutable_host_release_source(installed, source_sha)
+    tampered = installed / packet.ROOT_STAGE_A_REQUIRED_SOURCES[0]
+    tampered.write_bytes(b"malicious-root-source")
+    with pytest.raises(ValueError, match="SOURCE_DIGEST_OR_OWNER_DRIFT"):
+        packet.verify_immutable_host_release_source(installed, source_sha)

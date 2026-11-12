@@ -1148,21 +1148,66 @@ def _trusted_native_stage_a0_module(source_revision: str):
         )).hexdigest()
         if actual != expected:
             raise HostReconcileError("PMV4_NATIVE_INSTALLER_SOURCE_DRIFT")
-        head = subprocess.check_output(
-            _git("rev-parse", "HEAD"), text=True, timeout=10,
-        ).strip()
-        dirty = subprocess.check_output(
-            _git("status", "--porcelain", "--untracked-files=normal"),
-            text=True, timeout=10,
-        ).strip()
-        if head != source_revision or dirty:
-            raise HostReconcileError("PMV4_NATIVE_SOURCE_NOT_STAGED")
-        # The root worker accepts only the exact protected Git object
-        # source. Its imported dependency modules must be the same reviewed
-        # commit and no untrusted PYTHONPATH/site override is permitted.
+        # Root code dependencies MUST resolve only to the root-owned
+        # immutable candidate source. The managed engineering Git clone is
+        # writable by al, even when status is momentarily clean, and is
+        # therefore NEVER an import path for privileged Python execution.
+        root_release = Path("/opt/jason/releases") / source_revision
+        root_dirs = (
+            Path("/opt/jason/releases"), root_release,
+            root_release / "tools",
+            root_release / "implementation",
+            root_release / "implementation/kernel",
+        )
+        for directory in root_dirs:
+            info = directory.lstat()
+            if (directory.is_symlink() or not stat.S_ISDIR(info.st_mode)
+                    or (info.st_uid, info.st_gid) != (0, 0)
+                    or info.st_mode & 0o002):
+                raise HostReconcileError("PMV4_NATIVE_ROOT_SOURCE_DIR_UNTRUSTED")
+        required_modules = (
+            "tools/pmv4_stage_a_native_install.py",
+            "tools/pmv4_stage_a_packet.py",
+            "tools/pmv4_stage_a_admission.py",
+            "tools/pmv4_host_install_contract.py",
+            "tools/pmv4_host_release_guard.py",
+            "tools/pmv4_shadow_release.py",
+            "tools/pmv4_shadow_ci.py",
+            "implementation/kernel/signed_owner_release.py",
+            "implementation/kernel/__init__.py",
+        )
+        for relative in required_modules:
+            source_file = root_release / relative
+            info = source_file.lstat()
+            if (source_file.is_symlink()
+                    or not stat.S_ISREG(info.st_mode)
+                    or (info.st_uid, info.st_gid) != (0, 0)
+                    or info.st_mode & 0o002 or info.st_nlink != 1):
+                raise HostReconcileError("PMV4_NATIVE_ROOT_DEPENDENCY_UNTRUSTED")
+            committed = subprocess.check_output(
+                _git("show", source_revision + ":" + relative),
+                timeout=15,
+            )
+            if hashlib.sha256(source_file.read_bytes()).digest() != hashlib.sha256(committed).digest():
+                raise HostReconcileError("PMV4_NATIVE_ROOT_DEPENDENCY_SOURCE_DRIFT")
         import sys
-        if str(REPO) not in sys.path:
-            sys.path.insert(0, str(REPO))
+        import types
+        # A loaded tools/implementation namespace may already reference a
+        # mutable checkout. Never inherit it for root execution. Each root
+        # worker invocation processes only ONE request, so refusal is safe.
+        if any(name in sys.modules for name in (
+            "tools", "implementation", "implementation.kernel",
+        )):
+            raise HostReconcileError("PMV4_NATIVE_IMPORT_NAMESPACE_ALREADY_IN_USE")
+        for name, relative in (
+            ("tools", "tools"),
+            ("implementation", "implementation"),
+            ("implementation.kernel", "implementation/kernel"),
+        ):
+            pkg = types.ModuleType(name)
+            pkg.__path__ = [str(root_release / relative)]
+            pkg.__package__ = name
+            sys.modules[name] = pkg
         spec = importlib.util.spec_from_file_location(
             "jason_root_pmv4_stage_a_native", module_path,
         )
@@ -1180,7 +1225,10 @@ def _process_stage_a0_request(request: dict[str, object]) -> str:
     candidate = str(request["source_revision"])
     _verify_main(candidate)
     module = _trusted_native_stage_a0_module(candidate)
-    receipt = module.execute_native_stage_a0_request(request, repo=REPO)
+    # The helper reads only the root-owned immutable release tree.
+    receipt = module.execute_native_stage_a0_request(
+        request, repo=Path("/opt/jason/releases") / candidate,
+    )
     if (not isinstance(receipt, dict)
             or receipt.get("status") not in {
                 "installed", "empty_baseline_restored"

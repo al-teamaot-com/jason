@@ -132,6 +132,79 @@ def verify_exact_repository_head(repo: Path, source_sha: str) -> None:
         raise ValueError("STAGE_A_GIT_SOURCE_NOT_PINNED_AND_CLEAN")
 
 
+# The root worker reads ONLY source from the root-owned immutable release,
+# never the operator-owned managed Git checkout. Git is used as a *source
+# hash oracle* for each scoped file; it is never inserted into root sys.path.
+IMMUTABLE_RELEASES = Path("/opt/jason/releases")
+MANAGED_GIT = Path("/home/al/.local/lib/jason/engineering-source-repo")
+ROOT_STAGE_A_REQUIRED_SOURCES = (
+    "tools/pmv4_stage_a_native_install.py",
+    "tools/pmv4_stage_a_packet.py",
+    "tools/pmv4_stage_a_admission.py",
+    "tools/release_host_reconcile_worker.py",
+    "tools/install_release_host_reconciler.py",
+    "config/pmv4-shadow/docker-compose.yml",
+)
+
+
+def verify_immutable_host_release_source(repo: Path, source_sha: str) -> None:
+    """Independently pin root-owned source objects to the exact Git commit.
+
+    Production never imports or reads executable code from an al-writable
+    clone, even if 'git status' was clean when it was first inspected.
+    This bounded verifier must run inside the native root transaction.
+    """
+    _require_sha(source_sha)
+    expected = IMMUTABLE_RELEASES / source_sha
+    if os.geteuid() != 0 or Path(repo) != expected:
+        raise ValueError("STAGE_A_ROOT_IMMUTABLE_SOURCE_REQUIRED")
+    for directory in (IMMUTABLE_RELEASES, expected):
+        try:
+            metadata = directory.lstat()
+        except OSError as exc:
+            raise ValueError("STAGE_A_ROOT_SOURCE_UNAVAILABLE") from exc
+        if (directory.is_symlink() or not stat.S_ISDIR(metadata.st_mode)
+                or (metadata.st_uid, metadata.st_gid) != (0, 0)
+                or metadata.st_mode & 0o002):
+            raise ValueError("STAGE_A_ROOT_SOURCE_DIRECTORY_UNTRUSTED")
+    sources = sorted(set(BUNDLE_FILES) | set(ROOT_STAGE_A_REQUIRED_SOURCES))
+    for relative in sources:
+        if ".." in Path(relative).parts or not relative.startswith(("tools/", "implementation/", "config/")):
+            raise ValueError("STAGE_A_ROOT_SOURCE_PATH_INVALID")
+        p = expected / relative
+        # A symlink in a parent (tools/, implementation/, config/, etc.)
+        # is equally untrusted; validating only the final file lstat would
+        # silently follow a redirected intermediate directory.
+        ancestor = p.parent
+        while ancestor != expected:
+            try:
+                parent_meta = ancestor.lstat()
+            except OSError as exc:
+                raise ValueError("STAGE_A_ROOT_SOURCE_PARENT_MISSING") from exc
+            if (ancestor.is_symlink() or not stat.S_ISDIR(parent_meta.st_mode)
+                    or (parent_meta.st_uid, parent_meta.st_gid) != (0, 0)
+                    or parent_meta.st_mode & 0o002):
+                raise ValueError("STAGE_A_ROOT_SOURCE_PARENT_UNTRUSTED")
+            ancestor = ancestor.parent
+        try:
+            meta = p.lstat()
+            raw = p.read_bytes()
+            committed = subprocess.check_output(
+                [
+                    "git", "-c", f"safe.directory={MANAGED_GIT}",
+                    "-C", str(MANAGED_GIT), "show",
+                    f"{source_sha}:{relative}",
+                ], timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValueError("STAGE_A_ROOT_SOURCE_CANNOT_ATTEST") from exc
+        if (p.is_symlink() or not stat.S_ISREG(meta.st_mode)
+                or (meta.st_uid, meta.st_gid) != (0, 0)
+                or meta.st_mode & 0o002
+                or meta.st_nlink != 1 or sha256(raw).digest() != sha256(committed).digest()):
+            raise ValueError("STAGE_A_ROOT_SOURCE_DIGEST_OR_OWNER_DRIFT")
+
+
 def _scope_file_rows(repo: Path) -> list[dict[str, Any]]:
     data = []
     bundle = reviewed_code_manifest(repo)

@@ -38,6 +38,7 @@
     ".github/workflows/*",
     "config/release-manager-policy.json",
     "config/pmv4-owner-issuer-activation.json",
+    "config/pmv4-stage-a0-issuer-activation.json",
     "tools/release_manager*.py",
     "tools/install_release_manager*.py",
     "infrastructure/openclaw-operations/systemd/user/jason-release-manager.*",

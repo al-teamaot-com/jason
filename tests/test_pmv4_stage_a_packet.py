@@ -295,3 +295,13 @@ def test_recovery_history_does_not_accept_spoofed_prior_revision(mock_recovery):
     result = packet.recovery_readback(now=at)
     assert result["recovery_observations_valid"] is False
     assert result["preflight_evidence_satisfied"] is False
+
+
+def test_root_source_attestation_never_uses_developer_checkout():
+    with pytest.raises(ValueError, match="STAGE_A_ROOT_IMMUTABLE_SOURCE_REQUIRED"):
+        packet.verify_immutable_host_release_source(REPO, SHA)
+    root_worker = (REPO / "tools/release_host_reconcile_worker.py").read_text()
+    assert 'sys.path.insert(0, str(REPO))' not in root_worker
+    assert '"PMV4_NATIVE_ROOT_DEPENDENCY_SOURCE_DRIFT"' in root_worker
+    assert 'receipt = module.execute_native_stage_a0_request(' in root_worker
+    assert 'repo=Path("/opt/jason/releases") / candidate' in root_worker

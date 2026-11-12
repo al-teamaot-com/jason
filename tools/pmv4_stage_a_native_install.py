@@ -576,9 +576,10 @@ def execute_native_stage_a0_request(request: Mapping[str, Any],
     def check_ci(sha: str) -> bool:
         return protected_main_ci_verified(sha, runner=gh_as_al)
 
-    # Exact repo HEAD/clean checkout must be source staged by the existing
-    # native release mechanism; a developer tree never serves as root input.
-    packet.verify_exact_repository_head(repo, candidate)
+    # Root reads the immutable, root-owned release directory, NOT the
+    # operator-writable managed Git checkout or an untrusted Python path.
+    # Every scoped source is independently compared with the exact Git object.
+    packet.verify_immutable_host_release_source(repo, candidate)
     source = packet.build_scope(repo, candidate)
     if source["scope_sha256"] != request["scope_sha256"]:
         raise StageANativeDenied("STAGE_A_REQUESTED_SCOPE_MISMATCH")
