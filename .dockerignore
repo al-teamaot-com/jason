@@ -3,6 +3,10 @@
 !implementation/**
 !config/
 !config/**
+!tools/
+tools/*
+!tools/pmv4_shadow_owner_issuer.py
+!tools/pmv4_shadow_release.py
 !infrastructure/
 !infrastructure/jason-mcp/
 !infrastructure/jason-mcp/Dockerfile
