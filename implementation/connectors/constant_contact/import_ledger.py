@@ -42,6 +42,11 @@ class SQLiteImportActivityLedger:
             "intent_digest TEXT PRIMARY KEY, activity_id TEXT NOT NULL,"
             "verified_at INTEGER NOT NULL, result_json TEXT NOT NULL)"
         )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS terminal_failures("
+            "intent_digest TEXT PRIMARY KEY, activity_id TEXT NOT NULL,"
+            "failed_at INTEGER NOT NULL, reason TEXT NOT NULL)"
+        )
         return con
 
     @staticmethod
@@ -143,3 +148,44 @@ class SQLiteImportActivityLedger:
             "activity_id": row[0], "verified_at": row[1],
             "item_results": json.loads(row[2]),
         } if row else None)
+
+    def record_provider_failure(self, *, intent_digest: str, activity_id: str) -> None:
+        """Persist only a confirmed provider-reported terminal failure, never a timeout."""
+        self._check_digest(intent_digest)
+        if not isinstance(activity_id, str) or len(activity_id) != 36:
+            raise ImportAuthorizationError("Invalid terminal failure receipt")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            claim = db.execute(
+                "SELECT state,activity_id FROM claims WHERE intent_digest=?",
+                (intent_digest,),
+            ).fetchone()
+            if claim != ("dispatched", activity_id):
+                raise ImportAuthorizationError("Terminal failure has no dispatched activity")
+            if db.execute(
+                "SELECT 1 FROM verifications WHERE intent_digest=?", (intent_digest,),
+            ).fetchone():
+                raise ImportAuthorizationError("Verified import cannot become failed")
+            existing = db.execute(
+                "SELECT activity_id,reason FROM terminal_failures WHERE intent_digest=?",
+                (intent_digest,),
+            ).fetchone()
+            if existing:
+                if existing != (activity_id, "provider_activity_failed"):
+                    raise ImportAuthorizationError("Terminal provider failure is immutable")
+            else:
+                db.execute(
+                    "INSERT INTO terminal_failures VALUES (?,?,?,?)",
+                    (intent_digest, activity_id, int(time.time()), "provider_activity_failed"),
+                )
+            db.execute("COMMIT")
+
+    def read_provider_failure(self, *, intent_digest: str) -> dict[str, object] | None:
+        self._check_digest(intent_digest)
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT activity_id,failed_at,reason FROM terminal_failures "
+                "WHERE intent_digest=?", (intent_digest,),
+            ).fetchone()
+        return ({"activity_id": row[0], "failed_at": row[1], "reason": row[2]}
+                if row else None)

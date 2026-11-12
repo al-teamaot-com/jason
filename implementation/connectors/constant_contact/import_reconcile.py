@@ -36,7 +36,27 @@ class ConstantContactReadbackWorker:
         """Bounded GET-only execution; never redispatch ambiguous provider POST."""
         if type(max_items) is not int or not 1 <= max_items <= 25:
             raise ValueError("Invalid import reconciliation batch limit")
-        items = self.work_store.list_reconcilable(limit=max_items)
+        # Scan past completed/undispatched rows so older records never starve
+        # later real activity receipts. Bounded scan; no implicit dispatch.
+        # Retain pagination offset across calls for deterministic auditing.
+        items = []
+        offset = 0
+        while len(items) < max_items and offset < 2500:
+            page = self.work_store.list_reconcilable(
+                limit=min(25, max_items), offset=offset,
+            )
+            if not page:
+                break
+            offset += len(page)
+            for work in page:
+                digest = intent_for_work(work).digest()
+                claim = self.claims.read_claim(intent_digest=digest)
+                if (work.approval_id and claim is not None and claim.get("state") == "dispatched"
+                        and self.claims.read_verification(intent_digest=digest) is None
+                        and self.claims.read_provider_failure(intent_digest=digest) is None):
+                    items.append(work)
+                    if len(items) == max_items:
+                        break
         considered = verified = pending = blocked = 0
         reasons = []
         for work in items:
@@ -61,6 +81,15 @@ class ConstantContactReadbackWorker:
                                "provider_counts_unverified",
                                "incomplete_provider_readback"}:
                     pending += 1
+                elif state == "failed":
+                    claim = self.claims.read_claim(intent_digest=digest)
+                    activity_id = str(claim.get("activity_id") or "") if claim else ""
+                    if result.get("activity_id") == activity_id:
+                        self.claims.record_provider_failure(
+                            intent_digest=digest, activity_id=activity_id,
+                        )
+                    blocked += 1
+                    reasons.append("provider_activity_failed")
                 else:
                     blocked += 1
                     reasons.append("provider_import_" + state[:32])

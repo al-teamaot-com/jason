@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from io import BytesIO
 from typing import Mapping
+import stat
+from zipfile import ZipFile, BadZipFile
 
 from .import_preflight import ImportPreflight, preflight
 
@@ -23,6 +25,50 @@ class WorkbookPreflightError(ValueError):
     """Safe workbook validation error."""
 
 
+def _check_archive_safety(data: bytes) -> None:
+    """Reject zip bombs, external relations, embedded content and unsafe paths.
+
+    Source files are untrusted, and a 4-MB compressed workbook can otherwise
+    inflate to a very large amount of XML before any contact-row limits apply.
+    """
+    try:
+        with ZipFile(BytesIO(data)) as archive:
+            parts = archive.infolist()
+            if not 1 <= len(parts) <= 128:
+                raise WorkbookPreflightError("XLSX archive member count invalid")
+            seen: set[str] = set()
+            total = 0
+            for info in parts:
+                name = info.filename
+                lowered = name.casefold()
+                if (name in seen or name.startswith("/")
+                        or "\\" in name
+                        or any(bit in ("", "..") for bit in name.split("/")[:-1])
+                        or info.flag_bits & 1
+                        or stat.S_ISLNK(info.external_attr >> 16)
+                        or any(blocked in lowered for blocked in (
+                            "vba", "externallinks/", "activex/", "embeddings/",
+                            "connections.xml", "querytables/",
+                        ))):
+                    raise WorkbookPreflightError("Unsafe XLSX archive content")
+                seen.add(name)
+                total += info.file_size
+                if (info.file_size > 8_000_000 or total > 16_000_000
+                        or (info.file_size > 2048
+                            and info.file_size / max(1, info.compress_size) > 100)):
+                    raise WorkbookPreflightError("XLSX decompression limits exceeded")
+                if lowered.endswith(".rels"):
+                    relation = archive.read(info, pwd=None)
+                    if b'TargetMode="External"' in relation or b"TargetMode='External'" in relation:
+                        raise WorkbookPreflightError("XLSX external relationships forbidden")
+            if "[Content_Types].xml" not in seen or "xl/workbook.xml" not in seen:
+                raise WorkbookPreflightError("XLSX required package parts missing")
+    except WorkbookPreflightError:
+        raise
+    except (BadZipFile, OSError, RuntimeError, ValueError):
+        raise WorkbookPreflightError("Workbook archive invalid") from None
+
+
 def preview_xlsx(
     data: bytes, *,
     known_suppressed: set[str] | None = None,
@@ -30,6 +76,7 @@ def preview_xlsx(
 ) -> ImportPreflight:
     if not isinstance(data, bytes) or not 0 < len(data) <= MAX_WORKBOOK_BYTES:
         raise WorkbookPreflightError("Workbook size invalid")
+    _check_archive_safety(data)
     try:
         from openpyxl import load_workbook
     except ImportError:

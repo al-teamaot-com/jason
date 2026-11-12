@@ -299,3 +299,11 @@ def test_provider_readback_rejects_missing_imported_fields(tmp_path):
     assert claims.read_verification(
         intent_digest=canonical_import_arguments(work)["intent_digest"],
     ) is None
+
+
+def test_source_sha_is_bound_to_canonical_import_plan(tmp_path):
+    engine, transport, store, claims, approval = make_service(tmp_path)
+    work = prepare_work(engine, store)
+    from connectors.constant_contact.governed_import import canonical_import_arguments
+    assert len(work.source_sha256) == 64
+    assert canonical_import_arguments(work)["source_sha256"] == work.source_sha256

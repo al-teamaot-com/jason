@@ -36,6 +36,23 @@ class ImportDispatchReceipt:
     completion_state: str
 
 
+def read_provider_activity(
+    *, transport: HttpTransport, activity_id: str, access_token: str,
+) -> dict[str, object]:
+    """GET-only activity query, independent of expired write approvals."""
+    if not _UUID.fullmatch(activity_id) or not access_token:
+        raise ImportContractError("Authenticated activity lookup requires exact activity ID")
+    result = transport.request(
+        method="GET", url=ACTIVITY_BASE + activity_id,
+        headers={"Accept": "application/json",
+                 "Authorization": "Bearer " + access_token},
+        timeout_seconds=30.0,
+    )
+    if not isinstance(result, Mapping):
+        raise ImportContractError("Activity result invalid")
+    return classify_activity(result, expected_activity_id=activity_id)
+
+
 class UnwiredConstantContactImportDispatcher:
     """Caller supplies trusted ports; not a public or independently authorized API."""
 
@@ -79,14 +96,7 @@ class UnwiredConstantContactImportDispatcher:
         return ImportDispatchReceipt(claim.intent_digest, activity_id, "pending_unverified")
 
     def read_activity(self, *, activity_id: str, access_token: str) -> dict[str, object]:
-        if not _UUID.fullmatch(activity_id) or not access_token:
-            raise ImportContractError("Authenticated activity lookup requires exact activity ID")
-        result = self._transport.request(
-            method="GET", url=ACTIVITY_BASE + activity_id,
-            headers={"Accept": "application/json",
-                     "Authorization": "Bearer " + access_token},
-            timeout_seconds=30.0,
+        return read_provider_activity(
+            transport=self._transport, activity_id=activity_id,
+            access_token=access_token,
         )
-        if not isinstance(result, Mapping):
-            raise ImportContractError("Activity result invalid")
-        return classify_activity(result, expected_activity_id=activity_id)

@@ -45,6 +45,9 @@ class RuntimeHttpApplication:
     # A source-only, trusted in-process preview/approval/readback service.
     # Not exposed as an unauthenticated HTTP route; inactive by default.
     constant_contact_import_workflow: Any | None = None
+    # Separate bounded GET-only reconciler. Never invoked by HTTP or the
+    # production ticket worker; a governed standalone supervisor owns cadence.
+    constant_contact_reconciliation_worker: Any | None = None
     identity_authority: Any | None = None
     capabilities: Any | None = None
     microsoft_identity_bindings: Any | None = None

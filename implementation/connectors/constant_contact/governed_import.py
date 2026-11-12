@@ -8,6 +8,7 @@ account binding, fresh suppression evidence and an atomic one-time claim.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from hashlib import sha256
 from typing import Callable, Mapping, Protocol
 import hmac
 import secrets
@@ -24,7 +25,9 @@ from .import_activity import (
 from .import_authorization import (
     ExactImportIntent, ImportAuthorizationError, TrustedTeamsApprovalPort,
 )
-from .import_dispatch import UnwiredConstantContactImportDispatcher
+from .import_dispatch import (
+    UnwiredConstantContactImportDispatcher, read_provider_activity,
+)
 from .import_ledger import SQLiteImportActivityLedger
 from .import_preflight import ImportPreflight
 from .import_work_store import EncryptedImportWorkStore, StoredImportWork
@@ -68,6 +71,7 @@ def canonical_import_arguments(work: StoredImportWork) -> dict[str, object]:
         "suppression_receipt_sha256": intent.suppression_receipt_sha256,
         "list_ids": list(intent.list_ids),
         "contact_count": intent.contact_count,
+        "source_sha256": work.source_sha256,
     }
 
 
@@ -133,6 +137,7 @@ class GovernedConstantContactImportConnector:
             requester_id=requester_id, specification=spec,
             account_binding_sha256=evidence.account_binding_sha256,
             suppression_receipt_sha256=evidence.suppression_receipt_sha256,
+            source_sha256=sha256(workbook).hexdigest(),
         )
         return PreparedImportSummary(
             work_id=work.work_id,
@@ -267,16 +272,23 @@ class GovernedConstantContactImportConnector:
                 "verified_count": len(verified["item_results"]),
                 "per_record": verified["item_results"],
             }
+        terminal = self.claims.read_provider_failure(intent_digest=intent.digest())
+        if terminal is not None:
+            return {
+                "status": "failed",
+                "activity_id": terminal["activity_id"],
+                "reason": terminal["reason"],
+                "provider_readback_required": False,
+            }
         token, account = self.session()
         provider = self._provider(token, account)
         # Fail closed on account switch even for historical activities.
         if provider.require_account() != work.account_binding_sha256:
             raise ImportAuthorizationError("Provider account no longer matches")
-        dispatcher = UnwiredConstantContactImportDispatcher(
-            approval=self.approvals(work), evidence=provider,
-            ledger=self.claims, transport=self.transport,
-        )
-        activity = dispatcher.read_activity(
+        # Expired/rotated approvals do not block read-only reconciliation.
+        # This path has no approval issuer and no provider POST capability.
+        activity = read_provider_activity(
+            transport=self.transport,
             activity_id=str(prior["activity_id"]), access_token=token,
         )
         if activity["state"] != "activity_complete_unverified":

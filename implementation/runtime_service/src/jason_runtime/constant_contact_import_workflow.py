@@ -21,6 +21,7 @@ from connectors.constant_contact.governed_import import (
 )
 from connectors.constant_contact.import_authorization import ImportAuthorizationError
 from connectors.constant_contact.import_work_store import EncryptedImportWorkStore
+from connectors.constant_contact.intake_handoff import verify_excel_handoff
 from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 
@@ -32,7 +33,9 @@ class ConstantContactImportWorkflow:
     issuer: Any
 
     def _requester(self, identity) -> str:
-        if getattr(identity, "authentication_assurance", "") != "botframework-authenticated":
+        if getattr(identity, "authentication_assurance", "") not in {
+            "botframework-authenticated", "entra-oauth-bearer",
+        }:
             raise ImportAuthorizationError("Authenticated AOT requester required")
         binding = self.issuer.bindings.find(
             microsoft_tenant_id=identity.microsoft_tenant_id,
@@ -67,6 +70,32 @@ class ConstantContactImportWorkflow:
             workbook=workbook,
             list_ids=list_ids,
         )
+
+    def preview_attachment(
+        self, *, identity, workbook_base64: str, source_sha256: str,
+        source_reference: str, filename: str, list_ids: tuple[str, ...],
+    ) -> dict[str, object]:
+        # Permission before parsing or contacting the provider; handoff
+        # metadata never supplies requester identity or approval.
+        self._requester(identity)
+        evidence = verify_excel_handoff(
+            workbook_base64=workbook_base64, source_sha256=source_sha256,
+            source_reference=source_reference, filename=filename,
+        )
+        summary = self.preview(
+            identity=identity, workbook=evidence.workbook, list_ids=list_ids,
+        )
+        return {
+            "status": "preview_unapproved",
+            "work_id": summary.work_id,
+            "source_sha256": evidence.source_sha256,
+            "source_reference": evidence.source_reference,
+            "contact_count": summary.contact_count,
+            "list_ids": list(summary.list_ids),
+            "preview_digest": summary.preview_digest,
+            "provider_suppression_verified": True,
+            "approval_required": True,
+        }
 
     def submit_approval(self, *, identity, work_id: str) -> dict[str, object]:
         requester_id = self._requester(identity)
