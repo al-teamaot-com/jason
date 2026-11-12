@@ -9,6 +9,7 @@
 const MAX_JPEG_BYTES=1024*1024;
 const SHA256_HEX=/^[0-9a-f]{64}$/;
 const ID=/^[a-zA-Z0-9_-]{12,128}$/;
+const DATTO_UID=/^(?:[0-9]{1,24}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 const safeError=message=>({ok:false,sent:false,error:message});
 function isReceipt(result, context, sha256) {
   return result && result.status==="accepted" && result.analyzed_by_model===false &&
@@ -24,7 +25,7 @@ async function sendOnce({getContext,checkReadiness,capture,deliver,isCurrent,dig
     context=await getContext();
     if (!context || !context.technicianVerified || !context.dattoPermissionVerified ||
         !context.sessionAuthorized || typeof context.deviceUid!=="string" ||
-        !/^[0-9]{1,24}$/.test(context.deviceUid) ||
+        !DATTO_UID.test(context.deviceUid) ||
         typeof context.sessionId!=="string" || !ID.test(context.sessionId) ||
         !Number.isFinite(context.expiresAt) || context.expiresAt<=now() ||
         context.transport!=="authenticated-https" || context.imageReviewReady!==true) {

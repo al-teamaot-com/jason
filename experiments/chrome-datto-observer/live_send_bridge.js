@@ -7,7 +7,7 @@
  * individual technician, Datto device, session and content policy.
  */
 const JASSIST_PINNED_ORIGIN="https://mcp-jason.teamaot.com";
-const DEVICE_URL=/^\/(?:device|web-remote)\/([0-9]{1,24})(?:\/|$)/;
+const DEVICE_URL=/^\/(?:device|web-remote)\/([0-9]{1,24}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i;
 const HTTPS_DATTO=/^https:\/\/[a-z0-9-]+\.rmm\.datto\.com\//i;
 const SESSION_ID=/^[A-Za-z0-9_-]{12,128}$/;
 function deviceFromDattoUrl(raw) {
@@ -17,7 +17,7 @@ function deviceFromDattoUrl(raw) {
   if(url.username||url.password||url.hash||url.port||url.protocol!=="https:")return null;
   if(!/^[a-z0-9-]+\.rmm\.datto\.com$/i.test(url.hostname))return null;
   const found=DEVICE_URL.exec(url.pathname);
-  return found?found[1]:null;
+  return found && found[1]!=="00000000-0000-0000-0000-000000000000" ? found[1].toLowerCase():null;
 }
 function createLiveSendBridge({chromeApi,tokenForSend,
                                fetchImpl=fetch,

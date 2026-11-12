@@ -152,6 +152,57 @@ class RuntimeWiringTests(unittest.TestCase):
             disabled.read(session_id=session["session_id"],
                 device_uid="1717088",receipt_id=receipt["receipt_id"])
 
+    def test_governed_datto_native_uuid_full_session_and_image_read(self):
+        from dataclasses import fields
+        from jassist.runtime_wiring import JAssistRuntimeDependencies
+        native_uid="69571572-83f7-1e33-9cdf-01717d4e74a4"
+        site_uid="9bb56523-cade-4ffb-bc34-696e788f0f4c"
+        self.policy["aot_account_uid"]=site_uid
+        self.policy["revision"]=2
+        self.policy["approval_record"]="TEST-GOVERNED-DATTO-UUID-NONPRODUCTION"
+        self.publish()
+        record={"resource_id":native_uid,"hostname":"AOT-TEST-DEVICE",
+                "site_id":site_uid,"online":True,"suspended":False,
+                "deleted":False}
+        calls=[]
+        def governed_read(uid):
+            calls.append(uid)
+            return {
+                "status":"succeeded","stage":"completed",
+                "capability":"endpoint.device.read","provider":"datto_rmm",
+                "evidence":{"provider":"datto_rmm",
+                            "provider_capability":"datto_rmm.device.get",
+                            "record":record},
+            }
+        props={f.name:getattr(self.deps,f.name)
+               for f in fields(self.deps)
+               if f.name not in ("aot_datto_account_uid","datto_device_in_account")}
+        actual=JAssistRuntimeDependencies.from_governed_aot_site(
+            aot_site_uid=site_uid,governed_device_read=governed_read,**props)
+        service=actual.build()
+        bearer=self.bearer()
+        ready=service.api.readiness(bearer=bearer,device_uid=native_uid)
+        self.assertEqual(ready["status"],"ready")
+        self.assertTrue(ready["datto_device_authorized"])
+        session=service.api.create_session(bearer=bearer,
+             device_uid=native_uid,consent=True)
+        sid=session["session_id"]
+        receipt=service.api.accept_image(
+            bearer=bearer,session_id=sid,device_uid=native_uid,
+            nonce="TestNativeDattoUuidABC123",image=JPEG,
+            sha256=hashlib.sha256(JPEG).hexdigest())
+        read=service.mcp_image_tool.read_reviewed_image(
+            authenticated_technician=self.person,
+            session_id=sid,device_uid=native_uid,receipt_id=receipt["receipt_id"])
+        self.assertEqual(base64.b64decode(read["image"]["data"]),JPEG)
+        self.assertGreaterEqual(calls.count(native_uid),4)
+        # Native site revalidation on every read; no caching by browser.
+        record["site_id"]="11111111-1111-4111-8111-111111111111"
+        with self.assertRaises(Denied):
+            service.mcp_image_tool.read_reviewed_image(
+                authenticated_technician=self.person,session_id=sid,
+                device_uid=native_uid,receipt_id=receipt["receipt_id"])
+
     def test_auth_scope_group_and_tls_outage_fail_closed(self):
         for claims in ({"scp":"Jason.Read"},{"azp":OID},{"tid":OID}):
             with self.subTest(claims=claims),self.assertRaises(JAssistApiDenied):

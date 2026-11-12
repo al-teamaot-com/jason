@@ -12,6 +12,7 @@ from typing import Callable
 
 from .screen_evidence_intake import ScreenEvidenceIntake
 from .session_gate import Denied, VerifiedTechnician
+from .device_identifiers import valid_device_uid
 
 
 class ChatGPTImageEvidenceTool:
@@ -37,7 +38,7 @@ class ChatGPTImageEvidenceTool:
             raise Denied("trusted MCP identity required")
         if not isinstance(session_id, str) or not 12 <= len(session_id) <= 128:
             raise Denied("invalid session selector")
-        if not isinstance(device_uid, str) or not 1 <= len(device_uid) <= 24:
+        if not valid_device_uid(device_uid):
             raise Denied("invalid device selector")
         if not isinstance(receipt_id, str) or not 12 <= len(receipt_id) <= 128:
             raise Denied("invalid receipt selector")

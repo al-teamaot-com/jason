@@ -5,6 +5,7 @@ integration. Trusted identity and Datto authorization must be supplied by a
 future independently verified adapter. No browser-provided identity is trusted.
 """
 from __future__ import annotations
+from .device_identifiers import valid_device_uid
 
 import hashlib
 import re
@@ -13,7 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-_DEVICE = re.compile(r"^[0-9]{1,24}$")
+
 _MAX_SECONDS = 300
 
 
@@ -81,7 +82,7 @@ class SessionGate:
     ) -> tuple[SessionReceipt, str]:
         if consent is not True:
             raise Denied("explicit consent required")
-        if not isinstance(device_uid, str) or not _DEVICE.fullmatch(device_uid):
+        if not isinstance(device_uid, str) or not valid_device_uid(device_uid):
             raise Denied("invalid Datto device identity")
         if type(lifetime_seconds) is not int or not 1 <= lifetime_seconds <= _MAX_SECONDS:
             raise Denied("invalid session lifetime")

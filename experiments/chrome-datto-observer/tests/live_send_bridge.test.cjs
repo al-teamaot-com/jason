@@ -12,8 +12,8 @@ const base64="data:image/jpeg;base64,"+jpeg.toString("base64");
 const goodBearer="a".repeat(512);
 const now=Date.now();
 
-function harness(){
- const tab={id:42,windowId:2,url:"https://vidal.rmm.datto.com/device/1717088/console"};
+function harness(deviceUid="1717088"){
+ const tab={id:42,windowId:2,url:"https://vidal.rmm.datto.com/device/"+deviceUid+"/console"};
  const calls=[];
  let activeId=42,group=true,datto=true,review=true,expires=now+60000;
  let token={token:goodBearer,expiresAt:now+3600000};
@@ -30,30 +30,30 @@ function harness(){
    assert.match(opts.headers.Authorization,/^Bearer a+$/);
    const response=(status,body)=>({status,ok:status>=200&&status<300,json:async()=>body});
    if(path==="/v1/jassist/readiness"){
-     return response(200,{status:"ready",device_uid:"1717088",
+     return response(200,{status:"ready",device_uid:deviceUid,
        technician_verified:true,entra_group_verified:group,
        datto_device_authorized:datto,image_review_ready:review,
        production_ingress:true});
    }
    if(path==="/v1/jassist/session"){
      return response(201,{status:"authorized",
-       session_id:"server_session_123456789",device_uid:"1717088",
+       session_id:"server_session_123456789",device_uid:deviceUid,
        technician_verified:true,entra_group_verified:group,
        datto_device_authorized:datto,image_review_ready:review,
        production_ingress:true,expires_at_ms:expires});
    }
    if(path==="/v1/jassist/session/validate"){
      return response(200,{status:"authorized",session_id:"server_session_123456789",
-       device_uid:"1717088",image_review_ready:review,production_ingress:true});
+       device_uid:deviceUid,image_review_ready:review,production_ingress:true});
    }
    if(path==="/v1/jassist/image"){
      const request=Buffer.from(opts.body);
      assert.deepEqual(request,jpeg);
-     assert.equal(opts.headers["X-JAssist-Device"],"1717088");
+     assert.equal(opts.headers["X-JAssist-Device"],deviceUid);
      assert.equal(opts.headers["X-JAssist-SHA256"],
        crypto.createHash("sha256").update(jpeg).digest("hex"));
      return response(201,{status:"accepted",session_id:"server_session_123456789",
-       device_uid:"1717088",image_sha256:opts.headers["X-JAssist-SHA256"],
+       device_uid:deviceUid,image_sha256:opts.headers["X-JAssist-SHA256"],
        receipt_id:"test_receipt_12345678",analyzed_by_model:false});
    }
    if(path==="/v1/jassist/session/stop")return response(200,{ok:true});
@@ -100,6 +100,18 @@ test("full browser-shaped send requires server-authenticated group and Datto rea
  assert.equal(t.calls.filter(c=>c.path==="/v1/jassist/session").length,1);
  await t.live.revoke({tabId:42});
  assert.equal(t.calls.filter(c=>c.path==="/v1/jassist/session/stop").length,1);
+});
+test("native Datto UUID Web Remote device survives whole send and receipt",async()=>{
+ const nativeUid="69571572-83f7-1e33-9cdf-01717d4e74a4";
+ assert.equal(bridge.deviceFromDattoUrl(
+   "https://vidal.rmm.datto.com/web-remote/"+nativeUid+"?tool=shell"),nativeUid);
+ const t=harness(nativeUid);
+ const deps=await t.live.dependencies({tabId:42,sessionId:7});
+ const result=await sendOnce(deps);
+ assert.equal(result.sent,true);
+ assert.equal(result.device_uid,nativeUid);
+ assert.equal(t.calls.filter(c=>c.path==="capture").length,1);
+ assert.equal(t.calls.filter(c=>c.path==="/v1/jassist/image").length,1);
 });
 test("missing group, Datto ownership or reviewer rejects before capture",async()=>{
  for(const disable of ["group","datto","review"]){

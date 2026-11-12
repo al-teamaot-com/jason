@@ -7,6 +7,7 @@ not from browser-authored claims or an access-token group list. No live
 provider connector is registered and image uploads remain disabled.
 """
 from __future__ import annotations
+from .device_identifiers import valid_device_uid
 
 from dataclasses import dataclass
 import re
@@ -20,7 +21,7 @@ from .session_gate import VerifiedTechnician
 AOT_JASSIST_PILOT_GROUP_ID = "5273dd8a-1456-4985-b0a3-c00061267e26"
 
 _GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
-_DEVICE = re.compile(r"^[0-9]{1,24}$")
+
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,7 @@ class EntraGroupScreenAuthorizer:
             return False
         if not isinstance(technician, VerifiedTechnician) or technician.tenant_id != "aot":
             return False
-        if not isinstance(device_uid, str) or not _DEVICE.fullmatch(device_uid):
+        if not isinstance(device_uid, str) or not valid_device_uid(device_uid):
             return False
         try:
             # This mapping must be derived from the verified Entra JWT object

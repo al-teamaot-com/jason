@@ -63,3 +63,53 @@ At preparation, the last root-protected production readback identified accepted 
 Live Graph membership and scope consent, Datto device/account authority, certified DLP, trusted vault/HTTPS configuration, real browser session and MCP tool registration must be independently provided and verified. A live Chrome UI test requires browser control in ChatGPT Work or direct authorized technician hands-on acceptance; Chat-mode browser access is read-only. No test pass may substitute for those facts.
 
 Do not mark production ready until all gates have verifiable, immutable evidence.
+
+
+## 2026-11-12 Owner-approved nonproduction screenshot pilot
+
+The Owner approved exactly one **controlled, technician-initiated
+J-Assist screenshot pilot on an AOT-owned test device**, with content
+screening, AES-encrypted storage, 120-second evidence retention, no
+automatic endpoint commands and **no production deployment**. This
+approval DOES NOT authorize a production source promotion, relaxing
+Jason's release freeze, enabling the MCP tool on the production host,
+using clients' data, or replacing the independent Entra/Datto checks.
+
+**Selected candidate:** `Al`, Windows 11, account `AzureAD\AlDavis`,
+Datto site `Atlantic Office Machines` (native site UID
+`9bb56523-cade-4ffb-bc34-696e788f0f4c`), native Datto device UID
+`69571572-83f7-1e33-9cdf-01717d4e74a4`. Live governed Jason
+`endpoint.device.search` and `endpoint.device.read` confirmed a
+currently online, nonsuspended, nondeleted device in that exact site.
+No real screenshots were retrieved or transmitted by those reads.
+
+**Native-UID correction:** The original experimental extension and
+server policy accepted decimal Datto UIDs only. The pilot source
+now accepts *either* strict legacy decimal UIDs *or* canonical UUIDs,
+including Datto's actual API-reported UID above, and rechecks the
+same resource/site in the server-owned governed Datto device read
+adapter on each step. Wrong-site, stale, offline, suspended, deleted,
+corrupt provider response, disabled Entra group member or invalid
+device selector must deny. The v1 configuration key named
+`aot_account_uid` must be configured as the **verified internal Datto
+site UID** for this pilot; its legacy name is not authorization to use
+the broader Datto account indiscriminately. Rename in a future
+schema migration once live configuration publisher is established.
+
+**Prepared Windows pilot package:** Tested J-Assist 0.2.1 extension
+files staged under the Owner's Al workstation Downloads in the
+`JAssist-Pilot-20261112` directory. Package SHA256 read back on
+Windows after secure SSH file transfer; staged only, not loaded into
+Chrome or published. Update the hash once the UUID correction build
+has been re-transferred. Do not auto-install or run browser automation
+via shell.
+
+**Real acceptance STILL BLOCKED:** The Chrome Browser integration
+in this Chat context is read-only (Work-mode browser UI control is not
+available), and the currently deployed Jason MCP service still lacks
+an active J-Assist receiver, approved content DLP, governed enabled
+configuration, vault-backed keys, trusted TLS proxy and registered
+MCP image reader. No real screenshot acceptance can be claimed.
+A Work-mode authorized technician browser session and approved live
+nonproduction ingress are required. Until then, the extension remains
+fail-closed and no client/user screenshot data leaves the machine.

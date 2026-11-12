@@ -17,6 +17,7 @@ from .entra_group_http_transport import AotGraphMembershipHttpTransport
 from .entra_group_membership_reader import GraphMembershipReader
 from .entra_send_authority import EntraSendAuthority
 from .jassist_access_policy import JAssistEntraAccessPolicy, FileBackedJAssistPolicyReader
+from .datto_device_proof import GovernedAotDattoDeviceProof
 from .jassist_asgi_gateway import JAssistASGIGateway
 from .jassist_encrypted_evidence import EncryptedJAssistEvidenceIntake
 from .jassist_evidence_api import JAssistEvidenceApi
@@ -54,6 +55,24 @@ class JAssistRuntimeDependencies:
     content_reviewer: Callable
     content_review_ready: Callable
     secure_ingress_ready: Callable
+
+    @classmethod
+    def from_governed_aot_site(cls, *, aot_site_uid: str,
+                               governed_device_read: Callable[[str], dict],
+                               **verified_service_dependencies):
+        """Bind only an already-authorized Jason endpoint.device.read.
+
+        The AOT site must be pinned by Jason's governed configuration,
+        never selected by the extension or supplied in browser JSON.
+        """
+        device_proof = GovernedAotDattoDeviceProof(
+            aot_site_uid=aot_site_uid,
+            governed_read=governed_device_read)
+        return cls(
+            aot_datto_account_uid=aot_site_uid,
+            datto_device_in_account=device_proof,
+            **verified_service_dependencies,
+        )
 
     def build(self) -> JAssistRunningComponents:
         if self.session_encryption_key == self.evidence_encryption_key:

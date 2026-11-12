@@ -9,6 +9,7 @@ A production deployment additionally needs the governed secret resolver,
 reviewed configuration publisher and accepted encrypted evidence store.
 """
 from __future__ import annotations
+from .device_identifiers import valid_device_uid
 
 from dataclasses import dataclass
 import hashlib
@@ -25,7 +26,7 @@ from typing import Callable
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .session_gate import Denied, SessionReceipt, VerifiedTechnician
 
-_UID = re.compile(r"^[0-9]{1,24}$")
+
 _SID = re.compile(r"^[a-zA-Z0-9_-]{12,128}$")
 _MAX_SECONDS = 300
 
@@ -104,7 +105,7 @@ class DurableJAssistSessionGate:
 
     def can_start(self, *, trusted_context, device_uid):
         """Read-only current authorization check; no session is opened."""
-        if not isinstance(device_uid,str) or not _UID.fullmatch(device_uid):
+        if not isinstance(device_uid,str) or not valid_device_uid(device_uid):
             return False
         try:
             principal=self._principal(trusted_context)
@@ -115,7 +116,7 @@ class DurableJAssistSessionGate:
     def start(self, *, trusted_context, device_uid, consent,
               lifetime_seconds=120):
         if (consent is not True or not isinstance(device_uid,str)
-                or not _UID.fullmatch(device_uid)
+                or not valid_device_uid(device_uid)
                 or type(lifetime_seconds) is not int
                 or not 1<=lifetime_seconds<=_MAX_SECONDS):
             raise Denied("invalid consent, device or lifetime")
@@ -140,7 +141,7 @@ class DurableJAssistSessionGate:
         principal=self._principal(trusted_context)
         if (not isinstance(session_id,str) or not _SID.fullmatch(session_id)
                 or not isinstance(token,str)
-                or not isinstance(device_uid,str) or not _UID.fullmatch(device_uid)):
+                or not isinstance(device_uid,str) or not valid_device_uid(device_uid)):
             raise Denied("invalid session selector")
         with self._connect() as db:
             row=db.execute("SELECT subject,tenant,device_uid,credential_digest,expires_at,status FROM jassist_sessions WHERE session_id=?",(session_id,)).fetchone()

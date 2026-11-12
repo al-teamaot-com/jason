@@ -254,3 +254,18 @@ remain a controlled unpacked test build until approved release acceptance.
 Node tests exercise the real worker importScripts entrypoint and browser-shaped
 send orchestration with synthetic JWT/session responses. They are not evidence
 that a real Chrome Web Remote tab uploaded an image into deployed Jason.
+
+
+## AOT pilot native Datto UUID support (2026-11-12)
+
+J-Assist's reviewed active-tab URL parser and send coordinator now support
+strict canonical Datto device UUIDs in addition to historical decimal UIDs.
+Both `/device/{uid}` and `/web-remote/{uid}` require an exact
+`https://*.rmm.datto.com` host; browser URL alone never establishes
+device permission. The server separately requires the current authorized
+governed `endpoint.device.read` result to match the pinned internal AOT
+Datto site before accepting any screenshot.
+
+The Owner's controlled nonproduction pilot is approved; local Chrome
+installation is not automated. No real screenshots have yet been
+sent, and the production receiver is still disabled.

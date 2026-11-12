@@ -6,6 +6,7 @@ approved Chrome extension ID. It never provides browser access to Jason's
 internal session credential, encrypted evidence, or other MCP tools.
 """
 from __future__ import annotations
+from .device_identifiers import valid_device_uid
 
 import asyncio
 import json
@@ -22,7 +23,7 @@ _ALLOWED_PATHS=frozenset({
   "/v1/jassist/session/validate","/v1/jassist/session/stop",
   "/v1/jassist/image",
 })
-_DEVICE=re.compile(r"^[0-9]{1,24}$")
+
 _SESSION=re.compile(r"^[A-Za-z0-9_-]{12,128}$")
 _SHA=re.compile(r"^[0-9a-f]{64}$")
 _NONCE=re.compile(r"^[A-Za-z0-9]{16,96}$")
@@ -91,7 +92,7 @@ class JAssistASGIGateway:
 
     @staticmethod
     def _device(value):
-        if not isinstance(value,str) or not _DEVICE.fullmatch(value):
+        if not isinstance(value,str) or not valid_device_uid(value):
             raise JAssistApiDenied(400,"Invalid Datto device")
         return value
 
