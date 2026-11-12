@@ -13,9 +13,9 @@ from pathlib import Path
 DEFAULT_OUTPUT = Path('/var/lib/jason/openclaw/operational-health.json')
 LAST_SUCCESS = Path('/var/lib/jason/openclaw/operational-full-health-last-pass.json')
 # Full SQLite checks now cover a >28 GB orchestration audit and multi-GB
-# authority backup/restore. Retain a strict bound, but allow one 60-minute
+# authority backup/restore. Retain a strict bound, but allow one 90-minute
 # overnight attempt; never convert a timeout into a passing proof.
-SOURCE_HEALTH_TIMEOUT_SECONDS = 3600
+SOURCE_HEALTH_TIMEOUT_SECONDS = 5400
 BACKUP_TEMP_ROOT = Path('/srv/jason/archive')
 SOURCE_HEALTH_TIMEOUT_EXIT_CODE = 124
 
@@ -80,7 +80,7 @@ def main() -> int:
                 text=True,
                 check=False,
                 # Full PRAGMA integrity_check still runs on all four databases.
-                # The outer 3600-second bound and fail-closed result remain.
+                # The outer 5400-second bound and fail-closed result remain.
                 timeout=SOURCE_HEALTH_TIMEOUT_SECONDS,
             )
     except subprocess.TimeoutExpired as exc:
