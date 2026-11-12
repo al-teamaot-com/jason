@@ -44,3 +44,23 @@ AOT site, online/nondeleted/nonsuspended device check on each operation.
   not deployment of this connector change to production. Do not merge or
   promote until current protected-main CI, review, exact-SHA release
   authorization and rollback are independently satisfied.
+
+
+## Concurrent-change coordination (reviewed 2026-11-12)
+
+Integration coordination: #2448, #2395, #2343, #2333
+
+These active PRs all touch the broad MCP server source file, so the
+J-CHANGE-001 path-overlap gate requires explicit acknowledgement.
+Their inspected **server.py diff hunks do not overlap** this change to
+the bounded `_project_endpoint_read` helper (near line 835):
+
+- PR #2448: PMv4 release authorization around line 5344.
+- PR #2395: V5 integrity recovery and read path around lines 101 and 8657.
+- PR #2343: procurement invoice intake around lines 7682–7735.
+- PR #2333: endpoint security read/reporting around lines 1563–1654 and 8537.
+
+No code from those PRs has been merged, reused or replaced here.
+A separate protected-main review is still required immediately before
+integration; path-overlap acknowledgement is **not** production release
+approval.
