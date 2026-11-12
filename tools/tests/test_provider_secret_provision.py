@@ -394,3 +394,22 @@ def test_datto_edr_contract_uses_dedicated_readonly_identity() -> None:
     assert Path(spec["credential_dir"]) == Path(
         "/opt/jason/bootstrap/secrets/openbao/datto-edr-read-approle"
     )
+
+
+
+def test_microsoft_group_admin_policies_use_two_distinct_secrets_and_approles() -> None:
+    read = PROVIDERS["microsoft_graph_group_read"]
+    write = PROVIDERS["microsoft_graph_group_write"]
+    existing = PROVIDERS["microsoft_graph"]
+    fields = ("private_key_pem", "certificate_pem", "certificate_thumbprint", "generation")
+    for profile in (read, write):
+        assert profile["fields"] == fields
+        assert set(profile["fields"]) == set(existing["fields"])
+        assert profile["logical_name"].startswith("microsoft_graph.group_")
+        assert profile["secret_path"] not in {existing["secret_path"]}
+        assert profile["role_name"] != existing["role_name"]
+        assert provider_policy_text("microsoft_graph_group_read").count('capabilities = ["read"]') == 1
+    assert read["logical_name"] != write["logical_name"]
+    assert read["secret_path"] != write["secret_path"]
+    assert read["role_name"] != write["role_name"]
+    assert read["credential_dir"] != write["credential_dir"]

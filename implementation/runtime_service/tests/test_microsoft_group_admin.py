@@ -127,3 +127,40 @@ def test_builder_enforces_separate_read_write_token_app_ids_and_real_graph_respo
     assert len(transport.read_calls) > 1
     assert read_tokens.calls > 0
     assert write_tokens.calls == 1
+
+
+
+def test_openbao_builder_keeps_read_and_write_bootstrap_separate_and_dormant(tmp_path):
+    from jason_runtime.microsoft_group_admin import build_microsoft_group_admin_openbao_invoker
+    from connectors.microsoft_graph.group_executor import WRITE_PROVIDER
+    registry = InMemoryClientBoundaryRepository()
+    transport = BoundedGraphTransport()
+    invoker = build_microsoft_group_admin_openbao_invoker(
+        boundaries=registry, openbao_url="http://openbao.test:8200",
+        read_role_id_path=tmp_path / "read" / "role_id",
+        read_secret_id_path=tmp_path / "read" / "secret_id",
+        write_role_id_path=tmp_path / "write" / "role_id",
+        write_secret_id_path=tmp_path / "write" / "secret_id",
+        transport=transport, entitlement=FakeEntitlements(), audit=FakeAudit(),
+    )
+    assert WRITE_PROVIDER in invoker.connectors
+    assert not transport.read_calls and not transport.posts.calls
+    assert set(invoker.provider_capability_map) == {
+        (WRITE_PROVIDER, "identity.group.create"),
+        (WRITE_PROVIDER, "identity.group.member.add"),
+    }
+
+
+def test_openbao_builder_rejects_same_credential_identity_for_read_and_write(tmp_path):
+    import pytest
+    from jason_runtime.microsoft_group_admin import build_microsoft_group_admin_openbao_invoker
+    with pytest.raises(ValueError, match="MUST_BE_DISTINCT"):
+        build_microsoft_group_admin_openbao_invoker(
+            boundaries=InMemoryClientBoundaryRepository(),
+            openbao_url="http://openbao.test:8200",
+            read_role_id_path=tmp_path / "shared" / "role_id",
+            read_secret_id_path=tmp_path / "shared" / "secret_id",
+            write_role_id_path=tmp_path / "shared" / "role_id",
+            write_secret_id_path=tmp_path / "shared" / "secret_id",
+            transport=BoundedGraphTransport(), entitlement=FakeEntitlements(), audit=FakeAudit(),
+        )

@@ -61,6 +61,8 @@ jobs:
             implementation/connectors/microsoft_graph/test_group_pilot_manifest.py \
             implementation/orchestrator/tests/test_microsoft_group_admin_catalog.py \
             implementation/runtime_service/tests/test_microsoft_group_admin.py
+            implementation/connectors/tests/test_openbao_secrets.py \
+            tools/tests/test_provider_secret_provision.py
       - name: Active write-provider execution-plan regressions
         run: |
           python -m pytest -q \

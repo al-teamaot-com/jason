@@ -1,6 +1,6 @@
 # AOT Microsoft 365 Group Administration Pilot — Consent and Release Handoff
 
-**Current status:** Source-only preparation completed. No Microsoft tenant write, new application registration, consent grant, credential change, or production deployment performed.
+**Current status (2026-11-12):** AOT administrator created both app registrations and independently read back each exact application permission grant through Microsoft Graph PowerShell. Restricted staging certificate pairs have been generated. Public certificates are on the Owner's PC; Entra certificate upload and governed OpenBao provisioning remain pending. No group, membership, credential in production runtime, or deployment was changed.
 
 ## Verified AOT facts (2026-11-12)
 
@@ -8,7 +8,7 @@
 - AOT tenant: `f7054323-d52b-4863-8c2f-1898f0b6077c`, domain `teamaot.com`.
 - Existing validated `microsoft_graph / directory-read` app: `c94301b7-7194-46ab-aab7-94f9366f51a9` (do not modify or broaden; it supports current Jason user reads and Teams identity enrichment).
 - Validated mail-related applications also exist; these are unrelated and must not be repurposed.
-- No `microsoft_graph_group_read` or `microsoft_graph_group_write` boundary is present for AOT in the currently readable production boundary registry.
+- No `microsoft_graph_group_read` or `microsoft_graph_group_write` boundary was present for AOT in the read-only production registry check prior to application onboarding. Do not register as VALIDATED until certificate/token and consent are independently rechecked.
 - Jason's governed `identity.user.read` succeeded for `bee80bdc-ffb0-4c50-b453-c09d4d411f5f`, the enabled regular AOT account associated with `al@teamaot.com`.
 - Live Jason capability discovery returns no registered active `identity_group` mutation capability.
 - Project Jason PR #2454 contains the shared implementation, not an activated runtime capability.
@@ -26,12 +26,12 @@ The immutable *proposal*, not an approval or executable directive, is in
 - **No mail-enabled group**, Microsoft Teams/SharePoint site, license change, privileged role assignment, guest invitation, or notification.
 - **Cleanup:** retain until separate cleanup is approved; the current operation catalog does not permit group deletion.
 
-## Exact Microsoft consent boundary (not yet crossed)
+## Microsoft administrator consent — granted, independently read back by setup script
 
-Create two **separate AOT-owned multitenant app registrations** through Microsoft Entra, preserving separation of read and mutation identities. Proposed display names:
+AOT has created two **separate AOT-owned multitenant app registrations** through Microsoft Entra, preserving separation of read and mutation identities. Verified app metadata:
 
-1. `Jason - M365 Group Read`: Microsoft Graph **application** permissions `Group.Read.All` and `User.Read.All`; proposed profile `group-read`.
-2. `Jason - M365 Group Write`: Microsoft Graph **application** permissions `Group.Create`, `GroupMember.ReadWrite.All`, and `User.Read.All`; proposed profile `group-write`.
+1. `Jason - M365 Group Read`: app `bb8f8e09-f851-4e0d-9c4a-95ff36d34b9a`, SP `92191ddb-36dc-40f8-9b22-a070f68ff1e3`. Granted `Group.Read.All`, `User.Read.All`; proposed profile `group-read`.
+2. `Jason - M365 Group Write`: app `6583ee4b-5aa7-4c82-a46e-472f03a4c467`, SP `b15da46c-31f9-41a4-bb80-4d5eab615f81`. Granted `Group.Create`, `GroupMember.ReadWrite.All`, `User.Read.All`; proposed profile `group-write`.
 
 Use administrator-granted consent within the exact AOT tenant. App-only Graph group permissions operate at tenant scale; these must not be granted without the Owner/admin's deliberate security decision. Do not grant `Directory.ReadWrite.All` or `RoleManagement.ReadWrite.Directory`.
 
@@ -42,6 +42,16 @@ Only upload public certificate halves to the app registrations. Provision matchi
 After registration, obtain the two **application IDs**, approved **service-principal records**, consent/grant evidence and safe certificate thumbprint/generation metadata. Register client-boundary records for the two exact provider/profile pairs only after verifying consent. Tokens are in memory only.
 
 **This is the first external action for which administrator consent or approval is required.** Do not silently create apps, modify a customer's directory or reuse the existing directory-read app to avoid consent.
+
+### Certificate registration boundary — pending
+
+On the Jason host two RSA-3072 self-signed pilot key/certificate pairs were generated with private mode 0600 inside a private mode-0700 staging directory. Only public DER certificates were copied to `C:\Users\AlDavis\Documents\Jason-M365-Public-Certs`.
+
+- Read public SHA-1: `AB1EAD35B802F170BDFB7531637E923039B2F983`.
+- Write public SHA-1: `C020401DAB7CF05BFEFE84024AA323913D903885`.
+- Validity: November 12, 2026 through November 12, 2027 (pilot self-signed).
+- Enrollment script: `C:\Users\AlDavis\Documents\Jason-M365-Certificate-Upload.ps1`. This requires authorized interactive administrator sign-in and exact confirmation; it has not been run.
+- The private keys are *not* in production OpenBao, in Git or on the Owner's PC. Remove the restricted staging files after controlled vault transfer and verification.
 
 ## Post-consent automated acceptance
 
@@ -62,7 +72,7 @@ The previous dormant group-membership source branch `feature/governed-entra-grou
 
 ## Required human action
 
-An authorized AOT Microsoft Entra administrator must consent to the two narrowly specified app registrations and Graph **application** permissions, or expressly approve an authenticated, auditable administrator workflow that does the same. A separate exact-sha governed release authorization is also required before production deployment.
+The AOT app-role consent has been granted. **Next action requiring Owner interaction:** authenticate as the AOT Entra administrator and approve enrollment of the two exact public certificates using the prepared PowerShell script. After live read-only tenant token validation, a separate exact-SHA governed production authorization is still required before release or actual group mutation.
 
 No technician should be asked to paste credentials or hand-assemble Microsoft access tokens.
 
