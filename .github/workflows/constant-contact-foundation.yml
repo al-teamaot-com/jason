@@ -48,7 +48,10 @@ jobs:
           python-version: '3.12'
       - name: Install source test dependencies
         run: |
-          python -m pip install --disable-pip-version-check 'pytest>=8.3,<10' 'cryptography>=50,<51' 'openpyxl>=3.1,<4' 'mcp==2.2.0' 'PyJWT>=2.8,<3' 'requests>=2.31,<3'
+          python -m pip install --upgrade pip
+          python -m pip install --disable-pip-version-check 'pytest>=8.3,<10' 'cryptography>=50,<51' 'openpyxl>=3.1,<4' 'mcp==2.2.0' 'PyJWT>=2.8,<3' 'requests>=2.31,<3' 'pip-audit>=2.10,<3'
+      - name: Audit Constant Contact test dependency environment
+        run: python -m pip_audit --progress-spinner off --format columns
       - name: Compile source and runtime integration
         run: |
           python -m compileall -q implementation/connectors/constant_contact implementation/orchestrator/constant_contact_capability_catalog.py implementation/orchestrator/constant_contact_import_capability.py implementation/runtime_service/src/jason_runtime/constant_contact_activation.py implementation/runtime_service/src/jason_runtime/constant_contact_reads.py implementation/runtime_service/src/jason_runtime/constant_contact_reconcile_entrypoint.py implementation/runtime_service/src/jason_runtime/constant_contact_import_runtime.py implementation/runtime_service/src/jason_runtime/constant_contact_import_workflow.py implementation/runtime_service/src/jason_runtime/constant_contact_teams_approval.py implementation/runtime_service/src/jason_runtime/composition.py implementation/mcp_service/src/jason_mcp/server.py tools/constant_contact_oauth.py tools/constant_contact_reconcile_once.py
