@@ -41,3 +41,9 @@ The dormant write adapter is in draft PR #2455; its last reviewed head is 920bb2
 Source-only pytest negative/positive cases cover role mismatch, missing root/local identity, valid identity no-op, new SecretID login and KV contract before mutation, provider error redaction, invalid new identity rejection and single-provider boundaries. Mock tests do not prove live provider operations.
 
 REMAINING BLOCKERS: exact Owner-approved root release for this source, then local protected credential operation (this chat does not have the local hidden password/Owner console); live provider read acceptance; dedicated IT Glue write key; verified test organization and live create/update; separate exact signed production release approval for enabling writes. Native Release Manager requires a candidate reachable from protected main and normally the exact latest main SHA. Current main includes changes not present in the running production source: do not mislabel a release of all pending main changes as an isolated credential hotfix.
+
+## Concurrent host reconciliation review
+
+Integration coordination: #2391
+
+PR #2391 separately stages two disabled read-only provider-shadow units around host reconciliation line 717. This IT Glue change adds only an inert root-local helper install after the existing OpenBao lifecycle reconciliation, around line 828. Neither edits the other stage or activates a service. Preserve both additive stages and exact rollback behavior if either branch merges; re-review before promotion. This is documentation of overlap review, not a release approval.
