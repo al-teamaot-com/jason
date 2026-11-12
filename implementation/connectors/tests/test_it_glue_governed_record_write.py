@@ -68,6 +68,7 @@ class Transport:
         self.readback_corrupt = False
         self.raise_after_write = False
         self.folder_org = 81
+        self.folder_restricted = False
         self.existing = {
             "id": "101",
             "type": kind,
@@ -86,9 +87,13 @@ class Transport:
         if method == "GET":
             if url == "https://api.itglue.com/organizations/81":
                 return {"data": {"type": "organizations", "id": "81"}}
-            if url == "https://api.itglue.com/document_folders/32":
+            if url == "https://api.itglue.com/organizations/81/relationships/document_folders/32":
                 return {"data": {"type": "document-folders", "id": "32",
-                                 "attributes": {"organization-id": self.folder_org}}}
+                                 "attributes": {
+                                     "organization-id": self.folder_org,
+                                     "restricted": self.folder_restricted,
+                                     "my-glue": False,
+                                 }}}
             data = {
                 "id": self.existing["id"],
                 "type": self.existing["type"],
@@ -357,4 +362,37 @@ def test_cross_client_document_folder_blocks_creation(ready):
         writer.prepare_governed_execution(request(
             "it_glue.document.create", name="New SOP", folder_id=32,
             request_id="approved-create-20261112-0006"))
+    assert t.writes == 0
+
+
+def test_restricted_document_folder_blocks_creation(ready):
+    writer, t, *_ = harness("documents")
+    t.folder_restricted = True
+    with pytest.raises(ConnectorAuthorizationError, match="FOLDER_RESTRICTED"):
+        writer.prepare_governed_execution(request(
+            "it_glue.document.create", name="New SOP", folder_id=32,
+            request_id="approved-create-20261112-0007"))
+    assert t.writes == 0
+
+
+def test_complex_tag_resource_fails_closed_on_trait_update(ready):
+    writer, t, *_ = harness()
+    t.existing["attributes"]["traits"]["linked-server"] = {
+        "type": "Configurations", "values": [{"id": 42}]}
+    with pytest.raises(ConnectorAuthorizationError, match="UNSAFE_EXISTING_TRAITS"):
+        writer.prepare_governed_execution(request(
+            "it_glue.flexible_asset.update", resource_id=101,
+            traits={"backup-server": "new"}))
+    assert t.writes == 0
+
+
+def test_document_create_uses_documented_nested_folder_path(ready):
+    writer, t, *_ = harness("documents")
+    plan = writer.prepare_governed_execution(request(
+        "it_glue.document.create", name="New SOP", folder_id=32,
+        request_id="approved-create-20261112-0008"))
+    assert plan.normalized_path == "/organizations/81/relationships/documents"
+    assert any(call[1].endswith("/organizations/81/relationships/document_folders/32")
+               for call in t.calls)
+    assert plan.opaque.desired_attributes["is_uploaded"] == "true"
     assert t.writes == 0

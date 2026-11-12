@@ -212,7 +212,7 @@ class ItGlueGovernedRecordWriter:
                 required = {"name", "folder_id", "request_id"}
                 attrs = {"organization_id": org, "name": _name(a.get("name")),
                          "document_folder_id": _id(a.get("folder_id"), "FOLDER"),
-                         "public": False, "is_uploaded": "false"}
+                         "public": False, "is_uploaded": "true"}
             else:
                 required = {"name", "configuration_type_id", "request_id"}
                 attrs = {"name": _name(a.get("name")),
@@ -251,7 +251,14 @@ class ItGlueGovernedRecordWriter:
                 if any(not isinstance(k, str) or _BAD_TRAIT_KEY.search(k)
                        for k in prior_traits):
                     raise ConnectorAuthorizationError("IT_GLUE_EXISTING_SENSITIVE_TRAITS_DENIED")
-                attrs["traits"] = {**prior_traits, **attrs["traits"]}
+                # Provider returns complex Tag/Upload values as nested objects.
+                # Never reserialize these resource links or secret-like fields.
+                if any(not (type(v) in (str, int, float, bool) or
+                            (isinstance(v, list) and all(
+                                type(x) in (str, int, float, bool) for x in v)))
+                       for v in prior_traits.values()):
+                    raise ConnectorAuthorizationError("IT_GLUE_UNSAFE_EXISTING_TRAITS")
+                attrs["traits"] = _traits({**prior_traits, **attrs["traits"]})
             http_method = "PATCH"
         else:
             # Confirm the path's organization exists; caller cannot choose an org ID.
@@ -261,7 +268,9 @@ class ItGlueGovernedRecordWriter:
             if cap == "it_glue.document.create":
                 # Folder must be in the same verified client organization.
                 folder_id = attrs["document_folder_id"]
-                folder = self._get("/document_folders/" + str(folder_id), headers)
+                folder = self._get("/organizations/" + str(org) +
+                                   "/relationships/document_folders/" + str(folder_id),
+                                   headers)
                 folder_attrs = folder.get("attributes")
                 if (str(folder.get("id")) != str(folder_id)
                         or folder.get("type") not in {"document-folders", "document_folders"}
@@ -273,6 +282,8 @@ class ItGlueGovernedRecordWriter:
                     raise ConnectorAuthorizationError("IT_GLUE_FOLDER_ORGANIZATION_UNVERIFIED") from exc
                 if folder_org != org:
                     raise ConnectorAuthorizationError("IT_GLUE_CROSS_CLIENT_DOCUMENT_FOLDER_DENIED")
+                if folder_attrs.get("restricted") is not False or folder_attrs.get("my-glue") is True:
+                    raise ConnectorAuthorizationError("IT_GLUE_DOCUMENT_FOLDER_RESTRICTED")
             http_method = "POST"
         public_plan = {
             "type": kind,

@@ -57,6 +57,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "it_glue.readonly": (
         "secret/data/connectors/it-glue/production/read-only"
     ),
+    "it_glue.readwrite": (
+        "secret/data/connectors/it-glue/production/write"
+    ),
     "datto_rmm.readonly": (
         "secret/data/connectors/datto-rmm/production/read-only"
     ),
@@ -115,6 +118,7 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "autotask.readonly": frozenset({"username", "secret", "integration_code"}),
     "autotask.write": frozenset({"username", "secret", "integration_code"}),
     "it_glue.readonly": frozenset({"api_key"}),
+    "it_glue.readwrite": frozenset({"api_key"}),
     "datto_rmm.readonly": frozenset({"api_url", "api_key", "api_secret"}),
     "datto_rmm.execution": frozenset({"api_url", "api_key", "api_secret"}),
     "datto_edr.readonly": frozenset({"api_url", "api_token"}),

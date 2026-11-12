@@ -32,6 +32,11 @@ from jason_runtime.dnsfilter_mcp_mutation import (
     register_dnsfilter_mcp_mutation_invokers,
     register_dnsfilter_mcp_mutation_runtime_foundation,
 )
+from jason_runtime.it_glue_record_management import (
+    build_it_glue_write_invoker,
+    register_it_glue_write_foundation,
+    register_it_glue_write_invoker,
+)
 from connectors.kyocera_kfs.connector import KyoceraKfsConnector
 from connectors.backup_net.connector import (
     BACKUP_NET_FULL_ACCESS_SECRET,
@@ -1587,6 +1592,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         integration_broker=integration_broker,
         now=now,
     )
+    it_glue_write_activation = register_it_glue_write_foundation(
+        capabilities=capabilities, providers=providers, now=now,
+    )
     autonomous_completion_notifications_enabled = register_autonomous_completion_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -2123,6 +2131,17 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
 
     provider_boundary_store = SQLiteClientBoundaryStore(microsoft_boundary_db)
     provider_boundaries = SQLiteClientBoundaryRepository(provider_boundary_store)
+    it_glue_write_invoker = (
+        build_it_glue_write_invoker(
+            openbao_url=settings.openbao_url,
+            transport=http_transport,
+            audit=ConnectorEventAudit(orchestration_events),
+            bindings=source_authorization_bindings,
+            boundaries=provider_boundaries,
+        )
+        if it_glue_write_activation.enabled
+        else None
+    )
     if settings.backup_net_access_profile == "full_access":
         backup_net_role_id_path = (
             settings.backup_net_full_access_openbao_role_id_path
@@ -2277,6 +2296,10 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         invokers=invokers,
         invoker=provider_read_invoker,
     )
+    if it_glue_write_invoker is not None:
+        register_it_glue_write_invoker(
+            invokers=invokers, invoker=it_glue_write_invoker,
+        )
     if constant_contact_read_invoker is not None:
         register_constant_contact_read_invokers(
             invokers=invokers,
