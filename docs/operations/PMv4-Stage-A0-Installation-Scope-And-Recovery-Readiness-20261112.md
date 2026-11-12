@@ -311,3 +311,16 @@ The source CI runs the native journal/collision/crash/replay tests
 offline, and a second CI job executes true UID/GID/mode admission with
 root **only on a disposable GitHub runner**. No test launches a
 production container or uses Jason's provider keys.
+
+
+**Real process-exit acceptance:** In addition to exception-injection tests,
+the source suite forks a separate installer process, forces `os._exit(71)`
+after three independently selected durable transaction milestones
+(initial shadow directory, cross-release lock, and final relative
+pointer), then verifies the OS released the original legacy flock.
+The surviving test process independently reopens the hash-chained
+root-owned journal, checks the signed approval fingerprint, and
+restores only the known owned Stage A objects to the zero baseline.
+All three hard-exit/recovery cases passed locally. These are isolated
+`/tmp` acceptance tests, **not** a live-production kill or real
+production rollback exercise.

@@ -284,3 +284,41 @@ def test_dangling_symlink_replacing_approved_file_blocks_any_rollback(rig):
         )
     assert approved.is_symlink()
     assert root._map(packet.ROOT).is_dir()
+
+
+@pytest.mark.parametrize("crash_after", [
+    "dir:" + packet.ROOT,
+    "file:" + packet.ROOT + "/control/host-mutation.lock",
+    "link:" + packet.CURRENT,
+])
+def test_real_process_hard_exit_reacquires_native_lock_and_recovers(
+    rig, crash_after,
+):
+    from multiprocessing import get_context
+    sandbox, scope, freeze, health, kwargs, installer = rig
+    def crash_child():
+        def stop_after(step):
+            if step == crash_after:
+                os._exit(71)  # Real process death: bypass Python finally.
+        installer().install(**kwargs, after_step=stop_after)
+        os._exit(72)  # A normal return is an acceptance failure.
+    ctx = get_context("fork")
+    child = ctx.Process(target=crash_child)
+    child.start()
+    child.join(timeout=15)
+    if child.is_alive():
+        child.terminate()
+        child.join(timeout=5)
+    assert child.exitcode == 71
+    # Kernel releases the actual advisory lock after SIGKILL-equivalent
+    # process death. A new process can safely reconcile the same inode.
+    another = installer()
+    rows = another._events(another._journal(SHA))
+    assert rows and rows[-1]["event"] != "verified_installed"
+    restored = another.recover_empty(
+        scope=scope, confirmed_approval_id=ID,
+        confirmed_proof_sha256=native._hash(
+            native._canonical(kwargs["signed_proof"])),
+    )
+    assert restored["status"] == "empty_baseline_restored"
+    assert not another._map(packet.ROOT).exists()
