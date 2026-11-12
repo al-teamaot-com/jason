@@ -7,7 +7,7 @@ name = "jason-openclaw-connector"
 version = "0.1.0"
 description = "Provider-neutral OpenClaw ingress connector for Project Jason"
 requires-python = ">=3.12"
-dependencies = ["cryptography>=45,<47"]
+dependencies = ["cryptography>=50,<51"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<9"]

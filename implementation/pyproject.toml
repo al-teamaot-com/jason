@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<10"]
+constant_contact = ["openpyxl>=3.1,<4"]
 
 [tool.setuptools.packages.find]
 where = ["."]

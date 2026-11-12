@@ -276,6 +276,25 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
     },
+    "constant_contact": {
+        "logical_name": "constant_contact.oauth_client",
+        "secret_path": "secret/data/connectors/constant-contact/production/oauth-client",
+        "fields": ("client_id", "client_secret", "token_key_b64"),
+        "required_fields": ("client_id", "client_secret", "token_key_b64"),
+        "policy_name": "jason-constant-contact-oauth-client-read",
+        "role_name": "jason-constant-contact-oauth-client-read",
+        "connector_identity": "constant-contact-oauth-client",
+        "environment": "production",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/"
+            "constant-contact-oauth-client-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
+
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"

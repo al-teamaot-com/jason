@@ -105,6 +105,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "quickbooks.production.oauth_client": (
         "secret/data/connectors/quickbooks/production/oauth-client"
     ),
+    "constant_contact.oauth_client": (
+        "secret/data/connectors/constant-contact/production/oauth-client"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
@@ -151,6 +154,7 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "vulscan.readonly": frozenset({"api_key"}),
     "quickbooks.oauth_client": frozenset({"client_id", "client_secret"}),
     "quickbooks.production.oauth_client": frozenset({"client_id", "client_secret", "token_key_b64"}),
+    "constant_contact.oauth_client": frozenset({"client_id", "client_secret", "token_key_b64"}),
 }
 
 
