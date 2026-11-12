@@ -7960,6 +7960,78 @@
       "source_version": "2026-09-30.2",
       "created_at": "2026-09-30T15:19:43Z",
       "created_by": "Jason governed provider integration"
+    },
+    {
+      "registry_id": "component.ticket-processing-core",
+      "entity_type": "component",
+      "display_name": "PMv4 Protected Ticket Processing Core (proposed)",
+      "environment": "preproduction",
+      "lifecycle_status": "proposed",
+      "declared_state": {
+        "protected_core": "true",
+        "runtime_name": "jason-ticket-core",
+        "component_lifecycle": "independent",
+        "deployment_status": "not_deployed",
+        "configuration_authority": "existing_jason_governance",
+        "source_globs": "implementation/runtime_service/src/jason_runtime/ticket_worker_*.py;implementation/runtime_service/src/jason_runtime/autonomy_worker_supervisor.py;implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py;tools/pmv4_ticket_core_*.py",
+        "release_scope": "exact_owner_authorized_protected_core"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "ticket-core-independent-lifecycle-v1"
+      ],
+      "steward": "AOT technology steward",
+      "authority_references": [
+        "Project Jason PMv4 outline Section 4",
+        "Project Jason Governance Handbook Part IV"
+      ],
+      "evidence_references": [
+        "docs/operations/PMv4-Ticket-Core-Independent-Lifecycle-20261111.md",
+        "docs/operations/PMv4-Integrated-Migration-Readiness-20261111.md"
+      ],
+      "source_version": "2026-11-11.1",
+      "created_at": "2026-11-11T20:50:00Z",
+      "created_by": "PMv4 engineering - preproduction only"
+    },
+    {
+      "registry_id": "component.runbook-management",
+      "entity_type": "component",
+      "display_name": "PMv4 Independent Runbook Management (proposed)",
+      "environment": "preproduction",
+      "lifecycle_status": "proposed",
+      "declared_state": {
+        "protected_core": "true",
+        "runtime_name": "jason-runbook-management",
+        "component_lifecycle": "independent",
+        "deployment_status": "not_deployed",
+        "configuration_authority": "existing_json_playbook_registry",
+        "source_globs": "implementation/autonomous_remediation/playbook_store.py;implementation/autonomous_remediation/playbook_document.py;implementation/mcp_service/src/jason_mcp/json_playbook_admin.py;docs/playbooks/json/playbook-v1.schema.json",
+        "release_scope": "exact_owner_authorized_protected_core"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "runbook-json-transactional-lifecycle-v1"
+      ],
+      "steward": "AOT technology steward",
+      "authority_references": [
+        "Project Jason PMv4 outline Section 5",
+        "Project Jason Governance Handbook Part IV"
+      ],
+      "evidence_references": [
+        "docs/operations/PMv4-Runbook-Management-Independence-20261111.md",
+        "docs/operations/PMv4-Integrated-Migration-Readiness-20261111.md"
+      ],
+      "source_version": "2026-11-11.1",
+      "created_at": "2026-11-11T20:50:00Z",
+      "created_by": "PMv4 engineering - preproduction only"
     }
   ]
 }

@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "scope": "source-controlled preproduction specialists; not active gateway configuration",
+  "existing_agents_unchanged": [
+    "main",
+    "j-man",
+    "j-dev"
+  ],
+  "coordinator": "j-man",
+  "activation": "disabled",
+  "openai_authentication": "existing-chatgpt-codex-oauth-only",
+  "api_fallback_allowed": false,
+  "production_release_controller": "existing-pmv3.2-release-manager",
+  "agents": [
+    {
+      "id": "j-compliance",
+      "display_name": "Compliance",
+      "role": "Compliance",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-compliance",
+      "agent_instructions": "agents/j-compliance/AGENTS.md",
+      "identity": "agents/j-compliance/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    },
+    {
+      "id": "j-docs",
+      "display_name": "Documentation",
+      "role": "Documentation",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-docs",
+      "agent_instructions": "agents/j-docs/AGENTS.md",
+      "identity": "agents/j-docs/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    },
+    {
+      "id": "j-observe",
+      "display_name": "Grafana and Observability",
+      "role": "Grafana and Observability",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-observe",
+      "agent_instructions": "agents/j-observe/AGENTS.md",
+      "identity": "agents/j-observe/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    },
+    {
+      "id": "j-qa",
+      "display_name": "Testing and Reliability",
+      "role": "Testing and Reliability",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-qa",
+      "agent_instructions": "agents/j-qa/AGENTS.md",
+      "identity": "agents/j-qa/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    },
+    {
+      "id": "j-integrations",
+      "display_name": "Integration Engineering",
+      "role": "Integration Engineering",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-integrations",
+      "agent_instructions": "agents/j-integrations/AGENTS.md",
+      "identity": "agents/j-integrations/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    },
+    {
+      "id": "j-release",
+      "display_name": "Release Preparation",
+      "role": "Release Preparation",
+      "model": "openai/gpt-5.6-sol",
+      "workspace": "workspaces/j-release",
+      "agent_instructions": "agents/j-release/AGENTS.md",
+      "identity": "agents/j-release/IDENTITY.md",
+      "mode": "preproduction-only",
+      "channel_bindings": [],
+      "auto_dispatch": false,
+      "production_write_authority": false
+    }
+  ],
+  "staged_coordinator_policy": {
+    "main_allowed": [
+      "j-man"
+    ],
+    "j_man_allowed": [
+      "j-dev",
+      "j-compliance",
+      "j-docs",
+      "j-observe",
+      "j-qa",
+      "j-integrations",
+      "j-release"
+    ],
+    "worker_allowed": [],
+    "explicit_agent_id_required": true,
+    "no_channel_bindings": true,
+    "no_production_activation": true
+  },
+  "design_baseline": {
+    "name": "PMv4.11112026.1",
+    "source": "Project Jason PMv4_outline.docx (Project sources)",
+    "governing_handbook": "Project_Jason_Governance_Handbook_Updated.docx, 2026-11-03",
+    "shared_contract": "shared/PMV4-DEVELOPMENT-CONTRACT.md",
+    "communication_agreement": "Governance Handbook Part III",
+    "authority": "preproduction_design_only; current PMV3.2 remains live",
+    "existing_platform_reuse": true,
+    "no_production_activation": true
+  },
+  "target_shadow_release_controller": "standalone-pmv4-shadow-release-preproduction-only"
+}
