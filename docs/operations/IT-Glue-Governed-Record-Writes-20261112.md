@@ -56,3 +56,9 @@ Live IT Glue read continues failing with OPENBAO_AUTH_FAILED. Root-managed jason
 ## Test evidence and acceptance
 
 Focused IT Glue connector and runtime composition/source tests have passed, including read regression, core write operations, schema deny rules, separate credential paths, durable claim concurrency and restricted/cross-client records. Test data are simulated; production live write acceptance has not passed. Preserve deterministic J-102 plan fingerprints, audit proof and last known good rollback.
+
+## Reviewed concurrent integration (2026-11-12)
+
+Integration coordination: #2454
+
+PR #2454 adds Microsoft Graph group-read/group-write OpenBao mappings and provider profiles and extends only the Microsoft Graph credential-input dispatch. IT Glue writes use distinct it_glue.readwrite mapping and it_glue_write provisioner profile. The changes are additive, use different secret paths and logical names, and do not overwrite one another. Preserve both scopes at merge, and re-review if either PR changes. This coordination is not an activation approval.
