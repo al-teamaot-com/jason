@@ -27,6 +27,12 @@ def repo(tmp_path):
     git(root, "config", "user.name", "Isolated Reviewer")
     git(root, "config", "user.email", "reviewer@example.invalid")
     (root / "shared.py").write_text("baseline\n")
+    (root / "config").mkdir()
+    (root / "config/release-manager-policy.json").write_text(json.dumps({
+        "protected_core_globs": ["tools/release_manager*.py", "tools/manual_release_scope.py",
+                                 "config/release-manager-policy.json"]}))
+    (root / "tools").mkdir()
+    (root / "tools/manual_release_scope.py").write_bytes(SOURCE.read_bytes())
     git(root, "add", ".")
     git(root, "commit", "-m", "baseline")
     git(root, "push", "-u", "origin", "main")
@@ -442,3 +448,24 @@ def test_prunable_missing_native_exact_sha_worktree_does_not_invalidate_review(
     assert following["registered_worktrees"] == original["registered_worktrees"]
     # The orphaned registry evidence remains intact and can be audited in Git.
     assert "worktree " + str(internal) in git(root, "worktree", "list", "--porcelain")
+
+
+def test_newer_candidate_path_change_blocks_even_when_reverted(repo):
+    root, base, candidate, _ = repo
+    (root / "shared.py").write_text("newer edit\n")
+    git(root, "commit", "-am", "Conflicting edit (#102)")
+    (root / "shared.py").write_text("approved change\n")
+    git(root, "commit", "-am", "Revert conflicting edit (#103)")
+    git(root, "push", "origin", "main")
+    with pytest.raises(m.ScopeBlocked, match="pinned scope or controls"):
+        m.source_scope(root, base, candidate)
+
+
+def test_newer_protected_control_change_blocks_pinned_release(repo):
+    root, base, candidate, _ = repo
+    (root / "tools/release_manager_new.py").write_text("new protected control\n")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "New release control (#102)")
+    git(root, "push", "origin", "main")
+    with pytest.raises(m.ScopeBlocked, match="pinned scope or controls"):
+        m.source_scope(root, base, candidate)

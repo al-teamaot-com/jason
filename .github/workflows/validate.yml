@@ -205,6 +205,7 @@ jobs:
         run: |
           PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q \
             tools/tests/test_manual_release_scope.py \
+            tools/tests/test_release_current_main_gate.py \
             tools/tests/test_release_manager_atomic_surfaces.py \
             tools/tests/test_release_host_reconciler_contract.py \
             tools/tests/test_release_exporter_port_guard.py \

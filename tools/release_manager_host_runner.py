@@ -7433,9 +7433,9 @@ def authoritative_auto_promotion_head(repo: Path) -> str:
 def require_current_protected_release_source(repo: Path, record: dict[str, Any]) -> None:
     """Reject a superseded/manual candidate before a production transaction.
 
-    Automatic selection already compares to main; manual promotion must obey the
-    same immutable source rule. Neither a past exact-SHA approval nor a successful
-    preproduction run authorizes replacing more recent protected-main work.
+    Automatic selection remains latest-main. JES-005 permits an exact reviewed
+    protected ancestor only after independent lineage and newer-path checks.
+    This source proof grants no approval, freeze exception or mutation authority.
     """
     candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
     baseline = str(record.get("rollback_sha") or "")
@@ -7443,10 +7443,24 @@ def require_current_protected_release_source(repo: Path, record: dict[str, Any])
         raise ReleaseManagerError("production candidate or baseline SHA is invalid")
     current_main = authoritative_auto_promotion_head(repo)
     if candidate != current_main:
-        raise ReleaseManagerError(
-            "production release candidate is behind protected main; "
-            "reprepare and revalidate the exact current main revision"
-        )
+        # The same exact-candidate verifier is used by scope review and both
+        # under-lock promotion checks. Automatic selection remains latest-main.
+        import importlib.util
+        source = repo / "tools/manual_release_scope.py"
+        if source.is_symlink() or not source.is_file():
+            raise ReleaseManagerError("canonical pinned release verifier unavailable")
+        spec = importlib.util.spec_from_file_location("jason_pinned_release_scope", source)
+        if spec is None or spec.loader is None:
+            raise ReleaseManagerError("canonical pinned release verifier unavailable")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        try:
+            module.verify_pinned_candidate_against_main(
+                repo, baseline, candidate, current_main=current_main)
+        except (module.ScopeBlocked, OSError, ValueError, AttributeError) as exc:
+            raise ReleaseManagerError("pinned release lineage or newer changes unverified: "
+                                      + str(exc)) from exc
+        return
     # A valid candidate on main must also include the installed production
     # history; otherwise promoting it would drop production changes.
     ancestry = subprocess.run(

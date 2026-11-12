@@ -5,6 +5,7 @@ A reviewed scope is NOT an Owner's exact-SHA deployment authorization.
 """
 from __future__ import annotations
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -60,19 +61,51 @@ def repository_from_origin(repo):
     return path
 
 
-def source_scope(repo, baseline, candidate):
+def verify_pinned_candidate_against_main(repo, baseline, candidate, current_main=None):
+    """Reconcile PR #2156 with JES-005; read-only proof, never release authority."""
     if not SHA.fullmatch(baseline) or not SHA.fullmatch(candidate):
         raise ScopeBlocked("exact SHA required")
-    remote = command(["git", "ls-remote", "origin", "refs/heads/main"], repo).split()
-    if (len(remote) != 2 or remote[1] != "refs/heads/main"
-            or not SHA.fullmatch(remote[0])):
-        raise ScopeBlocked("current protected main is not verifiable")
-    # Owner-approved JES-005: the exact reviewed candidate may be a protected
-    # ancestor. Read the actual remote tip, never a possibly stale tracking ref.
-    # Missing objects/rewritten history fail closed; this read-only reviewer
-    # never fetches, rewrites history, changes checkout or grants deployment.
-    command(["git", "merge-base", "--is-ancestor", candidate, remote[0]], repo)
+    if current_main is None:
+        remote = command(["git", "ls-remote", "origin", "refs/heads/main"], repo).split()
+        if (len(remote) != 2 or remote[1] != "refs/heads/main"
+                or not SHA.fullmatch(remote[0])):
+            raise ScopeBlocked("current protected main is not verifiable")
+        current_main = remote[0]
+    if not SHA.fullmatch(current_main):
+        raise ScopeBlocked("current protected main revision is invalid")
+    command(["git", "merge-base", "--is-ancestor", candidate, current_main], repo)
     command(["git", "merge-base", "--is-ancestor", baseline, candidate], repo)
+    if current_main == candidate:
+        return
+    # Read policy from the exact immutable revision, not a developer checkout.
+    try:
+        policy = json.loads(command(
+            ["git", "show", candidate + ":config/release-manager-policy.json"], repo))
+        patterns = policy["protected_core_globs"]
+        if not isinstance(patterns, list) or not patterns or not all(
+                isinstance(x, str) and x for x in patterns):
+            raise ValueError("invalid protected patterns")
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ScopeBlocked("exact candidate release policy is invalid") from exc
+    candidate_paths = set(command(["git", "diff", "--no-renames", "--name-only",
+                                   baseline, candidate], repo).splitlines())
+    # Inspect all newer touched paths, including edits subsequently reverted.
+    newer_paths = set(command(["git", "log", "--format=", "--name-only",
+                               "--no-renames", candidate + ".." + current_main],
+                              repo).splitlines())
+    control_paths = {"tools/manual_release_scope.py",
+                     "config/release-manager-policy.json",
+                     "config/production-desired-state.json"}
+    conflicts = sorted(path for path in newer_paths if path in candidate_paths
+                       or path in control_paths
+                       or any(fnmatch.fnmatch(path, pat) for pat in patterns))
+    if conflicts:
+        raise ScopeBlocked("newer protected commits affect pinned scope or controls: "
+                           + ", ".join(conflicts[:6]))
+
+
+def source_scope(repo, baseline, candidate):
+    verify_pinned_candidate_against_main(repo, baseline, candidate)
     commits = []
     lines = command(["git", "log", "--first-parent", "--reverse",
                      "--format=%H%x09%s", baseline + ".." + candidate], repo).splitlines()
