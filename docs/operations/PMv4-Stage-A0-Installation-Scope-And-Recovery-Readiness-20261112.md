@@ -139,3 +139,50 @@ exact live SHA-bound Owner decision, and production rollback proof.
 Do **not** request or infer Stage A installation authorization from earlier
 source-only promotion. No root actions, protected-control edits, service
 restart, production unfreeze or runtime deployment occur in this package.
+
+## November 12 live-state refresh: separate native release and new breaker
+
+At approximately 05:07 ET, an **independent, separately approved**
+Constant Contact production release transaction
+`release-4235c0f377094356` temporarily removed the freeze via its
+recorded one-transaction exception. This was NOT a PMv4 operation. The
+release later reported FAILED; the existing `production-deployment-freeze`
+returned **byte-identically** to SHA-256
+`bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f`,
+the promotion hold remained unchanged, and original runtime LKG
+`690250b4d21f32cce79cab9f5b4c18cf93e7e94a` remained installed.
+
+An unrelated Grafana assurance systemd oneshot subsequently returned
+DRIFTED at 05:08 ET. The root watchdog opened a NEW breaker at
+10:11:58 UTC with `problem_kinds=["failed_system_unit"]`, identifying
+`jason-grafana-assurance.service`. Later that service completed a PASS
+check and returned inactive/success, but its earlier transient failure did
+not thereby close the already opened root breaker. **Stage A admission
+must remain blocked until a new root-governed, independent fresh-health
+revalidation explicitly closes THIS new breaker with exact current LKG
+and immutable evidence.** Do not reuse the earlier `root_verified_closed`
+permit or directly clear the failed-unit state without approved controls.
+
+The machine readback now distinguishes the 09:29 historical breaker
+closeout (original LKG) from the **CURRENT** protected breaker/LKG
+revalidation. This prevents a future legitimate, separately approved
+production release from invalidating historical recovery evidence, while
+preserving the mandatory current-source, current-breaker and fresh-drift
+checks. A successful service timer retry is not itself breaker authority.
+
+This packet remains **preproduction scope/recovery preparation only**;
+no Stage A deployment approval should be solicited while the current
+breaker is OPEN, `/etc/jason` root-only target metadata is unverified,
+or the trusted governed root installer and its real recovery/rollback
+acceptance are incomplete.
+
+**Bounded read-only recovery classification:** After Grafana assurance returned
+PASS, a subsequent root drift readback reported `pass` with zero problems,
+but the protected breaker remained OPEN. Running the pure, non-mutating
+`release_breaker_recovery_manager.decision(...)` against that snapshot
+reported `status=blocked`,
+`next_action=accumulate_distinct_root_drift_passes`, one distinct fresh
+observation and no new root attempts for this new breaker. The existing
+policy requires three distinct clean root observations and a new root
+revalidation transaction before closure. This classification does not
+consume a permit, run the manager, change a timer or edit protected state.

@@ -158,6 +158,7 @@ def mock_recovery(tmp_path, monkeypatch):
     }
     history = {
         "schema_version": "1.0", "status": "root_verified_closed",
+        "lkg_revision": source,
         "clean_observations": [
             "2026-11-12T09:25:29+00:00",
             "2026-11-12T09:27:29+00:00",
@@ -264,3 +265,33 @@ def test_source_package_requires_exact_clean_git_head(monkeypatch):
     )
     with pytest.raises(ValueError, match="NOT_PINNED_AND_CLEAN"):
         packet.verify_exact_repository_head(REPO, SHA)
+
+
+def test_new_native_release_can_supersede_historical_recovery_sha(
+    mock_recovery, monkeypatch, tmp_path,
+):
+    control, drift, history, at, view, recovery = mock_recovery
+    new = "b" * 40
+    root = packet.LIVE_LKG.parent
+    (root / "releases" / new).mkdir(parents=True)
+    packet.LIVE_LKG.unlink()
+    packet.LIVE_LKG.symlink_to("releases/" + new)
+    control["last_known_good"]["manifest"].update({
+        "revision": new, "runtime_revision": new, "mcp_revision": new,
+    })
+    control["circuit_breaker"]["revalidated_revision"] = new
+    control["last_revalidation"]["revision"] = new
+    (view / "production-control-state.json").write_text(json.dumps(control))
+    result = packet.recovery_readback(now=at)
+    assert result["preflight_evidence_satisfied"] is True
+    assert result["historical_recovery_matches_current_lkg"] is False
+    assert result["historical_recovery_revision"] == "a" * 40
+
+
+def test_recovery_history_does_not_accept_spoofed_prior_revision(mock_recovery):
+    control, drift, history, at, view, recovery = mock_recovery
+    history["last_revalidation_attempt"]["revision"] = "f" * 40
+    recovery.write_text(json.dumps(history))
+    result = packet.recovery_readback(now=at)
+    assert result["recovery_observations_valid"] is False
+    assert result["preflight_evidence_satisfied"] is False

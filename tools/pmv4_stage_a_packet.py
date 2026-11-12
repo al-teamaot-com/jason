@@ -262,7 +262,13 @@ def recovery_readback(*, now: datetime | None = None) -> dict[str, Any]:
                 for a,b in zip(timestamps, timestamps[1:]))
         and recovery.get("status") == "root_verified_closed"
         and recovery.get("last_revalidation_attempt", {}).get("result") == "root_verified_closed"
-        and recovery.get("last_revalidation_attempt", {}).get("revision") == source
+        # A later, independently authorized production LKG can replace
+        # the source SHA without re-opening the incident breaker. Preserve
+        # this bounded recovery as HISTORICAL evidence for its own LKG,
+        # while the CURRENT root breaker and native revalidation must bind
+        # the current live source separately below.
+        and recovery.get("last_revalidation_attempt", {}).get("revision")
+            == recovery.get("lkg_revision")
     )
     protected_root_metadata = all(_trusted_root_file(RELEASE_STATE / name)
                                   for name in ("production-control-state.json",
@@ -291,6 +297,8 @@ def recovery_readback(*, now: datetime | None = None) -> dict[str, Any]:
         "breaker_revalidated_at": breaker.get("updated_at"),
         "recovery_observation_count": len(set(timestamps)),
         "recovery_observations_valid": clean,
+        "historical_recovery_revision": recovery.get("lkg_revision"),
+        "historical_recovery_matches_current_lkg": recovery.get("lkg_revision") == source,
         "root_drift_status": drift.get("status"),
         "root_drift_problems": drift.get("problems"),
         "drift_observed_at": drift.get("observed_at"),
