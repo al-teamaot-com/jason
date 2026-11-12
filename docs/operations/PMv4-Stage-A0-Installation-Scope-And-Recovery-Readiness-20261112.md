@@ -458,3 +458,17 @@ the canonical reviewed source scope, and storing rollback evidence.
 Other GitHub branch-integration/required CI gates remain independently
 enforced. A final production SHA still has to be recalculated after
 approved source-only promotion to protected main.
+
+
+### New concurrent Datto numeric-device read PR #2456
+
+PR #2456 is a distinct draft preproduction enhancement to
+`_project_endpoint_read` in the shared MCP `server.py`: it exposes
+Datto's provider numeric device identifier separately from the durable
+resource UUID. Stage A0 touches only
+`authorize_pmv4_stage_a0_install` near the existing authenticated
+Owner release tool. It does not change Datto selector, device-read,
+identity conversion, endpoint action, or provider access behavior.
+The reviewed shared-file overlap is separately recorded in the
+canonical integration coordination line; the Datto PR is not activated
+or included in Stage A release authority.
