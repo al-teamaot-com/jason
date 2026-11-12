@@ -6,9 +6,9 @@
 
 - Baseline registry: `implementation/kernel/system_registry/production-registry.json`
 - Lifecycle history: `implementation/kernel/system_registry/production-lifecycle-events.json`
-- Environment(s): `production-pilot`
-- Registered entities: `235`
-- Effective lifecycle counts: `configured=9, registered=210, verified=16`
+- Environment(s): `preproduction, production-pilot`
+- Registered entities: `237`
+- Effective lifecycle counts: `configured=9, proposed=2, registered=210, verified=16`
 
 ## Verified current operational entities
 
@@ -204,6 +204,8 @@
 | `component.jason-ollama` | `component` | `configured` | `docker-container-inspect-v1` |
 | `component.jason-work-item-exporter` | `component` | `configured` | `docker-container-inspect-v1` |
 | `component.orchestration-event-store` | `component` | `registered` | `source-and-regression-proof-v1` |
+| `component.runbook-management` | `component` | `proposed` | `runbook-json-transactional-lifecycle-v1` |
+| `component.ticket-processing-core` | `component` | `proposed` | `ticket-core-independent-lifecycle-v1` |
 | `credential.openbao.autotask-read` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
 | `credential.openbao.autotask-write` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
 | `credential.openbao.aws-ses-sendmail` | `credential_reference` | `registered` | `provider-credential-status` |
