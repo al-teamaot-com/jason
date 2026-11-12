@@ -27,6 +27,42 @@ class BreakerRecoveryIndependenceTests(unittest.TestCase):
         self.assertNotIn("jason-support-repair-worker", timer)
         self.assertNotIn("pmv3-engineering", timer)
 
+    def test_competing_scheduler_cannot_execute_recovery_simultaneously(self):
+        import fcntl
+        import os
+        import sys
+        import tempfile
+        from unittest.mock import patch
+        from tools import release_breaker_recovery_manager as recovery
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lock = Path(tmp) / "release-breaker-recovery.lock"
+            fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with patch.object(sys, "argv", [
+                    "recovery", "--repo", tmp, "--spool", tmp,
+                    "--release-state", tmp,
+                ]), patch.object(recovery, "_run_once") as runner:
+                    self.assertEqual(recovery.main(), 0)
+                    runner.assert_not_called()
+            finally:
+                os.close(fd)
+
+    def test_single_recovery_owner_enters_guarded_existing_path(self):
+        import sys
+        import tempfile
+        from unittest.mock import patch
+        from tools import release_breaker_recovery_manager as recovery
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(sys, "argv", [
+                "recovery", "--repo", tmp, "--spool", tmp,
+                "--release-state", tmp,
+            ]), patch.object(recovery, "_run_once", return_value=0) as runner:
+                self.assertEqual(recovery.main(), 0)
+                runner.assert_called_once()
+
     def test_existing_recovery_policy_still_requires_clean_root_observations(self):
         import json
         policy = json.loads((ROOT / "config/release-breaker-self-recovery-policy.json").read_text())

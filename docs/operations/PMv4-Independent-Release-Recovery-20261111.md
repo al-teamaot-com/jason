@@ -200,3 +200,12 @@ interaction with existing root transition timers and proving no overlapping
 transaction. The first live recovery requires at least three distinct fresh
 root PASS observations and guarded root readback. Never manually edit the
 breaker to manufacture readiness.
+
+**Coexistence race protection:** The existing bounded manager now serializes both
+PMv3-pipeline and independently scheduled invocations using a persistent
+same-inode, no-follow, mode-0600 unprivileged advisory lock in its existing
+recovery spool. Contention skips the second invocation without consuming a
+root revalidation attempt or editing protected release state. The lock file
+is not unlinked. Focused contention and existing manager regression tests
+exercise both busy and uncontended paths. The installer must deploy the
+updated manager and independent timer together, never the timer alone.
