@@ -1,0 +1,14 @@
+{
+  "freeze_sha256": "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f",
+  "lkg_sha": "690250b4d21f32cce79cab9f5b4c18cf93e7e94a",
+  "mcp_image_sha256": "sha256:5ef62c30c35e98ca631b2fc8ea2a38a8b574a38e21f3423f4fe1f2ff09e0c16d",
+  "native_deployer": "/opt/jason/current/tools/deploy_live_container.py",
+  "native_deployer_sha256": "2687a73e07d63693a057c3aa89cea0abb41d02cf1dcafb22df5ce82792c81eee",
+  "one_shot": true,
+  "operation": "owner-signer-reattach-690250b4-v1",
+  "owner_authentication": "fresh_verified_entra_device_code",
+  "runtime_image_sha256": "sha256:186977467897e6944f5c5f0d51c0d465b3515174c44fda1e390ccd5d2b18bff7",
+  "schema_version": "1.0",
+  "script_sha256": "82198ce78c94cdcc334fa67b2b549edfae49267e9e1636039719424cebef1191",
+  "signer_public_sha256": "1e1f5a8d4098b57ca8bf7532b60f35950bbfd7eca22ee24ae37a89825d169840"
+}
