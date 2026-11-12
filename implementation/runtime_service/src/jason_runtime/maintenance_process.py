@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import replace
 import logging
 import time
 
 from .composition import RuntimeSettings, build_runtime_application
+from .ticket_worker_ownership import exclusive_ticket_worker_owner
 
 
 logger = logging.getLogger(__name__)
@@ -62,19 +64,27 @@ def run_autonomy_maintenance_process(
 ) -> None:
     """Own autonomy maintenance in a separate process with fresh SQLite connections."""
 
-    application = (
-        build_runtime_application(settings) if maintenance_profile == "all"
-        else build_runtime_application(settings, maintenance_profile=maintenance_profile)
+    # The actual provider-dispatch process owns the flock for its *entire*
+    # lifetime. A parent-only lock is unsafe: an orphaned dispatch child can
+    # continue after its supervisor dies while a replacement takes that lock.
+    # Both embedded and external modes use the identical ledger/inode here.
+    ownership = (
+        exclusive_ticket_worker_owner(settings.autonomy_worker_db)
+        if maintenance_profile == "ticket_worker" else nullcontext()
     )
-    maintenance = application.maintenance
-    if maintenance is None:
-        return
-
-    while True:
-        try:
-            maintenance.tick()
-        except Exception:
-            # Match the runtime server's existing fail-closed maintenance behavior:
-            # one failed cycle must not terminate the long-lived maintenance process.
-            logger.exception("Autonomy maintenance cycle failed; retrying on next tick")
-        time.sleep(max(0.05, float(idle_sleep_seconds)))
+    with ownership:
+        application = (
+            build_runtime_application(settings) if maintenance_profile == "all"
+            else build_runtime_application(settings, maintenance_profile=maintenance_profile)
+        )
+        maintenance = application.maintenance
+        if maintenance is None:
+            return
+        while True:
+            try:
+                maintenance.tick()
+            except Exception:
+                # Match existing bounded retry behavior; the owner lock is
+                # retained across any recoverable maintenance tick failure.
+                logger.exception("Autonomy maintenance cycle failed; retrying on next tick")
+            time.sleep(max(0.05, float(idle_sleep_seconds)))

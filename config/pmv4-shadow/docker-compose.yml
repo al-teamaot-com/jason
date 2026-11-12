@@ -1,0 +1,39 @@
+# Source-only standalone PMv4 shadow profile. NOT applied to production.
+# Must be installed independently under a root-owned shadow-only control
+# directory after exact-release Owner approval.
+services:
+  pmv4-shadow-gateway:
+    image: "$PMV4_SHADOW_IMAGE_SHA"
+    container_name: "jason-pmv4-shadow-gateway"
+    command: ["gateway", "--bind", "loopback", "--auth", "token", "--allow-unconfigured"]
+    network_mode: "none"
+    ports: []
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: "512m"
+    cpus: "0.5"
+    init: true
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "openclaw", "gateway", "health"]
+      interval: 15s
+      timeout: 8s
+      retries: 3
+      start_period: 60s
+    environment:
+      OPENCLAW_GATEWAY_TOKEN: "$PMV4_SHADOW_GATEWAY_TOKEN"
+      HOME: "/home/node"
+    volumes:
+      - pmv4-shadow-state:/home/node/.openclaw
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    labels:
+      com.aot.jason.component: "pmv4-shadow"
+      com.aot.jason.provider-mutation: "disabled"
+      com.aot.jason.production-core: "excluded"
+volumes:
+  pmv4-shadow-state:
+    name: "jason-pmv4-shadow-state"
