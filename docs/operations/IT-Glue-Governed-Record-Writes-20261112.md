@@ -8,6 +8,7 @@ Existing source:
 - `implementation/connectors/it_glue/configuration_note_update.py` — separately authored, dormant, configuration-notes-only PATCH adapter;
 - `implementation/connectors/it_glue/mutations.py` — proposal-only mutation planner;
 - `implementation/connectors/it_glue/governed_record_write.py` — new source-only create and bounded metadata/trait update adapter.
+- `implementation/connectors/it_glue/create_claim_store.py` — new durable SQLite once-only claim store (not yet composed into runtime).
 
 The new adapter uses Jason's existing J-102 `ProviderPreparedExecution` contract, exact client boundary verifier, independent credential resolver, canonical plan binding, and readback. Its `execute()` method always fails closed; only a future explicitly registered Central Orchestrator invocation may run prepare/execute.
 
@@ -27,7 +28,7 @@ No deletes, password/secret/vault changes, permissions/ACL changes, arbitrary JS
 1. Verify exact IT Glue documented create routes, JSON:API types/attributes, document-folder endpoint, provider-native permissions and response details with a controlled test account. The test transport is not provider acceptance.
 2. Inject existing authenticated requester authorization and authoritative AOT client-to-IT Glue organization mapping. Deny ambiguous and cross-client targets and restricted records.
 3. Provision `it_glue.readwrite` as a separately governed credential; never fall back to `it_glue.readonly`. Diagnose/restore the existing `it_glue.readonly` OpenBao AppRole authentication separately.
-4. Supply an existing atomic, durable, restart-safe claim ledger for creation, and a provider-backed reconciliation path for ambiguous outcomes. This implementation claims once before POST and refuses any automatic second attempt; successful create readback alone is insufficient for restart/crash recovery.
+4. Wire the new atomic, durable, restart-safe SQLite creation claim store into the approved runtime's existing storage and authorization composition. Add provider-backed reconciliation for ambiguous outcomes. The adapter claims once before POST, refuses any automatic second attempt, and marks successful readback in the claim ledger. The SQLite module is only source/tested; production storage and operator reconciliation remain unwired.
 5. Register explicit canonical capabilities and provider mappings using the existing registry/JKD-001/J-102 authorization chain. Do not activate all writes by enabling a catchall mutation connector.
 6. Use a reviewed enablement profile `JASON_IT_GLUE_RECORDS_RW_PROFILE=governed-records-v1`, exact approved release, immutable artifact, rollback SHA, positive and negative native provider tests, audit evidence, and independent production health checks.
 7. Test restricted documents, cross-client boundaries, ambiguous creates, provider 403/429/5xx, stale updates, no-op verification, and cross-provider regression. Preserve existing protected-core services.
@@ -42,4 +43,4 @@ No deletes, password/secret/vault changes, permissions/ACL changes, arbitrary JS
 
 ## Test evidence
 
-Run `PYTHONPATH=implementation:implementation/runtime_service/src python3 -m pytest -q implementation/connectors/tests/test_it_glue_governed_record_write.py implementation/connectors/tests/test_it_glue_configuration_note_update.py`. Tests include exact-plan tampering, one-shot creation, immutable scoped reads, merge prevention for sensitive traits, denial for cross-client folders, no-op update, stale preimage, restricted record, and failed readback. This is mocked transport verification, not live acceptance.
+Run `PYTHONPATH=implementation:implementation/runtime_service/src python3 -m pytest -q implementation/connectors/tests/test_it_glue_governed_record_write.py implementation/connectors/tests/test_it_glue_configuration_note_update.py`. Tests include exact-plan tampering, one-shot creation, immutable scoped reads, merge prevention for sensitive traits, denial for cross-client folders, no-op update, stale preimage, restricted record, and failed readback. The SQLite claim store is also exercised for persistence across process instances, concurrency, file permissions, symlinks, and wrong-digest rejection. These are mocked provider transport tests, not live acceptance.

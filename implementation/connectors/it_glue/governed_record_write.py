@@ -389,6 +389,12 @@ class ItGlueGovernedRecordWriter:
                 "resource_id": rid,
             })
             raise RuntimeError("IT_GLUE_RECORD_READBACK_MISMATCH")
+        if state.method == "POST" and self.creation_claims is not None:
+            mark_verified = getattr(self.creation_claims, "mark_verified", None)
+            if callable(mark_verified):
+                mark_verified(key=_sha([state.context.client_id, state.capability,
+                                       org, state.request_key]),
+                              payload_sha256=_sha(attrs))
         self.audit.record("connector.mutation.verified", state.context, {
             "provider": self.provider_name, "resource_type": state.resource_type,
             "resource_id": rid, "mutation_performed": performed,

@@ -141,6 +141,14 @@ def harness(kind="flexible-assets", *, claims=True):
     return writer, transport, secrets, scope, audit, ledger
 
 
+def test_capability_inventory_is_explicit_and_no_unapproved_delete():
+    assert CAPABILITIES == {
+        "it_glue.flexible_asset.create", "it_glue.flexible_asset.update",
+        "it_glue.document.create", "it_glue.document.update",
+        "it_glue.configuration.create",
+    }
+
+
 def test_update_flexible_assets_merges_traits_and_verifies(ready):
     writer, t, secrets, _, audit, _ = harness()
     req = request("it_glue.flexible_asset.update", resource_id=101,
