@@ -77,8 +77,11 @@ def sandbox_setup(path: Path) -> Path:
 
 
 def stage(repo: Path, root: Path, scope: dict[str, Any],
-          *, stop_after_files: int | None = None) -> dict[str, Any]:
+          *, stop_after_files: int | None = None,
+          root_metadata: bool = False) -> dict[str, Any]:
     root = _sandbox(root)
+    if root_metadata and os.geteuid() != 0:
+        raise PermissionError("STAGE_A_LAB_REAL_ROOT_METADATA_REQUIRED")
     if scope != packet.build_scope(repo, scope["candidate_sha"]):
         raise ValueError("STAGE_A_LAB_SCOPE_DRIFT")
     for directory in scope["directories"]:
@@ -94,6 +97,8 @@ def stage(repo: Path, root: Path, scope: dict[str, Any],
     for directory in scope["directories"]:
         p = _mapped(root, directory["path"])
         p.mkdir(parents=True, exist_ok=False)
+        if root_metadata:
+            os.chown(p, directory["uid"], directory["gid"])
         p.chmod(int(directory["mode"], 8))
     count = 0
     for row in scope["files"]:
@@ -101,26 +106,36 @@ def stage(repo: Path, root: Path, scope: dict[str, Any],
         data = _expected_file_data(repo, row)
         with p.open("xb") as file:
             file.write(data)
+        if root_metadata:
+            os.chown(p, row["uid"], row["gid"])
         p.chmod(int(row["mode"], 8))
         count += 1
         if stop_after_files is not None and count == stop_after_files:
             raise InterruptedError("STAGE_A_LAB_SYNTHETIC_INTERRUPTION")
     _mapped(root, packet.CURRENT).symlink_to(packet.CURRENT_TARGET)
-    verify(repo, root, scope)
+    verify(repo, root, scope, root_metadata=root_metadata)
     return {"status": "lab_installed_verified", "source_sha": scope["candidate_sha"],
-            "file_count": count, "source_only": True, "production_mutation": False}
+            "file_count": count, "source_only": True, "production_mutation": False,
+            "root_metadata_checked": root_metadata}
 
 
 def verify(repo: Path, root: Path, scope: dict[str, Any],
-           *, allow_partial: bool = False) -> dict[str, Any]:
+           *, allow_partial: bool = False,
+           root_metadata: bool = False) -> dict[str, Any]:
     root = _sandbox(root)
+    if root_metadata and os.geteuid() != 0:
+        raise PermissionError("STAGE_A_LAB_REAL_ROOT_METADATA_REQUIRED")
     expected = set()
     found = set()
     for directory in scope["directories"]:
         p = _mapped(root, directory["path"])
         expected.add(p)
         if p.exists():
-            if p.is_symlink() or not p.is_dir() or stat.S_IMODE(p.lstat().st_mode) != int(directory["mode"], 8):
+            meta = p.lstat()
+            if (p.is_symlink() or not p.is_dir()
+                    or stat.S_IMODE(meta.st_mode) != int(directory["mode"], 8)
+                    or (root_metadata and (meta.st_uid, meta.st_gid)
+                        != (directory["uid"], directory["gid"]))):
                 raise ValueError("STAGE_A_LAB_DIRECTORY_DRIFT")
         elif not allow_partial:
             raise ValueError("STAGE_A_LAB_DIRECTORY_MISSING")
@@ -128,8 +143,11 @@ def verify(repo: Path, root: Path, scope: dict[str, Any],
         p = _mapped(root, row["path"])
         expected.add(p)
         if p.exists():
+            meta = p.lstat()
             if (p.is_symlink() or not p.is_file()
-                    or stat.S_IMODE(p.lstat().st_mode) != int(row["mode"], 8)
+                    or stat.S_IMODE(meta.st_mode) != int(row["mode"], 8)
+                    or (root_metadata and (meta.st_uid, meta.st_gid)
+                        != (row["uid"], row["gid"]))
                     or packet._digest(p.read_bytes()) != row["sha256"]):
                 raise ValueError("STAGE_A_LAB_FILE_TAMPERED")
         elif not allow_partial:
@@ -155,10 +173,12 @@ def verify(repo: Path, root: Path, scope: dict[str, Any],
 
 
 def rollback(repo: Path, root: Path, scope: dict[str, Any],
-             *, allow_partial: bool = False) -> dict[str, Any]:
+             *, allow_partial: bool = False,
+             root_metadata: bool = False) -> dict[str, Any]:
     # Verify the ENTIRE target inventory before deleting even one inode.
     # A foreign file, new symlink or changed hash causes fail-closed refusal.
-    verify(repo, root, scope, allow_partial=allow_partial)
+    verify(repo, root, scope, allow_partial=allow_partial,
+           root_metadata=root_metadata)
     current = _mapped(root, packet.CURRENT)
     if current.is_symlink():
         current.unlink()

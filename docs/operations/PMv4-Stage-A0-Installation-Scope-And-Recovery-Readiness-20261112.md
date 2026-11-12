@@ -186,3 +186,27 @@ observation and no new root attempts for this new breaker. The existing
 policy requires three distinct clean root observations and a new root
 revalidation transaction before closure. This classification does not
 consume a permit, run the manager, change a timer or edit protected state.
+
+
+## Disposable-root UID/GID/mode acceptance extension
+
+The source-only Stage A0 CI now executes a *second* acceptance on a
+**disposable GitHub-hosted Ubuntu runner** using that runner's root account.
+This is not run against Jason's host, secrets, containers, or root state.
+The test harness hard-restricts every target to a private canonical
+`/tmp` sandbox and rejects arbitrary live host paths.
+
+This acceptance validates real `chown` and `chmod` metadata for all
+11 directories and 13 files against the exact reviewed UID/GID/mode
+manifest, then proves empty-baseline rollback. It injects a foreign
+GID on an otherwise intact installed code file and requires rollback
+to refuse without deleting or changing that file. Finally it interrupts
+installation after three files and verifies strict partial rollback to
+absence. The corresponding GitHub job must succeed before its isolated,
+non-secret acceptance receipt is published.
+
+**Important scope distinction:** isolated CI root permissions prove the
+installer's *metadata contract* but are not evidence that live protected
+`/etc/jason` parent, native root release transaction, exact Owner-signed
+Stage A authorization, immutable journaling or real root rollback have
+been deployed. Those remain separate production acceptance gates.

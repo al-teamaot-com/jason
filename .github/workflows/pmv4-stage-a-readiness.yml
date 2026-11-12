@@ -31,6 +31,19 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pytest -q             tests/test_pmv4_stage_a_packet.py             tests/test_pmv4_host_install_contract.py             tests/test_pmv4_breaker_recovery_independence.py             tests/test_pmv4_shadow_owner_issuer.py             tools/tests/test_release_breaker_recovery_manager.py             tools/tests/test_root_revalidate_release_breaker.py
+      - name: Verify UID/GID and empty rollback as root in disposable CI workspace
+        env:
+          PYTHONPATH: "implementation:."
+        run: |
+          set -euo pipefail
+          # Root is used ONLY inside this disposable hosted runner; the test
+          # enforces a private /tmp sandbox, never a production host target.
+          sudo -n env \
+            PYTHONPATH="$PWD/implementation:$PWD" \
+            PYTHONDONTWRITEBYTECODE=1 \
+            "$(command -v python3)" -m pytest -q \
+            -o cache_dir=/tmp/pmv4-stage-a0-root-pytest-cache \
+            tests/test_pmv4_stage_a_rootmode.py
       - name: Produce audited SOURCE-ONLY Stage A0 scope and lab rollback receipt
         env:
           PYTHONPATH: "implementation:."
@@ -66,6 +79,7 @@ jobs:
               "trusted_host_bundle_sha256": scope["host_code_bundle_sha256"],
               "synthetic_install": installed["status"],
               "synthetic_rollback": rolled_back["status"],
+              "uid_gid_mode_root_lab_acceptance": "verified_in_disposable_ci_runner",
               "production_modified": False,
               "authorized_release": False,
           }
