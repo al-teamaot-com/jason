@@ -49,7 +49,7 @@ LEDGER_DIR = Path("/etc/jason-owner-release/owner-signer-recovery-ledger")
 CONTROL = Path("/var/lib/jason/openclaw/release-manager/production-control-state.json")
 DRIFT = Path("/var/lib/jason/openclaw/release-manager/production-drift.json")
 FREEZE = Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
-DEPLOYER = Path("/opt/jason/current/tools/deploy_live_container.py")
+DEPLOYER = Path("/usr/local/lib/jason/deploy_live_container_owner_signer_2450.py")
 OPERATION = "owner-signer-reattach-690250b4-v1"
 MCP = "jason-mcp-pilot"
 BACKUP = "jason-mcp-signer-recovery-prior"
@@ -71,7 +71,7 @@ def root_file(path: Path, *, maximum: int = 32768,
     parent = path.parent.lstat()
     if (path.parent.is_symlink() or (not allow_mutable_parent and
             (parent.st_uid != 0 or parent.st_mode & 0o022))):
-        raise RecoveryDenied("ROOT_TRUST_PARENT_UNSAFE")
+        raise RecoveryDenied("ROOT_TRUST_PARENT_UNSAFE:" + str(path.parent))
     if path.is_symlink():
         raise RecoveryDenied("ROOT_TRUST_PATH_SYMLINK")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
