@@ -73,3 +73,96 @@ unchanged MCP/Teams/Autotask ticket processing. This is a plan, not an
 executed rollback. Existing SSM agent is **online** on the relay, but
 whether the operator has approved SSM session rights to edit Caddy remains
 unverified; the currently used `jason-readonly` profile is read-only.
+
+## Caddy compatibility and trustworthy TLS information
+
+The previous candidate used Caddy `request_body max_size`, which is
+**experimental and requires Caddy v2.10+**. Because the relay's actual
+Caddy version and live route order cannot be read using the current
+`Jason-AWS-ReadOnly` role or available SSH identities, that directive
+is deliberately **not** a mandatory part of the proposed fragment.
+The isolated ASGI gateway enforces the hard 1 MiB image bound, and the
+trusted ingress wrapper denies any forwarded HTTPS claim unless the
+actual TCP peer is the pinned ZeroTier relay at `10.87.246.16`.
+
+For the future separately approved ACTIVE container, Uvicorn must run
+with `--no-proxy-headers`: the `TrustedCaddyJAssistIngress` adapter
+validates `scope.client` from the real socket before trusting Caddy's
+`X-Forwarded-Proto: https`, and only for the exact MCP public Host.
+The disabled-image Dockerfile also uses `--no-proxy-headers`. Neither
+client-controlled forwarded headers nor unauthenticated incoming
+traffic may manufacture server readiness.
+
+**Full relay configuration readback is still mandatory.** The current
+AWS role lacks `ssm:ListCommandInvocations`; available ZeroTier SSH
+identities were rejected. An authorized read-only SSM session or
+read-only SSH account is needed to inspect live `/etc/caddy/Caddyfile`,
+`caddy version`, active routes, TLS, forwarded-header behavior and
+Caddy service parameters, followed by offline `caddy adapt` +
+`caddy validate` against a complete copy. Do not infer that the
+proposed route is safe from syntactic review alone.
+
+## Integrated preproduction runtime composition (not activated)
+
+A single typed factory,
+`implementation/jassist/pilot_runtime_composition.py`, now joins:
+
+- existing *governed* AOT Microsoft tenant application tokens and
+  Graph HTTP transport (`GovernedTenantApplicationTokenProvider` /
+  `UrlLibJsonHttpTransport`), checked for active account and current
+  membership in the **configured** Entra J-Assist group;
+- a fixed AOT issuer/JWKS signing-key resolver that accepts only RS256,
+  verified publicly at the known AOT Entra URL on November 12;
+- a scoped callback to Jason's `endpoint.device.read` through its
+  Central Orchestrator, with the by-ID pairing from PR #2456 and
+  exact single AOT test device/site bound by Owner pilot approval;
+- an existing Jason OpenBao secret resolver with separate
+  `jassist.session_encryption` and `jassist.evidence_encryption`
+  logical references, each providing exactly one canonical 32-byte
+  base64 key. These reference mappings and AppRole permissions have
+  **not been provisioned** on the production host;
+- an attested, 0600, independently approved positive SHA256 frame
+  allowlist for **pre-reviewed, non-sensitive pilot fixtures**. This
+  is intentionally **not a general DLP scanner** and must never
+  be represented as approval to send arbitrary live technician screens;
+- AES-GCM encrypted sessions and two-minute encrypted image evidence,
+  same-user MCP image retrieval, current permission rechecks, and
+  the exact AWS peer/HTTPS/HOST-only ASGI relay wrapper.
+
+Before opening databases, the factory requires a separately verified
+exact-action approval, *current attested* review manifest, separately
+provisioned keys and a trusted HTTPS-ready assertion. The Owner's
+existing conversational pilot consent **alone** does not provide a
+verified source/scope/Caddy-config/readback attestation.
+
+The tested synthetic end-to-end transaction covers browser-shaped
+HTTPS request -> Entra bearer -> live-shaped Graph membership -> exact
+governed Datto device-ID/UUID proof -> preapproved review -> AES-GCM
+receipt -> same-user MCP read; it also exercises group revocation,
+unknown image denial, wrong device, and missing review/HTTPS/approval.
+These synthetic tests DO NOT demonstrate live application consent,
+a service-to-service Datto broker or an approved production reviewer.
+
+## Strict read-only relay preflight (still pending live source)
+
+`verify_caddy_adapted.py` compares an **actual original** and
+**proposed candidate** Caddy adapted JSON file and allows only one
+path-limited `/v1/jassist/*` proxy on the existing
+`mcp-jason.teamaot.com` host, to the single private upstream
+`10.87.246.157:3981`. It denies any changes to existing MCP,
+Teams, OAuth, TLS, global settings, unknown handlers, proxy targets,
+or duplicate/out-of-host routes.
+
+It is read-only. After obtaining **authorized read-only access** to
+the current relay, copy the live Caddyfile to an isolated review
+location, compute SHA256, use the currently installed Caddy binary
+to `caddy adapt` it, create the proposed candidate by adding only
+the reviewed route to an exact copy, and `caddy adapt` that too.
+Run the verifier against both JSON outputs and separately run
+`caddy validate` for the complete candidate before any deployment.
+
+Because current IAM lacks SSM command-history access and all available
+SSH identities were rejected, **no live Caddyfile was obtained**;
+therefore the relay config is **NOT VERIFIED**. Do not confuse the
+passing synthetic JSON-delta tests with Caddy validation or live
+relay inspection. No relay or other production service was touched.

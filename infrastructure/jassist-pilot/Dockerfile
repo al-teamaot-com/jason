@@ -12,4 +12,4 @@ COPY infrastructure/jassist-pilot/disabled_app.py /srv/disabled_app.py
 RUN chmod -R a+rX /srv
 USER 10001:10001
 EXPOSE 3981
-CMD ["python","-m","uvicorn","disabled_app:app","--host","0.0.0.0","--port","3981","--workers","1","--no-access-log"]
+CMD ["python","-m","uvicorn","disabled_app:app","--host","0.0.0.0","--port","3981","--workers","1","--no-access-log","--no-proxy-headers"]

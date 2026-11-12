@@ -5,9 +5,9 @@
 # This fragment is intentionally NOT a complete replacement Caddyfile.
 @jassist_pilot path /v1/jassist/*
 handle @jassist_pilot {
-    request_body {
-        max_size 1MB
-    }
+    # Experimental Caddy request_body max_size requires v2.10+.
+    # Until LIVE Caddy version is verified, the ASGI receiver must
+    # enforce its hard 1 MiB limit independently.
     reverse_proxy 10.87.246.157:3981 {
         transport http {
             dial_timeout 3s

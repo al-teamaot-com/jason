@@ -28,6 +28,9 @@ network:
   zerotier_peers_require_fresh_verification: true
   jason_to_relay_zerotier_icmp_verified_20261112: true
   relay_ssm_agent_reported_online_20261112: true
+  relay_live_caddy_config_verified: false
+  read_only_relay_management_access_available: false
+  proposed_caddy_directive_requiring_v210_removed: true
   proposed_proxy_path: /v1/jassist/*
   container_port: 3981
   inactive_host_binding: 127.0.0.1:3981
@@ -46,6 +49,9 @@ storage:
   file_mode: "0600"
   encrypted_at_rest: AES-256-GCM
   separate_encryption_keys: 2
+  keys_provisioned_for_pilot: false
+  dlp_pilot_mode: attested-exact-frame-sha256-only
+  arbitrary_live_screenshot_dlp_approved: false
   key_length_bytes_each: 32
   screenshot_limit_bytes: 1048576
   max_live_receipts: 256
@@ -60,6 +66,8 @@ identity:
   verify_live_graph_consent_before_enable: true
   verify_exact_datto_id_and_site_before_enable: true
   content_reviewer_required_before_enable: true
+  real_graph_group_membership_verified: false
+  datto_numeric_id_broker_deployed: false
 aws:
   account_id: "887670144825"
   region: us-east-1

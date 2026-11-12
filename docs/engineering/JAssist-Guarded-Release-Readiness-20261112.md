@@ -182,3 +182,40 @@ No production deployment was authorized by the pilot approval.
 Detailed resources, permissions, tests and admission checklist:
 `infrastructure/jassist-pilot/README.md` and
 `infrastructure/jassist-pilot/resource-plan.yaml`.
+
+## November 12: provider and relay-preflight source integration
+
+A full synthetic, compartmentalized pilot service composition now
+integrates the existing governed Microsoft tenant token/Graph protocol,
+pinned signed Entra JWT key source, approved single AOT device's
+Datto by-ID proof, two distinct OpenBao-managed encryption-key
+references, independently attested exact-frame content-review policy,
+bounded encrypted session and image stores, HTTPS relay peer validation,
+and same-identity MCP image retrieval. Source tests prove revocation,
+wrong-device/unknown-frame rejection, no plaintext evidence at rest,
+and failure without Owner release/HTTPS/review attestations.
+
+The pinned AOT tenant **public JWKS** endpoint returned HTTP 200 with
+six RSA signing keys. It does NOT establish live app permission consent,
+JWT for this SPA, current technician group membership, screenshot review
+approval or any OpenBao key provisioning.
+
+**Actual live relay configuration could not be obtained.** AWS reports
+SSM online for `i-0b0bb56884acb565c`, but
+`Jason-AWS-ReadOnly` lacks `ssm:ListCommandInvocations`; attempted
+read-only ZeroTier SSH to available users returned
+`Permission denied (publickey)`. The public DNS and HTTPS are healthy
+but cannot prove internal Caddy route ordering or version. No SSM
+commands, Caddy reloads, host firewall changes or AWS mutations were
+performed. The Caddy `request_body` directive was removed from the
+proposed fragment because it requires **Caddy v2.10+**, while the
+actual relay version remains unknown.
+
+Offline `infrastructure/jassist-pilot/verify_caddy_adapted.py`
+enforces an exact one-route-only adapted-JSON delta and rejects changes
+to MCP, Teams, OAuth, TLS, existing upstreams, or global settings.
+It cannot assert live verification until the current relay Caddyfile
+and the Caddy version are read through an authorized session.
+The exact-action Owner approval remains **nonproduction screenshot
+pilot only**; this does not authorize changing the shared production
+AWS relay or registering a production MCP image tool.
