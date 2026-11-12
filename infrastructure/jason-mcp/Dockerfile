@@ -21,7 +21,9 @@ COPY implementation/mcp_service/src /tmp/jason-mcp/src
 
 RUN pip install --no-cache-dir \
     --constraint /tmp/jason-mcp/constraints-proven-pilot.txt \
-    /tmp/jason-mcp
+    /opt/jason-src/implementation/connectors/openclaw \
+    /tmp/jason-mcp \
+    && python -m pip check
 
 USER 1000:1000
 
