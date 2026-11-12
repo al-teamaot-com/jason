@@ -118,11 +118,11 @@ def verify_exact_repository_head(repo: Path, source_sha: str) -> None:
     _require_sha(source_sha)
     try:
         head = subprocess.check_output(
-            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            ["git", "-c", f"safe.directory={repo}", "-C", str(repo), "rev-parse", "HEAD"],
             text=True, timeout=8,
         ).strip()
         changed = subprocess.check_output(
-            ["git", "-C", str(repo), "status", "--porcelain",
+            ["git", "-c", f"safe.directory={repo}", "-C", str(repo), "status", "--porcelain",
              "--untracked-files=normal"],
             text=True, timeout=8,
         ).strip()
@@ -163,6 +163,31 @@ def build_scope(repo: Path, candidate_sha: str) -> dict[str, Any]:
         "rollback_sha": EMPTY_BASELINE,
         "rollback_semantics": "remove-only-new-stage-a-objects-after-verified-journal",
         "host_code_bundle_sha256": code_manifest["bundle_sha256"],
+        # These root-worker entrypoints are installed ONLY by the existing
+        # exact-SHA governed host-reconcile release. A0 itself does not
+        # restart or install the root worker. Bind their actual code bytes.
+        "native_root_entrypoints": [
+            {
+                "source": relative,
+                "sha256": _digest((repo / relative).read_bytes()),
+            }
+            for relative in (
+                "tools/pmv4_stage_a_native_install.py",
+                "tools/pmv4_stage_a_packet.py",
+                "tools/pmv4_stage_a_admission.py",
+                "tools/release_host_reconcile_worker.py",
+                "tools/install_release_host_reconciler.py",
+            )
+        ],
+        "native_root_audit": {
+            "path": str(
+                RELEASE_STATE / "protected-transitions" /
+                ("pmv4-stage-a0-" + candidate_sha + ".jsonl")
+            ),
+            "mode": "0600", "uid": 0, "gid": 0,
+            "append_only_hash_chained": True,
+            "existing_root_audit_parent_required": True,
+        },
         "directories": [
             {"path": p, "mode": f"{mode:04o}", "uid": uid, "gid": gid}
             for p, mode, uid, gid in DIRECTORIES

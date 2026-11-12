@@ -67,6 +67,7 @@
     "tools/pmv4_shadow_owner_issuer.py",
     "tools/pmv4_mcp_projection.py",
     "tools/pmv4_host_install_contract.py",
+    "tools/pmv4_stage_a_*.py",
     "tools/pmv4_runbook_lifecycle_acceptance.py",
     "tools/release_host_reconcile_worker.py",
     "tools/install_release_host_reconciler.py",

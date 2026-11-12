@@ -100,6 +100,31 @@ def _read_request(path: Path) -> dict[str, str]:
         raise HostReconcileError("request id is invalid")
     if not SHA.fullmatch(source_revision):
         raise HostReconcileError("source revision must be an exact SHA")
+    action = payload.get("action", "host_reconcile")
+    if action == "pmv4_stage_a0_install":
+        # This is a separate, exact Owner-signed transaction, not a generic
+        # extension to routine host release reconciliation. Untrusted al-owned
+        # requests are never proof of Owner authority by themselves.
+        expected = {
+            "request_id", "source_revision", "action",
+            "scope_sha256", "manifest_sha256", "freeze_sha256",
+            "signed_owner_proof",
+        }
+        if (set(payload) != expected
+                or stat.S_IMODE(meta.st_mode) != 0o600
+                or meta.st_nlink != 1 or meta.st_size > 16384
+                or any(not isinstance(payload.get(k), str)
+                       or re.fullmatch(r"[0-9a-f]{64}", payload[k]) is None
+                       for k in ("scope_sha256", "manifest_sha256",
+                                 "freeze_sha256"))
+                or not isinstance(payload.get("signed_owner_proof"), dict)):
+            raise HostReconcileError("PMV4_STAGE_A0_REQUEST_INVALID")
+        return dict(payload)
+    if action != "host_reconcile":
+        raise HostReconcileError("UNSUPPORTED_ROOT_RECONCILE_REQUEST")
+    # Do not accidentally narrow the historical ordinary host-reconcile
+    # payload contract while introducing this separately governed action.
+    # Only the new A0 route requires the strict bounded exact field set.
     return {"request_id": request_id, "source_revision": source_revision}
 
 
@@ -1100,6 +1125,81 @@ def _write_result(
     os.replace(temp, target)
 
 
+
+
+def _trusted_native_stage_a0_module(source_revision: str):
+    """Reuse the root-installed host boundary, not caller-provided code.
+
+    A different source revision or untrusted managed Git worktree must not
+    execute from the privileged worker. Staging this helper is itself a
+    separately governed production root-worker upgrade.
+    """
+    module_path = Path("/usr/local/lib/jason/pmv4_stage_a_native_install.py")
+    try:
+        info = module_path.lstat()
+        if (module_path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != 0 or info.st_mode & 0o022
+                or info.st_nlink != 1 or info.st_size > 131072):
+            raise HostReconcileError("PMV4_NATIVE_INSTALLER_UNTRUSTED")
+        actual = hashlib.sha256(module_path.read_bytes()).hexdigest()
+        expected = hashlib.sha256(subprocess.check_output(
+            _git("show", source_revision + ":tools/pmv4_stage_a_native_install.py"),
+            timeout=15,
+        )).hexdigest()
+        if actual != expected:
+            raise HostReconcileError("PMV4_NATIVE_INSTALLER_SOURCE_DRIFT")
+        head = subprocess.check_output(
+            _git("rev-parse", "HEAD"), text=True, timeout=10,
+        ).strip()
+        dirty = subprocess.check_output(
+            _git("status", "--porcelain", "--untracked-files=normal"),
+            text=True, timeout=10,
+        ).strip()
+        if head != source_revision or dirty:
+            raise HostReconcileError("PMV4_NATIVE_SOURCE_NOT_STAGED")
+        # The root worker accepts only the exact protected Git object
+        # source. Its imported dependency modules must be the same reviewed
+        # commit and no untrusted PYTHONPATH/site override is permitted.
+        import sys
+        if str(REPO) not in sys.path:
+            sys.path.insert(0, str(REPO))
+        spec = importlib.util.spec_from_file_location(
+            "jason_root_pmv4_stage_a_native", module_path,
+        )
+        if spec is None or spec.loader is None:
+            raise HostReconcileError("PMV4_NATIVE_INSTALLER_NOT_LOADABLE")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            ImportError) as exc:
+        raise HostReconcileError("PMV4_NATIVE_INSTALLER_NOT_TRUSTED") from exc
+
+
+def _process_stage_a0_request(request: dict[str, object]) -> str:
+    candidate = str(request["source_revision"])
+    _verify_main(candidate)
+    module = _trusted_native_stage_a0_module(candidate)
+    receipt = module.execute_native_stage_a0_request(request, repo=REPO)
+    if (not isinstance(receipt, dict)
+            or receipt.get("status") not in {
+                "installed", "empty_baseline_restored"
+            }
+            or receipt.get("source_sha") != candidate
+            or receipt.get("rollback_sha") != "0" * 40
+            or receipt.get("scope_sha256") not in {
+                request["scope_sha256"], None
+            }):
+        raise HostReconcileError("PMV4_NATIVE_INSTALLER_READBACK_FAILED")
+    return {
+        key: receipt.get(key) for key in (
+            "status", "source_sha", "scope_sha256",
+            "rollback_sha", "audit_chain_sha256",
+            "receipt_chain_sha256", "owner_approval_id"
+        )
+    }
+
+
 def _process(path: Path) -> None:
     request_id = path.stem
     source_revision = ""
@@ -1107,6 +1207,16 @@ def _process(path: Path) -> None:
         request = _read_request(path)
         request_id = request["request_id"]
         source_revision = request["source_revision"]
+        if request.get("action") == "pmv4_stage_a0_install":
+            # This path never calls ordinary host reconciliation, deploys
+            # containers, updates the PM runtime or mutates the freeze.
+            receipt = _process_stage_a0_request(request)
+            _write_result(
+                request_id, source_revision,
+                success=receipt["status"] == "installed",
+                detail="PMV4_STAGE_A0=" + json.dumps(receipt, sort_keys=True),
+            )
+            return
         _verify_main(source_revision)
 
         live_mcp = _mcp_revision()

@@ -30,7 +30,7 @@ jobs:
           PYTHONPATH: "implementation:."
         run: |
           set -euo pipefail
-          python3 -m pytest -q             tests/test_pmv4_stage_a_packet.py             tests/test_pmv4_stage_a_admission.py             tests/test_pmv4_host_install_contract.py             tests/test_pmv4_breaker_recovery_independence.py             tests/test_pmv4_shadow_owner_issuer.py             tools/tests/test_release_breaker_recovery_manager.py             tools/tests/test_root_revalidate_release_breaker.py
+          python3 -m pytest -q             tests/test_pmv4_stage_a_packet.py             tests/test_pmv4_stage_a_admission.py             tests/test_pmv4_stage_a_native_install.py             tests/test_pmv4_stage_a_root_worker_integration.py             tools/tests/test_release_host_reconciler_contract.py             tests/test_pmv4_host_install_contract.py             tests/test_pmv4_breaker_recovery_independence.py             tests/test_pmv4_shadow_owner_issuer.py             tools/tests/test_release_breaker_recovery_manager.py             tools/tests/test_root_revalidate_release_breaker.py
       - name: Verify UID/GID and empty rollback as root in disposable CI workspace
         env:
           PYTHONPATH: "implementation:."
@@ -43,7 +43,8 @@ jobs:
             PYTHONDONTWRITEBYTECODE=1 \
             "$(command -v python3)" -m pytest -q \
             -o cache_dir=/tmp/pmv4-stage-a0-root-pytest-cache \
-            tests/test_pmv4_stage_a_rootmode.py
+            tests/test_pmv4_stage_a_rootmode.py \
+            tests/test_pmv4_stage_a_native_install.py -k "root or native_journal_real_uid_gid"
       - name: Produce audited SOURCE-ONLY Stage A0 scope and lab rollback receipt
         env:
           PYTHONPATH: "implementation:."

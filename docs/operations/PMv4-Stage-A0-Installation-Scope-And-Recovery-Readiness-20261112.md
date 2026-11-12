@@ -238,3 +238,76 @@ The future native release boundary must obtain trusted root health and
 the actual Owner decision independently, perform this check *while holding*
 the cross-release lock, journal exact actions before each write, then
 read back/rollback as necessary. Passing tests do not authorize deployment.
+
+
+## Native root installer integration and crash/recovery admission
+
+The root integration now reuses **the existing**
+`jason-release-host-reconcile.service` and its Owner-governed protected
+Git/release chain. There is no new root daemon, unreviewed `sudo` script,
+standing signing key, or generic shell execution endpoint.
+
+The existing source-governed installer
+`tools/install_release_host_reconciler.py` stages the independent
+`tools/pmv4_stage_a_native_install.py` helper as root:root 0644 before
+activating the updated root reconcile worker. This staging is part of an
+**independently authorized exact source/runtime host release**, not a
+side effect of merging this PR. Until that root worker is actually
+installed, production cannot process A0 requests; source readiness
+alone must not be called operational readiness.
+
+The root worker accepts only a narrowly identified
+`action=pmv4_stage_a0_install` request (all seven documented fields;
+`al`-owned mode 0600, exact SHA and digests, size at most 16 KiB) and
+leaves ordinary host-reconciliation requests on their existing path.
+It independently verifies protected-main ancestry, installed root
+installer byte identity against the reviewed Git object, and a clean
+managed source at the exact SHA. The root native helper subsequently
+requires the live protected-main CI/branch check, root-only breaker,
+current root LKG, immutable freeze, and the existing pinned
+Ed25519 Owner proof and protected trust. No test key/path or supplied
+health status is accepted in production.
+
+**Shared transaction:** Stage A0 acquires the existing operator-owned
+PMv3 production transaction flock **before any write**. It creates the
+new PMv4 root lock only inside that transaction and immediately locks
+it too. No external worker, shadow service, freeze exception, reboot,
+service restart, or modification of current Ticket Core occurs.
+
+**Durable root recovery journal:** The only new legacy-root audit write
+is the exact candidate-bound journal
+`/var/lib/jason/openclaw/release-manager/protected-transitions/pmv4-stage-a0-<source-SHA>.jsonl`.
+Its preexisting root-owned parent must already be trusted; every entry
+is mode 0600 root-owned, fsynced, append-only and SHA-256 hash-chained.
+The journal records one signed approval ID and the exact source,
+scope, manifest, freeze and proof fingerprint before any new A0
+directory is created. Each bounded object creation has an intent
+and durable completion event. An interrupted request may only be
+rolled back to the **zero/absence baseline** when every existing
+declared file, mode, ownership, hash and relative pointer still
+matches its reviewed scope and the journal chain/proof fingerprint.
+Tampered files, forged links, extra objects, missing journal records,
+unknown approval or altered frozen marker **fail closed** rather than
+recursively deleting state.
+
+An ordinary post-intent exception initiates bounded rollback within
+the same root release boundary. A process killed during installation
+retains its immutable request and journal for the next native path
+activation, which performs journal-verified rollback rather than
+replaying installation. Previously committed A0 or already consumed
+Owner approval IDs cannot be silently reactivated.
+
+**Scope and limitations:** The Stage A0 reviewed scope includes the
+exact root-installer/reconciler source hashes and the single new
+audit-journal path, in addition to the 11 new directories, 13 new
+files and relative empty-baseline pointer. The actual production
+installer's separate initial root-worker upgrade, root-only target
+metadata, signed Owner request submission, postflight core
+health and rollback readback still require separately controlled
+production acceptance. The source tree alone cannot grant or execute
+this approval.
+
+The source CI runs the native journal/collision/crash/replay tests
+offline, and a second CI job executes true UID/GID/mode admission with
+root **only on a disposable GitHub runner**. No test launches a
+production container or uses Jason's provider keys.
