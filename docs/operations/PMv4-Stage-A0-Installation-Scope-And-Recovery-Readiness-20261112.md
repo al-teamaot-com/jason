@@ -324,3 +324,18 @@ restores only the known owned Stage A objects to the zero baseline.
 All three hard-exit/recovery cases passed locally. These are isolated
 `/tmp` acceptance tests, **not** a live-production kill or real
 production rollback exercise.
+
+
+## Protected-source integration overlap
+
+PR #2441 is a broader, still-draft PMv4 integration branch. It also
+touches `config/release-manager-policy.json` to protect core/runtime
+PMv4 files. Those shared protections are already present in current
+protected main through the prior scoped source promotion #2443.
+Stage A0 adds **only** the separately protected
+`tools/pmv4_stage_a_*.py` glob and does not remove or weaken any existing
+PMv3 or PMv4 protected paths. The overlap is explicitly coordinated in
+PR #2448's `Integration coordination: #2443 #2441` entry. These
+branches cannot be promoted independently as substitutes for one another.
+Full change-integration CI must verify this exact relationship again
+on the final Stage A0 source SHA.
