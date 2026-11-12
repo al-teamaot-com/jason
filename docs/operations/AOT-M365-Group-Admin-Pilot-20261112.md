@@ -35,6 +35,8 @@ Create two **separate AOT-owned multitenant app registrations** through Microsof
 
 Use administrator-granted consent within the exact AOT tenant. App-only Graph group permissions operate at tenant scale; these must not be granted without the Owner/admin's deliberate security decision. Do not grant `Directory.ReadWrite.All` or `RoleManagement.ReadWrite.Directory`.
 
+The consent must be issued by an AOT account with **Privileged Role Administrator** (or Global Administrator) authority, or an approved custom role that can grant the exact Microsoft Graph **application app roles**. Microsoft states that Cloud Application Administrator alone cannot grant Microsoft Graph application roles. Use an authenticated Entra administrator session and retain auditable consent evidence; do not attempt a privileged Graph app-role grant from an unrelated service token.
+
 Only upload public certificate halves to the app registrations. Provision matching private keys into separately restricted approved OpenBao credential boundaries, not chat, scripts, files in Git, shell arguments or logs. Reuse Jason's existing MSAL token and secret infrastructure.
 
 After registration, obtain the two **application IDs**, approved **service-principal records**, consent/grant evidence and safe certificate thumbprint/generation metadata. Register client-boundary records for the two exact provider/profile pairs only after verifying consent. Tokens are in memory only.
@@ -63,3 +65,5 @@ The previous dormant group-membership source branch `feature/governed-entra-grou
 An authorized AOT Microsoft Entra administrator must consent to the two narrowly specified app registrations and Graph **application** permissions, or expressly approve an authenticated, auditable administrator workflow that does the same. A separate exact-sha governed release authorization is also required before production deployment.
 
 No technician should be asked to paste credentials or hand-assemble Microsoft access tokens.
+
+Microsoft administrator consent role requirements: https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent
