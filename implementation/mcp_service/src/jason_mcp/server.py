@@ -5344,6 +5344,61 @@ def authorize_pmv4_shadow_release(
         return {"status": "rejected", "error_code": str(exc)}
 
 
+@mcp.tool()
+def authorize_pmv4_stage_a0_install(
+    candidate_sha: str,
+    scope_sha256: str,
+    manifest_sha256: str,
+    freeze_sha256: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Queue one exact authenticated Owner decision for PMv4 Stage A0.
+
+    Does not install, restart, deploy, unfreeze, change breaker, or grant a
+    standing release authority. This tool is disabled until its separately
+    governed, exact-release source profile is enabled.
+    """
+    try:
+        if os.environ.get("JASON_PMV4_STAGE_A0_ISSUER_ENABLED") != "true":
+            raise PermissionError("PMV4_STAGE_A0_OWNER_ISSUER_NOT_INSTALLED")
+        principal, organization = _release_approval_owner()
+        access_token = get_access_token()
+        if access_token is None or not isinstance(access_token.token, str):
+            raise PermissionError("PMV4_STAGE_A0_ENTRA_BEARER_REQUIRED")
+        from jason_mcp.pmv4_stage_a0_owner_issuer import issue_stage_a0_request
+        from jason_mcp.pmv4_owner_bridge import public_protected_main_head
+        exact_binding = {
+            "service": "pmv4-stage-a0-host-bootstrap",
+            "candidate_sha": candidate_sha,
+            "rollback_sha": "0" * 40,
+            "scope_sha256": scope_sha256,
+            "manifest_sha256": manifest_sha256,
+            "freeze_sha256": freeze_sha256,
+            "owner_principal": principal,
+        }
+        def consent(binding: Mapping[str, Any]) -> bool:
+            return isinstance(binding, Mapping) and dict(binding) == exact_binding
+        response = issue_stage_a0_request(
+            bearer_token=access_token.token,
+            verified_principal=principal,
+            verified_organization=organization,
+            verify_entra_bearer=_entra_token_verifier.verify_signed_claims,
+            exact_owner_consent=consent,
+            protected_main_check=public_protected_main_head,
+            candidate_sha=candidate_sha,
+            reviewed_scope_sha256=scope_sha256,
+            manifest_sha256=manifest_sha256,
+            freeze_sha256=freeze_sha256,
+            affirmative_decision=affirmative_decision,
+        )
+        return {
+            **response, "root_execution": "separately_governed_exact_stage",
+            "standing_authority": False, "production_deployment": False,
+        }
+    except (PermissionError, ValueError, RuntimeError, OSError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+
 def _component_unsupervised_block_reason(
     record: Mapping[str, Any],
 ) -> str | None:

@@ -253,6 +253,42 @@ else
   PMV4_OWNER_ARGS=(--set-env "JASON_PMV4_OWNER_ISSUER_ENABLED=false")
 fi
 
+# Stage A0 Owner issuer reuses the existing MCP authenticated bearer and
+# signer mount. Its separate, reviewed source profile is OFF by default;
+# a future exact Owner-approved MCP release must explicitly change it.
+PMV4_STAGE_A0_MODE="$(python3 - "$REPO_ROOT/config/pmv4-stage-a0-issuer-activation.json" <<'PY_PMV4_A0'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("DENIED: PMv4 Stage A0 issuer source profile missing")
+try:
+    doc=json.loads(p.read_text())
+except (OSError,ValueError):
+    raise SystemExit("DENIED: PMv4 Stage A0 issuer source profile invalid")
+if (not isinstance(doc,dict)
+        or set(doc)!={"schema_version","service","mode"}
+        or doc["schema_version"]!="1.0"
+        or doc["service"]!="pmv4-stage-a0-host-bootstrap"
+        or doc["mode"] not in ("off","on")):
+    raise SystemExit("DENIED: PMv4 Stage A0 issuer profile not exact")
+print(doc["mode"])
+PY_PMV4_A0
+)" || exit 2
+# Activation never bypasses existing signer checks; the established
+# root-reconciler must be staged and separately approved first.
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  PMV4_STAGE_A0_ARGS=(--set-env "JASON_PMV4_STAGE_A0_ISSUER_ENABLED=false")
+elif [ "$PMV4_STAGE_A0_MODE" = "on" ]; then
+  if [ "${#OWNER_SIGNER_ARGS[@]}" -eq 0 ]; then
+    echo "DENIED: Stage A0 has no trusted Owner signing mount" >&2
+    exit 2
+  fi
+  PMV4_STAGE_A0_ARGS=(--set-env "JASON_PMV4_STAGE_A0_ISSUER_ENABLED=true")
+else
+  PMV4_STAGE_A0_ARGS=(--set-env "JASON_PMV4_STAGE_A0_ISSUER_ENABLED=false")
+fi
+
 PREFLIGHT=false
 for arg in "$@"; do
   if [ "$arg" = "--preflight" ]; then
@@ -277,6 +313,7 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   "${QBO_PROD_ARGS[@]}" \
   "${OWNER_SIGNER_ARGS[@]}" \
   "${PMV4_OWNER_ARGS[@]}" \
+  "${PMV4_STAGE_A0_ARGS[@]}" \
   --promote-image-tag jason-mcp:production \
   --rollback-image-tag jason-mcp:rollback-current \
   --health-url http://127.0.0.1:8000/healthz   "$@"
