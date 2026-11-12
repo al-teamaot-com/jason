@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from connectors.core.contracts import ConnectorContext, SecretResolver
+from connectors.core.openbao_secrets import (
+    OpenBaoAuthenticationError,
+    OpenBaoHttpError,
+    OpenBaoSecretResolutionError,
+    OpenBaoTransportError,
+)
 
 from .token import MicrosoftCertificateCredential, MicrosoftCredentialError
 
@@ -44,6 +50,21 @@ class OpenBaoMicrosoftCredentialSource:
             )
         except MicrosoftCredentialError:
             raise
+        except OpenBaoSecretResolutionError as error:
+            # Only fixed resolver categories are disclosed. Never use exception
+            # text, credential values, logical paths, or upstream response bodies.
+            if isinstance(error, OpenBaoAuthenticationError):
+                code = "MICROSOFT_CREDENTIAL_OPENBAO_AUTH_FAILED"
+            elif isinstance(error, OpenBaoTransportError):
+                code = "MICROSOFT_CREDENTIAL_OPENBAO_UNREACHABLE"
+            elif isinstance(error, OpenBaoHttpError):
+                code = "MICROSOFT_CREDENTIAL_OPENBAO_HTTP_ERROR"
+            else:
+                code = "MICROSOFT_CREDENTIAL_RESOLUTION_FAILED"
+            raise MicrosoftCredentialError(
+                error_code=code,
+                message="Microsoft application credential could not be resolved.",
+            ) from error
         except (KeyError, TypeError, ValueError) as error:
             raise MicrosoftCredentialError(
                 error_code="MICROSOFT_CREDENTIAL_CONTRACT_INVALID",
