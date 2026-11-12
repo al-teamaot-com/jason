@@ -1,4 +1,5 @@
 import json
+import tomllib
 from pathlib import Path
 
 from jason_runtime.constant_contact_reconcile_entrypoint import main
@@ -29,3 +30,10 @@ def test_independent_timer_never_installs_enabled():
     assert "systemctl --user start" not in installer
     assert "jason-constant-contact-reconcile.timer" in desired["allowed_user_units"]
     assert "jason-constant-contact-reconcile.timer" not in desired["required_user_units"]
+
+
+def test_production_runtime_declares_excel_dependency():
+    runtime = tomllib.loads((ROOT / "implementation/runtime_service/pyproject.toml").read_text())
+    connector = tomllib.loads((ROOT / "implementation/pyproject.toml").read_text())
+    assert "jason-connectors[constant_contact]==0.1.0" in runtime["project"]["dependencies"]
+    assert "openpyxl>=3.1,<4" in connector["project"]["optional-dependencies"]["constant_contact"]
