@@ -28,7 +28,7 @@ from connectors.dnsfilter.mcp_connector import DnsFilterMcpConnector
 from connectors.darkwebid.connector import DarkWebIdConnector
 from connectors.dnsfilter.mcp_oauth import DnsFilterMcpOAuthStore
 from jason_runtime.microsoft_group_admin_activation import (
-    register_group_admin_from_env,
+    register_group_admin_from_env, ensure_group_admin_owner_authority,
 )
 from jason_runtime.microsoft_group_admin import (
     build_microsoft_group_admin_openbao_invoker,
@@ -1733,6 +1733,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     )
     ensure_aot_staff_internal_note_authority(
         identity_authority, enabled=staff_internal_note_enabled,
+    )
+    ensure_group_admin_owner_authority(
+        identity_authority, enabled=group_admin_activation.enabled,
     )
     ensure_teams_message_send_authority(
         identity_authority, enabled=configured_teams_message_send(),

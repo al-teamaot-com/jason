@@ -1038,3 +1038,82 @@ def test_group_admin_composition_exact_activation_only_two_scoped_invokers(tmp_p
     ).capability_name == "service.ticket.create"
     # Building the dormant executor cannot contact OpenBao/Graph, create
     # tenant groups or modify ticket processing.
+
+
+def test_group_admin_only_owner_exact_aot_approval_grants(tmp_path, monkeypatch):
+    """Real JKD-001 store: active pilot needs a new distinct exact action approval."""
+    from kernel.identity_authority import (
+        AuthorityOutcome, AuthorityRequest, IdentityRecord, PermissionMode,
+        ApprovalRecord,
+    )
+    from jason_runtime.microsoft_group_admin_activation import (
+        PROFILE, GRANT_PREFIX, GRANT_EXPIRES,
+    )
+    from orchestrator.microsoft_group_admin_catalog import (
+        AOT_PILOT_CLIENT_ID, AOT_PILOT_OWNER_PRINCIPAL_ID,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    monkeypatch.setenv("JASON_M365_GROUP_ADMIN_PROFILE", PROFILE)
+    app=build_runtime_application(_settings(tmp_path))
+    own=AOT_PILOT_OWNER_PRINCIPAL_ID
+    other="person-entra-11111111111141118111111111111111"
+    for principal in (own,other):
+        app.identity_authority.identities.put(
+            IdentityRecord(identity_id=principal,identity_type="human",
+                           organization_id="aot",status="active"))
+    now=datetime.now(timezone.utc)
+    assert GRANT_EXPIRES > now
+    for index,capability in enumerate(("identity.group.create","identity.group.member.add")):
+        grant_id=GRANT_PREFIX+capability.replace(".","-")
+        grant=app.identity_authority.grants.get(grant_id)
+        assert grant is not None
+        assert grant.subject_id == own
+        assert grant.capability == capability
+        assert grant.client_id == AOT_PILOT_CLIENT_ID
+        assert grant.approval_required is True
+        assert grant.effective_until==GRANT_EXPIRES
+        common=dict(
+            request_id="req-grp-"+str(index),correlation_id="corr-grp-"+str(index),
+            principal_id=own,organization_id="aot",client_id=AOT_PILOT_CLIENT_ID,
+            capability=capability,requested_mode=PermissionMode.EXECUTE,
+            authentication_assurance="entra-oauth-bearer")
+        initial=app.identity_authority.evaluate(AuthorityRequest(**common))
+        assert initial.outcome is AuthorityOutcome.APPROVAL_REQUIRED
+        assert grant_id in initial.matched_grants
+        assert app.identity_authority.evaluate(AuthorityRequest(
+            **{**common,"principal_id":other}
+        )).outcome is AuthorityOutcome.DENIED
+        assert app.identity_authority.evaluate(AuthorityRequest(
+            **{**common,"client_id":"client-another"}
+        )).outcome is AuthorityOutcome.DENIED
+        assert app.identity_authority.evaluate(AuthorityRequest(
+            **{**common,"client_id":None}
+        )).outcome is AuthorityOutcome.DENIED
+        # A record for a different action or client cannot satisfy this grant.
+        approval_id="approval-test-grp-"+str(index)
+        app.identity_authority.approvals.put(ApprovalRecord(
+            approval_id=approval_id,request_id=common["request_id"],
+            capability=capability,organization_id="aot",
+            client_id=AOT_PILOT_CLIENT_ID,requested_by=own,
+            status="approved",decided_by=own,
+            decided_at=now,expires_at=now+timedelta(minutes=3),
+        ))
+        approved=app.identity_authority.evaluate(AuthorityRequest(
+            **common,approval_id=approval_id))
+        assert approved.outcome is AuthorityOutcome.ALLOWED
+        assert approved.execution_context.approval_required is True
+        assert app.identity_authority.evaluate(AuthorityRequest(
+            **{**common,"request_id":"other-request"},approval_id=approval_id
+        )).outcome is AuthorityOutcome.DENIED
+
+
+def test_group_admin_default_composition_has_no_owner_group_grants(tmp_path, monkeypatch):
+    from jason_runtime.microsoft_group_admin_activation import GRANT_PREFIX
+    monkeypatch.delenv("JASON_M365_GROUP_ADMIN_PROFILE", raising=False)
+    app=build_runtime_application(_settings(tmp_path))
+    assert all(
+        app.identity_authority.grants.get(
+            GRANT_PREFIX+name.replace(".","-")
+        ) is None for name in ("identity.group.create","identity.group.member.add")
+    )

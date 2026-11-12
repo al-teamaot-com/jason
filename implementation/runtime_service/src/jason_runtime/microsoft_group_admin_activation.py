@@ -6,22 +6,61 @@ exact-action approval must independently authorize every write.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 from kernel.capabilities import CapabilityLifecycle, CapabilityRegistryService
+from kernel.identity_authority import AuthorityGrant, PermissionMode
 from kernel.execution_providers import (
     ExecutionProvider, ExecutionProviderRegistryService, ProviderApproval,
     ProviderFeatures, ProviderHealth, ProviderLifecycle, ProviderLimits,
     ProviderStewardship, ProviderType,
 )
 from orchestrator.microsoft_group_admin_catalog import (
-    AOT_PILOT_CLIENT_ID, AOT_PILOT_TENANT_ID, GROUP_ADMIN_CAPABILITIES,
+    AOT_PILOT_CLIENT_ID, AOT_PILOT_TENANT_ID,
+    AOT_PILOT_OWNER_PRINCIPAL_ID, GROUP_ADMIN_CAPABILITIES,
     GROUP_ADMIN_PROVIDER, microsoft_group_admin_capabilities,
 )
 
 PROFILE_ENV = "JASON_M365_GROUP_ADMIN_PROFILE"
 PROFILE = "aot-group-admin-exact-pilot-v1"
+
+GRANT_PREFIX = "grant-aot-m365-group-owner-exact-pilot-"
+GRANT_EXPIRES = datetime(2026, 12, 12, tzinfo=timezone.utc)
+
+
+def ensure_group_admin_owner_authority(identity_authority, *, enabled: bool) -> bool:
+    """Install only exact AOT Owner/client/capability approval-required grants.
+
+    No standing approval is recorded. Returning a grant does not satisfy the
+    per-request evidence gate or signed action-specific decision. If the
+    source activation is absent, do not create or modify durable grants.
+    """
+    if not enabled:
+        return False
+    if datetime.now(timezone.utc) >= GRANT_EXPIRES:
+        raise PermissionError("M365_GROUP_PILOT_EXPIRED")
+    created = False
+    for capability in sorted(GROUP_ADMIN_CAPABILITIES):
+        grant = AuthorityGrant(
+            grant_id=GRANT_PREFIX + capability.replace(".", "-"),
+            subject_id=AOT_PILOT_OWNER_PRINCIPAL_ID,
+            capability=capability,
+            organization_id="aot",
+            client_id=AOT_PILOT_CLIENT_ID,
+            permission=PermissionMode.EXECUTE,
+            approval_required=True,
+            effective_until=GRANT_EXPIRES,
+            status="active",
+        )
+        existing = identity_authority.grants.get(grant.grant_id)
+        if existing is None:
+            identity_authority.grants.put(grant)
+            created = True
+        elif existing != grant:
+            raise PermissionError("M365_GROUP_PILOT_GRANT_DRIFT")
+    return created
+
 
 
 @dataclass(frozen=True, slots=True)

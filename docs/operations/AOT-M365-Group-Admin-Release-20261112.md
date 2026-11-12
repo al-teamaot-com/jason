@@ -168,3 +168,28 @@ Run it **only after an appropriate exact-action authorization** and before the
 nonmutating native production release preflight. Afterwards verify four
 root:1000 0640 files and the new auditable receipt, with both running
 container IDs unchanged.
+
+## Source-only central authority acceptance
+
+The exact AOT regular Owner principal is verified in the live Entra-to-Jason
+binding database as
+`person-entra-bee80bdcffb04c50b453c09d4d411f5f`, mapping to Microsoft
+object `bee80bdc-ffb0-4c50-b453-c09d4d411f5f` and no preselected client.
+The MCP action route resolves only this principal to `client-aot-internal`.
+
+In an approved source-activated runtime, the existing JKD-001 authority
+service persists only two **exact capability** grants: one for
+`identity.group.create` and one for `identity.group.member.add`.
+Both bind to that Owner subject, AOT organization, the fixed AOT client, exact
+execute permission and `approval_required=true`. They expire at
+2026-12-12 00:00 UTC and are not created while the profile is off. Neither a
+group create nor a membership add is preapproved by installing a grant.
+The regular authenticated Owner must provide **separate current exact-action
+approval** for each operation. The existing central ledger persists the
+time-limited approval and request/argument binding; an unrelated principal,
+client, request ID or previous approval record is rejected.
+
+Composition and real SQLite identity-authority tests verify these conditions
+along with default-off registration. The activation is not considered ready
+for live use until those checks, Graph credential preflight and actual provider
+readback also succeed in a controlled production release.
