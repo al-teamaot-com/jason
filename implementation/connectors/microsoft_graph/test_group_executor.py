@@ -598,3 +598,55 @@ def test_technician_entitlement_may_restrict_exact_membership_target():
     with pytest.raises(ConnectorAuthorizationError, match="NOT_ENTITLED"):
         connector.prepare_governed_execution(member_request())
     assert len(transport.calls) == 1
+
+
+def test_central_orchestrator_two_exact_approvals_create_then_add_membership(tmp_path):
+    """Two separately bound actions use the same adapter, exact ledger and verified group ID."""
+    from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
+    from orchestrator.service import CentralOrchestrator
+    from orchestrator.contracts import OrchestrationStatus
+
+    _, reader, transport, _, _, _, connector = harness()
+    ledger = SQLiteGovernedExecutionLedger(str(tmp_path / "m365-two-actions.sqlite3"))
+    ledger.initialize()
+    runtime = CentralOrchestrator(
+        resolution=_GroupResolutionService(),
+        invoker=GovernedConnectorCapabilityInvoker(
+            connectors={WRITE_PROVIDER: connector},
+            provider_capability_map={(WRITE_PROVIDER, name): name for name in connector.capabilities},
+        ),
+        audit=_CentralAudit(), governed_execution_ledger=ledger,
+    )
+    group_args = direct_request().arguments
+    create_approval = ledger.reserve_approval(
+        principal_id="tech-17", organization_id="aot", client_id="client-17",
+        capability_name="identity.group.create", arguments=group_args,
+        request_id="approved-aot-group-create",
+    )
+    created = runtime.execute(_approved_request(create_approval))
+    assert created.status is OrchestrationStatus.SUCCEEDED
+    assert created.output["data"]["group_id"] == GROUP_ID
+    assert len(transport.calls) == 1
+
+    member_args = member_request().arguments
+    member_approval = ledger.reserve_approval(
+        principal_id="tech-17", organization_id="aot", client_id="client-17",
+        capability_name="identity.group.member.add", arguments=member_args,
+        request_id="approved-aot-group-member",
+    )
+    joined = runtime.execute(_approved_request(
+        member_approval, capability="identity.group.member.add",
+        args=member_args, execution_id="exec-member",
+    ))
+    assert joined.status is OrchestrationStatus.SUCCEEDED
+    assert joined.output["data"]["readback_verified"] is True
+    assert MEMBER_ID in reader.members[GROUP_ID]
+    assert len(transport.calls) == 2
+    replay = runtime.execute(_approved_request(
+        member_approval, capability="identity.group.member.add",
+        args=member_args, execution_id="exec-member-replay",
+    ))
+    assert replay.status is OrchestrationStatus.SUCCEEDED
+    assert len(transport.calls) == 2
+    assert ledger.evidence(create_approval.approval_id)["state"] == "succeeded"
+    assert ledger.evidence(member_approval.approval_id)["state"] == "succeeded"
