@@ -19,9 +19,7 @@ from __future__ import annotations
 from typing import Callable
 import re
 
-from entra_group_screen_authority import (
-    AOT_JASSIST_PILOT_GROUP_ID, EntraGroupEvidence,
-)
+from entra_group_screen_authority import EntraGroupEvidence
 from entra_send_authority import AOT_ENTRA_TENANT_ID
 
 GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
@@ -45,10 +43,12 @@ class GraphMembershipReader:
         if (tenant != AOT_ENTRA_TENANT_ID
                 or not isinstance(user_oid, str) or not GUID.fullmatch(user_oid)
                 or not isinstance(group_id, str)
-                or group_id.casefold() != AOT_JASSIST_PILOT_GROUP_ID):
+                or not GUID.fullmatch(group_id)
+                or group_id.casefold() == "00000000-0000-0000-0000-000000000000"):
             raise ValueError("only the exact AOT user/group binding is supported")
 
         oid = user_oid.lower()
+        group = group_id.lower()
         url = GRAPH_ROOT + "/users/" + oid
         profile = self._get(url + "?$select=id,accountEnabled")
         if (not isinstance(profile, dict)
@@ -60,11 +60,11 @@ class GraphMembershipReader:
         enabled = profile["accountEnabled"]
         if not enabled:
             return EntraGroupEvidence(
-                user_oid=oid, tenant_id=tenant, group_id=AOT_JASSIST_PILOT_GROUP_ID,
+                user_oid=oid, tenant_id=tenant, group_id=group,
                 is_member=False, account_enabled=False, verified_by_graph=True,
             )
         check = self._post(url + "/checkMemberGroups", {
-            "groupIds": [AOT_JASSIST_PILOT_GROUP_ID]
+            "groupIds": [group]
         })
         if (not isinstance(check, dict) or type(check.get("value")) is not list):
             raise ValueError("invalid Graph membership response")
@@ -73,12 +73,12 @@ class GraphMembershipReader:
         # shape or duplicate signals an invalid/unexpected provider result.
         if (len(values) > 1 or any(
             not isinstance(value, str)
-            or value.casefold() != AOT_JASSIST_PILOT_GROUP_ID
+            or value.casefold() != group
             for value in values
         )):
             raise ValueError("unexpected Graph membership group ID")
         return EntraGroupEvidence(
-            user_oid=oid, tenant_id=tenant, group_id=AOT_JASSIST_PILOT_GROUP_ID,
+            user_oid=oid, tenant_id=tenant, group_id=group,
             is_member=(len(values) == 1),
             account_enabled=True, verified_by_graph=True,
         )

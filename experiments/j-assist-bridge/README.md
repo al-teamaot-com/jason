@@ -555,3 +555,49 @@ or a test stub. Independently verify before enabling real screenshots.
 This development branch never modifies the protected ticket-processing
 service or production runtime. Owner exact-revision release authorization
 and real technician acceptance remain required separately.
+
+
+## Owner selection 2026-11-12: existing Entra J-Assist group is primary eligibility
+
+This decision **supersedes the November 11 Datto Administrator membership
+requirement for J-Assist access eligibility**, not native Datto account/device
+authorization. Staff eligibility is now controlled by the *existing*
+`AOT-Jason-JAssist-Users` Entra group, whose object ID was supplied
+from the November 6 Graph verification:
+`5273dd8a-1456-4985-b0a3-c00061267e26`.
+
+- Configuration key: `jassist.screen_access.entra_group_id`.
+  `config/jassist-screen-access.example.json` is an intentionally
+  **disabled** configuration example and is *not* a production grant.
+  Real changes require the governed settings publisher's exact-action
+  authorization, immutable revision audit and rollback.
+- The selected group is **data**, not a code-level allowlist or a display
+  name lookup. A trusted server reads it on every authorization and the
+  Graph transport permits membership checks *only for that configured ID*.
+- The trusted server verifies the same individual's bound Entra object
+  ID, enabled account and live group membership through Microsoft Graph.
+  It also separately verifies that the chosen Datto device belongs to the
+  pinned AOT Datto account. Membership is NOT authorization to execute
+  remote commands or change devices.
+- Disabling the policy, removing group membership, disabled user, wrong
+  tenant/object ID, Graph unavailability, missing config and Datto device
+  mismatch all deny. Existing sessions revalidate permissions at intake
+  and readback. A policy change mid-check is rejected.
+- `jassist_service_bindings.prepare_graph_backed_bindings` composes
+  the versioned policy, existing server-owned Graph tenant token/HTTP
+  conventions, Graph membership reader, Datto account/device source
+  and original session gate. No new credential or inference API is
+  introduced. The Datto Administrator membership prototype is retained
+  **only as legacy development code** and no longer participates in
+  the selected J-Assist service binding.
+
+This **removes the unavailable Datto security-level membership lookup
+as a prerequisite** for J-Assist *eligibility*. The existing Datto device
+authorization requirement remains.
+
+Preproduction tests use synthetic Graph tokens, identity bindings and
+Datto device fixtures. They do not verify live group membership on
+November 12, a functioning Chrome extension send to Jason, public HTTPS,
+screen DLP/encryption, production MCP image retrieval or production
+release. Until all applicable live acceptance gates are satisfied,
+`Send to Jason` stays disabled and existing ticket processing untouched.

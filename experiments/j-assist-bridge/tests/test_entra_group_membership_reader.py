@@ -69,10 +69,20 @@ class GraphGroupAdapterTests(unittest.TestCase):
         self.assertEqual([row[0] for row in self.calls],["GET"])
 
     def test_wrong_tenant_or_group_blocks_before_graph_io(self):
-        for tenant,group in ((TENANT,"bad"),("other",GROUP), (TENANT,"0"*8+"-"+"0"*4+"-"+"4000-"+"8000-"+"0"*12)):
+        for tenant,group in ((TENANT,"bad"),("other",GROUP), (TENANT,"00000000-0000-0000-0000-000000000000")):
             with self.assertRaises(ValueError):
                 self.reader(tenant,AL,group)
         self.assertEqual(self.calls,[])
+
+    def test_server_configured_alternate_group_is_not_hard_coded(self):
+        alternate="11111111-1111-4111-8111-111111111111"
+        reader=GraphMembershipReader(
+            get_json=lambda url:{"id":AL,"accountEnabled":True},
+            post_json=lambda url,body:{"value":[alternate]} if body=={"groupIds":[alternate]}
+                else (_ for _ in ()).throw(AssertionError("wrong group")))
+        e=reader(TENANT,AL,alternate)
+        self.assertEqual(e.group_id,alternate)
+        self.assertTrue(e.is_member)
 
     def test_strict_profile_type_and_oid_match(self):
         profiles=(

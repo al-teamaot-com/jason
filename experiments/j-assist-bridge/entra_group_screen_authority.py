@@ -1,6 +1,6 @@
 """Preproduction-only AOT Entra group authorization for J-Assist images.
 
-Supports one explicitly approved capability-group ID, not broad admin roles
+Uses a server-supplied approved group object ID, not broad admin roles
 or implicit rights in QuickBooks/other applications. Membership and account
 enabled state must be verified through Graph by a SERVER-OWNED adapter,
 not from browser-authored claims or an access-token group list. No live
@@ -15,8 +15,8 @@ from typing import Callable
 from entra_send_authority import AOT_ENTRA_TENANT_ID
 from session_gate import VerifiedTechnician
 
-# Exact AOT Entra pilot security group created and verified by Owner 2026-11-06.
-# Never change this to a display-name lookup or a browser-supplied group.
+# Default **configuration example** ID created and verified by Owner on 2026-11-06.
+# A server-managed policy selects the exact ID; this constant grants no access.
 AOT_JASSIST_PILOT_GROUP_ID = "5273dd8a-1456-4985-b0a3-c00061267e26"
 
 _GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
@@ -44,9 +44,9 @@ class EntraGroupScreenAuthorizer:
         read_live_membership: Callable[[str, str, str], EntraGroupEvidence | None],
         device_in_aot_account: Callable[[str], bool],
     ) -> None:
-        if (not isinstance(group_id, str) or
-                group_id.casefold() != AOT_JASSIST_PILOT_GROUP_ID):
-            raise ValueError("exact approved J-Assist group object ID required")
+        if (not isinstance(group_id, str) or not _GUID.fullmatch(group_id)
+                or group_id.casefold() == "00000000-0000-0000-0000-000000000000"):
+            raise ValueError("server-configured Entra group object ID required")
         if not (callable(resolve_entr_user_oid)
                 and callable(read_live_membership)
                 and callable(device_in_aot_account)):

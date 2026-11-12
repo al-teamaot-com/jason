@@ -5,7 +5,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from jassist_service_bindings import prepare_live_bindings
-from datto_administrator_authority import DattoSecurityLevelEvidence
+from entra_group_screen_authority import EntraGroupEvidence, AOT_JASSIST_PILOT_GROUP_ID
 from entra_send_authority import AOT_ENTRA_TENANT_ID, JASON_RESOURCE_CLIENT_ID, ENTRA_ISSUER, EntraSendAuthority
 from session_gate import VerifiedTechnician, Denied
 from loopback_transport import create_loopback_server
@@ -20,17 +20,18 @@ class ConfigBoundLoopbackE2E(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory()
         self.path=Path(self.temp.name)/"policy.json"
         self.policy={"schema_version":1,"revision":1,"enabled":True,
-            "access_source":"datto_rmm_assigned_security_level",
-            "aot_account_uid":"synthetic-aot","required_security_level":"Administrator",
+            "access_source":"entra_group",
+            "aot_account_uid":"synthetic-aot","entra_group_id":AOT_JASSIST_PILOT_GROUP_ID,
             "scope":"screen_assistance","approval_record":"TEST-ONLY-NO-APPROVAL"}
         self.publish()
         self.person=VerifiedTechnician("test-tech","aot")
         self.is_member=True
-        self.proof=DattoSecurityLevelEvidence("test-tech","aot","synthetic-aot",
-            "test@example.test",("Administrator",),True,True,True,time.time())
+        self.oid="22222222-2222-2222-2222-222222222222"
         self.gate=prepare_live_bindings(settings_path=self.path,
             datto_account_uid="synthetic-aot",identity=lambda ctx:ctx,
-            datto_level_evidence=lambda p:self.proof if self.is_member else None,
+            resolve_entra_user_oid=lambda p:self.oid if p==self.person else None,
+            read_live_membership=lambda t,oid,group:
+                EntraGroupEvidence(oid,t,group,self.is_member,True,True),
             datto_device_in_account=lambda a,d:a=="synthetic-aot" and d=="12345")
         self.session,self.secret=self.gate.start(trusted_context=self.person,
             device_uid="12345",consent=True)
@@ -93,7 +94,7 @@ class ConfigBoundLoopbackE2E(unittest.TestCase):
             self.image_tool.read_reviewed_image(authenticated_technician=self.person,
                 session_id=self.session.session_id,device_uid="12345",
                 receipt_id=receipt["receipt_id"])
-    def test_datto_membership_revocation_denies_send(self):
+    def test_entra_membership_revocation_denies_send(self):
         self.is_member=False
         self.assertEqual(self.send("SyntheticNonceForE2E999")[0],403)
 

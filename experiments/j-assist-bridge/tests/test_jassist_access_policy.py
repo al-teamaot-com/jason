@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jassist_access_policy import JAssistDattoAccessPolicy, FileBackedJAssistPolicyReader
+from jassist_access_policy import JAssistDattoAccessPolicy, JAssistEntraAccessPolicy, FileBackedJAssistPolicyReader
 from datto_administrator_authority import DattoAdministratorScreenAuthorizer, DattoAdministratorEvidence
 from session_gate import VerifiedTechnician, SessionGate, Denied
 
@@ -140,6 +140,67 @@ class JAssistConfigurationTests(unittest.TestCase):
     def test_requires_trusted_absolute_settings_path(self):
         with self.assertRaises(ValueError):
             FileBackedJAssistPolicyReader("relative-policy.json")
+
+
+def entra_policy():
+    return {"schema_version":1,"revision":1,"enabled":True,
+            "access_source":"entra_group","aot_account_uid":"aot-account",
+            "entra_group_id":"5273dd8a-1456-4985-b0a3-c00061267e26",
+            "scope":"screen_assistance",
+            "approval_record":"TEST-CONFIG-ENABLED-NONPROD"}
+
+
+class EntraConfigurationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path=Path(self.temp.name)/"policy.json"
+        self.write(entra_policy())
+        self.read=FileBackedJAssistPolicyReader(
+            self.path,policy_type=JAssistEntraAccessPolicy)
+
+    def write(self,policy):
+        staging=self.path.with_suffix(".tmp")
+        staging.write_text(json.dumps(policy))
+        staging.chmod(0o600)
+        staging.replace(self.path)
+
+    def test_existing_aot_group_is_config_not_code(self):
+        record=self.read()
+        self.assertEqual(record.entra_group_id,entra_policy()["entra_group_id"])
+        self.assertTrue(record.enabled)
+        self.write({**entra_policy(),
+            "entra_group_id":"11111111-1111-4111-8111-111111111111",
+            "revision":2,"approval_record":"TEST-GROUP-ROTATED-NONPROD"})
+        self.assertEqual(self.read().revision,2)
+        self.assertEqual(self.read().entra_group_id,
+                         "11111111-1111-4111-8111-111111111111")
+
+    def test_reject_wrong_group_shape_source_and_scope(self):
+        for change in (
+            {"entra_group_id":"Administrator"},
+            {"entra_group_id":""},
+            {"entra_group_id":"00000000-0000-0000-0000-000000000000"},
+            {"access_source":"datto_rmm_assigned_security_level"},
+            {"scope":"powershell"},
+            {"enabled":"true"},
+            {"revision":0},
+            {"approval_record":""},
+            {"aot_account_uid":""},
+            {"required_security_level":"Administrator"},
+        ):
+            with self.subTest(change=change),self.assertRaises(ValueError):
+                JAssistEntraAccessPolicy.from_mapping({**entra_policy(),**change})
+        with self.assertRaises(ValueError):
+            JAssistEntraAccessPolicy.from_mapping({
+                k:v for k,v in entra_policy().items() if k!="entra_group_id"})
+
+    def test_reject_unreadable_untrusted_settings(self):
+        self.path.chmod(0o666)
+        with self.assertRaises(ValueError):self.read()
+        self.path.unlink()
+        with self.assertRaises(FileNotFoundError):self.read()
+
 
 
 if __name__ == "__main__":

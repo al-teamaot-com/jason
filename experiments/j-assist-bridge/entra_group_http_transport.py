@@ -10,14 +10,14 @@ POST /users/{oid}/checkMemberGroups {groupIds:[approved group ID]}
 """
 from __future__ import annotations
 
-from typing import Protocol, Mapping, Any
+from typing import Protocol, Mapping, Any, Callable
 from urllib.parse import urlsplit
 import re
 
-from entra_group_screen_authority import AOT_JASSIST_PILOT_GROUP_ID
 from entra_send_authority import AOT_ENTRA_TENANT_ID
 
 _GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
+_GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 _USER_PATH = re.compile(r"^/v1\.0/users/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(/checkMemberGroups)?$", re.I)
 
 
@@ -37,12 +37,15 @@ class HttpTransport(Protocol):
 class AotGraphMembershipHttpTransport:
     """Graph credentials stay server-side, never in Chrome or a model tool."""
 
-    def __init__(self, *, tokens: TenantTokenProvider, transport: HttpTransport):
+    def __init__(self, *, tokens: TenantTokenProvider, transport: HttpTransport,
+                 approved_group_id_for: Callable[[], str]):
         if (not callable(getattr(tokens, "access_token_for_tenant", None))
-                or not callable(getattr(transport, "request", None))):
-            raise ValueError("trusted Graph token provider and transport required")
+                or not callable(getattr(transport, "request", None))
+                or not callable(approved_group_id_for)):
+            raise ValueError("trusted Graph provider, transport and approved group policy required")
         self._tokens = tokens
         self._transport = transport
+        self._approved_group_id_for = approved_group_id_for
 
     @staticmethod
     def _check_url(url: str, *, method: str) -> str:
@@ -89,13 +92,16 @@ class AotGraphMembershipHttpTransport:
 
     def post_json(self, url: str, body: dict) -> dict:
         canonical = self._check_url(url, method="POST")
-        if (not isinstance(body, dict)
-                or body != {"groupIds": [AOT_JASSIST_PILOT_GROUP_ID]}):
-            raise ValueError("membership scope exceeds exact approved group")
+        group_id = self._approved_group_id_for()
+        if (not isinstance(group_id, str) or not _GUID.fullmatch(group_id)
+                or group_id.casefold() == "00000000-0000-0000-0000-000000000000"
+                or not isinstance(body, dict)
+                or body != {"groupIds": [group_id.lower()]}):
+            raise ValueError("membership check must match the current governed group policy")
         result = self._transport.request(
             method="POST", url=canonical,
             headers=self._headers(),
-            json={"groupIds": [AOT_JASSIST_PILOT_GROUP_ID]},
+            json={"groupIds": [group_id.lower()]},
             timeout_seconds=10.0,
         )
         if not isinstance(result, dict):

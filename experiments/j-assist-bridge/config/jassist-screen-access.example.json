@@ -2,9 +2,9 @@
   "schema_version": 1,
   "revision": 1,
   "enabled": false,
-  "access_source": "datto_rmm_assigned_security_level",
+  "access_source": "entra_group",
   "aot_account_uid": "REPLACE_WITH_VERIFIED_AOT_DATTO_ACCOUNT_UID",
-  "required_security_level": "Administrator",
+  "entra_group_id": "5273dd8a-1456-4985-b0a3-c00061267e26",
   "scope": "screen_assistance",
   "approval_record": "CONFIG-EXAMPLE-NOT-APPROVED"
 }

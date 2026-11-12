@@ -34,7 +34,9 @@ class HttpAdapterTests(unittest.TestCase):
     def setUp(self):
         self.tokens=Tokens()
         self.transport=Transport()
-        self.http=AotGraphMembershipHttpTransport(tokens=self.tokens,transport=self.transport)
+        self.approved_group=GROUP
+        self.http=AotGraphMembershipHttpTransport(tokens=self.tokens,transport=self.transport,
+            approved_group_id_for=lambda:self.approved_group)
 
     def test_existing_tenant_provider_is_used_for_both_calls(self):
         reader=GraphMembershipReader(get_json=self.http.get_json,post_json=self.http.post_json)
@@ -90,11 +92,26 @@ class HttpAdapterTests(unittest.TestCase):
         self.assertEqual(self.transport.calls,[])
         self.assertEqual(self.tokens.tenants,[])
 
+    def test_configured_group_change_restricts_http_provider_scope(self):
+        uri=GRAPH_ROOT+"/users/"+OID+"/checkMemberGroups"
+        replacement="11111111-1111-4111-8111-111111111111"
+        self.approved_group=replacement
+        with self.assertRaises(ValueError):
+            self.http.post_json(uri,{"groupIds":[GROUP]})
+        self.assertEqual(self.transport.calls,[])
+        self.http.post_json(uri,{"groupIds":[replacement]})
+        self.assertEqual(self.transport.calls[0]["json"],{"groupIds":[replacement]})
+        self.approved_group=None
+        with self.assertRaises(ValueError):
+            self.http.post_json(uri,{"groupIds":[replacement]})
+
     def test_missing_server_provider_and_transport_fail(self):
         with self.assertRaises(ValueError):
-            AotGraphMembershipHttpTransport(tokens=None,transport=self.transport)
+            AotGraphMembershipHttpTransport(tokens=None,transport=self.transport,
+                approved_group_id_for=lambda:GROUP)
         with self.assertRaises(ValueError):
-            AotGraphMembershipHttpTransport(tokens=self.tokens,transport=None)
+            AotGraphMembershipHttpTransport(tokens=self.tokens,transport=None,
+                approved_group_id_for=lambda:GROUP)
         self.tokens.access_token_for_tenant=lambda **kwargs:None
         with self.assertRaises(PermissionError):
             self.http.get_json(GRAPH_ROOT+"/users/"+OID+"?$select=id,accountEnabled")
