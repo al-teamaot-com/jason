@@ -1,6 +1,6 @@
 # AOT Microsoft 365 Group Administration Pilot — Consent and Release Handoff
 
-**Current status (2026-11-12):** AOT administrator created both app registrations and independently read back each exact application permission grant through Microsoft Graph PowerShell. Restricted staging certificate pairs have been generated. Public certificates are on the Owner's PC; Entra certificate upload and governed OpenBao provisioning remain pending. No group, membership, credential in production runtime, or deployment was changed.
+**Current status (2026-11-12):** AOT administrator created and consented two applications and enrolled both public signing certificates, verifying the exact DER public certificates by single-application Microsoft Graph readback. Source-only isolated live preflight acquired tokens for both apps, performed authorized Graph group/user GETs, verified the AOT group owner and confirmed no alias collision. **Production OpenBao secrets and durable boundary records remain unprovisioned, no group/membership POST was performed, no production release is authorized.**
 
 ## Verified AOT facts (2026-11-12)
 
@@ -43,14 +43,14 @@ After registration, obtain the two **application IDs**, approved **service-princ
 
 **This is the first external action for which administrator consent or approval is required.** Do not silently create apps, modify a customer's directory or reuse the existing directory-read app to avoid consent.
 
-### Certificate registration boundary — pending
+### Certificate registration — complete; production credential provisioning pending
 
 On the Jason host two RSA-3072 self-signed pilot key/certificate pairs were generated with private mode 0600 inside a private mode-0700 staging directory. Only public DER certificates were copied to `C:\Users\AlDavis\Documents\Jason-M365-Public-Certs`.
 
 - Read public SHA-1: `AB1EAD35B802F170BDFB7531637E923039B2F983`.
 - Write public SHA-1: `C020401DAB7CF05BFEFE84024AA323913D903885`.
 - Validity: November 12, 2026 through November 12, 2027 (pilot self-signed).
-- Enrollment script: `C:\Users\AlDavis\Documents\Jason-M365-Certificate-Upload.ps1`. This requires authorized interactive administrator sign-in and exact confirmation; it has not been run.
+- Enrollment script: `C:\Users\AlDavis\Documents\Jason-M365-Certificate-Upload.ps1`. Ran in authorized AOT admin session, followed by corrected read-only verifier `Jason-M365-Verify-Certificates.ps1` confirming matching DER certificates and `CERTIFICATE_READBACK_VERIFIED=YES`.
 - The private keys are *not* in production OpenBao, in Git or on the Owner's PC. Remove the restricted staging files after controlled vault transfer and verification.
 
 ## Post-consent automated acceptance
@@ -72,7 +72,7 @@ The previous dormant group-membership source branch `feature/governed-entra-grou
 
 ## Required human action
 
-The AOT app-role consent has been granted. **Next action requiring Owner interaction:** authenticate as the AOT Entra administrator and approve enrollment of the two exact public certificates using the prepared PowerShell script. After live read-only tenant token validation, a separate exact-SHA governed production authorization is still required before release or actual group mutation.
+AOT administrator app-role consent and certificate enrollment are complete. Next requires separately governed production secret provisioning and creation/validation of the two durable client-boundary records, followed by an authorized exact-SHA controlled release. Without that, the source-only group creation/membership capability cannot safely execute in production.
 
 No technician should be asked to paste credentials or hand-assemble Microsoft access tokens.
 
@@ -99,3 +99,85 @@ inspected before release preparation:
 
 All concurrent logical names, KV paths and AppRole names must remain distinct
 when reviewed in the eventual protected integration/release candidate.
+
+
+## Live AOT source-based isolated preflight — PASS (2026-11-12)
+
+A controlled isolated process on the Jason host used the existing source
+`MsalCertificateTokenProvider`, `MicrosoftGroupTenantPreflight`,
+`MicrosoftGraphGroupReader`, and bounded HTTP transport. It used only the
+exact expected AOT tenant/client and both already consented application IDs,
+with **temporary in-memory boundaries**. Credential material came from
+owner-restricted on-host staging for this nonproduction verification. No
+production OpenBao KV, AppRole, boundary database or runtime activation changed.
+
+Safe observed results:
+
+```text
+LIVE_AOT_GROUP_CREDENTIAL_PREFLIGHT=PASS
+TENANT_ID=f7054323-d52b-4863-8c2f-1898f0b6077c
+LAB_ONLY_BOUNDARY=true; PRODUCTION_BOUNDARY_CHANGED=false
+READ_IDENTITY_AND_GRAPH_GROUPS_USERS_GET=True
+WRITE_IDENTITY_TOKEN=True
+WRITE_APP_GRAPH_POST_PERFORMED=false
+LIVE_GROUP_MUTATION_PERMITTED=False
+OWNER_ACTIVE_IDENTITY_READBACK=True
+PILOT_GROUP_ALIAS_EXISTS=False
+```
+
+The proof confirms real Microsoft authentication and bounded Graph reads, not
+production secret lifecycle, production boundary registration, or Graph write
+permission acceptance under a mutation. Source code does not use filesystem
+secret fallback in production.
+
+Owner approval will still be required before any exact-SHA production
+unfreeze/deploy, governed secret or durable boundary mutation, and live
+group-create/member-add operation. No tenant group was created.
+
+## Governed release and credential activation boundary (current production verified)
+
+Read-only production checks on 2026-11-12 confirmed:
+
+- Live `jason-runtime` Docker image
+  `jason-runtime:release-d1b8c196dadd-bb7d28ebd5e5` is healthy;
+  its immutable OCI source-revision label is
+  `d1b8c196dadd4b672ec8ba47075f27bb61c98d63`.
+- Live `jason-mcp-pilot` image starts with the same release revision.
+  The Jason MCP reports a current Owner-reviewed release policy on exactly
+  `d1b8c196dadd4b672ec8ba47075f27bb61c98d63`, with Teams not required.
+- The corresponding rollback source tree is present at
+  `/opt/jason/releases/d1b8c196dadd4b672ec8ba47075f27bb61c98d63`,
+  and the corresponding runtime image remains present locally.
+- Production tool discovery has **no** registered group-create or
+  group-membership mutation capability. The feature PR is not deployed.
+- Existing ticket scan remains live; an independent backlog is blocked or
+  waiting and is not caused by this undeployed group-admin feature.
+
+**Proposed rollback SHA for an approved future release:**
+`d1b8c196dadd4b672ec8ba47075f27bb61c98d63` (the verified
+currently running release, not a guessed prior image). This is a release
+candidate rollback reference, not proof of a completed rollback drill or
+authorization to modify that running release.
+
+### Exact additional actions requiring governed production authority
+
+1. Provision the two already-enrolled private keys into **different** approved
+   OpenBao secret paths and distinct least-privileged AppRoles using the
+   reviewed standard provider-secret provisioning code. Never emit private keys
+   or provider tokens into ticket notes, logs, chat, or source.
+2. Verify each staged certificate SHA-1 against the corresponding Entra
+   readback and each OpenBao record in a credential-safe manner. Remove local
+   private staging only after separately verified secure copies and recovery.
+3. Register separate `microsoft_graph_group_read` and
+   `microsoft_graph_group_write` durable AOT tenant boundaries through an
+   approved governed onboarding operation, not direct SQLite writes.
+4. Activate only the two approved group capability definitions through the
+   existing central governed executor, after exact SHA, scope, health and
+   rollback approvals. Do not change Autotask ticket processing.
+5. Execute the exact AOT test group-create and member-add actions with
+   distinct approved action plans; read back properties, owner and member,
+   verify audit and idempotent replay.
+6. Restore the production release freeze and independently check protected
+   ticket workflows and release health.
+
+**No step above was executed as part of the read-only preflight.**

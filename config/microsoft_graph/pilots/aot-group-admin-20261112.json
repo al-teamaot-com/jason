@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "status": "aot_admin_consent_verified_certificate_enrollment_pending",
+  "status": "aot_lab_live_readonly_preflight_verified_release_pending",
   "pilot_id": "aot-m365-group-admin-20261112",
   "client_id": "client-aot-internal",
   "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
@@ -18,8 +18,11 @@
     "administrator_consent": "granted_and_read_back_2026-11-12",
     "service_principal_id": "92191ddb-36dc-40f8-9b22-a070f68ff1e3",
     "public_certificate_sha1": "AB1EAD35B802F170BDFB7531637E923039B2F983",
-    "certificate_uploaded": false,
-    "bound_to_jason_runtime": false
+    "certificate_uploaded": true,
+    "bound_to_jason_runtime": false,
+    "certificate_readback_verified": "graph_application_public_der_matches_staged_certificate_2026-11-12",
+    "production_openbao_provisioned": false,
+    "lab_token_acquired": true
   },
   "required_group_write": {
     "provider": "microsoft_graph_group_write",
@@ -28,8 +31,11 @@
     "administrator_consent": "granted_and_read_back_2026-11-12",
     "service_principal_id": "b15da46c-31f9-41a4-bb80-4d5eab615f81",
     "public_certificate_sha1": "C020401DAB7CF05BFEFE84024AA323913D903885",
-    "certificate_uploaded": false,
-    "bound_to_jason_runtime": false
+    "certificate_uploaded": true,
+    "bound_to_jason_runtime": false,
+    "certificate_readback_verified": "graph_application_public_der_matches_staged_certificate_2026-11-12",
+    "production_openbao_provisioned": false,
+    "lab_token_acquired": true
   },
   "owner_user": {
     "object_id": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
@@ -52,8 +58,9 @@
   },
   "validation": {
     "before": [
-      "verify_granted_admin_consent_and_public_cert_enrollment",
-      "verify_read_and_write_tenant_boundaries",
+      "ensure_prod_OpenBao_AppRoles_and_cert_private_keys_are_separately_provisioned",
+      "verify_prod_read_and_write_tenant_boundaries",
+      "verify_privileged_application_role_consent_still_current",
       "verify_exact_technician_entitlement",
       "verify_group_alias_absent",
       "approve_exact_release_sha_and_rollback",
@@ -71,5 +78,17 @@
     "policy": "retain_test_group_until_separately_authorized_cleanup",
     "no_automatic_group_deletion": true
   },
-  "consent_evidence": "AOT administrator Graph PowerShell app-role assignment readback 2026-11-12; user-supplied output independently matched local evidence CSV"
+  "consent_evidence": "AOT administrator Graph PowerShell app-role assignment readback 2026-11-12; user-supplied output independently matched local evidence CSV",
+  "read_only_smoke_verification": {
+    "date": "2026-11-12",
+    "execution_context": "separate nonproduction in_memory boundaries with source connector; no production OpenBao or boundary database updates",
+    "reader_ms_graph_users_get": true,
+    "reader_ms_graph_groups_get": true,
+    "write_app_ms_token_acquired": true,
+    "write_app_mutation_exercised": false,
+    "group_owner_user_active": true,
+    "proposed_group_mail_nickname_available": true,
+    "production_app_role_secret_provisioned": false,
+    "production_tenant_boundary_validated": false
+  }
 }
