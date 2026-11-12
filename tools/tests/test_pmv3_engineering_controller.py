@@ -139,7 +139,7 @@ def test_controller_cannot_create_or_import_approval():
     assert "approval_request_id" not in source
     assert "decision=" not in lowered
     assert "channel=" not in lowered
-    assert "teams_only_approval" in source
+    assert "teams_only_approval" not in source
 
 
 def test_integration_queue_failure_does_not_stop_development(tmp_path):

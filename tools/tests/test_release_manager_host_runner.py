@@ -213,7 +213,9 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                   "111111111111", "222222222222", "333333333333", "444444444444"]),
               patch.object(runner, "worktree", return_value=checkout),
               patch.object(runner, "run"),
-              patch.object(runner, "image_id", return_value="sha256:verified"),
+              patch.object(runner, "image_id", side_effect=lambda ref: (
+                  "sha256:d709ca54b66d41e22bd1f67782cd5f6d681c4337bffb359b632523762a27788a"
+                  if ref == "jason-mcp:generic-governed-8f1e864947a2" else "sha256:verified")),
               patch.object(runner, "remove_worktree")):
             runtime1, _ = runner.build_candidate(repo, state, SHA_A)
             runtime2, _ = runner.build_candidate(repo, state, SHA_A)
@@ -769,23 +771,15 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             }
             request_path = request_root / f"{release_id}.json"
             request_path.write_text(json.dumps(request), encoding="utf-8")
+            # Historical unsigned owner-al JSON is deliberately no longer
+            # sufficient production authorization. Even if the claimed Owner
+            # is named, the root-pinned independent signed OAuth proof is
+            # mandatory and no untrusted approval may reach approve_release.
             with patch.object(runner, "approve_release") as approve:
-                count = runner.consume_owner_approval_requests(ROOT, state_root)
-            self.assertEqual(count, 1)
-            approve.assert_called_once_with(
-                ROOT,
-                state_root,
-                release_id=release_id,
-                candidate_sha=SHA_A,
-                source="governed_mcp_owner:owner-al",
-            )
-            self.assertFalse(request_path.exists())
-            archived = (
-                state_root
-                / "owner-approval-requests-processed"
-                / f"{release_id}.json"
-            )
-            self.assertEqual(json.loads(archived.read_text(encoding="utf-8")), request)
+                with self.assertRaises((PermissionError, runner.ReleaseManagerError)):
+                    runner.consume_owner_approval_requests(ROOT, state_root)
+            approve.assert_not_called()
+            self.assertTrue(request_path.exists())
 
     def test_consume_owner_approval_request_rejects_release_sha_mismatch(self):
         import json
@@ -3842,7 +3836,7 @@ def test_scheduled_promotion_defers_exact_material_owner_review_without_deployin
     assert saved["owner_approval"] == record["owner_approval"]
     assert saved["rollback_sha"] == SHA_B
 
-def test_reviewed_owner_offer_can_request_only_missing_ccc_review(tmp_path):
+def test_reviewed_owner_offer_needs_no_separate_ccc_review(tmp_path):
     from types import SimpleNamespace
     import json
     policy = SimpleNamespace(
@@ -3858,7 +3852,7 @@ def test_reviewed_owner_offer_can_request_only_missing_ccc_review(tmp_path):
     }
     assert runner.signed_owner_offer_purpose(
         approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
-    ) == "ccc_material_review_only"
+    ) is None
     # The exact already-approved release needs no second release grant.
     original_approval = dict(approved["owner_approval"])
     assert approved["owner_approval"] == original_approval
@@ -3905,7 +3899,7 @@ def test_reviewed_offer_policy_mode_risk_and_identity_do_not_widen(tmp_path):
     ) is None
 
 
-def test_reviewed_offer_rejects_conflicting_ccc_evidence_not_overwrite(tmp_path):
+def test_reviewed_offer_ignores_legacy_ccc_evidence_for_release_authority(tmp_path):
     from types import SimpleNamespace
     import json
     import pytest
@@ -3923,10 +3917,9 @@ def test_reviewed_offer_rejects_conflicting_ccc_evidence_not_overwrite(tmp_path)
         {"status": "approved", "source_revision": SHA_A, "recorded_by": "person-other"},
     ):
         named.write_text(json.dumps(bad))
-        with pytest.raises(runner.ReleaseManagerError, match="conflicts"):
-            runner.signed_owner_offer_purpose(
-                approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
-            )
+        assert runner.signed_owner_offer_purpose(
+            approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
+        ) is None
         assert json.loads(named.read_text()) == bad
 
 
@@ -6523,3 +6516,17 @@ def test_postacceptance_rollback_failure_restores_freeze_and_fails_receipt(tmp_p
     assert receipt['freeze_restored'] is True
     assert receipt['freeze_sha256_before'] == receipt['freeze_sha256_after']
     assert receipt['standing_authority'] is False
+
+
+
+def test_v31_owner_release_mode_is_not_treated_as_legacy_teams_pilot():
+    import pytest
+    from types import SimpleNamespace
+    assert runner._reviewed_mobile_release_mode(
+        SimpleNamespace(schema_version="3.1")
+    ) == "owner_reviewed"
+    assert runner._reviewed_mobile_release_mode(
+        SimpleNamespace(schema_version="4.1")
+    ) == "admin_approver_separated"
+    with pytest.raises(runner.ReleaseManagerError):
+        runner._reviewed_mobile_release_mode(SimpleNamespace(schema_version="9.0"))

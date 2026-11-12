@@ -18,10 +18,6 @@ class FakeApi:
         self.gates = []
         self.merges = []
         self.updates = []
-        self.gate_required = False
-
-    def ensure_gate_required(self):
-        self.gate_required = True
 
     def main_sha(self):
         return self._main
@@ -95,6 +91,38 @@ def write_approved(spool: Path, *prs: int):
     (spool / 'development-state.json').write_text(json.dumps({'items': items}))
 
 
+def test_gh_api_open_pr_discovery_uses_paginated_rest(monkeypatch):
+    api = queue.GhApi("al-teamaot-com/jason")
+    calls = []
+    pages = [[{
+        "number": 2399,
+        "title": "P0 recovery",
+        "draft": False,
+        "head": {"sha": "a" * 40, "ref": "feature/recovery"},
+        "created_at": "2026-11-10T15:00:00Z",
+        "labels": [{"name": queue.RECOVERY_LABEL}],
+        "state": "open",
+        "html_url": "https://github.com/al-teamaot-com/jason/pull/2399",
+    }]]
+
+    def fake_run(args, *, input_text=None):
+        calls.append(list(args))
+        return json.dumps(pages)
+
+    monkeypatch.setattr(api, "_run", fake_run)
+    result = api.open_pull_requests()
+    assert calls == [[
+        "api", "--paginate", "--slurp",
+        "repos/al-teamaot-com/jason/pulls?state=open&base=main&per_page=100",
+    ]]
+    assert len(result) == 1
+    assert result[0]["number"] == 2399
+    assert result[0]["headRefOid"] == "a" * 40
+    assert result[0]["mergeable"] == "UNKNOWN"
+    assert result[0]["mergeStateStatus"] == "UNKNOWN"
+    assert result[0]["labels"] == [{"name": queue.RECOVERY_LABEL}]
+
+
 def test_approved_pr_numbers_uses_durable_development_and_todo(tmp_path):
     spool = tmp_path / 'spool'
     spool.mkdir()
@@ -146,7 +174,6 @@ def test_main_ahead_of_lkg_infers_release_lock_and_blocks_merges(tmp_path):
     assert state['release_lock']['candidate_sha'] == '2' * 40
     assert api.merges == []
     assert any(x[1] == 'pending' for x in api.gates)
-    assert api.gate_required is True
 
 
 def test_release_lock_clears_when_candidate_becomes_lkg(tmp_path):
@@ -318,7 +345,7 @@ def test_read_only_status_refreshes_live_revision_without_mutating_queue(tmp_pat
     assert result['release_lock_active'] is True  # Stored lock remains enforceable.
     assert result['release_candidate_sha'] == merged
     assert path.read_bytes() == original
-    assert not api.merges and not api.gates and not api.gate_required
+    assert not api.merges and not api.gates
 
 
 def test_read_only_status_keeps_main_ahead_of_production_locked(tmp_path):
@@ -340,7 +367,7 @@ def test_read_only_status_keeps_main_ahead_of_production_locked(tmp_path):
     assert result['release_lock_reconciliation_pending'] is False
     assert result['queue_state_stale'] is True
     assert path.read_bytes() == original
-    assert not api.merges and not api.gates and not api.gate_required
+    assert not api.merges and not api.gates
 
 
 def test_read_only_status_unknown_production_is_fail_closed(tmp_path):
@@ -352,7 +379,7 @@ def test_read_only_status_unknown_production_is_fail_closed(tmp_path):
     assert result['production_lkg_sha'] == ''
     assert result['release_lock_reconciliation_pending'] is False
     assert not (spool / 'pmv3-integration-queue-state.json').exists()
-    assert not api.merges and not api.gates and not api.gate_required
+    assert not api.merges and not api.gates
 
 
 def test_read_only_status_rejects_unverifiable_protected_main(tmp_path):
@@ -366,7 +393,7 @@ def test_read_only_status_rejects_unverifiable_protected_main(tmp_path):
     with pytest.raises(ValueError, match='protected main SHA is unavailable'):
         queue.current_status(api=api, spool=spool, release_state=release)
     assert ledger.read_bytes() == before
-    assert not api.gates and not api.merges and not api.gate_required
+    assert not api.gates and not api.merges
 
 
 def test_read_only_status_does_not_clear_unrelated_release_lock(tmp_path):
@@ -389,4 +416,13 @@ def test_read_only_status_does_not_clear_unrelated_release_lock(tmp_path):
     assert result['release_lock_reconciliation_pending'] is False
     assert result['release_candidate_sha'] == unrelated
     assert ledger.read_bytes() == before
-    assert not api.gates and not api.merges and not api.gate_required
+    assert not api.gates and not api.merges
+
+
+
+def test_retired_required_integration_check_is_never_reinstalled():
+    # The source and mock API intentionally provide no branch-protection
+    # writer. A future attempt to resurrect the old call will fail existing
+    # controller/regression tests rather than quietly rewriting GitHub rules.
+    assert not hasattr(queue.GhApi, "ensure_gate_required")
+    assert not hasattr(FakeApi, "ensure_gate_required")

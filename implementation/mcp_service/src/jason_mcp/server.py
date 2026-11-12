@@ -4317,7 +4317,7 @@ _UNSUPERVISED_COMPONENT_BLOCK_PATTERNS = (
 def _authority_admin_owner() -> tuple[str, str]:
     """Administer exact grants with the authenticated privileged account only.
 
-    V4 is a distinct *opt-in* release policy. It does not remap the admin
+    V4/V4.1 is a distinct *opt-in* release policy. It does not remap the admin
     Entra identity into the routine technician account or write identity
     bindings. An enabled profile must be attested by source-controlled release
     input and the exact root-owned private policy; unknown profiles fail closed.
@@ -4335,7 +4335,7 @@ def _authority_admin_owner() -> tuple[str, str]:
             "/var/lib/jason/authority/mobile-release-approval-policy.json",
         )))
         if (
-            policy.schema_version != "4.0"
+            policy.schema_version not in {"4.0", "4.1"}
             or policy.admin_approver_binding is None
             or policy.regular_requester_binding is None
         ):
@@ -5248,9 +5248,22 @@ def _component_approval_owner() -> tuple[str, str]:
 
 
 def _release_approval_owner() -> tuple[str, str]:
-    principal, organization, _, _ = _authenticated_write_identity()
-    owners = approval_owner_identities()
-    if not owners or principal not in owners:
+    # Unlike global authority-grant administration, release approval may be
+    # performed by the exact licensed Owner's active Entra OAuth subject. The
+    # Entra/Jason identity middleware above independently verifies bearer
+    # signature, tenant, expiry and active binding before this decision.
+    from jason_mcp.release_owner_identity import authorized_release_owner
+
+    principal, organization, assurance, _ = _authenticated_write_identity()
+    token = get_access_token()
+    claims = (token.claims or {}) if token is not None else None
+    if not authorized_release_owner(
+        principal=principal,
+        organization_id=organization,
+        assurance=assurance,
+        verified_token_claims=claims,
+        existing_owner_identities=approval_owner_identities(),
+    ):
         raise PermissionError("RELEASE_APPROVAL_OWNER_REQUIRED")
     return principal, organization
 
@@ -5276,6 +5289,18 @@ def approve_release_candidate(
                 "/var/lib/jason/openclaw/release-manager",
             )
         )
+        from kernel.signed_owner_release import read_service_owner_signing_key
+
+        # The MCP OAuth middleware has authenticated and resolved this exact
+        # Owner subject. No model/caller-supplied identity or private signing
+        # key is accepted. Absence of the separately provisioned signer denies.
+        signer_path = os.getenv("JASON_OWNER_RELEASE_ED25519_KEY_PATH", "").strip()
+        if not signer_path or not signer_path.startswith("/"):
+            raise PermissionError("RELEASE_APPROVAL_SIGNER_NOT_CONFIGURED")
+        signer = read_service_owner_signing_key(Path(signer_path))
+        token = get_access_token()
+        if token is None:
+            raise PermissionError("RELEASE_APPROVAL_AUTHENTICATED_SESSION_REQUIRED")
         request = queue_release_approval_request(
             state_root=state_root,
             release_id=release_id,
@@ -5283,6 +5308,8 @@ def approve_release_candidate(
             approved_by=principal,
             organization_id=organization,
             reason=reason,
+            verified_token_claims=token.claims or {},
+            service_signer=signer,
         )
     except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
         return {"status": "rejected", "error_code": str(exc)}
@@ -6365,6 +6392,60 @@ def _production_commitment_snapshot() -> dict[str, object]:
     }
 
 
+def _current_release_approval_policy_snapshot() -> dict[str, object]:
+    """Read the protected production LKG, never infer approval from PMV3 history.
+
+    Legacy PMV3 records permanently describe their historical Teams-only
+    engineering train. A current approval mode is stated only when root's
+    last-known-good revision agrees with the closed, revalidated breaker.
+    Unknown or mismatched evidence is UNKNOWN rather than a false all-clear.
+    """
+    root = Path(os.environ.get(
+        "JASON_RELEASE_MANAGER_STATE_ROOT",
+        "/var/lib/jason/openclaw/release-manager",
+    ))
+    try:
+        report = json.loads(
+            (root / "protected-readback/production-control-state.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        manifest = report["last_known_good"]["manifest"]
+        breaker = report["circuit_breaker"]
+        revision = str(manifest["revision"]).lower()
+        if (
+            not re.fullmatch(r"[0-9a-f]{40}", revision)
+            or breaker.get("state") != "closed"
+            or breaker.get("revalidated_revision") != revision
+        ):
+            raise ValueError("production revision or breaker is unverified")
+        mode = str(manifest.get("mobile_release_approval_mode") or "")
+        if mode != "owner_reviewed":
+            return {
+                "status": "unknown",
+                "reason": "production_release_mode_not_owner_reviewed",
+                "mode": mode or None,
+                "teams_required": None,
+                "revision": revision,
+                "source": "root_protected_last_known_good",
+            }
+        return {
+            "status": "current",
+            "mode": mode,
+            "teams_required": False,
+            "revision": revision,
+            "source": "root_protected_last_known_good",
+        }
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return {
+            "status": "unknown",
+            "reason": "protected_production_approval_evidence_unavailable_or_mismatched",
+            "mode": None,
+            "teams_required": None,
+            "source": "root_protected_last_known_good",
+        }
+
+
 def _pmv3_engineering_snapshot() -> dict[str, object]:
     path = Path(
         os.environ.get(
@@ -6377,7 +6458,7 @@ def _pmv3_engineering_snapshot() -> dict[str, object]:
             "status": "unavailable",
             "reason": "pmv3_controller_state_missing",
             "pass_count": 0,
-            "teams_only_approval": True,
+            "teams_only_approval": None,
         }
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -6386,14 +6467,14 @@ def _pmv3_engineering_snapshot() -> dict[str, object]:
             "status": "unavailable",
             "reason": f"pmv3_controller_state_invalid:{type(exc).__name__}",
             "pass_count": 0,
-            "teams_only_approval": True,
+            "teams_only_approval": None,
         }
     if not isinstance(payload, Mapping):
         return {
             "status": "unavailable",
             "reason": "pmv3_controller_state_invalid_shape",
             "pass_count": 0,
-            "teams_only_approval": True,
+            "teams_only_approval": None,
         }
     passes = payload.get("passes")
     passes = passes if isinstance(passes, list) else []
@@ -6421,7 +6502,11 @@ def _pmv3_engineering_snapshot() -> dict[str, object]:
         "last_disposition": str(last_pass.get("disposition") or ""),
         "last_progress_sha256": str(last_pass.get("progress_sha256") or ""),
         "unchanged_passes": int(last_pass.get("unchanged_passes") or 0),
-        "teams_only_approval": payload.get("teams_only_approval") is True,
+        "teams_only_approval": (
+            payload.get("teams_only_approval")
+            if isinstance(payload.get("teams_only_approval"), bool)
+            else None
+        ),
         "integration_queue": integration_queue,
     }
 
@@ -6435,6 +6520,15 @@ def jason_mcp_status() -> dict[str, object]:
 
     autonomy_work = _autonomous_ticket_work_snapshot()
     pmv3_engineering = _pmv3_engineering_snapshot()
+    live_release_approval = _current_release_approval_policy_snapshot()
+    pmv3_engineering["historical_teams_only_approval"] = (
+        pmv3_engineering.get("teams_only_approval")
+    )
+    # Preserve the original historical value separately. This compatibility
+    # field must reflect CURRENT authorization, not a November engineering
+    # train that can never be the source of live Owner approval.
+    pmv3_engineering["teams_only_approval"] = live_release_approval["teams_required"]
+    pmv3_engineering["release_approval_policy"] = live_release_approval
     pmv3_engineering["ticket_processing"] = {
         key: autonomy_work.get(key)
         for key in (
@@ -6489,6 +6583,7 @@ def jason_mcp_status() -> dict[str, object]:
         "autonomy_work": autonomy_work,
         "production_commitments": _production_commitment_snapshot(),
         "pmv3_engineering": pmv3_engineering,
+        "release_approval_policy": live_release_approval,
     }
 
 

@@ -58,6 +58,15 @@ def main(*, stage_only: bool = False) -> int:
         LIB / "protected_root_policy_migration.py",
         0o755,
     )
+    # The root host must independently verify the authenticated Entra Owner
+    # signature. Stage immutable verifier code before making a new root worker
+    # executable. The public trust pin itself is a separate root-owned,
+    # exact-Owner-authorized policy and is NEVER auto-created here.
+    install(
+        ROOT / "implementation" / "kernel" / "signed_owner_release.py",
+        LIB / "owner_signed_release.py",
+        0o644,
+    )
     install(
         ROOT / "tools" / "release_host_reconcile_worker.py",
         LIB / "release_host_reconcile_worker.py",

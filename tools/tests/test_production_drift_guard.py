@@ -53,6 +53,29 @@ class ProductionDriftGuardTests(unittest.TestCase):
         ):
             return guard.evaluate(policy)
 
+    def test_declared_optional_sql_full_scan_failure_is_nonblocking_advisory(self):
+        scan = "jason-openclaw-authority-full-integrity.service"
+        result = self._synthetic_system_failure(failed={scan}, allowed={scan})
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["advisories"], [{
+            "kind": "independent_optional_system_unit_failed",
+            "unit": scan, "state": "failed",
+        }])
+
+    def test_required_or_undeclared_full_scan_failure_is_still_drift(self):
+        scan = "jason-openclaw-authority-full-integrity.service"
+        required = self._synthetic_system_failure(failed={scan}, required={scan})
+        undeclared = self._synthetic_system_failure(failed={scan})
+        self.assertEqual(required["status"], "drift_detected")
+        self.assertEqual(undeclared["status"], "drift_detected")
+        self.assertIn("required_system_unit_not_active", {
+            item["kind"] for item in required["problems"]
+        })
+        self.assertIn("undeclared_installed_system_unit", {
+            item["kind"] for item in undeclared["problems"]
+        })
+
     def test_declared_optional_documentation_failure_is_visible_advisory(self):
         docs = "jason-documentation-reconciliation.service"
         result = self._synthetic_system_failure(failed={docs}, allowed={docs})
@@ -253,3 +276,9 @@ class ProductionDriftGuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_failed_optional_full_integrity_scan_is_advisory_not_release_drift():
+    from tools import production_drift_guard as g
+    assert "jason-openclaw-authority-full-integrity.service" in g.INDEPENDENT_OPTIONAL_SYSTEM_ONESHOTS
+    assert "jason-runtime.service" not in g.INDEPENDENT_OPTIONAL_SYSTEM_ONESHOTS

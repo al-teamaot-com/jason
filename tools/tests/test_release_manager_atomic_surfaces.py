@@ -88,8 +88,8 @@ def record():
                 "JASON_RUNTIME_PRODUCTION_IMAGE": "jason-runtime:test-a",
                 "JASON_MCP_PRODUCTION_IMAGE": "jason-mcp:test-a",
                 "JASON_SOURCE_REVISION_OVERRIDE": SHA_A,
-                "JASON_RELEASE_MOBILE_APPROVAL_MODE": "admin_approver_separated",
-                "JASON_AOT_ADMIN_APPROVER_PROFILE": "admin-separated-v1",
+                "JASON_RELEASE_MOBILE_APPROVAL_MODE": "owner_reviewed",
+                "JASON_AOT_ADMIN_APPROVER_PROFILE": "",
             }),
         },
         "history": [],
@@ -164,7 +164,7 @@ def atomic_release_sandbox(monkeypatch, tmp_path):
     monkeypatch.setattr(
         runner, "live_release_mobile_approval_mode",
         lambda runtime: (
-            "admin_approver_separated" if str((runtime or {}).get("revision") or "") == SHA_A
+            "owner_reviewed" if str((runtime or {}).get("revision") or "") == SHA_A
             else "owner_only_pilot"
         ),
     )
@@ -507,7 +507,9 @@ def test_mcp_candidate_uses_established_governed_base_not_production():
     source = (ROOT / "tools" / "release_manager_host_runner.py").read_text(
         encoding="utf-8"
     )
-    assert 'base = "jason-mcp:generic-governed-8f1e864947a2"' in source
+    assert 'canonical = "jason-mcp:generic-governed-8f1e864947a2"' in source
+    assert "verified_mcp_preproduction_base(state_root)" in source
+    assert "root-attested V2 recovery base" in source
     assert 'base = "jason-mcp:production"' not in source
 
 

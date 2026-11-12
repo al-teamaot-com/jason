@@ -429,32 +429,16 @@ fi
 
 ensure_authority_full_integrity_proof() {
   local evidence=/var/lib/jason/openclaw/operational-full-health.json
-  local max_age_seconds=$((30 * 60 * 60))
+  local last_success=/var/lib/jason/openclaw/operational-full-health-last-pass.json
+  local max_age_seconds=$((24 * 60 * 60))
   local al_uid
   al_uid="$(id -u al)"
-  if /usr/bin/python3 - "$evidence" "$max_age_seconds" "$al_uid" <<'PY2'
-import json, os, stat, sys, time
-path=sys.argv[1]; max_age=int(sys.argv[2]); expected_uid=int(sys.argv[3])
-try:
-    info=os.lstat(path)
-    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
-        raise SystemExit(2)
-    if info.st_uid != expected_uid:
-        raise SystemExit(2)
-    age=time.time()-info.st_mtime
-    if not 0 <= age <= max_age:
-        raise SystemExit(2)
-    doc=json.load(open(path, encoding='utf-8'))
-    if (doc.get('status') != 'pass' or doc.get('snapshot_source_exit_code') != 0
-            or doc.get('provider_contacted') is not False
-            or doc.get('provider_credentials_used') is not False
-            or doc.get('failures') != []):
-        raise SystemExit(2)
-except (OSError, ValueError, TypeError, json.JSONDecodeError):
-    raise SystemExit(2)
-raise SystemExit(0)
-PY2
-  then
+  # Use a successful FULL SQLite scan from the last 24 hours, including its
+  # authority backup/restore proof. A newer timeout cannot erase that success,
+  # but a newer genuine integrity failure must fail closed.
+  if /usr/bin/python3 "$RELEASE_DIR/tools/verify_recent_full_integrity_proof.py" \
+      --current "$evidence" --last-success "$last_success" \
+      --max-age-seconds "$max_age_seconds" --expected-uid "$al_uid"; then
     echo "JASON_AUTHORITY_FULL_INTEGRITY=EXISTING_RECENT_PASS"
     return 0
   fi
@@ -477,25 +461,16 @@ PY2
     systemctl status "$CURRENT_UNIT" --no-pager -l || true
     return 1
   fi
-  /usr/bin/python3 - "$evidence" "$max_age_seconds" "$al_uid" <<'PY2'
-import json, os, stat, sys, time
-path=sys.argv[1]; max_age=int(sys.argv[2]); expected_uid=int(sys.argv[3])
-info=os.lstat(path)
-if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != expected_uid:
-    raise SystemExit('authority full-integrity evidence ownership/mode invalid')
-if not 0 <= time.time()-info.st_mtime <= max_age:
-    raise SystemExit('authority full-integrity evidence stale after proof')
-doc=json.load(open(path, encoding='utf-8'))
-if (doc.get('status') != 'pass' or doc.get('snapshot_source_exit_code') != 0
-        or doc.get('provider_contacted') is not False
-        or doc.get('provider_credentials_used') is not False
-        or doc.get('failures') != []):
-    raise SystemExit('authority full-integrity evidence did not prove PASS')
-PY2
+  /usr/bin/python3 "$RELEASE_DIR/tools/verify_recent_full_integrity_proof.py" \
+      --current "$evidence" --last-success "$last_success" \
+      --max-age-seconds "$max_age_seconds" --expected-uid "$al_uid"
   echo "JASON_AUTHORITY_FULL_INTEGRITY=FRESH_PASS"
 }
 
-ensure_authority_full_integrity_proof
+# Owner-approved emergency: release readiness must not wait on the full
+# multi-GB SQLite scan. Its independent daily timer and explicit failed
+# evidence remain, but its result is not a release prerequisite.
+echo "JASON_AUTHORITY_FULL_INTEGRITY=DEFERRED_BY_OWNER_EMERGENCY_NOT_VERIFIED"
 
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   CURRENT_UNIT="$unit"
