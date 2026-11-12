@@ -1,0 +1,81 @@
+name: PMv4 Stage A0 Source Scope and Empty-Rollback Acceptance
+
+on:
+  pull_request:
+    paths:
+      - "tools/pmv4_stage_a_*"
+      - "tests/test_pmv4_stage_a_*"
+      - "docs/operations/PMv4-Stage-A0-*"
+      - ".github/workflows/pmv4-stage-a-readiness.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage-a0-no-production:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install offline verification dependencies
+        run: python3 -m pip install pytest cryptography
+      - name: Verify exact Stage A bootstrap scope, fail-closed recovery and rollback
+        env:
+          PYTHONPATH: "implementation:."
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q             tests/test_pmv4_stage_a_packet.py             tests/test_pmv4_host_install_contract.py             tests/test_pmv4_breaker_recovery_independence.py             tests/test_pmv4_shadow_owner_issuer.py             tools/tests/test_release_breaker_recovery_manager.py             tools/tests/test_root_revalidate_release_breaker.py
+      - name: Produce audited SOURCE-ONLY Stage A0 scope and lab rollback receipt
+        env:
+          PYTHONPATH: "implementation:."
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          python3 tools/pmv4_stage_a_packet.py --scope --source-sha "$SHA" > pmv4-stage-a0-source-scope.json
+          python3 - <<'PY'
+          import json, tempfile
+          from pathlib import Path
+          from tools import pmv4_stage_a_packet as packet
+          from tools import pmv4_stage_a_lab as lab
+          from subprocess import check_output
+          scope = json.loads(Path("pmv4-stage-a0-source-scope.json").read_text())
+          assert scope["candidate_sha"] == check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          assert scope["production_freeze_change"] is False
+          assert scope["production_services_restart"] is False
+          assert scope["owner_issuer_enabled"] is False
+          assert scope["breaker_mutation"] is False
+          assert scope["rollback_sha"] == packet.EMPTY_BASELINE
+          repo = Path.cwd()
+          with tempfile.TemporaryDirectory(prefix="pmv4-stage-a0-ci-") as directory:
+              root = lab.sandbox_setup(Path(directory) / "host")
+              installed = lab.stage(repo, root, scope)
+              rolled_back = lab.rollback(repo, root, scope)
+          report = {
+              "schema_version": "1.0",
+              "source_sha": scope["candidate_sha"],
+              "scope_sha256": scope["scope_sha256"],
+              "trusted_host_bundle_sha256": scope["host_code_bundle_sha256"],
+              "synthetic_install": installed["status"],
+              "synthetic_rollback": rolled_back["status"],
+              "production_modified": False,
+              "authorized_release": False,
+          }
+          Path("pmv4-stage-a0-lab-acceptance.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print("STAGE_A0_SOURCE_ONLY_PREPROD=PASS")
+          PY
+      - name: Retain bounded, non-secret review artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pmv4-stage-a0-readiness
+          path: |
+            pmv4-stage-a0-source-scope.json
+            pmv4-stage-a0-lab-acceptance.json
+          retention-days: 14
