@@ -37,7 +37,10 @@ jobs:
         run: |
           set -euo pipefail
           SHA="$(git rev-parse HEAD)"
-          python3 tools/pmv4_stage_a_packet.py --scope --source-sha "$SHA" > pmv4-stage-a0-source-scope.json
+          # The exact-source guard must run before writing its own evidence:
+          # even an untracked report file correctly fails the guard.
+          SOURCE_SCOPE="$(python3 tools/pmv4_stage_a_packet.py --scope --source-sha "$SHA")"
+          printf '%s\n' "$SOURCE_SCOPE" > pmv4-stage-a0-source-scope.json
           python3 - <<'PY'
           import json, tempfile
           from pathlib import Path
