@@ -261,9 +261,11 @@ class NativeStageAInstaller:
         wanted = set(self._expected_paths(scope))
         for row in scope["directories"]:
             path = self._map(row["path"])
+            if path.is_symlink():
+                raise StageANativeDenied("STAGE_A_DIRECTORY_SYMLINK")
             if path.exists():
                 meta = path.lstat()
-                if (path.is_symlink() or not stat.S_ISDIR(meta.st_mode)
+                if (not stat.S_ISDIR(meta.st_mode)
                         or stat.S_IMODE(meta.st_mode) != int(row["mode"], 8)
                         or (self.owner_metadata and
                             (meta.st_uid, meta.st_gid) != (row["uid"], row["gid"]))):
@@ -272,9 +274,11 @@ class NativeStageAInstaller:
                 raise StageANativeDenied("STAGE_A_DIRECTORY_ABSENT")
         for row in scope["files"]:
             path = self._map(row["path"])
+            if path.is_symlink():
+                raise StageANativeDenied("STAGE_A_FILE_SYMLINK")
             if path.exists():
                 meta = path.lstat()
-                if (path.is_symlink() or not stat.S_ISREG(meta.st_mode)
+                if (not stat.S_ISREG(meta.st_mode)
                         or meta.st_nlink != 1
                         or stat.S_IMODE(meta.st_mode) != int(row["mode"], 8)
                         or (self.owner_metadata and

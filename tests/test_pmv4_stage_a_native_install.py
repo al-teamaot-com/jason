@@ -262,3 +262,25 @@ def test_last_step_freeze_drift_blocks_commit_and_preserves_journal(rig):
             native._canonical(kwargs["signed_proof"])),
     )
     assert rollback["status"] == "empty_baseline_restored"
+
+
+def test_dangling_symlink_replacing_approved_file_blocks_any_rollback(rig):
+    sandbox, scope, freeze, health, kwargs, installer = rig
+    def fault(step):
+        if step == "file:" + packet.ROOT + "/control/host-mutation.lock":
+            raise InterruptedError("crash")
+    with pytest.raises(InterruptedError):
+        installer().install(**kwargs, after_step=fault)
+    root = installer()
+    approved = root._map(packet.ROOT + "/control/host-mutation.lock")
+    other = root._map(packet.ROOT + "/control/shadow-release.lock")
+    approved.unlink()
+    approved.symlink_to("/never/a/real/target")
+    with pytest.raises(native.StageANativeDenied, match="FILE_SYMLINK"):
+        root.recover_empty(
+            scope=scope, confirmed_approval_id=ID,
+            confirmed_proof_sha256=native._hash(
+                native._canonical(kwargs["signed_proof"])),
+        )
+    assert approved.is_symlink()
+    assert root._map(packet.ROOT).is_dir()
