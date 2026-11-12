@@ -77,3 +77,25 @@ The AOT app-role consent has been granted. **Next action requiring Owner interac
 No technician should be asked to paste credentials or hand-assemble Microsoft access tokens.
 
 Microsoft administrator consent role requirements: https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/grant-admin-consent
+
+## Concurrent credential-provider integration reconciliation — 2026-11-12
+
+The central integration gate flagged additional source overlaps with PRs #2455
+and #2336 in the common OpenBao provider mappings/provisioning code. Both were
+inspected before release preparation:
+
+- PR #2455 adds an independent IT Glue write secret and AppRole definition
+  (`it_glue.readwrite`), with its own path and tests.
+- PR #2336 adds an independent SharePoint write secret and AppRole definition
+  (`microsoft_graph.sharepoint_write`), with its own path and tests.
+- This PR adds only `microsoft_graph.group_read` and
+  `microsoft_graph.group_write` using separate Microsoft group provider
+  AppRoles. All three additions are additive; none requires deleting or
+  overwriting another provider's secret mapping.
+- Other overlap with PRs #2395 and #2378 is an independent security CI step
+  for administrator browser approval. Retain both CI steps.
+- These reviews establish compatible proposed merge intent, not permission
+  to merge either other PR or alter any production secret/provider access.
+
+All concurrent logical names, KV paths and AppRole names must remain distinct
+when reviewed in the eventual protected integration/release candidate.
