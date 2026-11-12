@@ -48,13 +48,22 @@ AOT site, online/nondeleted/nonsuspended device check on each operation.
 
 ## Concurrent-change coordination (reviewed 2026-11-12)
 
-Integration coordination: #2448, #2395, #2343, #2333
+Integration coordination: #2454, #2448, #2395, #2343, #2333
 
 These active PRs all touch the broad MCP server source file, so the
 J-CHANGE-001 path-overlap gate requires explicit acknowledgement.
 Their inspected **server.py diff hunks do not overlap** this change to
 the bounded `_project_endpoint_read` helper (near line 835):
 
+- PR #2454: Microsoft 365 group administration is limited to
+  group capability imports and action canonicalization/owner approval,
+  authorization and read-mode gating (approximately lines 51, 3367,
+  3780, 3946 and 6814). It does **not** alter this PR's bounded
+  Datto `_project_endpoint_read` projection near line 835. Both
+  sets of hunks were inspected at source HEADs
+  `d3c3bf61a50bb0922801d2fd9539e0fce8bd1eda` (#2454)
+  and `a6b7037df0dcdf3ea2fbaf6f63b351186dfd8c53` (#2456).
+  Retain both changes on integration and rerun complete tests.
 - PR #2448: PMv4 release authorization around line 5344.
 - PR #2395: V5 integrity recovery and read path around lines 101 and 8657.
 - PR #2343: procurement invoice intake around lines 7682–7735.
