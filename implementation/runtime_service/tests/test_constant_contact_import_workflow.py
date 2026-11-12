@@ -156,3 +156,15 @@ def test_authenticated_requester_without_read_permission_does_not_contact_provid
         workflow.preview(identity=identity, workbook=b"mock", list_ids=(LIST_ID,))
     assert connector.requesters == []
     assert len(issuer.authority.calls) == 1
+
+
+def test_authenticated_entra_mcp_requester_is_subject_to_same_read_gate(tmp_path):
+    workflow, identity, issuer, connector, store = setup(tmp_path)
+    identity.authentication_assurance = "entra-oauth-bearer"
+    result = workflow.preview(identity=identity, workbook=b"mock", list_ids=(LIST_ID,))
+    assert result.work_id
+    assert connector.requesters == ["aot-owner"]
+    issuer.authority.allow = False
+    with pytest.raises(ImportAuthorizationError, match="contact-read permission"):
+        workflow.preview(identity=identity, workbook=b"mock", list_ids=(LIST_ID,))
+    assert connector.requesters == ["aot-owner"]

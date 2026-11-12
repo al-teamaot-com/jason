@@ -2493,6 +2493,15 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             work_store=source_import_connector.work_store,
             issuer=universal_approval_handler.issuer,
         )
+    constant_contact_reconciliation_worker = None
+    if constant_contact_import_invoker is not None:
+        from connectors.constant_contact.import_reconcile import ConstantContactReadbackWorker
+        source_import_connector = constant_contact_import_invoker.connector
+        constant_contact_reconciliation_worker = ConstantContactReadbackWorker(
+            work_store=source_import_connector.work_store,
+            claims=source_import_connector.claims,
+            connector=source_import_connector,
+        )
     request_factory = GovernedTeamsOrchestrationRequestFactory(
         authority=identity_authority,
         capabilities=capabilities,
@@ -3118,6 +3127,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         governed_orchestrator=orchestrator,
         universal_approval_handler=universal_approval_handler,
         constant_contact_import_workflow=constant_contact_import_workflow,
+        constant_contact_reconciliation_worker=constant_contact_reconciliation_worker,
         identity_authority=identity_authority,
         capabilities=capabilities,
         microsoft_identity_bindings=bindings,

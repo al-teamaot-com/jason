@@ -39,6 +39,7 @@ class StoredImportWork:
     suppression_receipt_sha256: str
     specification: ImportSpecification
     approval_id: str | None = None
+    source_sha256: str = ""
 
 
 class EncryptedImportWorkStore:
@@ -68,6 +69,7 @@ class EncryptedImportWorkStore:
         spec = work.specification
         if (
             not work.requester_id or not WORK_ID.fullmatch(work.work_id)
+            or (work.source_sha256 != "" and not HEX64.fullmatch(work.source_sha256))
             or not HEX64.fullmatch(work.account_binding_sha256)
             or not HEX64.fullmatch(work.suppression_receipt_sha256)
             or not HEX64.fullmatch(spec.sha256)
@@ -91,6 +93,7 @@ class EncryptedImportWorkStore:
                 "preview_digest": spec.preview_digest,
             },
             "approval_id": work.approval_id,
+            "source_sha256": work.source_sha256,
         }
         raw = json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
         if len(raw) > 3_900_000:
@@ -116,6 +119,7 @@ class EncryptedImportWorkStore:
                 account_binding_sha256=values["account_binding_sha256"],
                 suppression_receipt_sha256=values["suppression_receipt_sha256"],
                 specification=spec, approval_id=values["approval_id"],
+                source_sha256=values.get("source_sha256", ""),
             )
             # Also verify stored payload has not drifted from the original
             # canonical digest, even after an implementation upgrade.
@@ -133,12 +137,13 @@ class EncryptedImportWorkStore:
     def create(
         self, *, requester_id: str, specification: ImportSpecification,
         account_binding_sha256: str, suppression_receipt_sha256: str,
+        source_sha256: str = "",
     ) -> StoredImportWork:
         work = StoredImportWork(
             work_id=secrets.token_urlsafe(24), requester_id=requester_id,
             account_binding_sha256=account_binding_sha256,
             suppression_receipt_sha256=suppression_receipt_sha256,
-            specification=specification,
+            specification=specification, source_sha256=source_sha256,
         )
         blob = self._encrypt(work)
         with self._connect() as db:
@@ -198,19 +203,22 @@ class EncryptedImportWorkStore:
             return bound
 
 
-    def list_reconcilable(self, *, limit: int = 25) -> tuple[StoredImportWork, ...]:
+    def list_reconcilable(self, *, limit: int = 25, offset: int = 0) -> tuple[StoredImportWork, ...]:
         """Internal read-only supervisor view; never grants approval or writes."""
-        if type(limit) is not int or not 1 <= limit <= 25:
+        if (type(limit) is not int or not 1 <= limit <= 25
+                or type(offset) is not int or not 0 <= offset <= 2500):
             raise ImportAuthorizationError("Bounded import reconciliation limit required")
         with self._connect() as db:
             rows = db.execute(
                 "SELECT work_id,ciphertext FROM import_work "
-                "WHERE reconcile_until>? ORDER BY rowid LIMIT ?",
-                (int(self.clock()), limit),
+                "WHERE reconcile_until>? ORDER BY rowid LIMIT ? OFFSET ?",
+                (int(self.clock()), limit, offset),
             ).fetchall()
         results = []
         for work_id, ciphertext in rows:
             work = self._decrypt(work_id, ciphertext)
-            if work.approval_id:
-                results.append(work)
+            # Return the physical page intact. The readback worker filters
+            # approval and claim state; filtering here would corrupt OFFSET
+            # pagination and starve records after an unapproved batch.
+            results.append(work)
         return tuple(results)
