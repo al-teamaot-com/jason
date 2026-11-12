@@ -87,3 +87,50 @@ def test_decision_does_not_accept_different_bearer(monkeypatch):
     monkeypatch.setattr(bridge, "issue_shadow_owner_proof", issuer)
     with pytest.raises(PermissionError, match="AUTHENTICATED_TOKEN_MISMATCH"):
         bridge.authorize_exact_shadow_from_mcp(**arguments())
+
+
+def test_public_protected_main_precheck_requires_exact_source(monkeypatch):
+    import io
+    import json
+    seen = []
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.close()
+    def fake_open(request, timeout):
+        seen.append((request.full_url, timeout))
+        obj = {
+            "name": "main", "protected": True,
+            "commit": {"sha": C},
+        }
+        return Response(json.dumps(obj).encode())
+    monkeypatch.setattr(bridge, "urlopen", fake_open)
+    assert bridge.public_protected_main_head(C) is True
+    assert bridge.public_protected_main_head(R) is False
+    assert bridge.public_protected_main_head("../bad") is False
+    assert len(seen) == 2
+    assert seen[0] == (bridge.PUBLIC_MAIN_URL, 8)
+
+
+@pytest.mark.parametrize("untrusted", [
+    {"name": "main", "protected": False, "commit": {"sha": C}},
+    {"name": "not-main", "protected": True, "commit": {"sha": C}},
+    {"name": "main", "protected": True, "commit": {"sha": R}},
+    {"name": "main", "protected": True, "commit": {}},
+])
+def test_public_head_rejects_unprotected_or_mismatched_source(monkeypatch, untrusted):
+    import io
+    import json
+    monkeypatch.setattr(
+        bridge, "urlopen",
+        lambda *args, **kwargs: io.BytesIO(json.dumps(untrusted).encode()),
+    )
+    assert bridge.public_protected_main_head(C) is False
+
+
+def test_public_branch_transport_error_fails_closed(monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise OSError("GitHub network temporarily unavailable")
+    monkeypatch.setattr(bridge, "urlopen", unavailable)
+    assert bridge.public_protected_main_head(C) is False
