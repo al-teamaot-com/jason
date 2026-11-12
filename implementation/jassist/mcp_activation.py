@@ -21,22 +21,26 @@ _SHA = re.compile(r"^[0-9a-f]{40}$")
 class JAssistReleaseAttestation:
     candidate_sha: str
     deployed_sha: str
+    rollback_sha: str
     reviewed_scope_sha256: str
     owner_approval_receipt: str
     protected_main_verified: bool
     runtime_health_verified: bool
+    rollback_readback_verified: bool
     safe_review_enabled: bool
 
     def validate(self):
         if (not all(isinstance(x,str) and _SHA.fullmatch(x)
-                    for x in (self.candidate_sha,self.deployed_sha))
+                    for x in (self.candidate_sha,self.deployed_sha,self.rollback_sha))
                 or self.candidate_sha!=self.deployed_sha
+                or self.rollback_sha==self.candidate_sha
                 or not isinstance(self.reviewed_scope_sha256,str)
                 or not re.fullmatch(r"[0-9a-f]{64}",self.reviewed_scope_sha256)
                 or not isinstance(self.owner_approval_receipt,str)
                 or not self.owner_approval_receipt.strip()
                 or self.protected_main_verified is not True
                 or self.runtime_health_verified is not True
+                or self.rollback_readback_verified is not True
                 or self.safe_review_enabled is not True):
             raise PermissionError("verified exact-release attestation required")
 
@@ -46,7 +50,8 @@ def activate_jassist(*, app, register_mcp_tool: Callable,
                      authenticated_mcp_identity: Callable,
                      attest: JAssistReleaseAttestation,
                      enabled_by_governed_configuration: Callable[[],bool],
-                     image_read_enabled: Callable[[],bool]):
+                     image_read_enabled: Callable[[],bool],
+                     verify_governed_release_attestation: Callable[[JAssistReleaseAttestation],bool]):
     """Register a read-only MCP image tool and a narrow HTTPS intake mount.
 
     app is the existing Jason MCP Starlette application.
@@ -55,6 +60,12 @@ def activate_jassist(*, app, register_mcp_tool: Callable,
     Caller must ensure current identity bindings and TLS boundaries.
     """
     attest.validate()
+    # The immutable approval ledger and protected main/release readback
+    # MUST be checked by a separately governed verifier. Typed fields and
+    # an approval record string are not sufficient authority.
+    if (not callable(verify_governed_release_attestation)
+            or verify_governed_release_attestation(attest) is not True):
+        raise PermissionError("exact-action Owner release approval not verified")
     if (not isinstance(components,JAssistRunningComponents)
             or not callable(register_mcp_tool)
             or not callable(authenticated_mcp_identity)
