@@ -33,6 +33,24 @@ Make Jason's **existing foundational functions reliable** before expanding autom
 - Release Manager's own controller changes are production-control-core and require staged N→N+1 evidence; no live controller semantics changing mid-transaction.
 - Continue monitoring existing production services and ticket work; stopping **deployments** does not mean stopping normal customer support.
 
+### Release-specific scheduled-control verification
+
+Production Manager evaluates the required user/system **control timers for the
+exact immutable SHA being read**, not against the currently installed
+controller's newest timer list. A release with a valid desired-state manifest
+uses its own required-unit declarations. A historical pre-manifest release
+uses only canonical timer definitions present in that same immutable release.
+Malformed or missing immutable evidence is a hard failure.
+
+An extra active control timer belonging to a later release (for example,
+`jason-production-drift-watchdog.timer` after rollback to an older baseline)
+is **release drift**, not a reason to demand that the historical release
+adopt the newer timer. PM must fail verification rather than silently stop,
+disable, uninstall or suppress the timer. Only the existing guarded root
+host-unit reconciliation may remove candidate-only units; successful cleanup
+must be separately evidenced by exact release and health readback. The source
+unit tests are not a substitute for that production acceptance.
+
 ## Acceptance tests before closing #1078
 
 - An ordinary fix and a concurrent unrelated work-in-progress PR are preserved; stale manual and stale automatic candidates are rejected before production mutation. Verify dirty/untracked files still exist with identical content after an isolated acceptance cycle.
