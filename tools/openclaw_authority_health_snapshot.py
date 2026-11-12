@@ -67,16 +67,22 @@ def main() -> int:
 
     tool = Path(__file__).with_name('openclaw_authority_operational_health.py')
     try:
-        completed = subprocess.run(
-            [sys.executable, str(tool), '--backup-temp-root', str(BACKUP_TEMP_ROOT)],
-            capture_output=True,
-            text=True,
-            check=False,
-            # Full PRAGMA integrity_check includes the multi-GB orchestration
-            # audit database, plus authority backup/restore verification.
-            # Keep the *complete* checks bounded, but do not truncate them.
-            timeout=SOURCE_HEALTH_TIMEOUT_SECONDS,
-        )
+        # The child process cannot remove its backup/restore copies if
+        # subprocess.run kills it at the hard timeout. The parent owns exactly
+        # one new 0700 archive scratch directory and safely cleans only this
+        # run, leaving all unrelated and prior evidence untouched.
+        with tempfile.TemporaryDirectory(
+            prefix='jason-authority-integrity-run-', dir=BACKUP_TEMP_ROOT
+        ) as scoped_backup_root:
+            completed = subprocess.run(
+                [sys.executable, str(tool), '--backup-temp-root', scoped_backup_root],
+                capture_output=True,
+                text=True,
+                check=False,
+                # Full PRAGMA integrity_check still runs on all four databases.
+                # The outer 3600-second bound and fail-closed result remain.
+                timeout=SOURCE_HEALTH_TIMEOUT_SECONDS,
+            )
     except subprocess.TimeoutExpired as exc:
         # A timeout must not leave a previously successful snapshot looking
         # current: publish explicit failure evidence and exit nonzero.

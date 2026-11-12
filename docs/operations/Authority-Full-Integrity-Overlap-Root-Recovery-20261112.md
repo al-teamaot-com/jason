@@ -18,6 +18,10 @@
 
 This reduces repeated sequential wall time without weakening integrity coverage. It is a **preproduction mitigation**, not a verified production-scale performance guarantee; two concurrent SQLite readers may increase transient I/O. If it still times out, the strict 3,600-second failure and OPEN breaker remain in force.
 
+**Adopted existing scoped cleanup contract from #2390 (also appears in drafts #2395 and #2404):** The parent wrapper now creates exactly one private `jason-authority-integrity-run-*` subdirectory under the already-approved independent `/srv/jason/archive` mount. Only that child receives the directory as its `--backup-temp-root`. On success, failure or timeout the parent cleans that invocation's backup/restore copies; it never removes prior or unrelated archive data. This prevents another orphaned multi-GB backup when a timed-out child cannot execute its own `TemporaryDirectory` cleanup. **We do not adopt those drafts' 90-minute timeout extension.** A negative test creates partial scratch under the run root, simulates forced timeout, and verifies cleanup while preserving unrelated evidence.
+
+**Separate active overlap #2394:** its proposed dynamic orchestration database path for a later governed second-drive migration is not adopted in this source fix. Until that migration is independently reviewed, signed, deployed and verified across both writers and host-health checks, the existing ledger path is retained without a silent fallback or split audit. The four overlapping PRs remain independent; this PR neither merges nor activates their other features.
+
 ## Offline acceptance completed before production
 
 - Thread ordering tests require the orchestration full check to be active **before** the authority backup and confirm that the backup still executes exactly once.

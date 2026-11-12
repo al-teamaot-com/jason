@@ -4,6 +4,7 @@ import importlib.util
 import json
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -15,6 +16,8 @@ def _load_module():
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
+    # Test-only scratch; production source remains the independent archive.
+    module.BACKUP_TEMP_ROOT = Path(tempfile.gettempdir())
     return module
 
 
@@ -92,7 +95,12 @@ def test_snapshot_uses_archive_temp_root_and_systemd_allows_only_existing_archiv
     monkeypatch.setattr(module.subprocess, "run", fake_run)
     monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "--output", str(tmp_path / "health.json")])
     assert module.main() == 0
-    assert observed["args"][-2:] == ["--backup-temp-root", "/srv/jason/archive"]
+    assert observed["args"][-2] == "--backup-temp-root"
+    scoped_path = Path(observed["args"][-1])
+    assert scoped_path.parent == module.BACKUP_TEMP_ROOT
+    assert scoped_path.name.startswith("jason-authority-integrity-run-")
+    assert not scoped_path.exists(), "Parent must remove its scratch even on PASS"
+    assert "BACKUP_TEMP_ROOT = Path(\'/srv/jason/archive\')" in SCRIPT.read_text()
 
     unit = (
         SCRIPT.parents[1]
@@ -261,3 +269,34 @@ def test_subprocess_launch_error_fails_closed_with_no_secret_text(
     assert report['status'] == 'fail'
     assert report['failures'] == ['operational_health_launch_error']
     assert 'sensitive' not in output.read_text()
+
+
+def test_parent_owned_archive_scratch_cleans_only_this_timed_out_run(
+        monkeypatch, tmp_path):
+    module = _load_module()
+    monkeypatch.setattr(module, 'BACKUP_TEMP_ROOT', tmp_path)
+    unrelated = tmp_path / 'unrelated-existing-backup-keep'
+    unrelated.mkdir()
+    (unrelated / 'receipt').write_bytes(b'preserve')
+    observed = {}
+    def killed_child(cmd, **kwargs):
+        scratch = Path(cmd[-1])
+        observed['path'] = scratch
+        assert scratch.parent == tmp_path
+        assert scratch.is_dir()
+        assert stat.S_IMODE(scratch.stat().st_mode) == 0o700
+        partial = scratch / 'jason-authority-backup-simulated'
+        partial.mkdir()
+        (partial / 'authority.backup.sqlite3').write_bytes(b'partial')
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs['timeout'])
+    monkeypatch.setattr(module.subprocess, 'run', killed_child)
+    output = tmp_path / 'status.json'
+    monkeypatch.setattr(module.sys, 'argv', [
+        str(SCRIPT), '--output', str(output),
+    ])
+    assert module.main() == 124
+    assert not observed['path'].exists(), 'Timed-out child scratch must be removed'
+    assert (unrelated / 'receipt').read_bytes() == b'preserve'
+    report = json.loads(output.read_text())
+    assert report['status'] == 'fail'
+    assert report['failures'] == ['operational_health_timeout']
