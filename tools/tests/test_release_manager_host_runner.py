@@ -89,6 +89,17 @@ def test_native_worker_admission_guard_restores_on_deploy_exception(tmp_path, mo
 
 
 class ReleaseManagerHostRunnerTests(unittest.TestCase):
+    def test_manual_scope_reviewer_is_protected_production_control_core(self):
+        import fnmatch
+        import json
+        path = "tools/manual_release_scope.py"
+        policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
+        for change_class in ("feature", "support", "todo", "release_blocker"):
+            self.assertEqual(runner.classify_change_risk(change_class, [path]),
+                             "production_control_core")
+        self.assertTrue(any(fnmatch.fnmatch(path, pattern)
+                            for pattern in policy["protected_core_globs"]))
+
     def test_root_host_reconciliation_is_always_production_control_core(self):
         for path in (
             "tools/reconcile_production_host_services.sh",

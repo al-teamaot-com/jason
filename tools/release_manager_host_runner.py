@@ -1607,6 +1607,7 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
         path.startswith("tools/release_manager")
         or path in {
             "config/release-manager-policy.json",
+            "tools/manual_release_scope.py",
             "config/production-desired-state.json",
             "config/mobile-release-approval-policy.json",
             "config/open-breaker-recovery-policy.json",
@@ -6663,7 +6664,7 @@ def manual_release_scope_review(
     acknowledged_worktrees: tuple[str, ...] = (),
     record_review: bool = False,
 ) -> dict[str, Any]:
-    """Review a full exact-main release; no deployment or developer checkout edits.
+    """Review an exact protected-history release; no deployment or checkout edits.
 
     A scope acknowledgement is technical change-integration evidence, NOT
     owner deployment authorization. It is bound to the candidate and baseline

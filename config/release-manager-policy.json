@@ -40,6 +40,7 @@
     "config/pmv4-owner-issuer-activation.json",
     "config/pmv4-stage-a0-issuer-activation.json",
     "tools/release_manager*.py",
+    "tools/manual_release_scope.py",
     "tools/install_release_manager*.py",
     "infrastructure/openclaw-operations/systemd/user/jason-release-manager.*",
     "infrastructure/jason-runtime/production-deploy.sh",
