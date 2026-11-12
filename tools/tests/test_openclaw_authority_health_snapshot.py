@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import stat
 import subprocess
+import stat
 from pathlib import Path
 
 
@@ -20,6 +20,7 @@ def _load_module():
 
 def test_snapshot_uses_bounded_timeout_for_full_integrity_checks(monkeypatch, tmp_path):
     module = _load_module()
+    monkeypatch.setattr(module, "BACKUP_TEMP_ROOT", tmp_path)
     observed = {}
 
     class Completed:
@@ -34,12 +35,13 @@ def test_snapshot_uses_bounded_timeout_for_full_integrity_checks(monkeypatch, tm
     monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "--output", str(tmp_path / "health.json")])
 
     assert module.main() == 0
-    assert observed["timeout"] == 3600
+    assert observed["timeout"] == 5400
     assert json.loads((tmp_path / "health.json").read_text())["status"] == "pass"
 
 
 def test_timeout_records_explicit_failure_and_replaces_stale_pass(monkeypatch, tmp_path):
     module = _load_module()
+    monkeypatch.setattr(module, "BACKUP_TEMP_ROOT", tmp_path)
     output = tmp_path / "health.json"
     output.write_text(json.dumps({"status": "pass", "stale": True}), encoding="utf-8")
 
@@ -55,7 +57,7 @@ def test_timeout_records_explicit_failure_and_replaces_stale_pass(monkeypatch, t
     result = json.loads(output.read_text(encoding="utf-8"))
     assert result["status"] == "fail"
     assert result["failures"] == ["operational_health_timeout"]
-    assert result["snapshot_timeout_seconds"] == 3600
+    assert result["snapshot_timeout_seconds"] == 5400
     assert result["snapshot_source_exit_code"] == 124
     assert "stale" not in result
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
@@ -73,12 +75,13 @@ def test_systemd_timeout_exceeds_checker_deadline():
         if line.startswith("TimeoutStartSec=")
     ]
     assert len(timeouts) == 1, "Full-integrity systemd job requires one bounded timeout"
-    assert 3600 <= module.SOURCE_HEALTH_TIMEOUT_SECONDS < timeouts[0] <= 4200
+    assert 5400 <= module.SOURCE_HEALTH_TIMEOUT_SECONDS < timeouts[0] <= 6000
 
 
 
 def test_snapshot_uses_archive_temp_root_and_systemd_allows_only_existing_archive_mount(monkeypatch, tmp_path):
     module = _load_module()
+    monkeypatch.setattr(module, "BACKUP_TEMP_ROOT", tmp_path)
     observed = {}
 
     class Completed:
@@ -92,7 +95,9 @@ def test_snapshot_uses_archive_temp_root_and_systemd_allows_only_existing_archiv
     monkeypatch.setattr(module.subprocess, "run", fake_run)
     monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "--output", str(tmp_path / "health.json")])
     assert module.main() == 0
-    assert observed["args"][-2:] == ["--backup-temp-root", "/srv/jason/archive"]
+    assert observed["args"][-2] == "--backup-temp-root"
+    assert Path(observed["args"][-1]).parent == tmp_path
+    assert Path(observed["args"][-1]).name.startswith("jason-authority-integrity-run-")
 
     unit = (
         SCRIPT.parents[1]
@@ -102,6 +107,7 @@ def test_snapshot_uses_archive_temp_root_and_systemd_allows_only_existing_archiv
 
 def test_nonzero_source_exit_cannot_publish_pass(monkeypatch, tmp_path):
     module = _load_module()
+    monkeypatch.setattr(module, "BACKUP_TEMP_ROOT", tmp_path)
 
     class Completed:
         stdout = json.dumps({"status": "pass", "failures": []})
@@ -128,6 +134,7 @@ def test_full_sqlite_integrity_and_authority_restore_checks_remain_enabled():
 
 def test_success_snapshot_archived_and_timeout_does_not_erase_pass(monkeypatch, tmp_path):
     module = _load_module()
+    monkeypatch.setattr(module, "BACKUP_TEMP_ROOT", tmp_path)
     current = tmp_path / "current.json"
     saved = tmp_path / "saved.json"
     monkeypatch.setattr(module, "LAST_SUCCESS", saved)
@@ -159,3 +166,46 @@ def test_success_snapshot_archived_and_timeout_does_not_erase_pass(monkeypatch, 
     assert module.main() == 124
     assert json.loads(current.read_text())["status"] == "fail"
     assert saved.read_bytes() == prior
+
+
+def test_timeout_cleans_only_own_partial_backup_and_fails_closed(monkeypatch, tmp_path):
+    module = _load_module()
+    staging = tmp_path / "archive"
+    staging.mkdir()
+    unrelated = staging / "owner-unrelated-archive.txt"
+    unrelated.write_text("preserve", encoding="utf-8")
+    monkeypatch.setattr(module, "BACKUP_TEMP_ROOT", staging)
+    monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "--output", str(tmp_path / "health.json")])
+
+    def timed_out(command, **kwargs):
+        owned = Path(command[command.index("--backup-temp-root") + 1])
+        assert owned.is_dir() and owned.parent == staging
+        (owned / "incomplete-authority-restored.sqlite3").write_bytes(b"partial")
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(module.subprocess, "run", timed_out)
+    assert module.main() == 124
+    assert unrelated.read_text(encoding="utf-8") == "preserve"
+    assert sorted(x.name for x in staging.iterdir()) == [unrelated.name]
+    result = json.loads((tmp_path / "health.json").read_text())
+    assert result["status"] == "fail"
+    assert result["failures"] == ["operational_health_timeout"]
+    assert result["snapshot_source_exit_code"] == 124
+
+
+def test_success_removes_transient_backups_after_proof(monkeypatch, tmp_path):
+    module = _load_module()
+    staging = tmp_path / "archive"
+    staging.mkdir()
+    monkeypatch.setattr(module, "BACKUP_TEMP_ROOT", staging)
+    monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "--output", str(tmp_path / "health.json")])
+
+    def completed(command, **kwargs):
+        owned = Path(command[command.index("--backup-temp-root") + 1])
+        (owned / "complete-copy.sqlite3").write_bytes(b"synthetic")
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"status":"pass"}))
+
+    monkeypatch.setattr(module.subprocess, "run", completed)
+    assert module.main() == 0
+    assert list(staging.iterdir()) == []
+    assert json.loads((tmp_path / "health.json").read_text())["status"] == "pass"
