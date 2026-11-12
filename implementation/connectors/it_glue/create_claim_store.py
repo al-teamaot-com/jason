@@ -23,13 +23,27 @@ class SQLiteItGlueCreationClaimStore:
 
     def _connect(self):
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.path.is_symlink():
+        # sqlite3.connect creates files with the process umask (often 0644).
+        # With concurrent first writers, another worker could inspect the new
+        # DB before chmod and spuriously deny it. Create a mode-0600 inode
+        # atomically before any connection; never weaken an existing mode.
+        flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(self.path, flags, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            os.close(fd)
+        mode = os.lstat(self.path)
+        if stat.S_ISLNK(mode.st_mode):
             raise PermissionError("IT_GLUE_CLAIM_PATH_SYMLINK")
-        if self.path.exists() and (not self.path.is_file() or
-                stat.S_IMODE(self.path.stat().st_mode) & 0o077):
+        if (not stat.S_ISREG(mode.st_mode) or
+                mode.st_uid != os.geteuid() or
+                stat.S_IMODE(mode.st_mode) & 0o077):
             raise PermissionError("IT_GLUE_CLAIM_PERMISSIONS_UNSAFE")
         connection = sqlite3.connect(self.path, isolation_level=None, timeout=15)
-        os.chmod(self.path, 0o600)
         connection.execute(
             "CREATE TABLE IF NOT EXISTS itglue_create_claims("
             "intent_sha256 TEXT PRIMARY KEY, payload_sha256 TEXT NOT NULL,"
