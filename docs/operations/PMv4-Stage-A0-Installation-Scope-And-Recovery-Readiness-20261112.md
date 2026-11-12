@@ -443,3 +443,18 @@ line for Jason's concurrent-change gate:
 The scope and authorization for each concurrent PR remain distinct.
 This note is not blanket source/production approval or permission to
 merge a competing draft PR.
+
+
+## Exact PR-head CI evidence, not synthetic merge
+
+GitHub Actions `pull_request` checkouts normally use a generated merge
+commit; that synthetic SHA is **not** the reviewed Stage A release
+candidate and must never be used for exact action approval. The
+independent Stage A0 artifact job now explicitly checks out
+`github.event.pull_request.head.sha` (falling back to
+`github.sha` only for `workflow_dispatch`) and asserts the
+checked-out Git HEAD exactly matches before running tests, generating
+the canonical reviewed source scope, and storing rollback evidence.
+Other GitHub branch-integration/required CI gates remain independently
+enforced. A final production SHA still has to be recalculated after
+approved source-only promotion to protected main.

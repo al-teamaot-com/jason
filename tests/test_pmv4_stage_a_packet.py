@@ -305,3 +305,13 @@ def test_root_source_attestation_never_uses_developer_checkout():
     assert '"PMV4_NATIVE_ROOT_DEPENDENCY_SOURCE_DRIFT"' in root_worker
     assert 'receipt = module.execute_native_stage_a0_request(' in root_worker
     assert 'repo=Path("/opt/jason/releases") / candidate' in root_worker
+
+
+def test_github_source_artifact_is_bound_to_pr_head_not_merge_commit():
+    workflow = (REPO / ".github/workflows/pmv4-stage-a-readiness.yml").read_text()
+    exact_checkout = "ref: " + "${{ github.event.pull_request.head.sha || github.sha }}"
+    assert exact_checkout in workflow
+    assert 'test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"' in workflow
+    assert workflow.index(exact_checkout) < workflow.index(
+        "Produce audited SOURCE-ONLY Stage A0 scope"
+    )
