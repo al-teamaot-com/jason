@@ -1,0 +1,83 @@
+# Source-only deployment requirement inventory: NO AWS creation or mutation.
+schema_version: 1
+status: preproduction-not-deployed
+architecture: reuse-existing-jason-host-and-aws-https-relay
+host:
+  machine: Jason
+  os: Ubuntu Linux x86_64
+  observed_logical_cpus: 4
+  observed_total_memory_gib: 31
+  observed_available_memory_gib: 26
+  observed_available_disk_gib: 41
+  pilot_cpu_limit: "0.50"
+  pilot_memory_limit_mib: 768
+  pilot_pid_limit: 64
+  pilot_tmpfs_limit_mib: 64
+  pilot_state_disk_budget_mib: 1024
+  planned_uid: 10001
+  planned_gid: 10001
+  filesystem_read_only: true
+  restart_policy: "no"
+  start_state: disabled
+network:
+  existing_public_https_host: mcp-jason.teamaot.com
+  existing_relay_instance_id: i-0b0bb56884acb565c
+  existing_relay_public_ip: 18.235.19.103
+  existing_relay_private_zerotier_ip_documented: 10.87.246.16
+  existing_jason_private_zerotier_ip_documented: 10.87.246.157
+  zerotier_peers_require_fresh_verification: true
+  jason_to_relay_zerotier_icmp_verified_20261112: true
+  relay_ssm_agent_reported_online_20261112: true
+  proposed_proxy_path: /v1/jassist/*
+  container_port: 3981
+  inactive_host_binding: 127.0.0.1:3981
+  future_relay_only_binding: 10.87.246.157:3981
+  future_approved_source_only: 10.87.246.16
+  no_public_direct_port: true
+  no_additional_dns_name: true
+  no_new_tls_certificate: true
+  default_docker_network_internal_only: true
+  enable_egress_only_after_review: true
+storage:
+  future_host_directory: /var/lib/jason/pilots/jassist
+  future_sessions_db: /var/lib/jason/pilots/jassist/sessions.db
+  future_evidence_db: /var/lib/jason/pilots/jassist/evidence.db
+  directory_mode: "0700"
+  file_mode: "0600"
+  encrypted_at_rest: AES-256-GCM
+  separate_encryption_keys: 2
+  key_length_bytes_each: 32
+  screenshot_limit_bytes: 1048576
+  max_live_receipts: 256
+  receipt_retention_seconds: 120
+  nonce_reservation_seconds: 300
+  purge_interval_seconds: 60
+  future_secret_source: existing-Jason-governed-secret-service
+identity:
+  tenant_id: f7054323-d52b-4863-8c2f-1898f0b6077c
+  existing_jassist_group_object_id: 5273dd8a-1456-4985-b0a3-c00061267e26
+  delegated_send_scope: JAssist.Send
+  verify_live_graph_consent_before_enable: true
+  verify_exact_datto_id_and_site_before_enable: true
+  content_reviewer_required_before_enable: true
+aws:
+  account_id: "887670144825"
+  region: us-east-1
+  existing_route53_hosted_zone: Z02444982FY651WQ3RXFU
+  new_ec2_instances: 0
+  new_ecs_clusters: 0
+  new_ecs_services: 0
+  new_vpcs: 0
+  new_subnets: 0
+  new_nat_gateways: 0
+  new_load_balancers: 0
+  new_route53_records: 0
+  new_acm_certificates: 0
+  new_ecr_repositories: 0
+  new_aws_iam_roles: 0
+  new_aws_secrets: 0
+  mutations_performed: 0
+approval:
+  owner_pilot_scope: AOT-owned-test-device-no-production-deploy
+  existing_production_host_or_relay_changes_authorized: false
+  activation_requires_separately_governed_exact_release: true

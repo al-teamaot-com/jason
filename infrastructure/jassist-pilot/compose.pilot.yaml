@@ -1,0 +1,36 @@
+# PREPARATION ONLY. This stack is inert and has no external AWS side effects.
+# Its listener is loopback-only; do NOT expose to the relay until approved.
+name: jassist-pilot
+services:
+  jassist-pilot:
+    image: jassist-pilot:source-only
+    build:
+      context: ../..
+      dockerfile: infrastructure/jassist-pilot/Dockerfile
+    restart: "no"
+    user: "10001:10001"
+    read_only: true
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    pids_limit: 64
+    mem_limit: 768m
+    cpus: "0.50"
+    init: true
+    ports:
+      - "127.0.0.1:3981:3981"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=67108864,mode=1777
+    networks:
+      - jassist-isolated
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,json; x=json.load(urllib.request.urlopen('http://127.0.0.1:3981/healthz',timeout=2)); assert x['state']=='inactive' and x['ingress_ready'] is False"]
+      interval: 30s
+      timeout: 4s
+      retries: 2
+      start_period: 10s
+networks:
+  jassist-isolated:
+    internal: true
+    driver: bridge

@@ -1,0 +1,20 @@
+# PROPOSED CADDY ROUTE FRAGMENT ONLY -- DO NOT APPLY.
+# Must be inserted inside the CURRENT mcp-jason.teamaot.com site block
+# only after fresh readback/backup and exact-scope approval.
+# Existing /mcp, OAuth, Teams and ticket-processing routes stay unchanged.
+# This fragment is intentionally NOT a complete replacement Caddyfile.
+@jassist_pilot path /v1/jassist/*
+handle @jassist_pilot {
+    request_body {
+        max_size 1MB
+    }
+    reverse_proxy 10.87.246.157:3981 {
+        transport http {
+            dial_timeout 3s
+            response_header_timeout 10s
+        }
+    }
+}
+# Host bind and source firewall must permit ONLY the AWS relay ZeroTier
+# source 10.87.246.16. Confirm peer IPs and existing Caddy routes first.
+# Never enable on a generic public interface, and do not log Authorization.

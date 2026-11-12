@@ -148,3 +148,37 @@ browser-to-Jason test cannot pass until the separate by-ID governed
 capability and reviewed, encrypted, tenant-bound pilot receiver are
 installed in an authorized **nonproduction** environment and live
 accepted by a technician.
+
+
+## Reuse existing AOT infrastructure — source-only pilot package
+
+Owner preference: extend **existing Jason host and AWS relay**, do not
+create a new AWS environment or request a second ECS service. On November
+12, read-only inventory confirmed the AWS `Jason-Teams-Relay` instance
+`i-0b0bb56884acb565c` (t3.micro, `18.235.19.103`), existing
+`mcp-jason.teamaot.com` DNS, working public HTTPS, historic ZeroTier
+route to Jason, and no need to allocate a new VPC/ECS cluster/EC2. The
+existing `connectly-dev` ECS service is unrelated and stays untouched.
+
+The proposed isolated `infrastructure/jassist-pilot` **source-only**
+package provides an inert, nonroot Docker image, loopback-only
+`127.0.0.1:3981` binding, internal-only network, 0.5 CPU/768 MiB
+memory/64 PID limits, 64 MiB tmpfs and a future dedicated **1 GiB**
+encrypted evidence-state budget with 120-second image retention and
+separate 32-byte keys. The image currently serves only `/healthz`
+(`state: inactive`) and HTTP 503 for every screenshot request. It
+**cannot be enabled through environment variables**. No host container,
+directory, proxy route, IAM permission, DNS record, AWS resource, or
+production configuration was created or modified.
+
+The reviewed `caddy-route.PROPOSED.caddy` fragment is NOT applied.
+Before any future activation, independently inspect the **current**
+production Caddy routes and ZeroTier peer IPs, verify exact allowlist
+and isolated firewall route, bind existing authorized Graph/Datto/DLP
+and governed keys, lock Docker image digest and dependencies, and obtain
+the required exact-action approvals before modifying a shared edge.
+No production deployment was authorized by the pilot approval.
+
+Detailed resources, permissions, tests and admission checklist:
+`infrastructure/jassist-pilot/README.md` and
+`infrastructure/jassist-pilot/resource-plan.yaml`.
