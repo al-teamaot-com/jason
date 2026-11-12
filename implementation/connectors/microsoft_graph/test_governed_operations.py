@@ -28,7 +28,8 @@ def test_mutations_require_bound_approval_and_readback(operation_name):
 
 def test_group_schema_rejects_unrecognized_and_missing_arguments():
     item = operation("identity.group.create")
-    valid = {"display_name": "Accounting", "mail_nickname": "accounting", "group_type": "security"}
+    valid = {"display_name": "Accounting", "mail_nickname": "accounting", "group_type": "security",
+             "verified_owner_id": "55555555-5555-4555-8555-555555555555"}
     assert item.validate_arguments(valid) == valid
     for bad in (
         {"display_name": "Accounting"},
@@ -37,6 +38,8 @@ def test_group_schema_rejects_unrecognized_and_missing_arguments():
         {**valid, "display_name": "\n"},
         {**valid, "display_name": 7},
         {**valid, "group_type": "dynamic"},
+        {**valid, "mail_nickname": "invalid alias"},
+        {**valid, "verified_owner_id": "guess"},
     ):
         with pytest.raises(ValueError):
             item.validate_arguments(bad)

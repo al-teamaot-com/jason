@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from uuid import UUID
+import re
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -43,10 +44,15 @@ class GovernedMicrosoftOperation:
         for name, value in arguments.items():
             if not isinstance(value, str) or not value.strip() or len(value) > 256 or any(ord(c) < 32 for c in value):
                 raise ValueError(f"Invalid Microsoft operation field: {name}")
-        if self.name == "identity.group.create" and arguments["group_type"] not in {"security", "microsoft365"}:
-            raise ValueError("Unsupported group type")
-        if self.name == "identity.group.member.add":
-            for field_name in ("verified_group_id", "verified_member_id"):
+        if self.name == "identity.group.create":
+            if arguments["group_type"] not in {"security", "microsoft365"}:
+                raise ValueError("Unsupported group type")
+            alias = arguments["mail_nickname"]
+            if (len(alias) > 64 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", alias) is None
+                    or alias.endswith(".")):
+                raise ValueError("Unsupported mail nickname")
+        for field_name in ("verified_owner_id", "verified_group_id", "verified_member_id"):
+            if field_name in arguments:
                 try:
                     parsed = UUID(arguments[field_name])
                 except (ValueError, AttributeError) as error:
@@ -60,16 +66,16 @@ _OPERATIONS = {
     "identity.group.create": GovernedMicrosoftOperation(
         name="identity.group.create",
         service="microsoft_graph",
-        permission_profile="group-create",
+        permission_profile="group-write",
         method="POST",
         route="/v1.0/groups",
-        required_fields=frozenset({"display_name", "mail_nickname", "group_type"}),
+        required_fields=frozenset({"display_name", "mail_nickname", "group_type", "verified_owner_id"}),
         optional_fields=frozenset({"description"}),
     ),
     "identity.group.member.add": GovernedMicrosoftOperation(
         name="identity.group.member.add",
         service="microsoft_graph",
-        permission_profile="group-membership-write",
+        permission_profile="group-write",
         method="POST",
         route="/v1.0/groups/{verified_group_id}/members/$ref",
         required_fields=frozenset({"verified_group_id", "verified_member_id"}),
