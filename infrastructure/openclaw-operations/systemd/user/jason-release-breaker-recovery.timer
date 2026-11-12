@@ -1,0 +1,11 @@
+[Unit]
+Description=Jason bounded independent breaker recovery observation timer
+
+[Timer]
+OnBootSec=90s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+Unit=jason-release-breaker-recovery.service
+
+[Install]
+WantedBy=timers.target

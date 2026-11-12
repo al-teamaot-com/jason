@@ -173,3 +173,30 @@ the new lock; the separate worker must never run against it until M2.
 An Owner's approval of engineering preparation is not permission to deploy
 a still-untested runtime, disable a production service, bypass root drift
 or issue an approval proof on their behalf.
+
+## November 12 independent circuit-breaker recovery scheduler (source-only)
+
+Root-cause observed on Jason: the breaker opened at 2026-11-12T06:59:34Z
+for an undeclared running container; subsequent root drift observations passed,
+but the durable recovery tracker remained at its November 8 closeout. The
+installed `jason-support-repair-worker.service` is skipped because its separate
+PMv3 engineering Owner pause is active, so its `release_breaker_recovery`
+stage cannot accumulate the new breaker observations.
+
+The proposed `jason-release-breaker-recovery.service` and matching timer
+invoke **the existing pinned native recovery manager**, not a new breaker
+writer, under the same unprivileged identity. This removes its dependency
+on engineering admission and Owner pause without touching either hold.
+The manager still validates exact installed LKG policy and distinct root
+drift observations; only the preexisting independently privileged transition
+worker may revalidate and close the breaker. It does not have an emergency
+override, signing key, direct root-state writer or independent deployment path.
+
+**Source-only acceptance:** focused unit assertions and `systemd-analyze
+verify` must pass. These units are not installed or activated by this PR.
+The trusted release installer must explicitly add them to protected desired
+state in a later exact-scope Owner-authorized release, after comparing their
+interaction with existing root transition timers and proving no overlapping
+transaction. The first live recovery requires at least three distinct fresh
+root PASS observations and guarded root readback. Never manually edit the
+breaker to manufacture readiness.
