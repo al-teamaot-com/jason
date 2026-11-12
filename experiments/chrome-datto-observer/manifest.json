@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "J-Assist - Datto (Gated Development)",
+  "version": "0.2.1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAogWVuFDmhk2mLZQ7ATcNEXIimy5FfZiwW/Gqt2txWyHHY/b/2QxVCCrUrfQbIUvcghRmPHKbIzoQ5MDFZQLa0AN3JpVg8G3XGuhCuBu9PhwAJ+k+UEbP1Ax93UK/pHkU3ST1knVR6oiTO79xM46Ah8zN/+T8PGPixo0qSZiU4bp0K9eszDc5clMntivyiZZBGTJtfg38Y2Ese8Bg8J4LxsfMAj/LQaf5KH9xE97VmUxz5o83N3oXczVCYVY7zOVjBpyKK91SwjmlI9KBTxkiCsdN2/n7wLOG7Usx5MqyrEsyclpBg9k0Lgvwj22cs8Y8ftVh/4Gjqp8L+PNy3rGcPwIDAQAB",
+  "description": "Technician-initiated Datto preview and gated AOT Entra-to-Jason evidence delivery. Uploads require server-attested readiness and separate release.",
+  "permissions": [
+    "activeTab",
+    "sidePanel",
+    "clipboardWrite",
+    "identity"
+  ],
+  "host_permissions": [
+    "https://login.microsoftonline.com/*",
+    "https://mcp-jason.teamaot.com/*"
+  ],
+  "background": {
+    "service_worker": "worker.js"
+  },
+  "action": {
+    "default_title": "Open J-Assist",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
