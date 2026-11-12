@@ -29,6 +29,11 @@ network:
   jason_to_relay_zerotier_icmp_verified_20261112: true
   relay_ssm_agent_reported_online_20261112: true
   relay_live_caddy_config_verified: false
+  relay_cloudshell_work_reported_pass_20261112: true
+  relay_caddy_version_reported: 2.11.4
+  relay_reported_negative_checks_passed: 9
+  relay_reported_live_configuration_unchanged: true
+  relay_validation_raw_artifacts_attached_to_repo: false
   read_only_relay_management_access_available: false
   proposed_caddy_directive_requiring_v210_removed: true
   proposed_proxy_path: /v1/jassist/*

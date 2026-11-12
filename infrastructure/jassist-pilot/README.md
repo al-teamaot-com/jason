@@ -166,3 +166,19 @@ SSH identities were rejected, **no live Caddyfile was obtained**;
 therefore the relay config is **NOT VERIFIED**. Do not confuse the
 passing synthetic JSON-delta tests with Caddy validation or live
 relay inspection. No relay or other production service was touched.
+
+## Work-mode relay verification handoff — 2026-11-12 10:29 AM ET
+
+The Owner-provided completion report says the live existing relay was
+read through the authorized AWS CloudShell session: **Caddy v2.11.4**,
+unchanged running Caddyfile/process, adapted running/baseline match,
+complete candidate validated, MCP and Teams routes semantically equivalent
+despite generated group-label renumbering, **nine negative checks passed**.
+This completes the **reported relay-check objective**, not activation.
+
+See `docs/engineering/JAssist-Relay-CloudShell-Validation-20261112.md`
+for provenance, missing raw artifact hashes and the precise distinction
+between report and independently reproducible evidence. The older sections
+above describe the *earlier* state before CloudShell access succeeded.
+The proposed route is not applied; the disabled pilot and production hold
+remain unchanged.

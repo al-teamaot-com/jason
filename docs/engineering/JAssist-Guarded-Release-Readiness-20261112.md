@@ -219,3 +219,31 @@ and the Caddy version are read through an authorized session.
 The exact-action Owner approval remains **nonproduction screenshot
 pilot only**; this does not authorize changing the shared production
 AWS relay or registering a production MCP image tool.
+
+## Updated existing-relay verification: Work/CloudShell 2026-11-12, 10:29 AM ET
+
+The Project Owner has supplied a completed Work/CloudShell validation report
+covering the existing AWS Caddy relay. **The report states that this
+relay-verification task is 100% complete**:
+
+- Actual Caddy version **2.11.4** and unchanged live Caddyfile.
+- Running configuration matches a freshly adapted original baseline.
+- Complete candidate configuration passed validation.
+- Existing MCP and Teams routing is semantically equivalent after accounting
+  for Caddy-generated group-label renumbering.
+- **9/9** negative checks passed.
+- Live Caddy configuration, process and resources were unchanged.
+
+This **supersedes the earlier dated "relay not verified" blocker for
+the reported Work check**, but does *not* authorize application of the
+candidate or activation of J-Assist. The original Caddyfile/adapted
+config hashes, complete command transcript and per-negative-test evidence
+were not provided in this conversation and must not be invented. The
+immutable evidence handoff and required activation gates are documented in
+`docs/engineering/JAssist-Relay-CloudShell-Validation-20261112.md`.
+
+**Release state:** Existing relay candidate verification **reported PASS**.
+Pilot service installation, live Entra/Datto/OpenBao/DLP acceptance and
+production-relevant exact-action activation authorization are **still
+pending**. No change to Caddy, AWS permissions, or production ticket
+processing has been approved in this turn.
