@@ -12,6 +12,7 @@ on:
       - 'implementation/runtime_service/src/jason_runtime/constant_contact_*.py'
       - 'implementation/runtime_service/tests/test_constant_contact_*.py'
       - 'implementation/mcp_service/tests/test_constant_contact_*.py'
+      - 'implementation/mcp_service/constraints-proven-pilot.txt'
       - 'tools/constant_contact_reconcile_once.py'
       - 'implementation/mcp_service/src/jason_mcp/server.py'
       - 'implementation/connectors/core/openbao_secrets.py'
@@ -30,6 +31,7 @@ on:
       - 'implementation/runtime_service/src/jason_runtime/constant_contact_*.py'
       - 'implementation/runtime_service/tests/test_constant_contact_*.py'
       - 'implementation/mcp_service/tests/test_constant_contact_*.py'
+      - 'implementation/mcp_service/constraints-proven-pilot.txt'
       - 'tools/constant_contact_reconcile_once.py'
       - '.github/workflows/constant-contact-foundation.yml'
 
@@ -50,6 +52,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --disable-pip-version-check 'pytest>=8.3,<10' 'cryptography>=50,<51' 'openpyxl>=3.1,<4' 'mcp==2.2.0' 'PyJWT>=2.8,<3' 'requests>=2.31,<3' 'pip-audit>=2.10,<3'
+      - name: Verify MCP production dependency closure
+        run: |
+          python -m pip install --disable-pip-version-check --dry-run --ignore-installed \
+            --constraint implementation/mcp_service/constraints-proven-pilot.txt \
+            ./implementation/mcp_service
       - name: Audit Constant Contact test dependency environment
         run: python -m pip_audit --progress-spinner off --format columns
       - name: Compile source and runtime integration
