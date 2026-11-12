@@ -1,0 +1,5 @@
+{
+  "schema_version": "1.0",
+  "service": "pmv4-stage-a0-host-bootstrap",
+  "mode": "on"
+}
