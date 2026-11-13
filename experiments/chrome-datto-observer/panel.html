@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>J-Assist</title>
+<style>
+body{font:14px system-ui,sans-serif;margin:0;background:#121b26;color:#edf3f9}
+main{padding:16px;display:grid;gap:12px}
+h1{font-size:18px;margin:0}
+.brand-header{display:block;width:100%;height:auto;max-width:360px;border:0}
+p{line-height:1.45;margin:0;color:#bac8d5}
+button{padding:10px 14px;border:0;border-radius:6px;font-weight:600;cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+#send-to-jason{width:100%;background:#007f79;color:white;padding:14px;font-size:16px}
+#download{display:inline-block;color:#121b26;background:#91caee;text-decoration:none;padding:10px 14px;border-radius:6px;font-weight:600}
+#download[hidden]{display:none}
+#start{background:#72d4ae}
+#stop{background:#f4b8b8}
+#status{padding:10px;background:#243348;border-radius:6px}
+img{max-width:100%;border:1px solid #41556c;border-radius:4px}
+small{color:#b7c6d9}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+.warn{border-left:3px solid #eac576;padding:8px;background:#2c2a23}
+details{border:1px solid #41556c;border-radius:8px;padding:12px}
+summary{cursor:pointer;font-weight:600}
+details>*{margin-top:10px}
+</style></head>
+<body><main>
+<img class="brand-header" src="brand/jassist-panel-header.svg" width="360" height="96" alt="J-Assist — Technician Copilot">
+<h1>Datto remote assistance</h1>
+<div id="scope" role="status">Choose an authorized Datto tab to begin.</div>
+<button id="send-to-jason" disabled title="Requires verified AOT sign-in, active Datto tab and authorized Jason HTTPS receiver">Send to Jason</button>
+<small id="send-status" role="status">Not connected to Jason. Automatic sending is unavailable in this build.</small>
+<details id="advanced">
+<summary>Advanced · AOT sign-in, local preview and manual sharing</summary>
+<div class="controls"><button id="test-entra-signin" type="button">Sign in to AOT for J-Assist</button></div>
+<small id="entra-status" role="status">Not signed in to Jason. AOT tokens stay in browser worker memory only.</small>
+<div class="warn">Full-tab screenshots can expose sensitive client data. Avoid passwords, patient records and restricted information. Nothing is sent automatically. Microsoft sign-in does not authorize Datto access.</div>
+<div class="controls"><button id="start">Start local preview</button><button id="stop" disabled>Stop preview</button></div>
+<div class="controls"><button id="screenshot" disabled>Capture screenshot</button><button id="copy-for-chatgpt" disabled>Copy reviewed screenshot</button><a id="download" hidden download="j-assist-evidence.jpg">Download reviewed screenshot</a></div>
+<small id="evidence-status" role="status">No screenshot prepared</small>
+<img id="evidence-frame" alt="Screenshot to review before copying or downloading" hidden>
+<div id="status" role="status">Stopped</div>
+<small id="stamp">No captured frame</small>
+<img id="frame" alt="Most recently captured visible tab" hidden>
+<p>Manual alternative: capture, review, copy, then paste into an approved AOT ChatGPT conversation. The image remains in the system clipboard until replaced.</p>
+</details>
+</main><script src="tab_scope.js"></script><script src="panel.js"></script></body></html>
