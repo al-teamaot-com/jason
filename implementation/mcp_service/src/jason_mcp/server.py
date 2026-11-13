@@ -844,11 +844,21 @@ def _project_endpoint_read(output: Mapping[str, Any]) -> dict[str, Any]:
 
     if not isinstance(provider_data, Mapping):
         provider_data = data
+    # Datto device-by-ID can be provided as one exact nested device
+    # document; never use a collection's first candidate for identity.
+    nested = provider_data.get("device")
+    if nested is None:
+        nested = provider_data.get("data")
+    if isinstance(nested, Mapping):
+        provider_data = nested
 
     record: dict[str, Any] = {}
 
     aliases = (
         ("resource_id", ("resource_id", "uid", "deviceUid", "device_uid")),
+        # Provider-issued console device ID is a different identifier
+        # from the durable API resource UID. Expose both independently.
+        ("provider_device_id", ("id", "deviceId", "device_id")),
         ("hostname", ("hostname", "name")),
         ("site", ("site", "siteName")),
         ("site_id", ("site_id", "siteUid", "siteId")),

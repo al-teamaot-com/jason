@@ -1,0 +1,75 @@
+# Datto RMM governed numeric device-ID read — preproduction
+
+Date: 2026-11-12
+Status: Developer change only. No production deployment authorization.
+
+## Problem
+The J-Assist Chrome extension observes URLs like
+`https://vidal.rmm.datto.com/web-remote/1717088`; the Datto RMM
+REST `GET /v2/device/{uid}` uses a separate provider-issued UUID.
+A production governed read of `endpoint.device.read(resource_id=1717088)`
+returned HTTP 404. The same workstation was found through an exact
+hostname search as `Al-Samsung`, native UID
+`710e63d6-caca-d830-697a-81250b0a8321`, AOT site UID
+`9bb56523-cade-4ffb-bc34-696e788f0f4c`.
+A hostname match is not authoritative proof that the URL's numeric ID
+corresponds to that UUID.
+
+## Isolated read-only change
+Retain the single existing governed `endpoint.device.read` capability
+and read-only provider identity/tenant boundaries. When its exact
+`resource_id` is a positive ASCII decimal Datto device ID, the Datto
+connector uses the documented alternate **GET
+`/api/v2/device/id/{deviceId}`**. UUID selectors retain existing
+`GET /api/v2/device/{deviceUid}` behavior.
+
+On a numeric lookup, require the provider's returned `id` or `deviceId`
+to match the requested decimal selector *exactly*, and require a
+provider-issued durable UUID. A mismatch, incomplete, ambiguous, malformed
+or unavailable response fails closed. The bounded MCP read projection exposes
+`provider_device_id` **separately** from native `resource_id`, along
+with ordinary device/site fields. A sibling isolated J-Assist authorizer
+requires both independently provided identifiers and a fresh matching
+AOT site, online/nondeleted/nonsuspended device check on each operation.
+
+## Verification and boundaries
+- Existing Datto connector regression tests, new exact routing and
+  mismatched-ID tests; MCP projection tests for flat and nested responses
+- Separate draft PR with no automations/endpoint commands, ticket core or
+  production mutating capabilities modified
+- Provider-specific actual numeric ID endpoint behavior must still be
+  tested through governed read after separately authorized release;
+  synthetic tests cannot prove external provider schema
+- The Owner approved a bounded **nonproduction** J-Assist screenshot pilot,
+  not deployment of this connector change to production. Do not merge or
+  promote until current protected-main CI, review, exact-SHA release
+  authorization and rollback are independently satisfied.
+
+
+## Concurrent-change coordination (reviewed 2026-11-12)
+
+Integration coordination: #2454, #2448, #2395, #2343, #2333
+
+These active PRs all touch the broad MCP server source file, so the
+J-CHANGE-001 path-overlap gate requires explicit acknowledgement.
+Their inspected **server.py diff hunks do not overlap** this change to
+the bounded `_project_endpoint_read` helper (near line 835):
+
+- PR #2454: Microsoft 365 group administration is limited to
+  group capability imports and action canonicalization/owner approval,
+  authorization and read-mode gating (approximately lines 51, 3367,
+  3780, 3946 and 6814). It does **not** alter this PR's bounded
+  Datto `_project_endpoint_read` projection near line 835. Both
+  sets of hunks were inspected at source HEADs
+  `d3c3bf61a50bb0922801d2fd9539e0fce8bd1eda` (#2454)
+  and `a6b7037df0dcdf3ea2fbaf6f63b351186dfd8c53` (#2456).
+  Retain both changes on integration and rerun complete tests.
+- PR #2448: PMv4 release authorization around line 5344.
+- PR #2395: V5 integrity recovery and read path around lines 101 and 8657.
+- PR #2343: procurement invoice intake around lines 7682–7735.
+- PR #2333: endpoint security read/reporting around lines 1563–1654 and 8537.
+
+No code from those PRs has been merged, reused or replaced here.
+A separate protected-main review is still required immediately before
+integration; path-overlap acknowledgement is **not** production release
+approval.
