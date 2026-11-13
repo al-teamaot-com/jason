@@ -326,3 +326,131 @@ def test_systemd_overlay_is_read_only_bounded_and_keeps_original_unit(manifest):
     assert "ReadOnlyPaths=" in text
     assert manifest["no_runtime_or_mcp_mutation"] is True
     assert manifest["no_ticket_or_provider_mutation"] is True
+
+
+def test_disposable_fake_root_full_lifecycle_runs_proof_before_fast_health(
+    tmp_path,monkeypatch,policy,
+):
+    """Full lifecycle uses only fakes; never contacts host systemd or Docker."""
+    import contextlib
+
+    emergency=tmp_path/"expired-fast-overlay.conf"
+    emergency.write_bytes(b"[Service]\nExecStart=synthetic-expired\n")
+    emergency_bytes=emergency.read_bytes()
+    local_policy=dict(policy)
+    local_policy["old_fast_emergency_sha256"]=sha256(emergency_bytes).hexdigest()
+    ledger=tmp_path/"ledger";ledger.mkdir(mode=0o700)
+    class RootLedger:
+        def lstat(self):
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR|0o700,st_uid=0,
+            )
+        def is_symlink(self):return False
+        def iterdir(self):return iter(())
+        def __truediv__(self,item):return ledger/item
+
+    monkeypatch.setattr(repair,"LEDGER",RootLedger())
+    monkeypatch.setattr(repair,"FAST_EMERGENCY",emergency)
+    monkeypatch.setattr(repair.os,"geteuid",lambda:0)
+    monkeypatch.setattr(repair.sys,"flags",SimpleNamespace(isolated=1))
+    monkeypatch.setattr(repair,"ROOT_SCRIPT",Path(repair.__file__).resolve())
+    monkeypatch.setattr(repair,"fixed_policy",lambda:local_policy)
+    monkeypatch.setattr(repair,"checked_bundle",lambda p:({"source":[],"new_unit_dropin":{}},{"file":b"x"}))
+    monkeypatch.setattr(repair,"root_state",lambda p:{"runtime_id":"rt","mcp_id":"mcp"})
+    monkeypatch.setattr(repair,"signed_owner_decision",lambda *args:{"payload":{"exact":"approved"}})
+    @contextlib.contextmanager
+    def lock():
+        yield
+    monkeypatch.setattr(repair,"native_release_lock",lock)
+    operations=[]
+    monkeypatch.setattr(repair,"root_audit",lambda path,data:operations.append(
+        ("audit",path.name,dict(data))))
+    monkeypatch.setattr(repair,"stage_objects",lambda m,o:operations.append(("stage",)))
+    monkeypatch.setattr(repair,"verify_objects",lambda m,o:operations.append(("verify_source",)))
+    monkeypatch.setattr(repair,"rollback_objects",lambda *args,**kwargs:operations.append(("rollback",)))
+    def system(*args,**kwargs):
+        operations.append(("system",*args))
+        if args[0]=="cat":
+            return (str(repair.ROOT_SOURCE/"openclaw_authority_health_snapshot.py")
+                    +" TimeoutStartSec=5700")
+        return ""
+    monkeypatch.setattr(repair,"system",system)
+    monkeypatch.setattr(repair,"verify_full_proof",lambda after:operations.append(("full_pass",)))
+    fast=tmp_path/"fast.json"
+    fast.write_text(json.dumps({"status":"pass","failures":[]}))
+    monkeypatch.setattr(repair,"FAST",fast)
+    clock=[0]
+    def root_readback(path):
+        if path==repair.DRIFT:
+            clock[0]+=1
+            return {"status":"pass","problems":[],
+                    "observed_at":f"2026-11-13T13:00:{clock[0]:02}Z"}
+        return {"circuit_breaker":{"state":"closed"}}
+    monkeypatch.setattr(repair,"protected_release_record",root_readback)
+    monkeypatch.setattr(repair.time,"sleep",lambda seconds:None)
+    monkeypatch.setattr(repair.subprocess,"run",lambda *a,**k:SimpleNamespace(returncode=0))
+    repair.execute()
+    stages=[i[0] for i in operations]
+    assert "rollback" not in stages
+    assert stages.index("audit")<stages.index("stage")
+    assert stages.index("verify_source")<stages.index("full_pass")
+    assert stages.count("full_pass")==1
+    assert not emergency.exists()
+    result=[i for i in operations if i[0]=="audit" and i[1].endswith(".result.json")][0][2]
+    assert result["status"]=="verified"
+    assert result["full_integrity_verified"] is True
+    assert result["root_drift_distinct_passes"]==3
+    assert result["root_breaker_closed"] is True
+
+
+def test_disposable_fake_root_failed_full_proof_never_unlocks_breaker(
+    tmp_path,monkeypatch,policy,
+):
+    import contextlib
+    emergency=tmp_path/"expired-fast-overlay.conf"
+    emergency.write_bytes(b"original-immutable-overlay")
+    local_policy=dict(policy)
+    local_policy["old_fast_emergency_sha256"]=sha256(emergency.read_bytes()).hexdigest()
+    ledger=tmp_path/"ledger";ledger.mkdir(mode=0o700)
+    class RootLedger:
+        def lstat(self):return SimpleNamespace(st_mode=stat.S_IFDIR|0o700,st_uid=0)
+        def is_symlink(self):return False
+        def iterdir(self):return iter(())
+        def __truediv__(self,item):return ledger/item
+    monkeypatch.setattr(repair,"LEDGER",RootLedger())
+    monkeypatch.setattr(repair,"FAST_EMERGENCY",emergency)
+    monkeypatch.setattr(repair.os,"geteuid",lambda:0)
+    monkeypatch.setattr(repair.sys,"flags",SimpleNamespace(isolated=1))
+    monkeypatch.setattr(repair,"ROOT_SCRIPT",Path(repair.__file__).resolve())
+    monkeypatch.setattr(repair,"fixed_policy",lambda:local_policy)
+    monkeypatch.setattr(repair,"checked_bundle",lambda p:({"source":[],"new_unit_dropin":{}},{"file":b"x"}))
+    monkeypatch.setattr(repair,"root_state",lambda p:{"runtime_id":"rt","mcp_id":"mcp"})
+    monkeypatch.setattr(repair,"signed_owner_decision",lambda *args:{"payload":{"exact":"approved"}})
+    @contextlib.contextmanager
+    def lock():yield
+    monkeypatch.setattr(repair,"native_release_lock",lock)
+    events=[]
+    monkeypatch.setattr(repair,"root_audit",lambda path,data:events.append(("audit",path.name,dict(data))))
+    monkeypatch.setattr(repair,"stage_objects",lambda m,o:events.append(("stage",)))
+    monkeypatch.setattr(repair,"verify_objects",lambda m,o:events.append(("verify",)))
+    monkeypatch.setattr(repair,"rollback_objects",lambda *a,**k:events.append(("rollback",)))
+    def system(*args,**kwargs):
+        events.append(("system",*args))
+        return (str(repair.ROOT_SOURCE/"openclaw_authority_health_snapshot.py")
+                +" TimeoutStartSec=5700") if args[0]=="cat" else ""
+    monkeypatch.setattr(repair,"system",system)
+    def fail_full(at):
+        events.append(("proof_failed",))
+        raise repair.RepairDenied("FULL_TIMEOUT")
+    monkeypatch.setattr(repair,"verify_full_proof",fail_full)
+    with pytest.raises(repair.RepairDenied,match="FULL_TIMEOUT"):
+        repair.execute()
+    assert emergency.read_bytes()==b"original-immutable-overlay"
+    assert ("rollback",) in events
+    assert not any(e[:3]==("system","start","jason-openclaw-authority-health.service")
+                   for e in events)
+    result=[e for e in events if e[0]=="audit" and e[1].endswith(".result.json")][0][2]
+    assert result["status"]=="failed"
+    assert result["full_integrity_verified"] is False
+    assert result["root_breaker_closed"] is False
+    assert result["source_rollback"]=="verified_absence"
