@@ -48,15 +48,18 @@ class FakeFactory:
 
 
 class FakeOrchestrator:
-    def __init__(self):
+    def __init__(self, *, status="succeeded", error_code=None, reason_codes=()):
         self.requests = []
+        self.status = status
+        self.error_code = error_code
+        self.reason_codes = reason_codes
 
     def execute(self, request):
         self.requests.append(request)
         return SimpleNamespace(
-            status=SimpleNamespace(value="succeeded"),
-            error_code=None,
-            reason_codes=(),
+            status=SimpleNamespace(value=self.status),
+            error_code=self.error_code,
+            reason_codes=self.reason_codes,
         )
 
 
@@ -97,6 +100,17 @@ class AutonomousRepairMaintenanceTests(unittest.TestCase):
             now=lambda: datetime(2026, 9, 28, 14, 0, tzinfo=timezone.utc),
         )
         self.assertTrue(maintenance.tick())
+        self.assertFalse(maintenance.tick())
+
+    def test_maintenance_returns_false_when_orchestrator_fails(self):
+        maintenance = AutonomousRepairDeploymentMaintenance(
+            request_factory=FakeFactory(),
+            orchestrator=FakeOrchestrator(status="failed", error_code="boom", reason_codes=("provider_error",)),
+            source=Source(),
+            interval_seconds=300,
+            source_revision=LIVE,
+            now=lambda: datetime(2026, 9, 28, 14, 0, tzinfo=timezone.utc),
+        )
         self.assertFalse(maintenance.tick())
 
 
