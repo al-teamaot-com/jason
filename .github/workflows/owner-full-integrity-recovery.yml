@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'tools/owner_full_integrity_recovery.py'
+      - 'tools/openclaw_authority_health_snapshot.py'
+      - 'tools/openclaw_authority_operational_health.py'
       - 'tools/tests/test_owner_full_integrity_recovery.py'
       - 'config/full-integrity-recovery-policy.json'
       - 'docs/operations/Governed-Full-Integrity-One-Shot-Root-Recovery-20261112.md'
@@ -10,6 +12,8 @@ on:
   push:
     paths:
       - 'tools/owner_full_integrity_recovery.py'
+      - 'tools/openclaw_authority_health_snapshot.py'
+      - 'tools/openclaw_authority_operational_health.py'
       - 'tools/tests/test_owner_full_integrity_recovery.py'
       - 'config/full-integrity-recovery-policy.json'
       - '.github/workflows/owner-full-integrity-recovery.yml'
@@ -21,6 +25,10 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Read the immutable v1 recovery source as originally reviewed,
+          # not newer unrelated authority-health source in a later PR.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -32,20 +40,30 @@ jobs:
       - name: Verify exact file-hash and duration policy
         run: |
           python - <<'PY'
-          import hashlib,json
+          import hashlib,json,subprocess
           from pathlib import Path
-          r=json.loads(Path('config/full-integrity-recovery-policy.json').read_text())
+          # This one-use v1 recovery is rooted in its original protected
+          # source commit. Comparing policy hashes against mutable HEAD
+          # incorrectly blocks a separately reviewed later v2 checker.
+          # Never rebind or reissue the consumed v1 approval implicitly.
+          pinned='323ac1827cfe375bd58aa4f487400b911f8d23aa'
+          def original(path):
+              return subprocess.check_output(
+                  ['git','show',pinned+':'+path],timeout=25)
+          policy=Path('config/full-integrity-recovery-policy.json').read_bytes()
+          assert policy == original('config/full-integrity-recovery-policy.json')
+          r=json.loads(policy)
           for field,path in [
               ('source_script_sha256','tools/owner_full_integrity_recovery.py'),
               ('snapshot_sha256','tools/openclaw_authority_health_snapshot.py'),
               ('checker_sha256','tools/openclaw_authority_operational_health.py'),
           ]:
-              assert r[field]==hashlib.sha256(Path(path).read_bytes()).hexdigest(),field
+              assert r[field]==hashlib.sha256(original(path)).hexdigest(),field
           assert r['one_shot'] is True
           assert r['exact_action']=='owner-full-sqlite-integrity-proof-90m-recovery-v1'
           assert r['scan_timeout_seconds']==5400
           assert r['supervisor_timeout_seconds']==5700
           assert r['lkg_sha']=='d1b8c196dadd4b672ec8ba47075f27bb61c98d63'
           assert r['trusted_owner_auth_sha256']=='24d3632a4b0aa60851a1c82ccb15539eb823dd26afa5a1a2cc8c7afc54d72153'
-          print('ROOT_EXACT_SOURCE_POLICY_HASH=PASS')
+          print('ROOT_V1_IMMUTABLE_SOURCE_POLICY_HASH=PASS')
           PY

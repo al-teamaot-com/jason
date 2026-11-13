@@ -30,6 +30,34 @@ This reduces repeated sequential wall time without weakening integrity coverage.
 - Timeout, unavailable subprocess, missing or malformed JSON must atomically publish failure, never leak untrusted stderr or replace last-success proof.
 - The existing authority health, recovery, signer and release-manager regression suites remain mandatory; GitHub CI runs the new focused tests against the exact commit.
 
+## November 13: Root one-shot already consumed by a genuine success
+
+Read-only host audit establishes that the original v1 Owner recovery
+`owner-full-sqlite-integrity-proof-90m-recovery-v1` was executed at
+2026-11-12 11:56 EST. The separately preserved
+`operational-full-health-last-pass.json` was written approximately
+12:47 EST with **four SQLite integrity=ok**, backup/restore
+integrity=ok and matching counts. Its root-owned one-shot ledger is
+therefore *correctly consumed* and must not be reset or replayed.
+
+The **next** normal daily full checker still used the original 60-minute
+installed LKG, timed out at 2026-11-13 04:01 EST, and left the fast
+authority-health service failed. The root production breaker is OPEN.
+Healthy runtime/ticket scanning is not a release-health PASS.
+This PR addresses the recurring sequential-scan performance issue in
+**source only**; it does not authorize another 90-minute scan, a new
+Owner one-shot ledger, a protected root repair, or Stage A0 installation.
+
+The separate GitHub v1 root recovery workflow now verifies original
+immutable signed policy and source against exact protected commit
+`323ac1827cfe375bd58aa4f487400b911f8d23aa`, **not the moving
+HEAD checkout**. The installed root-owned checker and snapshot still
+match the original v1 byte digests. This corrects a false CI conflict
+between an intentionally immutable consumed v1 root action and a later
+independently reviewed v2 performance improvement. The current v1
+policy, source hashes, ledger and production systemd configuration are
+not changed; no future owner/recovery approval is inferred.
+
 ## Required source and production authorization sequence
 
 1. Review the exact isolated source PR, its required CI and commit/scope SHA. **Source-only promotion requires a separately authenticated exact Owner decision**, without deploy or unfreeze.
