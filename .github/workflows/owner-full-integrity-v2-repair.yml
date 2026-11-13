@@ -1,0 +1,82 @@
+name: Governed one-use full SQLite v2 root health repair — source only
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/owner-full-integrity-v2-repair.yml'
+      - 'tools/owner_full_integrity_v2_root_repair.py'
+      - 'tools/tests/test_owner_full_integrity_v2_root_repair.py'
+      - 'tools/openclaw_authority_health_snapshot.py'
+      - 'tools/openclaw_authority_operational_health.py'
+      - 'config/owner-full-integrity-v2-repair-policy.json'
+      - 'config/owner-full-integrity-v2-source-manifest.json'
+      - 'config/owner-full-integrity-v2.service.conf'
+      - 'docs/operations/Owner-Full-Integrity-V2-Root-Repair-20261113.md'
+  push:
+    paths:
+      - '.github/workflows/owner-full-integrity-v2-repair.yml'
+      - 'tools/owner_full_integrity_v2_root_repair.py'
+      - 'tools/tests/test_owner_full_integrity_v2_root_repair.py'
+      - 'config/owner-full-integrity-v2-repair-policy.json'
+      - 'config/owner-full-integrity-v2-source-manifest.json'
+      - 'config/owner-full-integrity-v2.service.conf'
+
+permissions:
+  contents: read
+
+jobs:
+  exact-source-and-root-disposable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install 'pytest>=8.3,<10' 'cryptography>=43,<49' 'PyJWT[crypto]>=2.9,<3'
+      - name: No production actions — source and complete authority regressions
+        env:
+          PYTHONPATH: '.:implementation:tools'
+        run: |
+          python -m py_compile tools/owner_full_integrity_v2_root_repair.py
+          python -m pytest -q \
+            tools/tests/test_owner_full_integrity_v2_root_repair.py \
+            tools/tests/test_openclaw_authority_operational_health.py \
+            tools/tests/test_openclaw_authority_health_snapshot.py \
+            tools/tests/test_owner_full_integrity_recovery.py \
+            tools/tests/test_openclaw_authority_fast_health.py
+      - name: Verify exact fixed code and 3-object bounded repair scope
+        run: |
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          p=json.loads(Path('config/owner-full-integrity-v2-repair-policy.json').read_text())
+          m=json.loads(Path('config/owner-full-integrity-v2-source-manifest.json').read_text())
+          digest=lambda path:hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          assert p['script_sha256']==digest('tools/owner_full_integrity_v2_root_repair.py')
+          assert p['source_sha']==m['source_sha']=='95832507e6e5f804f092cb5d3ebdea90ba1a49bf'
+          assert p['scope_sha256']==m['scope_sha256']
+          assert p['full_scan_max_seconds']==5400
+          assert p['service_max_seconds']==5700
+          assert m['no_runtime_or_mcp_mutation'] is True
+          assert m['no_ticket_or_provider_mutation'] is True
+          assert m['requires_new_owner_exact_signature'] is True
+          assert len(m['source'])==2
+          assert m['new_unit_dropin']['sha256']==digest('config/owner-full-integrity-v2.service.conf')
+          for item in m['source']:
+              assert item['sha256']==digest(item['git_path'])
+          print('EXACT_THREE_OBJECT_REVIEWED_SOURCE_AND_POLICY=PASS')
+          PY
+      - name: Disposable UID0 file modes, foreign-inode rollback, no host deployment
+        env:
+          PYTHONPATH: '.:implementation:tools'
+        run: |
+          sudo -E python -m pytest -q \
+            tools/tests/test_owner_full_integrity_v2_root_repair.py \
+            -k 'disposable or foreign_child or tampered_stage or untrusted_source'
+      - name: Source-only release boundary
+        run: |
+          echo 'SOURCE_ONLY_FULL_INTEGRITY_V2_ROOT_REPAIR=PASS'
+          echo 'PRODUCTION_ROOT_INSTALLATION_PERFORMED=false'
+          echo 'FULL_LIVE_SQLITE_PROOF_EXECUTED=false'
+          echo 'PROTECTED_BREAKER_UNCHANGED=true'
