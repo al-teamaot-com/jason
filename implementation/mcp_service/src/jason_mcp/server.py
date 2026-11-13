@@ -3770,6 +3770,35 @@ def _canonicalize_governed_action_arguments(
     }
 
 
+# Exact source-reviewed AOT diagnostic identities. This list is not a grant:
+# the component MUST also carry a current durable Owner standing-safe record,
+# pass live catalog/fingerprint verification, and accept zero variables.
+# Match both UID and name to avoid name-based risk downgrades.
+_AOT_REVIEWED_PASSIVE_DIAGNOSTICS = frozenset({
+    ("79943f0c-e614-4fcc-a5da-e396feab0a34", "windows diagnostic snapshot - aot"),
+    ("4e9d59fb-440a-460b-9107-40f3954890fd", "disk space analysis - aot"),
+    ("c259df3f-a6a2-4931-bf48-b6659846e9b1", "network and dns diagnostics - aot"),
+})
+
+
+def _is_reviewed_aot_passive_diagnostic(
+    selected_component: Any,
+    approval_mode: str | None,
+    variables: object,
+) -> bool:
+    return (
+        approval_mode == "standing_safe"
+        and getattr(selected_component, "approval_source", None) == "durable_registry"
+        and bool(getattr(selected_component, "metadata_fingerprint", None))
+        and (
+            str(getattr(selected_component, "uid", "")).strip(),
+            str(getattr(selected_component, "name", "")).strip().casefold(),
+        ) in _AOT_REVIEWED_PASSIVE_DIAGNOSTICS
+        and isinstance(variables, Mapping)
+        and len(variables) == 0
+    )
+
+
 def _governed_execute(
     *,
     capability_name: str,
@@ -3913,6 +3942,11 @@ def _governed_execute(
                     and selected_component.name.casefold().startswith((
                         "check ", "get-", "get status ", "query status ",
                     )))
+                or _is_reviewed_aot_passive_diagnostic(
+                    selected_component,
+                    datto_approval_mode,
+                    canonical_arguments.get("variables", {}),
+                )
             )
         )
         if not passive_diagnostic:
