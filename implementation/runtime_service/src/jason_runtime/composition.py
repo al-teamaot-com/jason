@@ -278,6 +278,11 @@ from .autotask_procurement import (
     register_autotask_procurement_invoker,
     register_autotask_procurement_runtime_foundation,
 )
+from .autotask_company_classification_update import (
+    register_foundation as register_company_classification_foundation,
+    build_invoker as build_company_classification_invoker,
+    register_invoker as register_company_classification_invoker,
+)
 from .autotask_company_outbound_opt_in_update import (
     register_autotask_company_outbound_opt_in_foundation,
     build_autotask_company_outbound_opt_in_invoker,
@@ -1639,6 +1644,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         providers=providers,
         now=now,
     )
+    register_company_classification_foundation(
+        capabilities=capabilities, providers=providers, now=now,
+    )
     register_autotask_company_outbound_opt_in_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -2046,6 +2054,13 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         audit=ConnectorEventAudit(orchestration_events),
         bindings=source_authorization_bindings,
     )
+    company_classification_invoker = build_company_classification_invoker(
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.autotask_write_openbao_role_id_path,
+        secret_id_path=settings.autotask_write_openbao_secret_id_path,
+        transport=http_transport, audit=ConnectorEventAudit(orchestration_events),
+        bindings=source_authorization_bindings,
+    )
     company_outbound_optin_invoker = build_autotask_company_outbound_opt_in_invoker(
         openbao_url=settings.openbao_url,
         role_id_path=settings.autotask_write_openbao_role_id_path,
@@ -2349,6 +2364,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     register_autotask_procurement_invoker(
         invokers=invokers,
         invoker=procurement_invoker,
+    )
+    register_company_classification_invoker(
+        invokers=invokers, invoker=company_classification_invoker,
     )
     register_autotask_company_outbound_opt_in_invoker(
         invokers=invokers,
