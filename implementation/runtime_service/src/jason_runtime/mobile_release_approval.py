@@ -1048,6 +1048,24 @@ class MobileReleaseApprovalMaintenance:
     _next_due: datetime | None = None
     required_policy_version: str = "1.0"
 
+    def _admin_teams_ready(self, request: ApprovalRequest) -> bool:
+        """Recoverable, read-only check; never create an unseen V4 card.
+
+        An expected Teams licensing/recipient outage must not crash or starve
+        the rest of Jason's shared maintenance cycle. The next eligible tick
+        may issue the same source offer after the admin becomes reachable.
+        """
+        try:
+            self.sender.preflight_release_delivery(request)
+            return True
+        except (PermissionError, OSError, AttributeError) as exc:
+            _LOG.warning(
+                "OWNER_RELEASE_APPROVER_NOT_READY release=%s reason=%s",
+                request.metadata.get("release_id"),
+                str(exc)[:200],
+            )
+            return False
+
     def tick(self) -> bool:
         if not self.enabled:
             return False
@@ -1180,6 +1198,13 @@ class MobileReleaseApprovalMaintenance:
                         )
                         # Create BEFORE network delivery. A crash after this
                         # point blocks unattended replay or duplicate sends.
+                        if policy.schema_version == "4.0":
+                            # An unlicensed privileged admin can receive a
+                            # Bot Framework provider message ID yet never see
+                            # the card. Never persist a renewal request before
+                            # checking the actual Teams service plan.
+                            if not self._admin_teams_ready(request):
+                                return False
                         self.approvals.create(request, now=now)
                         read_release_approval_containment(
                             self.state_root
@@ -1265,6 +1290,12 @@ class MobileReleaseApprovalMaintenance:
                 continue
             read_release_approval_containment(self.state_root).require_request_eligible(now)
             request = create_mobile_release_request(evidence, policy, now=now)
+            if policy.schema_version == "4.0":
+                # A failed preflight leaves NO pending approval and permits a
+                # normal later offer once the privileged account is reachable.
+                # The Teams decision still requires the same admin Entra OID.
+                if not self._admin_teams_ready(request):
+                    return False
             self.approvals.create(request, now=now)
             # A failed delivery leaves one durable pending request, not a loop
             # that spams new cards or bypasses Teams unavailable failure.

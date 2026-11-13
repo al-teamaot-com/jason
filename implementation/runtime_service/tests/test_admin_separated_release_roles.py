@@ -294,3 +294,116 @@ def test_host_policy_validator_attests_same_v4_principal_pair(tmp_path):
     p.write_text(json.dumps(payload))
     with pytest.raises(ReleaseManagerError):
         _validated_mobile_release_policy(p, source_v2_required=True)
+
+
+def test_v4_admin_teams_license_missing_blocks_before_request_creation(tmp_path):
+    """An unlicensed admin cannot consume one-shot release-card issuance."""
+    from jason_runtime.mobile_release_approval import (
+        MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority,
+    )
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        make_eligible_main_offer,
+    )
+
+    path = separated_policy_file(tmp_path)
+    root, _ = release_record(tmp_path)
+    mark_release_high_impact(root)
+    make_eligible_main_offer(root, path)
+    repository = SQLiteApprovalRequestRepository(tmp_path / "v4-unreachable.db")
+    approvals = ApprovalRequestService(repository, MobileReleaseOwnerAuthority(path))
+
+    class AdminReadiness:
+        licensed = False
+        preflights = []
+        sends = []
+
+        def preflight_release_delivery(self, request):
+            self.preflights.append(request)
+            assert request.authorized_approver_ids == ("person-al",)
+            if not self.licensed:
+                raise PermissionError("Teams release approver is not reachable: approver_teams_license_unavailable")
+
+        def send(self, request):
+            self.sends.append(request)
+            return ("real-provider-test-message-id",)
+
+    sender = AdminReadiness()
+    worker = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=path, state_root=root,
+        requests=repository, approvals=approvals,
+        sender=sender, clock=lambda: NOW, interval_seconds=60,
+        required_policy_version="4.0",
+    )
+    assert worker.tick() is False
+    assert len(sender.preflights) == 1
+    assert sender.sends == []
+    assert repository.list_all() == ()
+
+    # The owner can fix the admin Teams access without first revoking or
+    # replaying a one-shot approval request. Only one new request follows.
+    sender.licensed = True
+    worker._next_due = NOW
+    assert worker.tick() is True
+    assert len(repository.list_all()) == 1
+    assert len(sender.sends) == 1
+    assert repository.get(sender.sends[0].approval_id).status == ApprovalRequestStatus.PENDING
+    worker._next_due = NOW
+    assert worker.tick() is False
+    assert len(sender.sends) == 1
+
+
+def test_v4_sender_preflights_exact_admin_identity_without_fallback(monkeypatch):
+    pair = SenderBindings(binding(ADMIN))
+    obj = sender(pair)
+    verified = []
+
+    class ReadOnlyGateway:
+        def preflight_release_approver(self, *, binding):
+            verified.append(binding.microsoft_object_id)
+
+    monkeypatch.setattr(obj, "_existing_transport", lambda: ReadOnlyGateway())
+    from jason_runtime.mobile_release_approval import create_mobile_release_request, read_eligible_release
+    # This exact V4 release request uses the canonical Owner role name, not
+    # regular requester's Entra ID.
+    from datetime import datetime, timezone
+    from tempfile import TemporaryDirectory
+    with TemporaryDirectory() as temp:
+        root_path = Path(temp)
+        path = separated_policy_file(root_path)
+        root, _ = release_record(root_path)
+        mark_release_high_impact(root)
+        policy = read_mobile_release_policy(path)
+        req = create_mobile_release_request(
+            read_eligible_release(root, RELEASE, policy), policy, now=NOW,
+        )
+        obj.preflight_release_delivery(req)
+    assert verified == [ADMIN]
+    assert pair.lookup_calls == [(TENANT, ADMIN)]
+
+
+def test_v4_admin_preflight_requires_real_read_only_method_not_old_sender(tmp_path):
+    from jason_runtime.mobile_release_approval import (
+        MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority,
+    )
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        make_eligible_main_offer,
+    )
+    path = separated_policy_file(tmp_path)
+    root, _ = release_record(tmp_path)
+    mark_release_high_impact(root)
+    make_eligible_main_offer(root, path)
+    repo = SQLiteApprovalRequestRepository(tmp_path / "missing-check.db")
+    approvals = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(path))
+
+    class OldSender:
+        def send(self, request):
+            raise AssertionError("old transport must not issue admin release")
+
+    maintenance = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=path, state_root=root,
+        requests=repo, approvals=approvals, sender=OldSender(),
+        interval_seconds=60, clock=lambda: NOW,
+        required_policy_version="4.0",
+    )
+    assert maintenance.tick() is False
+    assert repo.list_all() == ()
