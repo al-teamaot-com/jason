@@ -85,6 +85,93 @@ class ProductionDriftGuardTests(unittest.TestCase):
             "kind": "independent_optional_system_unit_failed", "unit": docs, "state": "failed"
         }])
 
+    def test_optional_grafana_assurance_failure_is_visible_not_blocking(self):
+        assurance = "jason-grafana-assurance.service"
+        result = self._synthetic_system_failure(
+            failed={assurance}, allowed={assurance})
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["advisories"], [{
+            "kind": "independent_optional_system_unit_failed",
+            "unit": assurance, "state": "failed",
+        }])
+
+    def test_other_known_optional_observers_are_nonblocking(self):
+        # These are explicitly allowed, non-required reporting/health probes,
+        # not safety-critical release workers. Their failed result is visible.
+        for name in (
+            "jason-grafana-assurance-exporter.service",
+            "jason-grafana-assurance.timer",
+            "jason-isolated-provider-health.service",
+            "jason-isolated-provider-health.timer",
+            "jason-provider-health-canary.service",
+        ):
+            with self.subTest(name=name):
+                result=self._synthetic_system_failure(
+                    failed={name},allowed={name})
+                self.assertEqual(result["status"],"pass")
+                self.assertEqual(result["problems"],[])
+                self.assertEqual(result["advisories"],[{
+                    "kind":"independent_optional_system_unit_failed",
+                    "unit":name,"state":"failed",
+                }])
+
+    def test_critical_release_and_security_services_never_become_advisories(self):
+        # Allowed is not equivalent to optional: the explicit static
+        # observer allowlist must never catch core authority/release services.
+        for name in (
+            "jason-openclaw-authority-health.service",
+            "jason-production-drift-watchdog.service",
+            "jason-release-control-transition.service",
+            "jason-runtime.service",
+            "jason-openbao-backup.service",
+        ):
+            with self.subTest(name=name):
+                result=self._synthetic_system_failure(
+                    failed={name},allowed={name})
+                self.assertEqual(result["status"],"drift_detected")
+                self.assertEqual(result["advisories"],[])
+                self.assertTrue(any(problem["kind"]=="failed_system_unit"
+                                    and problem["unit"]==name
+                                    for problem in result["problems"]))
+
+    def test_grafana_assurance_still_blocks_if_undeclared_or_required(self):
+        assurance = "jason-grafana-assurance.service"
+        undeclared = self._synthetic_system_failure(failed={assurance})
+        required = self._synthetic_system_failure(
+            failed={assurance}, required={assurance})
+        self.assertEqual(undeclared["status"], "drift_detected")
+        self.assertEqual(required["status"], "drift_detected")
+        self.assertEqual(undeclared["advisories"], [])
+        self.assertEqual(required["advisories"], [])
+        self.assertIn("undeclared_installed_system_unit",
+                      {p["kind"] for p in undeclared["problems"]})
+        self.assertIn("required_system_unit_not_active",
+                      {p["kind"] for p in required["problems"]})
+
+    def test_grafana_assurance_warning_cannot_hide_real_health_failure(self):
+        assurance = "jason-grafana-assurance.service"
+        health = "jason-openclaw-authority-health.service"
+        result = self._synthetic_system_failure(
+            failed={assurance, health}, allowed={assurance, health})
+        self.assertEqual(result["status"], "drift_detected")
+        self.assertEqual(len(result["advisories"]), 1)
+        self.assertEqual(result["advisories"][0]["unit"], assurance)
+        self.assertTrue(any(p["kind"] == "failed_system_unit"
+                            and p["unit"] == health
+                            for p in result["problems"]))
+
+    def test_grafana_assurance_forbidden_path_still_blocks(self):
+        assurance = "jason-grafana-assurance.service"
+        result = self._synthetic_system_failure(
+            failed={assurance}, allowed={assurance},
+            forbidden_unit=assurance)
+        self.assertEqual(result["status"], "drift_detected")
+        self.assertEqual(len(result["advisories"]), 1)
+        self.assertTrue(any(p["kind"] == "forbidden_execution_path"
+                            and p["unit"] == assurance
+                            for p in result["problems"]))
+
     def test_undeclared_documentation_failure_is_still_production_drift(self):
         docs = "jason-documentation-reconciliation.service"
         result = self._synthetic_system_failure(failed={docs})
@@ -280,5 +367,5 @@ if __name__ == "__main__":
 
 def test_failed_optional_full_integrity_scan_is_advisory_not_release_drift():
     from tools import production_drift_guard as g
-    assert "jason-openclaw-authority-full-integrity.service" in g.INDEPENDENT_OPTIONAL_SYSTEM_ONESHOTS
-    assert "jason-runtime.service" not in g.INDEPENDENT_OPTIONAL_SYSTEM_ONESHOTS
+    assert "jason-openclaw-authority-full-integrity.service" in g.INDEPENDENT_OPTIONAL_OBSERVERS
+    assert "jason-runtime.service" not in g.INDEPENDENT_OPTIONAL_OBSERVERS

@@ -6,6 +6,11 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
+# Exit 2 = drift DETECTED and protected breaker evidence recorded, not a
+# watchdog execution error. Other nonzero exits remain failed system units.
+# Without this, detecting a real violation marks the watchdog itself failed,
+# creating an artificial, self-reinforcing drift incident.
+SuccessExitStatus=2
 ExecStart=/usr/bin/python3 /opt/jason/current/tools/production_drift_watchdog.py
 NoNewPrivileges=true
 PrivateTmp=true
