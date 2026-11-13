@@ -71,7 +71,7 @@ jobs:
         env:
           PYTHONPATH: '.:implementation:tools'
         run: |
-          sudo -E python -m pytest -q \
+          sudo env PYTHONPATH=.:implementation:tools "$(command -v python)" -m pytest -q \
             tools/tests/test_owner_full_integrity_v2_root_repair.py \
             -k 'disposable or foreign_child or tampered_stage or untrusted_source'
       - name: Source-only release boundary
