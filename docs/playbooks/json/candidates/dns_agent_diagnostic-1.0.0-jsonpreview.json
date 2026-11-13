@@ -1,0 +1,854 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "dns_agent_diagnostic",
+    "name": "Jason - DNSFilter DNS Agent Diagnostic (JSON migration draft)",
+    "version": "1.0.0-jsonpreview",
+    "lifecycle": "pilot",
+    "target_type": "endpoint",
+    "source_owner": "AOT",
+    "source_registry_version": "1.0.0",
+    "documented_version": null,
+    "original_lifecycle": "production"
+  },
+  "trigger": {
+    "source_registry_match": {
+      "title_contains": [
+        "DNS Agent"
+      ]
+    },
+    "details_section_key": "2",
+    "execution_enabled": false
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "preview_only": true,
+    "execution_authority": "none",
+    "scope_section_key": "3"
+  },
+  "expected_state": {
+    "details_section_key": "5",
+    "not_reverified_in_json_runtime": true
+  },
+  "state_model": {
+    "entry_step": "identity_gate",
+    "source_section_key": "6",
+    "context_binding_status": "not_implemented_for_migration_draft"
+  },
+  "steps": [
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "evidence_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "authoritative_evidence_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "authorization_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "authorization_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "approved_json_runtime_parity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "migration_hold"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "migration_hold",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Legacy source playbook section 17 and provider readbacks; not executed in this JSON draft",
+    "success_condition": "Legacy source Section 17 and Section 18 must pass independently; classification-only draft cannot verify or close"
+  },
+  "completion": {
+    "terminal_disposition": "Human Review (draft only; existing production source unchanged)"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": []
+  },
+  "procedure": {
+    "section_refs": {
+      "section_goal": "1",
+      "trigger": "2",
+      "scope": "3",
+      "identification": "4",
+      "expected_state": "5",
+      "state_model": "6",
+      "diagnostics": "7",
+      "decision_gates": "8",
+      "remediation": "9",
+      "retry_policy": "10",
+      "periodic_rechecks": "11",
+      "stale_condition": "12",
+      "dependencies": "13",
+      "documentation": "14",
+      "failures": "15",
+      "escalation": "16",
+      "verification": "17",
+      "completion": "18",
+      "final_resolution": "19",
+      "required_capabilities": "20",
+      "acceptance_test": "21",
+      "closure": "22",
+      "autonomy_review": "23"
+    },
+    "section_keys_missing_from_source": [
+      "23"
+    ],
+    "diagnostic_substep_titles": [
+      "Step 1 — Current device and alert state",
+      "Step 1A — Native DNSFilter posture correlation when client isolation is authorized",
+      "Step 2 — Native software inventory",
+      "Step 3 — Existing standing-safe service and DNS diagnostics",
+      "Step 4 — Dedicated DNSFilter-specific read-only component",
+      "Step 5 — Required-installation gate and approved install path",
+      "Step 6 — Vendor evidence when relevant",
+      "Step 7 — Classify"
+    ],
+    "remediation_substep_titles": [
+      "Standing-approved diagnostic",
+      "Native DNSFilter integration",
+      "Service start/restart",
+      "Missing-agent install",
+      "Bounded reinstall for existing broken client",
+      "Uninstall"
+    ],
+    "live_execution_mapped": false,
+    "structured_source_fields": {
+      "identification_checklist": {
+        "source_section_key": "4",
+        "present": true,
+        "verbatim_bullets": [
+          "1. Identify exact Autotask ticket and DRMM alert UID.",
+          "2. Identify client/site and endpoint.",
+          "3. Validate existing CI or run the global device-association gate.",
+          "4. Resolve exactly one authoritative DRMM device UID.",
+          "5. Confirm the alert is DNSFilter/DNS Agent related.",
+          "6. Record alert timestamp, monitor/policy, and any monitor-provided diagnostics/remediation result.",
+          "7. If endpoint is online, run the global ticket-work-start lifecycle before substantive diagnostics:",
+          "- queue Jason;",
+          "- status In Progress;",
+          "- Work Type Remote Support;",
+          "- require readback verification.",
+          "8. If endpoint is offline, do not claim solely to wait; add a recheck note and set `state = waiting_endpoint`."
+        ]
+      },
+      "expected_state_checklist": {
+        "source_section_key": "5",
+        "present": true,
+        "verbatim_bullets": [
+          "- endpoint online;",
+          "- required DNSFilter client installed;",
+          "- filtering service exists (`DNS Agent` for whitelabel/MSP or `DNSFilter Agent` for branded installs);",
+          "- for agent versions that include it, Service Manager exists (`DNS Agent Service Manager` / `DNSFilter Agent Service Manager`);",
+          "- required DNSFilter services are `Running`;",
+          "- startup mode not disabled;",
+          "- service executable exists;",
+          "- installed version can be identified;",
+          "- no unresolved recurring service-start/crash event;",
+          "- normal DNS resolution succeeds;",
+          "- current DNS configuration is consistent with the active agent mode;",
+          "- DRMM DNS Agent monitor is healthy / alert cleared;",
+          "- when native DNSFilter client scope is safely available, the provider-side agent/network/policy evidence agrees with the identified endpoint and does not indicate an unprotected/bypassed/stale state inconsistent with local evidence."
+        ]
+      },
+      "decision_gate_checklist": {
+        "source_section_key": "8",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact endpoint proven;",
+          "- endpoint online;",
+          "- ownership lifecycle succeeded;",
+          "- exact dedicated diagnostic component fingerprint is still approved.",
+          "- specific unhealthy condition proven;",
+          "- unrelated site/network outage excluded where practical;",
+          "- remediation action is covered by separate authority;",
+          "- user-impact risk evaluated."
+        ]
+      },
+      "retry_checklist": {
+        "source_section_key": "10",
+        "present": true,
+        "verbatim_bullets": [
+          "- Diagnostic component: maximum 2 executions per session only when the first fails for a transient/provider reason.",
+          "- Poll the exact job to terminal state; never redispatch while active.",
+          "- Never repeat a successful diagnostic just to obtain different output.",
+          "- Repeated diagnostic failure -> escalate.",
+          "- Bounded reinstall: maximum 1 uninstall/install cycle for the same unchanged incident state.",
+          "- Never redispatch uninstall or install while the exact job is active.",
+          "- Failed reinstall or failed post-reinstall verification -> Human Review; no second reinstall loop."
+        ]
+      },
+      "recheck_checklist": {
+        "source_section_key": "11",
+        "present": true,
+        "verbatim_bullets": [
+          "- use normal Jason queue cadence;",
+          "- each later availability check is documented with one concise recheck note;",
+          "- resume from persisted state when online.",
+          "- do not rerun identical diagnostics merely because the ticket is still open."
+        ]
+      },
+      "stale_checklist": {
+        "source_section_key": "12",
+        "present": true,
+        "verbatim_bullets": [
+          "- review client version;",
+          "- vendor known issues;",
+          "- VPN/network coexistence;",
+          "- endpoint event history;",
+          "- escalate to problem investigation rather than repeatedly restarting."
+        ]
+      },
+      "dependency_checklist": {
+        "source_section_key": "13",
+        "present": true,
+        "verbatim_bullets": [
+          "- current DNSFilter installer;",
+          "- correct client/site registration;",
+          "- supported agent version;",
+          "- Datto diagnostic component;",
+          "- standing component approval."
+        ]
+      },
+      "documentation_checklist": {
+        "source_section_key": "14",
+        "present": true,
+        "verbatim_bullets": [
+          "- one consolidated progress note per work session;",
+          "- not one note per command/read;",
+          "- a later offline/waiting recheck is a separate note-worthy event.",
+          "- **STATUS** — HEALTHY / REINSTALLING / VERIFIED RESOLVED / HUMAN REVIEW REQUIRED.",
+          "- **NEXT STEP** or **ACTION REQUIRED** — state the immediate action at the top.",
+          "- **DEVICE / ALERT** — endpoint and exact DRMM alert.",
+          "- **KEY EVIDENCE** — service state, installed version, DNS resolution/filtering result, relevant bounded event/log evidence.",
+          "- **WHAT JASON DID** — diagnostic/install/reinstall/alert-resolution actions.",
+          "- **CHANGES MADE** — explicitly state None when no modifying action occurred.",
+          "- **JASON STATE** — persisted playbook state.",
+          "- STATUS: VERIFIED RESOLVED",
+          "- NEXT STEP: Resolve exact DNSFilter alert and complete ticket automatically",
+          "- STATUS: HUMAN REVIEW REQUIRED",
+          "- ACTION REQUIRED: Review failed DNSFilter reinstall/verification evidence",
+          "- NEXT STEP: technician action only; Jason must not repeat the reinstall loop",
+          "- endpoint online/offline state;",
+          "- DNS Agent service state/start mode;",
+          "- installed version evidence;",
+          "- recent SCM/DNSFilter error evidence;",
+          "- DNS resolution result;",
+          "- job/correlation IDs;",
+          "- exact alert-resolution result and ticket-completion readback."
+        ]
+      },
+      "failure_checklist": {
+        "source_section_key": "15",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "escalation_checklist": {
+        "source_section_key": "16",
+        "present": true,
+        "verbatim_bullets": [
+          "- service/device identity is ambiguous;",
+          "- endpoint is an unsupported DNSFilter Roaming Client OS/role;",
+          "- reinstall gates cannot be proven;",
+          "- the single bounded reinstall attempt fails;",
+          "- post-reinstall healthy-state verification fails;",
+          "- DNS remains broken after the bounded reinstall;",
+          "- remediation requires DNS/NIC changes or reboot outside this playbook;",
+          "- vendor known issue materially matches the endpoint and the approved reinstall path does not restore health;",
+          "- two bounded diagnostic attempts fail."
+        ]
+      },
+      "verification_checklist": {
+        "source_section_key": "17",
+        "present": true,
+        "verbatim_bullets": [
+          "- endpoint online;",
+          "- filtering service `Running`;",
+          "- Service Manager `Running` where applicable;",
+          "- required services remain running through a short observation interval;",
+          "- normal DNS lookup succeeds;",
+          "- DNSFilter diagnostic TXT lookup shows expected DNSFilter handling;",
+          "- recent DNSFilter agent/Service Manager logs show no unresolved installation/registration/service-start failure;",
+          "- exact DRMM DNS Agent alert clears or is safely resolved;",
+          "- no new matching service failure appears during verification.",
+          "1. resolve the **exact** DRMM DNSFilter/DNS Agent alert that triggered the work;",
+          "2. independently verify the exact alert is resolved/cleared;",
+          "3. write the consolidated resolution note;",
+          "4. complete the Autotask ticket automatically;",
+          "5. independently read back status=Complete."
+        ]
+      },
+      "completion_checklist": {
+        "source_section_key": "18",
+        "present": true,
+        "verbatim_bullets": [
+          "1. exact endpoint/alert identified;",
+          "2. required diagnostics completed;",
+          "3. healthy state proven;",
+          "4. exact DNSFilter alert cleared/resolved and readback verified;",
+          "5. any install/reinstall remediation is independently verified;",
+          "6. consolidated resolution note exists;",
+          "7. Autotask completion write succeeds and status=Complete is independently read back."
+        ]
+      },
+      "required_capabilities_source": {
+        "source_section_key": "20",
+        "present": true,
+        "verbatim_bullets": [
+          "- `service.ticket.search/read/notes.search/note.create/update`",
+          "- `service.configuration.search/read`",
+          "- `endpoint.device.search/read`",
+          "- `endpoint.alert.search/history.search/resolve`",
+          "- `endpoint.software.search`",
+          "- `automation.component.search/execute`",
+          "- `automation.job.read`",
+          "- `automation.job.output.read`",
+          "- `dns.protection.organization.read`",
+          "- `dns.protection.agent.search`",
+          "- `dns.protection.agent.counts.read`",
+          "- `dns.protection.site.search`",
+          "- `dns.protection.policy.search`",
+          "- selected bounded DNSFilter investigation/report reads where a client-safe boundary is proven",
+          "- `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1` for exact service state/details and relevant Windows events;",
+          "- `Get-DNS Settings AOT Ver 06042025-1` for current DNS configuration.",
+          "- `DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026` is deployed;",
+          "- controlled AVMAC-1077 acceptance passed after correcting the `$Matches` collision;",
+          "- the exact diagnostic component is registered in Jason's durable standing-safe Datto component approval registry and has passed a production autonomous retest.",
+          "- acceptance-test exact existing installer `Install DNSFilter AOT Ver 08262024` (UID `3a3f04c4-3f69-45aa-9260-d8146958a24b`) for gated missing-agent and reinstall use;",
+          "- acceptance-test exact uninstall component `Uninstall DNS Filter / DNS Agent AOT Ver 11052025-1` (UID `449d39cc-e6e8-40a7-afb4-2ffeee069f5d`) specifically for the single bounded reinstall branch;",
+          "- prove the combined uninstall -> install -> diagnostic -> exact-alert resolve -> Autotask Complete lifecycle with readback. DNSFilter client-network isolation work tracked in #253 is complete."
+        ]
+      },
+      "acceptance_test_checklist": {
+        "source_section_key": "21",
+        "present": true,
+        "verbatim_bullets": [
+          "- Ticket: `T20260924.0021`",
+          "- Client: AVMAC llc",
+          "- Endpoint: `AVMAC-1077`",
+          "- DRMM UID: `a95c92ff-5b53-4813-d39a-638d108b48bf`",
+          "- Alert: `ba827896-edfb-4d41-be67-3c176d6cf418`",
+          "- endpoint online;",
+          "- Datto AV RunningAndUpToDate;",
+          "- reboot_required=False;",
+          "- monitor reported: `DNS Agent Cannot start service 'DNS Agent' on computer '.'`;",
+          "- native DRMM software search did not return a DNSFilter product;",
+          "- generic PowerShell diagnostic correctly stopped at the per-run approval gate.",
+          "- dedicated diagnostic UID `c3340a58-48d5-457b-bc30-5fd79e5ad8b1` ran to terminal completion after the `$Matches` regression was corrected;",
+          "- filtering service `DNS Agent` was Stopped/Auto;",
+          "- `DNS Agent Service Manager` was Running/Auto;",
+          "- expected filtering executable `C:\\\\Program Files\\\\DNS Agent\\\\Agent\\\\DNS Agent.exe` was missing;",
+          "- Service Manager binary was present, version 3.7.11.0, with valid signature;",
+          "- normal DNS resolution succeeded;",
+          "- DNSFilter diagnostic TXT verification failed;",
+          "- bounded Windows and DNSFilter operational-log evidence was returned;",
+          "- incident classification was correctly `agent_corrupt_or_partial`;",
+          "- no blind reinstall, service restart, DNS/NIC change, uninstall, registry modification, or reboot occurred;",
+          "- the corrected component was subsequently standing-approved and rerun successfully without per-run approval;",
+          "- native DNSFilter client-scoped reads for AVMAC remain blocked pending safe network/site isolation (#253).",
+          "1. exact identity;",
+          "2. dedicated component runs without per-run approval under standing-safe policy;",
+          "3. no modifying/disruptive action occurs;",
+          "4. filtering service + Service Manager/install/Windows-event/DNSFilter-log/DNS evidence is returned;",
+          "5. exact job is polled without duplicate dispatch;",
+          "6. one consolidated ticket note is written;",
+          "7. incident is correctly classified;",
+          "8. if the agent is genuinely missing on a supported/required endpoint, the exact approved installer runs once and is verified rather than repeatedly dispatched;",
+          "9. after install, both services, relevant logs, DNS resolution/filtering, and alert state are verified;",
+          "10. healthy/stale case resolves the exact alert and completes the Autotask ticket automatically without Help Desk review;",
+          "11. partial/corrupt install, service stopped/start failure, and DNSFilter-attributable DNS failure enter the single bounded reinstall branch;",
+          "12. bounded reinstall runs exact uninstall once, exact install once, then full diagnostic verification;",
+          "13. successful reinstall resolves the exact alert and completes the ticket automatically with independent readback;",
+          "14. failed reinstall/verification stops at Help Desk I / Human Review and does not loop;",
+          "15. audit records bind exact diagnostic, uninstall, installer, alert-resolution, and ticket-completion identities/fingerprints."
+        ]
+      },
+      "closure_checklist": {
+        "source_section_key": "22",
+        "present": true,
+        "verbatim_bullets": [
+          "- dedicated diagnostic component created in Datto RMM;",
+          "- read-only diagnostic behavior reviewed;",
+          "- diagnostic component standing-approved in Jason's durable registry;",
+          "- AVMAC-1077 diagnostic acceptance succeeded;",
+          "- partial/corrupt-install classification and fail-closed behavior were proven;",
+          "- production autonomous diagnostic rerun succeeded.",
+          "- exact `Install DNSFilter AOT Ver 08262024` component passes controlled acceptance for missing-agent and reinstall use;",
+          "- exact uninstall component passes controlled acceptance for the one-cycle reinstall branch;",
+          "- the combined reinstall -> verification -> exact-alert resolution -> automatic ticket completion lifecycle passes production acceptance;",
+          "- note quality and retry behavior remain verified after remediation acceptance;",
+          "- limitations/TODOs are documented;",
+          "- Project Jason/Grafana tracking is updated."
+        ]
+      },
+      "owner_review_checklist": {
+        "source_section_key": "23",
+        "present": false,
+        "verbatim_bullets": []
+      }
+    },
+    "diagnostic_substeps": [
+      {
+        "id": "7_sub_1",
+        "heading": "Step 1 — Current device and alert state",
+        "content_markdown": "\n\n**Reads:** `endpoint.device.read`, `endpoint.alert.search`, `endpoint.alert.history.search`.\n\n- Offline -> `waiting_endpoint`.\n- Alert already resolved and endpoint healthy -> verify and close normally.\n- Alert open -> continue.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_2",
+        "heading": "Step 1A — Native DNSFilter posture correlation when client isolation is authorized",
+        "content_markdown": "\n\nUse native DNSFilter reads as complementary provider evidence, not as a replacement for endpoint-local diagnostics.\n\nPreferred reads where authorized:\n- `dns.protection.organization.read`\n- `dns.protection.agent.search`\n- `dns.protection.agent.counts.read`\n- `dns.protection.site.search`\n- `dns.protection.policy.search`\n- bounded `dns.protection.agent.version.report` / site-drift or investigation reads only when they answer a specific diagnostic question.\n\nRules:\n- always supply the exact Autotask `company_id`;\n- organization/network/site scope must be server-derived and client-isolated;\n- for client tickets, never substitute AOT self-company `company_id=0` merely because the client lives inside AOT's DNSFilter MSP organization;\n- do not collect broad DNS query history during routine endpoint diagnosis;\n- if native provider evidence conflicts with endpoint-local evidence, preserve both and investigate rather than silently choosing one.\n\nDecision:\n- exact provider-side agent match -> record agent state/status/version, authorized network/site, policy relationship where returned, and relevant sync/traffic state;\n- no provider-side match -> continue local install/service diagnostics; absence from the provider search alone is not proof that the local client is absent;\n- multiple or cross-client candidates -> `identification_blocked`;\n- `CONNECTOR_AUTHORIZATION_DENIED` or missing safe client boundary -> document native connector evidence as unavailable, continue with the DRMM diagnostic path, and do not weaken isolation. Client-network isolation work tracked in GitHub #253 is complete; any remaining authorization denial must be treated as a live mapping/scope problem rather than bypassed.\n\n**Production evidence — 2026-09-24:** AOT self-company reads succeeded and returned AOT-50282 as an active/protected Windows agent, version 3.3.6, on the AOT Office network. Earlier AVMAC reads failed closed until client network/site isolation was designed and implemented under GitHub #253. Preserve the rule that client execution is bounded to the server-derived authorized network/site set; never map every client broadly to the shared MSP/master organization.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {
+          "decision": "- exact provider-side agent match -> record agent state/status/version, authorized network/site, policy relationship where returned, and relevant sync/traffic state;"
+        }
+      },
+      {
+        "id": "7_sub_3",
+        "heading": "Step 2 — Native software inventory",
+        "content_markdown": "\n\nUse `endpoint.software.search` for DNSFilter/DNS Agent variants.\n\nAbsence from DRMM software inventory is not sufficient proof that DNSFilter is absent.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_4",
+        "heading": "Step 3 — Existing standing-safe service and DNS diagnostics",
+        "content_markdown": "\n\nUse the already standing-approved components first where they answer the question cleanly:\n\n- `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1`\n  - run for filtering service (`DNS Agent` / `DNSFilter Agent`);\n  - run for Service Manager (`DNS Agent Service Manager` / `DNSFilter Agent Service Manager`) when applicable;\n  - captures detailed service properties and relevant Windows event evidence.\n- `Get-DNS Settings AOT Ver 06042025-1`\n  - capture current endpoint DNS configuration without modification.\n\nThese generic standing-safe components may be used immediately under existing policy and should not be duplicated merely because the DNSFilter playbook exists.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_5",
+        "heading": "Step 4 — Dedicated DNSFilter-specific read-only component",
+        "content_markdown": "\n\nUse the production-accepted component:\n\n`DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026`\n\nCurrent UID:\n`c3340a58-48d5-457b-bc30-5fd79e5ad8b1`\n\nStanding classification:\n- read-only;\n- non-disruptive;\n- production standing-approved for unsupervised diagnostic use.\n\n**Implementation evidence — 2026-09-24:** the initial AVMAC-1077 acceptance run exposed a PowerShell automatic-variable collision between `$Matches` (created by `-match`) and a script collection named `$matches`. The corrected component renamed the collection to `$logMatches`; the controlled rerun and later production standing-safe rerun both completed successfully with empty stderr. Preserve this regression lesson in future component revisions.\n\nThe component must collect only:\n\n**Service state**\n- detect branded vs whitelabel naming;\n- check filtering service: `DNS Agent` or `DNSFilter Agent`;\n- check Service Manager where applicable: `DNS Agent Service Manager` or `DNSFilter Agent Service Manager`;\n- if CyberSight is present, report its service state but do not treat it as required unless policy says it is enabled;\n- for each discovered service return Name, DisplayName, State, StartMode, StartName, PathName, ExitCode, ServiceSpecificExitCode, ProcessId.\n\nDNSFilter documentation states that agent v2.1+ includes a Service Manager that monitors the filtering service and can restart it after an unexpected stop, so both services must be evaluated together.\n\n**Install metadata**\n- check:\n  - `HKLM:\\SOFTWARE\\DNSFilter\\Agent`\n  - `HKLM:\\SOFTWARE\\DNSAgent\\Agent`\n  - uninstall inventory for DNSFilter/DNS Agent;\n- return only non-secret product name/version/install path/product code.\n\n**Binary evidence**\n- executable exists;\n- file/product version;\n- optional Authenticode signature status.\n\n**Recent Windows events**\n- previous 6 hours by default, extend to 24 hours when needed;\n- System Service Control Manager entries referencing DNS Agent/DNSFilter;\n- relevant Application errors from DNSFilter/DNS Agent executables/providers;\n- newest first, bounded output;\n- timestamp, event ID, provider, level, short error/message.\n\n**DNSFilter operational logs**\n- discover version-appropriate log roots instead of assuming one fixed path;\n- v3.x candidates include `%ProgramData%\\\\DNSFilter, Inc\\\\Logs` and whitelabel ProgramData variants;\n- legacy candidates include install-directory log folders such as `C:\\\\Program Files\\\\DNSFilter Agent\\\\logs` and `C:\\\\Program Files\\\\DNS Agent\\\\logs`;\n- inspect bounded recent entries from filtering-service/agent-operations logs, Service Manager logs, and auto-update logs;\n- return filenames, modification times, and recent Warning/Error/Exception/registration/update/service-failure lines with bounded context;\n- do **not** return raw DNS query logs in routine diagnostics because they may contain user browsing/query history;\n- do not change log level or enable DEBUG automatically.\n\n**DNS state**\n- active adapters;\n- configured DNS servers;\n- DNS Client service state;\n- one bounded normal DNS lookup against a neutral hostname;\n- run `nslookup -type=txt debug.dnsfilter.com` or equivalent read-only DNSFilter diagnostic query and report whether expected DNSFilter diagnostic fields are returned, without recording unrelated query history;\n- lookup success/failure and elapsed time.\n\n**System context**\n- hostname;\n- OS/build;\n- uptime/last boot;\n- pending reboot state if available.\n\nThe diagnostic component must never:\n- Start/Stop/Restart a service;\n- change startup type;\n- change NIC/DNS configuration;\n- flush DNS;\n- modify registry;\n- install/upgrade/uninstall inside the diagnostic component itself;\n- reboot;\n- disable protection;\n- collect DNS query history or secret registration values.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_6",
+        "heading": "Step 5 — Required-installation gate and approved install path",
+        "content_markdown": "\n\nBefore installing, prove all of the following:\n- endpoint is a supported Windows client OS/role for the DNSFilter Roaming Client;\n- client/site policy requires the Roaming Client on this endpoint;\n- the device is not a Windows Server, domain controller, shared desktop/RDS host, or other unsupported role unless DNSFilter support documentation explicitly says otherwise;\n- installation is genuinely absent, not merely hidden from DRMM inventory;\n- no existing filtering service, Service Manager, install registry evidence, binary, or active DNSFilter client is found;\n- required DNSFilter site configuration/secret is available to the existing component through the approved Datto/site-variable mechanism without exposing the secret;\n- endpoint has network connectivity and required runtime prerequisites.\n\nIf all gates pass:\n- run exact component `Install DNSFilter AOT Ver 08262024`;\n- poll the same job to terminal state;\n- do not redispatch while active;\n- then rerun the diagnostic component for authoritative verification.\n\nIf install evidence is partial/corrupt or an existing client is present but broken:\n- do not install over the broken client in place;\n- if the reinstall gates in Section 9 pass, transition to `reinstalling`;\n- perform the exact bounded uninstall/install sequence once;\n- then rerun the diagnostic component for authoritative verification;\n- if the reinstall branch fails or health cannot be proven, transition to Human Review.\n\nDNSFilter currently documents the Windows Roaming Client for Windows 10+ client systems and states it is not supported on Windows Server/shared desktop environments; v3.x also requires .NET 8 runtime prerequisites. Treat those as hard install gates.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_7",
+        "heading": "Step 6 — Vendor evidence when relevant",
+        "content_markdown": "\n\nIf version/behavior suggests a client defect, consult current official DNSFilter release/known-issue material first. Compare the installed version to current production and check for applicable DNS/VPN/IPv6/config-sync/stability fixes.\n\nDo not upgrade solely because a newer version exists.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_8",
+        "heading": "Step 7 — Classify",
+        "content_markdown": "\n\n**Healthy / stale monitor**\n- service running;\n- DNS resolution healthy;\n- no current failure evidence.\n- Verify -> resolve exact DRMM alert -> complete ticket.\n\n**Service stopped**\n- service exists but is not running.\n- Exclude a broader site/network outage where practical.\n- If the endpoint is eligible and DNSFilter is required, transition to `reinstalling`.\n\n**Service start failure**\n- monitor/event evidence shows start attempt failed.\n- Capture exact error/event evidence.\n- If the endpoint is eligible and DNSFilter is required, transition to `reinstalling`.\n\n**Agent missing**\n- DNSFilter is required;\n- supported client endpoint;\n- service/install/binary evidence all prove it is absent.\n- Run the approved install component, then verify both services/logs/DNS.\n\n**Agent corrupt/partial**\n- mixed evidence: service exists but executable/registry/install metadata is broken or inconsistent.\n- Use the bounded reinstall branch; do not perform an in-place repair-over-install.\n\n**DNS failure while service runs**\n- inspect DNS configuration/vendor-known issues/network context first;\n- exclude a broader site/network/DNS outage where practical;\n- when evidence reasonably attributes the failure to the DNSFilter client on an otherwise supported endpoint, use the bounded reinstall branch.\n\n**Known affected version**\n- document installed/current versions and official vendor evidence;\n- recommend bounded upgrade path;\n- remediation remains separately governed.\n\n---\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      }
+    ],
+    "remediation_branches": [
+      {
+        "id": "9_sub_1",
+        "heading": "Standing-approved diagnostic",
+        "content_markdown": "\n`DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026`\nUID: `c3340a58-48d5-457b-bc30-5fd79e5ad8b1`\n\nClassification: read-only / non-disruptive.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_2",
+        "heading": "Native DNSFilter integration",
+        "content_markdown": "\n\nCurrent classification: read-only.\n\nNative provider reads may be used to corroborate agent/network/policy posture only when Jason proves an exact safe client boundary. They do not authorize starting/restarting services, reinstalling agents, changing policies, changing networks, resolving unblock requests, or any other DNSFilter mutation.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_3",
+        "heading": "Service start/restart",
+        "content_markdown": "\nDo not use standalone service restart as the routine remediation branch. The approved target behavior for the qualifying failure states is the bounded reinstall sequence below.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_4",
+        "heading": "Missing-agent install",
+        "content_markdown": "\nExisting component:\n`Install DNSFilter AOT Ver 08262024`\n\nClassification: modifying, bounded installation.\n\n**Owner-approved workflow:** eligible for autonomous use only when all Step 4 install gates pass and after controlled acceptance proves the exact component behaves safely. The component must use the approved client/site configuration source and must never expose the site secret in output or ticket notes.\n\nAfter install, Jason must verify:\n- filtering service exists and is Running;\n- Service Manager exists/runs when applicable;\n- installed version is identified;\n- DNSFilter operational logs do not show unresolved install/registration/service failure;\n- normal DNS resolution succeeds;\n- DNSFilter diagnostic TXT lookup returns expected filtering evidence;\n- exact DRMM alert clears or can be safely resolved.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_5",
+        "heading": "Bounded reinstall for existing broken client",
+        "content_markdown": "\n\nQualifying conditions:\n- `agent_corrupt_or_partial`;\n- filtering service stopped;\n- documented service-start failure;\n- DNSFilter-attributable DNS resolution/filtering failure after broader outage/configuration causes are excluded where practical.\n\nHard gates:\n- supported Windows client endpoint/role;\n- DNSFilter is required for this client/site/device;\n- endpoint identity and CI are exact;\n- endpoint is online;\n- required DNSFilter site configuration is available without exposing secrets;\n- no broader site/network outage reasonably explains the symptom;\n- no reinstall has already been attempted for the same unchanged incident state.\n\nExact sequence:\n1. Run `Uninstall DNS Filter / DNS Agent AOT Ver 11052025-1` once.\n2. Poll the exact uninstall job to terminal state and verify DNSFilter is actually absent.\n3. Run `Install DNSFilter AOT Ver 08262024` once.\n4. Poll the exact install job to terminal state.\n5. Rerun `DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026`.\n6. Require full Section 17 healthy-state verification.\n7. Resolve the exact DRMM alert.\n8. Complete the Autotask ticket with readback verification.\n\nMaximum reinstall cycles for one unchanged incident state: **1**.\n\nIf uninstall, install, verification, exact-alert resolution, or ticket completion fails, stop and hand off to Help Desk I / Human Review with the technician-scannable evidence and next step. Do not loop the reinstall.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_6",
+        "heading": "Uninstall",
+        "content_markdown": "\nExisting component:\n`Uninstall DNS Filter / DNS Agent AOT Ver 11052025-1`\nUID: `449d39cc-e6e8-40a7-afb4-2ffeee069f5d`\n\nClassification: modifying/security-control removal.\n\nAutonomous use is limited to the single bounded reinstall sequence above after controlled acceptance and exact owner promotion. Standalone or unrelated uninstall remains approval-bound.\n\n---\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      }
+    ],
+    "source_section_inventory": [
+      {
+        "section_key": "1",
+        "present": true,
+        "title": "Section Goal",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "2",
+        "present": true,
+        "title": "Trigger",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "3",
+        "present": true,
+        "title": "Scope and Boundaries",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "4",
+        "present": true,
+        "title": "Initial Identification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "5",
+        "present": true,
+        "title": "Expected State",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "6",
+        "present": true,
+        "title": "State Model",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "7",
+        "present": true,
+        "title": "Diagnostic Workflow",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "8",
+        "present": true,
+        "title": "Decision Gates",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "9",
+        "present": true,
+        "title": "Remediation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "10",
+        "present": true,
+        "title": "Retry Policy",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "11",
+        "present": true,
+        "title": "Periodic Rechecks",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "12",
+        "present": true,
+        "title": "Aging / Stale Condition",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "13",
+        "present": true,
+        "title": "Dependency Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "14",
+        "present": true,
+        "title": "Documentation Requirements",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "15",
+        "present": true,
+        "title": "Failure Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "16",
+        "present": true,
+        "title": "Escalation Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "17",
+        "present": true,
+        "title": "Verification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "18",
+        "present": true,
+        "title": "Completion Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "19",
+        "present": true,
+        "title": "Final Resolution Note",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "20",
+        "present": true,
+        "title": "Required Capabilities",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "21",
+        "present": true,
+        "title": "Acceptance Test",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "22",
+        "present": true,
+        "title": "Section Goal Closure",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "23",
+        "present": false,
+        "title": null,
+        "review_status": "missing_in_source_needs_author_review"
+      }
+    ],
+    "section_semantics": "Source-derived metadata only. Diagnostic commands and remediation branches are inert Markdown, not executable provider calls."
+  },
+  "legacy_registry": {
+    "source_path": "docs/playbooks/Jason-DNSFilter-DNS-Agent-Diagnostic.md",
+    "source_version": "1.0.0",
+    "review_status": "diagnostic_only_autonomous_repair_gated",
+    "source_enabled": true,
+    "source_autonomy_activation": "autonomous",
+    "source_allowed_capabilities": [
+      "automation.component.execute",
+      "service.ticket.note.create",
+      "service.ticket.update"
+    ],
+    "source_required_gates": [
+      "trigger",
+      "identity",
+      "expected_condition",
+      "evidence_fresh",
+      "governance_precheck"
+    ],
+    "source_trigger": {
+      "title_contains": [
+        "DNS Agent"
+      ]
+    }
+  },
+  "source_document": {
+    "path": "docs/playbooks/Jason-DNSFilter-DNS-Agent-Diagnostic.md",
+    "source_blob_sha": "fa1dbb6375a0cb58a01c7948edc168bf55131e14",
+    "prelude_markdown": "# Jason Playbook: DNSFilter / DNS Agent Diagnostic\n\n",
+    "sections": [
+      {
+        "key": "1",
+        "title": "Section Goal",
+        "heading_markdown": "## 1. Section Goal",
+        "body_markdown": "\n\n**Goal:** Allow Jason to investigate and repair routine Windows DNSFilter / DNS Agent deployment-health alerts autonomously: prove the endpoint should have DNSFilter, verify installation, install the approved client when it is missing, perform one bounded approved reinstall when the existing client is partial/corrupt or the DNS Agent is stopped/failing or DNSFilter-attributable DNS resolution fails, verify recovery, resolve the exact DRMM alert, complete the Autotask ticket, and document the result. Higher-risk unrelated actions remain separately governed.\n\n**Success means:**\n- exact ticket/client/device/alert identity is proven;\n- endpoint availability is checked before diagnostics;\n- service/install/version/event/DNSFilter-log/DNS evidence can be collected without per-run approval;\n- where a client-safe DNSFilter boundary is proven, native DNSFilter reads correlate provider-side organization/network/agent/policy state with endpoint-local DRMM evidence;\n- if DNSFilter is required but genuinely missing, Jason can run the exact approved `Install DNSFilter AOT Ver 08262024` component after all install gates pass;\n- when a supported endpoint has a partial/corrupt install, service-stopped/start-failure condition, or DNSFilter-attributable DNS failure, Jason can perform one bounded governed uninstall/reinstall cycle after the reinstall gates pass;\n- both the filtering service and Service Manager are verified after install/reinstall and during diagnostics;\n- once authoritative healthy state is proven, Jason resolves the exact DRMM alert and completes the Autotask ticket automatically without Help Desk review;\n- one consolidated Autotask note summarizes each work session;\n- arbitrary DNS/NIC changes, registry modification outside the exact approved uninstall/install components, disabling protection outside the bounded reinstall, and reboot remain outside this playbook.\n\nThe dedicated diagnostic component milestone is complete as of 2026-09-24: `DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026` is deployed, production acceptance-tested, and standing-approved. DNSFilter client-network isolation work tracked in GitHub #253 is complete. The full Section Goal remains open until the exact install and uninstall/reinstall branches are acceptance-tested and promoted for this bounded autonomous use.\n\n---\n\n"
+      },
+      {
+        "key": "2",
+        "title": "Trigger",
+        "heading_markdown": "## 2. Trigger",
+        "body_markdown": "\n\nApply when:\n- ticket/alert references `DNS Agent`, `DNSFilter`, or the Windows Roaming Client;\n- DRMM reports `Service 'DNS Agent' isStopped`, service-start failure, agent unavailable, or equivalent DNSFilter health failure;\n- a technician explicitly invokes this playbook for a DNSFilter Windows endpoint.\n\nCurrent monitor example:\n- policy: `AOT - Policy DNSFilter Monitor/Resolve`\n\n---\n\n"
+      },
+      {
+        "key": "3",
+        "title": "Scope and Boundaries",
+        "heading_markdown": "## 3. Scope and Boundaries",
+        "body_markdown": "\n\n### In Scope\n- Windows endpoints managed by DRMM;\n- ticket/CI/device association;\n- endpoint online/offline verification;\n- current alert state;\n- read-only service discovery;\n- read-only install/version/path/registry discovery;\n- read-only recent Service Control Manager event review;\n- read-only DNSFilter filtering-service, Service Manager, and auto-update log review;\n- read-only DNS configuration and DNS resolution/filtering tests;\n- approved installation with `Install DNSFilter AOT Ver 08262024` when the endpoint is eligible, DNSFilter is required, installation is genuinely absent, and required site configuration is proven;\n- one bounded governed reinstall cycle using the exact approved uninstall then install components when the endpoint is eligible and diagnostics prove a partial/corrupt install, DNS Agent stopped/start failure, or DNSFilter-attributable DNS failure;\n- current DNSFilter vendor release/known-issue research when relevant;\n- governed native DNSFilter read evidence when a validated client-safe organization/network boundary exists;\n- exact DRMM alert resolution and automatic Autotask completion after authoritative healthy-state verification.\n\n### Out of Scope\n- starting/stopping/restarting DNS Agent;\n- changing startup type;\n- changing DNS servers/NIC configuration;\n- adapter reset;\n- `ipconfig /flushdns` as remediation;\n- arbitrary/manual installer execution outside the approved install component;\n- reinstall loops or repair-over-install that do not use the exact bounded uninstall/install sequence;\n- uninstall for any purpose other than the approved DNSFilter reinstall branch;\n- registry modification outside behavior already contained in the exact approved uninstall/install components;\n- disabling DNSFilter;\n- reboot/shutdown;\n- collection of browsing/query history;\n- disclosure of DNSFilter site/registration keys;\n- native DNSFilter policy/site/agent mutations in the current read-only integration phase;\n- using AOT self-company DNSFilter scope as a bypass for a client-scoped ticket.\n\nPreserve all Jason governance, including Central Orchestrator authority and `direct_provider_access=false`.\n\n**Owner policy decisions — 2026-09-24 and 2026-09-28:** routine DNSFilter diagnosis, healthy/stale closure, missing-agent installation, and one bounded reinstall cycle are approved target behaviors once their exact component/capability acceptance gates pass. The dedicated diagnostic component is deployed, acceptance-tested, and standing-approved. The reinstall branch is strictly: exact approved uninstall component once -> exact approved install component once -> full diagnostic verification. This does not authorize arbitrary uninstall, DNS/NIC changes, reboot, repeated reinstall loops, or unrelated native DNSFilter writes.\n\n---\n\n"
+      },
+      {
+        "key": "4",
+        "title": "Initial Identification",
+        "heading_markdown": "## 4. Initial Identification",
+        "body_markdown": "\n\n1. Identify exact Autotask ticket and DRMM alert UID.\n2. Identify client/site and endpoint.\n3. Validate existing CI or run the global device-association gate.\n4. Resolve exactly one authoritative DRMM device UID.\n5. Confirm the alert is DNSFilter/DNS Agent related.\n6. Record alert timestamp, monitor/policy, and any monitor-provided diagnostics/remediation result.\n7. If endpoint is online, run the global ticket-work-start lifecycle before substantive diagnostics:\n   - queue Jason;\n   - status In Progress;\n   - Work Type Remote Support;\n   - require readback verification.\n8. If endpoint is offline, do not claim solely to wait; add a recheck note and set `state = waiting_endpoint`.\n\nIf identity is ambiguous: `state = identification_blocked`.\n\n---\n\n"
+      },
+      {
+        "key": "5",
+        "title": "Expected State",
+        "heading_markdown": "## 5. Expected State",
+        "body_markdown": "\n\nHealthy DNSFilter Windows state:\n- endpoint online;\n- required DNSFilter client installed;\n- filtering service exists (`DNS Agent` for whitelabel/MSP or `DNSFilter Agent` for branded installs);\n- for agent versions that include it, Service Manager exists (`DNS Agent Service Manager` / `DNSFilter Agent Service Manager`);\n- required DNSFilter services are `Running`;\n- startup mode not disabled;\n- service executable exists;\n- installed version can be identified;\n- no unresolved recurring service-start/crash event;\n- normal DNS resolution succeeds;\n- current DNS configuration is consistent with the active agent mode;\n- DRMM DNS Agent monitor is healthy / alert cleared;\n- when native DNSFilter client scope is safely available, the provider-side agent/network/policy evidence agrees with the identified endpoint and does not indicate an unprotected/bypassed/stale state inconsistent with local evidence.\n\nThe alert alone does not prove the agent is currently unhealthy. A missing native DNSFilter result also does not prove the local client is absent.\n\n---\n\n"
+      },
+      {
+        "key": "6",
+        "title": "State Model",
+        "heading_markdown": "## 6. State Model",
+        "body_markdown": "\n\n`identified -> waiting_endpoint -> diagnosing -> healthy_stale_alert -> resolving_alert -> completing_ticket -> complete`\n\n`diagnosing -> service_stopped -> reinstalling -> verifying`\n\n`diagnosing -> service_start_failure -> reinstalling -> verifying`\n\n`diagnosing -> agent_missing -> installing -> verifying`\n\n`diagnosing -> agent_corrupt_or_partial -> reinstalling -> verifying`\n\n`diagnosing -> dns_resolution_failure -> reinstalling -> verifying`\n\n`installing -> verifying -> resolving_alert -> completing_ticket -> complete`\n\n`reinstalling -> verifying -> resolving_alert -> completing_ticket -> complete`\n\n`diagnosing -> version_or_known_issue -> remediation_required`\n\n`diagnosing -> evidence_inconclusive -> escalated`\n\nPersist ticket ID, alert UID, device UID, CI ID, whether DNSFilter is required, install-state proof, filtering-service state, Service Manager state, installed version, relevant Windows/DNSFilter log evidence, diagnostic/install job IDs, DNS/filtering test result, native DNSFilter scope/read status, classification, and next state.\n\n---\n\n"
+      },
+      {
+        "key": "7",
+        "title": "Diagnostic Workflow",
+        "heading_markdown": "## 7. Diagnostic Workflow",
+        "body_markdown": "\n\n### Step 1 — Current device and alert state\n\n**Reads:** `endpoint.device.read`, `endpoint.alert.search`, `endpoint.alert.history.search`.\n\n- Offline -> `waiting_endpoint`.\n- Alert already resolved and endpoint healthy -> verify and close normally.\n- Alert open -> continue.\n\n### Step 1A — Native DNSFilter posture correlation when client isolation is authorized\n\nUse native DNSFilter reads as complementary provider evidence, not as a replacement for endpoint-local diagnostics.\n\nPreferred reads where authorized:\n- `dns.protection.organization.read`\n- `dns.protection.agent.search`\n- `dns.protection.agent.counts.read`\n- `dns.protection.site.search`\n- `dns.protection.policy.search`\n- bounded `dns.protection.agent.version.report` / site-drift or investigation reads only when they answer a specific diagnostic question.\n\nRules:\n- always supply the exact Autotask `company_id`;\n- organization/network/site scope must be server-derived and client-isolated;\n- for client tickets, never substitute AOT self-company `company_id=0` merely because the client lives inside AOT's DNSFilter MSP organization;\n- do not collect broad DNS query history during routine endpoint diagnosis;\n- if native provider evidence conflicts with endpoint-local evidence, preserve both and investigate rather than silently choosing one.\n\nDecision:\n- exact provider-side agent match -> record agent state/status/version, authorized network/site, policy relationship where returned, and relevant sync/traffic state;\n- no provider-side match -> continue local install/service diagnostics; absence from the provider search alone is not proof that the local client is absent;\n- multiple or cross-client candidates -> `identification_blocked`;\n- `CONNECTOR_AUTHORIZATION_DENIED` or missing safe client boundary -> document native connector evidence as unavailable, continue with the DRMM diagnostic path, and do not weaken isolation. Client-network isolation work tracked in GitHub #253 is complete; any remaining authorization denial must be treated as a live mapping/scope problem rather than bypassed.\n\n**Production evidence — 2026-09-24:** AOT self-company reads succeeded and returned AOT-50282 as an active/protected Windows agent, version 3.3.6, on the AOT Office network. Earlier AVMAC reads failed closed until client network/site isolation was designed and implemented under GitHub #253. Preserve the rule that client execution is bounded to the server-derived authorized network/site set; never map every client broadly to the shared MSP/master organization.\n\n### Step 2 — Native software inventory\n\nUse `endpoint.software.search` for DNSFilter/DNS Agent variants.\n\nAbsence from DRMM software inventory is not sufficient proof that DNSFilter is absent.\n\n### Step 3 — Existing standing-safe service and DNS diagnostics\n\nUse the already standing-approved components first where they answer the question cleanly:\n\n- `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1`\n  - run for filtering service (`DNS Agent` / `DNSFilter Agent`);\n  - run for Service Manager (`DNS Agent Service Manager` / `DNSFilter Agent Service Manager`) when applicable;\n  - captures detailed service properties and relevant Windows event evidence.\n- `Get-DNS Settings AOT Ver 06042025-1`\n  - capture current endpoint DNS configuration without modification.\n\nThese generic standing-safe components may be used immediately under existing policy and should not be duplicated merely because the DNSFilter playbook exists.\n\n### Step 4 — Dedicated DNSFilter-specific read-only component\n\nUse the production-accepted component:\n\n`DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026`\n\nCurrent UID:\n`c3340a58-48d5-457b-bc30-5fd79e5ad8b1`\n\nStanding classification:\n- read-only;\n- non-disruptive;\n- production standing-approved for unsupervised diagnostic use.\n\n**Implementation evidence — 2026-09-24:** the initial AVMAC-1077 acceptance run exposed a PowerShell automatic-variable collision between `$Matches` (created by `-match`) and a script collection named `$matches`. The corrected component renamed the collection to `$logMatches`; the controlled rerun and later production standing-safe rerun both completed successfully with empty stderr. Preserve this regression lesson in future component revisions.\n\nThe component must collect only:\n\n**Service state**\n- detect branded vs whitelabel naming;\n- check filtering service: `DNS Agent` or `DNSFilter Agent`;\n- check Service Manager where applicable: `DNS Agent Service Manager` or `DNSFilter Agent Service Manager`;\n- if CyberSight is present, report its service state but do not treat it as required unless policy says it is enabled;\n- for each discovered service return Name, DisplayName, State, StartMode, StartName, PathName, ExitCode, ServiceSpecificExitCode, ProcessId.\n\nDNSFilter documentation states that agent v2.1+ includes a Service Manager that monitors the filtering service and can restart it after an unexpected stop, so both services must be evaluated together.\n\n**Install metadata**\n- check:\n  - `HKLM:\\SOFTWARE\\DNSFilter\\Agent`\n  - `HKLM:\\SOFTWARE\\DNSAgent\\Agent`\n  - uninstall inventory for DNSFilter/DNS Agent;\n- return only non-secret product name/version/install path/product code.\n\n**Binary evidence**\n- executable exists;\n- file/product version;\n- optional Authenticode signature status.\n\n**Recent Windows events**\n- previous 6 hours by default, extend to 24 hours when needed;\n- System Service Control Manager entries referencing DNS Agent/DNSFilter;\n- relevant Application errors from DNSFilter/DNS Agent executables/providers;\n- newest first, bounded output;\n- timestamp, event ID, provider, level, short error/message.\n\n**DNSFilter operational logs**\n- discover version-appropriate log roots instead of assuming one fixed path;\n- v3.x candidates include `%ProgramData%\\\\DNSFilter, Inc\\\\Logs` and whitelabel ProgramData variants;\n- legacy candidates include install-directory log folders such as `C:\\\\Program Files\\\\DNSFilter Agent\\\\logs` and `C:\\\\Program Files\\\\DNS Agent\\\\logs`;\n- inspect bounded recent entries from filtering-service/agent-operations logs, Service Manager logs, and auto-update logs;\n- return filenames, modification times, and recent Warning/Error/Exception/registration/update/service-failure lines with bounded context;\n- do **not** return raw DNS query logs in routine diagnostics because they may contain user browsing/query history;\n- do not change log level or enable DEBUG automatically.\n\n**DNS state**\n- active adapters;\n- configured DNS servers;\n- DNS Client service state;\n- one bounded normal DNS lookup against a neutral hostname;\n- run `nslookup -type=txt debug.dnsfilter.com` or equivalent read-only DNSFilter diagnostic query and report whether expected DNSFilter diagnostic fields are returned, without recording unrelated query history;\n- lookup success/failure and elapsed time.\n\n**System context**\n- hostname;\n- OS/build;\n- uptime/last boot;\n- pending reboot state if available.\n\nThe diagnostic component must never:\n- Start/Stop/Restart a service;\n- change startup type;\n- change NIC/DNS configuration;\n- flush DNS;\n- modify registry;\n- install/upgrade/uninstall inside the diagnostic component itself;\n- reboot;\n- disable protection;\n- collect DNS query history or secret registration values.\n\n### Step 5 — Required-installation gate and approved install path\n\nBefore installing, prove all of the following:\n- endpoint is a supported Windows client OS/role for the DNSFilter Roaming Client;\n- client/site policy requires the Roaming Client on this endpoint;\n- the device is not a Windows Server, domain controller, shared desktop/RDS host, or other unsupported role unless DNSFilter support documentation explicitly says otherwise;\n- installation is genuinely absent, not merely hidden from DRMM inventory;\n- no existing filtering service, Service Manager, install registry evidence, binary, or active DNSFilter client is found;\n- required DNSFilter site configuration/secret is available to the existing component through the approved Datto/site-variable mechanism without exposing the secret;\n- endpoint has network connectivity and required runtime prerequisites.\n\nIf all gates pass:\n- run exact component `Install DNSFilter AOT Ver 08262024`;\n- poll the same job to terminal state;\n- do not redispatch while active;\n- then rerun the diagnostic component for authoritative verification.\n\nIf install evidence is partial/corrupt or an existing client is present but broken:\n- do not install over the broken client in place;\n- if the reinstall gates in Section 9 pass, transition to `reinstalling`;\n- perform the exact bounded uninstall/install sequence once;\n- then rerun the diagnostic component for authoritative verification;\n- if the reinstall branch fails or health cannot be proven, transition to Human Review.\n\nDNSFilter currently documents the Windows Roaming Client for Windows 10+ client systems and states it is not supported on Windows Server/shared desktop environments; v3.x also requires .NET 8 runtime prerequisites. Treat those as hard install gates.\n\n### Step 6 — Vendor evidence when relevant\n\nIf version/behavior suggests a client defect, consult current official DNSFilter release/known-issue material first. Compare the installed version to current production and check for applicable DNS/VPN/IPv6/config-sync/stability fixes.\n\nDo not upgrade solely because a newer version exists.\n\n### Step 7 — Classify\n\n**Healthy / stale monitor**\n- service running;\n- DNS resolution healthy;\n- no current failure evidence.\n- Verify -> resolve exact DRMM alert -> complete ticket.\n\n**Service stopped**\n- service exists but is not running.\n- Exclude a broader site/network outage where practical.\n- If the endpoint is eligible and DNSFilter is required, transition to `reinstalling`.\n\n**Service start failure**\n- monitor/event evidence shows start attempt failed.\n- Capture exact error/event evidence.\n- If the endpoint is eligible and DNSFilter is required, transition to `reinstalling`.\n\n**Agent missing**\n- DNSFilter is required;\n- supported client endpoint;\n- service/install/binary evidence all prove it is absent.\n- Run the approved install component, then verify both services/logs/DNS.\n\n**Agent corrupt/partial**\n- mixed evidence: service exists but executable/registry/install metadata is broken or inconsistent.\n- Use the bounded reinstall branch; do not perform an in-place repair-over-install.\n\n**DNS failure while service runs**\n- inspect DNS configuration/vendor-known issues/network context first;\n- exclude a broader site/network/DNS outage where practical;\n- when evidence reasonably attributes the failure to the DNSFilter client on an otherwise supported endpoint, use the bounded reinstall branch.\n\n**Known affected version**\n- document installed/current versions and official vendor evidence;\n- recommend bounded upgrade path;\n- remediation remains separately governed.\n\n---\n\n"
+      },
+      {
+        "key": "8",
+        "title": "Decision Gates",
+        "heading_markdown": "## 8. Decision Gates",
+        "body_markdown": "\n\nBefore diagnostics:\n- exact endpoint proven;\n- endpoint online;\n- ownership lifecycle succeeded;\n- exact dedicated diagnostic component fingerprint is still approved.\n\nBefore remediation:\n- specific unhealthy condition proven;\n- unrelated site/network outage excluded where practical;\n- remediation action is covered by separate authority;\n- user-impact risk evaluated.\n\nDiagnostic approval is not remediation authority.\n\n---\n\n"
+      },
+      {
+        "key": "9",
+        "title": "Remediation",
+        "heading_markdown": "## 9. Remediation",
+        "body_markdown": "\n\n### Standing-approved diagnostic\n`DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026`\nUID: `c3340a58-48d5-457b-bc30-5fd79e5ad8b1`\n\nClassification: read-only / non-disruptive.\n\n### Native DNSFilter integration\n\nCurrent classification: read-only.\n\nNative provider reads may be used to corroborate agent/network/policy posture only when Jason proves an exact safe client boundary. They do not authorize starting/restarting services, reinstalling agents, changing policies, changing networks, resolving unblock requests, or any other DNSFilter mutation.\n\n### Service start/restart\nDo not use standalone service restart as the routine remediation branch. The approved target behavior for the qualifying failure states is the bounded reinstall sequence below.\n\n### Missing-agent install\nExisting component:\n`Install DNSFilter AOT Ver 08262024`\n\nClassification: modifying, bounded installation.\n\n**Owner-approved workflow:** eligible for autonomous use only when all Step 4 install gates pass and after controlled acceptance proves the exact component behaves safely. The component must use the approved client/site configuration source and must never expose the site secret in output or ticket notes.\n\nAfter install, Jason must verify:\n- filtering service exists and is Running;\n- Service Manager exists/runs when applicable;\n- installed version is identified;\n- DNSFilter operational logs do not show unresolved install/registration/service failure;\n- normal DNS resolution succeeds;\n- DNSFilter diagnostic TXT lookup returns expected filtering evidence;\n- exact DRMM alert clears or can be safely resolved.\n\n### Bounded reinstall for existing broken client\n\nQualifying conditions:\n- `agent_corrupt_or_partial`;\n- filtering service stopped;\n- documented service-start failure;\n- DNSFilter-attributable DNS resolution/filtering failure after broader outage/configuration causes are excluded where practical.\n\nHard gates:\n- supported Windows client endpoint/role;\n- DNSFilter is required for this client/site/device;\n- endpoint identity and CI are exact;\n- endpoint is online;\n- required DNSFilter site configuration is available without exposing secrets;\n- no broader site/network outage reasonably explains the symptom;\n- no reinstall has already been attempted for the same unchanged incident state.\n\nExact sequence:\n1. Run `Uninstall DNS Filter / DNS Agent AOT Ver 11052025-1` once.\n2. Poll the exact uninstall job to terminal state and verify DNSFilter is actually absent.\n3. Run `Install DNSFilter AOT Ver 08262024` once.\n4. Poll the exact install job to terminal state.\n5. Rerun `DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026`.\n6. Require full Section 17 healthy-state verification.\n7. Resolve the exact DRMM alert.\n8. Complete the Autotask ticket with readback verification.\n\nMaximum reinstall cycles for one unchanged incident state: **1**.\n\nIf uninstall, install, verification, exact-alert resolution, or ticket completion fails, stop and hand off to Help Desk I / Human Review with the technician-scannable evidence and next step. Do not loop the reinstall.\n\n### Uninstall\nExisting component:\n`Uninstall DNS Filter / DNS Agent AOT Ver 11052025-1`\nUID: `449d39cc-e6e8-40a7-afb4-2ffeee069f5d`\n\nClassification: modifying/security-control removal.\n\nAutonomous use is limited to the single bounded reinstall sequence above after controlled acceptance and exact owner promotion. Standalone or unrelated uninstall remains approval-bound.\n\n---\n\n"
+      },
+      {
+        "key": "10",
+        "title": "Retry Policy",
+        "heading_markdown": "## 10. Retry Policy",
+        "body_markdown": "\n\n- Diagnostic component: maximum 2 executions per session only when the first fails for a transient/provider reason.\n- Poll the exact job to terminal state; never redispatch while active.\n- Never repeat a successful diagnostic just to obtain different output.\n- Repeated diagnostic failure -> escalate.\n- Bounded reinstall: maximum 1 uninstall/install cycle for the same unchanged incident state.\n- Never redispatch uninstall or install while the exact job is active.\n- Failed reinstall or failed post-reinstall verification -> Human Review; no second reinstall loop.\n\n---\n\n"
+      },
+      {
+        "key": "11",
+        "title": "Periodic Rechecks",
+        "heading_markdown": "## 11. Periodic Rechecks",
+        "body_markdown": "\n\nIf endpoint is offline:\n- use normal Jason queue cadence;\n- each later availability check is documented with one concise recheck note;\n- resume from persisted state when online.\n\nIf waiting for remediation authority:\n- do not rerun identical diagnostics merely because the ticket is still open.\n\n---\n\n"
+      },
+      {
+        "key": "12",
+        "title": "Aging / Stale Condition",
+        "heading_markdown": "## 12. Aging / Stale Condition",
+        "body_markdown": "\n\nIf endpoint remains offline >3 business days, investigate retirement/replacement/reimage, CI mismatch, stale DRMM object, or broader connectivity issue.\n\nIf DNS Agent stops more than twice in 7 days after verified remediation, treat as recurring:\n- review client version;\n- vendor known issues;\n- VPN/network coexistence;\n- endpoint event history;\n- escalate to problem investigation rather than repeatedly restarting.\n\n---\n\n"
+      },
+      {
+        "key": "13",
+        "title": "Dependency Handling",
+        "heading_markdown": "## 13. Dependency Handling",
+        "body_markdown": "\n\nPotential dependencies:\n- current DNSFilter installer;\n- correct client/site registration;\n- supported agent version;\n- Datto diagnostic component;\n- standing component approval.\n\nNever document secret DNSFilter registration/site keys.\n\nIf a dependency is missing, search for an existing dependency ticket before creating another.\n\n---\n\n"
+      },
+      {
+        "key": "14",
+        "title": "Documentation Requirements",
+        "heading_markdown": "## 14. Documentation Requirements",
+        "body_markdown": "\n\nUse the AOT/Jason session-summary rule:\n- one consolidated progress note per work session;\n- not one note per command/read;\n- a later offline/waiting recheck is a separate note-worthy event.\n\nUse the standard technician-scannable Jason note layout wherever practical:\n\n- **STATUS** — HEALTHY / REINSTALLING / VERIFIED RESOLVED / HUMAN REVIEW REQUIRED.\n- **NEXT STEP** or **ACTION REQUIRED** — state the immediate action at the top.\n- **DEVICE / ALERT** — endpoint and exact DRMM alert.\n- **KEY EVIDENCE** — service state, installed version, DNS resolution/filtering result, relevant bounded event/log evidence.\n- **WHAT JASON DID** — diagnostic/install/reinstall/alert-resolution actions.\n- **CHANGES MADE** — explicitly state None when no modifying action occurred.\n- **JASON STATE** — persisted playbook state.\n\nFor a verified healthy or successfully repaired case, the note should make the terminal action obvious:\n- STATUS: VERIFIED RESOLVED\n- NEXT STEP: Resolve exact DNSFilter alert and complete ticket automatically\n\nFor a failed bounded reinstall:\n- STATUS: HUMAN REVIEW REQUIRED\n- ACTION REQUIRED: Review failed DNSFilter reinstall/verification evidence\n- NEXT STEP: technician action only; Jason must not repeat the reinstall loop\n\nAlso include where relevant:\n- endpoint online/offline state;\n- DNS Agent service state/start mode;\n- installed version evidence;\n- recent SCM/DNSFilter error evidence;\n- DNS resolution result;\n- job/correlation IDs;\n- exact alert-resolution result and ticket-completion readback.\n\nNever document secrets or raw browsing/query history.\n\n---\n\n"
+      },
+      {
+        "key": "15",
+        "title": "Failure Handling",
+        "heading_markdown": "## 15. Failure Handling",
+        "body_markdown": "\n\nDocument provider failures, component failures, missing output, ambiguous service identity, corrupt install metadata, inconclusive DNS tests, vendor-evidence gaps, and authority denials.\n\nFailure to collect evidence is not proof that DNSFilter is absent or broken.\n\n---\n\n"
+      },
+      {
+        "key": "16",
+        "title": "Escalation Criteria",
+        "heading_markdown": "## 16. Escalation Criteria",
+        "body_markdown": "\n\nEscalate when:\n- service/device identity is ambiguous;\n- endpoint is an unsupported DNSFilter Roaming Client OS/role;\n- reinstall gates cannot be proven;\n- the single bounded reinstall attempt fails;\n- post-reinstall healthy-state verification fails;\n- DNS remains broken after the bounded reinstall;\n- remediation requires DNS/NIC changes or reboot outside this playbook;\n- vendor known issue materially matches the endpoint and the approved reinstall path does not restore health;\n- two bounded diagnostic attempts fail.\n\n---\n\n"
+      },
+      {
+        "key": "17",
+        "title": "Verification",
+        "heading_markdown": "## 17. Verification",
+        "body_markdown": "\n\nAfter install or bounded reinstall, require:\n- endpoint online;\n- filtering service `Running`;\n- Service Manager `Running` where applicable;\n- required services remain running through a short observation interval;\n- normal DNS lookup succeeds;\n- DNSFilter diagnostic TXT lookup shows expected DNSFilter handling;\n- recent DNSFilter agent/Service Manager logs show no unresolved installation/registration/service-start failure;\n- exact DRMM DNS Agent alert clears or is safely resolved;\n- no new matching service failure appears during verification.\n\nA successful component return alone is not resolution proof.\n\nWhen all verification gates pass:\n1. resolve the **exact** DRMM DNSFilter/DNS Agent alert that triggered the work;\n2. independently verify the exact alert is resolved/cleared;\n3. write the consolidated resolution note;\n4. complete the Autotask ticket automatically;\n5. independently read back status=Complete.\n\nDo not send a healthy verified ticket to Help Desk for routine review. Human Review is reserved for failed/ambiguous/out-of-scope conditions.\n\n---\n\n"
+      },
+      {
+        "key": "18",
+        "title": "Completion Criteria",
+        "heading_markdown": "## 18. Completion Criteria",
+        "body_markdown": "\n\nComplete automatically when:\n1. exact endpoint/alert identified;\n2. required diagnostics completed;\n3. healthy state proven;\n4. exact DNSFilter alert cleared/resolved and readback verified;\n5. any install/reinstall remediation is independently verified;\n6. consolidated resolution note exists;\n7. Autotask completion write succeeds and status=Complete is independently read back.\n\nNo Help Desk review is required for a routine healthy/stale case or a successfully verified install/reinstall case.\n\nUnrelated endpoint issues remain separate unless they directly affect DNSFilter health.\n\n---\n\n"
+      },
+      {
+        "key": "19",
+        "title": "Final Resolution Note",
+        "heading_markdown": "## 19. Final Resolution Note",
+        "body_markdown": "\n\nSummarize original condition, classification/root cause, installed version, service/event evidence, remediation, attempts, DNS verification, alert disposition, verification timestamp, and any separate unresolved endpoint issue.\n\n---\n\n"
+      },
+      {
+        "key": "20",
+        "title": "Required Capabilities",
+        "heading_markdown": "## 20. Required Capabilities",
+        "body_markdown": "\n\nCurrent:\n- `service.ticket.search/read/notes.search/note.create/update`\n- `service.configuration.search/read`\n- `endpoint.device.search/read`\n- `endpoint.alert.search/history.search/resolve`\n- `endpoint.software.search`\n- `automation.component.search/execute`\n- `automation.job.read`\n- `automation.job.output.read`\n- `dns.protection.organization.read`\n- `dns.protection.agent.search`\n- `dns.protection.agent.counts.read`\n- `dns.protection.site.search`\n- `dns.protection.policy.search`\n- selected bounded DNSFilter investigation/report reads where a client-safe boundary is proven\n\nExisting standing-safe building blocks:\n- `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1` for exact service state/details and relevant Windows events;\n- `Get-DNS Settings AOT Ver 06042025-1` for current DNS configuration.\n\nCompleted implementation milestone:\n- `DNSFilter / DNS Agent Diagnostic [WIN] AOT Ver 09242026` is deployed;\n- controlled AVMAC-1077 acceptance passed after correcting the `$Matches` collision;\n- the exact diagnostic component is registered in Jason's durable standing-safe Datto component approval registry and has passed a production autonomous retest.\n\nRemaining implementation gaps:\n- acceptance-test exact existing installer `Install DNSFilter AOT Ver 08262024` (UID `3a3f04c4-3f69-45aa-9260-d8146958a24b`) for gated missing-agent and reinstall use;\n- acceptance-test exact uninstall component `Uninstall DNS Filter / DNS Agent AOT Ver 11052025-1` (UID `449d39cc-e6e8-40a7-afb4-2ffeee069f5d`) specifically for the single bounded reinstall branch;\n- prove the combined uninstall -> install -> diagnostic -> exact-alert resolve -> Autotask Complete lifecycle with readback. DNSFilter client-network isolation work tracked in #253 is complete.\n\nThe generic `Run Ad Hoc Command (PowerShell 2-5) [WIN]` must not be promoted to unsupervised authority.\n\n---\n\n"
+      },
+      {
+        "key": "21",
+        "title": "Acceptance Test",
+        "heading_markdown": "## 21. Acceptance Test",
+        "body_markdown": "\n\n**Target**\n- Ticket: `T20260924.0021`\n- Client: AVMAC llc\n- Endpoint: `AVMAC-1077`\n- DRMM UID: `a95c92ff-5b53-4813-d39a-638d108b48bf`\n- Alert: `ba827896-edfb-4d41-be67-3c176d6cf418`\n\nKnown baseline:\n- endpoint online;\n- Datto AV RunningAndUpToDate;\n- reboot_required=False;\n- monitor reported: `DNS Agent Cannot start service 'DNS Agent' on computer '.'`;\n- native DRMM software search did not return a DNSFilter product;\n- generic PowerShell diagnostic correctly stopped at the per-run approval gate.\n\nProduction acceptance results — 2026-09-24:\n- dedicated diagnostic UID `c3340a58-48d5-457b-bc30-5fd79e5ad8b1` ran to terminal completion after the `$Matches` regression was corrected;\n- filtering service `DNS Agent` was Stopped/Auto;\n- `DNS Agent Service Manager` was Running/Auto;\n- expected filtering executable `C:\\\\Program Files\\\\DNS Agent\\\\Agent\\\\DNS Agent.exe` was missing;\n- Service Manager binary was present, version 3.7.11.0, with valid signature;\n- normal DNS resolution succeeded;\n- DNSFilter diagnostic TXT verification failed;\n- bounded Windows and DNSFilter operational-log evidence was returned;\n- incident classification was correctly `agent_corrupt_or_partial`;\n- no blind reinstall, service restart, DNS/NIC change, uninstall, registry modification, or reboot occurred;\n- the corrected component was subsequently standing-approved and rerun successfully without per-run approval;\n- native DNSFilter client-scoped reads for AVMAC remain blocked pending safe network/site isolation (#253).\n\nAcceptance must prove:\n1. exact identity;\n2. dedicated component runs without per-run approval under standing-safe policy;\n3. no modifying/disruptive action occurs;\n4. filtering service + Service Manager/install/Windows-event/DNSFilter-log/DNS evidence is returned;\n5. exact job is polled without duplicate dispatch;\n6. one consolidated ticket note is written;\n7. incident is correctly classified;\n8. if the agent is genuinely missing on a supported/required endpoint, the exact approved installer runs once and is verified rather than repeatedly dispatched;\n9. after install, both services, relevant logs, DNS resolution/filtering, and alert state are verified;\n10. healthy/stale case resolves the exact alert and completes the Autotask ticket automatically without Help Desk review;\n11. partial/corrupt install, service stopped/start failure, and DNSFilter-attributable DNS failure enter the single bounded reinstall branch;\n12. bounded reinstall runs exact uninstall once, exact install once, then full diagnostic verification;\n13. successful reinstall resolves the exact alert and completes the ticket automatically with independent readback;\n14. failed reinstall/verification stops at Help Desk I / Human Review and does not loop;\n15. audit records bind exact diagnostic, uninstall, installer, alert-resolution, and ticket-completion identities/fingerprints.\n\n---\n\n"
+      },
+      {
+        "key": "22",
+        "title": "Section Goal Closure",
+        "heading_markdown": "## 22. Section Goal Closure",
+        "body_markdown": "\n\nCompleted as of 2026-09-24:\n- dedicated diagnostic component created in Datto RMM;\n- read-only diagnostic behavior reviewed;\n- diagnostic component standing-approved in Jason's durable registry;\n- AVMAC-1077 diagnostic acceptance succeeded;\n- partial/corrupt-install classification and fail-closed behavior were proven;\n- production autonomous diagnostic rerun succeeded.\n\nRemaining closure gates:\n- exact `Install DNSFilter AOT Ver 08262024` component passes controlled acceptance for missing-agent and reinstall use;\n- exact uninstall component passes controlled acceptance for the one-cycle reinstall branch;\n- the combined reinstall -> verification -> exact-alert resolution -> automatic ticket completion lifecycle passes production acceptance;\n- note quality and retry behavior remain verified after remediation acceptance;\n- limitations/TODOs are documented;\n- Project Jason/Grafana tracking is updated.\n\nAutonomous diagnostic execution is no longer capability-blocked. The new owner-approved target is bounded reinstall plus automatic exact-alert resolution and ticket completion after healthy verification; production authority remains contingent on the exact acceptance/promotion gates above.\n"
+      }
+    ]
+  },
+  "migration": {
+    "status": "SOURCE_PRESERVED_STRUCTURED_DRAFT_NOT_RUNTIME_PARITY",
+    "source_version_discrepancy": false,
+    "production_replacement_allowed": false,
+    "staged": false,
+    "activated": false,
+    "required_before_activation": [
+      "Canonical Python JSON semantic validation",
+      "Exact-capability binding and source-scoped argument context verified",
+      "Safe diagnostic and remediation branches mapped to governed capabilities",
+      "Durable retry/wait/terminal lifecycle parity with shared runtime",
+      "Error, negative-evidence and client-boundary regression tests",
+      "Controlled shadow comparison and independent acceptance",
+      "Owner-bound activation and branch-specific autonomous promotion"
+    ],
+    "external_fact_fields_non_authoritative": true,
+    "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
+    "section_semantic_extraction": "source_text_derived_no_provider_execution"
+  }
+}
