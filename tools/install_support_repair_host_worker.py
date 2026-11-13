@@ -7,6 +7,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import jason_engineering_worktree_storage as worktree_storage
+
 
 def _copy(source: Path, destination: Path, mode: int) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -41,6 +43,7 @@ def main() -> int:
     worker_release_gate = repo / 'tools' / 'pmv3_worker_release_gate.py'
     change_integration_gate = repo / 'tools' / 'change_integration_gate.py'
     documentation_impact_gate = repo / 'tools' / 'documentation_impact_gate.py'
+    worktree_storage_module = repo / 'tools' / 'jason_engineering_worktree_storage.py'
     unit_root = repo / 'infrastructure' / 'openclaw-operations' / 'systemd' / 'user'
     units = ('jason-support-repair-worker.service', 'jason-support-repair-worker.timer')
     if not runner.is_file():
@@ -73,6 +76,14 @@ def main() -> int:
     for unit in units:
         if not (unit_root / unit).is_file():
             raise SystemExit(f'systemd source unit is missing: {unit}')
+    if not worktree_storage_module.is_file():
+        raise SystemExit('governed engineering worktree storage module is missing')
+    # Exact release installer prepares privately owned directories on the
+    # independent archive before any sandboxed worker can create a worktree.
+    for family in ('support-repair', 'support-repair-closure',
+                   'owner-approved-development', 'todo-closure',
+                   'autonomous-repair', 'documentation-reconciliation'):
+        worktree_storage.prepare_family(family)
 
     install_root = home / '.local' / 'lib' / 'jason'
     user_units = home / '.config' / 'systemd' / 'user'
@@ -84,6 +95,7 @@ def main() -> int:
     source_link.parent.mkdir(parents=True, exist_ok=True)
     source_link.symlink_to(repo, target_is_directory=True)
     _copy(runner, install_root / 'support_repair_host_worker.py', 0o700)
+    _copy(worktree_storage_module, install_root / 'jason_engineering_worktree_storage.py', 0o600)
     _copy(pipeline_runner, install_root / 'engineering_pipeline.py', 0o700)
     _copy(pmv3_controller, install_root / 'pmv3_engineering_controller.py', 0o700)
     _copy(pmv3_integration_queue, install_root / 'pmv3_integration_queue.py', 0o700)

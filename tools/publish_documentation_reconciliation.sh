@@ -13,12 +13,24 @@ WORKFLOW_URL="${4:-}"
 REPO_ROOT="${JASON_DOCUMENTATION_REPO_ROOT:-/home/al/projects/jason}"
 SHORT_REVISION="${SOURCE_REVISION:0:12}"
 BRANCH="automation/documentation-reconcile-current"
-WORKTREE_ROOT="${JASON_DOCUMENTATION_WORKTREE_ROOT:-/home/al/jason-worktrees}"
+# Keep one stable lock across legacy and new second-drive publishers.
+LEGACY_WORKTREE_ROOT="/home/al/jason-worktrees"
+LEGACY_WORKTREE="$LEGACY_WORKTREE_ROOT/documentation-reconcile-current"
+if [ -n "${JASON_DOCUMENTATION_WORKTREE_ROOT:-}" ]; then
+  # Isolated test roots keep their existing configured directory.
+  WORKTREE_ROOT="$JASON_DOCUMENTATION_WORKTREE_ROOT"
+  LOCK_ROOT="$WORKTREE_ROOT"
+else
+  WORKTREE_ROOT="/srv/jason/archive/engineering-worktrees/documentation-reconciliation"
+  LOCK_ROOT="$LEGACY_WORKTREE_ROOT"
+  # Verify the independent mount and capacity before any worktree mutation.
+  PYTHONPATH="$REPO_ROOT/tools" python3 -c \
+    'import jason_engineering_worktree_storage as s; s.prepare_family("documentation-reconciliation")'
+fi
 WORKTREE="$WORKTREE_ROOT/documentation-reconcile-current"
-
+mkdir -p "$LOCK_ROOT"
 mkdir -p "$WORKTREE_ROOT"
-# One host publisher at a time: source and production events share this lock.
-exec 9>"$WORKTREE_ROOT/documentation-reconciliation.lock"
+exec 9>"$LOCK_ROOT/documentation-reconciliation.lock"
 flock -x 9
 cd "$REPO_ROOT"
 
@@ -88,10 +100,39 @@ for CHECK_REF in "${STATE_REFS[@]}"; do
   fi
 done
 
-if [ -d "$WORKTREE/.git" ] || [ -f "$WORKTREE/.git" ]; then
-  git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
+# Retire a legacy PRIMARY-drive checkout only when it is clean, registered
+# and not referenced by any running process. Never force-remove it.
+if [ -z "${JASON_DOCUMENTATION_WORKTREE_ROOT:-}" ] &&
+   { [ -e "$LEGACY_WORKTREE" ] || [ -L "$LEGACY_WORKTREE" ]; }; then
+  if [ -L "$LEGACY_WORKTREE" ] ||
+     { [ ! -d "$LEGACY_WORKTREE/.git" ] && [ ! -f "$LEGACY_WORKTREE/.git" ]; } ||
+     [ -n "$(git -C "$LEGACY_WORKTREE" status --porcelain --untracked-files=all)" ]; then
+    echo "DOCUMENTATION_PUBLICATION=BLOCKED_UNCLEAN_LEGACY_WORKTREE" >&2
+    exit 1
+  fi
+  if ! LEGACY_DOC_WORKTREE="$LEGACY_WORKTREE" PYTHONPATH="$REPO_ROOT/tools" python3 -c \
+    'import os,sys; from pathlib import Path; from jason_storage_autorepair import active_reference; sys.exit(1 if active_reference(Path(os.environ["LEGACY_DOC_WORKTREE"])) else 0)'; then
+    echo "DOCUMENTATION_PUBLICATION=BLOCKED_ACTIVE_LEGACY_WORKTREE" >&2
+    exit 1
+  fi
+  git worktree remove "$LEGACY_WORKTREE" >/dev/null || {
+    echo "DOCUMENTATION_PUBLICATION=BLOCKED_LEGACY_GIT_WORKTREE_REMOVE" >&2
+    exit 1
+  }
 fi
-rm -rf "$WORKTREE"
+# Existing generated-doc checkouts may be replaced only when clean.
+if [ -e "$WORKTREE" ] || [ -L "$WORKTREE" ]; then
+  if [ -L "$WORKTREE" ] ||
+     { [ ! -d "$WORKTREE/.git" ] && [ ! -f "$WORKTREE/.git" ]; } ||
+     [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+    echo "DOCUMENTATION_PUBLICATION=BLOCKED_UNCLEAN_WORKTREE" >&2
+    exit 1
+  fi
+  git worktree remove "$WORKTREE" >/dev/null || {
+    echo "DOCUMENTATION_PUBLICATION=BLOCKED_GIT_WORKTREE_REMOVE" >&2
+    exit 1
+  }
+fi
 
 # Migrate the revision-specific worktree from pre-single-flight publishers.
 # Only a validated 12-character SHA suffix can be used as a legacy path.

@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 import engineering_evidence_tools
+import jason_engineering_worktree_storage as worktree_storage
 
 DEFAULT_REPO = Path('/home/al/projects/jason')
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
@@ -561,18 +562,21 @@ def support_worktree_path(item_id: str, branch: str | None = None) -> Path:
         raise WorkerError('invalid support identity for repair worktree')
     normal = branch_name(item_id)
     if branch and re.fullmatch(re.escape(normal) + r'-(?:anchor|context|evidence)-[0-9a-f]{12}', branch):
-        return Path('/home/al/jason-worktrees/support-repair') / branch.split('/')[-1]
-    return Path('/home/al/jason-worktrees/support-repair') / item_id.casefold()
+        return worktree_storage.path_for('support-repair', branch.split('/')[-1])
+    return worktree_storage.path_for('support-repair', item_id.casefold())
 
 
 def ensure_worktree(repo: Path, item_id: str, branch: str | None = None) -> Path:
-    root = Path('/home/al/jason-worktrees/support-repair')
-    if root.is_symlink():
-        raise WorkerError('repair worktree root must not be a symlink')
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = support_worktree_path(item_id, branch)
     if path.is_symlink():
         raise WorkerError('repair worktree path is a symlink')
+    # The ordinary production locator is always archive or an existing
+    # legacy checkout. Test-only replacement locators still own their temp dirs.
+    if (path.parent.name == 'support-repair' and
+            path.parent.parent in (worktree_storage.ARCHIVE_ROOT, worktree_storage.LEGACY_ROOT)):
+        worktree_storage.prepare_parent(path)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if path.exists():
         if (branch and branch != branch_name(item_id)
                 and run(['git', 'branch', '--show-current'], cwd=path) != branch):
@@ -1345,9 +1349,8 @@ def production_state_from_main(repo: Path) -> dict[str, Any]:
 
 def create_closure_pr(repo: Path, item: Mapping[str, str], merge_sha: str, acceptance_reason: str) -> int:
     run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
-    root = Path('/home/al/jason-worktrees/support-repair-closure')
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path = root / item['id'].casefold()
+    path = worktree_storage.archive_path('support-repair-closure', item['id'].casefold())
+    worktree_storage.prepare_parent(path)
     if path.exists():
         shutil.rmtree(path)
     branch = f"support-close/{item['id'].casefold()}-{merge_sha[:8]}"

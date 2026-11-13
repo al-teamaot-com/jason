@@ -2524,3 +2524,23 @@ def test_evidence_recovery_requires_protected_recent_release_readbacks(tmp_path,
     assert not module.verified_live_evidence_recovery_release(spool,sha,current)
     drift.chmod(0o600)
     assert module.verified_live_evidence_recovery_release(spool,sha,current)
+
+
+def test_owner_locator_preserves_legacy_checkout_when_secondary_default_is_active(tmp_path, monkeypatch):
+    """PR #2215 stale-source identity must resolve old and new checkout paths."""
+    archive = tmp_path / 'archive' / 'engineering-worktrees'
+    legacy = tmp_path / 'legacy-worktrees'
+    monkeypatch.setattr(module.worktree_storage, 'ARCHIVE_ROOT', archive)
+    monkeypatch.setattr(module.worktree_storage, 'LEGACY_ROOT', legacy)
+    monkeypatch.setattr(module, 'WORKTREE_ROOT', archive / 'owner-approved-development')
+
+    existing = legacy / 'owner-approved-development' / 'issue-42'
+    existing.mkdir(parents=True)
+    assert module.owner_worktree_path('issue-42') == existing
+    assert module.owner_worktree_path('issue-43') == archive / 'owner-approved-development' / 'issue-43'
+    assert module.owner_worktree_path('issue-42-stale-' + 'a' * 12) == (
+        archive / 'owner-approved-development' / ('issue-42-stale-' + 'a' * 12)
+    )
+    # The legacy checkout is not copied, reset, removed or relinked.
+    assert existing.is_dir()
+    assert not (archive / 'owner-approved-development').exists()
