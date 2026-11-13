@@ -71,6 +71,22 @@ A PASS with advisories never automatically closes an existing OPEN
 breaker. Native protected Production Manager revalidation remains
 required.
 
+## Concurrent source coordination (PR #2404)
+
+Active draft PR #2404, a stale, **do-not-merge** first-cutover rehearsal,
+also edits `production_drift_guard.py` and its unit tests. We independently
+reviewed its two overlaps: its implementation is limited to a strictly
+verified masked `jason-release-manager.timer` plus protected production
+freeze marker, and its tests are for that intentional release-manager
+hold. The present change touches the separate optional system-observer
+classification and watchdog self-feedback exit status; it does **not**
+unmask or authorize release-manager timers.
+
+Do not merge or deploy PR #2404 as part of this correction. When that
+historical draft is reworked, it must rebase against the reviewed current
+main and re-run the entire drift regression. Both protections are intended
+to remain separately fail-closed.
+
 ## Verification and activation boundary
 
 Tests assert optional reporting failures are advisory, both required and
