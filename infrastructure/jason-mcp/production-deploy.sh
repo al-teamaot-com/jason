@@ -95,8 +95,18 @@ print("" if d["profile"]=="off" else "internal-note-v1")
 PY_STAFF
 )" || exit 2
 if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
-  # A rollback must not grant rights absent from the prior release.
-  STAFF_NOTE_PROFILE=""
+  # Restore only the explicitly attested LKG image's immutable source policy.
+  # A previous approved enabled release must not silently lose its authority.
+  if [[ ! "$REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "DENIED: rollback staff-note revision is not an exact SHA" >&2
+    exit 2
+  fi
+  STAFF_NOTE_IMAGE_SHA="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+  if [ "$STAFF_NOTE_IMAGE_SHA" != "$REVISION" ]; then
+    echo "DENIED: rollback staff-note image/revision mismatch" >&2
+    exit 2
+  fi
+  STAFF_NOTE_PROFILE="$(python3 "$REPO_ROOT/tools/resolve_staff_note_profile_at_revision.py" "$REPO_ROOT" "$REVISION")" || exit 2
 else
   STAFF_NOTE_PROFILE="$SOURCE_STAFF_NOTE_PROFILE"
   if [ "${JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE:-}" != "$STAFF_NOTE_PROFILE" ]; then
