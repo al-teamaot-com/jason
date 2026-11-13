@@ -58,6 +58,9 @@ MUTATION_ENV_OVERRIDES = {
     "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID": "",
     "JASON_AUTONOMY_WORKER_ENABLED": "false",
     "JASON_AUTONOMY_SHADOW_ENABLED": "false",
+    # Review maintenance is a separate child process; leaving it enabled
+    # races isolated SQLite startup and can perform preprod background work.
+    "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED": "false",
     "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED": "false",
     "JASON_UNIVERSAL_APPROVAL_MODE": "off",
     "JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED": "false",
