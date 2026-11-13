@@ -247,18 +247,18 @@ def test_graph_canary_exact_sentinel_uses_validated_client_tenant_without_human_
     assert audit.events == ["connector.requested", "connector.completed"]
 
 
-@pytest.mark.parametrize("request", [
+@pytest.mark.parametrize("connector_request", [
     canary_request(client_id="other-client"),
     canary_request(capability="microsoft_graph.user.get", arguments={"resource_id": "object-user-1"}),
     canary_request(arguments={"email": "user@example.com", "page_size": 1}),
     canary_request(arguments={"display_name": PROVIDER_HEALTH_CANARY_SENTINEL, "page_size": 2}),
 ])
-def test_graph_canary_denies_all_non_sentinel_client_or_capability(request):
+def test_graph_canary_denies_all_non_sentinel_client_or_capability(connector_request):
     subject, transport, _audit = connector(
         bindings=Bindings(binding=None), canary_boundaries=CanaryBoundaries()
     )
     with pytest.raises(ConnectorAuthorizationError):
-        subject.execute(request)
+        subject.execute(connector_request)
     assert transport.calls == []
 
 

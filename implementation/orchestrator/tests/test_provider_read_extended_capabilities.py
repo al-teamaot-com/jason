@@ -302,3 +302,31 @@ def test_configuration_search_supports_exact_serial_selector_for_governed_lookup
         for operation in resource.operations
     }
     assert "serial_number" in operations[SERVICE_CONFIGURATION_SEARCH].selector_names
+
+
+@pytest.mark.parametrize("capability,arguments,expected", [
+    ("service.ticket.search", {"page_size": 501}, "AUTOTASK_PAGE_SIZE_INVALID"),
+    ("service.ticket.search", {"filters": ["private-filter"]}, "AUTOTASK_FILTERS_INVALID"),
+    ("service.ticket.search", {"search": "private-filter"}, "AUTOTASK_RAW_SEARCH_PROHIBITED"),
+    ("service.ticket.search", {"after_resource_id": False}, "AUTOTASK_CONTINUATION_INVALID"),
+    ("service.ticket.search", {"resource_id": 1, "after_resource_id": 2}, "AUTOTASK_CONTINUATION_CONFLICT"),
+    ("service.ticket.search", {"created_after": 123}, "AUTOTASK_CREATED_RANGE_INVALID"),
+])
+def test_ticket_search_validation_reports_fixed_repair_code(capability, arguments, expected):
+    with pytest.raises(ValueError) as failure:
+        adapt_autotask_arguments(capability, arguments)
+    assert failure.value.error_code == expected
+    assert "private-filter" not in str(failure.value)
+
+
+@pytest.mark.parametrize("arguments,expected", [
+    ({}, "MICROSOFT_USER_SELECTOR_REQUIRED"),
+    ({"email": "private@example.com", "display_name": "Private"}, "MICROSOFT_USER_SELECTOR_REQUIRED"),
+    ({"email": "private@example.com", "private-field": "private-value"}, "MICROSOFT_USER_ARGUMENT_UNSUPPORTED"),
+    ({"email": "private@example.com", "page_size": 26}, "MICROSOFT_USER_PAGE_SIZE_INVALID"),
+])
+def test_user_search_validation_reports_fixed_repair_code(arguments, expected):
+    with pytest.raises(ValueError) as failure:
+        adapt_microsoft_graph_arguments(IDENTITY_USER_SEARCH, arguments)
+    assert failure.value.error_code == expected
+    assert "private@example.com" not in str(failure.value)

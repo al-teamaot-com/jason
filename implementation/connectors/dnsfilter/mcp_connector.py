@@ -67,6 +67,14 @@ _SINGLE_NETWORK_TOOLS = frozenset({"explain_query_decision", "detect_traffic_ano
 _ORGANIZATION_ONLY_TOOLS = frozenset(_CAPABILITY_TO_TOOL.values()) - _MULTI_NETWORK_TOOLS - _SINGLE_NETWORK_TOOLS
 
 
+class DnsFilterMcpScopeError(ConnectorAuthorizationError):
+    """Distinguish scope failures without relaxing any boundary or exposing data."""
+
+    def __init__(self, error_code: str, message: str):
+        super().__init__(message)
+        self.error_code = error_code
+
+
 class DnsFilterMcpConnector:
     provider_name = DNSFILTER_MCP_PROVIDER
     capabilities = frozenset(_CAPABILITY_TO_TOOL)
@@ -150,7 +158,8 @@ class DnsFilterMcpConnector:
     @staticmethod
     def _validate_arguments(tool_name: str, arguments: Mapping[str, Any]) -> None:
         if _FORBIDDEN_SCOPE_ARGUMENTS.intersection(arguments):
-            raise ConnectorAuthorizationError(
+            raise DnsFilterMcpScopeError(
+                "DNSFILTER_SCOPE_OVERRIDE_PROHIBITED",
                 "DNSFilter MCP organization and network scope is server-derived."
             )
         unexpected = sorted(set(arguments) - _ALLOWED_ARGUMENTS[tool_name])
@@ -200,21 +209,25 @@ class DnsFilterMcpConnector:
     ) -> tuple[str, int, tuple[int, ...]]:
         raw_company_id = arguments.get("company_id")
         if isinstance(raw_company_id, bool):
-            raise ConnectorAuthorizationError(
+            raise DnsFilterMcpScopeError(
+                "DNSFILTER_COMPANY_SELECTOR_REQUIRED",
                 "An exact Autotask company_id is required for DNSFilter MCP access."
             )
         try:
             company_id = str(int(raw_company_id))
         except (TypeError, ValueError) as exc:
-            raise ConnectorAuthorizationError(
+            raise DnsFilterMcpScopeError(
+                "DNSFILTER_COMPANY_SELECTOR_REQUIRED",
                 "An exact Autotask company_id is required for DNSFilter MCP access."
             ) from exc
         if int(company_id) < 0:
-            raise ConnectorAuthorizationError(
+            raise DnsFilterMcpScopeError(
+                "DNSFILTER_COMPANY_SELECTOR_REQUIRED",
                 "An exact Autotask company_id is required for DNSFilter MCP access."
             )
         if context.client_id is not None and str(context.client_id) != company_id:
-            raise ConnectorAuthorizationError(
+            raise DnsFilterMcpScopeError(
+                "DNSFILTER_CLIENT_SCOPE_MISMATCH",
                 "DNSFilter MCP request client scope does not match the selected company."
             )
         boundary = self._boundaries.find_active_for_client(
@@ -222,7 +235,8 @@ class DnsFilterMcpConnector:
             provider=DNSFILTER_PROVIDER,
         )
         if boundary is None or boundary.status is not BoundaryStatus.VALIDATED:
-            raise ConnectorAuthorizationError(
+            raise DnsFilterMcpScopeError(
+                "DNSFILTER_ORGANIZATION_BOUNDARY_UNVERIFIED",
                 "No validated DNSFilter organization boundary exists for this company."
             )
         if boundary.profile != DNSFILTER_PROFILE:
@@ -255,7 +269,8 @@ class DnsFilterMcpConnector:
             scopes.append(scope_id)
         network_ids = tuple(sorted(set(scopes)))
         if company_id != "0" and not network_ids:
-            raise ConnectorAuthorizationError(
+            raise DnsFilterMcpScopeError(
+                "DNSFILTER_NETWORK_BOUNDARY_UNVERIFIED",
                 "No validated DNSFilter network boundary exists for this company."
             )
         return company_id, organization_id, network_ids
