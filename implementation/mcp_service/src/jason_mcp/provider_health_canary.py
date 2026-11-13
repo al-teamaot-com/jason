@@ -53,8 +53,9 @@ def _error_class(
     return "execution_failed"
 
 
-def _run_one(spec: Mapping[str, Any]) -> dict[str, Any]:
-    app = server._runtime()
+def _run_one(spec: Mapping[str, Any], *, app: Any = None) -> dict[str, Any]:
+    if app is None:
+        app = server._runtime()
     capability_name = str(spec["capability_name"])
     expected_provider = str(spec["provider_id"])
     arguments = dict(spec["arguments"])
@@ -149,22 +150,33 @@ def _run_one(spec: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _opaque_runner_error(spec: Mapping[str, Any]) -> dict[str, Any]:
+    # Never expose startup exceptions, provider messages, or credential values.
+    return {
+        "provider": str(spec["provider_id"]),
+        "capability": str(spec["capability_name"]),
+        "healthy": False,
+        "latency_seconds": 0.0,
+        "error_class": "runner_error",
+        "correlation_id": f"corr_provider_canary_{uuid4().hex}",
+    }
+
+
 def run_canaries() -> dict[str, Any]:
-    results = []
-    for spec in PROVIDER_HEALTH_CANARY_SPECS:
-        try:
-            results.append(_run_one(spec))
-        except Exception:
-            results.append(
-                {
-                    "provider": str(spec["provider_id"]),
-                    "capability": str(spec["capability_name"]),
-                    "healthy": False,
-                    "latency_seconds": 0.0,
-                    "error_class": "runner_error",
-                    "correlation_id": f"corr_provider_canary_{uuid4().hex}",
-                }
-            )
+    # Runtime composition can require OpenBao AppRole authentication.
+    # Resolve it ONCE for this low-cadence batch: if authentication is broken,
+    # four successive attempts here can aggravate an AppRole lockout.
+    try:
+        app = server._runtime()
+    except Exception:
+        results = [_opaque_runner_error(spec) for spec in PROVIDER_HEALTH_CANARY_SPECS]
+    else:
+        results = []
+        for spec in PROVIDER_HEALTH_CANARY_SPECS:
+            try:
+                results.append(_run_one(spec, app=app))
+            except Exception:
+                results.append(_opaque_runner_error(spec))
 
     now = datetime.now(timezone.utc)
     return {
