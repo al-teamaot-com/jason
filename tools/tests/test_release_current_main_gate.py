@@ -29,11 +29,11 @@ def test_current_main_descendant_candidate_admitted(monkeypatch, tmp_path):
     assert ancestry.call_args.kwargs["cwd"] == tmp_path
 
 
-def test_stale_prepared_candidate_rejected_even_if_owner_approved(monkeypatch, tmp_path):
+def test_pinned_candidate_without_canonical_verifier_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "authoritative_auto_promotion_head", lambda repo: SHA_B)
     ancestry = Mock(side_effect=AssertionError("stale candidate must not reach baseline check"))
     monkeypatch.setattr(runner.subprocess, "run", ancestry)
-    with pytest.raises(runner.ReleaseManagerError, match="behind protected main"):
+    with pytest.raises(runner.ReleaseManagerError, match="canonical pinned release verifier unavailable"):
         runner.require_current_protected_release_source(tmp_path, record())
     ancestry.assert_not_called()
 
@@ -187,3 +187,30 @@ def test_owner_freeze_does_not_require_undoing_emergency_baseline_recovery(tmp_p
     recover = controller[controller.index("def recover_missing_last_known_good("):
                          controller.index("\ndef ", controller.index("def recover_missing_last_known_good(") + 5)]
     assert "require_owner_production_deployment_unfrozen" not in recover
+
+
+# Reuse the real bare-origin fixtures from the manual-scope regression corpus.
+from test_manual_release_scope import repo as protected_repo, git
+
+
+def test_real_protected_ancestor_passes_final_native_source_gate(monkeypatch, protected_repo):
+    root, base, candidate, _ = protected_repo
+    (root / "unrelated.py").write_text("not in selected release\n")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "Independent later work (#102)")
+    git(root, "push", "origin", "main")
+    tip = git(root, "rev-parse", "HEAD")
+    monkeypatch.setattr(runner, "authoritative_auto_promotion_head", lambda repo: tip)
+    runner.require_current_protected_release_source(root, record(candidate, base))
+    assert git(root, "rev-parse", "HEAD") == tip
+
+
+def test_newer_source_overlap_is_denied_by_final_native_gate(monkeypatch, protected_repo):
+    root, base, candidate, _ = protected_repo
+    (root / "shared.py").write_text("newer conflicting work\n")
+    git(root, "commit", "-am", "Conflicting later work (#102)")
+    git(root, "push", "origin", "main")
+    tip = git(root, "rev-parse", "HEAD")
+    monkeypatch.setattr(runner, "authoritative_auto_promotion_head", lambda repo: tip)
+    with pytest.raises(runner.ReleaseManagerError, match="pinned release lineage"):
+        runner.require_current_protected_release_source(root, record(candidate, base))

@@ -130,6 +130,26 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-mail-read-approle"
         ),
     },
+    "microsoft_graph_group_read": {
+        "create_only_secret": True,
+        "logical_name": "microsoft_graph.group_read",
+        "secret_path": "secret/data/connectors/microsoft-graph/production/group-read",
+        "fields": ("private_key_pem", "certificate_pem", "certificate_thumbprint", "generation"),
+        "policy_name": "jason-microsoft-graph-group-read",
+        "role_name": "jason-microsoft-graph-group-read",
+        "connector_identity": "microsoft-graph-group-read",
+        "credential_dir": Path("/opt/jason/bootstrap/secrets/openbao/microsoft-graph-group-read-approle"),
+    },
+    "microsoft_graph_group_write": {
+        "create_only_secret": True,
+        "logical_name": "microsoft_graph.group_write",
+        "secret_path": "secret/data/connectors/microsoft-graph/production/group-write",
+        "fields": ("private_key_pem", "certificate_pem", "certificate_thumbprint", "generation"),
+        "policy_name": "jason-microsoft-graph-group-write",
+        "role_name": "jason-microsoft-graph-group-write",
+        "connector_identity": "microsoft-graph-group-write",
+        "credential_dir": Path("/opt/jason/bootstrap/secrets/openbao/microsoft-graph-group-write-approle"),
+    },
     "kyocera_kfs": {
         "logical_name": "kyocera_kfs.readonly",
         "secret_path": "secret/data/connectors/kyocera-kfs/production/read-only",
@@ -400,7 +420,8 @@ def _collect_microsoft_graph_values() -> dict[str, str]:
 
 
 def collect_values(provider: str) -> dict[str, str]:
-    if provider in {"microsoft_graph", "microsoft_graph_mail"}:
+    if provider in {"microsoft_graph", "microsoft_graph_mail",
+                    "microsoft_graph_group_read", "microsoft_graph_group_write"}:
         return _collect_microsoft_graph_values()
     values: dict[str, str] = {}
     spec = PROVIDERS[provider]
@@ -627,6 +648,11 @@ def write_provider_secret(
     payload: dict[str, object] = {
         "data": {field: values[field] for field in expected if field in values}
     }
+    if spec.get("create_only_secret") is True:
+        # The two new Microsoft Graph group identities must be created once,
+        # without overwriting existing credential material. In particular,
+        # the protected OpenBao KV-v2 mount requires a CAS option.
+        payload["options"] = {"cas": 0}
     if provider == "constant_contact":
         # The protected OpenBao KV-v2 mount has cas_required=true. A new
         # Constant Contact OAuth secret must use CAS=0; do not silently

@@ -89,6 +89,17 @@ def test_native_worker_admission_guard_restores_on_deploy_exception(tmp_path, mo
 
 
 class ReleaseManagerHostRunnerTests(unittest.TestCase):
+    def test_manual_scope_reviewer_is_protected_production_control_core(self):
+        import fnmatch
+        import json
+        path = "tools/manual_release_scope.py"
+        policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
+        for change_class in ("feature", "support", "todo", "release_blocker"):
+            self.assertEqual(runner.classify_change_risk(change_class, [path]),
+                             "production_control_core")
+        self.assertTrue(any(fnmatch.fnmatch(path, pattern)
+                            for pattern in policy["protected_core_globs"]))
+
     def test_root_host_reconciliation_is_always_production_control_core(self):
         for path in (
             "tools/reconcile_production_host_services.sh",
@@ -265,6 +276,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
     def test_preprod_mutation_guards_disable_known_write_paths(self):
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTOTASK_MUTATION_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTONOMY_WORKER_ENABLED"], "false")
+        self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_UNIVERSAL_APPROVAL_MODE"], "off")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED"], "false")
@@ -4578,6 +4590,69 @@ def test_native_preflight_passes_same_bound_env_to_both_scripts(tmp_path):
     assert env["JASON_RUNTIME_PRODUCTION_IMAGE"] == "runtime"
     assert env["JASON_MCP_PRODUCTION_IMAGE"] == "mcp"
     assert env["JASON_SOURCE_REVISION_OVERRIDE"] == SHA_A
+
+
+def test_preprod_disables_inherited_playbook_review_child_and_rejects_reactivation(tmp_path):
+    import json
+
+    state_root = tmp_path / "openclaw" / "release-manager"
+    state_root.mkdir(parents=True)
+    live = {
+        "inspect": {
+            "Config": {
+                "Env": [
+                    "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=true",
+                    "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED=true",
+                ],
+                "Labels": {},
+            },
+            "HostConfig": {"NetworkMode": "bridge", "Tmpfs": {}},
+            "Mounts": [],
+            "NetworkSettings": {"Networks": {}},
+        },
+    }
+    with patch.object(runner.subprocess, "run"), patch.object(runner, "run") as docker:
+        name, scratch = runner.create_preprod_container(
+            live=live, candidate_image="jason-runtime:test",
+            candidate_sha=SHA_A, state_root=state_root,
+            release_id="release-" + SHA_A[:16],
+        )
+    try:
+        create_args = docker.call_args.args[0]
+        projected = [
+            create_args[i + 1] for i, arg in enumerate(create_args[:-1])
+            if arg == "--env"
+        ]
+        assert "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=false" in projected
+        assert "JASON_AUTONOMY_WORKER_ENABLED=false" in projected
+        assert "JASON_AUTONOMY_SHADOW_ENABLED=false" in projected
+        assert "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED=false" in projected
+
+        def inspected_env(review_enabled: bool) -> str:
+            values = [
+                item.replace("JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=false",
+                             "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=true")
+                if review_enabled else item
+                for item in projected
+            ]
+            return json.dumps([{
+                "Config": {
+                    "Labels": {"com.teamaot.jason.source_revision": SHA_A},
+                    "Env": values,
+                },
+            }])
+
+        with patch.object(runner, "output", return_value=inspected_env(False)):
+            runner.verify_preprod_env(name, SHA_A)
+        with patch.object(runner, "output", return_value=inspected_env(True)):
+            with unittest.TestCase().assertRaisesRegex(
+                runner.ReleaseManagerError,
+                "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED",
+            ):
+                runner.verify_preprod_env(name, SHA_A)
+    finally:
+        import shutil
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def test_transactional_sqlite_snapshot_includes_uncheckpointed_commits(tmp_path):
