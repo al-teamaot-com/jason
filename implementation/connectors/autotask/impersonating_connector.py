@@ -14,6 +14,8 @@ from .connector import AutotaskConnector
 from .dynamic_schema_read import (
     dynamic_generic_entity_eligible,
     proven_queryable_fields,
+    restricted_contract_id,
+    restricted_contract_visible_fields,
 )
 from .operations import APPROVED_AUTOTASK_ENTITIES
 
@@ -610,6 +612,66 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             return [AutotaskImpersonatingConnector._sanitize_attachment_metadata(value) for value in payload]
         return payload
 
+    def _verify_restricted_contract_parent(
+        self, *, contract_id: int, root: str, kwargs: Mapping[str, Any],
+    ) -> None:
+        """Require a unique readable parent through this same API identity."""
+        # This is a provider-account preflight, not a substitute for
+        # requester information-release authorization in the orchestrator.
+        payload = self._transport.request(
+            url=f"{root}/V1.0/Contracts/query",
+            params={"search": json.dumps({
+                "MaxRecords": 2,
+                "filter": [{"field": "id", "op": "eq", "value": contract_id}],
+                "IncludeFields": ["id", "companyID"],
+            })},
+            **{k: v for k, v in kwargs.items() if k != "params"},
+        )
+        rows = payload.get("items") if isinstance(payload, Mapping) else None
+        if (not isinstance(rows, list) or len(rows) != 1
+                or not isinstance(rows[0], Mapping)
+                or type(rows[0].get("id")) is not int
+                or rows[0]["id"] != contract_id
+                or type(rows[0].get("companyID")) is not int
+                or rows[0]["companyID"] < 1):
+            raise PermissionError("AUTOTASK_RESTRICTED_CONTRACT_PARENT_UNVERIFIED")
+
+    @staticmethod
+    def _verify_restricted_contract_rows(request: ConnectorRequest, result):
+        """Deny any unscoped or cross-contract child row before disclosure."""
+        if request.arguments.get("jason_dynamic_schema_read") is not True:
+            return result
+        entity = request.arguments.get("entity")
+        if entity not in {"ContractServices", "ContractServiceUnits",
+                          "ContractServiceBundles", "ContractServiceBundleUnits"}:
+            return result
+        search = json.loads(request.arguments["search"])
+        parent = restricted_contract_id(
+            entity=entity,
+            info={"canQuery": True, "userAccessForQuery": "Restricted"},
+            query=search,
+        )
+        if parent is None:
+            return result  # All-access queries keep their existing behavior.
+        rows = result.data.get("items") if isinstance(result.data, Mapping) else None
+        if not isinstance(rows, list) or any(
+            not isinstance(row, Mapping)
+            or type(row.get("id")) is not int
+            or type(row.get("contractID")) is not int
+            or row["contractID"] != parent
+            for row in rows
+        ):
+            raise PermissionError("AUTOTASK_RESTRICTED_CONTRACT_ROW_SCOPE_MISMATCH")
+        # This conditional path is for dependency inventory, not customer
+        # pricing/cost data. Redact even when the provider ignores projection.
+        allowed = restricted_contract_visible_fields(entity)
+        projected = [{k: v for k, v in row.items() if k in allowed} for row in rows]
+        return type(result)(
+            capability=result.capability, provider=result.provider,
+            data={**result.data, "items": projected},
+            evidence_ids=result.evidence_ids, warnings=result.warnings,
+        )
+
     def _verify_dynamic_schema_query(
         self,
         *,
@@ -673,8 +735,18 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
                 or not metadata_name[0].isalpha()
                 or not metadata_name.isalnum()
                 or actual.get("canQuery") is not True
-                or actual.get("userAccessForQuery") != "All"):
+                or (actual.get("userAccessForQuery") != "All"
+                    and restricted_contract_id(
+                        entity=entity, info=actual, query=search,
+                    ) is None)):
             raise PermissionError("AUTOTASK_DYNAMIC_PROVIDER_QUERY_NOT_AUTHORIZED")
+        restricted_parent = restricted_contract_id(
+            entity=entity, info=actual, query=search,
+        )
+        if restricted_parent is not None:
+            self._verify_restricted_contract_parent(
+                contract_id=restricted_parent, root=root, kwargs=kwargs,
+            )
         fields = self._transport.request(
             url=f"{root}/V1.0/{entity}/entityInformation/fields", **kwargs
         )
@@ -743,6 +815,7 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             )
         if request.context.capability not in self._ATTACHMENT_READ_OPERATIONS:
             result = self._project_dynamic_selection(request, super().execute(request))
+            result = self._verify_restricted_contract_rows(request, result)
             return self._verify_generic_exact_entity_result(request, result)
         self._verify_attachment_ticket_company(request)
         result = super().execute(request)
