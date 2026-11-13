@@ -71,6 +71,19 @@ A PASS with advisories never automatically closes an existing OPEN
 breaker. Native protected Production Manager revalidation remains
 required.
 
+## Acceptance matrix
+
+| Actual or simulated observation | Classification | Blocks Jason? |
+| --- | --- | --- |
+| Declared, non-required Grafana assurance fails on missing OpenAI metrics | Advisory | No |
+| Declared, non-required provider-health canary probe fails | Advisory | No |
+| Grafana assurance is REQUIRED or UNDECLARED | Integrity drift | Yes |
+| Optional observer runs from a forbidden execution directory | Integrity drift | Yes |
+| Authority-health, release-control or required runtime fails | Operational drift | Yes |
+| Watchdog detects actual drift and records code 2 | Successful observation; actual drift remains OPEN | Yes, because of genuine drift |
+| Watchdog crashes (unexpected exit, not code 2) | Required safety-monitoring failure | Yes |
+| Drift clears while the breaker is still OPEN | PASS does not auto-close the breaker | Existing breaker remains OPEN |
+
 ## Concurrent source coordination (PR #2404)
 
 Active draft PR #2404, a stale, **do-not-merge** first-cutover rehearsal,
