@@ -7,6 +7,7 @@ import pytest
 
 from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
 from autonomous_remediation.playbook_autonomy_review import PlaybookAutonomyReviewService
+from autonomous_remediation.playbook_autonomy_scope import registered_autonomy_scope
 from connectors.src.jason_connectors.approval_requests import (
     ApprovalRequestService,
     SQLiteApprovalRequestRepository,
@@ -331,3 +332,133 @@ def test_owner_only_pilot_fails_closed_without_preexisting_promotion(tmp_path):
     assert requests.get(request.approval_id).status.value == "pending"
     assert requests.accepted_decision(request.approval_id) is None
     assert promotions.list_all() == ()
+
+
+def test_version_only_revision_inherits_approved_authority_envelope_without_new_card(tmp_path):
+    registry, promotions, requests, review, _ = build(tmp_path)
+    scope = registered_autonomy_scope(registry_path=registry, playbook_id="demo")
+    root = promotions.new(
+        playbook_id=scope.playbook_id,
+        playbook_version=scope.playbook_version,
+        policy_id=scope.policy_id,
+        allowed_capabilities=scope.allowed_capabilities,
+        approved_by="person-owner",
+        authority_envelope_sha256=scope.authority_envelope_sha256,
+    )
+    promotions.put(root)
+    write_registry(registry, version="1.0.1")
+
+    sender = Sender()
+    maintenance = PlaybookAutonomyReviewMaintenance(
+        enabled=True,
+        registry_path=registry,
+        request_repository=requests,
+        approval_service=ApprovalRequestService(
+            repository=requests,
+            authority=OwnerOnlyPlaybookAutonomyAuthority({"person-owner"}),
+        ),
+        review_service=review,
+        sender=sender,
+        promotion_store=promotions,
+        interval_seconds=300,
+        now=lambda: NOW,
+    )
+    assert maintenance.tick() is True
+    assert sender.requests == []
+    current = promotions.find_scope_approved(
+        playbook_id="demo",
+        playbook_version="1.0.1",
+        policy_id=scope.policy_id,
+        required_capabilities=scope.allowed_capabilities,
+        now=NOW,
+    )
+    assert current is not None
+    assert current.inherited_from_approval_id == root.approval_id
+    audit = (tmp_path / "audit.jsonl").read_text()
+    assert "playbook.autonomy.version_inherited_from_approved_envelope" in audit
+
+
+def test_registry_scope_change_requires_new_owner_card_even_with_prior_envelope(tmp_path):
+    registry, promotions, requests, review, _ = build(tmp_path)
+    scope = registered_autonomy_scope(registry_path=registry, playbook_id="demo")
+    root = promotions.new(
+        playbook_id=scope.playbook_id,
+        playbook_version=scope.playbook_version,
+        policy_id=scope.policy_id,
+        allowed_capabilities=scope.allowed_capabilities,
+        approved_by="person-owner",
+        authority_envelope_sha256=scope.authority_envelope_sha256,
+    )
+    promotions.put(root)
+
+    write_registry(registry, version="1.0.1")
+    payload = json.loads(registry.read_text())
+    payload["playbooks"][0]["autonomy"]["required_gates"].append("new_safety_or_authority_gate")
+    registry.write_text(json.dumps(payload), encoding="utf-8")
+
+    sender = Sender()
+    maintenance = PlaybookAutonomyReviewMaintenance(
+        enabled=True,
+        registry_path=registry,
+        request_repository=requests,
+        approval_service=ApprovalRequestService(
+            repository=requests,
+            authority=OwnerOnlyPlaybookAutonomyAuthority({"person-owner"}),
+        ),
+        review_service=review,
+        sender=sender,
+        promotion_store=promotions,
+        interval_seconds=300,
+        now=lambda: NOW,
+    )
+    assert maintenance.tick() is True
+    assert len(sender.requests) == 1
+    request = sender.requests[0]
+    assert request.metadata["playbook_version"] == "1.0.1"
+    assert request.metadata["authority_envelope_sha256"] != scope.authority_envelope_sha256
+    assert promotions.find_scope_approved(
+        playbook_id="demo",
+        playbook_version="1.0.1",
+        policy_id=scope.policy_id,
+        required_capabilities=scope.allowed_capabilities,
+        now=NOW,
+    ) is None
+
+
+def test_legacy_exact_promotion_does_not_silently_become_version_envelope(tmp_path):
+    registry, promotions, requests, review, _ = build(tmp_path)
+    scope = registered_autonomy_scope(registry_path=registry, playbook_id="demo")
+    legacy = promotions.new(
+        playbook_id=scope.playbook_id,
+        playbook_version=scope.playbook_version,
+        policy_id=scope.policy_id,
+        allowed_capabilities=scope.allowed_capabilities,
+        approved_by="person-owner",
+    )
+    promotions.put(legacy)
+    write_registry(registry, version="1.0.1")
+
+    sender = Sender()
+    maintenance = PlaybookAutonomyReviewMaintenance(
+        enabled=True,
+        registry_path=registry,
+        request_repository=requests,
+        approval_service=ApprovalRequestService(
+            repository=requests,
+            authority=OwnerOnlyPlaybookAutonomyAuthority({"person-owner"}),
+        ),
+        review_service=review,
+        sender=sender,
+        promotion_store=promotions,
+        interval_seconds=300,
+        now=lambda: NOW,
+    )
+    assert maintenance.tick() is True
+    assert len(sender.requests) == 1
+    assert promotions.find_envelope_approved(
+        playbook_id="demo",
+        policy_id=scope.policy_id,
+        required_capabilities=scope.allowed_capabilities,
+        authority_envelope_sha256=scope.authority_envelope_sha256,
+        now=NOW,
+    ) is None
