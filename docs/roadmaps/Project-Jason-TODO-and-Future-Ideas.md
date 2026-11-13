@@ -1124,6 +1124,22 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Review trigger:** Continue immediately through the existing governed engineering queue; automatically resume non-disruptive dependency fixes under the approved scope. Stop only at a genuine new authority, security, provider or disruption gate.
 - **Canonical playbook:** `docs/playbooks/Jason-Approved-Device-Provisioning-and-Service-Offload.md`
 
+### TODO-OPS-014 — Cross-assignment ticket admission and ownership
+
+- **Priority:** P0 — fourth in sequence, **immediately after the Big 3** (1. Universal Teams Approval Flow, 2. Purchase Orders & Invoice Processing, 3. QuickBooks Integration with bank/credit-card reconciliation).
+- **Status:** Blocked by Big 3 acceptance — Owner specified P0 sequencing on 2026-10-23; not currently eligible for autonomous engineering admission or diversion of Big 3 development.
+- **Autonomous engineering readiness:** Not yet eligible; unblock only after all three precedence items are independently production-verified. Reuse the existing governed engineering worker.
+- **Risk level:** High — ticket ownership, concurrent human work and potentially disruptive playbook execution.
+- **Issue:** [#1977](https://github.com/al-teamaot-com/jason/issues/1977); related continuous-admission reliability [#770](https://github.com/al-teamaot-com/jason/issues/770).
+- **Idea:** Jason must continuously discover, assess, and claim any ticket it can investigate or resolve under an approved playbook **even if assigned to an AOT technician**. A human assignment alone must not prevent admission or require manual reassignment. Apply across all approved monitored Autotask queues using the established worker and queue-first lifecycle, not a second scheduler.
+- **Why it matters:** Eligible tickets can remain idle in Help Desk I/II simply because they are assigned. Jason should perform safe, approved diagnostics and remediation autonomously, keeping technicians informed; AVMAC-1049 / T20261022.0023 illustrates the assignment/ownership problem.
+- **Required behavior:** Scan eligible boards completely; determine exact ticket, client, CI, endpoint, active work and capability; claim via governed `begin_work` before substantive diagnostics; move to Jason queue/In Progress/Remote Support; preserve prior assignee and queue/status; document and notify as appropriate; perform governed investigation/resolution and verification; return with a complete handoff when human action is needed. Eligibility for diagnostic work does not mean authority to close an unverified threat alert.
+- **Concurrency safeguards:** Prevent duplicate claims, check for actual technician work in progress (not merely assignment), coordinate handoff, preserve original identity/state, observe existing active-ticket capacity and exact approval boundaries; recover from restarts without duplicate work or queue ping-pong.
+- **Prerequisites:** Big 3 independently verified; existing continuous-admission controller, ticket lifecycle and playbook grants, Autotask resource identity and write-readback; assignment-aware work collision/reconciliation logic, clear technician notifications, regression fixtures.
+- **Acceptance test:** (1) Ticket assigned to Lindsey or another technician is discovered, claimed and safely diagnosed without human reassignment; (2) active human work prevents conflicting remediation; (3) approved resolution is verified or human-review handoff is documented/read back; (4) restart, two-slot capacity, full queue pagination, approval and client isolation, and duplicate-prevention pass.
+- **Decision owner:** AOT Owner / Jason Governance Authority.
+- **Review trigger:** Immediately after the Big 3 are production-accepted, before accepting any lower-ranked development.
+
 ### TODO-CONN-018 — Internet-accessible Jason Control Panel through the AOT AWS endpoint
 
 - **Priority:** P2
