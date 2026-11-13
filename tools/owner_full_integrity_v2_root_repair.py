@@ -22,7 +22,6 @@ import subprocess
 import sys
 import tarfile
 import time
-import uuid
 
 SOURCE = "95832507e6e5f804f092cb5d3ebdea90ba1a49bf"
 LKG = "d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
@@ -46,9 +45,21 @@ LOCK = Path("/var/lib/jason/openclaw/release-manager/production-transaction.lock
 FULL = Path("/var/lib/jason/openclaw/operational-full-health.json")
 FAST = Path("/var/lib/jason/openclaw/operational-health.json")
 ROOT_PIN = Path("/etc/jason-owner-release/verified-owner-public-key.json")
-SIGNER = Path("/var/lib/jason/runtime-secrets/owner-release/private_key")
 OWNER_AUTH = Path("/usr/local/lib/jason/owner_signer_recovery.py")
 OWNER_PROOF = Path("/usr/local/lib/jason/owner_signed_release.py")
+# A root process must never read the al-owned 0400 private Ed25519 signer.
+# A separate Owner-authenticated UID1000 issuer prepares an exact signed proof;
+# the root process consumes and independently verifies it against root pin.
+OWNER_SIGNED_DECISION = Path(
+    "/srv/jason/archive/owner-full-integrity-v2-signed-owner-decision-20261113.json"
+)
+# The separately approved *initial root-trust bootstrap* populated this very
+# ledger with two immutable root-owned audit records. Those must never be
+# deleted to fabricate an empty one-shot ledger for the live health action.
+BOOTSTRAP_ACTION = "owner-full-integrity-v2-initial-root-trust-bootstrap-20261113"
+BOOTSTRAP_SOURCE = "45e52de4803a6f0768187793bba4990ed1d11a07"
+BOOTSTRAP_SCOPE = "a7524f8b761db1f3a912eea3221014b46729be34705397aa87ef283d513edf9d"
+BOOTSTRAP_MANIFEST_SHA = "d64d619b8bd26541fc1bcc8fa72ce047a747c093265bda55702d5e50f457199a"
 RUNTIME = "jason-runtime"
 MCP = "jason-mcp-pilot"
 CONFIRM = "APPROVE-EXACT-V2-FULL-SQLITE-PROOF-ONLY"
@@ -408,70 +419,130 @@ def rollback_objects(manifest: dict, objects: dict[str,bytes],
             d.rmdir()
     return all(not (root/target.lstrip("/")).exists() for target in expected)
 
-def signed_owner_decision(policy: dict, manifest: dict):
-    if not sys.stdin.isatty():
-        raise RepairDenied("OWNER_LOCAL_INTERACTIVE_TERMINAL_REQUIRED")
-    helper=load_trust(OWNER_AUTH,"root_exact_health_owner_auth")
-    verifier=load_trust(OWNER_PROOF,"root_exact_health_owner_proof")
-    endpoint="https://login.microsoftonline.com/"+helper.TENANT+"/oauth2/v2.0/"
-    challenge=helper._form(endpoint+"devicecode",{
-        "client_id":helper.CLIENT_ID,"scope":helper.SCOPE})
-    if not all(isinstance(challenge.get(x),str) for x in (
-            "device_code","user_code","verification_uri")):
-        raise RepairDenied("OWNER_OAUTH_NOT_AVAILABLE")
-    ttl=min(int(challenge.get("expires_in",0)),600)
-    if ttl<60:
-        raise RepairDenied("OWNER_OAUTH_EXPIRED")
-    print("EXACT_ACTION="+ACTION,flush=True)
-    print("SOURCE_SHA="+SOURCE,flush=True)
-    print("SCOPE_SHA256="+policy["scope_sha256"],flush=True)
-    print("PRODUCTION_FULL_SCAN_MAX_SECONDS=5700",flush=True)
-    print("NO_TICKET_OR_RUNTIME_RESTART=true",flush=True)
-    print("BROWSER_VERIFICATION_URL="+challenge["verification_uri"],flush=True)
-    print("SIGN_IN_CODE="+challenge["user_code"],flush=True)
-    until=time.monotonic()+ttl
-    interval=max(5,min(20,int(challenge.get("interval",5))))
-    oid=None
-    while time.monotonic()<until:
-        time.sleep(interval)
-        token=helper._form(endpoint+"token",{
-            "grant_type":"urn:ietf:params:oauth:grant-type:device_code",
-            "client_id":helper.CLIENT_ID,"device_code":challenge["device_code"]})
-        if isinstance(token.get("access_token"),str):
-            oid=helper.jwt_owner(token["access_token"])
-            break
-        if token.get("error")=="slow_down":
-            interval=min(interval+5,20)
-        elif token.get("error")!="authorization_pending":
-            raise RepairDenied("OWNER_OAUTH_NOT_APPROVED")
-    if oid is None or oid not in verifier.EXACT_OWNER_OAUTH_SUBJECTS:
-        raise RepairDenied("OWNER_OAUTH_NO_VERIFIED_IDENTITY")
-    if input("Confirm exact action with "+CONFIRM+": ").strip()!=CONFIRM:
-        raise RepairDenied("OWNER_EXACT_ACTION_CONSENT_MISSING")
-    key=verifier.read_service_owner_signing_key(SIGNER)
-    public=verifier.read_pinned_root_owner_public_key(ROOT_PIN)
-    if verifier.public_key_sha256(key.public_key())!=verifier.public_key_sha256(public):
-        raise RepairDenied("PINNED_ED25519_OWNER_SIGNER_MISMATCH")
-    at=datetime.now(timezone.utc)
-    proof=verifier.issue_exact_owner_release(
-        approval_id="owner-mcp-"+uuid.uuid4().hex,
-        release_id="release-"+SOURCE[:16],
-        candidate_sha=SOURCE,rollback_sha=LKG,
-        scope_sha256=policy["scope_sha256"],
-        manifest_sha256=policy["manifest_sha256"],
-        freeze_sha256=policy["freeze_sha256"],
-        verified_tenant_id=verifier.TID,verified_owner_oid=oid,
-        verified_principal=verifier.EXACT_OWNER_OAUTH_SUBJECTS[oid],
-        verified_organization_id="aot",confirmed_decision="approve",
-        at=at,private_key=key)
+def verified_initial_bootstrap_ledger():
+    """Validate immutable prior bootstrap evidence, never reuse its approval.
+
+    The v2 live health one-shot has separate action-named attempt/result
+    records in this ledger. Only the two known, root-owned successful
+    bootstrap records may predate the live health action. The bootstrap
+    proof's expiry is checked at its *historical issue time* solely to
+    confirm the audit trail; it is never accepted as new production consent.
+    """
+    meta=LEDGER.lstat()
+    if (LEDGER.is_symlink() or not stat.S_ISDIR(meta.st_mode)
+            or meta.st_uid!=0 or meta.st_gid!=0
+            or stat.S_IMODE(meta.st_mode)!=0o700):
+        raise RepairDenied("V2_ROOT_AUDIT_LEDGER_UNTRUSTED")
+    past_attempt=LEDGER/(BOOTSTRAP_ACTION+".attempt.json")
+    past_result=LEDGER/(BOOTSTRAP_ACTION+".result.json")
+    if set(LEDGER.iterdir())!={past_attempt,past_result}:
+        raise RepairDenied("EXACT_HEALTH_ONE_SHOT_ALREADY_USED_OR_FOREIGN_LEDGER")
+    attempt=json.loads(read_secure_root(past_attempt,131072))
+    result=json.loads(read_secure_root(past_result,131072))
+    if (attempt.get("schema_version")!="1.0"
+            or attempt.get("action")!=BOOTSTRAP_ACTION
+            or attempt.get("source_sha")!=BOOTSTRAP_SOURCE
+            or attempt.get("scope_sha256")!=BOOTSTRAP_SCOPE
+            or attempt.get("status")!="claimed_before_root_trust_installation"
+            or result.get("schema_version")!="1.0"
+            or result.get("action")!=BOOTSTRAP_ACTION
+            or result.get("source_sha")!=BOOTSTRAP_SOURCE
+            or result.get("scope_sha256")!=BOOTSTRAP_SCOPE
+            or result.get("status")!="verified"
+            or result.get("ledger_directory")!=str(LEDGER)
+            or set(result.get("approved_files") or [])!={
+                "/usr/local/lib/jason/owner_full_integrity_v2_root_repair.py",
+                "/etc/jason-owner-release/owner-full-integrity-v2-repair-policy.json",
+            }
+            or result.get("production_services_changed") is not False
+            or result.get("full_sqlite_scan_ran") is not False
+            or result.get("root_breaker_modified") is not False):
+        raise RepairDenied("ORIGINAL_ROOT_BOOTSTRAP_AUDIT_INCONSISTENT")
+    verifier=load_trust(OWNER_PROOF,"root_original_bootstrap_audit_verifier")
+    public=verifier.read_pinned_root_owner_public_key(
+        ROOT_PIN,require_root_owned=True)
+    proof=attempt.get("owner_proof")
+    if not isinstance(proof,dict) or not isinstance(proof.get("payload"),dict):
+        raise RepairDenied("ROOT_BOOTSTRAP_PROOF_NOT_PRESENT")
+    # HISTORICAL audit validation only, not fresh Owner authorization.
+    try:
+        historical=datetime.fromisoformat(proof["payload"]["issued_at"])
+    except (KeyError,TypeError,ValueError) as exc:
+        raise RepairDenied("ROOT_BOOTSTRAP_PROOF_TIMESTAMP_INVALID") from exc
     verifier.verify_exact_owner_release(
-        proof,public_key=public,at=at,
-        expected_candidate_sha=SOURCE,expected_rollback_sha=LKG,
+        proof,public_key=public,at=historical,
+        expected_candidate_sha=BOOTSTRAP_SOURCE,
+        expected_rollback_sha=LKG,
+        expected_release_id="release-"+BOOTSTRAP_SOURCE[:16],
+        expected_scope_sha256=BOOTSTRAP_SCOPE,
+        expected_manifest_sha256=BOOTSTRAP_MANIFEST_SHA,
+        expected_freeze_sha256="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f",
+    )
+    return True
+
+
+def signed_owner_decision(policy: dict, manifest: dict):
+    """Read *only* the independent UID1000-signed decision; never sign as root.
+
+    The exact 15-minute Ed25519 proof binds source, scope, rollback, freeze
+    and the pinned root-policy hash. The root policy itself pins this root
+    code and all provider/systemd/bundle bytes. Immutable already-consumed
+    V1 Owner recovery proof and its ledger are not consulted or reused.
+    """
+    decision=OWNER_SIGNED_DECISION
+    parent=decision.parent.lstat()
+    if (parent.st_uid!=1000 or not stat.S_ISDIR(parent.st_mode)
+            or stat.S_IMODE(parent.st_mode)!=0o2770
+            or decision.is_symlink()):
+        raise RepairDenied("UNTRUSTED_OWNER_DECISION_PARENT")
+    fd=os.open(decision,os.O_RDONLY|getattr(os,"O_NOFOLLOW",0))
+    try:
+        info=os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1
+                or info.st_uid!=1000 or stat.S_IMODE(info.st_mode)!=0o600
+                or info.st_size>32768):
+            raise RepairDenied("SIGNED_OWNER_DECISION_FILE_UNTRUSTED")
+        raw=os.read(fd,32769)
+        if len(raw)!=info.st_size:
+            raise RepairDenied("SIGNED_OWNER_DECISION_READ_CHANGED")
+    finally:
+        os.close(fd)
+    signed=json.loads(raw)
+    return verify_signed_owner_payload(policy,signed)
+
+
+def verify_signed_owner_payload(policy: dict, signed: dict):
+    """Pure exact Owner proof verification; root-installed script never signs."""
+    exact_fields={"schema_version","action","source_sha","scope_sha256",
+                  "bundle_sha256","root_policy_sha256","status",
+                  "signed_owner_proof"}
+    policy_sha=digest(read_secure_root(POLICY,32768))
+    if (not isinstance(signed,dict) or set(signed)!=exact_fields
+            or signed.get("schema_version")!="1.0"
+            or signed.get("action")!=ACTION
+            or signed.get("source_sha")!=SOURCE
+            or signed.get("scope_sha256")!=policy["scope_sha256"]
+            or signed.get("bundle_sha256")!=policy["bundle_sha256"]
+            or signed.get("root_policy_sha256")!=policy_sha
+            or signed.get("status")!="AUTHENTICATED_OWNER_APPROVED_NOT_EXECUTED"):
+        raise RepairDenied("SIGNED_OWNER_DECISION_EXACT_ACTION_DRIFT")
+    verifier=load_trust(OWNER_PROOF,"root_exact_health_owner_proof")
+    public=verifier.read_pinned_root_owner_public_key(
+        ROOT_PIN,require_root_owned=True)
+    verifier.verify_exact_owner_release(
+        signed["signed_owner_proof"],
+        public_key=public,at=datetime.now(timezone.utc),
+        expected_candidate_sha=SOURCE,
+        expected_rollback_sha=LKG,
         expected_release_id="release-"+SOURCE[:16],
         expected_scope_sha256=policy["scope_sha256"],
-        expected_manifest_sha256=policy["manifest_sha256"],
-        expected_freeze_sha256=policy["freeze_sha256"])
-    return proof
+        # Bind the reviewed root file code hash through root-policy
+        # content, not only the long-lived three-object bundle manifest.
+        expected_manifest_sha256=policy_sha,
+        expected_freeze_sha256=policy["freeze_sha256"],
+    )
+    return signed["signed_owner_proof"]
+
 
 def verify_full_proof(after: float):
     file=FULL.lstat()
@@ -515,11 +586,7 @@ def execute():
         raise RepairDenied("TRUSTED_ROOT_INSTALL_AND_ISOLATED_PYTHON_REQUIRED")
     policy=fixed_policy()
     manifest,objects=checked_bundle(policy)
-    ledger=LEDGER.lstat()
-    if (LEDGER.is_symlink() or not stat.S_ISDIR(ledger.st_mode)
-            or ledger.st_uid!=0 or stat.S_IMODE(ledger.st_mode)!=0o700
-            or any(LEDGER.iterdir())):
-        raise RepairDenied("EXACT_ACTION_ALREADY_USED_OR_AUDIT_UNTRUSTED")
+    verified_initial_bootstrap_ledger()
     before=root_state(policy)
     proof=signed_owner_decision(policy,manifest)
     result={"schema_version":"1.0","exact_action":ACTION,"status":"failed",
@@ -635,6 +702,7 @@ def main():
             if os.geteuid()==0:
                 policy=fixed_policy()
                 checked_bundle(policy)
+                verified_initial_bootstrap_ledger()
                 root_state(policy)
                 print("EXACT_V2_ROOT_HEALTH_PREFLIGHT=PASS")
             else:

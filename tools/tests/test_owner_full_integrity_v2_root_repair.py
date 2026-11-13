@@ -185,40 +185,58 @@ def test_untrusted_source_cannot_execute(monkeypatch):
         repair.execute()
 
 
-def test_signed_owner_proof_is_one_use_bound_and_wrong_scope_denied(monkeypatch,policy,manifest):
+def test_signed_owner_proof_is_user_signed_root_verified_and_wrong_scope_denied(
+    monkeypatch,policy,manifest,
+):
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from implementation.kernel import signed_owner_release as verifier
     key=Ed25519PrivateKey.generate()
-    challenge={"device_code":"abc","user_code":"ABCD","verification_uri":"https://login.microsoft.com/device","expires_in":600}
-    helper=SimpleNamespace(
-        TENANT="tenant",CLIENT_ID="client",SCOPE="scope",
-        _form=Mock(side_effect=[challenge,{"access_token":"synthetic"}]),
-        jwt_owner=lambda token:verifier.OWNER_OID,
+    policy_bytes=canonical(policy)+b"\n"
+    root_policy_sha=sha256(policy_bytes).hexdigest()
+    at=datetime.now(timezone.utc)
+    proof=verifier.issue_exact_owner_release(
+        approval_id="owner-mcp-"+"a"*32,
+        release_id="release-"+repair.SOURCE[:16],
+        candidate_sha=repair.SOURCE,rollback_sha=repair.LKG,
+        scope_sha256=policy["scope_sha256"],
+        manifest_sha256=root_policy_sha,
+        freeze_sha256=policy["freeze_sha256"],
+        verified_tenant_id=verifier.TID,
+        verified_owner_oid=verifier.OWNER_OID,
+        verified_principal=verifier.EXACT_OWNER_OAUTH_SUBJECTS[verifier.OWNER_OID],
+        verified_organization_id="aot",
+        confirmed_decision="approve",at=at,private_key=key,
     )
-    monkeypatch.setattr(repair,"load_trust",lambda path,name:helper if path==repair.OWNER_AUTH else verifier)
-    monkeypatch.setattr(repair.time,"sleep",lambda seconds:None)
-    monkeypatch.setattr(repair.sys,"stdin",SimpleNamespace(isatty=lambda:True))
-    monkeypatch.setattr("builtins.input",lambda prompt:repair.CONFIRM)
-    monkeypatch.setattr(verifier,"read_service_owner_signing_key",lambda path:key)
-    monkeypatch.setattr(verifier,"read_pinned_root_owner_public_key",lambda path:key.public_key())
-    proof=repair.signed_owner_decision(policy,manifest)
-    payload=proof["payload"]
-    assert payload["candidate_sha"]==repair.SOURCE
-    assert payload["rollback_sha"]==repair.LKG
-    assert payload["scope_sha256"]==policy["scope_sha256"]
-    assert payload["one_release_only"] is True
-    assert payload["standing_authority"] is False
+    envelope={
+        "schema_version":"1.0","action":repair.ACTION,
+        "source_sha":repair.SOURCE,
+        "scope_sha256":policy["scope_sha256"],
+        "bundle_sha256":policy["bundle_sha256"],
+        "root_policy_sha256":root_policy_sha,
+        "status":"AUTHENTICATED_OWNER_APPROVED_NOT_EXECUTED",
+        "signed_owner_proof":proof,
+    }
+    monkeypatch.setattr(repair,"read_secure_root",lambda path,*args:policy_bytes)
+    monkeypatch.setattr(repair,"load_trust",lambda path,name:verifier)
+    monkeypatch.setattr(verifier,"read_pinned_root_owner_public_key",
+                        lambda *args,**kwargs:key.public_key())
+    assert repair.verify_signed_owner_payload(policy,envelope)==proof
+    assert proof["payload"]["one_release_only"] is True
+    assert proof["payload"]["standing_authority"] is False
+    with pytest.raises(repair.RepairDenied,match="SIGNED_OWNER_DECISION_EXACT_ACTION_DRIFT"):
+        repair.verify_signed_owner_payload(
+            policy,{**envelope,"action":"unreviewed-production-install"})
+    with pytest.raises(repair.RepairDenied,match="SIGNED_OWNER_DECISION_EXACT_ACTION_DRIFT"):
+        repair.verify_signed_owner_payload(
+            policy,{**envelope,"root_policy_sha256":"f"*64})
     with pytest.raises(verifier.OwnerReleaseProofDenied,match="TRANSACTION_BINDING"):
-        verifier.verify_exact_owner_release(
-            proof,public_key=key.public_key(),
-            expected_candidate_sha=repair.SOURCE,
-            expected_rollback_sha=repair.LKG,
-            expected_release_id="release-"+repair.SOURCE[:16],
-            expected_scope_sha256="f"*64,
-            expected_manifest_sha256=policy["manifest_sha256"],
-            expected_freeze_sha256=policy["freeze_sha256"],
-            at=datetime.now(timezone.utc),
-        )
+        repair.verify_signed_owner_payload(
+            {**policy,"scope_sha256":"f"*64},
+            {**envelope,"scope_sha256":"f"*64})
+    assert "read_service_owner_signing_key(" not in (
+        __import__("inspect").getsource(repair))
+    assert str(repair.OWNER_SIGNED_DECISION).startswith("/srv/jason/archive/")
+
 
 
 def test_full_proof_does_not_allow_partial_or_quick_substitute(tmp_path,monkeypatch):
@@ -356,6 +374,7 @@ def test_disposable_fake_root_full_lifecycle_runs_proof_before_fast_health(
     monkeypatch.setattr(repair,"ROOT_SCRIPT",Path(repair.__file__).resolve())
     monkeypatch.setattr(repair,"fixed_policy",lambda:local_policy)
     monkeypatch.setattr(repair,"checked_bundle",lambda p:({"source":[],"new_unit_dropin":{}},{"file":b"x"}))
+    monkeypatch.setattr(repair,"verified_initial_bootstrap_ledger",lambda:True)
     monkeypatch.setattr(repair,"root_state",lambda p:{"runtime_id":"rt","mcp_id":"mcp"})
     monkeypatch.setattr(repair,"signed_owner_decision",lambda *args:{"payload":{"exact":"approved"}})
     @contextlib.contextmanager
@@ -424,6 +443,7 @@ def test_disposable_fake_root_failed_full_proof_never_unlocks_breaker(
     monkeypatch.setattr(repair,"ROOT_SCRIPT",Path(repair.__file__).resolve())
     monkeypatch.setattr(repair,"fixed_policy",lambda:local_policy)
     monkeypatch.setattr(repair,"checked_bundle",lambda p:({"source":[],"new_unit_dropin":{}},{"file":b"x"}))
+    monkeypatch.setattr(repair,"verified_initial_bootstrap_ledger",lambda:True)
     monkeypatch.setattr(repair,"root_state",lambda p:{"runtime_id":"rt","mcp_id":"mcp"})
     monkeypatch.setattr(repair,"signed_owner_decision",lambda *args:{"payload":{"exact":"approved"}})
     @contextlib.contextmanager
@@ -454,3 +474,179 @@ def test_disposable_fake_root_failed_full_proof_never_unlocks_breaker(
     assert result["full_integrity_verified"] is False
     assert result["root_breaker_closed"] is False
     assert result["source_rollback"]=="verified_absence"
+
+
+def test_disposable_uid1000_signed_decision_is_verified_by_real_uid0_root(
+    tmp_path,monkeypatch,policy,
+):
+    """Real UID0 test, synthetic al-owned proof and root-owned policy in /tmp."""
+    import os
+    if os.geteuid()!=0:
+        pytest.skip("requires isolated disposable UID0 pytest job")
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from implementation.kernel import signed_owner_release as verifier
+    key=Ed25519PrivateKey.generate()
+    archive=tmp_path/"owner-archive"
+    archive.mkdir(mode=0o2770)
+    os.chown(archive,1000,1000)
+    archive.chmod(0o2770)
+    policy_file=tmp_path/"installed-root-policy.json"
+    policy_raw=canonical(policy)+b"\n"
+    policy_file.write_bytes(policy_raw)
+    policy_file.chmod(0o400)
+    at=datetime.now(timezone.utc)
+    proof=verifier.issue_exact_owner_release(
+        approval_id="owner-mcp-"+"c"*32,
+        release_id="release-"+repair.SOURCE[:16],
+        candidate_sha=repair.SOURCE,rollback_sha=repair.LKG,
+        scope_sha256=policy["scope_sha256"],
+        manifest_sha256=sha256(policy_raw).hexdigest(),
+        freeze_sha256=policy["freeze_sha256"],
+        verified_tenant_id=verifier.TID,
+        verified_owner_oid=verifier.OWNER_OID,
+        verified_principal=verifier.EXACT_OWNER_OAUTH_SUBJECTS[verifier.OWNER_OID],
+        verified_organization_id="aot",
+        confirmed_decision="approve",at=at,private_key=key)
+    decision={
+        "schema_version":"1.0","action":repair.ACTION,
+        "source_sha":repair.SOURCE,"scope_sha256":policy["scope_sha256"],
+        "bundle_sha256":policy["bundle_sha256"],
+        "root_policy_sha256":sha256(policy_raw).hexdigest(),
+        "status":"AUTHENTICATED_OWNER_APPROVED_NOT_EXECUTED",
+        "signed_owner_proof":proof,
+    }
+    file=archive/"one-verified-owner-decision.json"
+    file.write_bytes(canonical(decision)+b"\n")
+    file.chmod(0o600)
+    os.chown(file,1000,1000)
+    monkeypatch.setattr(repair,"POLICY",policy_file)
+    monkeypatch.setattr(repair,"OWNER_SIGNED_DECISION",file)
+    monkeypatch.setattr(repair,"load_trust",lambda path,name:verifier)
+    monkeypatch.setattr(verifier,"read_pinned_root_owner_public_key",
+                        lambda *args,**kwargs:key.public_key())
+    assert repair.signed_owner_decision(policy,{})==proof
+    file.chmod(0o644)
+    with pytest.raises(repair.RepairDenied,match="SIGNED_OWNER_DECISION_FILE_UNTRUSTED"):
+        repair.signed_owner_decision(policy,{})
+    file.chmod(0o600)
+    decision["action"]="unapproved-production-reboot"
+    file.write_bytes(canonical(decision)+b"\n")
+    with pytest.raises(repair.RepairDenied,match="SIGNED_OWNER_DECISION_EXACT_ACTION_DRIFT"):
+        repair.signed_owner_decision(policy,{})
+
+
+def test_prior_bootstrap_audit_is_verified_and_never_reused_as_new_approval(
+    tmp_path,monkeypatch,
+):
+    from datetime import timedelta
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from implementation.kernel import signed_owner_release as verifier
+    root=tmp_path/"historical-verified-root-ledger"
+    root.mkdir()
+    first=root/(repair.BOOTSTRAP_ACTION+".attempt.json")
+    second=root/(repair.BOOTSTRAP_ACTION+".result.json")
+    key=Ed25519PrivateKey.generate()
+    earlier=datetime.now(timezone.utc)-timedelta(minutes=35)
+    historic=verifier.issue_exact_owner_release(
+        approval_id="owner-mcp-"+"d"*32,
+        release_id="release-"+repair.BOOTSTRAP_SOURCE[:16],
+        candidate_sha=repair.BOOTSTRAP_SOURCE,
+        rollback_sha=repair.LKG,
+        scope_sha256=repair.BOOTSTRAP_SCOPE,
+        manifest_sha256=repair.BOOTSTRAP_MANIFEST_SHA,
+        freeze_sha256="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f",
+        verified_tenant_id=verifier.TID,
+        verified_owner_oid=verifier.OWNER_OID,
+        verified_principal=verifier.EXACT_OWNER_OAUTH_SUBJECTS[verifier.OWNER_OID],
+        verified_organization_id="aot",
+        confirmed_decision="approve",
+        at=earlier,private_key=key,
+    )
+    attempt={
+        "schema_version":"1.0",
+        "action":repair.BOOTSTRAP_ACTION,
+        "source_sha":repair.BOOTSTRAP_SOURCE,
+        "scope_sha256":repair.BOOTSTRAP_SCOPE,
+        "status":"claimed_before_root_trust_installation",
+        "owner_proof":historic,
+    }
+    result={
+        "schema_version":"1.0",
+        "action":repair.BOOTSTRAP_ACTION,
+        "source_sha":repair.BOOTSTRAP_SOURCE,
+        "scope_sha256":repair.BOOTSTRAP_SCOPE,
+        "status":"verified",
+        "ledger_directory":str(root),
+        "approved_files":[
+            "/usr/local/lib/jason/owner_full_integrity_v2_root_repair.py",
+            "/etc/jason-owner-release/owner-full-integrity-v2-repair-policy.json",
+        ],
+        "production_services_changed":False,
+        "full_sqlite_scan_ran":False,
+        "root_breaker_modified":False,
+    }
+    first.write_bytes(canonical(attempt)+b"\n")
+    second.write_bytes(canonical(result)+b"\n")
+
+    class PriorLedger:
+        def lstat(self):
+            return SimpleNamespace(
+                st_uid=0,st_gid=0,st_mode=stat.S_IFDIR|0o700,
+            )
+        def is_symlink(self):return False
+        def iterdir(self):return root.iterdir()
+        def __truediv__(self,name):return root/name
+        def __str__(self):return str(root)
+
+    monkeypatch.setattr(repair,"LEDGER",PriorLedger())
+    monkeypatch.setattr(repair,"read_secure_root",lambda path,*a,**k:path.read_bytes())
+    monkeypatch.setattr(repair,"load_trust",lambda p,name:verifier)
+    monkeypatch.setattr(verifier,"read_pinned_root_owner_public_key",
+                        lambda *args,**kwargs:key.public_key())
+    assert repair.verified_initial_bootstrap_ledger() is True
+    # The bootstrap signature is historically valid but already expired; it
+    # does not authorize a fresh live full-integrity production scan.
+    with pytest.raises(verifier.OwnerReleaseProofDenied,match="EXPIRED"):
+        verifier.verify_exact_owner_release(
+            historic,public_key=key.public_key(),
+            expected_candidate_sha=repair.BOOTSTRAP_SOURCE,
+            expected_rollback_sha=repair.LKG,
+            expected_release_id="release-"+repair.BOOTSTRAP_SOURCE[:16],
+            expected_scope_sha256=repair.BOOTSTRAP_SCOPE,
+            expected_manifest_sha256=repair.BOOTSTRAP_MANIFEST_SHA,
+            expected_freeze_sha256="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f",
+            at=datetime.now(timezone.utc),
+        )
+    unrelated=root/"foreign-audit.json"
+    unrelated.write_text("foreign")
+    with pytest.raises(repair.RepairDenied,match="FOREIGN_LEDGER"):
+        repair.verified_initial_bootstrap_ledger()
+    unrelated.unlink()
+    result["status"]="failed"
+    second.write_bytes(canonical(result)+b"\n")
+    with pytest.raises(repair.RepairDenied,match="AUDIT_INCONSISTENT"):
+        repair.verified_initial_bootstrap_ledger()
+
+
+def test_root_check_only_requires_verified_bootstrap_audit_without_writes(
+    monkeypatch,
+):
+    observed=[]
+    monkeypatch.setattr(repair.os,"geteuid",lambda:0)
+    monkeypatch.setattr(repair.sys,"argv",[
+        "owner_full_integrity_v2_root_repair.py","--check-only",
+    ])
+    monkeypatch.setattr(repair,"fixed_policy",lambda:observed.append("policy") or {})
+    monkeypatch.setattr(repair,"checked_bundle",lambda p:observed.append("bundle"))
+    monkeypatch.setattr(
+        repair,"verified_initial_bootstrap_ledger",
+        lambda:observed.append("bootstrap_ledger"))
+    monkeypatch.setattr(repair,"root_state",lambda p:observed.append("root_state"))
+    assert repair.main()==0
+    assert observed==["policy","bundle","bootstrap_ledger","root_state"]
+    observed.clear()
+    def refuse():
+        raise repair.RepairDenied("FOREIGN_ROOT_BOOTSTRAP_LEDGER")
+    monkeypatch.setattr(repair,"verified_initial_bootstrap_ledger",refuse)
+    assert repair.main()==2
+    assert observed==["policy","bundle"]

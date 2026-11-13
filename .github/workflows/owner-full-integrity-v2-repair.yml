@@ -5,7 +5,9 @@ on:
     paths:
       - '.github/workflows/owner-full-integrity-v2-repair.yml'
       - 'tools/owner_full_integrity_v2_root_repair.py'
+      - 'tools/owner_full_integrity_v2_owner_consent.py'
       - 'tools/tests/test_owner_full_integrity_v2_root_repair.py'
+      - 'tools/tests/test_owner_full_integrity_v2_owner_consent.py'
       - 'tools/openclaw_authority_health_snapshot.py'
       - 'tools/openclaw_authority_operational_health.py'
       - 'config/owner-full-integrity-v2-repair-policy.json'
@@ -16,7 +18,9 @@ on:
     paths:
       - '.github/workflows/owner-full-integrity-v2-repair.yml'
       - 'tools/owner_full_integrity_v2_root_repair.py'
+      - 'tools/owner_full_integrity_v2_owner_consent.py'
       - 'tools/tests/test_owner_full_integrity_v2_root_repair.py'
+      - 'tools/tests/test_owner_full_integrity_v2_owner_consent.py'
       - 'config/owner-full-integrity-v2-repair-policy.json'
       - 'config/owner-full-integrity-v2-source-manifest.json'
       - 'config/owner-full-integrity-v2.service.conf'
@@ -39,8 +43,10 @@ jobs:
           PYTHONPATH: '.:implementation:tools'
         run: |
           python -m py_compile tools/owner_full_integrity_v2_root_repair.py
+          python -m py_compile tools/owner_full_integrity_v2_owner_consent.py
           python -m pytest -q \
             tools/tests/test_owner_full_integrity_v2_root_repair.py \
+            tools/tests/test_owner_full_integrity_v2_owner_consent.py \
             tools/tests/test_openclaw_authority_operational_health.py \
             tools/tests/test_openclaw_authority_health_snapshot.py \
             tools/tests/test_owner_full_integrity_recovery.py \
@@ -54,6 +60,12 @@ jobs:
           m=json.loads(Path('config/owner-full-integrity-v2-source-manifest.json').read_text())
           digest=lambda path:hashlib.sha256(Path(path).read_bytes()).hexdigest()
           assert p['script_sha256']==digest('tools/owner_full_integrity_v2_root_repair.py')
+          from tools import owner_full_integrity_v2_owner_consent as owner
+          assert owner.ROOT_POLICY_SHA==digest('config/owner-full-integrity-v2-repair-policy.json')
+          assert owner.ACTION==p['exact_action']
+          assert owner.SCOPE==p['scope_sha256']
+          assert owner.BUNDLE_SHA==p['bundle_sha256']
+          assert owner.BUNDLE_MANIFEST_SHA==p['manifest_sha256']
           assert p['source_sha']==m['source_sha']=='95832507e6e5f804f092cb5d3ebdea90ba1a49bf'
           assert p['scope_sha256']==m['scope_sha256']
           assert p['full_scan_max_seconds']==5400
@@ -73,6 +85,7 @@ jobs:
         run: |
           sudo env PYTHONPATH=.:implementation:tools "$(command -v python)" -m pytest -q \
             tools/tests/test_owner_full_integrity_v2_root_repair.py \
+            tools/tests/test_owner_full_integrity_v2_owner_consent.py \
             -k 'disposable or foreign_child or tampered_stage or untrusted_source'
       - name: Source-only release boundary
         run: |
