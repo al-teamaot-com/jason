@@ -27,9 +27,8 @@ SOURCE_REPO=Path('/home/al/.local/lib/jason/engineering-source-repo')
 INSTALLED_ROOT=Path('/home/al/.local/lib/jason')
 SPOOL_ROOT=Path('/var/lib/jason/openclaw/support-repair')
 PRODUCTION_LOCK=Path('/var/lib/jason/openclaw/release-manager/production-transaction.lock')
-PAUSE_RECEIPT=SPOOL_ROOT/'pmv3-engineering-owner-pause.json'
-LEGACY_DROPIN=Path('/home/al/.config/systemd/user/jason-support-repair-worker.service.d/owner-pause.conf')
-LEGACY_PAUSE_DIRECTIVE='ConditionPathExists=!/var/lib/jason/openclaw/support-repair/pmv3-engineering-owner-pause.json'
+LEGACY_SERVICE='jason-support-repair-worker.service'
+LEGACY_TIMER='jason-support-repair-worker.timer'
 WORK_LEASE=SPOOL_ROOT/'independent-engineering-lanes.lock'
 GOOD_SUPPORT_MAX_AGE_SECONDS=600
 LANES={
@@ -137,40 +136,41 @@ def verified_runner(repo:Path,installed:Path,lane:str)->Path:
     return binary
 
 
-def loaded_old_controller_paused(runner=subprocess.run)->bool:
-    """Verify active systemd condition, not just an untrusted pause receipt."""
+def _systemd_fields(unit:str, properties:tuple[str,...], *, runner=subprocess.run)->dict[str,str]:
     env=os.environ.copy()
     env.setdefault('XDG_RUNTIME_DIR',f'/run/user/{os.getuid()}')
-    env.setdefault('DBUS_SESSION_BUS_ADDRESS',
-                   f'unix:path=/run/user/{os.getuid()}/bus')
-    result=runner(['systemctl','--user','show','jason-support-repair-worker.service',
-                   '-p','ActiveState','-p','ConditionResult'],
-                  env=env,capture_output=True,text=True,check=False,timeout=12)
-    if result.returncode or len(result.stdout)>2000:
-        return False
-    fields=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
-    return (fields.get('ActiveState')=='inactive' and
-            fields.get('ConditionResult')=='no')
+    env.setdefault('DBUS_SESSION_BUS_ADDRESS',f'unix:path=/run/user/{os.getuid()}/bus')
+    args=['systemctl','--user','show',unit]
+    for name in properties: args.extend(['-p',name])
+    result=runner(args,env=env,capture_output=True,text=True,check=False,timeout=12)
+    if result.returncode or len(result.stdout)>4000:return {}
+    return dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
 
 
-def verify_old_controller_guard(guard:Path,probe)->None:
-    if (guard.is_symlink() or not guard.is_file() or
-            guard.stat().st_uid!=os.getuid() or guard.stat().st_size>10000):
-        raise LaneError('old monolithic controller guard not verified')
-    if LEGACY_PAUSE_DIRECTIVE not in guard.read_text(encoding='utf-8'):
-        raise LaneError('old monolithic controller no-start condition missing')
+def old_controller_quiescent(runner=subprocess.run)->bool:
+    """Prove the legacy engineering controller cannot compete with new lanes.
+
+    This is a technical topology invariant, not Owner authorization. The old
+    service must be inactive and its timer must be inactive and disabled or
+    masked before a replacement lane can run.
+    """
+    service=_systemd_fields(LEGACY_SERVICE,('ActiveState',),runner=runner)
+    timer=_systemd_fields(LEGACY_TIMER,('ActiveState','UnitFileState'),runner=runner)
+    return (service.get('ActiveState')=='inactive'
+            and timer.get('ActiveState')=='inactive'
+            and timer.get('UnitFileState') in {'disabled','masked'})
+
+
+def verify_old_controller_quiescent(probe)->None:
     if not probe():
-        raise LaneError('old monolithic controller is not verified inactive')
+        raise LaneError('old monolithic controller service/timer not quiescent')
 
 
 def execute(lane:str, *, repo:Path, installed:Path, spool:Path,
-            production_lock:Path, pause_receipt:Path,
-            legacy_guard:Path,legacy_probe=loaded_old_controller_paused,
+            production_lock:Path, legacy_probe=old_controller_quiescent,
             runner=subprocess.run) -> dict[str,Any]:
     if lane not in LANES:raise LaneError('unrecognized independent lane')
-    if not pause_receipt.is_file() or pause_receipt.is_symlink():
-        raise LaneError('old monolithic engineering controller is not owner-paused')
-    verify_old_controller_guard(legacy_guard,legacy_probe)
+    verify_old_controller_quiescent(legacy_probe)
     if spool.is_symlink() or not spool.is_dir():
         raise LaneError('canonical engineering spool unavailable')
     revision=source_revision(repo)
@@ -233,8 +233,7 @@ def main()->int:
         p.error('only the installed unprivileged canonical governed lane is allowed')
     try:
         result=execute(args.lane,repo=args.repo,installed=INSTALLED_ROOT,
-                       spool=args.spool,production_lock=PRODUCTION_LOCK,
-                       pause_receipt=PAUSE_RECEIPT,legacy_guard=LEGACY_DROPIN)
+                       spool=args.spool,production_lock=PRODUCTION_LOCK)
     except (LaneError,OSError,ValueError,subprocess.TimeoutExpired):
         # Integrity failures must remain visible as unit failures, not be
         # confused with an approved native worker rejection.

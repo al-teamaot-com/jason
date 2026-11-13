@@ -2,8 +2,7 @@
 Description=Jason independent governed engineering lane (support)
 After=network-online.target
 Wants=network-online.target
-# The old monolithic controller must be owner-paused before separation runs.
-ConditionPathExists=/var/lib/jason/openclaw/support-repair/pmv3-engineering-owner-pause.json
+# The wrapper independently verifies the legacy service is inactive and its timer is disabled/masked before any replacement lane runs.
 ConditionPathExists=/home/al/.local/lib/jason/pmv3_worker_release_gate.py
 ConditionPathExists=/home/al/.local/lib/jason/independent_governed_lane.py
 ConditionPathExists=/home/al/.local/lib/jason/support_repair_host_worker.py

@@ -16,7 +16,7 @@ def test_source_only_unit_inventory_and_admission_gate():
         assert (ROOT/source).is_file()
     for lane in ('support','todo-intake','development','supervisor'):
         body=(UNITS/f'jason-independent-{lane}.service').read_text()
-        assert 'ConditionPathExists=/var/lib/jason/openclaw/support-repair/pmv3-engineering-owner-pause.json' in body
+        assert 'pmv3-engineering-owner-pause.json' not in body
         assert 'ConditionPathExists=/home/al/.local/lib/jason/pmv3_worker_release_gate.py' in body
         assert 'ExecCondition=/usr/bin/python3 /home/al/.local/lib/jason/pmv3_worker_release_gate.py' in body
         assert 'User=al' in body
@@ -77,7 +77,9 @@ def test_source_only_independent_lanes_use_bounded_guard_not_direct_runners():
     assert guard['status']=='source_only_not_installed'
     assert guard['holds_production_transaction_shared_lock_for_full_worker_run'] is True
     assert guard['requires_ticket_continuity_release_gate'] is True
-    assert guard['requires_loaded_legacy_systemd_inactive_condition'] is True
+    assert guard['requires_legacy_controller_service_inactive'] is True
+    assert guard['requires_legacy_controller_timer_inactive_and_disabled_or_masked'] is True
+    assert guard['standing_owner_pause_receipt_required'] is False
     for lane in ('support','todo-intake','development','supervisor'):
         unit=(UNITS/f'jason-independent-{lane}.service').read_text()
         assert 'ConditionPathExists=/home/al/.local/lib/jason/independent_governed_lane.py' in unit
