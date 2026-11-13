@@ -81,6 +81,17 @@ def test_exact_archive_checks_fixed_scope_and_remote_git_blobs(
     file = tmp_path / "approved-source.tar"
     file.write_bytes(archive)
     file.chmod(0o600)
+    # GitHub's nonroot runner is not the production service UID 1000.
+    # The genuine guard must reject it; only this bounded fixture substitutes
+    # UID metadata to exercise the remaining archive/hash validation path.
+    if os.geteuid() != 1000:
+        original_fstat = rootstage.os.fstat
+        def service_uid_fixture(fd):
+            actual = original_fstat(fd)
+            return SimpleNamespace(
+                st_mode=actual.st_mode, st_nlink=actual.st_nlink,
+                st_uid=1000, st_size=actual.st_size,
+            )
     policy = {
         "archive_path": str(file),
         "archive_sha256": sha256(archive).hexdigest(),
@@ -94,6 +105,11 @@ def test_exact_archive_checks_fixed_scope_and_remote_git_blobs(
         source_manifest=sparse.source_manifest,
         verify_package=sparse.verify_package,
     )
+    if os.geteuid() != 1000:
+        with pytest.raises(rootstage.StageRootDenied,
+                           match="ARCHIVE_UNTRUSTED_METADATA"):
+            rootstage.exact_source_archive(policy, module)
+        monkeypatch.setattr(rootstage.os, "fstat", service_uid_fixture)
     observed, raw = rootstage.exact_source_archive(policy, module)
     assert raw == archive
     assert observed["scope_sha256"] == manifest["scope_sha256"]
