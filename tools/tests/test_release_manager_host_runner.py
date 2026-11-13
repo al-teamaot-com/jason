@@ -4600,7 +4600,10 @@ def test_preprod_disables_inherited_playbook_review_child_and_rejects_reactivati
     live = {
         "inspect": {
             "Config": {
-                "Env": ["JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=true"],
+                "Env": [
+                    "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=true",
+                    "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED=true",
+                ],
                 "Labels": {},
             },
             "HostConfig": {"NetworkMode": "bridge", "Tmpfs": {}},
