@@ -324,3 +324,13 @@ def test_root_refuses_fabricated_complete_step_indices(enrolled):
                 action_index=1,observed=observed(obj,1),at=AT,
                 verified_prior_steps=state,
             )
+
+
+def test_verified_parent_requires_current_grant_even_with_valid_signature(enrolled):
+    parent=enroll(enrolled);obj=enrolled["objective"]
+    with pytest.raises(BoundedStepProofDenied,match="CURRENT_GRANT_REQUIRED"):
+        verify_authenticated_owner_objective(
+            parent,objective=obj,
+            pinned_public_key=enrolled["owner_key"].public_key(),
+            at=AT,ledger=None,
+        )

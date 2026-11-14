@@ -118,6 +118,19 @@ skipping an intermediate stage. Only the **existing native root journal**
 may supply these prior-step completion facts in a future production adapter;
 this pure source predicate never treats a caller-supplied completion list
 as privileged evidence.
+
+An additional source-only Stage A0 adapter
+`tools/pmv4_stage_a_bounded_plan_preflight.py` reuses the **existing**
+`pmv4_stage_a_packet` source/rollback/scope hashing and
+`pmv4_stage_a_admission.exact_stage_a_manifest()`; it checks CI, root
+health, protected freeze/hold, signed parent/child, current grant and
+sequential prior native-journal receipts before returning **read-only
+preflight facts**. Its `production=True` mode **always rejects**:
+`STAGE_A_BOUNDED_PLAN_ROOT_POLICY_NOT_DEPLOYED`. The existing v1
+native root worker remains unchanged. Negative tests cover changed
+candidate, CI, manifest, root health, ticket/runtime continuity,
+freeze/hold, skipped step, expired consent and replay. No shadow or
+real root transaction has been claimed by this test.
 This is stronger test coverage than the earlier unsigned synthetic
 decision fixture, but still no live Microsoft token/provider or
 independent privileged root consumer. **Formal PMv3 amendment and a
@@ -135,3 +148,69 @@ Minimum acceptance before activating the feature:
 4. Production activation is one **separately authorized** code/policy release; no self-activation by a source merge. Pilot demonstrates one genuine Owner consent and end-to-end independent post-release acceptance with exact rollback and no extra auth requests.
 
 **Current operational rule:** This document cannot authorize the next native PMv4 Stage A0 production installation, nor can a generic chat approval supersede existing protected root policy. Finish engineering and isolated acceptance before presenting the Owner one consolidated approval package for future releases rather than repeating fragmented challenges.
+
+
+## Formal PMv3 amendment text — DRAFT, not yet adopted
+
+**Proposed successor to Part IV, Section 8 (Exact-Revision Approval)**
+
+> For a bounded objective explicitly reviewed by an authenticated authorized
+> Owner, one immutable, expiring, non-transferable approval may cover all
+> constituent phases of that objective, including scoped development,
+> integration, testing, production publication and operational verification.
+> The trusted Release Manager shall independently bind every production
+> transition to its exact immutable source revision, complete effect scope,
+> reviewed dependency/risk ceiling, immutable artifact digest and verified
+> rollback revision. The human approval need not be repeated when a
+> deterministic trusted review proves that the exact current change remains
+> within the approved objective and has passed the required independent
+> release evidence. New human approval is required if target, risk,
+> capability, tenant, production impact, protected Core change or materially
+> reviewed source/effect boundary expands beyond the original grant, or
+> the grant is revoked, expired or independently invalidated. No change
+> to production freeze, root signer controls, provider authorization,
+> release locks, rollback assurance or security gates is implied.
+
+**Proposed successor to Part IV, Section 9 (Approval Channel)**
+
+> One decision must be captured by an approved authenticated Owner channel,
+> with independently verified Entra Owner identity, reviewed complete plan
+> fingerprint, validity window, exact scope and immutable audit. ChatGPT can
+> be the presentation surface when the server independently verifies the
+> Owner's Entra identity and records a cryptographically verifiable exact
+> decision. Microsoft Teams approval is not mandatory. The canonical
+> existing Approval Service persists the one human decision; the existing
+> root release signer may derive one-use exact substep claims from it only
+> through approved and independently validated native release gates.
+> Revocation, expiry, changes of authority or out-of-scope changes fail
+> closed. Conversational assent, an unsigned status, a fabricated Entra
+> claim, or a reusable Owner token do not count as identity-verified
+> approval.
+
+**Proposed successor to Part IV, Section 10 (Production Freeze)**
+
+> A bounded objective approval does not unfreeze production globally.
+> Each independently attested, in-scope production step receives only its
+> exact single-transaction exception and must restore the original freeze
+> and automatic promotion hold byte-identically. Any out-of-scope step
+> remains prohibited. Nothing authorizes unattended disruptive
+> operations absent the specifically reviewed impact and independent
+> safety requirements.
+
+**Effective-date and release condition:** These proposed paragraphs have
+no effect until an authenticated Owner expressly adopts the exact text as
+a formal governance amendment, the change is reviewed and merged through
+the protected release process, and the associated bounded-plan root
+consumer is independently tested and deployed. Existing PMv3 Section 8/9/10
+and installed v1 Owner exact-release signer remain binding until then.
+
+**Transition strategy:** The current Stage A0 release is still pinned to
+`7b42ce983896711525de4c7955bf9fc43ac003d0`. Do not merge or promote
+this draft merely to accelerate that release. After native Stage A0 is
+successfully completed and its root audit reviewed, integrate this
+feature through the ordinary exact-SHA governed release, initially
+disabled/shadowed; run a four-step independent root readback canary and
+negative-path acceptance; only then switch release approval consumer
+to the one-plan policy under an Owner-reviewed separate one-time release
+authorization. If any validation fails, return to the v1 exact-action
+consumer, preserve signed audit, and restore the protected freeze/hold.

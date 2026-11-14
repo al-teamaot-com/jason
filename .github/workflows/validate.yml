@@ -139,6 +139,7 @@ jobs:
           tests/test_pmv4_single_owner_objective_scope.py
           tests/test_pmv4_derived_step_proof.py
           tests/test_pmv4_owner_objective_end_to_end.py
+          tests/test_pmv4_stage_a_bounded_plan_preflight.py
           implementation/kernel/tests/test_signed_owner_release.py
           implementation/orchestrator/tests/test_approval_plan_grants.py
       - name: Test universal approval trust and persistence boundaries

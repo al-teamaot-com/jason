@@ -413,9 +413,9 @@ def issue_authenticated_owner_objective(
 def verify_authenticated_owner_objective(
     signed: Mapping[str, Any], *, objective: Any,
     pinned_public_key: Ed25519PublicKey, at: datetime,
-    ledger: Any | None = None,
+    ledger: Any,
 ) -> dict[str, Any]:
-    """Independent signature + exact manifest + optional current grant readback.
+    """Independent signature + exact manifest + mandatory current grant readback.
 
     In production the root caller must ALSO enforce its independently trusted
     root health/readback, current Owner binding, policy and revocation evidence.
@@ -447,6 +447,8 @@ def verify_authenticated_owner_objective(
         pinned_public_key.verify(decoded, canonical(payload))
     except (InvalidSignature, TypeError, ValueError) as exc:
         raise BoundedStepProofDenied("OWNER_PLAN_SIGNATURE_INVALID") from exc
+    if ledger is None:
+        raise BoundedStepProofDenied("OWNER_PLAN_CURRENT_GRANT_REQUIRED")
     if ledger is not None:
         record = ledger.authenticated_owner_objective_receipt(
             plan_id=objective.plan_id,
