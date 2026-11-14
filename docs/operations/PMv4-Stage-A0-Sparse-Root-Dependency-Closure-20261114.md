@@ -49,7 +49,7 @@ The next Stage A0 native scope remains `6786baad0fc9d07aca6ba80dedad5c25bcfa7fb3
 
 ## Verification and disposition
 
-Run the focused sparse source/root-stage/bootstrap tests in an isolated worktree, all applicable repository CI/security checks, and disposable real-root staging tests with no production paths. After adding a supported exact-source closure root transition, test malicious source blobs, hardlink/symlink substitution, injected extra files, interruption, duplicates/replay, stale current main, Owner identity mismatch, revocation, policy drift, and rollback.
+Focused current worktree acceptance: **76 passed, 8 skipped**. This includes a real **`python -I` disposable temporary-directory import** of the complete fourteen-source-file native root graph (never calling the installer), which passed and will catch a missing transitive Python module in addition to the independent AST source allowlist check. Run all applicable repository CI/security checks and disposable real-root staging tests with no production paths before release approval. After adding a supported exact-source closure root transition, test malicious source blobs, hardlink/symlink substitution, injected extra files, interruption, duplicates/replay, stale current main, Owner identity mismatch, revocation, policy drift, and rollback.
 
 Until the missing root source is properly repaired, the following are **NOT complete**: Stage A0 native installation, PMv4 shadow, independent Ticket Core, independent Runbook Management, formal one-approval policy deployment, and PMv3 retirement. Preserve protected `origin/main` source pin and production freeze.
 

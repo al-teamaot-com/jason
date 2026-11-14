@@ -105,3 +105,57 @@ def test_one_source_file_was_missing_in_prior_prod_stage_without_changing_main()
     # production source stage. A new immutable manifest + Owner review is required.
     assert "only-14-pinned-stage-a0-source-files" in (REPO / "tools/pmv4_stage_a0_sparse_root_stage.py").read_text()
     assert "only-13-pinned-stage-a0-source-files" not in (REPO / "tools/pmv4_stage_a0_sparse_root_stage.py").read_text()
+
+
+
+def test_disposable_fully_isolated_native_loader_imports_all_exact_sparse_files(tmp_path):
+    """Exercise Python's real import graph in a -I isolated temp-only tree.
+
+    This does not invoke the native installer, import from production release
+    sources, or change any protected root path. It catches missing transient
+    dependencies beyond the root loader's manually maintained file tuple.
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    for relative in sparse.required_paths():
+        source = REPO / relative
+        assert source.is_file() and not source.is_symlink()
+        dest = tmp_path / relative
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, dest)
+
+    isolated_source = r"""
+from pathlib import Path
+import importlib.util
+import sys
+import types
+
+base = Path(sys.argv[1])
+for name, relative in (
+    ("tools", "tools"),
+    ("implementation", "implementation"),
+    ("implementation.kernel", "implementation/kernel"),
+):
+    package = types.ModuleType(name)
+    package.__path__ = [str(base / relative)]
+    package.__package__ = name
+    sys.modules[name] = package
+candidate = base / "tools/pmv4_stage_a_native_install.py"
+spec = importlib.util.spec_from_file_location(
+    "pmv4_a0_native_import_only_lab", candidate,
+)
+assert spec is not None and spec.loader is not None
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+assert callable(getattr(module, "execute_native_stage_a0_request", None))
+print("PMV4_NATIVE_ISOLATED_IMPORT_CLOSURE=PASS")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", isolated_source, str(tmp_path)],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        check=False, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr[-2500:]
+    assert "PMV4_NATIVE_ISOLATED_IMPORT_CLOSURE=PASS" in result.stdout
