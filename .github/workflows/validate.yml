@@ -102,6 +102,8 @@ jobs:
           PY
       - name: Validate production topology and bounded observation plan
         run: python tools/system_registry_verify.py --validate-only
+      - name: Check PMv4 reliability safeguards using existing registry and work controls
+        run: PYTHONPATH=implementation:tools python3 -B -m unittest discover -s tests -p test_pmv4_reliability_acceptance.py
       - name: Verify generated operational-state documentation
         run: python tools/system_registry_docs.py --check
       - name: Test constitutional System Registry behavior and governed query surface
@@ -123,6 +125,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip pytest
           python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service
+      - name: Prove independent PMv4 shadow release safety (source-only)
+        run: PYTHONPATH=. python3 -B -m unittest discover -s tests -p 'test_pmv4_shadow_*.py'
       - name: Test Owner-selected engineering continuity
         run: PYTHONPATH=tools python -m pytest tools/tests/test_owner_development_focus.py -q
       - name: Compile runtime composition
@@ -170,6 +174,16 @@ jobs:
         run: |
           python3 tools/engineering_standards_gate.py
           python3 -m unittest tools.tests.test_engineering_standards_gate
+      - name: Validate PMv4 OpenClaw specialist contract (source only)
+        run: python3 -B -m unittest discover -s tests -p test_openclaw_specialist_profiles.py
+      - name: Prove PMv4 reuse of existing durable work recovery (source only)
+        run: python3 -B -m unittest discover -s tests -p test_pmv4_reuse_durable_recovery.py
+      - name: Verify PMv4 Workboard-to-PMV3 reconciliation contract (source only)
+        run: PYTHONPATH=tools python3 -B -m unittest discover -s tests -p test_pmv4_workboard_reconciliation.py
+      - name: Check optional native Workboard schema acceptance contract (source only)
+        run: PYTHONPATH=tools python3 -B -m unittest discover -s tests -p test_pmv4_native_workboard_card.py
+      - name: Check evidence-first status-report replacement (source only)
+        run: python3 -B -m unittest discover -s tests -p test_pmv4_evidence_status.py
       - name: Test documentation single-flight publisher
         run: python3 -B -m unittest discover -s tests -p test_documentation_single_flight.py
       - name: Test documentation publisher in disposable Git remotes
