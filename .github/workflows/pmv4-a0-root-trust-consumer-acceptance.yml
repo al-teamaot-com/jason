@@ -1,0 +1,48 @@
+name: PMv4 Stage A0 Root Trust Consumer Source-Only Acceptance
+
+on:
+  pull_request:
+    paths:
+      - "tools/pmv4_a0_initial_root_trust_consumer.py"
+      - "tools/pmv4_a0_initial_root_trust_launcher.sh"
+      - "tools/tests/test_pmv4_a0_initial_root_trust_consumer.py"
+      - "docs/operations/PMv4-Stage-A0-Isolated-Source-Bootstrap-20261113.md"
+      - ".github/workflows/pmv4-a0-root-trust-consumer-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-root-consumer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Prove exact PR-head checkout
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install disposable CI-only test dependency
+        run: python3 -m pip install pytest
+      - name: Compile fixed-scope root consumer and shell launcher
+        run: |
+          python3 -B -m py_compile tools/pmv4_a0_initial_root_trust_consumer.py
+          bash -n tools/pmv4_a0_initial_root_trust_launcher.sh
+      - name: Test root-only target lifecycle in disposable GitHub workspace
+        run: |
+          sudo -n env PYTHONPATH="$PWD" PYTHONDONTWRITEBYTECODE=1 \
+            "$(command -v python3)" -m pytest -q \
+            -o cache_dir=/tmp/pmv4-a0-root-consumer-pytest-cache \
+            tools/tests/test_pmv4_a0_initial_root_trust_consumer.py
+      - name: Confirm no privileged production paths or provider access
+        run: |
+          test ! -e /var/lib/jason/openclaw/release-manager/protected-transitions
+          test ! -e /etc/jason-owner-release
+          echo PMV4_A0_ROOT_CONSUMER_SOURCE_ONLY=PASS

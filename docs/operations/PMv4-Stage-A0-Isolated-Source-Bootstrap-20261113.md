@@ -156,3 +156,54 @@ external Ticket Core, or Runbook Management.
 
 **As of source authoring:** Engineering implementation and CI pending.
 **Production disposition:** NO-GO; no standing authority or production writes.
+
+## November 14 — initial six-file root-trust bootstrap consumer (review-only)
+
+The Owner approved exactly one initial six-file/two-empty-ledger Stage A0
+root-trust installation against protected main `7b42ce983896711525de4c7955bf9fc43ac003d0`,
+package SHA256 `40ce2e9380c3864fcdcf42346a5857896db1c63cbf07b68e95ed9ae56a36761b`,
+scope `0ed4b2f8e65fd95a2890bac106ab03b5962d6cb73437fc8a2f869cde50c5ba37`,
+and unchanged protected production LKG `d1b8c196dadd4b672ec8ba47075f27bb61c98d63`.
+That explicit chat approval is **not** a verified Entra Owner signature or
+permission to use an arbitrary root shell.
+
+`tools/pmv4_a0_initial_root_trust_consumer.py` is a narrowly bounded
+one-use root-trust installer, not a new release engine. It may run only from an
+exact temporary `/run` root-owned mode-0700 staging directory containing a
+root-owned mode-0400 copy of its reviewed source. The operator's separate
+local sudo invocation must first compare the root-staged bytes to the exact
+reviewed SHA256. The source itself pins the approved immutable plan, archive,
+scope, existing production revision, freeze/hold, root verifier hash, running
+MCP/runtime images, and service boundaries. It independently requires a
+short-lived Entra-authenticated Ed25519 one-use proof verified with the existing
+root-owned pinned trust, a fresh closed native breaker, clean root drift, full
+authority-health evidence, unchanged runtime/MCP with issuer OFF, and the
+existing shared native release lock.
+
+The only persistent *installation* objects are exactly the six declared
+root-owned 0444/0400 files and two new empty mode-0700 root ledgers. An
+existing root-only protected transitions directory records the one-shot signed
+approval and result before installation. On ordinary validation failure the
+installer verifies byte hashes and inode ownership before deleting only
+objects it created; foreign/tampered objects stop recovery for review.
+No reboot, service restart, provider mutation, production source replacement,
+breaker reset, approval-relaxation, or ticket-core cutover is performed.
+
+`tools/pmv4_a0_initial_root_trust_launcher.sh` requires an interactive
+Owner-local console. It first performs the nonmutating same-source preflight,
+then the existing Entra device-code Owner consent and signature flow. Only if
+that proof verifies does it copy the reviewed consumer into temporary
+root-private staging, reverify its exact SHA and execute the single installer.
+It removes its own temporary stage afterward, leaving the canonical root
+audit untouched. Running the installer from a mutable owner checkout directly
+under sudo is prohibited.
+
+**Source-only review boundary:** This branch's files are for verified
+preproduction testing and exact-root-helper review. Do not merge this branch
+into protected main while retaining an old source-SHA-specific Owner
+authorization; a main SHA change would require reattestation and a newly
+bound scope. Do not invoke the root launcher until the exact helper source
+and disposable-root acceptance have passed and the authenticated Owner-local
+session is actually available. Even after the first trust installation,
+sparse source staging, MCP issuer ON and native Stage A0 remain separately
+approved operations.
