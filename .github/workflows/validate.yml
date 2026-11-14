@@ -243,6 +243,8 @@ jobs:
         run: python3 -B -m unittest tools.tests.test_todo_release_bridge
       - name: Test TODO engineering host wiring
         run: python3 -B -m unittest tools.tests.test_install_support_repair_host_worker
+      - name: Test independent PMv4 breaker recovery opt-in and isolation
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tools/tests/test_install_support_repair_breaker_optin.py tests/test_pmv4_breaker_recovery_independence.py
       - name: Test host PR integration reconciler
         run: python3 -B -m unittest tools.tests.test_pr_integration_source_reconciler
       - name: Test autonomous repair release classifier
