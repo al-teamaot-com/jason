@@ -54,6 +54,30 @@ New Owner consent is appropriate only for an impact/capability/tenant/risk outsi
 
 The existing continuation and native execution layers must perform authoritative root/machine checks. The current adapter accepts observed facts from a **trusted** host projection; passing facts from a user/LLM would be unsafe and is explicitly out of contract. No service calls this adapter in production.
 
+A separate, strictly dormant **cryptographic binding primitive**
+`implementation/kernel/pmv4_plan_child_proof.py` reuses the **existing**
+Ed25519 Owner release signer/key format through `signed_owner_release.py`
+without modifying the legacy v1 release-proof verifier. Its new distinct
+schema `2.0` binds one child claim to the original authenticated plan
+decision digest, parent approval ID, ordered action index and name, Owner
+identity, current policy, source/rollback/freeze/hold, scope/artifact hashes
+and both the 15-minute step TTL and parent plan expiry. It explicitly says
+`prior_authenticated_owner_plan` and must **never** masquerade as a new
+live Entra OAuth bearer. The legacy root proof verifier rejects this new
+schema, so it cannot authorize existing production root releases. Signature
+verification, matching trusted expected fields and consumption are separate:
+an affirmative cryptographic check does **not** issue authority or skip
+native root receipt verification.
+
+**Necessary integration still missing:** Existing authenticated universal
+plan continuation must verify the real one-human-decision audit and call
+the conformance gate before issuing a child proof; the independently
+trusted native root consumer must verify the signed parent evidence,
+current plan revocation/expiry and exact child claim before any mutation.
+That integration is not in the live runtime or production root handlers.
+Ephemeral-key tests are evidence of source cryptography, not live Owner
+identity or protected host acceptance.
+
 ## Proposed amendment and acceptance
 
 **Formal governance change required before production adoption:** Modify PMv3 exact-action Owner authorization to allow **one verified, short-lived bounded-objective Owner plan** to derive separate root-authorized one-use *substep* claims. Preserve the exact immutable final SHA, root readback, production freeze, high-risk control and rollback requirements. Retain the special approval class for actions not covered by that plan. Owner authentication may occur in an authenticated ChatGPT/Entra session; Teams approval is not required.
