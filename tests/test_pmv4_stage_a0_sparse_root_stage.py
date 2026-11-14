@@ -53,7 +53,7 @@ def test_root_stager_policy_has_no_caller_supplied_paths():
     assert rootstage.POLICY.as_posix().startswith("/etc/jason-owner-release/")
     assert rootstage.RELEASES == Path("/opt/jason/releases")
     assert rootstage.CURRENT != rootstage.RELEASES
-    assert rootstage.ACTION == "pmv4-stage-a0-sparse-root-source-v1"
+    assert rootstage.ACTION == "pmv4-stage-a0-sparse-root-source-v2"
     assert rootstage.MCP != rootstage.RUNTIME
     assert rootstage.ROOT_SCRIPT != rootstage.POLICY
 
@@ -143,7 +143,7 @@ def test_sparse_root_stage_rejects_unverified_root_policy(monkeypatch):
         "auth_helper_sha256": sha256(b"auth").hexdigest(),
         "owner_verifier_sha256": sha256(b"verify").hexdigest(),
         "owner_authentication": "fresh-entra-oauth-signed-exact-action",
-        "install_scope": "only-13-pinned-stage-a0-source-files",
+        "install_scope": "only-14-pinned-stage-a0-source-files",
         "no_services_changed": True,
         "no_provider_writes": True,
     }

@@ -28,7 +28,7 @@ import time
 from typing import Any, Callable, Mapping
 import uuid
 
-ACTION = "pmv4-stage-a0-sparse-root-source-v1"
+ACTION = "pmv4-stage-a0-sparse-root-source-v2"
 ROOT_SCRIPT = Path("/usr/local/lib/jason/pmv4_stage_a0_sparse_root_stage.py")
 SOURCE_TOOL = Path("/usr/local/lib/jason/pmv4_stage_a0_sparse_source.py")
 ROOT_CI = Path("/usr/local/lib/jason/pmv4_shadow_ci.py")
@@ -101,7 +101,7 @@ def trusted_policy() -> dict[str, Any]:
             or p["schema_version"] != "1.0" or p["action"] != ACTION
             or p["one_shot"] is not True
             or p["owner_authentication"] != "fresh-entra-oauth-signed-exact-action"
-            or p["install_scope"] != "only-13-pinned-stage-a0-source-files"
+            or p["install_scope"] != "only-14-pinned-stage-a0-source-files"
             or p["no_services_changed"] is not True
             or p["no_provider_writes"] is not True):
         raise StageRootDenied("A0_STAGE_ROOT_POLICY_SCOPE_INVALID")

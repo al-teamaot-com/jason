@@ -141,6 +141,10 @@ ROOT_STAGE_A_REQUIRED_SOURCES = (
     "tools/pmv4_stage_a_native_install.py",
     "tools/pmv4_stage_a_packet.py",
     "tools/pmv4_stage_a_admission.py",
+    # This module is imported by pmv4_stage_a_packet itself and is also a
+    # mandatory dependency of the native root worker loader. Missing it
+    # caused a fail-closed post-approval Stage A0 installation rejection.
+    "tools/pmv4_host_install_contract.py",
     "tools/release_host_reconcile_worker.py",
     "tools/install_release_host_reconciler.py",
     "config/pmv4-shadow/docker-compose.yml",
