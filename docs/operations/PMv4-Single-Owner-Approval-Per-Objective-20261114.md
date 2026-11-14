@@ -78,6 +78,51 @@ That integration is not in the live runtime or production root handlers.
 Ephemeral-key tests are evidence of source cryptography, not live Owner
 identity or protected host acceptance.
 
+### Source-only one-consent, four-step acceptance (November 14)
+
+The existing owner plan grant SQLite class now contains an **opt-in, atomic**
+`record_authenticated_owner_objective()` extension; it reuses that exact
+database, not a second authority system. The existing grant and full signed
+parent proof commit in **one SQLite transaction**. A failed proof storage
+transaction leaves no orphan human grant. Retrying the same still-valid
+Owner plan after service restart returns the **same signed receipt without
+presenting a second human consent**. Changed Owner identity, expired
+authorization, or revoked grant fails closed.
+
+`issue_authenticated_owner_objective()` in the **same already introduced
+cryptographic module** accepts a real independently signed/verified Entra
+OAuth bearer through the existing verifier contract, checks exact AOT
+tenant, audience, issuer, allowed Owner object ID, expiry and token age,
+checks protected source, and presents the **entire canonical plan and
+fingerprint to one exact Owner consent callback**. It signs the parent
+receipt with the existing Ed25519 owner signer interface, not a new key,
+and records it in the existing plan ledger. It cannot be reached from the
+running production MCP or root service.
+
+`issue_proved_objective_step()` and `verify_proved_objective_step()`
+recheck the original stored Owner decision, exact protected release
+baseline, scope/manifest, current grant/revocation and the signed parent
+at **every** step, then bind each one-use child proof to the same
+authenticated parent decision and full action index. These are pure
+read-only/signing adapters, **not execution** and not a root permit.
+
+The nonproduction end-to-end test uses a real ephemeral RSA-signed OAuth
+JWT and an independent RS256 verifier, a fresh ephemeral Ed25519 service
+key, disposable SQLite and four Stage A0 example actions. It verifies
+one human consent -> one durable grant -> four unique signed proofs, with
+no second consent on retry; rejects forged/expired/wrong-tenant tokens,
+altered scope, tampered signatures, revoked plans and consumed steps.
+The source-only bridge now requires an **exact sequential set of already
+verified prior steps**, and both issuance and root-style verification reject
+skipping an intermediate stage. Only the **existing native root journal**
+may supply these prior-step completion facts in a future production adapter;
+this pure source predicate never treats a caller-supplied completion list
+as privileged evidence.
+This is stronger test coverage than the earlier unsigned synthetic
+decision fixture, but still no live Microsoft token/provider or
+independent privileged root consumer. **Formal PMv3 amendment and a
+governed production activation remain mandatory.**
+
 ## Proposed amendment and acceptance
 
 **Formal governance change required before production adoption:** Modify PMv3 exact-action Owner authorization to allow **one verified, short-lived bounded-objective Owner plan** to derive separate root-authorized one-use *substep* claims. Preserve the exact immutable final SHA, root readback, production freeze, high-risk control and rollback requirements. Retain the special approval class for actions not covered by that plan. Owner authentication may occur in an authenticated ChatGPT/Entra session; Teams approval is not required.

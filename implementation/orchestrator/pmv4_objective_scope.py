@@ -65,9 +65,8 @@ class BoundedObjective:
         if len(caps) != len(set(caps)):
             raise ValueError("duplicate capability in reviewed objective")
 
-    @property
-    def fingerprint(self) -> str:
-        """Stable digest of all Owner-reviewed fields, including step ORDER."""
+    def review_material(self) -> dict:
+        """Canonical immutable Owner-facing facts; never sourced from card fields."""
         payload = {
             "schema_version": "1.0",
             "plan_id": self.plan_id,
@@ -89,8 +88,13 @@ class BoundedObjective:
             ],
             "expires_at": self.expires_at.isoformat(),
         }
+        return payload
+
+    @property
+    def fingerprint(self) -> str:
+        """Stable digest of every reviewed fact, including the ordered steps."""
         return hashlib.sha256(json.dumps(
-            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+            self.review_material(), sort_keys=True, separators=(",", ":"), ensure_ascii=True,
         ).encode("utf-8")).hexdigest()
 
 
@@ -135,3 +139,162 @@ def require_objective_step_conformance(
         plan_fingerprint=approved_fingerprint, now=now,
     )
     return action.capability
+
+
+def issue_proved_objective_step(
+    *, objective: BoundedObjective, ledger: PlanGrantLedger,
+    signed_parent: dict, signing_key: object, pinned_public_key: object,
+    action_index: int, observed: dict, at: datetime,
+    verified_prior_steps: frozenset[int] = frozenset(),
+) -> dict:
+    """Source-only bridge: ONE existing authenticated human decision -> step.
+
+    This can only be connected to a trusted existing Owner issuer after its
+    authenticated Entra plan/consent record and current signer identity have
+    been independently verified. It does not publish a production root job.
+    The caller must get observed facts from privileged source/CI/root readback.
+    """
+    from kernel.pmv4_plan_child_proof import (
+        issue_derived_step_proof, verify_authenticated_owner_objective,
+    )
+    from kernel.signed_owner_release import canonical, public_key_sha256
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    if not isinstance(signing_key, Ed25519PrivateKey):
+        raise PermissionError("native trusted Owner signer required")
+    if public_key_sha256(signing_key.public_key()) != public_key_sha256(pinned_public_key):
+        raise PermissionError("Owner signer differs from independently pinned trust")
+    parent = verify_authenticated_owner_objective(
+        signed_parent, objective=objective,
+        pinned_public_key=pinned_public_key, at=at, ledger=ledger,
+    )
+    require_objective_step_sequence(
+        action_index=action_index, verified_prior_steps=verified_prior_steps,
+        total_steps=len(objective.actions),
+    )
+    if not isinstance(observed, dict) or set(observed) != {
+        "candidate_sha", "rollback_sha", "freeze_sha256", "hold_sha256",
+        "scope_sha256", "artifact_sha256",
+    }:
+        raise PermissionError("complete native observed effects required")
+    require_objective_step_conformance(
+        ledger=ledger, objective=objective,
+        approved_fingerprint=parent["parent_plan_fingerprint"],
+        action_index=action_index,
+        observed_candidate_sha=observed["candidate_sha"],
+        observed_rollback_sha=observed["rollback_sha"],
+        observed_freeze_sha256=observed["freeze_sha256"],
+        observed_hold_sha256=observed["hold_sha256"],
+        observed_scope_sha256=observed["scope_sha256"],
+        observed_artifact_sha256=observed["artifact_sha256"],
+        now=at,
+    )
+    action = objective.actions[action_index]
+    return issue_derived_step_proof(
+        private_key=signing_key, verified_owner_oid=parent["owner_oid"],
+        parent_plan_id=objective.plan_id,
+        parent_approval_id=parent["parent_approval_id"],
+        parent_plan_fingerprint=objective.fingerprint,
+        parent_authenticated_decision_sha256=hashlib.sha256(
+            canonical(signed_parent)).hexdigest(),
+        parent_plan_expires_at=objective.expires_at,
+        policy_digest=objective.policy_digest,
+        step_index=action_index, action=action.capability,
+        candidate_sha=objective.candidate_sha,
+        rollback_sha=objective.rollback_sha,
+        scope_sha256=action.scope_sha256,
+        artifact_sha256=action.artifact_sha256,
+        freeze_sha256=objective.freeze_sha256,
+        hold_sha256=objective.hold_sha256, at=at,
+    )
+
+
+def verify_proved_objective_step(
+    *, objective: BoundedObjective, ledger: PlanGrantLedger,
+    signed_parent: dict, signed_step: dict, pinned_public_key: object,
+    action_index: int, observed: dict, at: datetime,
+    consumed_step_claims: frozenset[str] = frozenset(),
+    verified_prior_steps: frozenset[int] = frozenset(),
+) -> dict:
+    """Read-only root gate adapter: NO release execution or claim consumption.
+
+    The future native root caller must independently gather observed facts,
+    enforce protected release locks/CCC/CI/health and atomically reserve the
+    returned one-use step claim before any mutation. A stored approval cannot
+    stand in for these independent gates.
+    """
+    from kernel.pmv4_plan_child_proof import (
+        verify_authenticated_owner_objective, verify_derived_step_proof,
+    )
+    from kernel.signed_owner_release import canonical
+
+    parent = verify_authenticated_owner_objective(
+        signed_parent, objective=objective,
+        pinned_public_key=pinned_public_key, at=at, ledger=ledger,
+    )
+    require_objective_step_sequence(
+        action_index=action_index, verified_prior_steps=verified_prior_steps,
+        total_steps=len(objective.actions),
+    )
+    if not isinstance(observed, dict) or set(observed) != {
+        "candidate_sha", "rollback_sha", "freeze_sha256", "hold_sha256",
+        "scope_sha256", "artifact_sha256",
+    }:
+        raise PermissionError("root independently observed complete stage effects required")
+    require_objective_step_conformance(
+        ledger=ledger, objective=objective,
+        approved_fingerprint=parent["parent_plan_fingerprint"],
+        action_index=action_index,
+        observed_candidate_sha=observed["candidate_sha"],
+        observed_rollback_sha=observed["rollback_sha"],
+        observed_freeze_sha256=observed["freeze_sha256"],
+        observed_hold_sha256=observed["hold_sha256"],
+        observed_scope_sha256=observed["scope_sha256"],
+        observed_artifact_sha256=observed["artifact_sha256"],
+        now=at,
+    )
+    action = objective.actions[action_index]
+    expected = {
+        "tenant_id": parent["tenant_id"],
+        "owner_oid": parent["owner_oid"],
+        "owner_principal": parent["owner_principal"],
+        "organization_id": parent["organization_id"],
+        "parent_plan_id": objective.plan_id,
+        "parent_approval_id": parent["parent_approval_id"],
+        "parent_plan_fingerprint": objective.fingerprint,
+        "parent_authenticated_decision_sha256": hashlib.sha256(
+            canonical(signed_parent)).hexdigest(),
+        "parent_plan_expires_at": objective.expires_at.isoformat(),
+        "policy_digest": objective.policy_digest,
+        "step_index": action_index,
+        "action": action.capability,
+        "candidate_sha": observed["candidate_sha"],
+        "rollback_sha": observed["rollback_sha"],
+        "scope_sha256": observed["scope_sha256"],
+        "artifact_sha256": observed["artifact_sha256"],
+        "freeze_sha256": observed["freeze_sha256"],
+        "hold_sha256": observed["hold_sha256"],
+    }
+    return verify_derived_step_proof(
+        signed_step, pinned_public_key=pinned_public_key,
+        expected=expected, at=at, consumed_step_claims=consumed_step_claims,
+    )
+
+
+def require_objective_step_sequence(
+    *, action_index: int, verified_prior_steps: frozenset[int],
+    total_steps: int,
+) -> None:
+    """Caller must source prior completions from the existing ROOT journal.
+
+    Do not accept prior-step IDs supplied from a chat, Teams card, API body,
+    model output, or unprivileged workboard. A pure sequence result is never
+    evidence that the prior step succeeded or an approval to execute the next.
+    """
+    if (type(action_index) is not int
+            or type(total_steps) is not int
+            or not 0 <= action_index < total_steps
+            or not isinstance(verified_prior_steps, frozenset)
+            or any(type(x) is not int for x in verified_prior_steps)
+            or verified_prior_steps != frozenset(range(action_index))):
+        raise PermissionError("verified root journal sequential completion required")

@@ -5,6 +5,7 @@ been validated. No raw Teams payload may mint grants via this interface.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -117,3 +118,91 @@ class PlanGrantLedger:
         if row is None:
             return None
         return dict(zip(('plan_id','approval_id','approver_identity_id','plan_fingerprint','decided_at','revoked_at'),row))
+
+
+    def record_authenticated_owner_objective(
+        self, scope: ApprovedPlanScope, decision: VerifiedPlanDecision,
+        signed_receipt: dict,
+    ) -> dict:
+        """Atomically store one verified plan grant and its signed Owner proof.
+
+        A trusted authenticated issuer must verify Entra identity/consent and the
+        Ed25519 signature before calling this. This is storage, never authority.
+        Existing Teams grant recording is unaffected until this opt-in call.
+        A crashed response may recover EXACTLY the same stored signed receipt;
+        a changed/revoked grant is never republished.
+        """
+        values = self._decision_values(scope, decision)
+        if (not isinstance(signed_receipt, dict)
+                or set(signed_receipt) != {'payload', 'signature_base64url'}
+                or not isinstance(signed_receipt.get('payload'), dict)
+                or signed_receipt['payload'].get('parent_plan_id') != scope.plan_id
+                or signed_receipt['payload'].get('parent_approval_id') != decision.approval_id
+                or signed_receipt['payload'].get('parent_plan_fingerprint') != decision.plan_fingerprint):
+            raise PermissionError('signed objective does not match recorded grant')
+        encoded = json.dumps(signed_receipt, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
+        if len(encoded.encode('utf-8')) > 32768:
+            raise ValueError('bounded owner proof maximum length exceeded')
+        digest = hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+        with self._connection() as db:
+            # Serialize duplicate callers before the initial existence check:
+            # a competing request must see and read back the original receipt.
+            db.execute('BEGIN IMMEDIATE')
+            db.execute('''CREATE TABLE IF NOT EXISTS signed_owner_objective_receipts (
+                plan_id TEXT PRIMARY KEY, approval_id TEXT NOT NULL UNIQUE,
+                proof_json TEXT NOT NULL, proof_sha256 TEXT NOT NULL,
+                decided_at TEXT NOT NULL)''')
+            existing = db.execute(
+                '''SELECT p.plan_id,p.approval_id,p.approver,p.fingerprint,p.scope_json,
+                          p.decided_at,r.revoked_at,o.proof_json,o.proof_sha256
+                   FROM plan_grants p
+                   LEFT JOIN revoked_plan_grants r ON r.plan_id=p.plan_id
+                   LEFT JOIN signed_owner_objective_receipts o ON o.plan_id=p.plan_id
+                   WHERE p.plan_id=?''', (scope.plan_id,),
+            ).fetchone()
+            if existing is not None:
+                if (tuple(existing[:6]) != values
+                        or existing[6] is not None or existing[7] != encoded
+                        or existing[8] != digest):
+                    raise PermissionError('existing signed Owner objective differs or was revoked')
+                return json.loads(existing[7])
+            db.execute('INSERT INTO plan_grants VALUES (?,?,?,?,?,?)', values)
+            db.execute(
+                'INSERT INTO signed_owner_objective_receipts VALUES (?,?,?,?,?)',
+                (scope.plan_id, decision.approval_id, encoded, digest,
+                 decision.decided_at.isoformat()),
+            )
+        return dict(signed_receipt)
+
+    def authenticated_owner_objective_receipt(
+        self, *, plan_id: str, approval_id: str,
+    ) -> dict | None:
+        """Exact durable readback; separate crypto/identity authorization required."""
+        if not plan_id or not approval_id:
+            raise ValueError('both plan and approval id are required')
+        with self._connection() as db:
+            available = db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='signed_owner_objective_receipts'"
+            ).fetchone()
+            if available is None:
+                return None
+            row = db.execute(
+                '''SELECT p.approval_id,p.fingerprint,r.revoked_at,
+                          o.proof_json,o.proof_sha256
+                   FROM plan_grants p
+                   JOIN signed_owner_objective_receipts o ON o.plan_id=p.plan_id
+                   LEFT JOIN revoked_plan_grants r ON r.plan_id=p.plan_id
+                   WHERE p.plan_id=? AND o.approval_id=?''',
+                (plan_id, approval_id),
+            ).fetchone()
+        if row is None:
+            return None
+        if row[2] is not None:
+            raise PermissionError('signed Owner objective grant was revoked')
+        if hashlib.sha256(row[3].encode('utf-8')).hexdigest() != row[4]:
+            raise PermissionError('signed Owner objective stored proof altered')
+        proof = json.loads(row[3])
+        if (proof['payload']['parent_approval_id'] != row[0]
+                or proof['payload']['parent_plan_fingerprint'] != row[1]):
+            raise PermissionError('signed Owner objective stored proof mismatched')
+        return proof

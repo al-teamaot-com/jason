@@ -13,8 +13,9 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+import json
 import re
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -208,4 +209,263 @@ def verify_derived_step_proof(
         raise BoundedStepProofDenied("PLAN_STEP_PROOF_SIGNATURE_INVALID") from exc
     if payload["step_claim_id"] in consumed_step_claims:
         raise BoundedStepProofDenied("PLAN_STEP_PROOF_REPLAY")
+    return dict(payload)
+
+
+# This extends the existing Owner Ed25519 signer with one authenticated PARENT
+# objective receipt. It is not an alternate signer or production release policy.
+_ENTRA_ISSUER = "https://login.microsoftonline.com/" + TID + "/v2.0"
+_ENTRA_AUDIENCE = "9b9996e9-5c34-48b7-948c-f44f89352f89"
+_MAX_PARENT_LIFETIME = timedelta(hours=24)
+_PARENT_FIELDS = frozenset({
+    "schema_version", "authorization", "authentication", "decision",
+    "tenant_id", "owner_oid", "owner_principal", "organization_id",
+    "parent_plan_id", "parent_approval_id", "parent_plan_fingerprint",
+    "reviewed_objective", "policy_digest", "issued_at", "expires_at",
+    "identity_evidence_sha256", "signer_public_key_sha256",
+    "standing_authority", "one_plan_only",
+})
+
+
+def _parent_validation(
+    payload: Mapping[str, Any], *, at: datetime,
+) -> None:
+    """Recompute the reviewed full manifest digest; deny partial signatures."""
+    if (not isinstance(payload, Mapping) or set(payload) != _PARENT_FIELDS
+            or payload["schema_version"] != "2.0"
+            or payload["authorization"] != "verified_entra_owner_bounded_plan"
+            or payload["authentication"] != "verified_entra_oauth_bearer"
+            or payload["decision"] != "approve"
+            or payload["tenant_id"] != TID or payload["organization_id"] != "aot"
+            or not isinstance(payload["owner_oid"], str)
+            or payload["owner_oid"] not in EXACT_OWNER_OAUTH_SUBJECTS
+            or payload["owner_principal"] != EXACT_OWNER_OAUTH_SUBJECTS.get(
+                payload["owner_oid"])
+            or type(payload["standing_authority"]) is not bool
+            or payload["standing_authority"] is not False
+            or type(payload["one_plan_only"]) is not bool
+            or payload["one_plan_only"] is not True
+            or not isinstance(payload["parent_plan_id"], str)
+            or _NAME.fullmatch(payload["parent_plan_id"]) is None
+            or not isinstance(payload["parent_approval_id"], str)
+            or _PARENT.fullmatch(payload["parent_approval_id"]) is None
+            or any(not isinstance(payload[k], str)
+                   or _HEX64.fullmatch(payload[k]) is None for k in (
+                       "policy_digest", "parent_plan_fingerprint",
+                       "identity_evidence_sha256", "signer_public_key_sha256",
+                   ))
+            or not isinstance(payload["reviewed_objective"], dict)):
+        raise BoundedStepProofDenied("OWNER_PLAN_RECEIPT_FIELDS_INVALID")
+    material = payload["reviewed_objective"]
+    if (material.get("schema_version") != "1.0"
+            or material.get("organization_id") != "aot"
+            or material.get("plan_id") != payload["parent_plan_id"]
+            or material.get("policy_digest") != payload["policy_digest"]
+            or not isinstance(material.get("actions"), list)
+            or not 1 <= len(material["actions"]) <= 12):
+        raise BoundedStepProofDenied("OWNER_PLAN_REVIEWED_MANIFEST_INVALID")
+    original = sha256(json.dumps(
+        material, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("utf-8")).hexdigest()
+    if original != payload["parent_plan_fingerprint"]:
+        raise BoundedStepProofDenied("OWNER_PLAN_MANIFEST_DIGEST_DRIFT")
+    try:
+        issued = datetime.fromisoformat(payload["issued_at"])
+        expires = datetime.fromisoformat(payload["expires_at"])
+        manifest_expires = datetime.fromisoformat(material["expires_at"])
+    except (TypeError, ValueError, KeyError) as exc:
+        raise BoundedStepProofDenied("OWNER_PLAN_TIME_INVALID") from exc
+    if (any(x.tzinfo is None or x.utcoffset() is None
+            for x in (at, issued, expires, manifest_expires))
+            or not issued <= at < expires
+            or expires != manifest_expires
+            or not timedelta(0) < expires - issued <= _MAX_PARENT_LIFETIME):
+        raise BoundedStepProofDenied("OWNER_PLAN_EXPIRED_OR_INVALID_LIFETIME")
+
+
+def issue_authenticated_owner_objective(
+    *, objective: Any, ledger: Any, approval_id: str,
+    bearer_token: str,
+    verify_entra_bearer: Callable[[str], Mapping[str, Any] | None],
+    exact_owner_consent: Callable[[Mapping[str, Any]], bool],
+    protected_main_check: Callable[[str], bool],
+    signer_private_key: Ed25519PrivateKey, at: datetime,
+) -> dict[str, Any]:
+    """ONE actual Owner decision to approve a full bounded, immutable plan.
+
+    The signed OAuth bearer must already be independently verified by the
+    trusted caller callback (e.g. the existing MCP Entra verifier). The callback
+    only returns verified claims, not user-supplied JSON. The Owner sees and
+    approves exactly the full immutable review manifest once. Store human grant
+    and signed parent proof in the EXISTING PlanGrantLedger atomically.
+
+    Source-only interface. Not reachable from production and cannot bypass the
+    current exact-revision release rule or mint root-action authority.
+    """
+    from orchestrator.approval_plan_scope import ApprovedPlanScope
+    from orchestrator.approval_plan_grants import VerifiedPlanDecision
+    from orchestrator.pmv4_objective_scope import BoundedObjective
+
+    if (not isinstance(objective, BoundedObjective)
+            or objective.organization_id != "aot"
+            or not isinstance(approval_id, str)
+            or _PARENT.fullmatch(approval_id) is None
+            or not isinstance(signer_private_key, Ed25519PrivateKey)
+            or not isinstance(bearer_token, str)
+            or len(bearer_token) < 16
+            or not isinstance(at, datetime) or at.tzinfo is None
+            or any(not callable(v) for v in (
+                verify_entra_bearer, exact_owner_consent, protected_main_check,
+            ))):
+        raise BoundedStepProofDenied("OWNER_PLAN_EXACT_PRINCIPAL_OR_SCOPE_REQUIRED")
+    if protected_main_check(objective.candidate_sha) is not True:
+        raise BoundedStepProofDenied("OWNER_PLAN_PROTECTED_MAIN_UNVERIFIED")
+    try:
+        claims = verify_entra_bearer(bearer_token)
+    except (ValueError, TypeError, RuntimeError, OSError, PermissionError) as exc:
+        raise BoundedStepProofDenied("OWNER_PLAN_ENTRA_VERIFIER_FAILURE") from exc
+    seconds = int(at.timestamp())
+    if (not isinstance(claims, Mapping)
+            or claims.get("tid") != TID
+            or claims.get("iss") != _ENTRA_ISSUER
+            or claims.get("aud") != _ENTRA_AUDIENCE
+            or not isinstance(claims.get("oid"), str)
+            or claims["oid"] not in EXACT_OWNER_OAUTH_SUBJECTS
+            or any(type(claims.get(field)) is not int for field in (
+                "iat", "nbf", "exp"))
+            or not claims["iat"] <= seconds < claims["exp"]
+            or not claims["nbf"] <= seconds
+            or seconds - claims["iat"] > 900):
+        raise BoundedStepProofDenied("OWNER_PLAN_ENTRA_OWNER_CLAIMS_DENIED")
+    # Recover the identical, still-valid verified decision without presenting
+    # a second human approval. Re-authenticate the caller first, then check
+    # immutable signed evidence, Owner OID and current grant/revocation.
+    prior = ledger.authenticated_owner_objective_receipt(
+        plan_id=objective.plan_id, approval_id=approval_id,
+    )
+    if prior is not None:
+        already = verify_authenticated_owner_objective(
+            prior, objective=objective,
+            pinned_public_key=signer_private_key.public_key(),
+            at=at, ledger=ledger,
+        )
+        if already["owner_oid"] != claims["oid"]:
+            raise BoundedStepProofDenied("OWNER_PLAN_RECOVERY_OWNER_IDENTITY_CHANGED")
+        return prior
+    scope = ApprovedPlanScope(
+        objective.plan_id, objective.organization_id,
+        objective.policy_digest,
+        frozenset(a.capability for a in objective.actions),
+        frozenset(), max(a.risk for a in objective.actions),
+        True, objective.expires_at,
+    )
+    review = objective.review_material()
+    presented = {
+        "service": "pmv4-bounded-owner-objective",
+        "approval_id": approval_id,
+        "owner_principal": EXACT_OWNER_OAUTH_SUBJECTS[claims["oid"]],
+        "plan_fingerprint": objective.fingerprint,
+        "full_reviewed_objective": review,
+    }
+    if exact_owner_consent(presented) is not True:
+        raise BoundedStepProofDenied("OWNER_PLAN_EXACT_CONSENT_DENIED")
+    claims_digest = sha256(canonical({
+        k: claims[k] for k in ("tid", "iss", "aud", "oid", "iat", "nbf", "exp")
+    })).hexdigest()
+    payload = {
+        "schema_version": "2.0",
+        "authorization": "verified_entra_owner_bounded_plan",
+        "authentication": "verified_entra_oauth_bearer",
+        "decision": "approve",
+        "tenant_id": TID, "owner_oid": claims["oid"],
+        "owner_principal": EXACT_OWNER_OAUTH_SUBJECTS[claims["oid"]],
+        "organization_id": "aot",
+        "parent_plan_id": objective.plan_id,
+        "parent_approval_id": approval_id,
+        "parent_plan_fingerprint": objective.fingerprint,
+        "reviewed_objective": review,
+        "policy_digest": objective.policy_digest,
+        "issued_at": at.isoformat(),
+        "expires_at": objective.expires_at.isoformat(),
+        "identity_evidence_sha256": claims_digest,
+        "signer_public_key_sha256": public_key_sha256(
+            signer_private_key.public_key()),
+        "standing_authority": False,
+        "one_plan_only": True,
+    }
+    _parent_validation(payload, at=at)
+    signed = {
+        "payload": payload,
+        "signature_base64url": base64.urlsafe_b64encode(
+            signer_private_key.sign(canonical(payload))
+        ).decode("ascii").rstrip("="),
+    }
+    decision = VerifiedPlanDecision(
+        approval_id=approval_id,
+        approver_identity_id=payload["owner_principal"],
+        authenticated=True, authorized=True, approved=True,
+        plan_fingerprint=objective.fingerprint, decided_at=at,
+    )
+    ledger.record_authenticated_owner_objective(scope, decision, signed)
+    return signed
+
+
+def verify_authenticated_owner_objective(
+    signed: Mapping[str, Any], *, objective: Any,
+    pinned_public_key: Ed25519PublicKey, at: datetime,
+    ledger: Any | None = None,
+) -> dict[str, Any]:
+    """Independent signature + exact manifest + optional current grant readback.
+
+    In production the root caller must ALSO enforce its independently trusted
+    root health/readback, current Owner binding, policy and revocation evidence.
+    """
+    from orchestrator.pmv4_objective_scope import BoundedObjective
+    from orchestrator.approval_plan_scope import ProposedPlanStep
+
+    if (not isinstance(objective, BoundedObjective)
+            or not isinstance(pinned_public_key, Ed25519PublicKey)
+            or not isinstance(signed, Mapping)
+            or set(signed) != {"payload", "signature_base64url"}
+            or not isinstance(signed.get("payload"), Mapping)):
+        raise BoundedStepProofDenied("OWNER_PLAN_SIGNED_ENVELOPE_INVALID")
+    payload = signed["payload"]
+    _parent_validation(payload, at=at)
+    if (payload["reviewed_objective"] != objective.review_material()
+            or payload["parent_plan_fingerprint"] != objective.fingerprint
+            or public_key_sha256(pinned_public_key) != payload["signer_public_key_sha256"]):
+        raise BoundedStepProofDenied("OWNER_PLAN_REVIEWED_MATERIAL_CHANGED")
+    signature = signed.get("signature_base64url")
+    if not isinstance(signature, str) or re.fullmatch(
+        r"[A-Za-z0-9_-]{86}", signature,
+    ) is None:
+        raise BoundedStepProofDenied("OWNER_PLAN_SIGNATURE_MALFORMED")
+    try:
+        decoded = base64.urlsafe_b64decode(signature + "==")
+        if len(decoded) != 64:
+            raise ValueError("invalid Ed25519 signature length")
+        pinned_public_key.verify(decoded, canonical(payload))
+    except (InvalidSignature, TypeError, ValueError) as exc:
+        raise BoundedStepProofDenied("OWNER_PLAN_SIGNATURE_INVALID") from exc
+    if ledger is not None:
+        record = ledger.authenticated_owner_objective_receipt(
+            plan_id=objective.plan_id,
+            approval_id=payload["parent_approval_id"],
+        )
+        if record != signed:
+            raise BoundedStepProofDenied("OWNER_PLAN_DURABLE_RECEIPT_MISSING_OR_CHANGED")
+        first = objective.actions[0]
+        ledger.require_grant(
+            ProposedPlanStep(
+                objective.plan_id, objective.organization_id,
+                objective.policy_digest, first.capability, None,
+                first.risk, True,
+            ), plan_fingerprint=objective.fingerprint, now=at,
+        )
+        stored = ledger.decision_receipt(payload["parent_approval_id"])
+        if (stored is None
+                or stored["approver_identity_id"] != payload["owner_principal"]
+                or stored["plan_fingerprint"] != objective.fingerprint
+                or stored["revoked_at"] is not None):
+            raise BoundedStepProofDenied("OWNER_PLAN_DURABLE_ACTOR_MISMATCH")
     return dict(payload)
