@@ -68,6 +68,16 @@ def test_plan_modified_without_authorization_denied(tmp_path, monkeypatch):
     file.chmod(0o600)
     monkeypatch.setattr(boot, "PLAN", file)
     monkeypatch.setattr(boot, "PLAN_SHA", sha256(file.read_bytes()).hexdigest())
+    # CI runners do not own the production UID1000. Exercise the independent
+    # scope verifier even after a simulated trusted-owner metadata preflight.
+    original = boot.read_bounded
+    def owned_fixture(path, maximum, expected=None, **kwargs):
+        if Path(path) == file:
+            data = file.read_bytes()
+            assert sha256(data).hexdigest() == expected
+            return data
+        return original(path, maximum, expected, **kwargs)
+    monkeypatch.setattr(boot, "read_bounded", owned_fixture)
     with pytest.raises(boot.BootstrapDenied, match="SCOPE_CHANGED"):
         boot.validate_plan()
 
