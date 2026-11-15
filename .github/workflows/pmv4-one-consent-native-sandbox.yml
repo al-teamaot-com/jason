@@ -9,6 +9,8 @@ on:
       - tools/pmv4_a0_atomic_plan_transaction.py
       - tools/pmv4_a0_one_release_v1_proof.py
       - tests/test_pmv4_a0_one_release_v1_proof.py
+      - tools/pmv4_a0_exact_v1_atomic_transaction.py
+      - tests/test_pmv4_a0_exact_v1_atomic_transaction.py
       - tests/test_pmv4_a0_atomic_plan_transaction.py
       - tests/test_pmv4_a0_atomic_actual_root_components.py
       - tests/test_pmv4_native_root_no_operator_sqlite.py
@@ -57,6 +59,7 @@ jobs:
             tests/test_pmv4_native_root_no_operator_sqlite.py \
             tests/test_pmv4_a0_atomic_plan_transaction.py \
             tests/test_pmv4_a0_one_release_v1_proof.py \
+            tests/test_pmv4_a0_exact_v1_atomic_transaction.py \
             tests/test_pmv4_a0_atomic_actual_root_components.py \
             tests/test_pmv4_stage_a_native_install.py \
             tests/test_pmv4_stage_a_bounded_plan_preflight.py \
@@ -76,12 +79,14 @@ jobs:
             tests/test_pmv4_native_root_no_operator_sqlite.py \
             tests/test_pmv4_a0_atomic_plan_transaction.py \
             tests/test_pmv4_a0_one_release_v1_proof.py \
+            tests/test_pmv4_a0_exact_v1_atomic_transaction.py \
             tests/test_pmv4_a0_atomic_actual_root_components.py \
             tests/test_pmv4_stage_a_native_install.py
       - name: Verify actual three-stage A0 root actions on disposable UID0
         run: |
           sudo env PYTHONPATH=implementation:. "$(which python)" -m pytest -q \
-            tests/test_pmv4_a0_atomic_actual_root_components.py
+            tests/test_pmv4_a0_atomic_actual_root_components.py \
+            tests/test_pmv4_a0_exact_v1_atomic_transaction.py
       - name: Verify immutable source-only production denial
         run: |
           PYTHONPATH=implementation:. python -m pytest -q \

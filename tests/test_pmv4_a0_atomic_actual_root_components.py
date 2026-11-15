@@ -132,6 +132,35 @@ class ActualA0Components:
             )
             self._retain_inode(self.exact_file)
         elif index == 2:
+            if "signed_v1_whole" in evidence:
+                # Same original native Stage A0 create/journal machinery,
+                # but the *one complete* v1 release signature authorizes this
+                # exact three-operation atomic objective, not a separately
+                # authenticated per-stage v1 grant. Sandbox-only acceptance.
+                self._native_proof = evidence["signed_v1_whole"]
+                actual = self.installer()
+                binding = {
+                    "source_sha":SOURCE,
+                    "scope_sha256":self.scope["scope_sha256"],
+                    "owner_approval_id":self._native_proof["payload"]["approval_id"],
+                    "manifest_sha256":sha256(canonical(self.manifest)).hexdigest(),
+                    "freeze_sha256":FROZEN_SHA,
+                    "signed_proof_sha256":sha256(canonical(self._native_proof)).hexdigest(),
+                }
+                journal = actual._journal(SOURCE)
+                with actual._legacy_lock():
+                    actual._trusted_journal_parent()
+                    actual._assert_parents()
+                    if journal.exists():
+                        raise PermissionError("native receipt already claimed")
+                    actual._append(journal,"prepared",binding)
+                    def after_step(label):
+                        if self.fault == 2 and label.startswith("file:"):
+                            raise InterruptedError("actual native file interruption")
+                    actual._create(self.repo,self.scope,journal,binding,after_step)
+                    actual._verify_objects(self.scope,partial=False)
+                    actual._append(journal,"verified_installed",binding)
+                return {"status":"native_installed_original_engine", "mode":"one_whole_v1"}
             self._native_proof = evidence["signed_step"]
             args = {
                 "repo":self.repo, "candidate_sha":SOURCE,
@@ -197,7 +226,9 @@ class ActualA0Components:
             if self._native_proof is None:
                 raise PermissionError("native proof unavailable")
             return self.installer().recover_empty(
-                scope=self.scope, confirmed_approval_id=APPROVAL_ID,
+                scope=self.scope,
+                confirmed_approval_id=(self._native_proof["payload"].get("approval_id")
+                                       or self._native_proof["payload"].get("parent_approval_id")),
                 confirmed_proof_sha256=sha256(canonical(self._native_proof)).hexdigest(),
             )
         else:
