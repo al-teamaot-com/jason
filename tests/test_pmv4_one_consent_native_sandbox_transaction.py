@@ -17,6 +17,9 @@ from implementation.kernel.signed_owner_release import canonical
 from orchestrator.pmv4_objective_scope import issue_proved_objective_step
 from tools import pmv4_stage_a_native_install as native
 from tools import pmv4_stage_a_packet as packet
+from tools.pmv4_bounded_plan_journal import (
+    BoundedPlanJournal, BoundedPlanJournalDenied,
+)
 from test_pmv4_owner_objective_end_to_end import (
     AT, APPROVAL_ID, enrolled, enroll, observed,
 )
@@ -46,6 +49,38 @@ def plan_install(enrolled, native_rig, tmp_path):
     )
     env["objective"] = objective
     parent = enroll(env)
+    plan_dir = tmp_path / "sealed-plan-sandbox"
+    plan_dir.mkdir(mode=0o700)
+    plan_journal = BoundedPlanJournal(
+        directory=plan_dir, objective=objective, signed_parent=parent,
+        pinned_public_key=env["owner_key"].public_key(),
+        owner_ledger=env["ledger"], at=AT,
+    )
+    # In source-only acceptance the preceding three components provide
+    # synthetic results, deliberately NOT claimed as native production work.
+    # The final Stage A0 step below executes the actual native install.
+    for index in range(3):
+        verified_prior = plan_journal.observe_prior(action_index=index, at=AT)
+        previous_step = issue_proved_objective_step(
+            objective=objective, ledger=env["ledger"], signed_parent=parent,
+            signing_key=env["owner_key"],
+            pinned_public_key=env["owner_key"].public_key(),
+            action_index=index, observed=observed(objective, index),
+            verified_prior_steps=verified_prior, at=AT,
+        )
+        claimed = plan_journal.claim(
+            action_index=index, signed_step=previous_step,
+            observed=observed(objective, index), at=AT,
+        )
+        plan_journal.complete(
+            action_index=index, claim_id=claimed["step_claim_id"],
+            native_result={
+                "status": "installed", "owner_approval_id": APPROVAL_ID,
+                "production_mutation": False,
+                "scope_sha256": objective.actions[index].scope_sha256,
+            },
+            at=AT,
+        )
     step = issue_proved_objective_step(
         objective=objective,
         ledger=env["ledger"],
@@ -77,8 +112,7 @@ def plan_install(enrolled, native_rig, tmp_path):
         "signed_parent": parent,
         "ledger": env["ledger"],
         "pinned_public_key": env["owner_key"].public_key(),
-        "verified_prior_steps": frozenset({0, 1, 2}),
-        "consumed_step_claims": frozenset(),
+        "plan_journal": plan_journal,
         "hold_path": hold,
     }
     arguments = {
@@ -102,7 +136,12 @@ def test_one_human_decision_native_install_journal_and_empty_recovery(plan_insta
     assert events[-1]["event"] == "verified_installed"
     assert events[-1]["signed_proof_sha256"] == sha256(canonical(step)).hexdigest()
     assert len(env["consents"]) == 1
-    with pytest.raises(native.StageANativeDenied, match="EXISTING_JOURNAL"):
+    # The separate durable one-plan journal also proves the exact completed
+    # chain without consulting any caller-provided prior-step list.
+    rows = [__import__("json").loads(x) for x in plan["plan_journal"].path.read_text().splitlines()]
+    assert len([x for x in rows if x["event"] == "completed"]) == 4
+    assert rows[-1]["event"] == "completed" and rows[-1]["step"] == 3
+    with pytest.raises(BoundedPlanJournalDenied, match="PRIOR_STEPS_NOT_COMPLETE"):
         factory().install(**args)
     outcome = factory().recover_empty(
         scope=scope,
@@ -126,9 +165,22 @@ def test_no_native_mutation_on_invalid_plan_evidence(plan_install, tamper):
     plan = plan.copy()
     args["bounded_plan_evidence"] = plan
     if tamper == "prior":
-        plan["verified_prior_steps"] = frozenset({0, 2})
+        # Fresh durable root-sandbox ledger has NONE of the three successful
+        # preceding steps. Supplying a forged prior list is not supported.
+        other = plan["plan_journal"].directory.parent / "missing-prior-proof"
+        other.mkdir(mode=0o700)
+        plan["plan_journal"] = BoundedPlanJournal(
+            directory=other, objective=env["objective"],
+            signed_parent=plan["signed_parent"],
+            pinned_public_key=env["owner_key"].public_key(),
+            owner_ledger=env["ledger"], at=AT,
+        )
     elif tamper == "replay":
-        plan["consumed_step_claims"] = frozenset({step["payload"]["step_claim_id"]})
+        # Outstanding one-use claim makes a repeated native call fail closed.
+        plan["plan_journal"].claim(
+            action_index=3, signed_step=step,
+            observed=observed(env["objective"], 3), at=AT,
+        )
     elif tamper == "hold":
         hold.write_bytes(b"tampered protected hold")
     elif tamper == "runtime":

@@ -417,13 +417,23 @@ class NativeStageAInstaller:
                 )
                 fields = {
                     "objective", "action_index", "signed_parent", "ledger",
-                    "pinned_public_key", "verified_prior_steps",
-                    "consumed_step_claims", "hold_path",
+                    "pinned_public_key", "hold_path", "plan_journal",
                 }
                 if (set(bounded_plan_evidence) != fields
                         or not isinstance(signed_proof, Mapping)
                         or approval_public_key is not None):
                     raise StageANativeDenied("STAGE_A_PLAN_EVIDENCE_NOT_EXACT")
+                from tools.pmv4_bounded_plan_journal import BoundedPlanJournal
+                trusted_plan_journal = bounded_plan_evidence["plan_journal"]
+                if (not isinstance(trusted_plan_journal, BoundedPlanJournal)
+                        or trusted_plan_journal.objective != bounded_plan_evidence["objective"]
+                        or trusted_plan_journal.signed_parent != bounded_plan_evidence["signed_parent"]
+                        or trusted_plan_journal.owner_ledger is not bounded_plan_evidence["ledger"]):
+                    raise StageANativeDenied("STAGE_A_PLAN_JOURNAL_NOT_EXACT")
+                plan_snapshot = trusted_plan_journal.verified_snapshot(
+                    action_index=bounded_plan_evidence["action_index"],
+                    at=self.at or datetime.now(timezone.utc),
+                )
                 verified = verify_bounded_plan_stage_a0_readonly(
                     repo=repo, candidate_sha=candidate_sha,
                     scope=scope, exact_manifest=manifest,
@@ -436,8 +446,8 @@ class NativeStageAInstaller:
                     freeze_path=freeze_path,
                     hold_path=bounded_plan_evidence["hold_path"],
                     native_root_health=observed_health,
-                    verified_prior_steps=bounded_plan_evidence["verified_prior_steps"],
-                    consumed_step_claims=bounded_plan_evidence["consumed_step_claims"],
+                    verified_prior_steps=plan_snapshot["verified_prior_steps"],
+                    consumed_step_claims=plan_snapshot["consumed_step_claims"],
                     protected_main_ci_check=ci_check,
                     at=self.at or datetime.now(timezone.utc),
                     production=False,
@@ -462,6 +472,26 @@ class NativeStageAInstaller:
                 "freeze_sha256": manifest["freeze_sha256"],
                 "signed_proof_sha256": _hash(_canonical(signed_proof)),
             }
+            # Claim the reviewed machine step only after native source,
+            # exact manifest and immutable empty-baseline checks pass. Never
+            # accept prior completion claims from the caller. A crash after
+            # this claim is preserved and must be reconciled against native
+            # readback before any replay; no new human consent is minted.
+            plan_claim = None
+            if bounded_plan_evidence is not None:
+                plan_claim = trusted_plan_journal.claim(
+                    action_index=bounded_plan_evidence["action_index"],
+                    signed_step=signed_proof,
+                    observed={
+                        "candidate_sha": candidate_sha,
+                        "rollback_sha": scope["rollback_sha"],
+                        "freeze_sha256": _hash(freeze_path.read_bytes()),
+                        "hold_sha256": _hash(bounded_plan_evidence["hold_path"].read_bytes()),
+                        "scope_sha256": scope["scope_sha256"],
+                        "artifact_sha256": _hash(_canonical(manifest)),
+                    },
+                    at=self.at or datetime.now(timezone.utc),
+                )
             self._append(journal, "prepared", binding)
             # All create steps have a durable preceding intent. A torn
             # file/foreign entry is quarantined, never recursively erased.
@@ -488,7 +518,7 @@ class NativeStageAInstaller:
                 ):
                     raise StageANativeDenied("STAGE_A_PROMOTION_HOLD_CHANGED")
             self._append(journal, "verified_installed", binding)
-            return {
+            outcome = {
                 "status": "installed",
                 "source_sha": candidate_sha,
                 "scope_sha256": scope["scope_sha256"],
@@ -497,6 +527,68 @@ class NativeStageAInstaller:
                 "audit_chain_sha256": self._events(journal)[-1]["hash"],
                 "production_mutation": self.production,
             }
+            if plan_claim is not None:
+                trusted_plan_journal.complete(
+                    action_index=bounded_plan_evidence["action_index"],
+                    claim_id=plan_claim["step_claim_id"],
+                    native_result=outcome,
+                    at=self.at or datetime.now(timezone.utc),
+                )
+            return outcome
+
+    def reconcile_bounded_plan_completion(
+        self, *, plan_journal: Any, action_index: int,
+        scope: Mapping[str, Any], signed_step: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Sandbox-only crash recovery without another human approval.
+
+        A torn final plan-journal write is recoverable only if the ORIGINAL
+        exact native installation journal is already in verified_installed,
+        all scoped native bytes match, all recorded signed Step hashes match
+        and the original signed Owner plan is still valid/not revoked.
+        Never reinterpret a prepared/failed/rolled-back journal as success.
+        """
+        if self.production:
+            raise StageANativeDenied("STAGE_A_PLAN_ROOT_POLICY_NOT_DEPLOYED")
+        from tools.pmv4_bounded_plan_journal import BoundedPlanJournal
+        if (not isinstance(plan_journal, BoundedPlanJournal)
+                or type(action_index) is not int
+                or not 0 <= action_index < len(plan_journal.objective.actions)
+                or not isinstance(signed_step, Mapping)
+                or plan_journal.objective.actions[action_index].scope_sha256
+                   != scope.get("scope_sha256")):
+            raise StageANativeDenied("STAGE_A_PLAN_RECOVERY_SCOPE_UNTRUSTED")
+        proof_hash = _hash(_canonical(signed_step))
+        claim_id = (signed_step.get("payload") or {}).get("step_claim_id")
+        if not isinstance(claim_id, str):
+            raise StageANativeDenied("STAGE_A_PLAN_RECOVERY_CLAIM_MISSING")
+        with self._legacy_lock():
+            self._trusted_journal_parent()
+            journal = self._journal(scope["candidate_sha"])
+            rows = self._events(journal)
+            if (not rows or rows[0]["event"] != "prepared"
+                    or rows[-1]["event"] != "verified_installed"
+                    or any(row["source_sha"] != scope["candidate_sha"]
+                           or row["scope_sha256"] != scope["scope_sha256"]
+                           or row["owner_approval_id"]
+                              != plan_journal.parent["parent_approval_id"]
+                           or row["signed_proof_sha256"] != proof_hash
+                           for row in rows)):
+                raise StageANativeDenied("STAGE_A_PLAN_NATIVE_RECEIPT_UNVERIFIED")
+            self._verify_objects(scope, partial=False)
+            outcome = {
+                "status": "installed", "source_sha": scope["candidate_sha"],
+                "scope_sha256": scope["scope_sha256"],
+                "rollback_sha": packet.EMPTY_BASELINE,
+                "owner_approval_id": plan_journal.parent["parent_approval_id"],
+                "audit_chain_sha256": rows[-1]["hash"],
+                "production_mutation": False,
+            }
+            plan_journal.complete(
+                action_index=action_index, claim_id=claim_id,
+                native_result=outcome, at=self.at or datetime.now(timezone.utc),
+            )
+            return outcome
 
     def recover_empty(self, *, scope: Mapping[str, Any],
                       confirmed_approval_id: str,
