@@ -67,7 +67,8 @@ MCP = "jason-mcp-pilot"
 # is trusted only after validating its immutable private success ledger,
 # its signed historical exact Owner action, and the actual live MCP ID.
 ISSUER_ACTION = "pmv4-stage-a0-same-image-owner-issuer-v1"
-ISSUER_SOURCE = "7b42ce983896711525de4c7955bf9fc43ac003d0"
+# The issuer activation signed the LIVE LKG image, not the A0 staging Git candidate.
+ISSUER_SOURCE = LKG
 ISSUER_LEDGER = Path("/etc/jason-owner-release/pmv4-stage-a0-issuer-ledger")
 ISSUER_POLICY = Path("/etc/jason-owner-release/pmv4-stage-a0-issuer-activation.json")
 ISSUER_CODE = Path("/usr/local/lib/jason/pmv4_stage_a0_issuer_activation.py")

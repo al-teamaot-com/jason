@@ -19,16 +19,16 @@ import uuid
 MERGE="7b42ce983896711525de4c7955bf9fc43ac003d0"
 ROLLBACK="45e52de4803a6f0768187793bba4990ed1d11a07"
 LKG="d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
-ACTION="owner-v2-issuer-attested-root-code-policy-replace-v1-20261115"
-SCOPE_SHA="cf866a84f38fc0b45decb7bf0a87ac34232bf124be3b1796e6a243cb86bfb196"
-MANIFEST_SHA="119128ead74bc08e02dff543ae2a5ec458c3c14685c267bbd7cca230a290b6e1"
-PACKAGE_SHA="b221e48383cef5cfd69fdd24b38c08ceacf8459a1b7c0b62dab6036fd721006c"
+ACTION="owner-v2-issuer-attested-root-code-policy-replace-v2-20261115"
+SCOPE_SHA="6892f490c4632a95825240110ead9193ae1269d6624a70dbfe992b9a537ae22e"
+MANIFEST_SHA="b1b3dd1c49d74ffc33597081d955d7b68341bdca9b504828b5ea822df39a6aca"
+PACKAGE_SHA="db8fc31ec8dcdfce78fc602dffba36e856cd19c03c81265e90978ba6c1364135"
 FREEZE_SHA="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 HOLD_SHA="11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0"
 ARCHIVE=Path("/srv/jason/archive")
-MANIFEST=ARCHIVE/("owner-v2-issuer-attested-two-file-root-replace-audited-manifest-"+MERGE+".json")
-PACKAGE=ARCHIVE/("owner-v2-issuer-attested-two-file-root-replace-audited-"+MERGE+".tar")
-PROOF=ARCHIVE/("owner-v2-issuer-attested-two-file-root-replace-owner-proof-"+MERGE+".json")
+MANIFEST=ARCHIVE/("owner-v2-issuer-attested-v2-two-file-root-replace-audited-manifest-"+MERGE+".json")
+PACKAGE=ARCHIVE/("owner-v2-issuer-attested-v2-two-file-root-replace-audited-"+MERGE+".tar")
+PROOF=ARCHIVE/("owner-v2-issuer-attested-v2-two-file-root-replace-owner-proof-"+MERGE+".json")
 OWNER_AUTH=Path("/usr/local/lib/jason/owner_signer_recovery.py")
 OWNER_VERIFIER=Path("/usr/local/lib/jason/owner_signed_release.py")
 OWNER_KEY=Path("/var/lib/jason/runtime-secrets/owner-release/private_key")
@@ -36,9 +36,9 @@ ROOT_PIN=Path("/etc/jason-owner-release/verified-owner-public-key.json")
 FREEZE=Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
 HOLD=Path("/var/lib/jason/openclaw/release-manager/auto-promotion-incident-hold")
 LEDGER=Path("/etc/jason-owner-release/owner-full-integrity-v2-repair-ledger")
-ATTEMPT=Path("/etc/jason-owner-release/owner-v2-root-code-upgrade-"+MERGE[:12]+".attempt.json")
-RESULT=Path("/etc/jason-owner-release/owner-v2-root-code-upgrade-"+MERGE[:12]+".result.json")
-CONFIRM="AUTHORIZE-TWO-ISSUER-AWARE-V2-ROOT-FILES-ONLY"
+ATTEMPT=Path("/etc/jason-owner-release/owner-v2-issuer-attested-v2-"+MERGE[:12]+".attempt.json")
+RESULT=Path("/etc/jason-owner-release/owner-v2-issuer-attested-v2-"+MERGE[:12]+".result.json")
+CONFIRM="AUTHORIZE-EXACT-ISSUER-LKG-CORRECTED-V2-ROOT-FILES-ONLY"
 
 def digest(data:bytes)->str:
     return sha256(data).hexdigest()

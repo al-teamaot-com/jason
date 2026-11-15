@@ -134,6 +134,16 @@ def verify(case):
     )
 
 
+def test_real_lkg_issuer_binding_not_protected_main_candidate():
+    # The original same-image issuer approval was deliberately for live LKG.
+    assert repair.ISSUER_SOURCE == repair.LKG
+    assert repair.ISSUER_SOURCE == "d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
+    assert repair.ISSUER_SOURCE != "7b42ce983896711525de4c7955bf9fc43ac003d0"
+    published = Path("/srv/jason/archive/pmv4-stage-a0-PREP-ONLY-issuer-activation-policy-7b42ce983896711525de4c7955bf9fc43ac003d0.json")
+    if published.is_file():
+        assert json.loads(published.read_bytes())["source_sha"] == repair.ISSUER_SOURCE
+
+
 def test_exact_original_signed_root_activation_is_accepted(issuer_case):
     assert verify(issuer_case) is True
 

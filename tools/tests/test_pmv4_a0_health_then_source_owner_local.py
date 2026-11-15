@@ -24,9 +24,9 @@ def test_owner_chain_is_parseable_and_rejects_unknown_execution_mode():
 
 def test_both_existing_signed_exact_scopes_are_pinned_independently():
     text = SCRIPT.read_text()
-    assert "owner-v2-issuer-aware-local-7b42.sh" in text
+    assert "owner-v2-issuer-aware-v2-local-7b42.sh" in text
     assert "pmv4-a0-closure-owner-local-7b42.sh" in text
-    assert "c738d2e5fc8610082686a5f29a3e00e595929636ae0beb723684c56edae76bdb" in text
+    assert "de4519df425d796d1f7cc3e8270c4a427b05ff9621c1955bc6b7d367c43e65eb" in text
     assert "3ba8b330c0d5efd79e2f9a92f2348e703eef42f9b2837b18237522854b7fc49f" in text
     assert 'bash "$HEALTH" --execute' in text
     assert 'bash "$CLOSURE" --execute' in text

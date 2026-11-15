@@ -19,7 +19,7 @@
   "runtime_image_id": "sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132",
   "schema_version": "1.0",
   "scope_sha256": "8267a53e7c532125a8cf8df316c1f71da6eecdb7c8e34536c298119816e483fe",
-  "script_sha256": "58e124205518eb8084889b61c23562f876cb782470572be72b97641be9705198",
+  "script_sha256": "a328adcf67fc258713bfaac8971490d2f3b5fdb5d409bf1b873813abd82711dc",
   "service_max_seconds": 5700,
   "source_sha": "95832507e6e5f804f092cb5d3ebdea90ba1a49bf"
 }

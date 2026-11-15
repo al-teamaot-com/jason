@@ -18,10 +18,10 @@ import tarfile
 
 MAIN = "7b42ce983896711525de4c7955bf9fc43ac003d0"
 OLD = "45e52de4803a6f0768187793bba4990ed1d11a07"
-ACTION = "owner-v2-issuer-attested-root-code-policy-replace-v1-20261115"
-SCOPE = "cf866a84f38fc0b45decb7bf0a87ac34232bf124be3b1796e6a243cb86bfb196"
-MANIFEST_SHA256 = "119128ead74bc08e02dff543ae2a5ec458c3c14685c267bbd7cca230a290b6e1"
-PACKAGE_SHA256 = "b221e48383cef5cfd69fdd24b38c08ceacf8459a1b7c0b62dab6036fd721006c"
+ACTION = "owner-v2-issuer-attested-root-code-policy-replace-v2-20261115"
+SCOPE = "6892f490c4632a95825240110ead9193ae1269d6624a70dbfe992b9a537ae22e"
+MANIFEST_SHA256 = "b1b3dd1c49d74ffc33597081d955d7b68341bdca9b504828b5ea822df39a6aca"
+PACKAGE_SHA256 = "db8fc31ec8dcdfce78fc602dffba36e856cd19c03c81265e90978ba6c1364135"
 PATH = "config/pmv4-stage-a0/issuer-aware-v2-root-upgrade-manifest-review.json"
 ROOT_PATHS = {
     "tools/owner_full_integrity_v2_root_repair.py":
@@ -81,9 +81,9 @@ def verify(repo: Path, *, produced_tar: Path | None = None,
           == ROOT_PATHS, "ROOT_TWO_FILE_TARGETS_CHANGED")
     receipts = doc.get("immutable_root_audit_outputs", {})
     check(receipts.get("root_attempt_path") ==
-          "/etc/jason-owner-release/owner-v2-root-code-upgrade-" + MAIN[:12] + ".attempt.json"
+          "/etc/jason-owner-release/owner-v2-issuer-attested-v2-" + MAIN[:12] + ".attempt.json"
           and receipts.get("root_result_path") ==
-          "/etc/jason-owner-release/owner-v2-root-code-upgrade-" + MAIN[:12] + ".result.json",
+          "/etc/jason-owner-release/owner-v2-issuer-attested-v2-" + MAIN[:12] + ".result.json",
           "ROOT_UPDATE_ONE_USE_AUDIT_CHANGED")
     items = {}
     for row in rows:

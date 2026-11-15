@@ -23,19 +23,19 @@ import uuid
 MERGE="7b42ce983896711525de4c7955bf9fc43ac003d0"
 ROLLBACK="45e52de4803a6f0768187793bba4990ed1d11a07"
 LKG="d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
-ACTION="owner-v2-issuer-attested-root-code-policy-replace-v1-20261115"
-SCOPE="cf866a84f38fc0b45decb7bf0a87ac34232bf124be3b1796e6a243cb86bfb196"
-MANIFEST_SHA="119128ead74bc08e02dff543ae2a5ec458c3c14685c267bbd7cca230a290b6e1"
-PACKAGE_SHA="b221e48383cef5cfd69fdd24b38c08ceacf8459a1b7c0b62dab6036fd721006c"
+ACTION="owner-v2-issuer-attested-root-code-policy-replace-v2-20261115"
+SCOPE="6892f490c4632a95825240110ead9193ae1269d6624a70dbfe992b9a537ae22e"
+MANIFEST_SHA="b1b3dd1c49d74ffc33597081d955d7b68341bdca9b504828b5ea822df39a6aca"
+PACKAGE_SHA="db8fc31ec8dcdfce78fc602dffba36e856cd19c03c81265e90978ba6c1364135"
 FREEZE_SHA="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 HOLD_SHA="11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0"
 ARCHIVE=Path("/srv/jason/archive")
-MANIFEST=ARCHIVE/("owner-v2-issuer-attested-two-file-root-replace-audited-manifest-"+MERGE+".json")
-PACKAGE=ARCHIVE/("owner-v2-issuer-attested-two-file-root-replace-audited-"+MERGE+".tar")
-OWNER_DECISION=ARCHIVE/("owner-v2-issuer-attested-two-file-root-replace-owner-proof-"+MERGE+".json")
-AUDIT_ATTEMPT=Path("/etc/jason-owner-release/owner-v2-root-code-upgrade-"+MERGE[:12]+".attempt.json")
-AUDIT_RESULT=Path("/etc/jason-owner-release/owner-v2-root-code-upgrade-"+MERGE[:12]+".result.json")
-ROOT_RUNNER=Path("/run/jason-owner-v2-root-updater-"+MERGE[:12]+".py")
+MANIFEST=ARCHIVE/("owner-v2-issuer-attested-v2-two-file-root-replace-audited-manifest-"+MERGE+".json")
+PACKAGE=ARCHIVE/("owner-v2-issuer-attested-v2-two-file-root-replace-audited-"+MERGE+".tar")
+OWNER_DECISION=ARCHIVE/("owner-v2-issuer-attested-v2-two-file-root-replace-owner-proof-"+MERGE+".json")
+AUDIT_ATTEMPT=Path("/etc/jason-owner-release/owner-v2-issuer-attested-v2-"+MERGE[:12]+".attempt.json")
+AUDIT_RESULT=Path("/etc/jason-owner-release/owner-v2-issuer-attested-v2-"+MERGE[:12]+".result.json")
+ROOT_RUNNER=Path("/run/jason-owner-v2-issuer-v2-root-updater-"+MERGE[:12]+".py")
 ROOT_VERIFIER=Path("/usr/local/lib/jason/owner_signed_release.py")
 ROOT_PIN=Path("/etc/jason-owner-release/verified-owner-public-key.json")
 LEDGER=Path("/etc/jason-owner-release/owner-full-integrity-v2-repair-ledger")
@@ -273,6 +273,34 @@ def root_record(path:Path):
         raise RootUpdateDenied("PROTECTED_RELEASE_SPOOL_NOT_TRUSTED")
     return json.loads(owned_read(path,0,"0600",131072))
 
+def verify_existing_issuer_receipt(history:dict,outcome:dict,*,
+                                   current_mcp_id:str,
+                                   expected_mcp_image:str)->None:
+    """Verify only historical root-owned issuer evidence, never mint authority.
+
+    The November 14 issuer transaction bound *live production* LKG SHA,
+    while the later PMv4 Stage A0 source candidate was on protected main.
+    Those SHAs must never be interchanged in historical receipt comparison.
+    Root-owned 0700 ledger metadata and exact two-file membership are
+    separately validated before these already-trusted records are parsed.
+    """
+    action="pmv4-stage-a0-same-image-owner-issuer-v1"
+    if history.get("action")!=action or outcome.get("action")!=action:
+        raise RootUpdateDenied("STAGE_A0_ISSUER_AUDIT_ACTION_MISMATCH")
+    if history.get("source")!=LKG:
+        raise RootUpdateDenied("STAGE_A0_ISSUER_HISTORICAL_LKG_MISMATCH")
+    if history.get("mcp_image")!=expected_mcp_image:
+        raise RootUpdateDenied("STAGE_A0_ISSUER_HISTORICAL_IMAGE_MISMATCH")
+    if history.get("freeze_sha256")!=FREEZE_SHA:
+        raise RootUpdateDenied("STAGE_A0_ISSUER_HISTORICAL_FREEZE_MISMATCH")
+    if history.get("status")!="exact_one_use_claimed_before_mutation":
+        raise RootUpdateDenied("STAGE_A0_ISSUER_AUDIT_ATTEMPT_NOT_CLAIMED")
+    if outcome.get("result")!="verified":
+        raise RootUpdateDenied("STAGE_A0_ISSUER_AUDIT_RESULT_NOT_VERIFIED")
+    if outcome.get("new_mcp_id")!=current_mcp_id:
+        raise RootUpdateDenied("STAGE_A0_ISSUER_AUDIT_LIVE_MCP_ID_MISMATCH")
+
+
 def runtime_state():
     if (Path("/opt/jason/current").resolve(strict=True)
             !=Path("/opt/jason/releases")/LKG
@@ -320,15 +348,8 @@ def runtime_state():
                 raise RootUpdateDenied("STAGE_A0_ISSUER_LEDGER_NOT_EXACT")
             history=json.loads(owned_read(attempt,0,"0600",131072))
             outcome=json.loads(owned_read(result,0,"0600",131072))
-            if (history.get("action")!=action
-                    or history.get("source")!=MERGE
-                    or history.get("mcp_image")!=image
-                    or history.get("freeze_sha256")!=FREEZE_SHA
-                    or history.get("status")!="exact_one_use_claimed_before_mutation"
-                    or outcome.get("action")!=action
-                    or outcome.get("result")!="verified"
-                    or outcome.get("new_mcp_id")!=obj["Id"]):
-                raise RootUpdateDenied("STAGE_A0_ISSUER_ROOT_ACTIVATION_NOT_PROVEN")
+            verify_existing_issuer_receipt(history, outcome,
+                current_mcp_id=obj["Id"], expected_mcp_image=image)
             # The newly installed V2 health code independently verifies the
             # *historical Owner Ed25519 signature* and root pinned issuer code.
         identities[name]=obj["Id"]

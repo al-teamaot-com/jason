@@ -13,17 +13,17 @@ if [[ "$(id -u)" != 1000 ]]; then
 fi
 
 ROOT=/srv/jason/archive
-OWNER_UPGRADE="$ROOT/owner-v2-issuer-attested-update-owner-7b42.py"
-ROOT_UPGRADE="$ROOT/owner-v2-issuer-attested-root-updater-7b42.py"
-FULL_OWNER="$ROOT/owner-v2-issuer-attested-full-health-owner-7b42.py"
+OWNER_UPGRADE="$ROOT/owner-v2-issuer-attested-v2-update-owner-7b42.py"
+ROOT_UPGRADE="$ROOT/owner-v2-issuer-attested-v2-root-updater-7b42.py"
+FULL_OWNER="$ROOT/owner-v2-issuer-attested-v2-full-health-owner-7b42.py"
 FULL_ROOT=/usr/local/lib/jason/owner_full_integrity_v2_root_repair.py
 V2_OLD=ff0b81a0cb60c6a76a21b3f45301f7750d4c7d95f044626c35e8ac5b9aaeb9a4
-V2_NEW=58e124205518eb8084889b61c23562f876cb782470572be72b97641be9705198
-OWNER_UPGRADE_SHA=7851e7cc7ffcdf5ea589adea3d1bc5863a34184ca9f3344469ed3181379d6ddf
-ROOT_UPGRADE_SHA=764e2eff8ad744a3c51c55c45c15235f5a839335d668a73265040a7600d90a29
-FULL_OWNER_SHA=afb9fad632b84fc664c77b3e350f1a6e09f623687a4a0d4fa2d1f73c4b050e7f
-POLICY_HASH=063c85d8eff3938fb713054abb8b5735ae0c2821c69ccbb1cd7889092fb74b28
-STAGED=/run/jason-owner-v2-root-updater-7b42ce983896.py
+V2_NEW=a328adcf67fc258713bfaac8971490d2f3b5fdb5d409bf1b873813abd82711dc
+OWNER_UPGRADE_SHA=4f087109f7aeef53849dae5e34437272d50cccda7d4f4d4557c7cfd82eef5e19
+ROOT_UPGRADE_SHA=470f2dafa050ecbc81c6b1c8121da643678ffbd4d280c7bf8ec64de347461b9a
+FULL_OWNER_SHA=deda7b16467148136c3206e5d041eca1b200a9da24e32e203ff234b0a14d66a3
+POLICY_HASH=0c592b24a96be57754ff96973e58e7309da6ed502bb7021d303fa839c3cf7ecd
+STAGED=/run/jason-owner-v2-issuer-v2-root-updater-7b42ce983896.py
 CREATED=0
 
 for record in "$OWNER_UPGRADE_SHA|$OWNER_UPGRADE" "$ROOT_UPGRADE_SHA|$ROOT_UPGRADE" "$FULL_OWNER_SHA|$FULL_OWNER"; do

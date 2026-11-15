@@ -13,9 +13,9 @@ if [[ "$(id -u)" != 1000 ]]; then
 fi
 
 ROOT=/srv/jason/archive
-HEALTH="$ROOT/owner-v2-issuer-aware-local-7b42.sh"
+HEALTH="$ROOT/owner-v2-issuer-aware-v2-local-7b42.sh"
 CLOSURE="$ROOT/pmv4-a0-closure-owner-local-7b42.sh"
-HEALTH_SHA="c738d2e5fc8610082686a5f29a3e00e595929636ae0beb723684c56edae76bdb"
+HEALTH_SHA="de4519df425d796d1f7cc3e8270c4a427b05ff9621c1955bc6b7d367c43e65eb"
 CLOSURE_SHA="3ba8b330c0d5efd79e2f9a92f2348e703eef42f9b2837b18237522854b7fc49f"
 SOURCE="7b42ce983896711525de4c7955bf9fc43ac003d0"
 LKG="d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
