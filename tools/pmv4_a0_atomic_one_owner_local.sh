@@ -10,20 +10,20 @@ MODE="${1:-}"
 [[ "$(id -u)" == 1000 ]] ||
   { echo "DENIED: authenticated local Jason al UID1000 required" >&2; exit 2; }
 
-R="/srv/jason/archive/engineering-worktrees/pmv4-a0-atomic-oneowner-20261115"
+R="/srv/jason/archive/engineering-worktrees/pmv4-a0-rebind-20261115"
 ROOT="$R/tools/pmv4_a0_exact_v1_root_release.py"
 BOOT="$R/tools/pmv4_a0_closure_bootstrap_root.py"
 OWNER="$R/tools/pmv4_a0_atomic_v1_owner_issuer.py"
 POLICY="$R/config/pmv4-stage-a0/atomic-v1-root-policy-review.json"
-STAGE="/run/jason-pmv4-a0-atomic-v1-7b42"
+STAGE="/run/jason-pmv4-a0-atomic-v1-8c20"
 STAGED="$STAGE/installer.py"
 STAGED_BOOT="$STAGE/bootstrap.py"
 STAGED_POLICY="$STAGE/policy.json"
-ROOT_SHA="a72b0b17a5accd9f70835399caa8f2bc4fc803453945cb9d41fed01f5a087ba2"
-BOOT_SHA="3790bf79d4a302fe572055c3936ba28b8935ea9e1dc1a833b6b8acc9ed62878b"
-OWNER_SHA="1b5e8612c774359e060f7b8f6618ef0479b7f42f4a0eb012f5ecff71dd71b3e1"
-POLICY_SHA="f95507fabb0084ed1cf3a31e4dbcba7076a73929da3fde8cf5cc36c162132cda"
-SOURCE="7b42ce983896711525de4c7955bf9fc43ac003d0"
+ROOT_SHA="eb5ffd4361cc5979eadbc5f275c452343fd44a0e56d6276e5b62d938d233295b"
+BOOT_SHA="da5c2743caa01946548a1399f188010e55c2c4cf743d3dafe7e314d25633c794"
+OWNER_SHA="5f65ed5858d5f8a18db6604dbbe23e51ffe4ee94e889752be4a889cad46277b2"
+POLICY_SHA="67ef7942070a840371da3a45c8283fe1f0c118f48582ae3b0aa809a6c8686d0b"
+SOURCE="8c2064193d74cc41b52369681febbc0a74fa96f7"
 LKG="d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 FREEZE="/var/lib/jason/openclaw/release-manager/production-deployment-freeze"
 HOLD="/var/lib/jason/openclaw/release-manager/auto-promotion-incident-hold"
@@ -43,7 +43,7 @@ check_hash "$HOLD_SHA" "$HOLD"
   { echo "DENIED: existing production LKG drift" >&2; exit 2; }
 [[ ! -e "$STAGE" && ! -L "$STAGE" ]] ||
   { echo "DENIED: preexisting private root release stage requires review" >&2; exit 2; }
-[[ ! -e "/srv/jason/archive/pmv4-a0-atomic-v1-OWNER-PROOF-7b42.json" ]] ||
+[[ ! -e "/srv/jason/archive/pmv4-a0-atomic-v1-OWNER-PROOF-8c20.json" ]] ||
   { echo "DENIED: original one-use Owner grant has already been published" >&2; exit 2; }
 
 cd "$R"

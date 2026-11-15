@@ -23,8 +23,8 @@ from orchestrator.pmv4_objective_scope import (
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "config/pmv4-stage-a0/one-owner-recovery-review-20261115.json"
-CONTRACT_SHA256 = "f5f525e33e4cad46827018e23ea7ae8f72603459dcd740bfbf63f9a176cfa52a"
-SOURCE = "7b42ce983896711525de4c7955bf9fc43ac003d0"
+CONTRACT_SHA256 = "a4eab5848bd7aa17b88c4e305e1caed7456186d2a35bfe0e68a34f56acf1b92e"
+SOURCE = "8c2064193d74cc41b52369681febbc0a74fa96f7"
 LKG = "d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 FREEZE = "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 HOLD = "11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0"
@@ -35,20 +35,20 @@ ARCHIVE = Path("/srv/jason/archive")
 GIT = Path("/home/al/.local/lib/jason/engineering-source-repo")
 RELEASE_ROOT = Path("/opt/jason/releases") / SOURCE
 MISSING = RELEASE_ROOT / "tools/pmv4_host_install_contract.py"
-BOOTSTRAP = ARCHIVE / "pmv4-a0-closure-bootstrap-plan-7b42.json"
+BOOTSTRAP = ARCHIVE / "pmv4-a0-closure-bootstrap-plan-8c20.json"
 ONEFILE = ARCHIVE / ("pmv4-stage-a0-root-source-closure-repair-proposal-"
                      + SOURCE + ".json")
-NATIVE_SCOPE = "6786baad0fc9d07aca6ba80dedad5c25bcfa7fb3e50fdde7c4d36ad067285eac"
-NATIVE_MANIFEST = "addba768d1ab92d9507d466fdd3980b93ea2041f42901f5d6e5a2cde81dcb025"
+NATIVE_SCOPE = "509e2a39d323009a55af2e5244214fae3e8e14c910a5c4ece4b3da73a0fa0ae3"
+NATIVE_MANIFEST = "bd18226b5f82e276e2f7cc1229c7d0046c99401c4bf4a0753de7ec2b13f237f0"
 MISSING_SHA = "ca844feeb43aa624fb1a965571bfb30f554e24662b2837bb2efa8bfddbdfb5db"
 REVIEWED_ACTIONS = (
     ("pmv4.stage-a0.root-source-helper.bootstrap",
      "root-source-closure-helper",
-     "e5515b5e0d5243c5e18c3118fcc0c39580535c7e0da31525390c141e1aa298cb",
-     "25e68eaee841791b5b857d59eef543691225ff9ea7d38fc9477eff69957e4564"),
+     "9e36a199cda7a176e893a17fdfeeedfb3782dce3f705886e29deed5867bf2837",
+     "a4ea1463435fdeff50c9ae2e2322b899a22987f3fcac6b313f220834d01138f3"),
     ("pmv4.stage-a0.immutable-root-source-onefile",
      "exact-one-missing-root-blob",
-     "089f8706b61b70c9f31406204bb27fab0bde47bc8df56f13a274defb8b537381",
+     "4f36e1eee0d5051484aeaadc77877525274faf880c9638b8e5ffe56eddc78a42",
      MISSING_SHA),
     ("pmv4.stage-a0.native-empty-baseline-install",
      "independent-stage-a0-native",
@@ -122,7 +122,7 @@ def exact_contract() -> dict[str, Any]:
              and p["archived_onefile_proposal_path"] == str(ONEFILE)
              and p["archived_bootstrap_plan_sha256"] == REVIEWED_ACTIONS[0][3]
              and p["archived_onefile_proposal_sha256"]
-                == "7a5752e80c378de8e3a5e9c4ad46132a46431be196c0e0fc4e9ac27c21a617e9",
+                == "b8e6d0d5786fe4c1238b587fdf20c42fbf1757456ac97f321256f9c575b448ff",
              "OWNER_PLAN_REVIEW_PROTECTED_IDENTITY_CHANGED")
     _require(p["must_not_change"] == [
         "ticket_runtime", "mcp_image", "production_lkg_pointer",

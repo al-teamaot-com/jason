@@ -23,9 +23,9 @@ import uuid
 from typing import Any,Mapping
 
 WORKTREE=Path(
-    "/srv/jason/archive/engineering-worktrees/pmv4-a0-atomic-oneowner-20261115"
+    "/srv/jason/archive/engineering-worktrees/pmv4-a0-rebind-20261115"
 )
-PROOF=Path("/srv/jason/archive/pmv4-a0-atomic-v1-OWNER-PROOF-7b42.json")
+PROOF=Path("/srv/jason/archive/pmv4-a0-atomic-v1-OWNER-PROOF-8c20.json")
 RELEASE=Path("/var/lib/jason/openclaw/release-manager")
 FREEZE=RELEASE/"production-deployment-freeze"
 HOLD=RELEASE/"auto-promotion-incident-hold"
@@ -35,7 +35,7 @@ OAUTH=Path("/usr/local/lib/jason/owner_signer_recovery.py")
 SIGNER=Path("/var/lib/jason/runtime-secrets/owner-release/private_key")
 ROOT_PIN=Path("/etc/jason-owner-release/verified-owner-public-key.json")
 CONFIRM="APPROVE-ONE-EXACT-PMV4-A0-THREE-STAGE-ATOMIC-RELEASE"
-CANDIDATE="7b42ce983896711525de4c7955bf9fc43ac003d0"
+CANDIDATE="8c2064193d74cc41b52369681febbc0a74fa96f7"
 LKG="d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 FREEZE_SHA="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 HOLD_SHA="11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0"

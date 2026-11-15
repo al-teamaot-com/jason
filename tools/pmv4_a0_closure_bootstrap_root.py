@@ -22,19 +22,19 @@ import subprocess
 import sys
 from typing import Any, Mapping
 
-SOURCE_SHA = "7b42ce983896711525de4c7955bf9fc43ac003d0"
+SOURCE_SHA = "8c2064193d74cc41b52369681febbc0a74fa96f7"
 LKG = "d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 ACTION = "pmv4-stage-a0-root-source-closure-bootstrap-v1"
-PLAN_SHA = "25e68eaee841791b5b857d59eef543691225ff9ea7d38fc9477eff69957e4564"
-SCOPE_SHA = "e5515b5e0d5243c5e18c3118fcc0c39580535c7e0da31525390c141e1aa298cb"
+PLAN_SHA = "a4ea1463435fdeff50c9ae2e2322b899a22987f3fcac6b313f220834d01138f3"
+SCOPE_SHA = "9e36a199cda7a176e893a17fdfeeedfb3782dce3f705886e29deed5867bf2837"
 FREEZE_SHA = "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 HOLD_SHA = "11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0"
 MCP_IMAGE = "sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477"
 RUNTIME_IMAGE = "sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132"
 VERIFIER_SHA = "f50eea90102d9a1de82b3753ec8d0cd225280d385ac7a658ae2c2a303934a0e3"
 ARCHIVE = Path("/srv/jason/archive")
-PLAN = ARCHIVE / "pmv4-a0-closure-bootstrap-plan-7b42.json"
-PROOF = ARCHIVE / "pmv4-a0-closure-bootstrap-OWNER-PROOF-7b42.json"
+PLAN = ARCHIVE / "pmv4-a0-closure-bootstrap-plan-8c20.json"
+PROOF = ARCHIVE / "pmv4-a0-closure-bootstrap-OWNER-PROOF-8c20.json"
 RELEASE = Path("/var/lib/jason/openclaw/release-manager")
 LOCK = RELEASE / "production-transaction.lock"
 CONTROL = RELEASE / "production-control-state.json"
@@ -43,15 +43,15 @@ FREEZE = RELEASE / "production-deployment-freeze"
 HOLD = RELEASE / "auto-promotion-incident-hold"
 VERIFIER = Path("/usr/local/lib/jason/owner_signed_release.py")
 ROOT_PIN = Path("/etc/jason-owner-release/verified-owner-public-key.json")
-STAGE = Path("/run/jason-pmv4-a0-closure-bootstrap-7b42")
+STAGE = Path("/run/jason-pmv4-a0-closure-bootstrap-8c20")
 STAGED = STAGE / "installer.py"
 LEDGER = Path("/etc/jason-owner-release/pmv4-stage-a0-root-source-closure-ledger")
 JOURNAL = RELEASE / "protected-transitions/pmv4-a0-root-source-closure-bootstrap-7b42.json"
 FILES = {
     "/usr/local/lib/jason/pmv4_stage_a0_root_source_closure.py":
-        ("pmv4-a0-root-source-closure-7b42.py", "1006edb6613f3ff976fadf64c25d8e6096dfef6b2296e4583ba51ee81ee4c4f6", 16909, 0o444),
+        ("pmv4-a0-root-source-closure-8c20.py", "69a7fa57916290295f3f085f35a0fafa67c51110e2ce8dcc2b1b886ca5ed0e4d", 16909, 0o444),
     "/etc/jason-owner-release/pmv4-stage-a0-root-source-closure.json":
-        ("pmv4-a0-root-source-closure-policy-7b42.json", "7cd1ef65c9bcf8c6442a191348ac187c05c421ed8576998b61b7427d08a5da32", 1206, 0o400),
+        ("pmv4-a0-root-source-closure-policy-8c20.json", "1af604a3e8b9459dfda7e5c617126378a3c58bc77f6a1819a6389eb8c1ff5079", 1206, 0o400),
 }
 
 

@@ -27,24 +27,24 @@ import subprocess
 import sys
 from typing import Any, Mapping
 
-CANDIDATE = "7b42ce983896711525de4c7955bf9fc43ac003d0"
+CANDIDATE = "8c2064193d74cc41b52369681febbc0a74fa96f7"
 LKG = "d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 FREEZE_SHA = "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 HOLD_SHA = "11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0"
 RUNTIME_IMAGE = "sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132"
 MCP_IMAGE = "sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477"
-REVIEW = "f5f525e33e4cad46827018e23ea7ae8f72603459dcd740bfbf63f9a176cfa52a"
-NATIVE_SCOPE = "6786baad0fc9d07aca6ba80dedad5c25bcfa7fb3e50fdde7c4d36ad067285eac"
-NATIVE_MANIFEST = "addba768d1ab92d9507d466fdd3980b93ea2041f42901f5d6e5a2cde81dcb025"
+REVIEW = "a4eab5848bd7aa17b88c4e305e1caed7456186d2a35bfe0e68a34f56acf1b92e"
+NATIVE_SCOPE = "509e2a39d323009a55af2e5244214fae3e8e14c910a5c4ece4b3da73a0fa0ae3"
+NATIVE_MANIFEST = "bd18226b5f82e276e2f7cc1229c7d0046c99401c4bf4a0753de7ec2b13f237f0"
 SOURCE_MISSING_SHA = "ca844feeb43aa624fb1a965571bfb30f554e24662b2837bb2efa8bfddbdfb5db"
 STEPS = (
     ("pmv4.stage-a0.root-source-helper.bootstrap",
      "root-source-closure-helper",
-     "e5515b5e0d5243c5e18c3118fcc0c39580535c7e0da31525390c141e1aa298cb",
-     "25e68eaee841791b5b857d59eef543691225ff9ea7d38fc9477eff69957e4564"),
+     "9e36a199cda7a176e893a17fdfeeedfb3782dce3f705886e29deed5867bf2837",
+     "a4ea1463435fdeff50c9ae2e2322b899a22987f3fcac6b313f220834d01138f3"),
     ("pmv4.stage-a0.immutable-root-source-onefile",
      "exact-one-missing-root-blob",
-     "089f8706b61b70c9f31406204bb27fab0bde47bc8df56f13a274defb8b537381",
+     "4f36e1eee0d5051484aeaadc77877525274faf880c9638b8e5ffe56eddc78a42",
      SOURCE_MISSING_SHA),
     ("pmv4.stage-a0.native-empty-baseline-install",
      "independent-stage-a0-native",
@@ -54,12 +54,12 @@ RELEASE = Path("/var/lib/jason/openclaw/release-manager")
 LOCK = RELEASE / "production-transaction.lock"
 FREEZE = RELEASE / "production-deployment-freeze"
 HOLD = RELEASE / "auto-promotion-incident-hold"
-JOURNAL = RELEASE / "protected-transitions/pmv4-a0-exact-one-release-v1-7b42.jsonl"
-STAGE = Path("/run/jason-pmv4-a0-atomic-v1-7b42")
+JOURNAL = RELEASE / "protected-transitions/pmv4-a0-exact-one-release-v1-8c20.jsonl"
+STAGE = Path("/run/jason-pmv4-a0-atomic-v1-8c20")
 THIS = STAGE / "installer.py"
 BOOT = STAGE / "bootstrap.py"
 POLICY = STAGE / "policy.json"
-PROOF = Path("/srv/jason/archive/pmv4-a0-atomic-v1-OWNER-PROOF-7b42.json")
+PROOF = Path("/srv/jason/archive/pmv4-a0-atomic-v1-OWNER-PROOF-8c20.json")
 SOURCE = Path("/opt/jason/releases") / CANDIDATE
 MISSING_FILE = SOURCE / "tools/pmv4_host_install_contract.py"
 ROOT_HELPER = Path("/usr/local/lib/jason/pmv4_stage_a0_root_source_closure.py")
@@ -70,9 +70,9 @@ SPARSE_SHA = "b3880288e24a44de2c461c474dd2bf86d44b8b57ad0c5ba1720d1c5aedecf606"
 VERIFIER = Path("/usr/local/lib/jason/owner_signed_release.py")
 VERIFIER_SHA = "f50eea90102d9a1de82b3753ec8d0cd225280d385ac7a658ae2c2a303934a0e3"
 ROOT_PIN = Path("/etc/jason-owner-release/verified-owner-public-key.json")
-BOOT_SHA = "3790bf79d4a302fe572055c3936ba28b8935ea9e1dc1a833b6b8acc9ed62878b"
-ROOT_HELPER_SHA = "1006edb6613f3ff976fadf64c25d8e6096dfef6b2296e4583ba51ee81ee4c4f6"
-ROOT_HELPER_POLICY_SHA = "7cd1ef65c9bcf8c6442a191348ac187c05c421ed8576998b61b7427d08a5da32"
+BOOT_SHA = "da5c2743caa01946548a1399f188010e55c2c4cf743d3dafe7e314d25633c794"
+ROOT_HELPER_SHA = "69a7fa57916290295f3f085f35a0fafa67c51110e2ce8dcc2b1b886ca5ed0e4d"
+ROOT_HELPER_POLICY_SHA = "1af604a3e8b9459dfda7e5c617126378a3c58bc77f6a1819a6389eb8c1ff5079"
 SOURCE_ROOT = Path("/usr/local/lib/jason/pmv4_stage_a0_sparse_source.py")
 ROOT_CI = Path("/usr/local/lib/jason/pmv4_shadow_ci.py")
 LIVE_GIT = Path("/home/al/.local/lib/jason/engineering-source-repo")
@@ -490,7 +490,7 @@ def read_root_preflight() -> dict[str,Any]:
     original=source.source_manifest(CANDIDATE,blob,
         freeze_sha256=FREEZE_SHA,current_lkg=LKG)
     need(original.get("scope_sha256")==
-         "09e35bf812c3bedd61991af669ea9a80b0a0ff5948b1d1a6edb1d70c3332c27f"
+         "00bbf9884a1f724886be50d100a6aec2f3dfece6ec18177ca39d18768c6248e1"
          and len(original["files"])==13,
          "A0_ATOMIC_ORIGINAL_THIRTEEN_SOURCE_SCOPE_CHANGED")
     stage.verify_staged_source(SOURCE,original)
@@ -764,7 +764,7 @@ def build_recovery_context() -> dict[str,Any]:
     original=source.source_manifest(
         CANDIDATE,blob,freeze_sha256=FREEZE_SHA,current_lkg=LKG)
     need(original.get("scope_sha256")==
-         "09e35bf812c3bedd61991af669ea9a80b0a0ff5948b1d1a6edb1d70c3332c27f"
+         "00bbf9884a1f724886be50d100a6aec2f3dfece6ec18177ca39d18768c6248e1"
          and len(original["files"])==13,
          "A0_ATOMIC_RECOVERY_SOURCE_CHANGED")
     return {"policy":p,"bootstrap":boot,
