@@ -20,7 +20,10 @@ def test_one_owner_prompt_after_root_only_preflight_no_human_before_it():
     assert script.count('"$OWNER" --verify-proof')==1
     assert script.count('"$STAGED" --preflight')==1
     assert script.count('"$STAGED" --execute')==1
-    assert script.count('"$STAGED" --recover')==1
+    # Recovery is allowed in TWO failure windows: failed execute before
+    # commit, and failed independent postflight after commit. Neither case
+    # requires a second human Owner consent or signs a new release.
+    assert script.count('"$STAGED" --recover')==2
     assert script.count('"$STAGED" --postflight')==1
     assert script.index('"$STAGED" --preflight')<script.index('"$OWNER" --authorize')
     assert script.index('"$OWNER" --authorize')<script.index('"$STAGED" --execute')

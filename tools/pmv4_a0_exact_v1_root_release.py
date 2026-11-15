@@ -340,12 +340,15 @@ def validate_sequence(rows: list[dict[str,Any]]) -> None:
     reverting=False
     rolled=set()
     terminal=False
+    committed=False
     for index,row in enumerate(rows):
         action,step=row["action"],row["step"]
         if index==0:
             need(action=="begin" and step==-1,"A0_ATOMIC_BEGIN_CHANGED")
             continue
         need(not terminal,"A0_ATOMIC_EVENT_AFTER_COMPLETION")
+        if committed and action != "rollback_begin":
+            raise AtomicRootDenied("A0_ATOMIC_COMMITTED_ALLOWS_ONLY_EXACT_ROLLBACK")
         if action=="intent":
             need(not reverting and pending is None
                  and type(step) is int and step==len(done) and step<3,
@@ -360,11 +363,12 @@ def validate_sequence(rows: list[dict[str,Any]]) -> None:
             need(not reverting and step==-1 and pending is None
                  and done=={0,1,2},
                  "A0_ATOMIC_PARTIAL_COMMIT_DENIED")
-            terminal=True
+            committed=True
         elif action=="rollback_begin":
             need(not reverting and step==-1,
                  "A0_ATOMIC_INVALID_REVERSE_START")
             reverting=True
+            committed=False
         elif action=="rollback_verified":
             need(reverting and type(step) is int
                  and step in (done|({pending} if pending is not None else set()))
@@ -395,7 +399,8 @@ def audit_append(action: str,step: int,evidence: Mapping[str,Any],
         need(action=="begin" and step==-1,
              "A0_ATOMIC_AUDIT_REQUIRES_BEGIN")
     else:
-        need(rows[-1]["action"] not in {"committed","rolled_back","requires_review"},
+        need((rows[-1]["action"] not in {"rolled_back","requires_review"}
+              and (rows[-1]["action"]!="committed" or action=="rollback_begin")),
              "A0_ATOMIC_ALREADY_FINAL")
     row={
         "version":1,"seq":len(rows)+1,"step":step,"action":action,
@@ -743,13 +748,17 @@ def build_recovery_context() -> dict[str,Any]:
     p=reviewed_policy(require_root=True)
     boot=load_trusted(BOOT,"a0_atomic_recovery_boot",BOOT_SHA)
     boot.validate_plan()
-    initial=boot.readback()
+    # Rollback must remain available even if a newly introduced health
+    # failure OPENED the breaker or stopped the MCP. Never demand a PASSING
+    # production health status as a precondition to undo exact own objects.
+    # Exact source, independently signed Owner proof, root inode readback,
+    # unchanged freeze/hold and LKG still remain mandatory.
+    need(sha(FREEZE.read_bytes())==FREEZE_SHA
+         and sha(HOLD.read_bytes())==HOLD_SHA
+         and Path("/opt/jason/current").resolve(strict=True).name==LKG,
+         "A0_ATOMIC_RECOVERY_SOURCE_OR_CONTROL_DRIFT")
     stage=load_trusted(SPARSE_STAGE,"a0_atomic_recovery_stage",SPARSE_SHA)
     sparse=stage.trusted_policy()
-    protected=stage.protected_preflight(sparse)
-    need(protected["runtime_id"]==initial["runtime_id"]
-         and protected["mcp_id"]==initial["mcp_id"],
-         "A0_ATOMIC_RECOVERY_PRODUCTION_DRIFT")
     source=stage._load_trusted(SOURCE_ROOT,"a0_atomic_recovery_sparse_source")
     blob=source.git_object(stage.REPO)
     original=source.source_manifest(
@@ -758,7 +767,7 @@ def build_recovery_context() -> dict[str,Any]:
          "09e35bf812c3bedd61991af669ea9a80b0a0ff5948b1d1a6edb1d70c3332c27f"
          and len(original["files"])==13,
          "A0_ATOMIC_RECOVERY_SOURCE_CHANGED")
-    return {"policy":p,"bootstrap":boot,"baseline":initial,
+    return {"policy":p,"bootstrap":boot,
             "stage":stage,"sparse":sparse,"source":source,"original":original}
 
 
@@ -827,6 +836,9 @@ def execute() -> None:
             need(ctx["stage"].protected_preflight(ctx["sparse"])["runtime_id"]==
                  ctx["baseline"]["runtime_id"],
                  "A0_ATOMIC_POSTFLIGHT_RUNTIME_CHANGED")
+            # Full separate root readback before committed: no success from
+            # individual file creation, empty native shadow, or green CI only.
+            verify_all_stage_postflights(proof)
             audit_append("committed",-1,{
                 "all_three_postflights":True,
                 "candidate_sha":CANDIDATE,
@@ -849,9 +861,8 @@ def recover() -> None:
             print("A0_ONE_OWNER_RECOVERY=ALREADY_VERIFIED_EMPTY_NO_REPEAT")
             print("NEW_OWNER_APPROVAL_REQUIRED=false")
             return
-        need(bool(rows) and rows[-1]["action"] not in {
-            "committed","requires_review"},
-            "A0_ATOMIC_NO_RECOVERABLE_TRANSACTION")
+        need(bool(rows) and rows[-1]["action"]!="requires_review",
+             "A0_ATOMIC_NO_RECOVERABLE_TRANSACTION")
         # A previously authenticated Owner release is an immutable source
         # for *rollback only*, even if its 15-minute execution TTL elapsed.
         # This cannot cause a forward action or mint new approval.
@@ -861,9 +872,61 @@ def recover() -> None:
         need(rows[0]["owner_approval_id"]==proof["approval_id"]
              and rows[0]["signed_release_sha256"]==proof["proof_sha256"],
              "A0_ATOMIC_RECOVERY_DIFFERENT_PROOF")
+        if rows[-1]["action"]=="committed":
+            # Only a demonstrably FAILED final full native postflight may
+            # reverse a signed committed release. This is corrective rollback,
+            # never replay or a forward retry. Do not let a technician roll
+            # back a healthy A0 release with unverified chat instructions.
+            try:
+                verify_all_stage_postflights(proof)
+            except Exception:
+                print("A0_ATOMIC_COMMITTED_POSTFLIGHT_FAILED_EXACT_ROLLBACK",flush=True)
+            else:
+                raise AtomicRootDenied("A0_ATOMIC_HEALTHY_COMMITTED_RELEASE_NOT_RECOVERABLE")
         result=revert_all(build_recovery_context(),proof,rows=rows)
         print("A0_ONE_OWNER_RECOVERY="+result["status"])
         print("NEW_OWNER_APPROVAL_REQUIRED=false")
+
+
+def verify_all_stage_postflights(proof:Mapping[str,str]) -> None:
+    """Full exact root source, native A0, Ticket Core, health under lock.
+
+    Called BEFORE atomic commit as well as after completion. A failed
+    final verification during release is rolled back while the one-use
+    signed original Owner proof and existing native lock remain held.
+    """
+    bootstrap=load_trusted(BOOT,"a0_atomic_post_bootstrap",BOOT_SHA)
+    _,blobs=bootstrap.validate_plan()
+    bootstrap.verify_targets(blobs)
+    stage=load_trusted(SPARSE_STAGE,"a0_atomic_post_stage",SPARSE_SHA)
+    sparse=stage.trusted_policy()
+    closure=load_trusted(ROOT_HELPER,"a0_atomic_post_source",ROOT_HELPER_SHA)
+    policy=closure.trusted_policy(stage)
+    source=stage._load_trusted(SOURCE_ROOT,"a0_atomic_post_source_manifest")
+    _,after,_=closure.exact_source_scopes(source,stage,policy)
+    stage.verify_staged_source(SOURCE,after)
+    ctx={"stage":stage,"sparse":sparse,"source":source}
+    packet,native,scope,manifest=load_native_exact_source(ctx,after)
+    engine=native.NativeStageAInstaller(production=True,owner_metadata=True,
+        root_health=native.production_root_health_readback)
+    engine._verify_objects(scope,partial=False)
+    bound=engine._events(engine._journal(CANDIDATE))
+    need(bound and bound[-1]["event"]=="verified_installed"
+         and bound[-1]["owner_approval_id"]==proof["approval_id"]
+         and bound[-1]["signed_proof_sha256"]==proof["proof_sha256"],
+         "A0_ATOMIC_NATIVE_COMPLETE_AUDIT_DRIFT")
+    bootstrap.readback()
+    stage.protected_preflight(sparse)
+    guard=packet.IndependentHostGuard()
+    need(guard.protected_release_status().get("ready") is True
+         and all(guard.core_health_evidence().get(k) is True
+                 for k in ("runtime_healthy","mcp_running","worker_scan_fresh")),
+         "A0_ATOMIC_FINAL_TICKET_WORKER_NOT_READY")
+    verify_full_integrity()
+    need(sha(FREEZE.read_bytes())==FREEZE_SHA
+         and sha(HOLD.read_bytes())==HOLD_SHA
+         and Path("/opt/jason/current").resolve(strict=True).name==LKG,
+         "A0_ATOMIC_FINAL_PRODUCTION_FROZEN_CONTROLS_CHANGED")
 
 
 def postflight() -> None:
@@ -876,34 +939,7 @@ def postflight() -> None:
         need(rows[0]["owner_approval_id"]==proof["approval_id"]
              and rows[0]["signed_release_sha256"]==proof["proof_sha256"],
              "A0_ATOMIC_FINAL_PROOF_MISMATCH")
-        bootstrap=load_trusted(BOOT,"a0_atomic_post_bootstrap",BOOT_SHA)
-        _,blobs=bootstrap.validate_plan()
-        bootstrap.verify_targets(blobs)
-        stage=load_trusted(SPARSE_STAGE,"a0_atomic_post_stage",SPARSE_SHA)
-        sparse=stage.trusted_policy()
-        closure=load_trusted(ROOT_HELPER,"a0_atomic_post_source",ROOT_HELPER_SHA)
-        policy=closure.trusted_policy(stage)
-        source=stage._load_trusted(SOURCE_ROOT,"a0_atomic_post_source_manifest")
-        _,after,_=closure.exact_source_scopes(source,stage,policy)
-        stage.verify_staged_source(SOURCE,after)
-        ctx={"stage":stage,"sparse":sparse,"source":source}
-        packet,native,scope,manifest=load_native_exact_source(ctx,after)
-        engine=native.NativeStageAInstaller(production=True,owner_metadata=True,
-            root_health=native.production_root_health_readback)
-        engine._verify_objects(scope,partial=False)
-        bound=engine._events(engine._journal(CANDIDATE))
-        need(bound and bound[-1]["event"]=="verified_installed"
-             and bound[-1]["owner_approval_id"]==proof["approval_id"]
-             and bound[-1]["signed_proof_sha256"]==proof["proof_sha256"],
-             "A0_ATOMIC_NATIVE_COMPLETE_AUDIT_DRIFT")
-        bootstrap.readback()
-        stage.protected_preflight(sparse)
-        guard=packet.IndependentHostGuard()
-        need(guard.protected_release_status().get("ready") is True
-             and all(guard.core_health_evidence().get(k) is True
-                     for k in ("runtime_healthy","mcp_running","worker_scan_fresh")),
-             "A0_ATOMIC_FINAL_TICKET_WORKER_NOT_READY")
-        verify_full_integrity()
+        verify_all_stage_postflights(proof)
         print("A0_ATOMIC_FULL_POSTFLIGHT=PASS")
         print("ONE_SIGNED_OWNER_RELEASE=VERIFIED")
         print("GLOBAL_PRODUCTION_FREEZE_AND_PROMOTION_HOLD=UNCHANGED")

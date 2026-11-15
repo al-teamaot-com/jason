@@ -19,10 +19,10 @@ STAGE="/run/jason-pmv4-a0-atomic-v1-7b42"
 STAGED="$STAGE/installer.py"
 STAGED_BOOT="$STAGE/bootstrap.py"
 STAGED_POLICY="$STAGE/policy.json"
-ROOT_SHA="fc6d88932a168e9b613d2adf229be1cc6524a16d41243ae0b2538797477073bd"
+ROOT_SHA="a72b0b17a5accd9f70835399caa8f2bc4fc803453945cb9d41fed01f5a087ba2"
 BOOT_SHA="3790bf79d4a302fe572055c3936ba28b8935ea9e1dc1a833b6b8acc9ed62878b"
 OWNER_SHA="1b5e8612c774359e060f7b8f6618ef0479b7f42f4a0eb012f5ecff71dd71b3e1"
-POLICY_SHA="717b9b1c2734451681b2a80441fe3d4dad7223153c106ef312861c48e9740790"
+POLICY_SHA="f95507fabb0084ed1cf3a31e4dbcba7076a73929da3fde8cf5cc36c162132cda"
 SOURCE="7b42ce983896711525de4c7955bf9fc43ac003d0"
 LKG="d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 FREEZE="/var/lib/jason/openclaw/release-manager/production-deployment-freeze"
@@ -93,7 +93,12 @@ if ! sudo /usr/bin/python3 -I -B "$STAGED" --execute; then
     echo "A0_ATOMIC_RECOVERY_REQUIRES_PRIVILEGED_REVIEW; stage retained" >&2
   exit 2
 fi
-sudo /usr/bin/python3 -I -B "$STAGED" --postflight
+if ! sudo /usr/bin/python3 -I -B "$STAGED" --postflight; then
+  echo "A0_POSTCOMMIT_POSTFLIGHT_FAILED; original Owner rollback only" >&2
+  sudo /usr/bin/python3 -I -B "$STAGED" --recover ||
+    echo "A0_ROLLBACK_REQUIRES_REVIEW; root stage retained" >&2
+  exit 2
+fi
 check_hash "$FREEZE_SHA" "$FREEZE"
 check_hash "$HOLD_SHA" "$HOLD"
 [[ "$(readlink -f /opt/jason/current)" == "/opt/jason/releases/$LKG" ]] ||

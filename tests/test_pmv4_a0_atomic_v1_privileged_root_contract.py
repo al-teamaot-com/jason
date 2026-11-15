@@ -233,3 +233,57 @@ def test_actual_native_root_substep_retains_protected_breaker_and_ticket_checks(
         assert "prepared" in actions
         assert "verified_installed" not in actions
     assert "create-native" in actions and "native-lock-verified" in actions
+
+@pytest.mark.parametrize("detected_failure",[False,True])
+def test_exact_original_owner_proof_committed_rollback_only_on_failed_postflight(
+    root_audit,monkeypatch,detected_failure,
+):
+    from contextlib import nullcontext
+    proof=root_audit
+    root.audit_append("begin",-1,{"reviewed":True},proof)
+    for i in range(3):
+        root.audit_append("intent",i,{"scope_sha256":root.STEPS[i][2]},proof)
+        root.audit_append("installed",i,{"source_verified":True},proof)
+    root.audit_append("committed",-1,{"all_three_pass":True},proof)
+    calls=[]
+    monkeypatch.setattr(root,"trusted_entry",lambda:{"policy":"reviewed"})
+    monkeypatch.setattr(root,"root_release_lock",lambda:nullcontext())
+    monkeypatch.setattr(root,"read_one_user_proof",lambda:{
+        "signed_owner_proof":{"payload":{"issued_at":"2026-11-15T10:00:00+00:00"}}
+    })
+    monkeypatch.setattr(root,"verify_proof",lambda p,at:dict(proof))
+    monkeypatch.setattr(root,"build_recovery_context",lambda:{})
+    monkeypatch.setattr(root,"recover_native_if_present",lambda c,p:calls.append(2))
+    monkeypatch.setattr(root,"recover_source_if_present",lambda c:calls.append(1))
+    monkeypatch.setattr(root,"recover_bootstrap_if_present",lambda c:calls.append(0))
+    if detected_failure:
+        def unhealthy(p):
+            raise root.AtomicRootDenied("independently observed postcommit unhealthy")
+        monkeypatch.setattr(root,"verify_all_stage_postflights",unhealthy)
+        root.recover()
+        assert calls==[2,1,0]
+        assert root.audit_rows()[-1]["action"]=="rolled_back"
+        root.recover() # already rolled-back original receipt is idempotent
+    else:
+        monkeypatch.setattr(root,"verify_all_stage_postflights",lambda p:None)
+        with pytest.raises(root.AtomicRootDenied,match="HEALTHY_COMMITTED_RELEASE"):
+            root.recover()
+        assert calls==[]
+        assert root.audit_rows()[-1]["action"]=="committed"
+
+
+def test_root_late_commit_audit_cannot_reopen_for_new_stage(root_audit):
+    proof=root_audit
+    root.audit_append("begin",-1,{},proof)
+    for i in range(3):
+        root.audit_append("intent",i,{},proof)
+        root.audit_append("installed",i,{},proof)
+    root.audit_append("committed",-1,{},proof)
+    with pytest.raises(root.AtomicRootDenied,match="ALREADY_FINAL"):
+        root.audit_append("intent",0,{},proof)
+    root.audit_append("rollback_begin",-1,{"failed_final_postflight":True},proof)
+    for i in (2,1,0):
+        root.audit_append("rollback_verified",i,{"exact_owned_inode_absent":True},proof)
+    root.audit_append("rolled_back",-1,{"full_previous_baseline":True},proof)
+    with pytest.raises(root.AtomicRootDenied,match="ALREADY_FINAL"):
+        root.audit_append("rollback_begin",-1,{},proof)

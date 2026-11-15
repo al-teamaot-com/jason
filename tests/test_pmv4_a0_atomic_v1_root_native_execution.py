@@ -44,6 +44,22 @@ def root_native(real_three,monkeypatch,tmp_path):
     monkeypatch.setattr(root,"JOURNAL",own/"root-protected-transaction.jsonl")
     a=make_adapter()
     a.outer_lock_held=True
+    # The *production* final check is root-pinned and separately covered by
+    # source/native guard tests. In isolated /tmp UID0 acceptance, require
+    # all THREE original native effects, signed ID, original frozen source,
+    # and exact native receipt before the one-release commit.
+    def verify_disposable_final_all(proof):
+        assert proof["approval_id"]==signed["payload"]["approval_id"]
+        assert all(a.verify_installed(i) for i in range(3))
+        assert a.freeze.read_bytes()==__import__(
+            "test_pmv4_a0_atomic_actual_root_components",
+            fromlist=["FREEZE_BYTES"]
+        ).FREEZE_BYTES
+        assert a.hold.read_bytes()==__import__(
+            "test_pmv4_a0_atomic_actual_root_components",
+            fromlist=["HOLD_BYTES"]
+        ).HOLD_BYTES
+    monkeypatch.setattr(root,"verify_all_stage_postflights",verify_disposable_final_all)
     lock=a.old_lock
     os.chown(lock,1000,1000)
     lock.chmod(0o664)
@@ -154,6 +170,23 @@ def test_root_native_failure_preserves_foreign_replacement(root_native):
             root.execute()
         assert a.exact_file.read_bytes()==b"foreign"
         assert root.audit_rows()[-1]["action"]=="requires_review"
+        assert len(env["consents"])==1
+    finally:
+        a.close()
+
+
+def test_actual_all_three_root_actions_final_postflight_failure_rollback(
+    root_native,monkeypatch,
+):
+    env,a,signed,private=root_native
+    def late_failure(proof):
+        raise root.AtomicRootDenied("final native/ticket health failed before commit")
+    monkeypatch.setattr(root,"verify_all_stage_postflights",late_failure)
+    try:
+        with pytest.raises(root.AtomicRootDenied,match="before commit"):
+            root.execute()
+        assert root.audit_rows()[-1]["action"]=="rolled_back"
+        assert all(a.verify_absent(i) for i in range(3))
         assert len(env["consents"])==1
     finally:
         a.close()
