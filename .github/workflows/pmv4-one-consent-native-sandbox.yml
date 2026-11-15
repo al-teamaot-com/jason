@@ -12,6 +12,11 @@ on:
       - tests/test_pmv4_bounded_plan_native_journal_recovery.py
       - tests/test_pmv4_current_grant_attestation.py
       - tests/test_pmv4_mixed_step_rollback_scope.py
+      - tests/test_pmv4_bounded_owner_mcp_bridge.py
+      - implementation/mcp_service/src/jason_mcp/pmv4_bounded_owner_bridge.py
+      - config/pmv4-stage-a0/one-owner-recovery-review-20261115.json
+      - tools/pmv4_stage_a0_one_owner_review.py
+      - tests/test_pmv4_stage_a0_one_owner_review.py
       - docs/operations/PMv4-Single-Owner-Approval-Per-Objective-20261114.md
       - .github/workflows/pmv4-one-consent-native-sandbox.yml
   workflow_dispatch:
@@ -37,9 +42,13 @@ jobs:
             tests/test_pmv4_bounded_plan_native_journal_recovery.py \
             tests/test_pmv4_current_grant_attestation.py \
             tests/test_pmv4_mixed_step_rollback_scope.py \
+            tests/test_pmv4_bounded_owner_mcp_bridge.py \
+            tests/test_pmv4_stage_a0_one_owner_review.py \
             tests/test_pmv4_stage_a_native_install.py \
             tests/test_pmv4_stage_a_bounded_plan_preflight.py \
             tests/test_pmv4_owner_objective_end_to_end.py
+      - name: Verify exact three-stage source and no apply capability
+        run: PYTHONPATH=implementation:. python tools/pmv4_stage_a0_one_owner_review.py --check-only
       - name: Real disposable UID0 native test paths, never production release
         run: |
           sudo env PYTHONPATH=implementation:. "$(which python)" -m pytest -q \
@@ -47,6 +56,8 @@ jobs:
             tests/test_pmv4_bounded_plan_native_journal_recovery.py \
             tests/test_pmv4_current_grant_attestation.py \
             tests/test_pmv4_mixed_step_rollback_scope.py \
+            tests/test_pmv4_bounded_owner_mcp_bridge.py \
+            tests/test_pmv4_stage_a0_one_owner_review.py \
             tests/test_pmv4_stage_a_native_install.py
       - name: Verify immutable source-only production denial
         run: |
@@ -55,4 +66,6 @@ jobs:
             tests/test_pmv4_bounded_plan_native_journal_recovery.py \
             tests/test_pmv4_current_grant_attestation.py \
             tests/test_pmv4_mixed_step_rollback_scope.py \
+            tests/test_pmv4_bounded_owner_mcp_bridge.py \
+            tests/test_pmv4_stage_a0_one_owner_review.py \
             -k production_plan_path_denied

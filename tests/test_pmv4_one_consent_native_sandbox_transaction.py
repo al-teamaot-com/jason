@@ -27,6 +27,10 @@ from test_pmv4_owner_objective_end_to_end import (
     AT, APPROVAL_ID, enrolled, enroll, observed,
 )
 from test_pmv4_stage_a_native_install import rig as native_rig
+from implementation.mcp_service.src.jason_mcp.pmv4_bounded_owner_bridge import (
+    authorize_one_bounded_objective_from_mcp,
+)
+from kernel.signed_owner_release import OWNER_PRINCIPAL
 
 
 @pytest.fixture
@@ -51,7 +55,22 @@ def plan_install(enrolled, native_rig, tmp_path):
         actions=env["objective"].actions[:3] + (scoped,),
     )
     env["objective"] = objective
-    parent = enroll(env)
+    # The ONE human action crosses the actual MCP identity binding before
+    # native plan claims are derived. No synthetic per-step Owner approvals.
+    issued = authorize_one_bounded_objective_from_mcp(
+        bearer_token=env["token"],
+        verified_owner_principal=OWNER_PRINCIPAL,
+        verified_organization="aot",
+        verify_entra_bearer=env["verifier"],
+        exact_owner_consent=lambda displayed: env["consents"].append(displayed) or True,
+        protected_main_check=lambda sha: sha == objective.candidate_sha,
+        objective=objective, ledger=env["ledger"],
+        signing_key=env["owner_key"], approval_id=APPROVAL_ID,
+        affirmative_decision="approve_exact_one_pmv4_objective",
+        at=AT,
+    )
+    assert issued["production_authorized"] is False
+    parent = issued["signed_parent"]
     plan_dir = tmp_path / "sealed-plan-sandbox"
     plan_dir.mkdir(mode=0o700)
     plan_journal = BoundedPlanJournal(
