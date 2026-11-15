@@ -1,0 +1,44 @@
+name: PMv4 One Consent Native Transaction (sandbox only)
+on:
+  pull_request:
+    paths:
+      - tools/pmv4_stage_a_native_install.py
+      - tools/pmv4_stage_a_bounded_plan_preflight.py
+      - implementation/kernel/pmv4_plan_child_proof.py
+      - implementation/orchestrator/pmv4_objective_scope.py
+      - tests/test_pmv4_one_consent_native_sandbox_transaction.py
+      - docs/operations/PMv4-Single-Owner-Approval-Per-Objective-20261114.md
+      - .github/workflows/pmv4-one-consent-native-sandbox.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  one-consent-native-transaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated cryptographic test dependencies
+        run: python -m pip install pytest cryptography PyJWT requests
+      - name: One signed Owner decision into actual native sandbox create and rollback
+        run: |
+          PYTHONPATH=implementation:. python -m pytest -q \
+            tests/test_pmv4_one_consent_native_sandbox_transaction.py \
+            tests/test_pmv4_stage_a_native_install.py \
+            tests/test_pmv4_stage_a_bounded_plan_preflight.py \
+            tests/test_pmv4_owner_objective_end_to_end.py
+      - name: Real disposable UID0 native test paths, never production release
+        run: |
+          sudo env PYTHONPATH=implementation:. "$(which python)" -m pytest -q \
+            tests/test_pmv4_one_consent_native_sandbox_transaction.py \
+            tests/test_pmv4_stage_a_native_install.py
+      - name: Verify immutable source-only production denial
+        run: |
+          PYTHONPATH=implementation:. python -m pytest -q \
+            tests/test_pmv4_one_consent_native_sandbox_transaction.py \
+            -k production_plan_path_denied

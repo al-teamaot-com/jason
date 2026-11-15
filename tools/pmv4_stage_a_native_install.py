@@ -375,8 +375,18 @@ class NativeStageAInstaller:
         freeze_path: Path, ci_check: Callable[[str], bool],
         approval_public_key: Any = None,
         after_step: Callable[[str], None] | None = None,
+        bounded_plan_evidence: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """One bounded exact transaction, never public ungoverned apply."""
+        """One bounded exact transaction, never public ungoverned apply.
+
+        The separately tested schema-v2 plan bridge may exercise this SAME
+        actual create/journal/recovery engine only inside disposable sandbox.
+        Production must still use the installed legacy v1 exact Owner proof
+        until an independently reviewed root-owned plan consumer is released.
+        No caller can toggle this flag to gain production authority.
+        """
+        if bounded_plan_evidence is not None and self.production:
+            raise StageANativeDenied("STAGE_A_PLAN_ROOT_POLICY_NOT_DEPLOYED")
         if self.production and approval_public_key is not None:
             raise StageANativeDenied("STAGE_A_UNPINNED_PUBLIC_KEY_DENIED")
         if self.production and (self.root_health is None
@@ -388,15 +398,54 @@ class NativeStageAInstaller:
         with self._legacy_lock():
             self._assert_parents()
             observed_health = dict(self.root_health())
-            proof = admission.verify_admission(
-                repo=repo, candidate_sha=candidate_sha,
-                reviewed_scope=scope, exact_manifest=manifest,
-                signed_owner_proof=signed_proof, frozen_marker=freeze_path,
-                confirmed_root_health=observed_health,
-                protected_main_ci_check=ci_check,
-                at=self.at or datetime.now(timezone.utc),
-                production=self.production, test_public_key=approval_public_key,
-            )
+            if bounded_plan_evidence is None:
+                proof = admission.verify_admission(
+                    repo=repo, candidate_sha=candidate_sha,
+                    reviewed_scope=scope, exact_manifest=manifest,
+                    signed_owner_proof=signed_proof, frozen_marker=freeze_path,
+                    confirmed_root_health=observed_health,
+                    protected_main_ci_check=ci_check,
+                    at=self.at or datetime.now(timezone.utc),
+                    production=self.production, test_public_key=approval_public_key,
+                )
+            else:
+                # Test only: no alternate root/trust signer, no alternate
+                # release mutation method. Reuse the actual native journal,
+                # full exact-scope checks, root lock and rollback acceptance.
+                from tools.pmv4_stage_a_bounded_plan_preflight import (
+                    verify_bounded_plan_stage_a0_readonly,
+                )
+                fields = {
+                    "objective", "action_index", "signed_parent", "ledger",
+                    "pinned_public_key", "verified_prior_steps",
+                    "consumed_step_claims", "hold_path",
+                }
+                if (set(bounded_plan_evidence) != fields
+                        or not isinstance(signed_proof, Mapping)
+                        or approval_public_key is not None):
+                    raise StageANativeDenied("STAGE_A_PLAN_EVIDENCE_NOT_EXACT")
+                verified = verify_bounded_plan_stage_a0_readonly(
+                    repo=repo, candidate_sha=candidate_sha,
+                    scope=scope, exact_manifest=manifest,
+                    objective=bounded_plan_evidence["objective"],
+                    action_index=bounded_plan_evidence["action_index"],
+                    signed_parent=bounded_plan_evidence["signed_parent"],
+                    signed_step=signed_proof,
+                    owner_plan_ledger=bounded_plan_evidence["ledger"],
+                    pinned_public_key=bounded_plan_evidence["pinned_public_key"],
+                    freeze_path=freeze_path,
+                    hold_path=bounded_plan_evidence["hold_path"],
+                    native_root_health=observed_health,
+                    verified_prior_steps=bounded_plan_evidence["verified_prior_steps"],
+                    consumed_step_claims=bounded_plan_evidence["consumed_step_claims"],
+                    protected_main_ci_check=ci_check,
+                    at=self.at or datetime.now(timezone.utc),
+                    production=False,
+                )
+                proof = {
+                    "owner_approval_id": verified["parent_approval_id"],
+                    "exact_manifest_sha256": _hash(_canonical(manifest)),
+                }
             if scope["candidate_sha"] != candidate_sha:
                 raise StageANativeDenied("STAGE_A_SOURCE_NOT_PINNED")
             journal = self._journal(candidate_sha)
