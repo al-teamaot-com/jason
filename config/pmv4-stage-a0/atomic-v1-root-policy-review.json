@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "action": "pmv4-a0-exact-three-action-one-release-v1",
   "production_apply_supported": false,
-  "root_executor_sha256": "7547979a190b16b5d7caadc3ea7e39c48e52e65484a6d5cc0be0706c0da74a1d",
+  "root_executor_sha256": "fc6d88932a168e9b613d2adf229be1cc6524a16d41243ae0b2538797477073bd",
   "root_bootstrap_sha256": "3790bf79d4a302fe572055c3936ba28b8935ea9e1dc1a833b6b8acc9ed62878b",
   "helper_sha256": "1006edb6613f3ff976fadf64c25d8e6096dfef6b2296e4583ba51ee81ee4c4f6",
   "helper_policy_sha256": "7cd1ef65c9bcf8c6442a191348ac187c05c421ed8576998b61b7427d08a5da32",

@@ -591,8 +591,20 @@ def native_install_under_outer_lock(
     engine._create(SOURCE,scope,journal,binding,None)
     engine._verify_objects(scope,partial=False)
     engine._assert_new_lock(scope)
-    need(sha(FREEZE.read_bytes())==FREEZE_SHA,
-         "A0_ATOMIC_FREEZE_CHANGED_AFTER_NATIVE")
+    need(sha(FREEZE.read_bytes())==FREEZE_SHA
+         and sha(HOLD.read_bytes())==HOLD_SHA,
+         "A0_ATOMIC_FROZEN_CONTROLS_CHANGED_AFTER_NATIVE")
+    # Preserve the ORIGINAL native release fitness checks rather than
+    # calling its install() with a different per-stage human signature.
+    # One root-verified complete-release proof must not waive ticket scanner
+    # freshness, runtime health, MCP service, or protected root breaker.
+    guard=packet.IndependentHostGuard()
+    need(guard.protected_release_status().get("ready") is True,
+         "A0_ATOMIC_POSTINSTALL_ROOT_BREAKER_NOT_READY")
+    core=guard.core_health_evidence()
+    need(all(core.get(k) is True for k in (
+        "runtime_healthy","mcp_running","worker_scan_fresh")),
+         "A0_ATOMIC_POSTINSTALL_TICKET_CORE_DEGRADED")
     engine._append(journal,"verified_installed",binding)
     if engine._new_fd is not None:
         os.close(engine._new_fd)
@@ -886,6 +898,11 @@ def postflight() -> None:
              "A0_ATOMIC_NATIVE_COMPLETE_AUDIT_DRIFT")
         bootstrap.readback()
         stage.protected_preflight(sparse)
+        guard=packet.IndependentHostGuard()
+        need(guard.protected_release_status().get("ready") is True
+             and all(guard.core_health_evidence().get(k) is True
+                     for k in ("runtime_healthy","mcp_running","worker_scan_fresh")),
+             "A0_ATOMIC_FINAL_TICKET_WORKER_NOT_READY")
         verify_full_integrity()
         print("A0_ATOMIC_FULL_POSTFLIGHT=PASS")
         print("ONE_SIGNED_OWNER_RELEASE=VERIFIED")

@@ -10,9 +10,9 @@ The existing Jason v1 Owner signer and root-pinned Ed25519 verifier provide **on
 - Exactly one missing root-owned/0444 immutable Git source file, byte SHA256 ca844feeb43aa624fb1a965571bfb30f554e24662b2837bb2efa8bfddbdfb5db (scope 089f8706b61b70c9f31406204bb27fab0bde47bc8df56f13a274defb8b537381)
 - Native source-pinned Stage A0 empty-baseline install, native scope 6786baad0fc9d07aca6ba80dedad5c25bcfa7fb3e50fdde7c4d36ad067285eac, exact manifest addba768d1ab92d9507d466fdd3980b93ea2041f42901f5d6e5a2cde81dcb025
 
-**One signed full-release scope SHA256:** 5752aaa3f85a59ac4584725c1f6318e6e41750e9843115da74d14f4687759e7a. **One signed full-release manifest SHA256:** 7c6d2b38c56cb9625ae97b75255e7a8590a21fde486c78d6a1dc9d772d50ca4e.
+**One signed full-release scope SHA256:** 2216a40f1d493112a1a3eb6faf87aa570717d94812bb29ad4e095d8779999c4c. **One signed full-release manifest SHA256:** 3635f9d22eb32fd1cb5ca58822fa9d4b5a7b0ec43575c1c34074b08210663831.
 
-**Fixed executable root controller SHA256:** 7547979a190b16b5d7caadc3ea7e39c48e52e65484a6d5cc0be0706c0da74a1d. **Fixed root policy SHA256:** 4e263cb2e6d7518a34bd03a1af731f0cf3d011ff077eb3c23ba0491ccd064e14. **Owner issuer SHA256:** 1b5e8612c774359e060f7b8f6618ef0479b7f42f4a0eb012f5ecff71dd71b3e1. **One Owner-local wrapper SHA256:** aebac8daa1eb202827dfe89852e7a0f1b73633b0aa607c7165d7ac860b10b382.
+**Fixed executable root controller SHA256:** fc6d88932a168e9b613d2adf229be1cc6524a16d41243ae0b2538797477073bd. **Fixed root policy SHA256:** 717b9b1c2734451681b2a80441fe3d4dad7223153c106ef312861c48e9740790. **Owner issuer SHA256:** 1b5e8612c774359e060f7b8f6618ef0479b7f42f4a0eb012f5ecff71dd71b3e1. **One Owner-local wrapper SHA256:** 7dfe20da1b915b1aa0f4de44255c7232a216da5ab78d9abad09fd89ef9afaf13.
 
 Production LKG remains d1b8c196dadd4b672ec8ba47075f27bb61c98d63; candidate immutable source 7b42ce983896711525de4c7955bf9fc43ac003d0. Freeze remains bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f. Promotion hold remains 11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0. Existing Ticket Core/MCP images and current release pointer remain unchanged by this source-only preparation.
 

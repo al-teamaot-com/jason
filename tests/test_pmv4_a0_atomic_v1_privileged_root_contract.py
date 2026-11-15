@@ -181,3 +181,55 @@ def test_no_generic_file_writer_or_machine_command_surface():
     assert len(root.STEPS)==3
     assert "pmv4-a0-exact-three-action-one-release-v1" in script
     assert "A0_ATOMIC_TRUSTED_LOCAL_ROOT_REQUIRED" in script
+
+@pytest.mark.parametrize("bad_gate", ["none", "breaker", "ticket_worker", "mcp"])
+def test_actual_native_root_substep_retains_protected_breaker_and_ticket_checks(
+    monkeypatch, tmp_path, bad_gate,
+):
+    from types import SimpleNamespace
+    from test_pmv4_a0_atomic_actual_root_components import FREEZE_BYTES, HOLD_BYTES
+    frozen=tmp_path/"freeze"; frozen.write_bytes(FREEZE_BYTES)
+    hold=tmp_path/"promotion-hold";hold.write_bytes(HOLD_BYTES)
+    monkeypatch.setattr(root,"FREEZE",frozen)
+    monkeypatch.setattr(root,"HOLD",hold)
+    actions=[]
+    class FakeNative:
+        def __init__(self,**kwargs):
+            assert kwargs["production"] is True and kwargs["owner_metadata"] is True
+            self._new_fd=None
+        def _trusted_journal_parent(self): actions.append("trusted-journal")
+        def _assert_parents(self): actions.append("root-parents")
+        def _journal(self,sha): return tmp_path/"atomic-native-install.jsonl"
+        def _append(self,journal,event,binding): actions.append(event)
+        def _create(self,src,scope,journal,binding,after): actions.append("create-native")
+        def _verify_objects(self,scope,*,partial): actions.append("verified-objects")
+        def _assert_new_lock(self,scope): actions.append("native-lock-verified")
+    state={"runtime_healthy":True,"mcp_running":True,"worker_scan_fresh":True}
+    if bad_gate=="ticket_worker": state["worker_scan_fresh"]=False
+    if bad_gate=="mcp": state["mcp_running"]=False
+    breaker="breaker"!=bad_gate
+    class RootGuard:
+        def protected_release_status(self): return {"ready":breaker}
+        def core_health_evidence(self): return state
+    packet=SimpleNamespace(IndependentHostGuard=RootGuard)
+    native=SimpleNamespace(
+        NativeStageAInstaller=FakeNative,
+        production_root_health_readback=lambda:{
+            "stage_a_empty_baseline_verified":True,
+            "root_only_target_parent_verification_needed":False,
+        },
+    )
+    proof={"approval_id":"owner-mcp-"+"a"*32,
+           "proof_sha256":"c"*64}
+    if bad_gate=="none":
+        result=root.native_install_under_outer_lock(
+            packet,native,{"scope_sha256":root.NATIVE_SCOPE},{},proof)
+        assert result[2]["owner_approval_id"]==proof["approval_id"]
+        assert actions[-1]=="verified_installed"
+    else:
+        with pytest.raises(root.AtomicRootDenied):
+            root.native_install_under_outer_lock(
+                packet,native,{"scope_sha256":root.NATIVE_SCOPE},{},proof)
+        assert "prepared" in actions
+        assert "verified_installed" not in actions
+    assert "create-native" in actions and "native-lock-verified" in actions
