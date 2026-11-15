@@ -69,7 +69,8 @@ def verify_bounded_plan_stage_a0_readonly(
             if key != "scope_sha256"
     })):
         raise StageABoundedPlanDenied("STAGE_A_BOUNDED_PLAN_SCOPE_HASH_CHANGED")
-    if actual_scope.get("rollback_sha") != objective.rollback_sha:
+    if actual_scope.get("rollback_sha") != (
+            objective.actions[action_index].rollback_sha or objective.rollback_sha):
         raise StageABoundedPlanDenied("STAGE_A_BOUNDED_PLAN_ROLLBACK_CHANGED")
     try:
         freeze_sha256 = sha256(Path(freeze_path).read_bytes()).hexdigest()

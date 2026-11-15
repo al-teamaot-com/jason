@@ -28,12 +28,16 @@ class ObjectiveAction:
     scope_sha256: str
     artifact_sha256: str
     risk: int
+    rollback_sha: str | None = None  # Per-step override, if it differs from plan default.
 
     def __post_init__(self) -> None:
         if (not self.capability.strip() or not self.component.strip()
                 or not _HEX_64.fullmatch(self.scope_sha256)
                 or not _HEX_64.fullmatch(self.artifact_sha256)
-                or type(self.risk) is not int or not 0 <= self.risk <= 3):
+                or type(self.risk) is not int or not 0 <= self.risk <= 3
+                or (self.rollback_sha is not None
+                    and (not isinstance(self.rollback_sha, str)
+                         or _SHA.fullmatch(self.rollback_sha) is None))):
             raise ValueError("invalid bounded objective action")
 
 
@@ -83,6 +87,8 @@ class BoundedObjective:
                     "scope_sha256": a.scope_sha256,
                     "artifact_sha256": a.artifact_sha256,
                     "risk": a.risk,
+                    **({"rollback_sha": a.rollback_sha}
+                       if a.rollback_sha is not None else {}),
                 }
                 for a in self.actions
             ],
@@ -122,12 +128,12 @@ def require_objective_step_conformance(
         raise PermissionError("reviewed objective authorization expired")
     if approved_fingerprint != objective.fingerprint:
         raise PermissionError("reviewed objective material changed")
+    action = objective.actions[action_index]
     if (observed_candidate_sha != objective.candidate_sha
-            or observed_rollback_sha != objective.rollback_sha
+            or observed_rollback_sha != (action.rollback_sha or objective.rollback_sha)
             or observed_freeze_sha256 != objective.freeze_sha256
             or observed_hold_sha256 != objective.hold_sha256):
         raise PermissionError("release candidate or production control drift")
-    action = objective.actions[action_index]
     if (observed_scope_sha256 != action.scope_sha256
             or observed_artifact_sha256 != action.artifact_sha256):
         raise PermissionError("reviewed action effect or artifact changed")
@@ -201,7 +207,7 @@ def issue_proved_objective_step(
         policy_digest=objective.policy_digest,
         step_index=action_index, action=action.capability,
         candidate_sha=objective.candidate_sha,
-        rollback_sha=objective.rollback_sha,
+        rollback_sha=observed["rollback_sha"],
         scope_sha256=action.scope_sha256,
         artifact_sha256=action.artifact_sha256,
         freeze_sha256=objective.freeze_sha256,

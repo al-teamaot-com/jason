@@ -11,6 +11,7 @@ on:
       - tests/test_pmv4_one_consent_native_sandbox_transaction.py
       - tests/test_pmv4_bounded_plan_native_journal_recovery.py
       - tests/test_pmv4_current_grant_attestation.py
+      - tests/test_pmv4_mixed_step_rollback_scope.py
       - docs/operations/PMv4-Single-Owner-Approval-Per-Objective-20261114.md
       - .github/workflows/pmv4-one-consent-native-sandbox.yml
   workflow_dispatch:
@@ -35,6 +36,7 @@ jobs:
             tests/test_pmv4_one_consent_native_sandbox_transaction.py \
             tests/test_pmv4_bounded_plan_native_journal_recovery.py \
             tests/test_pmv4_current_grant_attestation.py \
+            tests/test_pmv4_mixed_step_rollback_scope.py \
             tests/test_pmv4_stage_a_native_install.py \
             tests/test_pmv4_stage_a_bounded_plan_preflight.py \
             tests/test_pmv4_owner_objective_end_to_end.py
@@ -44,6 +46,7 @@ jobs:
             tests/test_pmv4_one_consent_native_sandbox_transaction.py \
             tests/test_pmv4_bounded_plan_native_journal_recovery.py \
             tests/test_pmv4_current_grant_attestation.py \
+            tests/test_pmv4_mixed_step_rollback_scope.py \
             tests/test_pmv4_stage_a_native_install.py
       - name: Verify immutable source-only production denial
         run: |
@@ -51,4 +54,5 @@ jobs:
             tests/test_pmv4_one_consent_native_sandbox_transaction.py \
             tests/test_pmv4_bounded_plan_native_journal_recovery.py \
             tests/test_pmv4_current_grant_attestation.py \
+            tests/test_pmv4_mixed_step_rollback_scope.py \
             -k production_plan_path_denied

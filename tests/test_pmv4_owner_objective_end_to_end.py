@@ -93,7 +93,8 @@ def enroll(env, *, token=None, verifier=None, consent=None, at=AT):
 def observed(obj, index):
     action=obj.actions[index]
     return {
-        "candidate_sha":obj.candidate_sha,"rollback_sha":obj.rollback_sha,
+        "candidate_sha":obj.candidate_sha,
+        "rollback_sha":action.rollback_sha or obj.rollback_sha,
         "freeze_sha256":obj.freeze_sha256,"hold_sha256":obj.hold_sha256,
         "scope_sha256":action.scope_sha256,"artifact_sha256":action.artifact_sha256,
     }
