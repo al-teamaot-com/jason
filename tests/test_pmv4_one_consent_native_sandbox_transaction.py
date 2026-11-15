@@ -20,6 +20,9 @@ from tools import pmv4_stage_a_packet as packet
 from tools.pmv4_bounded_plan_journal import (
     BoundedPlanJournal, BoundedPlanJournalDenied,
 )
+from tools.pmv4_current_grant_attestation import (
+    issue_current_grant_attestation,
+)
 from test_pmv4_owner_objective_end_to_end import (
     AT, APPROVAL_ID, enrolled, enroll, observed,
 )
@@ -114,6 +117,12 @@ def plan_install(enrolled, native_rig, tmp_path):
         "pinned_public_key": env["owner_key"].public_key(),
         "plan_journal": plan_journal,
         "hold_path": hold,
+        "current_grant_attestation": issue_current_grant_attestation(
+            objective=objective, signed_parent=parent, ledger=env["ledger"],
+            signer_private_key=env["owner_key"],
+            pinned_public_key=env["owner_key"].public_key(),
+            action_index=3, at=AT + timedelta(seconds=20),
+        ),
     }
     arguments = {
         **kwargs, "signed_proof": step,
@@ -157,7 +166,7 @@ def test_one_human_decision_native_install_journal_and_empty_recovery(plan_insta
 @pytest.mark.parametrize("tamper", [
     "prior", "replay", "hold", "runtime", "mcp", "ci",
     "changed_step", "changed_parent", "revoked", "extra_field",
-    "legacy_test_pub",
+    "legacy_test_pub", "attestation_forged", "attestation_stale",
 ])
 def test_no_native_mutation_on_invalid_plan_evidence(plan_install, tamper):
     env, factory, sandbox, scope, args, health, plan, step, hold = plan_install
@@ -204,6 +213,18 @@ def test_no_native_mutation_on_invalid_plan_evidence(plan_install, tamper):
         plan["shell_command"] = "sh -c arbitrary"
     elif tamper == "legacy_test_pub":
         args["approval_public_key"] = env["owner_key"].public_key()
+    elif tamper == "attestation_forged":
+        plan["current_grant_attestation"] = {
+            **plan["current_grant_attestation"],
+            "signature_base64url": "A" * 86,
+        }
+    elif tamper == "attestation_stale":
+        plan["current_grant_attestation"] = issue_current_grant_attestation(
+            objective=env["objective"], signed_parent=plan["signed_parent"],
+            ledger=env["ledger"], signer_private_key=env["owner_key"],
+            pinned_public_key=env["owner_key"].public_key(),
+            action_index=3, at=AT,
+        )
 
     with pytest.raises((PermissionError, ValueError, TypeError)):
         factory().install(**args)

@@ -418,6 +418,7 @@ class NativeStageAInstaller:
                 fields = {
                     "objective", "action_index", "signed_parent", "ledger",
                     "pinned_public_key", "hold_path", "plan_journal",
+                    "current_grant_attestation",
                 }
                 if (set(bounded_plan_evidence) != fields
                         or not isinstance(signed_proof, Mapping)
@@ -430,6 +431,17 @@ class NativeStageAInstaller:
                         or trusted_plan_journal.signed_parent != bounded_plan_evidence["signed_parent"]
                         or trusted_plan_journal.owner_ledger is not bounded_plan_evidence["ledger"]):
                     raise StageANativeDenied("STAGE_A_PLAN_JOURNAL_NOT_EXACT")
+                from tools.pmv4_current_grant_attestation import (
+                    verify_current_grant_attestation,
+                )
+                verify_current_grant_attestation(
+                    objective=bounded_plan_evidence["objective"],
+                    signed_parent=bounded_plan_evidence["signed_parent"],
+                    signed_attestation=bounded_plan_evidence["current_grant_attestation"],
+                    pinned_public_key=bounded_plan_evidence["pinned_public_key"],
+                    expected_action_index=bounded_plan_evidence["action_index"],
+                    at=self.at or datetime.now(timezone.utc), production=False,
+                )
                 plan_snapshot = trusted_plan_journal.verified_snapshot(
                     action_index=bounded_plan_evidence["action_index"],
                     at=self.at or datetime.now(timezone.utc),

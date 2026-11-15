@@ -4,11 +4,13 @@ on:
     paths:
       - tools/pmv4_stage_a_native_install.py
       - tools/pmv4_bounded_plan_journal.py
+      - tools/pmv4_current_grant_attestation.py
       - tools/pmv4_stage_a_bounded_plan_preflight.py
       - implementation/kernel/pmv4_plan_child_proof.py
       - implementation/orchestrator/pmv4_objective_scope.py
       - tests/test_pmv4_one_consent_native_sandbox_transaction.py
       - tests/test_pmv4_bounded_plan_native_journal_recovery.py
+      - tests/test_pmv4_current_grant_attestation.py
       - docs/operations/PMv4-Single-Owner-Approval-Per-Objective-20261114.md
       - .github/workflows/pmv4-one-consent-native-sandbox.yml
   workflow_dispatch:
@@ -32,6 +34,7 @@ jobs:
           PYTHONPATH=implementation:. python -m pytest -q \
             tests/test_pmv4_one_consent_native_sandbox_transaction.py \
             tests/test_pmv4_bounded_plan_native_journal_recovery.py \
+            tests/test_pmv4_current_grant_attestation.py \
             tests/test_pmv4_stage_a_native_install.py \
             tests/test_pmv4_stage_a_bounded_plan_preflight.py \
             tests/test_pmv4_owner_objective_end_to_end.py
@@ -40,10 +43,12 @@ jobs:
           sudo env PYTHONPATH=implementation:. "$(which python)" -m pytest -q \
             tests/test_pmv4_one_consent_native_sandbox_transaction.py \
             tests/test_pmv4_bounded_plan_native_journal_recovery.py \
+            tests/test_pmv4_current_grant_attestation.py \
             tests/test_pmv4_stage_a_native_install.py
       - name: Verify immutable source-only production denial
         run: |
           PYTHONPATH=implementation:. python -m pytest -q \
             tests/test_pmv4_one_consent_native_sandbox_transaction.py \
             tests/test_pmv4_bounded_plan_native_journal_recovery.py \
+            tests/test_pmv4_current_grant_attestation.py \
             -k production_plan_path_denied
