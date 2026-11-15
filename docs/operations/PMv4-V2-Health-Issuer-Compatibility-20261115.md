@@ -35,3 +35,9 @@ Historical root bytes are read only from immutable protected Git commit `45e52de
 5. PMv4 shadow release, Ticket Core transition, runbook cutover and retirement remain distinct scope/acceptance decisions.
 
 Until the root health recovery is successful, the PMv4 root bootstrap must reject with breaker OPEN. No chat-based approval substitutes for a signed Owner root transaction.
+
+## One Owner-local sequencer (PREPARED, NOT EXECUTED)
+
+A narrowly scoped composite launcher lives at \`/srv/jason/archive/pmv4-a0-health-and-root-closure-owner-local-7b42.sh\`, mode 0700 UID1000, SHA256 \`07d35d8bc568bdbc61944d0e44655e158565e311c0d42e045b5523e00d879ec8\`. It invokes two **independently authenticated, narrowly authorized** existing components in the only safe order: recover the real V2 full integrity/breaker if currently OPEN from exactly the known health unit; then install the prepared PMv4 Stage A0 root closure helper/policy and one missing immutable source file. It never edits breaker JSON or disables the issuer, never approves a general runtime release and does not install Stage A0 itself. Each child launcher validates its own SHA-pinned source and Owner identity.
+
+\`bash /srv/jason/archive/pmv4-a0-health-and-root-closure-owner-local-7b42.sh --check-only\` was independently verified live in the unprivileged UID1000 Jason session: V2 Owner packet PASS, Stage A0 Owner packet PASS, historical current breaker OPEN with exactly one required authority health unit failure, zero approvals issued and zero protected writes. **Do not use \`--execute\` before GitHub CI/security checks and current root preflight pass.** The remote ChatGPT Desktop Commander cannot run sudo and is not an acceptable substitute for the real interactive Owner-local SSH session. Production recovery and Stage A0 installation remain NOT DONE.
