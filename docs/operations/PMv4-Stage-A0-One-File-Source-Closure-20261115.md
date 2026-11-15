@@ -28,3 +28,7 @@ Next engineering gates before any root installation: review code/security findin
 ## Exact policy review artifact (no live activation)
 
 `config/pmv4-stage-a0/root-source-closure-policy-review.json` is a data-only reviewed example of the exact future trusted policy; it is **not** installed under `/etc`, is **not** signed, and grants **no production authority**. Its file hash and helper hash are verified by tests. The root-owned current policy remains separately inaccessible to the nonprivileged operator; any activation must independently read back current host state before consent and before write.
+
+### Post-write rollback refinement
+
+The production call now runs full fourteen-file closure verification and the unchanged runtime/freeze/hold health check **while the original created inode is still open**. If either check fails, only that exclusively created inode is eligible for rollback; a foreign replacement is preserved. An audit-result write failure after the write helper returns remains fail-closed and requires independent forensic readback; no unconditional deletion is authorized. This refinement is source-only and has not been exercised in the real root environment.

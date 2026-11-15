@@ -293,16 +293,23 @@ def execute() -> None:
         result = {"schema_version": "1.0", "action": ACTION,
                   "candidate_sha": CANDIDATE, "status": "failed"}
         try:
-            _write_one_exact(root / RELATIVE, missing)
-            stage.verify_staged_source(root, after)
-            if stage.protected_preflight(policy) != before:
-                raise SourceClosureDenied("A0_CLOSURE_PRODUCTION_CHANGED_AFTER_WRITE")
+            def verify_before_commit() -> None:
+                # Keep the created inode OPEN while verifying the exact full
+                # fourteen-file closure and protected production state.
+                # Any failure here rolls back only our own inode inside
+                # _write_one_exact, never a replacement or foreign object.
+                stage.verify_staged_source(root, after)
+                if stage.protected_preflight(policy) != before:
+                    raise SourceClosureDenied("A0_CLOSURE_PRODUCTION_CHANGED_AFTER_WRITE")
+            _write_one_exact(root / RELATIVE, missing,
+                             after_write=verify_before_commit)
             result["status"] = "verified"
             result["installed_file_sha256"] = MISSING_SHA256
             result["source_file_count"] = 14
         except Exception:
-            # No silent rollback after the helper returned: a completed file is
-            # retained for forensic review if a post-write health check fails.
+            # The in-flight helper conditionally rolls back if its postflight
+            # refuses. An audit failure AFTER helper return is fail-closed for
+            # independent forensic review; never unconditionally unlink.
             result["status"] = "requires_review"
             raise
         finally:
