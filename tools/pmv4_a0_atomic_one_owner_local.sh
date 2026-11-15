@@ -60,9 +60,12 @@ CREATED=0
 APPROVAL_CREATED=0
 COMPLETED=0
 cleanup() {
-  # Retain trusted staged root recovery source after any partial protected
-  # action for independent native forensic/recovery. Never erase proof/audit.
-  if [[ "$CREATED" == 1 && ( "$APPROVAL_CREATED" == 0 || "$COMPLETED" == 1 ) ]]; then
+  # Once the ONE signed whole-release Owner proof exists, retain the exact
+  # root-owned 0400 /run recovery executable/policy (even after success).
+  # It has no service/standing authority; one-use root journal denies replay,
+  # but rollback-only and independent postflight must remain available.
+  # Only pre-approval staging may be removed automatically.
+  if [[ "$CREATED" == 1 && "$APPROVAL_CREATED" == 0 ]]; then
     sudo /usr/bin/rm -f -- "$STAGED" "$STAGED_BOOT" "$STAGED_POLICY"
     sudo /usr/bin/rmdir -- "$STAGE"
   fi

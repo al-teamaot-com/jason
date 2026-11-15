@@ -31,6 +31,9 @@ def test_one_owner_prompt_after_root_only_preflight_no_human_before_it():
     assert 'ROOT_SHA=' in script and 'POLICY_SHA=' in script
     assert 'sudo /usr/bin/python3 -I -B "$STAGED"' in script
     assert 'COMPLETED=1' in script and 'trap cleanup EXIT' in script
+    assert '"$CREATED" == 1 && "$APPROVAL_CREATED" == 0' in script
+    assert '"$COMPLETED" == 1 )' not in script
+    assert 'rollback-only and independent postflight must remain available' in script
 
 
 def test_exact_reviewed_code_and_policy_hashes_were_pinned_by_owner_launcher():
