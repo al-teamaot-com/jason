@@ -183,3 +183,18 @@ def test_no_arbitrary_target_even_in_disposable_sandbox(tmp_path, git_blobs):
     with pytest.raises(repair.SourceClosureDenied, match="EXACT_TARGET"):
         repair._write_one_exact(parent / Path(repair.RELATIVE).name,
                                 payload, test_only=True)
+
+
+def test_review_policy_binds_live_readback_and_helper_hash():
+    import json
+    root = Path(__file__).parents[1]
+    policy = json.loads((root / "config/pmv4-stage-a0/root-source-closure-policy-review.json").read_text())
+    helper = (root / "tools/pmv4_stage_a0_root_source_closure.py").read_bytes()
+    assert set(policy) == repair.REQUIRED_POLICY
+    assert policy["script_sha256"] == sha256(helper).hexdigest()
+    assert policy["action"] == repair.ACTION
+    assert policy["candidate_sha"] == repair.CANDIDATE
+    assert policy["file_sha256"] == repair.MISSING_SHA256
+    assert policy["one_shot"] is True
+    assert policy["no_services_changed"] is True
+    assert policy["no_provider_writes"] is True

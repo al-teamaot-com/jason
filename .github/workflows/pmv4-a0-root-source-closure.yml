@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - tools/pmv4_stage_a0_root_source_closure.py
+      - config/pmv4-stage-a0/root-source-closure-policy-review.json
       - tests/test_pmv4_stage_a0_root_source_closure.py
       - docs/operations/PMv4-Stage-A0-One-File-Source-Closure-20261115.md
       - .github/workflows/pmv4-a0-root-source-closure.yml

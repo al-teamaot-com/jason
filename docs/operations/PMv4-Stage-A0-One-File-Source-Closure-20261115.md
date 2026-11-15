@@ -24,3 +24,7 @@ The root-owned Stage A0 source at protected main `7b42ce983896711525de4c7955bf9f
 Run `python3 -m pytest -q tests/test_pmv4_stage_a0_root_source_closure.py`, along with existing Stage A0 and security regression suites. Tests verify fixed scope, real Git blob and thirteen-file baseline, exact exclusive copy, fail-closed source checkout, file tamper and symlink denial, conditional rollback and foreign replacement preservation.
 
 Next engineering gates before any root installation: review code/security findings, prepare and attest exact root-installed helper and policy, independently verify full root trust/bootstrap, obtain authenticated exact-action Owner consent, and demonstrate disposable root-mode dry-run including injected failures and postflight. Production LKG, protected runtime/MCP, ticket processing, freeze, hold, and breaker must remain unchanged until separately approved.
+
+## Exact policy review artifact (no live activation)
+
+`config/pmv4-stage-a0/root-source-closure-policy-review.json` is a data-only reviewed example of the exact future trusted policy; it is **not** installed under `/etc`, is **not** signed, and grants **no production authority**. Its file hash and helper hash are verified by tests. The root-owned current policy remains separately inaccessible to the nonprivileged operator; any activation must independently read back current host state before consent and before write.
