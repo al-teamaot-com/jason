@@ -1,0 +1,50 @@
+name: PMv4 A0 Exact Root Source Closure (source only)
+on:
+  pull_request:
+    paths:
+      - tools/pmv4_stage_a0_root_source_closure.py
+      - tools/pmv4_a0_closure_bootstrap_root.py
+      - tools/pmv4_a0_closure_bootstrap_owner.py
+      - tests/test_pmv4_a0_closure_bootstrap.py
+      - config/pmv4-stage-a0/closure-bootstrap-plan-review.json
+      - tools/pmv4_a0_closure_owner_local.sh
+      - tools/pmv4_a0_bootstrap_only_owner_local.sh
+      - tests/test_pmv4_a0_bootstrap_only_owner_local.py
+      - config/pmv4-stage-a0/root-source-closure-policy-review.json
+      - tests/test_pmv4_stage_a0_root_source_closure.py
+      - docs/operations/PMv4-Stage-A0-One-File-Source-Closure-20261115.md
+      - .github/workflows/pmv4-a0-root-source-closure.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-source-closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install limited test dependencies
+        run: python -m pip install pytest cryptography requests
+      - name: Validate fixed-scope one-file source closure (no root installs)
+        run: python -m pytest -q tests/test_pmv4_stage_a0_root_source_closure.py
+      - name: Verify fixed Bootstrap Owner and nonprivileged checks
+        run: python -m pytest -q tests/test_pmv4_a0_closure_bootstrap.py
+      - name: Verify stage-1-only Owner local ceremony is single-use and has no follow-on action
+        run: python -m pytest -q tests/test_pmv4_a0_bootstrap_only_owner_local.py
+      - name: Verify disposable UID0 install, rollback and foreign-object protection
+        run: sudo "$(which python)" -m pytest -q tests/test_pmv4_a0_closure_bootstrap.py -k disposable_root
+      - name: Compile and check source-only inspection
+        run: |
+          python -m py_compile tools/pmv4_stage_a0_root_source_closure.py
+          python tools/pmv4_stage_a0_root_source_closure.py --inspect
+      - name: Verify no production apply from checkout
+        run: |
+          if python tools/pmv4_stage_a0_root_source_closure.py --execute; then
+            echo "UNEXPECTED: mutable checkout accepted production root execution"
+            exit 1
+          fi
