@@ -412,8 +412,8 @@ class NativeStageAInstaller:
                 # Test only: no alternate root/trust signer, no alternate
                 # release mutation method. Reuse the actual native journal,
                 # full exact-scope checks, root lock and rollback acceptance.
-                from tools.pmv4_stage_a_bounded_plan_preflight import (
-                    verify_bounded_plan_stage_a0_readonly,
+                from tools.pmv4_one_owner_native_root_admission import (
+                    verify_sandbox_native_root_action,
                 )
                 fields = {
                     "objective", "action_index", "signed_parent", "ledger",
@@ -431,35 +431,23 @@ class NativeStageAInstaller:
                         or trusted_plan_journal.signed_parent != bounded_plan_evidence["signed_parent"]
                         or trusted_plan_journal.owner_ledger is not bounded_plan_evidence["ledger"]):
                     raise StageANativeDenied("STAGE_A_PLAN_JOURNAL_NOT_EXACT")
-                from tools.pmv4_current_grant_attestation import (
-                    verify_current_grant_attestation,
-                )
-                verify_current_grant_attestation(
-                    objective=bounded_plan_evidence["objective"],
-                    signed_parent=bounded_plan_evidence["signed_parent"],
-                    signed_attestation=bounded_plan_evidence["current_grant_attestation"],
-                    pinned_public_key=bounded_plan_evidence["pinned_public_key"],
-                    expected_action_index=bounded_plan_evidence["action_index"],
-                    at=self.at or datetime.now(timezone.utc), production=False,
-                )
-                plan_snapshot = trusted_plan_journal.verified_snapshot(
-                    action_index=bounded_plan_evidence["action_index"],
-                    at=self.at or datetime.now(timezone.utc),
-                )
-                verified = verify_bounded_plan_stage_a0_readonly(
+                # Root acceptance independently verifies source/manifest,
+                # original parent + derived step signatures, a fresh current
+                # grant assertion and the ROOT journal chain. It does NOT
+                # consult the mutable operator-owned approval SQLite directly.
+                verified = verify_sandbox_native_root_action(
                     repo=repo, candidate_sha=candidate_sha,
-                    scope=scope, exact_manifest=manifest,
-                    objective=bounded_plan_evidence["objective"],
-                    action_index=bounded_plan_evidence["action_index"],
-                    signed_parent=bounded_plan_evidence["signed_parent"],
-                    signed_step=signed_proof,
-                    owner_plan_ledger=bounded_plan_evidence["ledger"],
-                    pinned_public_key=bounded_plan_evidence["pinned_public_key"],
+                    reviewed_scope=scope, exact_manifest=manifest,
                     freeze_path=freeze_path,
                     hold_path=bounded_plan_evidence["hold_path"],
                     native_root_health=observed_health,
-                    verified_prior_steps=plan_snapshot["verified_prior_steps"],
-                    consumed_step_claims=plan_snapshot["consumed_step_claims"],
+                    objective=bounded_plan_evidence["objective"],
+                    signed_parent=bounded_plan_evidence["signed_parent"],
+                    signed_step=signed_proof,
+                    current_signed_grant=bounded_plan_evidence["current_grant_attestation"],
+                    root_readonly_journal=trusted_plan_journal,
+                    pinned_public_key=bounded_plan_evidence["pinned_public_key"],
+                    action_index=bounded_plan_evidence["action_index"],
                     protected_main_ci_check=ci_check,
                     at=self.at or datetime.now(timezone.utc),
                     production=False,

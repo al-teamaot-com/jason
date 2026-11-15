@@ -227,6 +227,43 @@ class BoundedPlanJournal:
                 ),
             }
 
+    def root_readonly_snapshot(self, *, action_index: int) -> dict[str, Any]:
+        """Existing signed-plan journal, STRICT READ ONLY, without operator DB.
+
+        This prototypes the trusted-root reader. Production must independently
+        stage the same schema in a ROOT-owned fixed directory and must require
+        a fresh signer-attested active grant before trusting the snapshot.
+        No O_CREAT, no mutable UID1000 approval read, no new human approval.
+        """
+        if type(action_index) is not int or not 0 <= action_index < len(self.objective.actions):
+            raise BoundedPlanJournalDenied("PLAN_JOURNAL_INVALID_STEP")
+        try:
+            fd = os.open(self.path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except (OSError, ValueError) as exc:
+            raise BoundedPlanJournalDenied("PLAN_JOURNAL_ROOT_READER_MISSING") from exc
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH)
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or info.st_uid != os.geteuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600):
+                raise BoundedPlanJournalDenied("PLAN_JOURNAL_ROOT_READER_UNTRUSTED")
+            rows = self._read(fd)
+            state = self._state(rows)
+            if (not rows or state["revoked"] or state["claimed"] is not None
+                    or state["completed"] != set(range(action_index))):
+                raise BoundedPlanJournalDenied("PLAN_JOURNAL_ROOT_READER_NOT_READY")
+            return {
+                "verified_prior_steps": frozenset(state["completed"]),
+                "consumed_step_claims": frozenset(
+                    row["claim_id"] for row in rows if row["event"] == "claimed"
+                ),
+                "journal_head_sha256": rows[-1]["hash"],
+            }
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
     def observe_prior(self, *, action_index: int, at: datetime) -> frozenset[int]:
         return self.verified_snapshot(action_index=action_index, at=at)[
             "verified_prior_steps"

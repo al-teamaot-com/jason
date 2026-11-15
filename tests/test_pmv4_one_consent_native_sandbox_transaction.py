@@ -169,7 +169,7 @@ def test_one_human_decision_native_install_journal_and_empty_recovery(plan_insta
     rows = [__import__("json").loads(x) for x in plan["plan_journal"].path.read_text().splitlines()]
     assert len([x for x in rows if x["event"] == "completed"]) == 4
     assert rows[-1]["event"] == "completed" and rows[-1]["step"] == 3
-    with pytest.raises(BoundedPlanJournalDenied, match="PRIOR_STEPS_NOT_COMPLETE"):
+    with pytest.raises(BoundedPlanJournalDenied, match="ROOT_READER_NOT_READY"):
         factory().install(**args)
     outcome = factory().recover_empty(
         scope=scope,

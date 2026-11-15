@@ -5,6 +5,8 @@ on:
       - tools/pmv4_stage_a_native_install.py
       - tools/pmv4_bounded_plan_journal.py
       - tools/pmv4_current_grant_attestation.py
+      - tools/pmv4_one_owner_native_root_admission.py
+      - tests/test_pmv4_native_root_no_operator_sqlite.py
       - tools/pmv4_stage_a_bounded_plan_preflight.py
       - implementation/kernel/pmv4_plan_child_proof.py
       - implementation/orchestrator/pmv4_objective_scope.py
@@ -44,6 +46,7 @@ jobs:
             tests/test_pmv4_mixed_step_rollback_scope.py \
             tests/test_pmv4_bounded_owner_mcp_bridge.py \
             tests/test_pmv4_stage_a0_one_owner_review.py \
+            tests/test_pmv4_native_root_no_operator_sqlite.py \
             tests/test_pmv4_stage_a_native_install.py \
             tests/test_pmv4_stage_a_bounded_plan_preflight.py \
             tests/test_pmv4_owner_objective_end_to_end.py
@@ -58,6 +61,7 @@ jobs:
             tests/test_pmv4_mixed_step_rollback_scope.py \
             tests/test_pmv4_bounded_owner_mcp_bridge.py \
             tests/test_pmv4_stage_a0_one_owner_review.py \
+            tests/test_pmv4_native_root_no_operator_sqlite.py \
             tests/test_pmv4_stage_a_native_install.py
       - name: Verify immutable source-only production denial
         run: |
@@ -68,4 +72,5 @@ jobs:
             tests/test_pmv4_mixed_step_rollback_scope.py \
             tests/test_pmv4_bounded_owner_mcp_bridge.py \
             tests/test_pmv4_stage_a0_one_owner_review.py \
+            tests/test_pmv4_native_root_no_operator_sqlite.py \
             -k production_plan_path_denied
