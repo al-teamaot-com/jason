@@ -60,7 +60,8 @@ def test_mutable_source_cannot_execute_production_root():
 
 
 def test_plan_modified_without_authorization_denied(tmp_path, monkeypatch):
-    altered = json.loads(boot.PLAN.read_text())
+    source = Path(__file__).parents[1] / "config/pmv4-stage-a0/closure-bootstrap-plan-review.json"
+    altered = json.loads(source.read_text())
     altered["files"][0]["destination"] = "/etc/shadow"
     file = tmp_path / "tampered-plan.json"
     file.write_text(json.dumps(altered))
