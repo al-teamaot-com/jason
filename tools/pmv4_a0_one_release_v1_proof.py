@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from hashlib import sha256
+import json
+from pathlib import Path
 from typing import Any, Mapping
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -34,6 +36,16 @@ class A0OneReleaseProofDenied(PermissionError):
 def exact_three_action_manifest() -> dict[str, Any]:
     """All fields independently pinned to existing exact release scope."""
     p = review.exact_contract()
+    root_dir = Path(__file__).resolve().parents[1]
+    root_code = root_dir / "tools/pmv4_a0_exact_v1_root_release.py"
+    root_policy = json.loads((root_dir / "config/pmv4-stage-a0/atomic-v1-root-policy-review.json").read_bytes())
+    if (root_policy.get("candidate_sha") != review.SOURCE
+            or root_policy.get("lkg_sha") != review.LKG
+            or root_policy.get("reviewed_contract_sha256") != review.CONTRACT_SHA256
+            or root_policy.get("production_apply_supported") is not False
+            or root_policy.get("root_executor_sha256")
+                != sha256(root_code.read_bytes()).hexdigest()):
+        raise A0OneReleaseProofDenied("A0_ONE_RELEASE_ROOT_CODE_NOT_PINNED")
     actions = [dict(x) for x in p["ordered_actions"]]
     if (len(actions) != 3
             or [(
@@ -51,6 +63,7 @@ def exact_three_action_manifest() -> dict[str, Any]:
         "freeze_sha256": review.FREEZE,
         "promotion_hold_sha256": review.HOLD,
         "reviewed_contract_sha256": review.CONTRACT_SHA256,
+        "root_executor_sha256":root_policy["root_executor_sha256"],
         "exact_ordered_actions": actions,
         "owner_consents": 1,
         "root_lock_shared_by_all_actions": True,
@@ -72,6 +85,7 @@ def exact_v1_release_scopes() -> dict[str, Any]:
         "source_sha": manifest["source_sha"],
         "rollback_sha": manifest["rollback_sha"],
         "reviewed_contract_sha256": manifest["reviewed_contract_sha256"],
+        "root_executor_sha256":manifest["root_executor_sha256"],
         "exact_ordered_actions": manifest["exact_ordered_actions"],
         "one_release_only": True,
     }

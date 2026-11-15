@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "action": "pmv4-a0-exact-three-action-one-release-v1",
+  "production_apply_supported": false,
+  "root_executor_sha256": "7547979a190b16b5d7caadc3ea7e39c48e52e65484a6d5cc0be0706c0da74a1d",
+  "root_bootstrap_sha256": "3790bf79d4a302fe572055c3936ba28b8935ea9e1dc1a833b6b8acc9ed62878b",
+  "helper_sha256": "1006edb6613f3ff976fadf64c25d8e6096dfef6b2296e4583ba51ee81ee4c4f6",
+  "helper_policy_sha256": "7cd1ef65c9bcf8c6442a191348ac187c05c421ed8576998b61b7427d08a5da32",
+  "reviewed_contract_sha256": "f5f525e33e4cad46827018e23ea7ae8f72603459dcd740bfbf63f9a176cfa52a",
+  "candidate_sha": "7b42ce983896711525de4c7955bf9fc43ac003d0",
+  "lkg_sha": "d1b8c196dadd4b672ec8ba47075f27bb61c98d63",
+  "freeze_sha256": "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f",
+  "hold_sha256": "11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0",
+  "runtime_image_sha256": "sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132",
+  "mcp_image_sha256": "sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477",
+  "ordered_actions": [
+    {"capability": "pmv4.stage-a0.root-source-helper.bootstrap", "component": "root-source-closure-helper", "scope_sha256": "e5515b5e0d5243c5e18c3118fcc0c39580535c7e0da31525390c141e1aa298cb", "artifact_sha256": "25e68eaee841791b5b857d59eef543691225ff9ea7d38fc9477eff69957e4564", "rollback_sha": "0000000000000000000000000000000000000000", "risk": 3},
+    {"capability": "pmv4.stage-a0.immutable-root-source-onefile", "component": "exact-one-missing-root-blob", "scope_sha256": "089f8706b61b70c9f31406204bb27fab0bde47bc8df56f13a274defb8b537381", "artifact_sha256": "ca844feeb43aa624fb1a965571bfb30f554e24662b2837bb2efa8bfddbdfb5db", "rollback_sha": "0000000000000000000000000000000000000000", "risk": 3},
+    {"capability": "pmv4.stage-a0.native-empty-baseline-install", "component": "independent-stage-a0-native", "scope_sha256": "6786baad0fc9d07aca6ba80dedad5c25bcfa7fb3e50fdde7c4d36ad067285eac", "artifact_sha256": "addba768d1ab92d9507d466fdd3980b93ea2041f42901f5d6e5a2cde81dcb025", "rollback_sha": "0000000000000000000000000000000000000000", "risk": 3}
+  ],
+  "one_use": true,
+  "standing_authority": false
+}

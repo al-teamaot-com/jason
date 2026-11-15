@@ -10,6 +10,13 @@ on:
       - tools/pmv4_a0_one_release_v1_proof.py
       - tests/test_pmv4_a0_one_release_v1_proof.py
       - tools/pmv4_a0_exact_v1_atomic_transaction.py
+      - tools/pmv4_a0_exact_v1_root_release.py
+      - tools/pmv4_a0_atomic_v1_owner_issuer.py
+      - tools/pmv4_a0_atomic_one_owner_local.sh
+      - config/pmv4-stage-a0/atomic-v1-root-policy-review.json
+      - tests/test_pmv4_a0_atomic_v1_privileged_root_contract.py
+      - tests/test_pmv4_a0_atomic_v1_root_native_execution.py
+      - tests/test_pmv4_a0_atomic_one_owner_launcher.py
       - tests/test_pmv4_a0_exact_v1_atomic_transaction.py
       - tests/test_pmv4_a0_atomic_plan_transaction.py
       - tests/test_pmv4_a0_atomic_actual_root_components.py
@@ -60,6 +67,9 @@ jobs:
             tests/test_pmv4_a0_atomic_plan_transaction.py \
             tests/test_pmv4_a0_one_release_v1_proof.py \
             tests/test_pmv4_a0_exact_v1_atomic_transaction.py \
+            tests/test_pmv4_a0_atomic_v1_privileged_root_contract.py \
+            tests/test_pmv4_a0_atomic_v1_root_native_execution.py \
+            tests/test_pmv4_a0_atomic_one_owner_launcher.py \
             tests/test_pmv4_a0_atomic_actual_root_components.py \
             tests/test_pmv4_stage_a_native_install.py \
             tests/test_pmv4_stage_a_bounded_plan_preflight.py \
@@ -80,8 +90,16 @@ jobs:
             tests/test_pmv4_a0_atomic_plan_transaction.py \
             tests/test_pmv4_a0_one_release_v1_proof.py \
             tests/test_pmv4_a0_exact_v1_atomic_transaction.py \
+            tests/test_pmv4_a0_atomic_v1_privileged_root_contract.py \
+            tests/test_pmv4_a0_atomic_v1_root_native_execution.py \
+            tests/test_pmv4_a0_atomic_one_owner_launcher.py \
             tests/test_pmv4_a0_atomic_actual_root_components.py \
             tests/test_pmv4_stage_a_native_install.py
+      - name: Verify full native Owner v1 root executor under ONE real CI UID0 lock
+        run: |
+          sudo env PYTHONPATH=implementation:. "$(which python)" -m pytest -q \
+            tests/test_pmv4_a0_atomic_v1_privileged_root_contract.py \
+            tests/test_pmv4_a0_atomic_v1_root_native_execution.py
       - name: Verify actual three-stage A0 root actions on disposable UID0
         run: |
           sudo env PYTHONPATH=implementation:. "$(which python)" -m pytest -q \

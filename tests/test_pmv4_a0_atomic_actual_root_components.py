@@ -72,6 +72,7 @@ class ActualA0Components:
         assert sha256(self.blobs[str(root / "policy.json")]).hexdigest() == bootstrap.FILES[
             "/etc/jason-owner-release/pmv4-stage-a0-root-source-closure.json"][1]
         self._held = {}
+        self.outer_lock_held = False  # CI-only adapter uses the same root-held lock.
         self._native_proof = None
         self.exact_file = root / "source" / SOURCE / "tools" / "pmv4_host_install_contract.py"
         self.exact_file.parent.mkdir(parents=True)
@@ -148,7 +149,12 @@ class ActualA0Components:
                     "signed_proof_sha256":sha256(canonical(self._native_proof)).hexdigest(),
                 }
                 journal = actual._journal(SOURCE)
-                with actual._legacy_lock():
+                from contextlib import nullcontext
+                # The production one-release root executor already holds the
+                # SAME existing release lock continuously across all stages.
+                # The disposable root acceptance must not re-flock it through
+                # a second descriptor: source ._create is executed directly.
+                with (nullcontext() if self.outer_lock_held else actual._legacy_lock()):
                     actual._trusted_journal_parent()
                     actual._assert_parents()
                     if journal.exists():
@@ -225,6 +231,23 @@ class ActualA0Components:
         elif index == 2:
             if self._native_proof is None:
                 raise PermissionError("native proof unavailable")
+            if self.outer_lock_held:
+                # Test the production root adapter's conditional rollback
+                # without releasing/reacquiring its outer native release lock.
+                from tools import pmv4_a0_exact_v1_root_release as root_release
+                binding={
+                    "source_sha":SOURCE,"scope_sha256":self.scope["scope_sha256"],
+                    "owner_approval_id":self._native_proof["payload"].get("approval_id")
+                        or self._native_proof["payload"].get("parent_approval_id"),
+                    "manifest_sha256":sha256(canonical(self.manifest)).hexdigest(),
+                    "freeze_sha256":FROZEN_SHA,
+                    "signed_proof_sha256":sha256(canonical(self._native_proof)).hexdigest(),
+                }
+                engine=self.installer()
+                root_release.cleanup_native_under_outer_lock(
+                    packet,engine,self.scope,engine._journal(SOURCE),binding,
+                )
+                return {"status":"empty_baseline_restored_under_same_lock"}
             return self.installer().recover_empty(
                 scope=self.scope,
                 confirmed_approval_id=(self._native_proof["payload"].get("approval_id")
