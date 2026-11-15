@@ -19,6 +19,8 @@ on:
       - config/pmv4-stage-a0/one-owner-recovery-review-20261115.json
       - tools/pmv4_stage_a0_one_owner_review.py
       - tests/test_pmv4_stage_a0_one_owner_review.py
+      - tests/test_pmv4_stage_a0_owner_governance_decision.py
+      - docs/operations/PMv4-Stage-A0-One-Release-Approval-Decision-20261115.md
       - docs/operations/PMv4-Single-Owner-Approval-Per-Objective-20261114.md
       - .github/workflows/pmv4-one-consent-native-sandbox.yml
   workflow_dispatch:
@@ -46,6 +48,7 @@ jobs:
             tests/test_pmv4_mixed_step_rollback_scope.py \
             tests/test_pmv4_bounded_owner_mcp_bridge.py \
             tests/test_pmv4_stage_a0_one_owner_review.py \
+            tests/test_pmv4_stage_a0_owner_governance_decision.py \
             tests/test_pmv4_native_root_no_operator_sqlite.py \
             tests/test_pmv4_stage_a_native_install.py \
             tests/test_pmv4_stage_a_bounded_plan_preflight.py \
@@ -61,6 +64,7 @@ jobs:
             tests/test_pmv4_mixed_step_rollback_scope.py \
             tests/test_pmv4_bounded_owner_mcp_bridge.py \
             tests/test_pmv4_stage_a0_one_owner_review.py \
+            tests/test_pmv4_stage_a0_owner_governance_decision.py \
             tests/test_pmv4_native_root_no_operator_sqlite.py \
             tests/test_pmv4_stage_a_native_install.py
       - name: Verify immutable source-only production denial
@@ -72,5 +76,6 @@ jobs:
             tests/test_pmv4_mixed_step_rollback_scope.py \
             tests/test_pmv4_bounded_owner_mcp_bridge.py \
             tests/test_pmv4_stage_a0_one_owner_review.py \
+            tests/test_pmv4_stage_a0_owner_governance_decision.py \
             tests/test_pmv4_native_root_no_operator_sqlite.py \
             -k production_plan_path_denied
