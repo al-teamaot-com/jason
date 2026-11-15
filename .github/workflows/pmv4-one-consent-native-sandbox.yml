@@ -6,6 +6,9 @@ on:
       - tools/pmv4_bounded_plan_journal.py
       - tools/pmv4_current_grant_attestation.py
       - tools/pmv4_one_owner_native_root_admission.py
+      - tools/pmv4_a0_atomic_plan_transaction.py
+      - tests/test_pmv4_a0_atomic_plan_transaction.py
+      - tests/test_pmv4_a0_atomic_actual_root_components.py
       - tests/test_pmv4_native_root_no_operator_sqlite.py
       - tools/pmv4_stage_a_bounded_plan_preflight.py
       - implementation/kernel/pmv4_plan_child_proof.py
@@ -50,6 +53,8 @@ jobs:
             tests/test_pmv4_stage_a0_one_owner_review.py \
             tests/test_pmv4_stage_a0_owner_governance_decision.py \
             tests/test_pmv4_native_root_no_operator_sqlite.py \
+            tests/test_pmv4_a0_atomic_plan_transaction.py \
+            tests/test_pmv4_a0_atomic_actual_root_components.py \
             tests/test_pmv4_stage_a_native_install.py \
             tests/test_pmv4_stage_a_bounded_plan_preflight.py \
             tests/test_pmv4_owner_objective_end_to_end.py
@@ -66,7 +71,13 @@ jobs:
             tests/test_pmv4_stage_a0_one_owner_review.py \
             tests/test_pmv4_stage_a0_owner_governance_decision.py \
             tests/test_pmv4_native_root_no_operator_sqlite.py \
+            tests/test_pmv4_a0_atomic_plan_transaction.py \
+            tests/test_pmv4_a0_atomic_actual_root_components.py \
             tests/test_pmv4_stage_a_native_install.py
+      - name: Verify actual three-stage A0 root actions on disposable UID0
+        run: |
+          sudo env PYTHONPATH=implementation:. "$(which python)" -m pytest -q \
+            tests/test_pmv4_a0_atomic_actual_root_components.py
       - name: Verify immutable source-only production denial
         run: |
           PYTHONPATH=implementation:. python -m pytest -q \

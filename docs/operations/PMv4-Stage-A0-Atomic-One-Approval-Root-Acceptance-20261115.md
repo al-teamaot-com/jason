@@ -1,0 +1,25 @@
+# PMv4 Stage A0 — one-approval atomic root acceptance
+
+**Date:** 2026-11-15. **Approval policy:** Owner amendment to issue #2481. **Deployment authority:** NOT GRANTED. This is an integrated source-only engineering acceptance, not a privileged production release.
+
+## Reviewed one-owner scope
+
+ONE independently authenticated Microsoft Entra Owner decision binds exactly three operations, each with its own signed derived machine step and independently verified root evidence: (1) exact root source-closure helper and policy bootstrap, (2) one immutable root source-file closure, (3) actual native isolated Stage A0 host installation. All three must complete before the combined objective can be reported successful. One decision is not blanket authority for other releases.
+
+Reviewed protected candidate SHA: 7b42ce983896711525de4c7955bf9fc43ac003d0. Existing production LKG/rollback: d1b8c196dadd4b672ec8ba47075f27bb61c98d63. Freeze SHA256: bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f. Promotion hold SHA256: 11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0. Root helper scope e5515b5e...; immutable one-file closure scope 089f8706...; native Stage A0 source scope 6786baad... and manifest addba768...
+
+## Source-only atomic coordinator
+
+The fixed three-step tool, tools/pmv4_a0_atomic_plan_transaction.py, **rejects production=True before any action**. Disposable private /tmp test scope only. It requires an immutable reviewed three-stage Owner plan, the existing original signed Entra Owner parent, fresh independently signed active/unrevoked grant evidence per machine step, and original cryptographically signed child proof. It obtains prior-step facts only from the durable plan journal, never an asserted caller-supplied completion list.
+
+Its independent chain-hashed, fsynced, one-use transaction journal records begin, intent, installed, then committed ONLY after all three. Failed actions cause reverse ordered exact-object readback and conditional rollback to absence. A foreign or tampered object fails closed as requires_review, never recursively deleted. An interrupted journal can be reconciled solely by exact rollback without a second Owner decision. Any executed/aborted/needs-review journal prevents another installation attempt.
+
+Unit tests test_pmv4_a0_atomic_plan_transaction.py cover all three actual disposable file creating effects under one mock identity authentication/consent, interruption at each stage, malicious substituted objects, signed-proof modification, torn records, one-use replay and recovery.
+
+Disposable UID0 acceptance test_pmv4_a0_atomic_actual_root_components.py uses three **actual previously reviewed root/native source methods** with mapping only to private /tmp fixtures: exact two-file root bootstrap publish and rollback, the exclusive one missing source file creation and inode readback, then NativeStageAInstaller.install and recover_empty using a detached exact protected Git candidate. It uses the original immutable reviewed source blob hash ca844fee..., actual helper hash 1006edb6... and policy 7cd1ef65..., and the original protected freeze/hold fixture bytes to recompute the genuine native manifest. Each stage is exercised in isolation and across the same three-step atomic coordination; faults at each stage require reverse rollback and no repeat Owner consent. No host production paths may be touched.
+
+## Unfinished privileged production boundary
+
+The installed production root worker remains v1 and does not yet consume the signed whole-objective schema-v2 Parent, current-grant attestation and three-step journal. The source-only coordinator and tests are NOT a production-root installer. Production needs an independently reviewed and root-owned native one-release consumer, existing native legacy release lock across all three actions, root-only target readback and journal, trusted signer/revocation feed, exact root source manifest and independent full-production rollback and postflight.
+
+Prior two-prompt local launcher may not substitute for the newly approved single-release policy. No runtime/MCP image, Ticket Core worker, provider data, freeze, hold, production LKG or existing root signer change is authorized by this engineering. Owner's governance Yes is approval to proceed with this design, **not** the final signed Entra production deployment consent.
