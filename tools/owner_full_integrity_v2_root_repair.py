@@ -62,6 +62,15 @@ BOOTSTRAP_SCOPE = "a7524f8b761db1f3a912eea3221014b46729be34705397aa87ef283d513ed
 BOOTSTRAP_MANIFEST_SHA = "d64d619b8bd26541fc1bcc8fa72ce047a747c093265bda55702d5e50f457199a"
 RUNTIME = "jason-runtime"
 MCP = "jason-mcp-pilot"
+# The separately governed PMv4 Stage A0 same-image issuer was activated
+# AFTER this health-only root repair was prepared. The current root issuer
+# is trusted only after validating its immutable private success ledger,
+# its signed historical exact Owner action, and the actual live MCP ID.
+ISSUER_ACTION = "pmv4-stage-a0-same-image-owner-issuer-v1"
+ISSUER_SOURCE = "7b42ce983896711525de4c7955bf9fc43ac003d0"
+ISSUER_LEDGER = Path("/etc/jason-owner-release/pmv4-stage-a0-issuer-ledger")
+ISSUER_POLICY = Path("/etc/jason-owner-release/pmv4-stage-a0-issuer-activation.json")
+ISSUER_CODE = Path("/usr/local/lib/jason/pmv4_stage_a0_issuer_activation.py")
 CONFIRM = "APPROVE-EXACT-V2-FULL-SQLITE-PROOF-ONLY"
 
 class RepairDenied(PermissionError):
@@ -132,7 +141,8 @@ def fixed_policy() -> dict:
               "runtime_image_id","mcp_image_id","owner_auth_sha256",
               "owner_proof_sha256","full_unit_sha256","fast_unit_sha256",
               "old_fast_emergency_sha256","service_max_seconds",
-              "full_scan_max_seconds","no_provider_writes","no_runtime_change"}
+              "full_scan_max_seconds","no_provider_writes","no_runtime_change",
+              "existing_stage_a0_issuer_state"}
     if (set(document)!=required or document["schema_version"]!="1.0"
             or document["exact_action"]!=ACTION or document["one_shot"] is not True
             or document["source_sha"]!=SOURCE
@@ -140,7 +150,10 @@ def fixed_policy() -> dict:
             or document["service_max_seconds"]!=5700
             or document["full_scan_max_seconds"]!=5400
             or document["no_provider_writes"] is not True
-            or document["no_runtime_change"] is not True):
+            or document["no_runtime_change"] is not True
+            or document["existing_stage_a0_issuer_state"]
+              != "true_with_exact_root_signed_activation_receipt"):
+
         raise RepairDenied("POLICY_CONTRACT_CHANGED")
     for field,file in (
         ("script_sha256",ROOT_SCRIPT),("owner_auth_sha256",OWNER_AUTH),
@@ -226,6 +239,85 @@ def checked_bundle(policy: dict) -> tuple[dict,dict[str,bytes]]:
             raise RepairDenied("ARCHIVE_SOURCE_INCOMPLETE")
     return manifest,objects
 
+def verify_previous_issuer_activation(*, mcp_id: str,
+                                      mcp_image: str,
+                                      freeze_sha256: str) -> bool:
+    """Attest the EXISTING separately signed Owner issuer state, read-only.
+
+    This is historical approval evidence, not reusable release authority.
+    Only the root-owned sealed result and exact same-image Owner proof may
+    justify the existing `true` flag. Unknown or foreign audit objects deny.
+    """
+    meta = ISSUER_LEDGER.lstat()
+    if (ISSUER_LEDGER.is_symlink() or not stat.S_ISDIR(meta.st_mode)
+            or (meta.st_uid, meta.st_gid) != (0, 0)
+            or stat.S_IMODE(meta.st_mode) != 0o700):
+        raise RepairDenied("STAGE_A0_ISSUER_ROOT_LEDGER_UNTRUSTED")
+    attempt_path = ISSUER_LEDGER / (ISSUER_ACTION + ".attempt.json")
+    result_path = ISSUER_LEDGER / (ISSUER_ACTION + ".result.json")
+    if set(ISSUER_LEDGER.iterdir()) != {attempt_path, result_path}:
+        raise RepairDenied("STAGE_A0_ISSUER_ROOT_LEDGER_FOREIGN_OR_INCOMPLETE")
+    attempt = json.loads(read_secure_root(attempt_path, 131072))
+    result = json.loads(read_secure_root(result_path, 131072))
+    issuer_policy = json.loads(read_secure_root(ISSUER_POLICY, 8192))
+    if (issuer_policy.get("source_sha") != ISSUER_SOURCE
+            or issuer_policy.get("exact_action") != ISSUER_ACTION
+            or issuer_policy.get("mcp_image_sha256") != mcp_image
+            or issuer_policy.get("freeze_sha256") != freeze_sha256
+            or issuer_policy.get("change") != "same-mcp-image-one-env-flag-only"
+            or issuer_policy.get("one_shot") is not True
+            or issuer_policy.get("provider_writes") is not False
+            or issuer_policy.get("script_sha256") != digest(read_secure_root(ISSUER_CODE,131072))):
+        raise RepairDenied("STAGE_A0_ISSUER_ROOT_POLICY_CHANGED")
+    if (result.get("schema_version") != "1.0"
+            or result.get("action") != ISSUER_ACTION
+            or result.get("result") != "verified"
+            or result.get("new_mcp_id") != mcp_id
+            or attempt.get("schema_version") != "1.0"
+            or attempt.get("action") != ISSUER_ACTION
+            or attempt.get("source") != ISSUER_SOURCE
+            or attempt.get("mcp_image") != mcp_image
+            or attempt.get("freeze_sha256") != freeze_sha256
+            or attempt.get("status") != "exact_one_use_claimed_before_mutation"
+            or attempt.get("approved_script_sha256") != issuer_policy["script_sha256"]):
+        raise RepairDenied("STAGE_A0_ISSUER_ROOT_RECEIPT_CHANGED")
+    issuer_scope = digest(canonical({
+        "schema_version": "1.0", "action": ISSUER_ACTION,
+        "source_sha": ISSUER_SOURCE,
+        "runtime_image": issuer_policy["runtime_image_sha256"],
+        "mcp_image": mcp_image,
+        "flag": "JASON_PMV4_STAGE_A0_ISSUER_ENABLED=true",
+        "rollback": "same-image-original-container-issuer-off",
+        "provider_writes": False,
+        "core_mutation": False,
+    }))
+    if attempt.get("scope_sha256") != issuer_scope:
+        raise RepairDenied("STAGE_A0_ISSUER_EXACT_SCOPE_CHANGED")
+    proof = attempt.get("owner_signed_exact_action")
+    if (not isinstance(proof, dict)
+            or not isinstance(proof.get("payload"), dict)):
+        raise RepairDenied("STAGE_A0_ISSUER_SIGNED_PROOF_MISSING")
+    try:
+        issued_at = datetime.fromisoformat(proof["payload"]["issued_at"])
+    except (TypeError, KeyError, ValueError) as exc:
+        raise RepairDenied("STAGE_A0_ISSUER_SIGNED_TIME_INVALID") from exc
+    verifier = load_trust(OWNER_PROOF, "root_existing_issuer_owner_verifier")
+    public = verifier.read_pinned_root_owner_public_key(
+        ROOT_PIN, require_root_owned=True)
+    # Verify the old proof at the actual historical issue instant, not now;
+    # it cannot grant a new release, only authenticate past activation.
+    verifier.verify_exact_owner_release(
+        proof, public_key=public, at=issued_at,
+        expected_candidate_sha=ISSUER_SOURCE,
+        expected_rollback_sha=ISSUER_SOURCE,
+        expected_release_id="release-" + ISSUER_SOURCE[:16],
+        expected_scope_sha256=issuer_scope,
+        expected_manifest_sha256=digest(canonical(issuer_policy)),
+        expected_freeze_sha256=freeze_sha256,
+    )
+    return True
+
+
 def root_state(policy: dict) -> dict:
     if (Path("/opt/jason/current").resolve(strict=True)
             !=Path("/opt/jason/releases")/LKG
@@ -258,8 +350,17 @@ def root_state(policy: dict) -> dict:
     mcp_env=json.loads(subprocess.check_output(
         ["docker","inspect","--format","{{json .Config.Env}}",MCP],
         text=True,timeout=15))
-    if mcp_env.count("JASON_PMV4_STAGE_A0_ISSUER_ENABLED=false")!=1:
+    # The approved Stage A0 issuer activation may not be silently reverted
+    # just to run this unrelated read-only full health repair. Require its
+    # *actual* live true flag and its verified sealed root/audited Owner proof.
+    if (mcp_env.count("JASON_PMV4_STAGE_A0_ISSUER_ENABLED=true")!=1
+            or mcp_env.count("JASON_PMV4_STAGE_A0_ISSUER_ENABLED=false")!=0):
         raise RepairDenied("UNAUTHORIZED_STAGE_A0_ISSUER_STATE")
+    live_mcp=json.loads(subprocess.check_output(
+        ["docker","inspect",MCP],timeout=15,text=True))[0]
+    verify_previous_issuer_activation(
+        mcp_id=live_mcp["Id"], mcp_image=policy["mcp_image_id"],
+        freeze_sha256=policy["freeze_sha256"])
     full_info=FULL.lstat()
     if (FULL.is_symlink() or not stat.S_ISREG(full_info.st_mode)
             or full_info.st_uid!=1000

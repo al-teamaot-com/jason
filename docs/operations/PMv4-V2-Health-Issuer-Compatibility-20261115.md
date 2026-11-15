@@ -1,0 +1,37 @@
+# PMv4 Stage A0 — required authority full-integrity recovery with the already-enabled Owner issuer
+
+**Status:** Source-only; no root update, full scan, unit restart, production promotion, freeze or hold change authorized by this document.
+
+## Independently observed incident (2026-11-15)
+
+The production full-integrity daily unit `jason-openclaw-authority-full-integrity.service` ran 03:01–04:01 EST, returning exit 124 after 3,600 seconds. The result file records `operational_health_timeout`; the fast authority health unit fails with exit 2 because the temporary degraded-health exception expired November 12. A fresh root drift record reports exactly one failed required health systemd unit, and the independent release breaker correctly remains OPEN. Runtime and MCP containers are still running; ticket runtime is healthy. The previous genuine full-integrity proof passed November 14, but that does not validate the November 15 timeout. **Never classify fast SQLite readability as a substitute for the full four-database integrity plus backup/restore proof.**
+
+The already-installed V2 root health helper is an older root-owned, exact-pinned version SHA256 `ff0b81a0cb60c6a76a21b3f45301f7750d4c7d95f044626c35e8ac9a4`. The originally reviewed V2 replacement helper at protected main `7b42ce983896711525de4c7955bf9fc43ac003d0` wrongly required `JASON_PMV4_STAGE_A0_ISSUER_ENABLED=false`. Yet the Owner separately approved and activated the existing MCP **same-image, one-flag** Stage A0 issuer November 14, so the existing V2 repair would deterministically reject production state.
+
+## Minimal issuer-compatible V2 code change
+
+Only the **admission/read-only existing MCP issuer attestation** is changed in `tools/owner_full_integrity_v2_root_repair.py`. It now requires the existing MCP image, source LKG, existing exact true flag and root-owned 0700 issuer ledger containing precisely its expected root-owned attempt/result records. It checks root issuer policy against its installed root code SHA, pinned protected issuer source SHA, existing image/freeze, the ledger's verified success and **the exact current MCP container ID**. It additionally verifies the historical Owner Entra/Ed25519 exact-action signature against the existing pinned root public key **at original issuance time for audit only**. An expired past approval never grants new privileges. A changed issuer flag, removed/foreign audit object, changed MCP ID, forged or tampered signature, modified issuer policy, unknown source, or unreviewed image is denied.
+
+**Unchanged:** four COMPLETE SQLite `PRAGMA integrity_check` proofs, authority backup/restore, complete registry coverage, 5,400-second bounded child check and 5,700-second service, native release lock, runtime/MCP/no-provider-writes, native breaker/drift revalidation, exact root-produced receipts, freeze/hold, and conditional rollback. The repaired V2 policy adds one explicit field `existing_stage_a0_issuer_state=true_with_exact_root_signed_activation_receipt`; root code and policy hashes are rebound. The UID1000 health Owner-consent companion pins the updated policy hash, never issues approval from an unattended session, and never runs the full scan.
+
+## Reviewed independent two-file root update
+
+Historical root bytes are read only from immutable protected Git commit `45e52de4803a6f0768187793bba4990ed1d11a07`; the candidate source main remains **exact** `7b42ce983896711525de4c7955bf9fc43ac003d0`. No protected source promotion is authorized.
+
+- Exact action `owner-v2-issuer-attested-root-code-policy-replace-v1-20261115`, new scope SHA256 `cf866a84f38fc0b45decb7bf0a87ac34232bf124be3b1796e6a243cb86bfb196`.
+- Reviewed root helper SHA256 `58e124205518eb8084889b61c23562f876cb782470572be72b97641be9705198`; reviewed root policy SHA256 `063c85d8eff3938fb713054abb8b5735ae0c2821c69ccbb1cd7889092fb74b28`. Root destinations remain the **same two existing** exact paths, root:root modes 0444 and 0400, with verified byte-for-byte rollback to original helper/policy.
+- Immutable reviewed two-file manifest SHA256 `119128ead74bc08e02dff543ae2a5ec458c3c14685c267bbd7cca230a290b6e1`. Rebuilt deterministic package SHA256 `b221e48383cef5cfd69fdd24b38c08ceacf8459a1b7c0b62dab6036fd721006c`. New root attempt/result paths are unique and one-use under `/etc/jason-owner-release/`. Never alter or clear the original V2 root-trust audit ledger.
+- `tools/owner_v2_issuer_aware_root_updater.py` is an exact independent root code/policy updater based on the existing reviewed two-file updater, additionally requiring the original immutable issuer activation root ledger to match the *actual live MCP container ID*. After atomic replacement it executes the newly installed V2 helper in **read-only --check-only mode** to validate the complete historical Entra proof, owner ledger and current breaker, before returning VERIFIED. Any failed check triggers exact old-byte rollback.
+- `tools/owner_v2_issuer_aware_update_owner.py` performs only a fresh interactive UID1000 Entra Owner exact-release signature; root-side verification independently enforces one-use, current live host identity, fixed two-file manifest and production freeze/hold. The package is read-only from the user-controlled archive and never executes mutable operator-owned Python as root.
+- `tools/owner_v2_issuer_aware_local.sh` provides a local Owner terminal preflight (`--check-only`) and separately consented (`--execute`) exact code/policy upgrade followed by the genuine full-four-database health recovery. Each native action requires its own signed Entra Owner proof; no Teams approval. The bounded full health may have a long running time. **Do not run on production before all CI, root-mode tests, exact source review and current-state preflight pass.**
+- Root full integrity stage must verify a fresh actual full PASS before removing the expired fast-health override. It then verifies canonical fast health PASS and three distinct root drift PASS samples before invoking existing native breaker revalidation. If any mismatch, fail closed with breaker OPEN; no direct breaker-edit or integrity waiver.
+
+## Strict sequencing
+
+1. Complete preproduction tests, security/dependency and exact source/manifest/rollback review. The source-only correction MUST NOT be merged into protected main while current Stage A0 source remains pinned to that main SHA.
+2. In a real interactive local Owner UID1000 terminal, use the separately approved, SHA-pinned one-use V2 root helper/policy updater, confirm root read-only acceptance, then obtain **new, distinct** authenticated Owner consent for genuine full SQLite+restore proof and root breaker recovery.
+3. Independently verify full proof, canonical fast health, root breaker CLOSED, fresh drift PASS, original runtime/MCP images and issuer flag true, frozen main and freeze/hold unchanged.
+4. Only then resume the separately governed PMv4 Stage A0 two-file root closure bootstrap and **one missing immutable source file**; after readback, invoke the already live signed Jason Stage A0 installer as a separate exact action.
+5. PMv4 shadow release, Ticket Core transition, runbook cutover and retirement remain distinct scope/acceptance decisions.
+
+Until the root health recovery is successful, the PMv4 root bootstrap must reject with breaker OPEN. No chat-based approval substitutes for a signed Owner root transaction.

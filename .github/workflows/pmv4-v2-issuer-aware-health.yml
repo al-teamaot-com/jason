@@ -1,0 +1,46 @@
+name: PMv4 Issuer-Aware V2 Full Integrity (source only)
+on:
+  pull_request:
+    paths:
+      - tools/owner_full_integrity_v2_root_repair.py
+      - tools/owner_full_integrity_v2_owner_consent.py
+      - tools/owner_v2_issuer_aware_root_updater.py
+      - tools/owner_v2_issuer_aware_update_owner.py
+      - tools/owner_v2_issuer_aware_local.sh
+      - tools/pmv4_v2_issuer_aware_packet.py
+      - tools/tests/test_owner_full_integrity_v2_issuer_compatibility.py
+      - config/owner-full-integrity-v2-repair-policy.json
+      - config/pmv4-stage-a0/issuer-aware-v2-root-upgrade-manifest-review.json
+      - docs/operations/PMv4-V2-Health-Issuer-Compatibility-20261115.md
+      - .github/workflows/pmv4-v2-issuer-aware-health.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  issuer-receipt-and-exact-root-code:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install bounded test dependencies
+        run: python -m pip install pytest cryptography requests
+      - name: Verify genuine historical Owner signature and fail-closed issuer admission
+        run: |
+          python -m pytest -q             tools/tests/test_owner_full_integrity_v2_issuer_compatibility.py             tools/tests/test_owner_full_integrity_v2_root_repair.py             tools/tests/test_owner_full_integrity_v2_owner_consent.py
+      - name: Rebuild exact 2-file root rollback archive from protected Git
+        run: python tools/pmv4_v2_issuer_aware_packet.py
+      - name: Compile exact root updater and Owner consent without applying
+        run: |
+          python -m py_compile             tools/owner_v2_issuer_aware_root_updater.py             tools/owner_v2_issuer_aware_update_owner.py             tools/owner_full_integrity_v2_root_repair.py             tools/owner_full_integrity_v2_owner_consent.py
+          bash -n tools/owner_v2_issuer_aware_local.sh
+      - name: Reject root updates from untrusted checkout
+        run: |
+          if python -I tools/owner_v2_issuer_aware_root_updater.py --execute; then
+            echo "Untrusted checkout incorrectly accepted root execution"
+            exit 1
+          fi
