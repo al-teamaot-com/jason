@@ -102,7 +102,7 @@ def test_nonexistent_registry_never_created_by_read(tmp_path):
     assert not db.parent.exists()
 
 
-@pytest.mark.parametrize("case",["symlink","world_writable","relative","uri","wrong_uid"])
+@pytest.mark.parametrize("case",["symlink","world_writable","relative","uri","fragment","wrong_uid"])
 def test_untrusted_readonly_paths_fail_closed(tmp_path,monkeypatch,case):
     db=historical_two_table_db(tmp_path)
     if case=="symlink":
@@ -116,6 +116,9 @@ def test_untrusted_readonly_paths_fail_closed(tmp_path,monkeypatch,case):
     elif case=="uri":
         db.rename(tmp_path/"json-playbooks?.sqlite3")
         db=tmp_path/"json-playbooks?.sqlite3"
+    elif case=="fragment":
+        db.rename(tmp_path/"json-playbooks#.sqlite3")
+        db=tmp_path/"json-playbooks#.sqlite3"
     elif case=="wrong_uid":
         original_uid=os.geteuid()
         monkeypatch.setattr(os,"geteuid",lambda:original_uid+1)
