@@ -24,12 +24,17 @@ def test_generated_root_is_versioned_and_rejects_old_owner_replay():
     assert 'CANDIDATE="'+SOURCE+'"' in text
     assert 'IMAGE="'+IMAGE+'"' in text
     assert 'ACTION="'+b.NEW_ACTION+'"' in text
-    assert 'bootstrap-v2-' in text
-    assert '"/run/jason-pmv4-a1-v2-'+SOURCE[:12]+'/installer.py"' in text
+    assert 'bootstrap-v3-' in text
+    assert '"/run/jason-pmv4-a1-v3-'+SOURCE[:12]+'/installer.py"' in text
+    assert 'original_v2_rollback_audit()' in text
+    assert 'preapproval_candidate_compose_pair(manifest)' in text
+    assert 'native.ShadowController(' in text
+    assert 'compose_binding="candidate"' in text
+    assert 'legacy_compose_sha256="'+b.LEGACY_COMPOSE_SHA+'"' in text
     assert b.ORIGINAL_APPROVAL in text
     assert 'historical.get("state")=="rolled_back"' in text
     assert 'A1_V2_ORIGINAL_OWNER_RECEIPT_NOT_RECONCILED' in text
-    assert '    source_git_attestation(plan)\n    empty_baseline()' in text
+    assert '    source_git_attestation(plan)\n    original_v2_rollback_audit()\n    preapproval_candidate_compose_pair(manifest)\n    empty_baseline()' in text
     assert 'verified_reviewed_module("tools/pmv4_host_release_guard.py","guard")' in text
     assert 'verified_reviewed_module("tools/pmv4_shadow_docker_adapter.py","adapter")' in text
     assert 'exec(compile(body,"protected-main:"+CANDIDATE' in text
@@ -46,7 +51,8 @@ def test_issuer_imports_exact_generated_root_not_old_source_module():
     assert 'from tools import pmv4_a1_atomic_shadow_root as root' not in text
     assert str(b.ARTIFACT_PARENT/("pmv4-a1-"+SOURCE)) in text
     assert "signer.issue_exact_owner_release" in text
-    assert "APPROVE-ONE-EXACT-PMV4-A1-V2-DISCONNECTED-SHADOW" in text
+    assert "APPROVE-ONE-EXACT-PMV4-A1-V3-DISCONNECTED-SHADOW" in text
+    assert "APPROVE-ONE-EXACT-PMV4-A1-V2-DISCONNECTED-SHADOW" not in text
     assert "APPROVE-ONE-EXACT-PMV4-A1-DISCONNECTED-SHADOW-BOOTSTRAP" not in text
     assert 'root.CANDIDATE' in text
 
@@ -58,7 +64,7 @@ def test_local_launcher_is_exact_versioned_one_use():
     assert 'SOURCE="'+SOURCE+'"' in text
     assert 'A1_V2_SOURCE_CHECKOUT_DIRTY' in text
     assert 'A1_V2_SOURCE_CHECKOUT_CHANGED' in text
-    assert '"/run/jason-pmv4-a1-v2-'+SOURCE[:12]+'"' in text
+    assert '"/run/jason-pmv4-a1-v3-'+SOURCE[:12]+'"' in text
     assert "sudo /usr/bin/python3 -I -B \"$STAGED\" --preflight" in text
     assert "sudo /usr/bin/python3 -I -B \"$STAGED\" --postflight" in text
     assert "OWNER_APPROVAL_CREATED=1" in text
@@ -100,6 +106,8 @@ def test_packet_emits_new_only_in_disposable_folder(tmp_path,monkeypatch):
     monkeypatch.setattr(b,"read_git",source)
     report=b.prepare(SOURCE,IMAGE,repo=HERE,verify_main=lambda x:x==SOURCE)
     assert report["previous_owner_approval_reused"] is False
+    assert report["previous_v2_approval_reused"] is False
+    assert report["previous_v2_approval_id"]==b.PREVIOUS_V2_APPROVAL
     assert report["production_mutations"] is False
     assert report["gateway_started"] is False
     assert report["source_approval_issued"] is False
