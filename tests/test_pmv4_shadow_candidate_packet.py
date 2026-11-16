@@ -115,3 +115,17 @@ def test_github_source_retrieval_denies_unreviewed_path(tmp_path):
         candidate.git_file(tmp_path, SHA, "../secret")
     with pytest.raises(ShadowReleaseDenied, match="ALLOWLISTED"):
         candidate.git_file(tmp_path, "x"*40, candidate.EXACT_SOURCE_FILES[0])
+
+
+def test_offline_derivative_dockerfile_has_no_downloads_or_secrets():
+    source = Path(__file__).resolve().parents[1]
+    path = source / "infrastructure/pmv4-shadow-image/Dockerfile"
+    lines = [x.strip() for x in path.read_text().splitlines()
+             if x.strip() and not x.lstrip().startswith("#")]
+    assert lines[0] == "ARG BASE_IMAGE=openclaw:local"
+    assert lines[1] == "FROM ${BASE_IMAGE}"
+    assert lines[2].startswith('LABEL com.aot.jason.component="pmv4-shadow"')
+    assert 'com.aot.jason.provider-mutations="disabled"' in path.read_text()
+    assert not any(line.split(" ", 1)[0] in {
+        "RUN", "COPY", "ADD", "EXPOSE", "ENTRYPOINT", "CMD"
+    } for line in lines)
