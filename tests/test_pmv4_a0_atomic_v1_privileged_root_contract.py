@@ -258,7 +258,12 @@ def test_exact_original_owner_proof_committed_rollback_only_on_failed_postflight
         "signed_owner_proof":{"payload":{"issued_at":"2026-11-15T10:00:00+00:00"}}
     })
     monkeypatch.setattr(root,"verify_proof",lambda p,at:dict(proof))
-    monkeypatch.setattr(root,"build_recovery_context",lambda:{})
+    from types import SimpleNamespace
+    stage=SimpleNamespace(recover_exact_source=lambda parent,scope:
+                          (calls.append("staged-source"),True)[1])
+    monkeypatch.setattr(root,"build_recovery_context",lambda:{
+        "stage":stage,"original":{"scope_sha256":root.SPARSE_SCOPE},
+    })
     monkeypatch.setattr(root,"recover_native_if_present",lambda c,p:calls.append(2))
     monkeypatch.setattr(root,"recover_source_if_present",lambda c:calls.append(1))
     monkeypatch.setattr(root,"recover_bootstrap_if_present",lambda c:calls.append(0))
@@ -267,7 +272,7 @@ def test_exact_original_owner_proof_committed_rollback_only_on_failed_postflight
             raise root.AtomicRootDenied("independently observed postcommit unhealthy")
         monkeypatch.setattr(root,"verify_all_stage_postflights",unhealthy)
         root.recover()
-        assert calls==[2,1,0]
+        assert calls==[2,1,0,"staged-source"]
         assert root.audit_rows()[-1]["action"]=="rolled_back"
         root.recover() # already rolled-back original receipt is idempotent
     else:

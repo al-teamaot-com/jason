@@ -11,7 +11,8 @@ import pytest
 
 from tools import pmv4_a0_closure_bootstrap_root as boot
 from tools import pmv4_a0_closure_bootstrap_owner as owner
-from tools import pmv4_stage_a0_one_owner_review as current_review
+CURRENT_REVIEW = json.loads((Path(__file__).parents[1] / "config/pmv4-stage-a0/one-owner-recovery-review-20261115.json").read_bytes())
+BOOTSTRAP_SCOPE = "9e36a199cda7a176e893a17fdfeeedfb3782dce3f705886e29deed5867bf2837"
 
 
 def test_fixed_scope_no_generic_root_file_writer():
@@ -22,11 +23,11 @@ def test_fixed_scope_no_generic_root_file_writer():
     }
     # The pinned root consumer is current-main 8c20, while the retired
     # separately approved 7b42 Owner helper is retained only for history.
-    assert boot.SCOPE_SHA == current_review.BOOTSTRAP_SCOPE
-    assert boot.PLAN_SHA == current_review.BOOTSTRAP_ARTIFACT
+    assert boot.SCOPE_SHA == BOOTSTRAP_SCOPE
+    assert boot.PLAN_SHA == CURRENT_REVIEW["archived_bootstrap_plan_sha256"]
     assert boot.FREEZE_SHA == owner.FREEZE_SHA
     assert boot.HOLD_SHA == owner.HOLD_SHA
-    assert boot.SOURCE_SHA == current_review.SOURCE
+    assert boot.SOURCE_SHA == CURRENT_REVIEW["source_sha"]
     assert boot.PROOF.name.endswith("8c20.json")
     assert boot.STAGED == Path("/run/jason-pmv4-a0-closure-bootstrap-8c20/installer.py")
 
@@ -144,7 +145,7 @@ def test_disposable_root_foreign_replacement_preserved(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(not boot.PLAN.is_file(), reason="current-main reviewed archive unavailable")
 def test_source_review_policy_hash_is_pinned_by_manifest():
-    assert sha256(boot.PLAN.read_bytes()).hexdigest() == current_review.BOOTSTRAP_ARTIFACT
+    assert sha256(boot.PLAN.read_bytes()).hexdigest() == CURRENT_REVIEW["archived_bootstrap_plan_sha256"]
     plan = json.loads(boot.PLAN.read_bytes())
     rows = {r["destination"]: r for r in plan["files"]}
     for dest, (name, expected, size, mode) in boot.FILES.items():

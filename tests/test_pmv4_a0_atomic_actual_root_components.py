@@ -61,11 +61,30 @@ class ActualA0Components:
         self.monkeypatch, self.fault = monkeypatch, fault
         self.applied = []
         reviewed_source = Path(__file__).resolve().parents[1]
-        self.blobs = {
-            str(root / "helper.py"):
-                (reviewed_source / "tools/pmv4_stage_a0_root_source_closure.py").read_bytes(),
-            str(root / "policy.json"):
-                (reviewed_source / "config/pmv4-stage-a0/root-source-closure-policy-review.json").read_bytes(),
+        # The checked-out test sources preserve historical 7b42 defaults;
+        # the reviewed 8c20 immutable root package binds exactly three
+        # helper constants and four policy values, without editing history.
+        helper=(reviewed_source / "tools/pmv4_stage_a0_root_source_closure.py").read_bytes()
+        pairs=(
+            (b"7b42ce983896711525de4c7955bf9fc43ac003d0",
+             b"8c2064193d74cc41b52369681febbc0a74fa96f7"),
+            (b"09e35bf812c3bedd61991af669ea9a80b0a0ff5948b1d1a6edb1d70c3332c27f",
+             b"00bbf9884a1f724886be50d100a6aec2f3dfece6ec18177ca39d18768c6248e1"),
+            (b"089f8706b61b70c9f31406204bb27fab0bde47bc8df56f13a274defb8b537381",
+             b"4f36e1eee0d5051484aeaadc77877525274faf880c9638b8e5ffe56eddc78a42"),
+        )
+        for previous,current in pairs:
+            assert helper.count(previous)==1
+            helper=helper.replace(previous,current)
+        policy=(reviewed_source / "config/pmv4-stage-a0/root-source-closure-policy-review.json").read_bytes()
+        for previous,current in (*pairs,
+            (b"1006edb6613f3ff976fadf64c25d8e6096dfef6b2296e4583ba51ee81ee4c4f6",
+             b"69a7fa57916290295f3f085f35a0fafa67c51110e2ce8dcc2b1b886ca5ed0e4d")):
+            assert policy.count(previous)==1
+            policy=policy.replace(previous,current)
+        self.blobs={
+            str(root/"helper.py"):helper,
+            str(root/"policy.json"):policy,
         }
         assert sha256(self.blobs[str(root / "helper.py")]).hexdigest() == bootstrap.FILES[
             "/usr/local/lib/jason/pmv4_stage_a0_root_source_closure.py"][1]

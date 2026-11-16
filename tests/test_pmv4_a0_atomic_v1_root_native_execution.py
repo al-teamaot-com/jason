@@ -18,6 +18,8 @@ from kernel.signed_owner_release import canonical,OWNER_OID
 from tools import pmv4_a0_exact_v1_root_release as root
 from tools import pmv4_a0_one_release_v1_proof as signature
 from tools import pmv4_stage_a_packet as packet
+from tools import pmv4_stage_a0_sparse_source as pinned_source
+from tools import pmv4_stage_a0_sparse_root_stage as source_stage
 from tools.pmv4_a0_atomic_plan_transaction import A0AtomicTransactionDenied
 from test_pmv4_a0_atomic_actual_root_components import real_three
 from test_pmv4_owner_objective_end_to_end import AT, enrolled
@@ -44,6 +46,20 @@ def root_native(real_three,monkeypatch,tmp_path):
     monkeypatch.setattr(root,"JOURNAL",own/"root-protected-transaction.jsonl")
     a=make_adapter()
     a.outer_lock_held=True
+    # Current-main immutable 13-source staging is the first mutation of the
+    # same approved root action zero; never touch the consumed old stage ledger.
+    blob=pinned_source.git_object(a.repo)
+    original=pinned_source.source_manifest(
+        root.CANDIDATE,blob,freeze_sha256=root.FREEZE_SHA,
+        current_lkg=root.LKG)
+    source_archive=pinned_source.package_bytes(original,blob)
+    assert original["scope_sha256"]==root.SPARSE_SCOPE
+    assert sha256(source_archive).hexdigest()==root.SPARSE_ARCHIVE_SHA
+    mapped_releases=tmp_path/"separate-source-root"
+    mapped_releases.mkdir(mode=0o755)
+    monkeypatch.setattr(root,"SOURCE",mapped_releases/root.CANDIDATE)
+    monkeypatch.setattr(root,"MISSING_FILE",
+                        root.SOURCE/"tools/pmv4_host_install_contract.py")
     # The *production* final check is root-pinned and separately covered by
     # source/native guard tests. In isolated /tmp UID0 acceptance, require
     # all THREE original native effects, signed ID, original frozen source,
@@ -51,6 +67,7 @@ def root_native(real_three,monkeypatch,tmp_path):
     def verify_disposable_final_all(proof):
         assert proof["approval_id"]==signed["payload"]["approval_id"]
         assert all(a.verify_installed(i) for i in range(3))
+        source_stage.verify_staged_source(root.SOURCE,original)
         assert a.freeze.read_bytes()==__import__(
             "test_pmv4_a0_atomic_actual_root_components",
             fromlist=["FREEZE_BYTES"]
@@ -66,14 +83,17 @@ def root_native(real_three,monkeypatch,tmp_path):
     monkeypatch.setattr(root,"LOCK",lock)
     baseline={"safe":"unchanged","runtime_id":"r-unchanged","mcp_id":"m-unchanged"}
     monkeypatch.setattr(root,"trusted_entry",lambda:policy)
+    monkeypatch.setattr(source_stage,"protected_preflight",lambda sp:{
+        "runtime_id":baseline["runtime_id"],"mcp_id":baseline["mcp_id"]})
     monkeypatch.setattr(root,"read_root_preflight",lambda:{
         "bootstrap":__import__(
             "tools.pmv4_a0_closure_bootstrap_root",
             fromlist=["validate_plan"]
         ),
         "baseline":baseline,
-        "stage":SimpleNamespace(protected_preflight=lambda sp:{
-            "runtime_id":baseline["runtime_id"],"mcp_id":baseline["mcp_id"]}),
+        "stage":source_stage,
+        "source_archive":source_archive,
+        "original":original,
         "sparse":{},
     })
     boot=__import__("tools.pmv4_a0_closure_bootstrap_root",fromlist=["publish"])
@@ -118,7 +138,7 @@ def root_native(real_three,monkeypatch,tmp_path):
     monkeypatch.setattr(root,"native_install_under_outer_lock",apply_native)
     monkeypatch.setattr(root,"build_recovery_context",lambda:{
         "bootstrap":boot,
-        "stage":None,"sparse":None,
+        "stage":source_stage,"original":original,"sparse":None,
     })
     monkeypatch.setattr(root,"recover_native_if_present",lambda ctx,proof: (
         a.rollback_exact(2) if not a.verify_absent(2) else None
@@ -143,11 +163,13 @@ def test_one_existing_native_v1_root_lease_covers_all_three_actual_effects(
             root.execute()
             assert root.audit_rows()[-1]["action"]=="committed"
             assert all(a.verify_installed(i) for i in range(3))
+            assert root.SOURCE.is_dir()
         else:
             with pytest.raises(InterruptedError):
                 root.execute()
             assert root.audit_rows()[-1]["action"]=="rolled_back"
             assert all(a.verify_absent(i) for i in range(3))
+            assert not root.SOURCE.exists()
         assert len(env["consents"])==1
         with pytest.raises(root.AtomicRootDenied):
             root.execute()
@@ -187,6 +209,7 @@ def test_actual_all_three_root_actions_final_postflight_failure_rollback(
             root.execute()
         assert root.audit_rows()[-1]["action"]=="rolled_back"
         assert all(a.verify_absent(i) for i in range(3))
+        assert not root.SOURCE.exists()
         assert len(env["consents"])==1
     finally:
         a.close()
