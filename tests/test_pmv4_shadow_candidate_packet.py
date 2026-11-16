@@ -126,6 +126,8 @@ def test_offline_derivative_dockerfile_has_no_downloads_or_secrets():
     assert lines[1] == "FROM ${BASE_IMAGE}"
     assert lines[2].startswith('LABEL com.aot.jason.component="pmv4-shadow"')
     assert 'com.aot.jason.provider-mutations="disabled"' in path.read_text()
+    assert "ENTRYPOINT [\"tini\",\"-s\",\"--\",\"node\",\"openclaw.mjs\"]" in lines
+    assert "CMD [\"gateway\"]" in lines
     assert not any(line.split(" ", 1)[0] in {
-        "RUN", "COPY", "ADD", "EXPOSE", "ENTRYPOINT", "CMD"
+        "RUN", "COPY", "ADD", "EXPOSE"
     } for line in lines)
