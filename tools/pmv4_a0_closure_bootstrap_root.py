@@ -46,7 +46,7 @@ ROOT_PIN = Path("/etc/jason-owner-release/verified-owner-public-key.json")
 STAGE = Path("/run/jason-pmv4-a0-closure-bootstrap-8c20")
 STAGED = STAGE / "installer.py"
 LEDGER = Path("/etc/jason-owner-release/pmv4-stage-a0-root-source-closure-ledger")
-JOURNAL = RELEASE / "protected-transitions/pmv4-a0-root-source-closure-bootstrap-7b42.json"
+JOURNAL = RELEASE / "protected-transitions/pmv4-a0-root-source-closure-bootstrap-8c20.json"
 FILES = {
     "/usr/local/lib/jason/pmv4_stage_a0_root_source_closure.py":
         ("pmv4-a0-root-source-closure-8c20.py", "69a7fa57916290295f3f085f35a0fafa67c51110e2ce8dcc2b1b886ca5ed0e4d", 16909, 0o444),

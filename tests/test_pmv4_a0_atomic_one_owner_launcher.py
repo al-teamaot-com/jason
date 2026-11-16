@@ -74,3 +74,18 @@ def test_actual_unprivileged_local_check_uses_no_owner_approval():
     assert proc.returncode==0,proc.stderr
     assert "OWNER_APPROVAL_CONSUMED=false" in proc.stdout
     assert "PRODUCTION_MUTATIONS=false" in proc.stdout
+
+
+def test_current_main_bootstrap_journal_exactly_matches_reviewed_plan():
+    """Regression: a signed plan may hash PASS yet fail root preflight if its journal differs."""
+    import json
+    from tools import pmv4_a0_closure_bootstrap_root as boot
+    reviewed = ROOT / "config/pmv4-stage-a0/one-owner-recovery-review-20261115.json"
+    contract = json.loads(reviewed.read_text())
+    assert boot.PLAN == Path(contract["archived_bootstrap_plan_path"])
+    assert boot.PLAN.name.endswith("8c20.json")
+    assert boot.JOURNAL.name == "pmv4-a0-root-source-closure-bootstrap-8c20.json"
+    if boot.PLAN.exists():
+        plan, blobs = boot.validate_plan()
+        assert plan["journal"] == str(boot.JOURNAL)
+        assert len(blobs) == 2
