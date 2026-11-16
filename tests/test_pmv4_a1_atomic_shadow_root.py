@@ -158,3 +158,32 @@ def test_stage_fails_on_preexisting_root_target(isolated):
     with pytest.raises(a1.A1RootDenied,match="STAGE_DIRECTORY_ALREADY_PRESENT"):
         a1.stage_exact(plan,{}, {}, "owner-mcp-"+"9"*32)
     assert marker.read_bytes()==b"untouched"
+
+
+def test_active_watchdog_policy_requires_explicit_shadow_allowance(tmp_path):
+    config=tmp_path/"production-desired-state.json"
+    allowed=["jason-runtime","jason-mcp-pilot","jason-pmv4-shadow-gateway"]
+    config.write_text(__import__("json").dumps({
+        "schema_version":"1.0","allowed_running_containers":allowed}))
+    config.chmod(0o600)
+    digest=a1.active_shadow_allowlist(path=config,expected_uid=os.geteuid())
+    assert len(digest)==64
+    assert digest==a1.sha(config.read_bytes())
+    config.write_text(__import__("json").dumps({
+        "schema_version":"1.0",
+        "allowed_running_containers":["jason-runtime","jason-mcp-pilot"]}))
+    with pytest.raises(a1.A1RootDenied,match="SHADOW_NOT_ALLOWED"):
+        a1.active_shadow_allowlist(path=config,expected_uid=os.geteuid())
+
+
+def test_active_watchdog_policy_symlink_or_wrong_mode_refused(tmp_path):
+    config=tmp_path/"desired.json"
+    config.write_text('{"schema_version":"1.0","allowed_running_containers":["jason-pmv4-shadow-gateway"]}')
+    config.chmod(0o666)
+    with pytest.raises(a1.A1RootDenied,match="POLICY_NOT_TRUSTED"):
+        a1.active_shadow_allowlist(path=config,expected_uid=os.geteuid())
+    config.chmod(0o600)
+    alias=tmp_path/"alias.json"
+    alias.symlink_to(config)
+    with pytest.raises(a1.A1RootDenied,match="POLICY_NOT_TRUSTED"):
+        a1.active_shadow_allowlist(path=alias,expected_uid=os.geteuid())

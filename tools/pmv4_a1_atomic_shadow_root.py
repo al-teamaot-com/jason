@@ -47,6 +47,7 @@ AUDIT=ROOT/"control"/"a1-exact-atomic-bootstrap.jsonl"
 SHADOW_FREEZE=ROOT/"control"/"shadow-freeze.json"
 GLOBAL_FREEZE=Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
 GLOBAL_HOLD=Path("/var/lib/jason/openclaw/release-manager/auto-promotion-incident-hold")
+ACTIVE_WATCHDOG_POLICY=Path("/etc/jason/release-readback-recovery/production-desired-state.json")
 ROOT_PIN=shadow.TRUST_PATH
 APPROVED=ROOT/"control"/"approved-manifest.json"
 REVIEWED=ROOT/"control"/"reviewed-scope.json"
@@ -189,7 +190,36 @@ def runner_as_al(args,**kwargs):
     )
 
 
+def active_shadow_allowlist(*, path:Path=ACTIVE_WATCHDOG_POLICY,
+                            expected_uid:int=0)->str:
+    """Fail BEFORE Owner consent when the live drift watchdog would reject A1.
+
+    The active root-installed watchdog policy may differ from the repository
+    copy. Never disable or change the watchdog to make this check pass.
+    """
+    need(path==ACTIVE_WATCHDOG_POLICY or expected_uid!=0,
+         "A1_WATCHDOG_POLICY_PATH_NOT_PINNED")
+    try:
+        meta=path.lstat()
+        need(not path.is_symlink() and stat.S_ISREG(meta.st_mode)
+             and meta.st_uid==expected_uid and meta.st_nlink==1
+             and not meta.st_mode&0o022 and 0<meta.st_size<=128000,
+             "A1_ACTIVE_WATCHDOG_POLICY_NOT_TRUSTED")
+        doc=json.loads(path.read_bytes())
+    except (OSError,ValueError,TypeError) as exc:
+        raise A1RootDenied("A1_ACTIVE_WATCHDOG_POLICY_UNAVAILABLE") from exc
+    allowed=doc.get("allowed_running_containers") if isinstance(doc,dict) else None
+    need(isinstance(doc,dict) and doc.get("schema_version")=="1.0"
+         and isinstance(allowed,list)
+         and all(isinstance(x,str) and x for x in allowed)
+         and len(allowed)==len(set(allowed))
+         and "jason-pmv4-shadow-gateway" in allowed,
+         "A1_SHADOW_NOT_ALLOWED_BY_ACTIVE_PRODUCTION_WATCHDOG")
+    return sha(path.read_bytes())
+
+
 def protected_source_and_health()->guard_lib.IndependentHostGuard:
+    active_shadow_allowlist()
     need(sha(GLOBAL_FREEZE.read_bytes())==FREEZE_SHA
          and sha(GLOBAL_HOLD.read_bytes())==HOLD_SHA
          and Path("/opt/jason/current").resolve(strict=True).name==LKG,
@@ -500,7 +530,10 @@ def execute()->None:
     owner,child=verify_owner(plan,manifest)
     approval=owner["approval_id"]
     source_git_attestation(plan)
+    watchdog_before=active_shadow_allowlist()
     with host.host_release_transaction():
+        need(active_shadow_allowlist()==watchdog_before,
+             "A1_ACTIVE_WATCHDOG_POLICY_CHANGED_BEFORE_RELEASE")
         # Recheck under both original and independent release locks.
         host._assert_protected_release_state()
         need(host.preexisting_core_health() is True,
@@ -510,7 +543,8 @@ def execute()->None:
         need(not AUDIT.exists(),"A1_ROOT_RELEASE_ALREADY_ATTEMPTED")
         append("begin",approval,
                {"parent_scope_sha256":plan["scope_sha256"],
-                "shadow_manifest_sha256":plan["shadow_manifest_sha256"]})
+                "shadow_manifest_sha256":plan["shadow_manifest_sha256"],
+                "active_watchdog_policy_sha256":watchdog_before})
         promoted=False
         try:
             stage_exact(plan,manifest,scope,approval)
@@ -524,6 +558,7 @@ def execute()->None:
             promoted=True
             need(host.preexisting_core_health() is True
                  and host.protected_release_status().get("ready") is True
+                 and active_shadow_allowlist()==watchdog_before
                  and sha(GLOBAL_FREEZE.read_bytes())==FREEZE_SHA
                  and sha(GLOBAL_HOLD.read_bytes())==HOLD_SHA
                  and Path("/opt/jason/current").resolve(strict=True).name==LKG,
@@ -561,6 +596,9 @@ def postflight()->None:
     rows=audit_rows()
     need(rows and rows[-1]["event"]=="committed",
          "A1_ROOT_TRANSACTION_NOT_COMMITTED")
+    need(rows[0].get("details",{}).get("active_watchdog_policy_sha256")
+         ==active_shadow_allowlist(),
+         "A1_ACTIVE_WATCHDOG_POLICY_CHANGED_AFTER_RELEASE")
     owner,child=verify_owner(plan,manifest,recovery=True)
     need(owner["approval_id"]==rows[0]["approval_id"],
          "A1_ROOT_COMMIT_OWNER_PROOF_MISMATCH")
