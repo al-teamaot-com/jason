@@ -36,3 +36,16 @@ The locally built, disconnected-only *preproduction OCI candidate image* is deri
 5. After further PMv4 stages are proved, continue B (embedded lock), C (external worker), D (independent JSON Runbook Management), E (PMv3 retirement) and other full-outline requirements. **Do not call PMv4 complete at A1.**
 
 No authorization is requested or consumed by this document or source-only candidate.
+
+
+## November 16 — real privileged A1 preflight Docker 29 denial and resolution
+
+The Owner ran the exact A1 launcher under a real sudo TTY. Source-only review passed, but the **independent root-only preflight** denied `ShadowReleaseDenied:SHADOW_INSPECT_UNAVAILABLE` *before* any Entra Owner challenge or release mutation. Confirmed no Owner proof, root stage, A1 audit, shadow container, reviewed manifest or gateway token was created; the temporary `/run` executor was safely cleaned.
+
+The cause was the installed A0 Docker adapter's strict older missing-object diagnostic. Docker 29.6.2 emits `error: no such object: jason-pmv4-shadow-gateway` (lowercase) and stdout `[]`, whereas the A0 adapter recognizes only uppercase `No such object:`. An absent, not-yet-created shadow container is the correct initial rollback baseline.
+
+The source adapter now accepts **only the exact shadow-container missing diagnostic** in either known format and exits non-mutating; all daemon outages, permission failures, different container names, wrong exit codes or unrelated stdout still fail closed. Because the A0 adapter copy is already root-trusted and must not be silently modified, A1's independently signed root executor now uses a narrowly pinned Docker 29 runner translating only that exact diagnostic for the existing trusted adapter. This avoids replacing any protected A0 file or weakening its other container isolation, health, ownership, rollback or freeze checks.
+
+The fix passed 123 focused tests and 37 subtests; an independent, unprivileged live Docker readback returned expected empty-shadow baseline. The prior unsigned A1 root release plan was archived with its SHA256; the re-reviewed plan binds executor SHA256 `ea259a6a281d3a04d16e7fe4a8fe7b90a00b78e02fe0c9dbecdadd5ccc1c9e1b` and exact whole-release Owner scope SHA256 `7e1f62de1a10e46db934792967f43e03e778990d2764ea42cbdde1657dc61716`. No Owner proof issued and no production mutations performed.
+
+**Still required:** privileged A1 preflight must pass *all* remaining independent gates, notably the root-only active drift-watchdog allowlist, current source/CI and cross-release lock. Only then may one fresh authenticated Owner exact-action decision authorize the disconnected shadow activation. Real shadow start, health, reversal to original empty baseline and Ticket Core continuity remain unverified until executed. Preserve unrelated production Core/MCP, freeze and hold throughout.

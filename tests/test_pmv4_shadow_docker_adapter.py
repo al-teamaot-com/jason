@@ -179,6 +179,33 @@ class DockerAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(PermissionError, "SHADOW_INSPECT_UNAVAILABLE"):
             self.adapter.activate_shadow(self.release)
 
+    def test_real_docker_29_missing_object_format_is_exactly_absent(self):
+        def docker29(argv,**kwargs):
+            self.assertEqual(argv,
+                             ["/usr/bin/docker","inspect",SHADOW_NAME])
+            return subprocess.CompletedProcess(
+                argv,1,"[]\n","error: no such object: "+SHADOW_NAME+"\n",
+            )
+        self.adapter.runner=docker29
+        self.assertIsNone(self.adapter._owned_or_absent())
+
+    def test_docker29_missing_object_requires_exact_name_and_diagnostic(self):
+        for code,out,err in (
+            (1,"[]\n","error: no such object: unrelated-container\n"),
+            (1,"[]\n","permission denied\n"),
+            (1,"[]\n","Cannot connect to the Docker daemon\n"),
+            (1,"other","error: no such object: "+SHADOW_NAME+"\n"),
+            (1,"[]\n","error: no such object: "+SHADOW_NAME+"\nextra"),
+            (2,"[]\n","error: no such object: "+SHADOW_NAME+"\n"),
+        ):
+            def incorrect(argv,**kwargs):
+                return subprocess.CompletedProcess(argv,code,out,err)
+            self.adapter.runner=incorrect
+            with self.subTest(code=code,err=err):
+                with self.assertRaisesRegex(PermissionError,
+                                            "SHADOW_INSPECT_UNAVAILABLE"):
+                    self.adapter._owned_or_absent()
+
     def test_initial_empty_baseline_rolls_back_only_shadow_project(self):
         self.inspect_data = copy.deepcopy(RUNNING)
         baseline = self.root / "releases" / ("0"*40)

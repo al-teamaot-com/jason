@@ -84,8 +84,19 @@ class DockerShadowAdapter:
         except (OSError, subprocess.TimeoutExpired, ValueError, TypeError) as exc:
             raise ShadowReleaseDenied("SHADOW_INSPECT_UNAVAILABLE") from exc
         if result.returncode != 0:
-            if (result.returncode == 1 and isinstance(result.stderr, str)
-                and "No such object: " + SHADOW_NAME in result.stderr):
+            # Docker 29.6 emits lowercase "error: no such object: ..." and
+            # sometimes stdout="[]". Older Docker emits the capitalized form.
+            # Accept ONLY an exact missing *this* named container diagnostic:
+            # daemon outage, permission failure and arbitrary CLI errors still
+            # fail closed, never masquerading as an empty release baseline.
+            absent = {"Error: No such object: " + SHADOW_NAME,
+                      "error: no such object: " + SHADOW_NAME}
+            if (result.returncode == 1
+                and isinstance(result.stderr, str)
+                and result.stderr.rstrip("\n") in absent
+                and result.stderr in (result.stderr.rstrip("\n"),
+                                      result.stderr.rstrip("\n") + "\n")
+                and result.stdout in ("", "[]", "[]\n")):
                 return None
             raise ShadowReleaseDenied("SHADOW_INSPECT_UNAVAILABLE")
         try:

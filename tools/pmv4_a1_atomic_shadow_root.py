@@ -251,6 +251,29 @@ def protected_source_and_health()->guard_lib.IndependentHostGuard:
     return host
 
 
+def exact_docker_29_compat_runner(argv, **kwargs):
+    """Normalize only Docker 29's exact *absent object* diagnostic.
+
+    The installed immutable A0 Docker adapter expects the older capitalized
+    spelling. Preserve every other Docker result and the adapter's existing
+    ownership, health and isolation checks. Never turn daemon failures into
+    an empty baseline.
+    """
+    result=subprocess.run(argv, **kwargs)
+    if (isinstance(argv,(list,tuple))
+        and list(argv)==["/usr/bin/docker","inspect",
+                        docker_shadow.SHADOW_NAME]
+        and result.returncode==1
+        and result.stdout in ("", "[]\n", "[]")
+        and result.stderr==
+          "error: no such object: "+docker_shadow.SHADOW_NAME+"\n"):
+        return subprocess.CompletedProcess(
+            argv,1,result.stdout,
+            "Error: No such object: "+docker_shadow.SHADOW_NAME+"\n",
+        )
+    return result
+
+
 def empty_baseline()->None:
     need(CURRENT.is_symlink() and os.readlink(CURRENT)=="releases/"+ROLLBACK,
          "A1_SHADOW_ROLLBACK_NOT_INITIAL_ABSENCE")
@@ -264,7 +287,8 @@ def empty_baseline()->None:
     receipts=list((ROOT/"receipts").iterdir())
     need(not receipts,"A1_REVIEW_EXISTING_RELEASE_RECEIPTS")
     adapter=docker_shadow.DockerShadowAdapter(
-        root=ROOT,core_continuity_probe=lambda:True)
+        root=ROOT,core_continuity_probe=lambda:True,
+        runner=exact_docker_29_compat_runner)
     need(adapter._owned_or_absent() is None,
          "A1_SHADOW_CONTAINER_ALREADY_PRESENT")
 
@@ -508,7 +532,8 @@ def cleanup_exact_unpromoted(approval_id:str)->None:
 
 def controller(host:guard_lib.IndependentHostGuard):
     adapter=docker_shadow.DockerShadowAdapter(
-        root=ROOT,core_continuity_probe=host.preexisting_core_health)
+        root=ROOT,core_continuity_probe=host.preexisting_core_health,
+        runner=exact_docker_29_compat_runner)
     return adapter,shadow.ShadowController(
         ROOT,public_key_path=ROOT_PIN,
         protected_ci_check=lambda source:ci.protected_main_ci_verified(

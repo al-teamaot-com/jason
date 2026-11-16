@@ -187,3 +187,42 @@ def test_active_watchdog_policy_symlink_or_wrong_mode_refused(tmp_path):
     alias.symlink_to(config)
     with pytest.raises(a1.A1RootDenied,match="POLICY_NOT_TRUSTED"):
         a1.active_shadow_allowlist(path=alias,expected_uid=os.geteuid())
+
+
+def test_docker_29_exact_missing_object_is_normalized_only_in_a1(monkeypatch,tmp_path):
+    import subprocess
+    original="error: no such object: "+a1.docker_shadow.SHADOW_NAME+"\n"
+    commands=[]
+    def fake_run(argv,**kwargs):
+        commands.append(list(argv))
+        return subprocess.CompletedProcess(argv,1,"[]\n",original)
+    monkeypatch.setattr(a1.subprocess,"run",fake_run)
+    expected=["/usr/bin/docker","inspect",a1.docker_shadow.SHADOW_NAME]
+    result=a1.exact_docker_29_compat_runner(expected,check=False)
+    assert result.returncode==1
+    assert result.stderr=="Error: No such object: "+a1.docker_shadow.SHADOW_NAME+"\n"
+    adapter=a1.docker_shadow.DockerShadowAdapter(
+        root=tmp_path,production=False,core_continuity_probe=lambda:True,
+        runner=a1.exact_docker_29_compat_runner)
+    assert adapter._owned_or_absent() is None
+    assert commands==[expected,expected]
+
+
+@pytest.mark.parametrize("exit_code,stderr,stdout",[
+    (1,"Cannot connect to the Docker daemon\n",""),
+    (1,"permission denied\n",""),
+    (1,"error: no such object: other-container\n",""),
+    (1,"error: no such object: jason-pmv4-shadow-gateway\n","secret"),
+    (2,"error: no such object: jason-pmv4-shadow-gateway\n",""),
+])
+def test_docker_daemon_and_other_errors_stay_fail_closed(monkeypatch,tmp_path,
+                                                          exit_code,stderr,stdout):
+    import subprocess
+    def fake_run(argv,**kwargs):
+        return subprocess.CompletedProcess(argv,exit_code,stdout,stderr)
+    monkeypatch.setattr(a1.subprocess,"run",fake_run)
+    adapter=a1.docker_shadow.DockerShadowAdapter(
+        root=tmp_path,production=False,core_continuity_probe=lambda:True,
+        runner=a1.exact_docker_29_compat_runner)
+    with pytest.raises(a1.shadow.ShadowReleaseDenied,match="SHADOW_INSPECT_UNAVAILABLE"):
+        adapter._owned_or_absent()
