@@ -68,7 +68,12 @@ def test_owner_review_requires_exact_files_and_no_existing_proof():
     assert issuer.review()["root_executor_sha256"] == sha256(
         (ROOT / "tools/pmv4_a0_exact_twofile_root_trust_migrator.py").read_bytes()
     ).hexdigest()
-    assert not issuer.PROOF.exists()
+    # The same source acceptance must remain valid after the one-use Owner
+    # migration has completed. A consumed proof is not permission to replay.
+    if issuer.PROOF.exists():
+        assert issuer.verify_proof(issuer.review()).startswith("owner-mcp-")
+    else:
+        assert not issuer.PROOF.is_symlink()
 
 
 def test_exact_file_replace_and_reverse_recovery_sandbox(tmp_path, monkeypatch):
@@ -115,5 +120,9 @@ def test_one_owner_launcher_only_offers_exact_modes():
                   ).hexdigest() in script
     result=subprocess.run(["bash",str(ROOT/"tools/pmv4_a0_exact_twofile_owner_local.sh"),
                            "--check-only"],capture_output=True,text=True,timeout=30)
-    assert result.returncode==0,result.stderr
-    assert "ROOT_WRITES=false" in result.stdout
+    if issuer.PROOF.exists():
+        assert result.returncode == 2
+        assert "review existing stage/proof before retry" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert "ROOT_WRITES=false" in result.stdout
