@@ -5,15 +5,19 @@ on:
       - "config/production-desired-state.json"
       - "tools/pmv4_a1_watchdog_policy_review.py"
       - "tools/pmv4_a1_watchdog_policy_readonly_local.sh"
+      - "tools/pmv4_a1_watchdog_policy_root.py"
+      - "tools/pmv4_a1_watchdog_one_owner.py"
+      - "tools/pmv4_a1_watchdog_one_owner_local.sh"
       - "tests/test_pmv4_a1_watchdog_allowlist.py"
       - "tests/test_pmv4_a1_watchdog_policy_review.py"
+      - "tests/test_pmv4_a1_watchdog_policy_atomic.py"
       - ".github/workflows/pmv4-a1-watchdog-policy-review.yml"
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   exact-policy-delta:
-    name: Review one optional A1 container only (no root write)
+    name: Review one optional A1 container, signed root scope, and rollback (no production)
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
@@ -24,14 +28,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: One optional container, no guard weakening
+      - name: Exact one-container policy, Owner proof and symmetric rollback
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install --disable-pip-version-check -q pytest
-          PYTHONPATH=tools:. python -B -m pytest -q \
+          python -m pip install --disable-pip-version-check -q pytest cryptography
+          PYTHONPATH=implementation:tools:. python -B -m pytest -q \
             tests/test_pmv4_a1_watchdog_allowlist.py \
-            tests/test_pmv4_a1_watchdog_policy_review.py
+            tests/test_pmv4_a1_watchdog_policy_review.py \
+            tests/test_pmv4_a1_watchdog_policy_atomic.py
           bash -n tools/pmv4_a1_watchdog_policy_readonly_local.sh
+          bash -n tools/pmv4_a1_watchdog_one_owner_local.sh
           python -B -m py_compile tools/pmv4_a1_watchdog_policy_review.py
+          python -B -m py_compile tools/pmv4_a1_watchdog_policy_root.py
+          python -B -m py_compile tools/pmv4_a1_watchdog_one_owner.py
           test ! -e /etc/jason/release-readback-recovery/production-desired-state.json

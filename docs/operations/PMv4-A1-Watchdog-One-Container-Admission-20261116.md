@@ -81,3 +81,60 @@ startup. Do not reuse an earlier or failed release proof.
 **Not yet proved:** live root policy original hash, authenticated policy-write
 approval, policy migration/rollback, subsequent root A1 preflight PASS, actual
 isolated shadow startup/health, rollback and independent C/D/E acceptance.
+
+
+## Exact standalone root transaction prepared after successful Owner read-only hash proof
+
+Owner's independent root-only report confirmed:
+- Original active root policy SHA256: `4af577ccc02c367607da0c221c288df71ddc72bf4561ee6d7c6a35138f37e61c`
+- Proposed exact one-optional-container root policy SHA256: `9d3d4a634f2b347b760da80e0dc2bb057d3b35ddcbaf88293bffd47971d0c804`
+- Protected main source SHA: `8c2064193d74cc41b52369681febbc0a74fa96f7`
+- Reviewed proposed source config SHA256: `db3eaf92b16ccfb3d0bad6bd351ab99bffb84bd9a338bb8321ac7c0691562b50`
+- `root_policy_changes=1`, `required_containers_changed=false`, `other_root_policy_fields_changed=false`, `production_mutations=false`.
+
+An independent one-time policy-release source was prepared in
+`tools/pmv4_a1_watchdog_policy_root.py` with the local Owner entrypoint
+`tools/pmv4_a1_watchdog_one_owner_local.sh` and the **existing** pinned Entra
+OAuth / Ed25519 Owner signer used by A0. This is a **separate policy action**,
+not reuse of an A0 approval or authority for starting the A1 shadow.
+
+The release's immutable signed plan binds the reviewed protected main,
+a retained reviewed configuration commit, the **current exact PR head**
+(which may differ from the earlier source/config commit as tests are added),
+the root installer SHA256, both original/target root policy SHA256,
+one optional container name, production LKG, freeze, hold,
+one authenticated Owner consent and no standing authority. If the proposed
+PR moves after the Owner signs, the privileged source re-attestation DENIES.
+
+Root preflight runs on a privileged `sudo` TTY from a copy of the reviewed
+root script stored in a new root-owned `/run` 0400 one-shot directory.
+It must prove original root policy exact hash, source blobs/PR CI,
+a fresh CLOSED breaker and PASS drift, live Ticket Core/MCP health,
+and both native legacy release and new PMv4 cross-release locks.
+**No Owner signature is requested until all those conditions pass.**
+
+After the single authenticated exact-action Owner decision, the root
+transaction acquires both native release locks, writes an exclusive root
+audit intent, durably backs up the **original exact policy bytes** 0600,
+atomically replaces ONLY the named root policy file with the exact hash
+of the one-container candidate, then independently runs the existing
+production drift guard without disabling it. It checks protected runtime
+and freeze/hold again, records one committed audit receipt and re-verifies
+independently. If drift, Ticket Core, write readback or other postflight
+denies before commit, it restores original bytes from the audited backup
+under the same native locks and records a recovery receipt. A second
+activation cannot reuse a root audit transaction or consumed Owner proof.
+
+Disposable positive and negative tests verify: exact-byte original backup,
+optional-only field semantics, successful atomic hash readback, native
+lock held, rejected arbitrary replacement, failed-drift rollback to original
+bytes, absent-Owner denial, actual Ed25519 exact-binding verification and
+one-use replay denial, source head/installer hash binding. Tests are
+**source-only** and do not prove a live privileged release or daemon rollback
+after abrupt power failure. Future crash recovery requires independent
+root audit inspection, not reusing an already committed Owner approval.
+
+The older unsigned plan is archived rather than overwritten if the reviewed
+root executor source changes. No source branch merge, live root policy
+mutation, shadow startup, PMv3 retirement, service restart, breaker or
+drift-watchdog bypass has been performed by this preparation.
