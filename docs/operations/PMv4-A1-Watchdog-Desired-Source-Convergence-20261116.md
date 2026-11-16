@@ -27,7 +27,9 @@ verify optional absence and presence, and ensure that an unrelated
 container still causes drift. GitHub's existing protected required checks
 remain mandatory.
 
-**Integration coordination: #2500 #2391.** #2500 contains the historical
+Integration coordination: #2500 #2391
+
+#2500 contains the historical
 source and exact Owner root admission tooling used to apply the existing
 policy but is behind protected main and should not be merged wholesale;
 this PR carries only its exact one-container source delta. #2391 touches
