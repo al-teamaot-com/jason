@@ -81,3 +81,16 @@ checks **do not prove actual OpenClaw gateway health**.
    not constitute deployed production readiness.
 
 **No Owner action needed merely to review this consolidated source.**
+
+
+## Concurrent engineering source reconciliation
+
+**Integration coordination: #2496 #2502.** This combined change is directly
+based on the exact #2496 reviewed head and includes both original #2502
+commits by normal cherry-pick. The overlapping Docker 29 adapter,
+A1 local Owner launcher, isolated shadow Dockerfile, host lock adapter and
+Compose resource profile have been inspected as one source tree and their
+combined A1 tests rerun. PR #2503 is therefore the single *source review*
+candidate for this iteration, not authority to merge or activate any
+runtime. Do not independently merge #2496 and #2502 into a different
+protected-main ordering without a fresh conflict and hash review.
