@@ -11,6 +11,7 @@ import pytest
 
 from tools import pmv4_a0_closure_bootstrap_root as boot
 from tools import pmv4_a0_closure_bootstrap_owner as owner
+from tools import pmv4_stage_a0_one_owner_review as current_review
 
 
 def test_fixed_scope_no_generic_root_file_writer():
@@ -19,13 +20,15 @@ def test_fixed_scope_no_generic_root_file_writer():
         "/usr/local/lib/jason/pmv4_stage_a0_root_source_closure.py",
         "/etc/jason-owner-release/pmv4-stage-a0-root-source-closure.json",
     }
-    assert boot.SCOPE_SHA == owner.SCOPE_SHA
-    assert boot.PLAN_SHA == owner.PLAN_SHA
+    # The pinned root consumer is current-main 8c20, while the retired
+    # separately approved 7b42 Owner helper is retained only for history.
+    assert boot.SCOPE_SHA == current_review.BOOTSTRAP_SCOPE
+    assert boot.PLAN_SHA == current_review.BOOTSTRAP_ARTIFACT
     assert boot.FREEZE_SHA == owner.FREEZE_SHA
     assert boot.HOLD_SHA == owner.HOLD_SHA
-    assert boot.SOURCE_SHA == owner.SOURCE_SHA
-    assert boot.PROOF == owner.PROOF
-    assert boot.STAGED == Path("/run/jason-pmv4-a0-closure-bootstrap-7b42/installer.py")
+    assert boot.SOURCE_SHA == current_review.SOURCE
+    assert boot.PROOF.name.endswith("8c20.json")
+    assert boot.STAGED == Path("/run/jason-pmv4-a0-closure-bootstrap-8c20/installer.py")
 
 
 @pytest.mark.skipif(not boot.PLAN.is_file(), reason="live Jason archive only")
@@ -139,9 +142,10 @@ def test_disposable_root_foreign_replacement_preserved(tmp_path, monkeypatch):
     assert first.read_bytes() == b"foreign"
 
 
+@pytest.mark.skipif(not boot.PLAN.is_file(), reason="current-main reviewed archive unavailable")
 def test_source_review_policy_hash_is_pinned_by_manifest():
-    source = Path(__file__).parents[1] / "config/pmv4-stage-a0/closure-bootstrap-plan-review.json"
-    plan = json.loads(source.read_bytes())
+    assert sha256(boot.PLAN.read_bytes()).hexdigest() == current_review.BOOTSTRAP_ARTIFACT
+    plan = json.loads(boot.PLAN.read_bytes())
     rows = {r["destination"]: r for r in plan["files"]}
     for dest, (name, expected, size, mode) in boot.FILES.items():
         assert rows[dest]["sha256"] == expected
@@ -160,7 +164,8 @@ def test_source_owner_auth_only_in_interactive_1000():
 def test_source_only_root_bootstrap_no_enabled_prod_by_default():
     assert boot.main.__name__ == "main"
     assert owner.main.__name__ == "main"
-    assert boot.PLAN.name.endswith("7b42.json")
+    assert boot.PLAN.name.endswith("8c20.json")
+    assert owner.PLAN.name.endswith("7b42.json")
 
 
 def _source_items():
