@@ -138,6 +138,10 @@ _spec.loader.exec_module(root)''')
         result,
         'WORKTREE=Path("/srv/jason/archive/engineering-worktrees/pmv4-a1-shadow-package-20261116")',
         'WORKTREE=Path("'+str(archive)+'")')
+    result = exact_replace(
+        result,
+        'CONFIRM="APPROVE-ONE-EXACT-PMV4-A1-DISCONNECTED-SHADOW-BOOTSTRAP"',
+        'CONFIRM="APPROVE-ONE-EXACT-PMV4-A1-V2-DISCONNECTED-SHADOW"')
     return result
 
 

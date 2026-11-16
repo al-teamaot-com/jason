@@ -46,6 +46,8 @@ def test_issuer_imports_exact_generated_root_not_old_source_module():
     assert 'from tools import pmv4_a1_atomic_shadow_root as root' not in text
     assert str(b.ARTIFACT_PARENT/("pmv4-a1-"+SOURCE)) in text
     assert "signer.issue_exact_owner_release" in text
+    assert "APPROVE-ONE-EXACT-PMV4-A1-V2-DISCONNECTED-SHADOW" in text
+    assert "APPROVE-ONE-EXACT-PMV4-A1-DISCONNECTED-SHADOW-BOOTSTRAP" not in text
     assert 'root.CANDIDATE' in text
 
 
