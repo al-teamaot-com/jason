@@ -23,7 +23,7 @@ from orchestrator.pmv4_objective_scope import (
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "config/pmv4-stage-a0/one-owner-recovery-review-20261115.json"
-CONTRACT_SHA256 = "a4eab5848bd7aa17b88c4e305e1caed7456186d2a35bfe0e68a34f56acf1b92e"
+CONTRACT_SHA256 = "2682ef9c5f0a31ede23b8a222bac596d3516a188b54b9ebb78533ee2f684a1c0"
 SOURCE = "8c2064193d74cc41b52369681febbc0a74fa96f7"
 LKG = "d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 FREEZE = "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
@@ -41,11 +41,16 @@ ONEFILE = ARCHIVE / ("pmv4-stage-a0-root-source-closure-repair-proposal-"
 NATIVE_SCOPE = "509e2a39d323009a55af2e5244214fae3e8e14c910a5c4ece4b3da73a0fa0ae3"
 NATIVE_MANIFEST = "bd18226b5f82e276e2f7cc1229c7d0046c99401c4bf4a0753de7ec2b13f237f0"
 MISSING_SHA = "ca844feeb43aa624fb1a965571bfb30f554e24662b2837bb2efa8bfddbdfb5db"
+BOOTSTRAP_SCOPE = "9e36a199cda7a176e893a17fdfeeedfb3782dce3f705886e29deed5867bf2837"
+BOOTSTRAP_ARTIFACT = "a4ea1463435fdeff50c9ae2e2322b899a22987f3fcac6b313f220834d01138f3"
+SPARSE_ARCHIVE_SHA = "1e30acee8e9a5d5fe8478be644c51a71cabb2651875961540eae4f10d2903998"
+SPARSE_SCOPE = "00bbf9884a1f724886be50d100a6aec2f3dfece6ec18177ca39d18768c6248e1"
+SOURCE_STAGE = {'candidate_sha': '8c2064193d74cc41b52369681febbc0a74fa96f7', 'archive_path': '/srv/jason/archive/pmv4-stage-a0-sparse-8c2064193d74cc41b52369681febbc0a74fa96f7.tar', 'archive_sha256': '1e30acee8e9a5d5fe8478be644c51a71cabb2651875961540eae4f10d2903998', 'scope_sha256': '00bbf9884a1f724886be50d100a6aec2f3dfece6ec18177ca39d18768c6248e1', 'file_count': 13, 'destination': '/opt/jason/releases/8c2064193d74cc41b52369681febbc0a74fa96f7', 'rollback': 'exact-13-immutable-root-files-to-absence', 'old_one_shot_audit_reused': False}
 REVIEWED_ACTIONS = (
-    ("pmv4.stage-a0.root-source-helper.bootstrap",
-     "root-source-closure-helper",
-     "9e36a199cda7a176e893a17fdfeeedfb3782dce3f705886e29deed5867bf2837",
-     "a4ea1463435fdeff50c9ae2e2322b899a22987f3fcac6b313f220834d01138f3"),
+    ("pmv4.stage-a0.bound-sparse-source-and-helper-bootstrap",
+     "root-sparse13-plus-closure-helper",
+     "0f4a5cb3774c804a898cc3d987ee9d48c5fc6bb2cee9ab000d5dcabf09d94eff",
+     "041a3a94fd6287a749e7ca981ff73fc2e1fd8e1189b710ef859279e871a776c9"),
     ("pmv4.stage-a0.immutable-root-source-onefile",
      "exact-one-missing-root-blob",
      "4f36e1eee0d5051484aeaadc77877525274faf880c9638b8e5ffe56eddc78a42",
@@ -90,7 +95,7 @@ def exact_contract() -> dict[str, Any]:
         "must_not_change", "ordered_actions", "archived_bootstrap_plan_path",
         "archived_bootstrap_plan_sha256",
         "archived_onefile_proposal_path", "archived_onefile_proposal_sha256",
-        "expected_existing_pinned_source_files",
+        "expected_existing_pinned_source_files", "source_staging",
         "expected_after_source_closure_files",
         "one_missing_root_file", "one_missing_root_file_sha256",
     }
@@ -114,13 +119,19 @@ def exact_contract() -> dict[str, Any]:
                  "require_genuine_four_sqlite_and_restore_pass",
                  "require_current_drift_pass",
              ))
-             and p["expected_existing_pinned_source_files"] == 13
+             and p["expected_existing_pinned_source_files"] == 0
+             and p["source_staging"] == SOURCE_STAGE
+             and _hash(_canonical({"staged_source": SOURCE_STAGE,
+                 "bootstrap_scope_sha256": BOOTSTRAP_SCOPE,
+                 "bootstrap_plan_sha256": BOOTSTRAP_ARTIFACT})) == REVIEWED_ACTIONS[0][2]
+             and _hash(_canonical({"source_archive_sha256": SPARSE_ARCHIVE_SHA,
+                 "bootstrap_plan_sha256": BOOTSTRAP_ARTIFACT})) == REVIEWED_ACTIONS[0][3]
              and p["expected_after_source_closure_files"] == 14
              and p["one_missing_root_file"] == str(MISSING)
              and p["one_missing_root_file_sha256"] == MISSING_SHA
              and p["archived_bootstrap_plan_path"] == str(BOOTSTRAP)
              and p["archived_onefile_proposal_path"] == str(ONEFILE)
-             and p["archived_bootstrap_plan_sha256"] == REVIEWED_ACTIONS[0][3]
+             and p["archived_bootstrap_plan_sha256"] == BOOTSTRAP_ARTIFACT
              and p["archived_onefile_proposal_sha256"]
                 == "b8e6d0d5786fe4c1238b587fdf20c42fbf1757456ac97f321256f9c575b448ff",
              "OWNER_PLAN_REVIEW_PROTECTED_IDENTITY_CHANGED")
@@ -188,10 +199,23 @@ def read_archive_proof() -> None:
                  "OWNER_PLAN_REVIEW_ARCHIVE_PACKET_CHANGED")
     bootstrap = json.loads(BOOTSTRAP.read_bytes())
     proposal = json.loads(ONEFILE.read_bytes())
-    _require(bootstrap.get("scope_sha256") == REVIEWED_ACTIONS[0][2]
+    from tools import pmv4_stage_a0_sparse_source as sparse
+    tar = Path(SOURCE_STAGE["archive_path"])
+    _require(tar.is_file() and not tar.is_symlink()
+             and _hash(tar.read_bytes()) == SPARSE_ARCHIVE_SHA,
+             "OWNER_PLAN_REVIEW_SOURCE_ARCHIVE_CHANGED")
+    scope = sparse.source_manifest(
+        SOURCE, sparse.git_object(GIT), freeze_sha256=FREEZE,
+        current_lkg=LKG,
+    )
+    _require(scope.get("scope_sha256") == SPARSE_SCOPE
+             and len(scope.get("files", [])) == 13,
+             "OWNER_PLAN_REVIEW_SOURCE_STAGING_SCOPE_CHANGED")
+    sparse.verify_package(tar.read_bytes(), scope)
+    _require(bootstrap.get("scope_sha256") == BOOTSTRAP_SCOPE
              and _hash(_canonical({
                  k:v for k,v in bootstrap.items() if k!="scope_sha256"
-             })) == REVIEWED_ACTIONS[0][2]
+             })) == BOOTSTRAP_SCOPE
              and bootstrap.get("source_sha") == SOURCE
              and bootstrap.get("lkg_sha") == LKG
              and bootstrap.get("approved_before_execution") is False
@@ -252,11 +276,9 @@ def _read_live_host() -> None:
              "OWNER_PLAN_REVIEW_REAL_INTEGRITY_NOT_PASS")
     _require(not MISSING.exists() and not MISSING.is_symlink(),
              "OWNER_PLAN_REVIEW_ROOT_SOURCE_ALREADY_PRESENT")
-    files = [path for path in RELEASE_ROOT.rglob("*") if path.is_file()]
-    _require(len(files) == 13 and all(
-        not f.is_symlink() and f.lstat().st_uid == 0 and f.lstat().st_gid == 0
-        and stat.S_IMODE(f.lstat().st_mode) == 0o444
-        for f in files), "OWNER_PLAN_REVIEW_EXISTING_ROOT_SPARSE_CHANGED")
+    _require(not RELEASE_ROOT.exists() and not RELEASE_ROOT.is_symlink()
+             and not (RELEASE_ROOT.parent / (".pmv4-a0-stage-" + SOURCE)).exists(),
+             "OWNER_PLAN_REVIEW_NEW_ROOT_SOURCE_NOT_EMPTY")
     for obj in (Path("/usr/local/lib/jason/pmv4_stage_a0_root_source_closure.py"),
                 Path("/etc/jason-owner-release/pmv4-stage-a0-root-source-closure.json")):
         _require(not obj.exists() and not obj.is_symlink(),

@@ -28,10 +28,10 @@
   ],
   "ordered_actions": [
     {
-      "capability": "pmv4.stage-a0.root-source-helper.bootstrap",
-      "component": "root-source-closure-helper",
-      "scope_sha256": "9e36a199cda7a176e893a17fdfeeedfb3782dce3f705886e29deed5867bf2837",
-      "artifact_sha256": "a4ea1463435fdeff50c9ae2e2322b899a22987f3fcac6b313f220834d01138f3",
+      "capability": "pmv4.stage-a0.bound-sparse-source-and-helper-bootstrap",
+      "component": "root-sparse13-plus-closure-helper",
+      "scope_sha256": "0f4a5cb3774c804a898cc3d987ee9d48c5fc6bb2cee9ab000d5dcabf09d94eff",
+      "artifact_sha256": "041a3a94fd6287a749e7ca981ff73fc2e1fd8e1189b710ef859279e871a776c9",
       "rollback_sha": "0000000000000000000000000000000000000000",
       "risk": 3
     },
@@ -56,8 +56,18 @@
   "archived_bootstrap_plan_sha256": "a4ea1463435fdeff50c9ae2e2322b899a22987f3fcac6b313f220834d01138f3",
   "archived_onefile_proposal_path": "/srv/jason/archive/pmv4-stage-a0-root-source-closure-repair-proposal-8c2064193d74cc41b52369681febbc0a74fa96f7.json",
   "archived_onefile_proposal_sha256": "b8e6d0d5786fe4c1238b587fdf20c42fbf1757456ac97f321256f9c575b448ff",
-  "expected_existing_pinned_source_files": 13,
+  "expected_existing_pinned_source_files": 0,
   "expected_after_source_closure_files": 14,
   "one_missing_root_file": "/opt/jason/releases/8c2064193d74cc41b52369681febbc0a74fa96f7/tools/pmv4_host_install_contract.py",
-  "one_missing_root_file_sha256": "ca844feeb43aa624fb1a965571bfb30f554e24662b2837bb2efa8bfddbdfb5db"
+  "one_missing_root_file_sha256": "ca844feeb43aa624fb1a965571bfb30f554e24662b2837bb2efa8bfddbdfb5db",
+  "source_staging": {
+    "candidate_sha": "8c2064193d74cc41b52369681febbc0a74fa96f7",
+    "archive_path": "/srv/jason/archive/pmv4-stage-a0-sparse-8c2064193d74cc41b52369681febbc0a74fa96f7.tar",
+    "archive_sha256": "1e30acee8e9a5d5fe8478be644c51a71cabb2651875961540eae4f10d2903998",
+    "scope_sha256": "00bbf9884a1f724886be50d100a6aec2f3dfece6ec18177ca39d18768c6248e1",
+    "file_count": 13,
+    "destination": "/opt/jason/releases/8c2064193d74cc41b52369681febbc0a74fa96f7",
+    "rollback": "exact-13-immutable-root-files-to-absence",
+    "old_one_shot_audit_reused": false
+  }
 }

@@ -65,6 +65,7 @@ def exact_three_action_manifest() -> dict[str, Any]:
         "reviewed_contract_sha256": review.CONTRACT_SHA256,
         "root_executor_sha256":root_policy["root_executor_sha256"],
         "exact_ordered_actions": actions,
+        "source_staging": review.SOURCE_STAGE,
         "owner_consents": 1,
         "root_lock_shared_by_all_actions": True,
         "require_root_only_empty_baseline": True,
@@ -87,6 +88,7 @@ def exact_v1_release_scopes() -> dict[str, Any]:
         "reviewed_contract_sha256": manifest["reviewed_contract_sha256"],
         "root_executor_sha256":manifest["root_executor_sha256"],
         "exact_ordered_actions": manifest["exact_ordered_actions"],
+        "source_staging": manifest["source_staging"],
         "one_release_only": True,
     }
     return {

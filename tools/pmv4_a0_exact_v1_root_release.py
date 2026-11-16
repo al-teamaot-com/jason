@@ -33,15 +33,18 @@ FREEZE_SHA = "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 HOLD_SHA = "11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0"
 RUNTIME_IMAGE = "sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132"
 MCP_IMAGE = "sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477"
-REVIEW = "a4eab5848bd7aa17b88c4e305e1caed7456186d2a35bfe0e68a34f56acf1b92e"
+REVIEW = "2682ef9c5f0a31ede23b8a222bac596d3516a188b54b9ebb78533ee2f684a1c0"
 NATIVE_SCOPE = "509e2a39d323009a55af2e5244214fae3e8e14c910a5c4ece4b3da73a0fa0ae3"
 NATIVE_MANIFEST = "bd18226b5f82e276e2f7cc1229c7d0046c99401c4bf4a0753de7ec2b13f237f0"
 SOURCE_MISSING_SHA = "ca844feeb43aa624fb1a965571bfb30f554e24662b2837bb2efa8bfddbdfb5db"
+SPARSE_SCOPE = "00bbf9884a1f724886be50d100a6aec2f3dfece6ec18177ca39d18768c6248e1"
+SPARSE_ARCHIVE_SHA = "1e30acee8e9a5d5fe8478be644c51a71cabb2651875961540eae4f10d2903998"
+SOURCE_STAGE = {'candidate_sha': '8c2064193d74cc41b52369681febbc0a74fa96f7', 'archive_path': '/srv/jason/archive/pmv4-stage-a0-sparse-8c2064193d74cc41b52369681febbc0a74fa96f7.tar', 'archive_sha256': '1e30acee8e9a5d5fe8478be644c51a71cabb2651875961540eae4f10d2903998', 'scope_sha256': '00bbf9884a1f724886be50d100a6aec2f3dfece6ec18177ca39d18768c6248e1', 'file_count': 13, 'destination': '/opt/jason/releases/8c2064193d74cc41b52369681febbc0a74fa96f7', 'rollback': 'exact-13-immutable-root-files-to-absence', 'old_one_shot_audit_reused': False}
 STEPS = (
-    ("pmv4.stage-a0.root-source-helper.bootstrap",
-     "root-source-closure-helper",
-     "9e36a199cda7a176e893a17fdfeeedfb3782dce3f705886e29deed5867bf2837",
-     "a4ea1463435fdeff50c9ae2e2322b899a22987f3fcac6b313f220834d01138f3"),
+    ("pmv4.stage-a0.bound-sparse-source-and-helper-bootstrap",
+     "root-sparse13-plus-closure-helper",
+     "0f4a5cb3774c804a898cc3d987ee9d48c5fc6bb2cee9ab000d5dcabf09d94eff",
+     "041a3a94fd6287a749e7ca981ff73fc2e1fd8e1189b710ef859279e871a776c9"),
     ("pmv4.stage-a0.immutable-root-source-onefile",
      "exact-one-missing-root-blob",
      "4f36e1eee0d5051484aeaadc77877525274faf880c9638b8e5ffe56eddc78a42",
@@ -141,6 +144,7 @@ def reviewed_policy(*, require_root: bool) -> dict[str, Any]:
         "candidate_sha", "lkg_sha", "freeze_sha256", "hold_sha256",
         "runtime_image_sha256", "mcp_image_sha256",
         "ordered_actions", "one_use", "standing_authority",
+        "source_staging",
     }, "A0_ATOMIC_POLICY_FIELDS_INVALID")
     need(p["schema_version"] == "1.0"
          and p["action"] == "pmv4-a0-exact-three-action-one-release-v1"
@@ -152,6 +156,7 @@ def reviewed_policy(*, require_root: bool) -> dict[str, Any]:
          and p["runtime_image_sha256"] == RUNTIME_IMAGE
          and p["mcp_image_sha256"] == MCP_IMAGE
          and p["reviewed_contract_sha256"] == REVIEW
+         and p["source_staging"] == SOURCE_STAGE
          and p["root_bootstrap_sha256"] == BOOT_SHA
          and p["helper_sha256"] == ROOT_HELPER_SHA
          and p["helper_policy_sha256"] == ROOT_HELPER_POLICY_SHA
@@ -191,6 +196,7 @@ def full_release_scopes(p: Mapping[str, Any]) -> dict[str, Any]:
         "reviewed_contract_sha256":REVIEW,
         "root_executor_sha256":p["root_executor_sha256"],
         "exact_ordered_actions":list(p["ordered_actions"]),
+        "source_staging":SOURCE_STAGE,
         "owner_consents":1,
         "root_lock_shared_by_all_actions":True,
         "require_root_only_empty_baseline":True,
@@ -209,6 +215,7 @@ def full_release_scopes(p: Mapping[str, Any]) -> dict[str, Any]:
         "reviewed_contract_sha256":REVIEW,
         "root_executor_sha256":p["root_executor_sha256"],
         "exact_ordered_actions":list(p["ordered_actions"]),
+        "source_staging":SOURCE_STAGE,
         "one_release_only":True,
     }
     return {"manifest": manifest, "scope_sha256":sha(canon(scope)),
@@ -469,7 +476,13 @@ def read_root_preflight() -> dict[str,Any]:
     p=reviewed_policy(require_root=True)
     stage=load_trusted(SPARSE_STAGE,"a0_atomic_existing_sparse_root",SPARSE_SHA)
     sparse_policy=stage.trusted_policy()
+    # The separately approved root-trust migration already pinned the 8c20
+    # source/archive policy; only the old staging action's audit is consumed.
+    # Use this immutable reviewed policy without reopening its one-use action.
     need(sparse_policy["candidate_sha"]==CANDIDATE
+         and sparse_policy["sparse_scope_sha256"]==SPARSE_SCOPE
+         and sparse_policy["archive_sha256"]==SPARSE_ARCHIVE_SHA
+         and sparse_policy["archive_path"]==SOURCE_STAGE["archive_path"]
          and sparse_policy["lkg_sha"]==LKG
          and sparse_policy["freeze_sha256"]==FREEZE_SHA
          and sparse_policy["promotion_hold_sha256"]==HOLD_SHA
@@ -493,9 +506,17 @@ def read_root_preflight() -> dict[str,Any]:
          "00bbf9884a1f724886be50d100a6aec2f3dfece6ec18177ca39d18768c6248e1"
          and len(original["files"])==13,
          "A0_ATOMIC_ORIGINAL_THIRTEEN_SOURCE_SCOPE_CHANGED")
-    stage.verify_staged_source(SOURCE,original)
-    need(not MISSING_FILE.exists() and not MISSING_FILE.is_symlink(),
-         "A0_ATOMIC_SOURCE_ALREADY_CLOSED")
+    # Read and authenticate all thirteen exact Git-source objects from the
+    # root-trusted current-main policy. Do not invoke the consumed old issuer.
+    staged_scope,source_archive=stage.exact_source_archive(
+        sparse_policy,source)
+    need(staged_scope==original and len(staged_scope["files"])==13
+         and staged_scope["scope_sha256"]==SPARSE_SCOPE
+         and sha(source_archive)==SPARSE_ARCHIVE_SHA,
+         "A0_ATOMIC_BOUND_SOURCE_ARCHIVE_CHANGED")
+    need(not SOURCE.exists() and not SOURCE.is_symlink()
+         and not (SOURCE.parent / (".pmv4-a0-stage-" + CANDIDATE)).exists(),
+         "A0_ATOMIC_NEW_SOURCE_ROOT_NOT_EMPTY")
     for target in (
         Path("/var/lib/jason/pmv4-shadow"),
         Path("/usr/local/lib/jason/pmv4-trusted"),
@@ -515,7 +536,7 @@ def read_root_preflight() -> dict[str,Any]:
          "A0_ATOMIC_FROZEN_CONTROL_DRIFT")
     return {"policy":p,"stage":stage,"bootstrap":bootstrap,
             "sparse":sparse_policy,"source":source,"baseline":baseline,
-            "original":original}
+            "original":original,"source_archive":source_archive}
 
 
 def close_source(ctx: Mapping[str,Any]) -> dict[str,Any]:
@@ -792,6 +813,11 @@ def revert_all(ctx:Mapping[str,Any],proof:Mapping[str,str],
                 recover_source_if_present(ctx)
             elif index==0:
                 recover_bootstrap_if_present(ctx)
+                # Only remove this release's exact pinned source objects;
+                # never modify the consumed prior-candidate audit ledger.
+                need(ctx["stage"].recover_exact_source(SOURCE.parent,
+                     ctx["original"]),
+                     "A0_ATOMIC_STAGED_SOURCE_ROLLBACK_NOT_EMPTY")
             audit_append("rollback_verified",index,
                          {"step":index,"absent_verified":True},proof)
     except BaseException as exc:
@@ -810,11 +836,19 @@ def execute() -> None:
         proof=verify_proof(p,at=datetime.now(timezone.utc))
         audit_append("begin",-1,{"three_exact_actions":True},proof)
         try:
-            audit_append("intent",0,{"scope_sha256":STEPS[0][2]},proof)
+            audit_append("intent",0,{"scope_sha256":STEPS[0][2],
+                                     "source_archive_sha256":SPARSE_ARCHIVE_SHA},proof)
+            # Stage the exact current-main 13-file source within this SAME
+            # one-use Owner proof and native production transaction lock.
+            ctx["stage"].stage_root_copy(
+                SOURCE.parent,ctx["original"],ctx["source_archive"])
+            ctx["stage"].verify_staged_source(SOURCE,ctx["original"])
             _,blobs=ctx["bootstrap"].validate_plan()
             ctx["bootstrap"].publish(blobs,ctx["baseline"])
             ctx["bootstrap"].verify_targets(blobs)
-            audit_append("installed",0,{"helper":ROOT_HELPER_SHA},proof)
+            audit_append("installed",0,{"helper":ROOT_HELPER_SHA,
+                                        "staged_source_files":13,
+                                        "staged_scope_sha256":SPARSE_SCOPE},proof)
 
             audit_append("intent",1,{"scope_sha256":STEPS[1][2]},proof)
             closed=close_source(ctx)

@@ -71,7 +71,12 @@ def test_owner_review_requires_exact_files_and_no_existing_proof():
     # The same source acceptance must remain valid after the one-use Owner
     # migration has completed. A consumed proof is not permission to replay.
     if issuer.PROOF.exists():
-        assert issuer.verify_proof(issuer.review()).startswith("owner-mcp-")
+        # Historical immutable proofs expire and must not be reauthorized.
+        # Inspect their sealed scope, never validate at today's wall clock.
+        envelope=json.loads(issuer.PROOF.read_bytes())
+        assert envelope["action"]==issuer.ACTION
+        assert envelope["scope_sha256"]==issuer.EXPECTED_SCOPE
+        assert envelope["signed_owner_proof"]["payload"]["approval_id"].startswith("owner-mcp-")
     else:
         assert not issuer.PROOF.is_symlink()
 

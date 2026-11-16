@@ -151,14 +151,20 @@ def test_root_audit_reverse_rollback_only_and_preserve_foreign(
     monkeypatch.setattr(root,"recover_source_if_present",stage1)
     monkeypatch.setattr(root,"recover_bootstrap_if_present",
                         lambda c: attempts.append(0))
+    from types import SimpleNamespace
+    stage=SimpleNamespace(
+        recover_exact_source=lambda release_root,scope:
+            (attempts.append("source-stage"),True)[1],
+    )
+    recovery_ctx={"stage":stage,"original":{"scope_sha256":root.SPARSE_SCOPE}}
     if fault=="safe_recovery":
-        done=root.revert_all({},proof)
+        done=root.revert_all(recovery_ctx,proof)
         assert done["status"]=="exact_original_root_absence_restored"
-        assert attempts==[2,1,0]
+        assert attempts==[2,1,0,"source-stage"]
         assert root.audit_rows()[-1]["action"]=="rolled_back"
     else:
         with pytest.raises(root.AtomicRootDenied,match="FOREIGN_OR_UNVERIFIED"):
-            root.revert_all({},proof)
+            root.revert_all(recovery_ctx,proof)
         assert attempts==[2,1]
         assert root.audit_rows()[-1]["action"]=="requires_review"
 

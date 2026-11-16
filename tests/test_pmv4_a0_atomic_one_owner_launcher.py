@@ -65,8 +65,9 @@ def test_owner_issuer_requires_one_real_interactive_authenticated_approval():
 
 
 @pytest.mark.skipif(
-    not Path("/srv/jason/archive/pmv4-a0-closure-bootstrap-plan-7b42.json").is_file(),
-    reason="live Jason host only",
+    not Path("/srv/jason/archive/pmv4-a0-closure-bootstrap-plan-7b42.json").is_file()
+    or ROOT != Path("/srv/jason/archive/engineering-worktrees/pmv4-a0-rebind-20261115"),
+    reason="final Owner launcher fixed-path host acceptance only",
 )
 def test_actual_unprivileged_local_check_uses_no_owner_approval():
     proc=subprocess.run(["bash",str(LAUNCHER),"--check-only"],

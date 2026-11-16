@@ -2,11 +2,11 @@
   "schema_version": "1.0",
   "action": "pmv4-a0-exact-three-action-one-release-v1",
   "production_apply_supported": false,
-  "root_executor_sha256": "980ae1a632854c6f9232d87340713b41c914419e4dc4ad71ce7bbf61abe63dd4",
+  "root_executor_sha256": "cb24795359ec1c220a4d84cc735fe5bedeab4f93c150802c4a27ea89c79ca065",
   "root_bootstrap_sha256": "44cac21301f371f0f9ff16e18e57be8734aae8b5ab1e75cfee9d1bcf6c6e3474",
   "helper_sha256": "69a7fa57916290295f3f085f35a0fafa67c51110e2ce8dcc2b1b886ca5ed0e4d",
   "helper_policy_sha256": "1af604a3e8b9459dfda7e5c617126378a3c58bc77f6a1819a6389eb8c1ff5079",
-  "reviewed_contract_sha256": "a4eab5848bd7aa17b88c4e305e1caed7456186d2a35bfe0e68a34f56acf1b92e",
+  "reviewed_contract_sha256": "2682ef9c5f0a31ede23b8a222bac596d3516a188b54b9ebb78533ee2f684a1c0",
   "candidate_sha": "8c2064193d74cc41b52369681febbc0a74fa96f7",
   "lkg_sha": "d1b8c196dadd4b672ec8ba47075f27bb61c98d63",
   "freeze_sha256": "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f",
@@ -15,10 +15,10 @@
   "mcp_image_sha256": "sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477",
   "ordered_actions": [
     {
-      "capability": "pmv4.stage-a0.root-source-helper.bootstrap",
-      "component": "root-source-closure-helper",
-      "scope_sha256": "9e36a199cda7a176e893a17fdfeeedfb3782dce3f705886e29deed5867bf2837",
-      "artifact_sha256": "a4ea1463435fdeff50c9ae2e2322b899a22987f3fcac6b313f220834d01138f3",
+      "capability": "pmv4.stage-a0.bound-sparse-source-and-helper-bootstrap",
+      "component": "root-sparse13-plus-closure-helper",
+      "scope_sha256": "0f4a5cb3774c804a898cc3d987ee9d48c5fc6bb2cee9ab000d5dcabf09d94eff",
+      "artifact_sha256": "041a3a94fd6287a749e7ca981ff73fc2e1fd8e1189b710ef859279e871a776c9",
       "rollback_sha": "0000000000000000000000000000000000000000",
       "risk": 3
     },
@@ -40,5 +40,15 @@
     }
   ],
   "one_use": true,
-  "standing_authority": false
+  "standing_authority": false,
+  "source_staging": {
+    "candidate_sha": "8c2064193d74cc41b52369681febbc0a74fa96f7",
+    "archive_path": "/srv/jason/archive/pmv4-stage-a0-sparse-8c2064193d74cc41b52369681febbc0a74fa96f7.tar",
+    "archive_sha256": "1e30acee8e9a5d5fe8478be644c51a71cabb2651875961540eae4f10d2903998",
+    "scope_sha256": "00bbf9884a1f724886be50d100a6aec2f3dfece6ec18177ca39d18768c6248e1",
+    "file_count": 13,
+    "destination": "/opt/jason/releases/8c2064193d74cc41b52369681febbc0a74fa96f7",
+    "rollback": "exact-13-immutable-root-files-to-absence",
+    "old_one_shot_audit_reused": false
+  }
 }
