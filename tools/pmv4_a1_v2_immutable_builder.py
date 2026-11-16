@@ -24,7 +24,10 @@ from tools.pmv4_shadow_candidate_packet import ARTIFACT_PARENT
 ORIGINAL_SOURCE = "8c2064193d74cc41b52369681febbc0a74fa96f7"
 ORIGINAL_APPROVAL = "owner-mcp-319c697027a146beac98818e5305a971"
 REPO = Path("/home/al/.local/lib/jason/engineering-source-repo")
-NEW_ACTION = "pmv4-a1-one-owner-exact-disconnected-shadow-bootstrap-v2"
+NEW_ACTION = "pmv4-a1-one-owner-exact-disconnected-shadow-bootstrap-v3"
+PREVIOUS_V2_SOURCE = "e187d4a8a33f46d718fe27815e999690cf5a6c98"
+PREVIOUS_V2_APPROVAL = "owner-mcp-1d28029e9de249e0b56a0e34288b4b84"
+LEGACY_COMPOSE_SHA = "892f7a506fcb759887697f4a9882a76e2377969a701a4ca1aff240f6cb23277b"
 FILES = (
     "tools/pmv4_a1_atomic_shadow_root.py",
     "tools/pmv4_a1_atomic_one_owner.py",
@@ -52,10 +55,63 @@ def exact_replace(value: str, old: str, new: str) -> str:
     return value.replace(old, new)
 
 
+def v3_root_preapproval_guards() -> str:
+    return """def original_v2_rollback_audit()->None:
+    path=ROOT/"control"/"a1-exact-atomic-bootstrap-v2-e187d4a8a33f.jsonl"
+    need(path.is_file() and not path.is_symlink(),"A1_V3_PRIOR_AUDIT_MISSING")
+    info=path.lstat()
+    need(info.st_uid==0 and info.st_nlink==1
+         and stat.S_IMODE(info.st_mode)==0o600 and 0<info.st_size<150000,
+         "A1_V3_PRIOR_AUDIT_METADATA_CHANGED")
+    prev="0"*64
+    rows=[]
+    for line in path.read_bytes().splitlines():
+        need(len(line)<20000,"A1_V3_PRIOR_AUDIT_ROW_TOO_LARGE")
+        row=json.loads(line)
+        actual=row.pop("hash")
+        need(row.get("index")==len(rows)
+             and row.get("previous_sha256")==prev
+             and sha(canon(row))==actual
+             and row.get("approval_id")=="owner-mcp-1d28029e9de249e0b56a0e34288b4b84"
+             and row.get("source_sha")=="e187d4a8a33f46d718fe27815e999690cf5a6c98",
+             "A1_V3_PRIOR_AUDIT_CHAIN_INVALID")
+        prev=actual
+        rows.append(row)
+    need(len(rows)>3 and rows[0]["event"]=="begin"
+         and rows[-1]["event"]=="rolled_back"
+         and not any(x["event"] in ("committed","requires_review") for x in rows),
+         "A1_V3_PRIOR_SIGNED_RELEASE_NOT_ROLLED_BACK")
+    p=Path("/srv/jason/archive/engineering-artifacts/pmv4-a1-e187d4a8a33f46d718fe27815e999690cf5a6c98/root-oneowner-proof.json")
+    proof=read_json(p,maxsize=30000)
+    need(proof.get("approval_id")=="owner-mcp-1d28029e9de249e0b56a0e34288b4b84"
+         and proof.get("source_sha")=="e187d4a8a33f46d718fe27815e999690cf5a6c98"
+         and not (ROOT/"releases"/"e187d4a8a33f46d718fe27815e999690cf5a6c98").exists(),
+         "A1_V3_PREVIOUS_OWNER_PROOF_CHANGED")
+
+
+def preapproval_candidate_compose_pair(manifest:dict[str,Any])->None:
+    native=verified_reviewed_module("tools/pmv4_shadow_release.py","native")
+    legacy=ROOT/"control"/"docker-compose.yml"
+    info=legacy.lstat()
+    need(not legacy.is_symlink() and stat.S_ISREG(info.st_mode)
+         and info.st_uid==0 and info.st_nlink==1
+         and not info.st_mode&0o022,
+         "A1_V3_PROTECTED_ROLLBACK_COMPOSE_UNTRUSTED")
+    candidate=ARCHIVE/"release"/"bundle"/"config"/"pmv4-shadow"/"docker-compose.yml"
+    native.verify_shadow_compose_pair(
+        legacy,candidate,manifest["compose_sha256"],
+        "892f7a506fcb759887697f4a9882a76e2377969a701a4ca1aff240f6cb23277b",
+        production=False,
+    )
+
+
+"""
+
+
 def render_root(source: str, sha: str, image: str) -> str:
     need(bool(SHA.fullmatch(sha) and IMAGE.fullmatch(image)),
          "A1_V2_SHA_OR_IMAGE_NOT_EXACT")
-    stage = "/run/jason-pmv4-a1-v2-" + sha[:12]
+    stage = "/run/jason-pmv4-a1-v3-" + sha[:12]
     result = source
     for old, new in (
         ('CANDIDATE="' + ORIGINAL_SOURCE + '"', 'CANDIDATE="' + sha + '"'),
@@ -64,7 +120,7 @@ def render_root(source: str, sha: str, image: str) -> str:
         ('ACTION="pmv4-a1-one-owner-exact-shadow-bootstrap-and-activate-v1"',
          'ACTION="' + NEW_ACTION + '"'),
         ('AUDIT=ROOT/"control"/"a1-exact-atomic-bootstrap.jsonl"',
-         'AUDIT=ROOT/"control"/("a1-exact-atomic-bootstrap-v2-"+CANDIDATE[:12]+".jsonl")'),
+         'AUDIT=ROOT/"control"/("a1-exact-atomic-bootstrap-v3-"+CANDIDATE[:12]+".jsonl")'),
         ('TRUSTED_SCRIPT=Path("/run/jason-pmv4-a1-oneowner-8c20/installer.py")',
          'TRUSTED_SCRIPT=Path("' + stage + '/installer.py")'),
     ):
@@ -93,17 +149,34 @@ def render_root(source: str, sha: str, image: str) -> str:
     loader = '''def verified_reviewed_module(relative:str, name:str):
     import types
     need(relative in ("tools/pmv4_host_release_guard.py",
-                      "tools/pmv4_shadow_docker_adapter.py"),
-         "A1_V2_RUNTIME_MODULE_NOT_ALLOWLISTED")
+                      "tools/pmv4_shadow_docker_adapter.py",
+                      "tools/pmv4_shadow_release.py"),
+         "A1_V3_RUNTIME_MODULE_NOT_ALLOWLISTED")
     plan,manifest,scope=plan_and_source()
     body=(ARCHIVE/"release"/"bundle"/relative).read_bytes()
     need(0<len(body)<1_000_000
          and sha(body)==plan["source_files"][relative],
          "A1_V2_REVIEWED_RUNTIME_MODULE_HASH_CHANGED")
-    module=types.ModuleType("tools.pmv4_a1_v2_"+name)
+    module=types.ModuleType("tools.pmv4_a1_v3_"+name)
     module.__package__="tools"
-    exec(compile(body,"protected-main:"+CANDIDATE+":"+relative,"exec"),
-         module.__dict__)
+    # Native helper uses __file__ to derive its import root. Resolve ONLY
+    # inside the independently root-owned preinstalled A0 trust library,
+    # never the mutable archived source bundle. Executed bytes remain
+    # separately exact SHA-pinned to protected Git main.
+    module.__file__=str(TRUSTED/relative)
+    module.__a1_source_hash=sha(body)
+    existing=sys.modules.get(module.__name__)
+    need(existing is None or
+         getattr(existing,"__a1_source_hash",None)==module.__a1_source_hash,
+         "A1_V3_REVIEWED_MODULE_NAMESPACE_COLLISION")
+    sys.modules[module.__name__]=module
+    try:
+        exec(compile(body,"protected-main:"+CANDIDATE+":"+relative,"exec"),
+             module.__dict__)
+    except BaseException:
+        if sys.modules.get(module.__name__) is module:
+            sys.modules.pop(module.__name__,None)
+        raise
     return module
 
 
@@ -115,11 +188,38 @@ def render_root(source: str, sha: str, image: str) -> str:
     result = exact_replace(
         result, "    adapter=docker_shadow.DockerShadowAdapter(\n        root=ROOT,core_continuity_probe=host.preexisting_core_health,",
         '    adapter=verified_reviewed_module("tools/pmv4_shadow_docker_adapter.py","adapter").DockerShadowAdapter(\n        root=ROOT,core_continuity_probe=host.preexisting_core_health,')
+    result = exact_replace(
+        result,
+        '    return adapter,shadow.ShadowController(\n',
+        '    native=verified_reviewed_module("tools/pmv4_shadow_release.py","native")\n'
+        '    return adapter,native.ShadowController(\n',
+    )
+    result = exact_replace(
+        result,
+        '        host_release_transaction=host.host_release_transaction,\n',
+        '        host_release_transaction=host.host_release_transaction,\n'
+        '        compose_binding="candidate",\n'
+        '        legacy_compose_sha256="'+LEGACY_COMPOSE_SHA+'",\n',
+    )
     # Source-git identity must precede executing any source-derived root module.
     result = exact_replace(
         result,
         "    plan,manifest,scope=plan_and_source()\n    empty_baseline()\n    host=protected_source_and_health()",
         "    plan,manifest,scope=plan_and_source()\n    source_git_attestation(plan)\n    empty_baseline()\n    host=protected_source_and_health()")
+    result = exact_replace(
+        result,
+        "    source_git_attestation(plan)\n    empty_baseline()",
+        "    source_git_attestation(plan)\n"
+        "    original_v2_rollback_audit()\n"
+        "    preapproval_candidate_compose_pair(manifest)\n"
+        "    empty_baseline()",
+    )
+    result = exact_replace(
+        result,
+        "def protected_source_and_health()->guard_lib.IndependentHostGuard:\n",
+        v3_root_preapproval_guards() +
+        "def protected_source_and_health()->guard_lib.IndependentHostGuard:\n",
+    )
     return result
 
 
@@ -129,9 +229,9 @@ def render_owner(source: str, source_sha: str) -> str:
         source,
         "from tools import pmv4_a1_atomic_shadow_root as root",
         '''ROOT_GENERATED=Path(__file__).with_name("pmv4_a1_atomic_shadow_root.py")
-_spec=importlib.util.spec_from_file_location("tools.pmv4_a1_v2_verified_root",ROOT_GENERATED)
+_spec=importlib.util.spec_from_file_location("tools.pmv4_a1_v3_verified_root",ROOT_GENERATED)
 if _spec is None or _spec.loader is None:
-    raise RuntimeError("A1_V2_REVIEWED_ROOT_IMPORT_UNAVAILABLE")
+    raise RuntimeError("A1_V3_REVIEWED_ROOT_IMPORT_UNAVAILABLE")
 root=importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(root)''')
     result = exact_replace(
@@ -141,15 +241,15 @@ _spec.loader.exec_module(root)''')
     result = exact_replace(
         result,
         'CONFIRM="APPROVE-ONE-EXACT-PMV4-A1-DISCONNECTED-SHADOW-BOOTSTRAP"',
-        'CONFIRM="APPROVE-ONE-EXACT-PMV4-A1-V2-DISCONNECTED-SHADOW"')
+        'CONFIRM="APPROVE-ONE-EXACT-PMV4-A1-V3-DISCONNECTED-SHADOW"')
     return result
 
 
 def render_local(source:str, source_sha:str, root_hash:str,
                  owner_hash:str)->str:
     archive=str(ARTIFACT_PARENT / ("pmv4-a1-"+source_sha))
-    stage="/run/jason-pmv4-a1-v2-"+source_sha[:12]
-    tree="/srv/jason/archive/engineering-worktrees/pmv4-a1-v2-main-"+source_sha[:12]
+    stage="/run/jason-pmv4-a1-v3-"+source_sha[:12]
+    tree="/srv/jason/archive/engineering-worktrees/pmv4-a1-v3-main-"+source_sha[:12]
     result=source
     for old,new in (
         ('TREE="/srv/jason/archive/engineering-worktrees/pmv4-a1-shadow-package-20261116"',
@@ -226,11 +326,14 @@ def prepare(source_sha:str,image_digest:str,*,repo:Path=REPO,
         write_exclusive(folder/"pmv4_a1_atomic_one_owner.py",owner)
         write_exclusive(folder/"pmv4_a1_one_owner_local.sh",local)
         receipt={
-            "status":"new_source_exact_immutable_a1_v2_candidate",
+            "status":"new_source_exact_immutable_a1_v3_candidate",
             "source_sha":source_sha,"image_digest":image_digest,
             "action":NEW_ACTION,"previous_owner_approval_reused":False,
             "previous_failed_source_sha":ORIGINAL_SOURCE,
             "previous_approval_id":ORIGINAL_APPROVAL,
+            "previous_v2_source_sha":PREVIOUS_V2_SOURCE,
+            "previous_v2_approval_id":PREVIOUS_V2_APPROVAL,
+            "previous_v2_approval_reused":False,
             "root_executor_sha256":rh,
             "owner_issuer_sha256":oh,
             "local_launcher_sha256":digest(local.encode()),
