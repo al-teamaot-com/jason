@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from hashlib import sha256
 import json
 from pathlib import Path
 import subprocess
@@ -34,8 +35,8 @@ RUNNING = {
         "CapDrop": ["ALL"], "CapAdd": None,
         "SecurityOpt": ["no-new-privileges:true"],
         "Init": True, "RestartPolicy": {"Name": "no"},
-        "PidsLimit": 64, "Memory": 512 * 1024 * 1024,
-        "NanoCpus": 500_000_000, "PublishAllPorts": False,
+        "PidsLimit": 256, "Memory": 2 * 1024 * 1024 * 1024,
+        "NanoCpus": 1_000_000_000, "PublishAllPorts": False,
         "Devices": None, "Binds": None,
     },
     "Mounts": [
@@ -59,8 +60,12 @@ class DockerAdapterTests(unittest.TestCase):
         token.chmod(0o600)
         self.release = self.root / "releases" / ("a"*40)
         self.release.mkdir(parents=True)
+        bundle = self.release / "bundle" / "config" / "pmv4-shadow"
+        bundle.mkdir(parents=True)
+        (bundle / "docker-compose.yml").write_text("immutable-source-only-2gb-256pids")
+        self.compose_sha = sha256((bundle / "docker-compose.yml").read_bytes()).hexdigest()
         (self.release / "release-manifest.json").write_text(json.dumps({
-            "image_digest": DIGEST,
+            "image_digest": DIGEST, "compose_sha256": self.compose_sha,
         }))
         self.commands = []
         self.inspect_data = None
@@ -99,10 +104,63 @@ class DockerAdapterTests(unittest.TestCase):
         flattened = [" ".join(cmd) for cmd, _ in self.commands]
         self.assertTrue(any("--project-name " + SHADOW_PROJECT in command
                             and "up --detach" in command and "--pull never" in command
+                            and str(self.release / "bundle" / "config" / "pmv4-shadow" / "docker-compose.yml") in command
                             for command in flattened))
         self.assertTrue(all(SHADOW_NAME in cmd or "pmv4-shadow" in " ".join(cmd)
                             or "image inspect" in " ".join(cmd)
                             for cmd, _ in self.commands))
+
+    def test_immutable_candidate_compose_replaces_outdated_root_template(self):
+        self.adapter.activate_shadow(self.release)
+        up = [args for args, _ in self.commands if "up" in args]
+        self.assertEqual(len(up), 1)
+        self.assertEqual(up[0][up[0].index("-f")+1],
+                         str(self.release / "bundle" / "config" /
+                             "pmv4-shadow" / "docker-compose.yml"))
+        self.assertNotIn(str(self.root / "control" / "docker-compose.yml"),
+                         up[0])
+        self.assertEqual(self.inspect_data["HostConfig"]["Memory"],
+                         2 * 1024 * 1024 * 1024)
+        self.assertEqual(self.inspect_data["HostConfig"]["PidsLimit"], 256)
+
+    def test_candidate_compose_source_tamper_denied_before_any_docker_up(self):
+        path = self.release / "bundle" / "config" / "pmv4-shadow" / "docker-compose.yml"
+        path.write_text("arbitrary-change-after-reviewed-manifest")
+        with self.assertRaisesRegex(PermissionError,
+                                    "SHADOW_IMMUTABLE_COMPOSE_HASH_MISMATCH"):
+            self.adapter.activate_shadow(self.release)
+        self.assertFalse(any("up" in x[0] for x in self.commands))
+
+    def test_manifest_hash_substitution_is_not_trusted(self):
+        manifest = self.release / "release-manifest.json"
+        manifest.write_text(json.dumps({
+            "image_digest": DIGEST,
+            "compose_sha256": "0" * 64,
+        }))
+        with self.assertRaisesRegex(PermissionError,
+                                    "SHADOW_IMMUTABLE_COMPOSE_HASH_MISMATCH"):
+            self.adapter.activate_shadow(self.release)
+        self.assertFalse(any("up" in x[0] for x in self.commands))
+
+    def test_old_and_expanded_resource_profiles_both_rejected(self):
+        for pids,mem,cpus in ((64,512*1024*1024,500_000_000),
+                              (512,4*1024*1024*1024,2_000_000_000)):
+            self.inspect_data = copy.deepcopy(RUNNING)
+            self.inspect_data["HostConfig"].update(
+                PidsLimit=pids,Memory=mem,NanoCpus=cpus)
+            with self.subTest(pids=pids):
+                with self.assertRaisesRegex(PermissionError,
+                                            "SHADOW_RUNTIME_SECURITY_PROFILE_DRIFT"):
+                    self.adapter.activate_shadow(self.release)
+        self.assertFalse(any("up" in x[0] for x in self.commands))
+
+    def test_health_wait_budget_covers_120sec_start_period(self):
+        probe = DockerShadowAdapter(
+            root=self.root, core_continuity_probe=lambda: True,
+            runner=self.adapter.runner, production=False,
+        )
+        self.assertGreater(probe.health_wait_seconds, 120)
+        self.assertLessEqual(probe.health_wait_seconds, 300)
 
     def test_core_probe_must_confirm(self):
         self.adapter.activate_shadow(self.release)
