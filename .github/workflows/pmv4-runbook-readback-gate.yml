@@ -4,6 +4,10 @@ on:
     paths:
       - "tools/pmv4_runbook_registry_readback.py"
       - "tests/test_pmv4_runbook_registry_readback.py"
+      - "tests/test_pmv4_runbook_readonly_path.py"
+      - "implementation/autonomous_remediation/playbook_store.py"
+      - "implementation/mcp_service/src/jason_mcp/json_playbook_admin.py"
+      - "implementation/mcp_service/src/jason_mcp/server.py"
       - ".github/workflows/pmv4-runbook-readback-gate.yml"
   workflow_dispatch:
 permissions:
@@ -25,6 +29,9 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check -q pytest
-          PYTHONPATH=implementation:tests:. python -B -m pytest -q tests/test_pmv4_runbook_registry_readback.py
+          PYTHONPATH=implementation:implementation/mcp_service/src:tests:. python -B -m pytest -q \
+            tests/test_pmv4_runbook_registry_readback.py \
+            tests/test_pmv4_runbook_readonly_path.py \
+            implementation/autonomous_remediation/test_json_playbook_store.py
           test ! -e /var/lib/jason/openclaw/json-playbooks.sqlite3
           test ! -e /var/lib/jason/pmv4-runbook-management

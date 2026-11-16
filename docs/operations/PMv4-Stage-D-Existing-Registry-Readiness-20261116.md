@@ -22,3 +22,35 @@ A separately hosted Runbook Management lifecycle is **NOT** installed.
 6. Keep production freeze/hold and the original ticket worker, MCP, signer and provider secrets untouched until the exact Owner release is authorized.
 
 **Conclusion:** The existing registry is viable for a componentized D release; its live schema and independent service lifecycle still require governed installation. The source-only readback tool does not grant execution authority.
+
+## Confirmed production list-path write-risk and proposed source-only correction
+
+Read-only source inspection established that the *current deployed*
+`list_json_playbooks` route calls `open_json_playbook_registry()`, whose
+`SQLitePlaybookRegistry` constructor executes the full DDL migration and
+chmod even when the requester only lists definitions. Since the live registry
+lacks `json_playbook_lifecycle_events`, the deployed list action could change
+the production schema. Therefore do not use the existing MCP list action as
+non-mutating proof prior to an authorized release.
+
+The Stage D source change adds `SQLitePlaybookRegistry(..., read_only=True)`
+which requires an already present trusted UID-bound database, opens
+`file:<exact-path>?mode=ro` with `PRAGMA query_only=ON`, and cannot
+mkdir, chmod, initialize tables, or execute `_atomic_change`. The
+`list_json_playbooks` MCP handler alone requests read-only mode; staging,
+activation and retirement retain the existing write path and authorization.
+No second registry, new control plane or new provider access is introduced.
+
+Independent local tests cover an existing historical two-table registry,
+populated active definition reads, stage/activate/retire mutation rejection,
+missing DB, symlink, path URI injection, wrong UID, world-write, direct SQLite
+UPDATE rejection, and exact MCP list-handler call-site separation. The new
+read-only implementation was exercised against the *actual production DB*:
+generation 0, zero definitions, original inode/size/mtime unchanged. This is
+a source test, not evidence that the deployed MCP image contains the fix.
+
+A dedicated governed MCP component release remains necessary before claiming
+the production list path is fixed. During later Stage D rollout, migrate the
+original registry schema only after consistent backup, exact Owner-bound
+authorization and rollback acceptance. Never run the mutating deployed list
+tool to simulate pre-release read-only verification.

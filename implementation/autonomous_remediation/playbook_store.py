@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 from typing import Any, Mapping
 
 from .playbook_document import (
@@ -73,8 +74,28 @@ class SQLitePlaybookRegistry:
     );
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, read_only: bool = False) -> None:
         self.path = Path(path)
+        self.read_only = read_only
+        if read_only:
+            # A list/read request must never execute schema DDL, chmod, mkdir
+            # or silently migrate the historical two-table registry. Mode=ro
+            # keeps the live WAL visible without using unsafe immutable=1.
+            if (not self.path.is_absolute() or self.path.is_symlink()
+                    or self.path.parent.is_symlink() or not self.path.is_file()
+                    or "?" in str(self.path) or "#" in str(self.path)):
+                raise RuntimeError("PLAYBOOK_READONLY_REGISTRY_UNTRUSTED")
+            info = self.path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or info.st_uid != os.geteuid() or info.st_mode & 0o022):
+                raise RuntimeError("PLAYBOOK_READONLY_REGISTRY_UNTRUSTED")
+            self._connection = sqlite3.connect(
+                "file:" + self.path.as_posix() + "?mode=ro",
+                uri=True, timeout=10.0, isolation_level=None,
+            )
+            self._connection.row_factory = sqlite3.Row
+            self._connection.execute("PRAGMA query_only=ON")
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(
             str(self.path), timeout=10.0, isolation_level=None
@@ -94,6 +115,8 @@ class SQLitePlaybookRegistry:
         BEGIN IMMEDIATE serializes competing writers and rolls back on failure.
         This is the EXISTING JSON playbook registry, not a PM release journal.
         """
+        if self.read_only:
+            raise RuntimeError("PLAYBOOK_READONLY_MUTATION_FORBIDDEN")
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             yield

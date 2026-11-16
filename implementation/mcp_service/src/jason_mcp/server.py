@@ -6346,11 +6346,11 @@ def stage_json_playbook(payload_json: str) -> dict[str, Any]:
 
 @mcp.tool()
 def list_json_playbooks() -> dict[str, Any]:
-    """List durable JSON playbook versions and the current active version."""
+    """Read existing JSON definitions without initializing or migrating schema."""
     registry = None
     try:
         _authenticated_identity()
-        registry = open_json_playbook_registry()
+        registry = open_json_playbook_registry(read_only=True)
         return {
             "status": "succeeded",
             "generation": registry.generation(),
