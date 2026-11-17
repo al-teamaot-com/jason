@@ -44,6 +44,12 @@ jobs:
       - name: Catalog scoped native root installation preflight cannot install or elevate
         run: |
           python -m pytest -q tools/tests/test_catalog_scoped_root_install_plan.py
+      - name: Owner-authenticated single-use catalog root bootstrap source security
+        run: |
+          python -m pytest -q \
+            tools/tests/test_catalog_scoped_root_install_transaction.py \
+            tools/tests/test_catalog_scoped_root_bootstrap_packet.py \
+            tools/tests/test_catalog_scoped_root_install_native.py
       - name: Prompt-injection evidence boundary regressions
         run: |
           python -m pytest -q \
