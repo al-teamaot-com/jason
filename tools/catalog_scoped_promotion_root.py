@@ -21,7 +21,7 @@ from tools.catalog_scoped_promotion import (
 )
 from tools.catalog_scoped_release_admission import attest_source_scope,load_manifest
 from tools.catalog_scoped_promotion_host import (
-    NativeCatalogHost,STATE,ROOT,SOURCE_REPO,secure_read,atomic_root_json,
+    NativeCatalogHost,STATE,ROOT,SOURCE_REPO,NATIVE,secure_read,atomic_root_json,
 )
 
 ID=re.compile(r'^release-[0-9a-f]{16}$')
@@ -125,7 +125,8 @@ def execute_native_catalog_scoped_request(
         from tools.catalog_scoped_protected_ci import check_catalog_protected_ci
         native_ci_checks=lambda sha:check_catalog_protected_ci(sha,repo=repo)
     if action=='catalog_scope_stage':
-        fresh=attest_source_scope(repo,native_ci_checks=native_ci_checks)
+        fresh=attest_source_scope(repo,native_ci_checks=native_ci_checks,
+                                  preflight_script=NATIVE)
         manifest=load_manifest(repo,main_sha=fresh['protected_source']['verified_main_sha'])
         historical_path=Path('/usr/local/lib/jason/catalog-scoped-promotion')/ADMISSION_EVIDENCE_PATH
         historical=json.loads(secure_read(historical_path,mode=0o644,max_bytes=10000))

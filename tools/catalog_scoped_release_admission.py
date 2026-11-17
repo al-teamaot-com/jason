@@ -409,7 +409,7 @@ def verify_native_preflights(manifest: Mapping[str, Any], *, script: Path = Path
     return verified
 
 
-def attest_source_scope(repo: Path, *, native_ci_checks: Any) -> dict[str, Any]:
+def attest_source_scope(repo: Path, *, native_ci_checks: Any, preflight_script: Path | None = None) -> dict[str, Any]:
     """Nonmutating Production Manager admission command (NOT a release)."""
     remote = git(repo, "ls-remote", "origin", "refs/heads/main").decode().strip().split()
     if len(remote) != 2 or remote[1] != "refs/heads/main":
@@ -425,7 +425,12 @@ def attest_source_scope(repo: Path, *, native_ci_checks: Any) -> dict[str, Any]:
     live = verify_live_image_evidence(manifest, observed)
     ci = native_ci_checks(manifest["protected_feature_sha"])
     evidence = source_scope_receipt(manifest, source, live, ci)
-    evidence["native_readonly_preflight"] = verify_native_preflights(manifest)
+    # Root promotion paths must pass a separately SHA-pinned native helper.
+    # Only the unprivileged read-only CLI may use the live deployment copy.
+    if preflight_script is None:
+        evidence["native_readonly_preflight"] = verify_native_preflights(manifest)
+    else:
+        evidence["native_readonly_preflight"] = verify_native_preflights(manifest, script=preflight_script)
     # Bind the same exact preflight outcomes into the auditable final receipt.
     material = dict(evidence)
     material.pop("receipt_sha256")
