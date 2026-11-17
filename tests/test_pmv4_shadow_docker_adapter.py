@@ -37,7 +37,8 @@ RUNNING = {
         "Init": True, "RestartPolicy": {"Name": "no"},
         "PidsLimit": 256, "Memory": 2 * 1024 * 1024 * 1024,
         "NanoCpus": 1_000_000_000, "PublishAllPorts": False,
-        "Devices": None, "Binds": None,
+        "Devices": None,
+        "Binds": ["jason-pmv4-shadow-state:/home/node/.openclaw:rw"],
     },
     "Mounts": [
         {"Type": "volume", "Name": "jason-pmv4-shadow-state",
@@ -290,6 +291,30 @@ class DockerAdapterTests(unittest.TestCase):
         }))
         with self.assertRaisesRegex(PermissionError, "SHADOW_IMAGE_NOT_PINNED"):
             self.adapter.activate_shadow(self.release)
+
+    def test_real_docker29_named_volume_bind_and_mount_are_accepted(self):
+        self.inspect_data = copy.deepcopy(RUNNING)
+        self.assertEqual(self.inspect_data["HostConfig"]["Binds"], [
+            "jason-pmv4-shadow-state:/home/node/.openclaw:rw",
+        ])
+        self.assertTrue(self.adapter._owned_or_absent())
+
+    def test_only_exact_approved_named_volume_bind_is_permitted(self):
+        variants = (
+            ["/etc:/etc:ro"],
+            ["jason-pmv4-shadow-state:/home/node/.openclaw:ro"],
+            ["jason-pmv4-shadow-state:/tmp:rw"],
+            ["other-volume:/home/node/.openclaw:rw"],
+            ["jason-pmv4-shadow-state:/home/node/.openclaw:rw",
+             "/var/lib/jason:/mnt:ro"],
+        )
+        for value in variants:
+            with self.subTest(value=value):
+                self.inspect_data = copy.deepcopy(RUNNING)
+                self.inspect_data["HostConfig"]["Binds"] = value
+                with self.assertRaisesRegex(PermissionError,
+                                            "SHADOW_RUNTIME_SECURITY_PROFILE_DRIFT"):
+                    self.adapter._owned_or_absent()
 
     def test_inspect_requires_readback_of_effective_security_restrictions(self):
         from copy import deepcopy
