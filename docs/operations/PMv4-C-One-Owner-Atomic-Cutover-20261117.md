@@ -63,3 +63,16 @@ immutable packet and privileged preflight, prior root fallback journal,
 new exact signed Owner proof, two genuine scans, strict drift, and rollback
 readbacks independently PASS. If any of those gates fails, preserve the
 working embedded Ticket Core.
+
+### Narrow rollback-retention correction
+
+The November 17 postflight failure was reproduced as a rollback-retention
+policy capacity error: before cutover, 20 stopped rollback containers already
+occupied the declared maximum of 20. The cutover adds exactly one stopped
+rollback container; the drift guard then reports count 21 against maximum 20.
+The source packet for the subsequent exact Owner-approved retry changes only
+`max_stopped_rollback_containers` from 20 to 21 in the Stage C candidate
+policy. All other drift restrictions and validation rules remain byte-for-byte
+equivalent after canonical JSON comparison. A new exact Owner approval is
+required; the previous signed approval is consumed. No database relocation
+or MCP restart is permitted.

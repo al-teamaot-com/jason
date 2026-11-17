@@ -65,6 +65,14 @@ def test_canonical_packet_requires_prior_same_inode_and_no_old_file(tmp_path, mo
     }
     prior_dir = tmp_path / ("pmv4-c-" + root.PREVIOUS)
     prior_dir.mkdir()
+    source_policy = {
+        "schema_version": "1.0",
+        "allowed_running_containers": [root.c.WORKER],
+        "max_stopped_rollback_containers": 20,
+    }
+    baseline = (json.dumps(source_policy, sort_keys=True, indent=2) + "\n").encode()
+    (prior_dir / "production-desired-state.stage-c.json").write_bytes(baseline)
+    prior["watchdog_candidate_sha256"] = root.c.sha(baseline)
     (prior_dir / "root-release-plan.json").write_bytes(root.c.canon(prior))
     (prior_dir / "root-oneowner-proof.json").write_text("synthetic")
     monkeypatch.setattr(root, "PRIOR", prior_dir)
@@ -83,7 +91,7 @@ def test_canonical_packet_requires_prior_same_inode_and_no_old_file(tmp_path, mo
         "mcp_image_digest": prior["mcp_image_digest"],
         "worker_image_digest": prior["worker_image_digest"],
         "watchdog_base_sha256": prior["watchdog_base_sha256"],
-        "watchdog_candidate_sha256": prior["watchdog_candidate_sha256"],
+        "watchdog_candidate_sha256": root.c.sha(root.reviewed_candidate_policy(baseline)),
         "service_manifest_sha256": prior["service_manifest_sha256"],
         "previous_plan_sha256": root.c.sha((prior_dir/"root-release-plan.json").read_bytes()),
         "previous_proof_sha256": root.c.sha((prior_dir/"root-oneowner-proof.json").read_bytes()),
@@ -231,3 +239,26 @@ def test_failure_attempts_same_canonical_data_rollback(tmp_path, monkeypatch):
         root.execute(path)
     assert rollback == [True]
     assert ("stop", "jason-mcp-pilot") not in calls
+
+
+
+def test_retention_only_revises_one_guard_setting():
+    policy = {
+        "schema_version": "1.0",
+        "allowed_running_containers": ["jason-runtime", root.c.WORKER],
+        "max_stopped_rollback_containers": 20,
+        "required_containers": ["jason-runtime", "jason-mcp-pilot"],
+        "forbidden_execution_prefixes": ["/unsafe"],
+    }
+    raw = (json.dumps(policy, indent=2, sort_keys=True) + "\n").encode()
+    adjusted = json.loads(root.reviewed_candidate_policy(raw))
+    assert adjusted.pop("max_stopped_rollback_containers") == 21
+    assert {k:v for k,v in policy.items()
+            if k != "max_stopped_rollback_containers"} == adjusted
+    policy["max_stopped_rollback_containers"] = 21
+    with pytest.raises(root.c.StageCRootDenied, match="RETENTION_POLICY"):
+        root.reviewed_candidate_policy(json.dumps(policy).encode())
+    policy["max_stopped_rollback_containers"] = 20
+    policy["allowed_running_containers"] = ["jason-runtime"]
+    with pytest.raises(root.c.StageCRootDenied, match="RETENTION_POLICY"):
+        root.reviewed_candidate_policy(json.dumps(policy).encode())
