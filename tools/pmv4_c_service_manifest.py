@@ -93,10 +93,17 @@ FORCED_ENV = {
     "JASON_PROCUREMENT_WEB_READ_PROFILE": "",
 }
 
+LEGACY_AUTONOMY_WORKER_DB = (
+    "/var/lib/jason/openclaw/autonomy-operational-work.sqlite3"
+)
 _REQUIRED_LIVE = {
     "JASON_AUTONOMY_WORKER_ENABLED": "true",
-    "JASON_AUTONOMY_WORKER_DB":
-        "/var/lib/jason/openclaw/autonomy-operational-work.sqlite3",
+}
+_DEFAULTED_LIVE = {
+    # The protected runtime LKG historically relies on RuntimeSettings.from_env
+    # for this default instead of exporting the variable in Docker metadata.
+    # An explicit value must still equal the canonical legacy path.
+    "JASON_AUTONOMY_WORKER_DB": LEGACY_AUTONOMY_WORKER_DB,
 }
 _SENSITIVE = re.compile(r"(?:PASSWORD|SECRET|TOKEN|PRIVATE_KEY|API_KEY)")
 _PATHISH = re.compile(r"(?:_PATH|_FILE)$")
@@ -105,6 +112,9 @@ def reviewed_worker_environment(live: Mapping[str, str]) -> dict[str, str]:
     """Copy only JASON config; reject raw secret-like environment values."""
     for key, expected in _REQUIRED_LIVE.items():
         _need(str(live.get(key, "")).strip() == expected,
+              "C_SERVICE_LIVE_BASELINE_MISMATCH:" + key)
+    for key, expected in _DEFAULTED_LIVE.items():
+        _need(str(live.get(key, expected)).strip() == expected,
               "C_SERVICE_LIVE_BASELINE_MISMATCH:" + key)
     result: dict[str, str] = {}
     for key, value in live.items():
