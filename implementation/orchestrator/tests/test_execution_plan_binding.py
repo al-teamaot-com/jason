@@ -311,3 +311,15 @@ def test_external_approval_continuation_plan_change_denied_zero_writes():
     denied = [p for e, p in audit.events if e == "orchestration.execution_plan.denied"]
     assert denied[-1]["provider_invoked"] is False
     assert denied[-1]["approval_binding"] == "external_continuation_guard"
+
+
+def test_changed_catalog_execution_account_denies_before_provider_write(tmp_path):
+    _assert_denied_zero_writes(tmp_path,
+        {"params": {"execution_auth_mode": "jason_managed", "execution_account": "jason-api@example.invalid"}},
+        {"params": {"execution_auth_mode": "jason_managed", "execution_account": "other@example.invalid"}})
+
+
+def test_changed_catalog_execution_mode_denies_before_provider_write(tmp_path):
+    _assert_denied_zero_writes(tmp_path,
+        {"params": {"execution_auth_mode": "jason_managed", "impersonation_resource_id": ""}},
+        {"params": {"execution_auth_mode": "impersonated", "impersonation_resource_id": "77"}})
