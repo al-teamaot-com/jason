@@ -121,3 +121,5 @@ credentials and the governed dedicated writer profile; the user's GPT SharePoint
 dependency and does not require reconnection for this objective. Existing directory/mail/group identities
 are not a fallback for missing SharePoint authority. Provider write authority, dedicated-writer preflight
 and production activation remain unverified. A successful build or fixture tests cannot resolve those prerequisites.
+
+Integration coordination: #2455 — its IT Glue write profile adds separate keys to the shared OpenBao secret map and provider provisioner. The SharePoint writer keys in this candidate are distinct; re-review those dictionaries if #2455 merges first.
