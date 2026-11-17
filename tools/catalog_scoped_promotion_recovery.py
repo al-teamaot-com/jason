@@ -25,6 +25,7 @@ INSTALLED=Path('/usr/local/lib/jason/catalog-scoped-promotion/tools/catalog_scop
 TERMINAL={
     'freeze_restored_verified',
     'interrupted_rollback_verified',
+    'interrupted_before_unfreeze_verified',
 }
 
 

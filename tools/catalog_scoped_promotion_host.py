@@ -36,7 +36,10 @@ ROOT=Path('/var/lib/jason/catalog-scoped-promotion')
 POLICY=Path('/etc/jason-owner-release/catalog-scoped-promotion-installed.json')
 TRUST=Path('/etc/jason-owner-release/verified-owner-public-key.json')
 INSTALLED=Path('/usr/local/lib/jason/catalog-scoped-promotion/tools/catalog_scoped_promotion_host.py')
-NATIVE=Path('/opt/jason/current/tools/deploy_live_container.py')
+# Root installer copies the EXISTING exact native deploy helper into the
+# immutable hash-pinned root bundle; the live checkout is never executable
+# via a privileged mutable/less-strict path.
+NATIVE=Path('/usr/local/lib/jason/catalog-scoped-promotion/tools/deploy_live_container.py')
 LOCK=STATE/'production-transaction.lock'
 FREEZE=STATE/'production-deployment-freeze'
 CONTROL=STATE/'production-control-state.json'
@@ -84,6 +87,49 @@ def atomic_root_json(path:Path, data:Mapping[str,Any]):
         finally:os.close(d)
     finally:
         if os.path.exists(name):os.unlink(name)
+
+
+def atomic_root_protected_control(data:Mapping[str,Any]):
+    """Update only the EXISTING root control file inside al-owned PM state.
+
+    Jason's native Production Manager owns the state parent as al:al mode
+    0700 while protecting the live breaker itself as root:root mode 0600.
+    The scoped release must preserve that model and must not generalize the
+    root-only store writer for other caller-controlled paths.
+    """
+    if os.geteuid()!=0:
+        fail('ROOT_CONTROL_WRITER_REQUIRES_ROOT')
+    path=CONTROL
+    parent=path.parent
+    info=parent.lstat()
+    al=pwd.getpwnam('al')
+    if (parent.is_symlink() or not stat.S_ISDIR(info.st_mode)
+            or info.st_uid!=al.pw_uid
+            or stat.S_IMODE(info.st_mode)!=0o700):
+        fail('NATIVE_CONTROL_PARENT_OWNERSHIP_CHANGED')
+    previous=secure_read(path,max_bytes=131072)
+    if not previous:
+        fail('ROOT_CONTROL_PREVIOUS_EVIDENCE_MISSING')
+    payload=json.dumps(dict(data),sort_keys=True,separators=(',',':')).encode()+b'\n'
+    if len(payload)>131072:
+        fail('ROOT_CONTROL_RECORD_TOO_LARGE')
+    fd,tmp=tempfile.mkstemp(prefix='.catalog-root-control-',dir=parent)
+    try:
+        with os.fdopen(fd,'wb') as handle:
+            handle.write(payload);handle.flush();os.fsync(handle.fileno())
+        os.chown(tmp,0,0,follow_symlinks=False)
+        os.chmod(tmp,0o600)
+        # A valid root-owned old file must still exist. Never publish over
+        # an untrusted replacement introduced from the operator-owned dir.
+        secure_read(path,max_bytes=131072)
+        os.replace(tmp,path)
+        descriptor=os.open(parent,os.O_RDONLY|os.O_DIRECTORY)
+        try:os.fsync(descriptor)
+        finally:os.close(descriptor)
+    finally:
+        if os.path.exists(tmp):os.unlink(tmp)
+    if secure_read(path,max_bytes=131072)!=payload:
+        fail('ROOT_CONTROL_WRITE_READBACK_FAILED')
 
 
 def inspect_container(name:str)->dict[str,Any]:
@@ -238,6 +284,12 @@ class NativeCatalogHost:
         source=verified_source_scope(self.repo,manifest,
                 main_sha=offer['protected_main_sha'],
                 advertised_snapshot_sha=offer['candidate_sha'])
+        # Protected CI is a LIVE gate: a previously staged read-only receipt
+        # is not authority to proceed after checks regress or become stale.
+        from tools.catalog_scoped_protected_ci import check_catalog_protected_ci
+        current_ci=check_catalog_protected_ci(offer['protected_main_sha'],repo=self.repo)
+        if current_ci.get('passed') is not True or current_ci.get('failures'):
+            fail('LIVE_PROTECTED_SECURITY_CI_NOT_GREEN')
         historical_file=(INSTALLED.parent.parent/'docs/engineering/evidence/catalog-scope-admission-20261117.json')
         historical=json.loads(secure_read(historical_file,max_bytes=10000,mode=0o644))
         historical_receipt_verified(historical,manifest)
@@ -630,7 +682,7 @@ class NativeCatalogHost:
             'opened_at':utcnow(),'updated_at':utcnow(),
         }
         data['updated_at']=utcnow()
-        atomic_root_json(path,data)
+        atomic_root_protected_control(data)
         verify=json.loads(secure_read(path,max_bytes=131072))
         if verify.get('circuit_breaker',{}).get('state')!='open':
             fail('BREAKER_OPEN_READBACK_FAILED')
@@ -655,7 +707,44 @@ class NativeCatalogHost:
             if journal.get('outcome') in {'production_pair_verified',
                                            'rolled_back_and_verified'}:
                 fail('RECOVERY_ALREADY_RESOLVED')
+            protected=journal.get('protected_services_before')
+            if (not isinstance(protected,dict)
+                    or set(protected)!=set(PROTECTED_CONTAINERS)):
+                fail('RECOVERY_PROTECTED_SERVICES_BASELINE_MISSING')
+            self.protected_before=protected
+            self.active_offer=offer
+            self.open_circuit_breaker('CATALOG_SCOPED_INTERRUPTED_TRANSACTION')
             backup=self.root/'freeze-backups'/(offer['release_id']+'.bin')
+            # A process may die after root journals intent/consumes the proof,
+            # but BEFORE the freeze backup is first created. No deploy or
+            # rollback is permitted on that path: prove both original images,
+            # the unmodified host/freeze and protected services, or fail closed.
+            if not backup.exists():
+                if journal.get('status') not in {
+                    'prepared_no_mutation', 'owner_approval_consumed_no_mutation',
+                    'one_exact_owner_unfreeze_pending',
+                }:
+                    fail('RECOVERY_FREEZE_BACKUP_MISSING_AFTER_MUTATION')
+                try:
+                    self._frozen(offer)
+                    self.verify_rollback_and_host(offer)
+                    self.verify_unchanged_protected_containers(protected)
+                    self.clear_scoped_control_readback(offer)
+                    self._frozen(offer)
+                    self._journal_status(offer,'interrupted_before_unfreeze_verified',
+                        outcome='interrupted_before_unfreeze_verified',
+                        freeze_sha256_after=offer['freeze_sha256'])
+                except BaseException:
+                    self._journal_status(offer,'interrupted_unverified_breaker_open')
+                    raise
+                return {
+                    'status':'interrupted_before_unfreeze_verified',
+                    'release_id':offer['release_id'],
+                    'rollback_sha':offer['rollback_sha'],
+                    'freeze_restored':True,
+                    'circuit_breaker_remains_open':True,
+                    'owner_proof_not_reusable':True,
+                }
             raw=secure_read(backup,max_bytes=4096)
             if sha256(raw).hexdigest()!=offer['freeze_sha256']:
                 fail('RECOVERY_FREEZE_BACKUP_MISMATCH')
@@ -664,13 +753,6 @@ class NativeCatalogHost:
                 'raw':raw,'mode':0o600,'uid':account.pw_uid,
                 'gid':account.pw_gid,'sha256':offer['freeze_sha256'],
             }
-            protected=journal.get('protected_services_before')
-            if (not isinstance(protected,dict)
-                    or set(protected)!=set(PROTECTED_CONTAINERS)):
-                fail('RECOVERY_PROTECTED_SERVICES_BASELINE_MISSING')
-            self.protected_before=protected
-            self.active_offer=offer
-            self.open_circuit_breaker('CATALOG_SCOPED_INTERRUPTED_TRANSACTION')
             try:
                 self.rollback_both(offer)
                 self.verify_rollback_and_host(offer)
