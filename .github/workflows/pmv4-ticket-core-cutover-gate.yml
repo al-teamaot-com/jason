@@ -14,6 +14,7 @@ on:
       - "tools/pmv4_c_immutable_builder.py"
       - "tests/test_pmv4_c_atomic_root.py"
       - "tests/test_pmv4_c_immutable_builder.py"
+      - "tests/test_pmv4_c_owner_proof_contract.py"
       - "infrastructure/pmv4-ticket-core/Dockerfile"
       - "implementation/runtime_service/src/jason_runtime/ticket_worker_health.py"
       - "implementation/runtime_service/src/jason_runtime/composition.py"
@@ -51,6 +52,7 @@ jobs:
             tests/test_pmv4_c_service_manifest.py \
             tests/test_pmv4_c_atomic_root.py \
             tests/test_pmv4_c_immutable_builder.py \
+            tests/test_pmv4_c_owner_proof_contract.py \
             implementation/runtime_service/tests/test_ticket_worker_health.py \
             implementation/runtime_service/tests/test_ticket_core_worker_only_composition.py \
             implementation/runtime_service/tests/test_ticket_core_lifecycle.py

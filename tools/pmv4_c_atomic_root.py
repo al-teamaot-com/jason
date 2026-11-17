@@ -420,7 +420,9 @@ def _verify_owner(plan_path:Path,plan:Mapping[str,Any], *,
         record["signed_release"],public_key=public,at=at,
         expected_candidate_sha=plan["candidate_sha"],
         expected_rollback_sha=plan["rollback_sha"],
-        expected_release_id="pmv4-c-"+plan["candidate_sha"][:16],
+        # The pinned issuer enforces the cryptographic release-* namespace.
+        # Stage C host artifacts remain separately named pmv4-c-*.
+        expected_release_id="release-"+plan["candidate_sha"][:16],
         expected_scope_sha256=plan["scope_sha256"],
         expected_manifest_sha256=sha(canon(plan)),
         expected_freeze_sha256=plan["freeze_sha256"])
