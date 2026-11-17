@@ -43,7 +43,9 @@ jobs:
             implementation/mcp_service/tests/test_catalog_scoped_promotion_approval.py
       - name: Catalog scoped native root installation preflight cannot install or elevate
         run: |
-          python -m pytest -q tools/tests/test_catalog_scoped_root_install_plan.py
+          python -m pytest -q \
+            tools/tests/test_catalog_scoped_root_install_plan.py \
+            tools/tests/test_catalog_scoped_trusted_install_paths.py
       - name: Owner-authenticated single-use catalog root bootstrap source security
         run: |
           python -m pytest -q \
