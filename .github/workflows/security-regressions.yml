@@ -45,7 +45,9 @@ jobs:
         run: |
           python -m pytest -q \
             tools/tests/test_catalog_scoped_root_install_plan.py \
-            tools/tests/test_catalog_scoped_trusted_install_paths.py
+            tools/tests/test_catalog_scoped_trusted_install_paths.py \
+            tools/tests/test_catalog_scoped_native_projection_closure.py \
+            tools/tests/test_catalog_scoped_projection_rebind_plan.py
       - name: Owner-authenticated single-use catalog root bootstrap source security
         run: |
           python -m pytest -q \

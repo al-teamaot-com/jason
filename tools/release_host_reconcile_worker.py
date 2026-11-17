@@ -1312,6 +1312,10 @@ def _trusted_catalog_scoped_promotion_module(source_revision: str):
         "tools/deploy_live_container.py",
         "tools/catalog_scoped_protected_ci.py",
         "tools/catalog_scoped_promotion_recovery.py",
+        # The pinned native deploy helper imports this module before even
+        # entering --preflight. A verified root-only copy is mandatory; do
+        # not fall back to /opt/jason/current or a mutable PYTHONPATH.
+        "tools/pmv4_mcp_projection.py",
         "implementation/kernel/catalog_scoped_promotion_contract.py",
         "implementation/kernel/signed_owner_release.py",
         "docs/engineering/evidence/catalog-scope-admission-20261117.json",
