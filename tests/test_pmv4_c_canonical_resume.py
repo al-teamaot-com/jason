@@ -125,3 +125,109 @@ def test_proposed_local_launcher_is_syntax_valid_and_requires_interactive_owner(
     assert "--preflight" in text and "--authorize" in text
     assert text.index(" --preflight\n") < text.index(" --authorize\n") < text.index(" --execute\n")
     assert "PRODUCTION_MUTATIONS=false" in text
+
+
+def test_handoff_only_recreates_runtime_and_starts_existing_worker(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    class Host:
+        @contextmanager
+        def host_release_transaction(self):
+            yield
+        def _assert_protected_release_state(self):
+            pass
+
+    sha = "b" * 40
+    db = tmp_path / "watchdog.json"
+    db.write_text("baseline")
+    candidate = tmp_path / ("pmv4-c-resume-" + sha)
+    candidate.mkdir()
+    (candidate / "service-manifest.json").write_text("{}")
+    (candidate / "watchdog-candidate.json").write_text("allowed-stage-c")
+    plan = {
+        "candidate_sha": sha, "worker_image_digest": "sha256:" + "a"*64,
+        "mcp_container_id": "mcp-untouched",
+        "watchdog_candidate_sha256": root.c.sha(b"allowed-stage-c"),
+    }
+    events = []
+    monkeypatch.setattr(root, "preflight", lambda path: (plan, Host()))
+    monkeypatch.setattr(root, "verify_owner", lambda *a, **kw: "exact-owner-1")
+    monkeypatch.setattr(root.c, "read_json", lambda path: {})
+    monkeypatch.setattr(root.c, "_clone_command",
+                        lambda *a, **kw: (["docker", "create-runtime"], None, []))
+    monkeypatch.setattr(root.c, "_worker_create",
+                        lambda *a, **kw: ["docker", "create-worker"])
+    monkeypatch.setattr(root.c, "_wait_ticket_idle",
+                        lambda *a, **kw: ("cycle-before", "2026-11-17T20:00:00+00:00"))
+    monkeypatch.setattr(root.c, "_ensure_root_state", lambda: None)
+    monkeypatch.setattr(root.c, "WATCHDOG", db)
+    monkeypatch.setattr(root.c, "_stop", lambda n: events.append(("stop", n)))
+    monkeypatch.setattr(root.c, "_run", lambda args, **kw: events.append(tuple(args)))
+    monkeypatch.setattr(root.c, "_connect_and_start",
+                        lambda name, nets, **kw: events.append(("start", name)))
+    monkeypatch.setattr(root.c, "_wait_container",
+                        lambda name, **kw: {"Id": name})
+    monkeypatch.setattr(root.c, "_docker_json",
+                        lambda name: {"Id": "mcp-untouched"} if name == "jason-mcp-pilot" else {})
+    monkeypatch.setattr(root.c, "_append",
+                        lambda plan, owner, event, detail: events.append(("audit", event)))
+    monkeypatch.setattr(root.service, "validate_effective_inspect",
+                        lambda *args: None)
+    monkeypatch.setattr(root.c, "_atomic_policy",
+                        lambda contents, meta: db.write_bytes(contents))
+    root.execute(candidate / "root-release-plan.json")
+    assert ("stop", "jason-runtime") in events
+    assert ("stop", "jason-mcp-pilot") not in events
+    assert ("/usr/bin/docker", "start", "jason-pmv4-ticket-core") in events
+    assert ("audit", "activated") in events
+    assert db.read_text() == "allowed-stage-c"
+    assert not any(row and row[0] in ("/usr/bin/mv", "mv") for row in events)
+
+
+def test_failure_attempts_same_canonical_data_rollback(tmp_path, monkeypatch):
+    # The rollback is the existing embedded worker, not an old SQLite copy.
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    class Host:
+        @contextmanager
+        def host_release_transaction(self):
+            yield
+        def _assert_protected_release_state(self): pass
+    sha = "c"*40
+    packet = tmp_path / ("pmv4-c-resume-" + sha)
+    packet.mkdir()
+    (packet / "watchdog-candidate.json").write_bytes(b"approved-candidate")
+    path = packet / "root-release-plan.json"
+    policy = tmp_path / "watchdog.json"
+    policy.write_bytes(b"old-base")
+    calls = []
+    plan = {"candidate_sha": sha, "mcp_container_id": "unchanged",
+            "watchdog_candidate_sha256": root.c.sha(b"approved-candidate")}
+    monkeypatch.setattr(root, "preflight", lambda *a: (plan, Host()))
+    monkeypatch.setattr(root, "verify_owner", lambda *a, **kw: "owner-1")
+    monkeypatch.setattr(root.c, "read_json", lambda *a: {})
+    monkeypatch.setattr(root.c, "_clone_command",
+                        lambda *a, **kw: (["docker", "create-runtime"], None, []))
+    monkeypatch.setattr(root.c, "_worker_create", lambda *a: ["docker", "create-worker"])
+    monkeypatch.setattr(root.c, "_wait_ticket_idle", lambda *a: ("before", "time"))
+    monkeypatch.setattr(root.c, "_ensure_root_state", lambda: None)
+    monkeypatch.setattr(root.c, "WATCHDOG", policy)
+    monkeypatch.setattr(root.c, "_stop", lambda n: calls.append(("stop", n)))
+    def run(args, **kwargs):
+        calls.append(tuple(args))
+        if args[-2:] == ["start", root.c.WORKER]:
+            raise RuntimeError("SYNTHETIC_WORKER_START_FAILURE")
+    monkeypatch.setattr(root.c, "_run", run)
+    monkeypatch.setattr(root.c, "_connect_and_start", lambda *a, **kw: None)
+    monkeypatch.setattr(root.c, "_wait_container", lambda *a, **kw: {})
+    monkeypatch.setattr(root.c, "_append", lambda *a: None)
+    monkeypatch.setattr(root.c, "_atomic_policy",
+                        lambda contents, meta: policy.write_bytes(contents))
+    rollback = []
+    monkeypatch.setattr(root, "rollback",
+                        lambda p, a, *, policy_changed: rollback.append(policy_changed))
+    with pytest.raises(RuntimeError, match="SYNTHETIC_WORKER_START_FAILURE"):
+        root.execute(path)
+    assert rollback == [True]
+    assert ("stop", "jason-mcp-pilot") not in calls
