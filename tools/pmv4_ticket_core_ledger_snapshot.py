@@ -90,7 +90,7 @@ def _same(actual:dict[str,Any], before:dict[str,Any])->bool:
 
 def snapshot_quiesced_ledger(
     source: Path, destination: Path, *, expected_uid:int=1000,
-    expected_directory_uid:int=0,
+    expected_directory_uid:int=1000,
 ) -> dict[str,Any]:
     """Snapshot full committed WAL-backed SQLite ledger under a free worker lock.
 

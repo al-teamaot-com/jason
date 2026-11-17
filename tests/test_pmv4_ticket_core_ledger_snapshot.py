@@ -222,3 +222,10 @@ def test_unusual_sqlite_table_names_do_not_form_executable_sql(ledgers):
     result=copy(source,dest)
     assert result["status"]=="consistent_quiesced_snapshot"
     assert snap._facts(dest)["counts"]['autonomy_odd" name']==1
+
+
+def test_default_destination_contract_matches_nonroot_worker_uid():
+    import inspect
+    signature=inspect.signature(snap.snapshot_quiesced_ledger)
+    assert signature.parameters["expected_uid"].default==1000
+    assert signature.parameters["expected_directory_uid"].default==1000
