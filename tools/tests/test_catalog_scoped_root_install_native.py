@@ -281,6 +281,16 @@ def test_root_bootstrap_watchdog_precedes_first_worker_mutation(plan,monkeypatch
     monkeypatch.setattr(n,'BOOTSTRAP',root)
     monkeypatch.setattr(n,'secure_blob',lambda path,**kw:path.read_bytes())
     monkeypatch.setattr(n,'atomic_root_file',lambda dest,raw,**kw:events.append(('root_file',dest.name)))
+    # This is an OFFLINE source test: an unrelated live host may already
+    # have these root-owned units installed. Model an initially empty unit
+    # namespace without deleting or modifying anything in /etc/systemd.
+    original_exists = Path.exists
+    def isolated_exists(path):
+        if (path.parent == Path('/etc/systemd/system')
+                and path.name in (n.BOOTSTRAP_TIMER,n.BOOTSTRAP_SERVICE)):
+            return False
+        return original_exists(path)
+    monkeypatch.setattr(Path,'exists',isolated_exists)
     monkeypatch.setattr(host,'_audit',lambda state:events.append(('audit',state)))
     def run(*args,**kw):
         events.append(('systemctl',args))
