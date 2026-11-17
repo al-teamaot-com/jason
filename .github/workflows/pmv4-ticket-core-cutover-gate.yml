@@ -25,6 +25,8 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check -q pytest
-          PYTHONPATH=implementation:. python -B -m pytest -q tests/test_pmv4_ticket_core_cutover_preflight.py
+          PYTHONPATH=implementation:. python -B -m pytest -q \
+            tests/test_pmv4_ticket_core_cutover_preflight.py \
+            tests/test_pmv4_ticket_core_ledger_snapshot.py
           test ! -e /var/lib/jason/openclaw/autonomy-operational-work.sqlite3
           test ! -e /var/lib/jason/ticket-core/autonomy-operational-work.sqlite3
