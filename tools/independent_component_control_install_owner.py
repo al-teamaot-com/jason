@@ -42,8 +42,13 @@ def preflight(directory):
                "OWNER_APPROVAL_ALREADY_REQUESTED")
     scope.need(scope.digest(scope.FREEZE.read_bytes())==scope.FREEZE_HASH,
                "OWNER_FROZEN_BASELINE_CHANGED")
-    # Avoid signing over a new active incident or an already-installed controller.
-    scope.capture_protected()
+    # The Owner process is unprivileged: never probe inaccessible root-only
+    # profile paths here. The root installer enforces those exact gates again.
+    scope.need(Path("/opt/jason/current").resolve(strict=True).name==scope.LKG,
+               "OWNER_PRODUCTION_REVISION_CHANGED")
+    control=json.loads(scope.CONTROL_STATE.read_bytes())
+    scope.need((control.get("circuit_breaker") or {}).get("state")=="closed",
+               "OWNER_PROTECTED_BREAKER_OPEN")
     issuer=pinned(ISSUER,ISSUER_SHA,"owner_component_installer")
     auth=pinned(OAUTH,OAUTH_SHA,"oauth_component_installer")
     info=PRIVATE.lstat()
