@@ -37,3 +37,7 @@ A successful container start is not acceptance. Postflight requires:
 7. a root-owned final receipt tied to the same authenticated Owner approval.
 
 Any failure during acceptance invokes the post-write embedded fallback above.
+
+## Offline worker image construction
+
+The Ticket Core image does not resolve Python packages from the Internet during the release build. A multi-stage Dockerfile copies the already-reviewed `/usr/local` Python dependency layer from the exact current runtime LKG image into a fresh cached `python:3.12-slim` final stage, then copies the Stage C source. This retains the production-tested dependency set while deliberately not inheriting the HTTP runtime image's EXPOSE or CMD metadata. The final candidate build pins the dependency-stage image to the exact current runtime LKG tag/image and independently verifies the resulting image ID, source label, UID, command, absence of exposed ports, and exact Stage C lifecycle labels.
