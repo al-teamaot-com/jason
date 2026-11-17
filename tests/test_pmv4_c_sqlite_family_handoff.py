@@ -64,6 +64,8 @@ def test_source_only_preview_has_stable_exact_source_inode_budget(layout):
     source,target,uid=layout
     plan=preview(layout)
     assert len(plan.entries)==7
+    assert plan.uid==uid
+    assert handoff.MIN_UID==1000
     assert plan.bytes_not_copied==sum((source/x.name).stat().st_size
                                       for x in plan.entries)
     assert len(plan.digest)==64
@@ -284,3 +286,11 @@ def test_stage_c_requires_exact_control_owner(layout):
             verify_all_producers_stopped=lambda:None,
             journal_owner_uid=different_uid)
     assert not journal.exists()
+
+
+def test_signed_manifest_uid_is_part_of_exact_identity(layout):
+    source,target,uid=layout
+    plan=preview(layout,active=False)
+    wrong=handoff._fingerprint(source,target,plan.kind,uid+1,plan.entries)
+    assert wrong!=plan.digest
+    assert plan.uid==uid

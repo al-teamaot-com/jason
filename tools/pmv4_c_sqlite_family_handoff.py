@@ -48,6 +48,7 @@ class FamilyPlan:
     source: Path
     destination: Path
     kind: str
+    uid: int
     entries: tuple[FileIdentity, ...]
     digest: str
 
@@ -107,9 +108,10 @@ def _canon(value: object) -> bytes:
                       ensure_ascii=False,allow_nan=False).encode("utf-8")
 
 
-def _fingerprint(source:Path,dest:Path,kind:str,items:tuple[FileIdentity,...])->str:
+def _fingerprint(source:Path,dest:Path,kind:str,uid:int,
+                 items:tuple[FileIdentity,...])->str:
     return hashlib.sha256(_canon({
-        "source":str(source),"destination":str(dest),"kind":kind,
+        "source":str(source),"destination":str(dest),"kind":kind,"uid":uid,
         "files":[{
             "name":x.name,"device":x.device,"inode":x.inode,
             "size":x.size,"mode":x.mode
@@ -154,8 +156,8 @@ def preview(source:Path,destination:Path,*,kind:str,uid:int=MIN_UID,
               "C_SQLITE_TARGET_NOT_EMPTY:"+x.name)
     if require_quiescence:
         inspect_quiescence(src/x.name for x in entries)
-    return FamilyPlan(src,dst,kind,entries,
-                      _fingerprint(src,dst,kind,entries))
+    return FamilyPlan(src,dst,kind,uid,entries,
+                      _fingerprint(src,dst,kind,uid,entries))
 
 
 def _rename_noreplace(source:Path,destination:Path)->None:
@@ -183,7 +185,7 @@ def _fsync_dir(directory:Path)->None:
 
 def _assert_original(plan:FamilyPlan)->None:
     for x in plan.entries:
-        actual=_stat(plan.source/x.name,MIN_UID,required=True)
+        actual=_stat(plan.source/x.name,plan.uid,required=True)
         _need(actual is not None
               and (actual.st_dev,actual.st_ino,actual.st_size)==
                   (x.device,x.inode,x.size),
@@ -237,7 +239,8 @@ def move_under_signed_root(
           "C_SQLITE_JOURNAL_ALREADY_PRESENT")
     signed_host_fence()
     verify_all_producers_stopped()
-    refreshed=preview(plan.source,plan.destination,kind=plan.kind)
+    refreshed=preview(plan.source,plan.destination,
+                      kind=plan.kind,uid=plan.uid)
     _need(refreshed.digest==plan.digest,"C_SQLITE_PLAN_CHANGED")
     _assert_original(plan)
     flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC
@@ -255,7 +258,7 @@ def move_under_signed_root(
             signed_host_fence()
             verify_all_producers_stopped()
             source=plan.source/x.name; target=plan.destination/x.name
-            active=_stat(source,MIN_UID,required=True)
+            active=_stat(source,plan.uid,required=True)
             _need(active is not None and active.st_ino==x.inode
                   and active.st_dev==x.device
                   and active.st_size==x.size
@@ -265,7 +268,7 @@ def move_under_signed_root(
                 "name":x.name,"inode":x.inode});count+=1
             _rename_noreplace(source,target)
             _fsync_dir(plan.source);_fsync_dir(plan.destination)
-            landed=_stat(target,MIN_UID,required=True)
+            landed=_stat(target,plan.uid,required=True)
             _need(landed is not None and landed.st_ino==x.inode
                   and landed.st_dev==x.device,
                   "C_SQLITE_INODE_CHANGED_AFTER_MOVE:"+x.name)
@@ -274,7 +277,7 @@ def move_under_signed_root(
         signed_host_fence()
         verify_all_producers_stopped()
         for x in plan.entries:
-            landed=_stat(plan.destination/x.name,MIN_UID,required=True)
+            landed=_stat(plan.destination/x.name,plan.uid,required=True)
             _need(landed is not None
                   and (landed.st_dev,landed.st_ino,landed.st_size)==
                       (x.device,x.inode,x.size)
@@ -364,16 +367,16 @@ def rollback_before_new_writer(
           "C_SQLITE_ROOT_AUDIT_AUTHORITY_REQUIRED")
     _journal_root(plan,journal,journal_owner_uid)
     signed_host_fence(); verify_no_new_writer_or_provider_action()
-    _trusted_dir(plan.source,MIN_UID)
-    _trusted_dir(plan.destination,MIN_UID)
+    _trusted_dir(plan.source,plan.uid)
+    _trusted_dir(plan.destination,plan.uid)
     rows=read_exact_journal(plan,journal)
     _need(rows[-1]["event"]!="rollback_complete",
           "C_SQLITE_ROLLBACK_ALREADY_CLOSED")
     present=[]
     for x in plan.entries:
         source=plan.source/x.name;dest=plan.destination/x.name
-        old=_stat(source,MIN_UID,required=False)
-        new=_stat(dest,MIN_UID,required=False)
+        old=_stat(source,plan.uid,required=False)
+        new=_stat(dest,plan.uid,required=False)
         _need((old is None)!=(new is None),
               "C_SQLITE_INCONSISTENT_RECOVERY:"+x.name)
         active=old if old is not None else new
@@ -392,7 +395,7 @@ def rollback_before_new_writer(
             if source.exists():
                 _need(not dest.exists(),"C_SQLITE_RECOVERY_DUPLICATE")
                 continue
-            actual=_stat(dest,MIN_UID,required=True)
+            actual=_stat(dest,plan.uid,required=True)
             _need(actual is not None
                   and (actual.st_dev,actual.st_ino,actual.st_size)==
                       (x.device,x.inode,x.size),
@@ -401,7 +404,7 @@ def rollback_before_new_writer(
                 "name":x.name,"inode":x.inode});count+=1
             _rename_noreplace(dest,source)
             _fsync_dir(plan.source);_fsync_dir(plan.destination)
-            check=_stat(source,MIN_UID,required=True)
+            check=_stat(source,plan.uid,required=True)
             _need(check is not None and check.st_ino==x.inode,
                   "C_SQLITE_ROLLBACK_INODE_MISMATCH")
             previous=_write_event(fd,count,previous,"rolled_back",{
