@@ -83,5 +83,9 @@ def test_ticket_core_dockerfile_has_no_http_exposure():
         "infrastructure/pmv4-ticket-core/Dockerfile"
     ).read_text()
     assert "\nEXPOSE " not in dockerfile
+    assert "ARG JASON_RUNTIME_DEPENDENCY_IMAGE=jason-runtime:production" in dockerfile
+    assert "AS runtime-deps" in dockerfile
+    assert "COPY --from=runtime-deps /usr/local /usr/local" in dockerfile
+    assert "pip install" not in dockerfile
     assert 'CMD ["python", "-m", "jason_runtime.ticket_worker_service"]' in dockerfile
     assert "USER 1000:1000" in dockerfile
