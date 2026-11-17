@@ -49,6 +49,20 @@ def test_generated_launcher_orders_root_preflight_before_owner_and_execute(tmp_p
     assert "teams" not in text.casefold()
     assert "continue" not in text.casefold()
 
+def test_provider_state_comes_from_exact_projection():
+    assert tuple(builder.PROVIDER_STATE)==(
+        "/var/lib/jason/openclaw/dnsfilter-mcp",
+        "/var/lib/jason/openclaw/quickbooks-production",
+    )
+
+
+def test_builder_uses_atomic_hidden_staging_directory():
+    source=Path(builder.__file__).read_text()
+    assert '".pmv4-c-"+candidate+".building"' in source
+    assert "os.rename(artifact,final_artifact)" in source
+    assert "shutil.rmtree(partial)" in source
+
+
 def test_stage_c_support_set_contains_transaction_dependencies():
     assert {
         "tools/pmv4_c_sqlite_family_handoff.py",
