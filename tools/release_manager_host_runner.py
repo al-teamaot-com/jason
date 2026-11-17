@@ -8603,6 +8603,10 @@ def main() -> int:
     recovery.add_argument("--revision", required=True)
     recovery.add_argument("--owner-approved", action="store_true")
 
+    # Source-only scoped catalog admission. This subcommand is read-only:
+    # no release record, Owner decision, mutable state root or promotion.
+    sub.add_parser("catalog-scope-admit")
+
     sub.add_parser("promote-eligible")
     sub.add_parser("approval-only-held")
     renew = sub.add_parser("renew-expired-owner-card")
@@ -8614,6 +8618,18 @@ def main() -> int:
     args = parser.parse_args()
     repo = args.repo.expanduser().resolve()
     state_root = args.state_root.expanduser().resolve()
+    if args.command == "catalog-scope-admit":
+        from catalog_scoped_release_admission import attest_source_scope
+        # All inputs come from immutable protected source, the published
+        # isolated snapshot, native CI and live Docker readbacks. Do not
+        # initialize state_root, use root authority or persist a release.
+        result = attest_source_scope(
+            repo, native_ci_checks=lambda sha: github_checks(
+                sha, list(dict.fromkeys(required_checks(repo) +
+                    ["governed-security-regressions"]))),
+        )
+        print(json.dumps(result, indent=2))
+        return 0
     state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     if args.command == "create":
