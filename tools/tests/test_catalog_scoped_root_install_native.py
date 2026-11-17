@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from hashlib import sha256
 from pathlib import Path
+from copy import deepcopy
 from types import SimpleNamespace
 import builtins
 import pytest
@@ -181,3 +182,146 @@ def test_all_protected_checks_must_be_fresh_and_green(plan,tmp_path,monkeypatch)
     checks['teams-gateway']['conclusion']='failure'
     with pytest.raises(n.NativeBootstrapDenied,match='PROTECTED_CI_FAILED_OR_INCOMPLETE'):
         host._protected_git_and_ci()
+
+
+def test_interruption_before_owner_consumption_ends_without_docker_or_root_writes(plan,monkeypatch,tmp_path):
+    from contextlib import nullcontext
+    source=deepcopy(plan)
+    source['rollback_root_worker_sha256']=sha256(b'original worker').hexdigest()
+    source['install_plan_sha256']=sha256(p.canonical({k:v for k,v in source.items()
+                                                    if k!='install_plan_sha256'})).hexdigest()
+    host=n.NativeRootInstaller(source,tmp_path,{})
+    root_state=tmp_path/'state';root_state.mkdir()
+    ledger=root_state/'consumed-owner-approvals';ledger.mkdir()
+    journal_dir=root_state/'root-installer-audit';journal_dir.mkdir()
+    journal={
+        'schema_version':'1.0','action':t.ACTION,
+        'source_sha':source['source_sha'],
+        'scope_sha256':source['installation_scope_sha256'],
+        'plan_sha256':source['install_plan_sha256'],
+        'rollback_source_sha':source['rollback_source_sha'],
+        'freeze_sha256':source['freeze_sha256'],
+        'approval_id':'catalog-root-owner-'+'a'*32,
+        'verified_owner_oid':'bee80bdc-ffb0-4c50-b453-c09d4d411f5f',
+        'verified_token_sha256':'a'*64,
+        'status':'prepared_signed_entra_owner_no_mutation',
+        'protected_containers_before':{
+            name:{'id':name,'image':'sha256:'+'1'*64,'started_at':'old'}
+            for name in n.IMAGE_NAMES},
+    }
+    path=journal_dir/('release-'+source['source_sha'][:16]+'.json')
+    path.write_text(json.dumps(journal))
+    fake_worker=tmp_path/'old-worker'
+    monkeypatch.setattr(n,'STATE',root_state)
+    monkeypatch.setattr(n,'WORKER',fake_worker)
+    monkeypatch.setattr(n,'ROOT_POLICY',tmp_path/'no-policy')
+    monkeypatch.setattr(n,'BUNDLE_ROOT',tmp_path/'no-bundle')
+    monkeypatch.setattr(n,'safe_root_dir',lambda *args,**kw:None)
+    monkeypatch.setattr(host,'verify_root_bootstrap_trust',lambda **kw:None)
+    monkeypatch.setattr(host,'lock_existing_production_manager',lambda:nullcontext())
+    monkeypatch.setattr(n,'secure_blob',lambda file,**kw:(
+        b'original worker' if file==fake_worker else path.read_bytes()
+        if file==path else pytest.fail('unreviewed file read '+str(file))))
+    states=[]
+    monkeypatch.setattr(host,'_audit',lambda status:states.append(status))
+    monkeypatch.setattr(host,'_unchanged',lambda plan:states.append('original_images_and_freeze_verified'))
+    monkeypatch.setattr(host,'restore_original_worker_units_and_state',
+        lambda plan:pytest.fail('rollback not allowed before first mutation'))
+    monkeypatch.setattr(n.subprocess,'run',lambda *args,**kwargs:
+        SimpleNamespace(stdout='inactive',returncode=3))
+    result=host.recover_interrupted()
+    assert result['status']=='interrupted_before_owner_consumption_verified'
+    assert result['approval_reusable'] is False
+    assert states==['original_images_and_freeze_verified',
+                    'interrupted_before_owner_consumption_verified']
+
+
+def test_interruption_missing_owner_consumption_after_mutation_denied(plan,monkeypatch,tmp_path):
+    from contextlib import nullcontext
+    host=n.NativeRootInstaller(plan,tmp_path,{})
+    root_state=tmp_path/'state';root_state.mkdir()
+    (root_state/'consumed-owner-approvals').mkdir()
+    audit=root_state/'root-installer-audit';audit.mkdir()
+    journal={'schema_version':'1.0','action':t.ACTION,
+        'source_sha':plan['source_sha'],
+        'scope_sha256':plan['installation_scope_sha256'],
+        'plan_sha256':plan['install_plan_sha256'],
+        'rollback_source_sha':plan['rollback_source_sha'],
+        'freeze_sha256':plan['freeze_sha256'],
+        'approval_id':'catalog-root-owner-'+'a'*32,
+        'status':'installing_hash_pinned_root_files'}
+    path=audit/('release-'+plan['source_sha'][:16]+'.json')
+    path.write_text(json.dumps(journal))
+    monkeypatch.setattr(n,'STATE',root_state)
+    monkeypatch.setattr(n,'safe_root_dir',lambda *args,**kw:None)
+    monkeypatch.setattr(host,'verify_root_bootstrap_trust',lambda **kw:None)
+    monkeypatch.setattr(host,'lock_existing_production_manager',lambda:nullcontext())
+    monkeypatch.setattr(n,'secure_blob',lambda file,**kw:path.read_bytes())
+    opened=[]
+    monkeypatch.setattr(host,'open_root_production_breaker',lambda reason:opened.append(reason))
+    with pytest.raises(n.NativeBootstrapDenied,match='INTERRUPTED_OWNER_CONSUMPTION_MISSING_AFTER_MUTATION'):
+        host.recover_interrupted()
+    assert opened==['CATALOG_ROOT_INSTALL_ROLLBACK_UNVERIFIED']
+
+
+def test_root_bootstrap_watchdog_precedes_first_worker_mutation(plan,monkeypatch,tmp_path):
+    host=n.NativeRootInstaller(plan,tmp_path,{})
+    host.owner={'approval_id':'catalog-root-owner-'+'a'*32,
+                'owner_oid':'bee80bdc-ffb0-4c50-b453-c09d4d411f5f',
+                'verified_access_token_sha256':'a'*64}
+    host.journal=tmp_path/'root-audit.json'
+    root=tmp_path/'pinned-root'
+    blobs={}
+    for relative in n.ROOT_RECOVERY_UNITS:
+        source=root/relative
+        source.parent.mkdir(parents=True,exist_ok=True)
+        source.write_text('reviewed boot recovery unit '+relative)
+        blobs[relative]=sha256(source.read_bytes()).hexdigest()
+    host.trust={'bootstrap_stage_files':blobs}
+    monkeypatch.setattr(n,'BOOTSTRAP',root)
+    monkeypatch.setattr(n,'secure_blob',lambda path,**kw:path.read_bytes())
+    monkeypatch.setattr(n,'atomic_root_file',lambda dest,raw,**kw:events.append(('root_file',dest.name)))
+    monkeypatch.setattr(n.Path,'exists',lambda self:False if self.parent==Path('/etc/systemd/system') else Path.__dict__['exists'](self)) if False else None
+    monkeypatch.setattr(host,'_audit',lambda state:events.append(('audit',state)))
+    def run(*args,**kw):
+        events.append(('systemctl',args))
+        if args[:2]==('systemctl','is-active'):return 'active'
+        if args[:2]==('systemctl','is-enabled'):return 'enabled'
+        return ''
+    monkeypatch.setattr(n,'run',run)
+    events=[]
+    host.activate_preinstall_recovery_watchdog(plan)
+    staged=[x for x in events if x[0]=='root_file']
+    assert len(staged)==2
+    assert set(name for _,name in staged)=={n.BOOTSTRAP_TIMER,n.BOOTSTRAP_SERVICE}
+    assert ('systemctl',('systemctl','enable','--now',n.BOOTSTRAP_TIMER)) in events
+    assert events[-1]==('audit','bootstrap_rollback_watchdog_active_before_root_mutation')
+
+
+def test_auto_recovery_defers_when_existing_pm_transaction_owns_lock(plan,monkeypatch,tmp_path):
+    host=n.NativeRootInstaller(plan,tmp_path,{})
+    monkeypatch.setattr(host,'verify_root_bootstrap_trust',lambda **kw:None)
+    from contextlib import contextmanager
+    @contextmanager
+    def busy():
+        raise n.NativeBootstrapDenied('CATALOG_NATIVE_BOOTSTRAP_PRODUCTION_MANAGER_BUSY')
+        yield
+    monkeypatch.setattr(host,'lock_existing_production_manager',busy)
+    monkeypatch.setattr(host,'_recover_under_native_lock',lambda:pytest.fail('recovery must defer while active'))
+    result=host.recover_interrupted()
+    assert result['status']=='native_release_transaction_in_progress_no_change'
+    assert result['runtime_mcp_promotion_approved'] is False
+
+
+def test_watchdog_unit_is_bounded_one_use_root_only():
+    root=Path(__file__).resolve().parents[2]
+    service=(root/'infrastructure/openclaw-operations/systemd/jason-catalog-root-bootstrap-recovery.service').read_text()
+    timer=(root/'infrastructure/openclaw-operations/systemd/jason-catalog-root-bootstrap-recovery.timer').read_text()
+    assert 'User=root' in service
+    assert '--recover' in service
+    assert '--execute' not in service
+    assert 'NoNewPrivileges=true' in service
+    assert 'ProtectSystem=strict' in service
+    assert 'catalog-root-bootstrap-recovery.service' in timer
+    assert 'OnUnitActiveSec=35s' in timer
+    assert 'WantedBy=timers.target' in timer

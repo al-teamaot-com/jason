@@ -22,7 +22,12 @@ SCRIPT = 'tools/catalog_scoped_root_install_native.py'
 TRANSACTION = 'tools/catalog_scoped_root_install_transaction.py'
 INSTALL_PLAN = 'tools/catalog_scoped_root_install_plan.py'
 SOURCE_BUILDER = 'tools/catalog_scoped_promotion_bundle.py'
-SOURCES = tuple(sorted(set(FILES) | {SCRIPT,TRANSACTION,INSTALL_PLAN,SOURCE_BUILDER}))
+ROOT_RECOVERY_SERVICE = 'infrastructure/openclaw-operations/systemd/jason-catalog-root-bootstrap-recovery.service'
+ROOT_RECOVERY_TIMER = 'infrastructure/openclaw-operations/systemd/jason-catalog-root-bootstrap-recovery.timer'
+SOURCES = tuple(sorted(set(FILES) | {
+    SCRIPT,TRANSACTION,INSTALL_PLAN,SOURCE_BUILDER,
+    ROOT_RECOVERY_SERVICE,ROOT_RECOVERY_TIMER,
+}))
 INSTALL_ROOT=Path('/usr/local/lib/jason/catalog-root-bootstrap')
 POLICY=Path('/etc/jason-owner-release/catalog-scoped-root-bootstrap-trust.json')
 OWNER_VERIFIER=Path('/usr/local/lib/jason/owner_signer_recovery.py')

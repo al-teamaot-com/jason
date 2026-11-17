@@ -46,6 +46,12 @@ WORKER=Path('/usr/local/lib/jason/release_host_reconcile_worker.py')
 ROOT_POLICY=Path('/etc/jason-owner-release/catalog-scoped-promotion-installed.json')
 BUNDLE_ROOT=Path('/usr/local/lib/jason/catalog-scoped-promotion')
 TIMER='jason-catalog-scoped-recovery.timer'
+BOOTSTRAP_TIMER='jason-catalog-root-bootstrap-recovery.timer'
+BOOTSTRAP_SERVICE='jason-catalog-root-bootstrap-recovery.service'
+ROOT_RECOVERY_UNITS=(
+    'infrastructure/openclaw-operations/systemd/jason-catalog-root-bootstrap-recovery.service',
+    'infrastructure/openclaw-operations/systemd/jason-catalog-root-bootstrap-recovery.timer',
+)
 IMAGE_NAMES=('jason-runtime','jason-mcp-pilot','jason-teams-gateway',
              'jason-pmv4-shadow-gateway','openbao')
 HEX64=re.compile(r'^[0-9a-f]{64}$')
@@ -172,6 +178,7 @@ class NativeRootInstaller:
             'tools/catalog_scoped_root_install_transaction.py',
             'tools/catalog_scoped_root_install_plan.py',
             'tools/catalog_scoped_promotion_bundle.py',
+            *ROOT_RECOVERY_UNITS,
         }
         if not isinstance(stage,dict) or set(stage)!=allowed:
             fail('ROOT_BOOTSTRAP_STAGING_SCOPE_CHANGED')
@@ -348,9 +355,10 @@ class NativeRootInstaller:
             dest=Path(entry['destination'])
             if dest!=WORKER and (dest.exists() or dest.is_symlink()):
                 fail('PREEXISTING_SCOPED_TARGET_REQUIRES_REVIEW')
-        checked=subprocess.run(['systemctl','is-active',TIMER],stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL,text=True,timeout=12)
-        if checked.stdout.strip()=='active':fail('CATALOG_RECOVERY_TIMER_ALREADY_ACTIVE')
+        for name in (TIMER,BOOTSTRAP_TIMER):
+            checked=subprocess.run(['systemctl','is-active',name],stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL,text=True,timeout=12)
+            if checked.stdout.strip()=='active':fail('CATALOG_RECOVERY_TIMER_ALREADY_ACTIVE')
 
     def _verified_oauth_module(self):
         filename='jason_catalog_owner_oauth_pinned'
@@ -506,7 +514,8 @@ class NativeRootInstaller:
         backup=self._ledger_dir('root-installer-backup')/'release-host-reconcile-worker.original'
         atomic_root_file(backup,worker,mode=0o600)
         for rel in ('jason-catalog-scoped-recovery.service',
-                    'jason-catalog-scoped-recovery.timer'):
+                    'jason-catalog-scoped-recovery.timer',
+                    BOOTSTRAP_SERVICE,BOOTSTRAP_TIMER):
             dest=Path('/etc/systemd/system')/rel
             if dest.exists() or dest.is_symlink():fail('PROTECTED_UNIT_NOT_EMPTY_BEFORE_INSTALL')
         original=self.before.get('_original_freeze')
@@ -515,6 +524,34 @@ class NativeRootInstaller:
         atomic_root_file(self._ledger_dir('root-installer-backup')/'original-freeze.bin',
                          original,mode=0o600)
         self._audit('original_worker_and_freeze_backed_up')
+
+    def activate_preinstall_recovery_watchdog(self,plan:Mapping[str,Any])->None:
+        # This is the FIRST production write after durable one-use Owner
+        # consumption and the original worker+freeze backup. A crash during
+        # subsequent worker replacement is then bounded by a root watchdog.
+        if self.owner is None or self.journal is None:
+            fail('ROOT_RECOVERY_WATCHDOG_WITHOUT_OWNER_INTENT')
+        stage=self.trust.get('bootstrap_stage_files')
+        if not isinstance(stage,dict):fail('ROOT_RECOVERY_WATCHDOG_SOURCE_POLICY_MISSING')
+        for source in ROOT_RECOVERY_UNITS:
+            src=BOOTSTRAP/source
+            name=Path(source).name
+            dest=Path('/etc/systemd/system')/name
+            if dest.exists() or dest.is_symlink():
+                fail('ROOT_RECOVERY_WATCHDOG_UNIT_ALREADY_EXISTS')
+            raw=secure_blob(src,mode=0o644,maximum=16000)
+            expected=stage.get(source)
+            if not isinstance(expected,str) or sha256(raw).hexdigest()!=expected:
+                fail('ROOT_RECOVERY_WATCHDOG_UNIT_DIGEST_DRIFT')
+            atomic_root_file(dest,raw,mode=0o644)
+            self.installed.add(str(dest))
+        run('systemctl','daemon-reload',timeout=40)
+        run('systemctl','enable','--now',BOOTSTRAP_TIMER,timeout=65)
+        if (run('systemctl','is-active',BOOTSTRAP_TIMER,timeout=20)!='active'
+                or run('systemctl','is-enabled',BOOTSTRAP_TIMER,timeout=20)!='enabled'):
+            fail('ROOT_BOOTSTRAP_RECOVERY_WATCHDOG_NOT_ACTIVE')
+        self._audit('bootstrap_rollback_watchdog_active_before_root_mutation')
+
 
     def _ensure_destination_parent(self,dest:Path)->None:
         if dest==WORKER or dest.parent==Path('/etc/systemd/system'):
@@ -599,6 +636,7 @@ class NativeRootInstaller:
             after=inspect(name)
             if (not isinstance(previous,dict) or after.get('Id')!=previous.get('Id')
                     or after.get('Image')!=previous.get('Image')
+                    or after.get('State',{}).get('Running') is not True
                     or after.get('State',{}).get('StartedAt')!=previous.get('State',{}).get('StartedAt')):
                 fail('UNRELATED_LIVE_PRODUCTION_CONTAINER_CHANGED')
 
@@ -609,8 +647,17 @@ class NativeRootInstaller:
                 fail('INDEPENDENT_ROOT_INSTALLED_HASH_MISMATCH')
         if json.loads(secure_blob(ROOT_POLICY,mode=0o600))!=plan['root_policy_after_separate_approval']:
             fail('ROOT_POLICY_READBACK_CHANGED')
-        if run('systemctl','is-active',TIMER,timeout=20)!='active':
-            fail('ROOT_TIMER_READBACK_FAILED')
+        for timer in (TIMER,BOOTSTRAP_TIMER):
+            if (run('systemctl','is-active',timer,timeout=20)!='active'
+                    or run('systemctl','is-enabled',timer,timeout=20)!='enabled'):
+                fail('ROOT_TIMER_READBACK_FAILED')
+        for relative in ROOT_RECOVERY_UNITS:
+            dest=Path('/etc/systemd/system')/Path(relative).name
+            expected=self.trust.get('bootstrap_stage_files',{}).get(relative)
+            if (not isinstance(expected,str)
+                    or sha256(secure_blob(dest,mode=0o644,maximum=16000)).hexdigest()
+                    !=expected):
+                fail('BOOTSTRAP_TIMER_UNIT_HASH_DRIFT')
         self._unchanged(plan)
         self._protected_git_and_ci()
         self._audit('root_install_verified_freeze_unchanged')
@@ -619,9 +666,10 @@ class NativeRootInstaller:
         # No new source, timer, or root policy is removed unless its exact
         # installed bytes match the reviewed immutable scope. Unknown drift
         # requires root breaker + manual recovery rather than blind delete.
-        subprocess.run(['systemctl','disable','--now',TIMER],
-                       stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
-                       timeout=45,check=False)
+        for timer in (TIMER,BOOTSTRAP_TIMER):
+            subprocess.run(['systemctl','disable','--now',timer],
+                           stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                           timeout=45,check=False)
         old=secure_blob(self._ledger_dir('root-installer-backup')/
                         'release-host-reconcile-worker.original',
                         maximum=300000,mode=0o600)
@@ -635,6 +683,18 @@ class NativeRootInstaller:
             fail('UNKNOWN_INSTALLED_ROOT_WORKER_CANNOT_RESTORE')
         if actual!=plan['rollback_root_worker_sha256']:
             atomic_root_file(WORKER,old,mode=0o755,overwrite=True)
+        # Remove ONLY the exact two bootstrap recovery units after stopping
+        # the timer. Unknown unit bytes must not be deleted.
+        for relative in ROOT_RECOVERY_UNITS:
+            dest=Path('/etc/systemd/system')/Path(relative).name
+            if dest.is_symlink():fail('BOOTSTRAP_RECOVERY_UNIT_SYMLINK_ON_ROLLBACK')
+            if dest.is_file():
+                raw=secure_blob(dest,mode=0o644,maximum=16000)
+                expected=self.trust.get('bootstrap_stage_files',{}).get(relative)
+                if (not isinstance(expected,str)
+                        or sha256(raw).hexdigest()!=expected):
+                    fail('BOOTSTRAP_RECOVERY_UNIT_DRIFT_ON_ROLLBACK')
+                dest.unlink()
         # Drop the scoped policy before deleting its expected root modules.
         if ROOT_POLICY.is_symlink():fail('ROOT_SCOPED_POLICY_SYMLINK_DURING_ROLLBACK')
         if ROOT_POLICY.is_file():
@@ -674,9 +734,14 @@ class NativeRootInstaller:
             dest=Path('/etc/systemd/system')/('jason-catalog-scoped-recovery.'+ext)
             if dest.exists() or dest.is_symlink():
                 fail('CATALOG_RECOVERY_UNIT_NOT_ROLLED_BACK')
-        try:active=run('systemctl','is-active',TIMER,timeout=20)
-        except NativeBootstrapDenied:active='inactive'
-        if active=='active':fail('CATALOG_RECOVERY_TIMER_STILL_ACTIVE')
+        for timer in (TIMER,BOOTSTRAP_TIMER):
+            try:active=run('systemctl','is-active',timer,timeout=20)
+            except NativeBootstrapDenied:active='inactive'
+            if active=='active':fail('CATALOG_RECOVERY_TIMER_STILL_ACTIVE')
+        for relative in ROOT_RECOVERY_UNITS:
+            dest=Path('/etc/systemd/system')/Path(relative).name
+            if dest.exists() or dest.is_symlink():
+                fail('ROOT_BOOTSTRAP_WATCHDOG_UNIT_NOT_ROLLED_BACK')
         self._unchanged(plan)
         self._audit('exact_old_root_worker_and_freeze_rollback_verified')
 
@@ -729,132 +794,140 @@ class NativeRootInstaller:
 
 
     def recover_interrupted(self)->dict[str,Any]:
-        """Rollback a PREVIOUS signed exact installer attempt; never repromote.
-
-        Requires independently root-pinned bootstrap code and original one-use
-        evidence. Recover does not ask for, mint or reuse another Owner proof.
-        """
+        """Rollback previous exact attempt; defer when production lock held."""
         self.verify_root_bootstrap_trust(allow_existing_catalog_policy=True)
-        with self.lock_existing_production_manager():
-            audit=self._ledger_dir('root-installer-audit')
-            safe_root_dir(STATE,mode=0o700)
-            safe_root_dir(audit,mode=0o700)
-            path=audit/('release-'+self.plan['source_sha'][:16]+'.json')
-            journal=json.loads(secure_blob(path,mode=0o600,maximum=30000))
-            if (journal.get('schema_version')!='1.0'
-                    or journal.get('action')!=transaction.ACTION
-                    or journal.get('source_sha')!=self.plan['source_sha']
-                    or journal.get('scope_sha256')!=self.plan['installation_scope_sha256']
-                    or journal.get('plan_sha256')!=self.plan['install_plan_sha256']
-                    or journal.get('rollback_source_sha')!=self.plan['rollback_source_sha']
-                    or journal.get('freeze_sha256')!=self.plan['freeze_sha256']):
-                fail('INTERRUPTED_JOURNAL_SCOPE_CHANGED')
-            self.journal=path
-            approval=journal.get('approval_id')
-            ledger=self._ledger_dir('consumed-owner-approvals')
-            safe_root_dir(ledger,mode=0o700)
-            if not isinstance(approval,str) or re.fullmatch('catalog-root-owner-[0-9a-f]{32}',approval) is None:
-                fail('INTERRUPTED_OWNER_APPROVAL_MISSING')
-            self.owner={
-                'approval_id':approval,
-                'owner_oid':str(journal.get('verified_owner_oid') or ''),
-                'verified_access_token_sha256':str(journal.get('verified_token_sha256') or ''),
-            }
-            consumed_path=ledger/(approval+'.json')
-            consumption_missing=(not consumed_path.exists() and not consumed_path.is_symlink())
-            if not consumption_missing:
-                proof=json.loads(secure_blob(consumed_path,mode=0o600,maximum=4096))
-                if (proof.get('approval_id')!=approval
-                        or proof.get('plan_sha256')!=self.plan['install_plan_sha256']
-                        or proof.get('source_sha')!=self.plan['source_sha']):
-                    fail('INTERRUPTED_OWNER_CONSUMPTION_DRIFT')
-            elif journal.get('status') not in {
-                    'prepared_signed_entra_owner_no_mutation',
-                    'interrupted_before_owner_consumption_verified',
-            }:
-                fail('INTERRUPTED_OWNER_CONSUMPTION_MISSING_AFTER_MUTATION')
-            safe=journal.get('protected_containers_before')
-            if (not isinstance(safe,dict) or set(safe)!=set(IMAGE_NAMES)):
-                fail('INTERRUPTED_PROTECTED_CONTAINER_BASELINE_MISSING')
-            self.before={}
-            for name,item in safe.items():
-                if (not isinstance(item,dict) or
-                        set(item)!={'id','image','started_at'}):
-                    fail('INTERRUPTED_CONTAINER_EVIDENCE_INVALID')
-                self.before[name]={
-                    'Id':item['id'],'Image':item['image'],
-                    'State':{'StartedAt':item['started_at']},
-                }
-            if consumption_missing:
-                # The process died after recording intent but before writing
-                # the one-use Owner consumption file. Only original, untouched
-                # host state can be declared safe. Never mint/reuse the proof.
-                if (ROOT_POLICY.exists() or ROOT_POLICY.is_symlink()
-                        or BUNDLE_ROOT.exists() or BUNDLE_ROOT.is_symlink()
-                        or sha256(secure_blob(WORKER,mode=0o755)).hexdigest()
-                           !=self.plan['rollback_root_worker_sha256']):
-                    self.open_root_production_breaker('CATALOG_ROOT_INSTALL_ROLLBACK_UNVERIFIED')
-                    fail('ROOT_MUTATION_WITHOUT_DURABLE_OWNER_CONSUMPTION')
-                active=subprocess.run(['systemctl','is-active',TIMER],
-                    stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=15,
-                    check=False,text=True)
-                if active.stdout.strip()=='active':
-                    self.open_root_production_breaker('CATALOG_ROOT_INSTALL_ROLLBACK_UNVERIFIED')
-                    fail('RECOVERY_TIMER_ACTIVE_WITHOUT_OWNER_CONSUMPTION')
-                self._unchanged(self.plan)
-                self._audit('interrupted_before_owner_consumption_verified')
-                return {'status':'interrupted_before_owner_consumption_verified',
+        try:
+            with self.lock_existing_production_manager():
+                return self._recover_under_native_lock()
+        except NativeBootstrapDenied as exc:
+            if str(exc)=='CATALOG_NATIVE_BOOTSTRAP_PRODUCTION_MANAGER_BUSY':
+                return {'status':'native_release_transaction_in_progress_no_change',
                         'source_sha':self.plan['source_sha'],
-                        'original_freeze_restored':True,
-                        'approval_reusable':False,
                         'runtime_mcp_promotion_approved':False,
                         'provider_write_approved':False}
-            if journal.get('status') in {
-                    'exact_catalog_root_install_verified',
-                    'root_install_verified_freeze_unchanged',
-            }:
-                # Never reinterpret an already completed root install as
-                # authorization to promote images or write to Autotask.
-                self._unchanged(self.plan)
-                return {'status':'already_installed_no_recovery_required',
-                        'source_sha':self.plan['source_sha'],
-                        'promotion_approved':False,'provider_write_approved':False}
-            if journal.get('status') in {
-                    'catalog_root_rolled_back_verified',
-                    'exact_old_root_worker_and_freeze_rollback_verified',
-                    'root_install_backup_failed_before_mutation',
-            }:
-                return {'status':'previous_attempt_already_resolved',
-                        'source_sha':self.plan['source_sha'],
-                        'promotion_approved':False,'provider_write_approved':False}
-            backup=self._ledger_dir('root-installer-backup')/'release-host-reconcile-worker.original'
-            if backup.is_file():
-                # A partial install may have swapped the worker. Restore
-                # exactly the recorded immutable original bytes and check
-                # the original freeze and all protected containers.
-                try:
-                    self.restore_original_worker_units_and_state(self.plan)
-                    self.independently_verify_rollback_and_freeze(self.plan)
-                except BaseException:
-                    self.open_root_production_breaker('CATALOG_ROOT_INSTALL_ROLLBACK_UNVERIFIED')
-                    self._audit('catalog_root_rollback_unverified')
-                    raise
-            else:
-                # A missing backup is safe ONLY if no installed root change
-                # exists. Never guess that an incomplete journal was harmless.
-                if (ROOT_POLICY.exists() or BUNDLE_ROOT.exists()
-                        or sha256(secure_blob(WORKER,mode=0o755)).hexdigest()
-                           !=self.plan['rollback_root_worker_sha256']):
-                    self.open_root_production_breaker('CATALOG_ROOT_INSTALL_ROLLBACK_UNVERIFIED')
-                    fail('INTERRUPTED_INSTALL_MISSING_BACKUP_AFTER_MUTATION')
-                self._unchanged(self.plan)
-            self._audit('catalog_root_rolled_back_verified')
-            return {'status':'interrupted_exact_root_install_rolled_back_verified',
+            raise
+
+    def _recover_under_native_lock(self)->dict[str,Any]:
+        audit=self._ledger_dir('root-installer-audit')
+        safe_root_dir(STATE,mode=0o700)
+        safe_root_dir(audit,mode=0o700)
+        path=audit/('release-'+self.plan['source_sha'][:16]+'.json')
+        journal=json.loads(secure_blob(path,mode=0o600,maximum=30000))
+        if (journal.get('schema_version')!='1.0'
+                or journal.get('action')!=transaction.ACTION
+                or journal.get('source_sha')!=self.plan['source_sha']
+                or journal.get('scope_sha256')!=self.plan['installation_scope_sha256']
+                or journal.get('plan_sha256')!=self.plan['install_plan_sha256']
+                or journal.get('rollback_source_sha')!=self.plan['rollback_source_sha']
+                or journal.get('freeze_sha256')!=self.plan['freeze_sha256']):
+            fail('INTERRUPTED_JOURNAL_SCOPE_CHANGED')
+        self.journal=path
+        approval=journal.get('approval_id')
+        ledger=self._ledger_dir('consumed-owner-approvals')
+        safe_root_dir(ledger,mode=0o700)
+        if not isinstance(approval,str) or re.fullmatch('catalog-root-owner-[0-9a-f]{32}',approval) is None:
+            fail('INTERRUPTED_OWNER_APPROVAL_MISSING')
+        self.owner={
+            'approval_id':approval,
+            'owner_oid':str(journal.get('verified_owner_oid') or ''),
+            'verified_access_token_sha256':str(journal.get('verified_token_sha256') or ''),
+        }
+        consumed_path=ledger/(approval+'.json')
+        consumption_missing=(not consumed_path.exists() and not consumed_path.is_symlink())
+        if not consumption_missing:
+            proof=json.loads(secure_blob(consumed_path,mode=0o600,maximum=4096))
+            if (proof.get('approval_id')!=approval
+                    or proof.get('plan_sha256')!=self.plan['install_plan_sha256']
+                    or proof.get('source_sha')!=self.plan['source_sha']):
+                fail('INTERRUPTED_OWNER_CONSUMPTION_DRIFT')
+        elif journal.get('status') not in {
+                'prepared_signed_entra_owner_no_mutation',
+                'interrupted_before_owner_consumption_verified',
+        }:
+            self.open_root_production_breaker('CATALOG_ROOT_INSTALL_ROLLBACK_UNVERIFIED')
+            fail('INTERRUPTED_OWNER_CONSUMPTION_MISSING_AFTER_MUTATION')
+        safe=journal.get('protected_containers_before')
+        if (not isinstance(safe,dict) or set(safe)!=set(IMAGE_NAMES)):
+            fail('INTERRUPTED_PROTECTED_CONTAINER_BASELINE_MISSING')
+        self.before={}
+        for name,item in safe.items():
+            if (not isinstance(item,dict) or
+                    set(item)!={'id','image','started_at'}):
+                fail('INTERRUPTED_CONTAINER_EVIDENCE_INVALID')
+            self.before[name]={
+                'Id':item['id'],'Image':item['image'],
+                'State':{'StartedAt':item['started_at']},
+            }
+        if consumption_missing:
+            # The process died after recording intent but before writing
+            # the one-use Owner consumption file. Only original, untouched
+            # host state can be declared safe. Never mint/reuse the proof.
+            if (ROOT_POLICY.exists() or ROOT_POLICY.is_symlink()
+                    or BUNDLE_ROOT.exists() or BUNDLE_ROOT.is_symlink()
+                    or sha256(secure_blob(WORKER,mode=0o755)).hexdigest()
+                       !=self.plan['rollback_root_worker_sha256']):
+                self.open_root_production_breaker('CATALOG_ROOT_INSTALL_ROLLBACK_UNVERIFIED')
+                fail('ROOT_MUTATION_WITHOUT_DURABLE_OWNER_CONSUMPTION')
+            active=subprocess.run(['systemctl','is-active',TIMER],
+                stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=15,
+                check=False,text=True)
+            if active.stdout.strip()=='active':
+                self.open_root_production_breaker('CATALOG_ROOT_INSTALL_ROLLBACK_UNVERIFIED')
+                fail('RECOVERY_TIMER_ACTIVE_WITHOUT_OWNER_CONSUMPTION')
+            self._unchanged(self.plan)
+            self._audit('interrupted_before_owner_consumption_verified')
+            return {'status':'interrupted_before_owner_consumption_verified',
                     'source_sha':self.plan['source_sha'],
                     'original_freeze_restored':True,
                     'approval_reusable':False,
                     'runtime_mcp_promotion_approved':False,
                     'provider_write_approved':False}
+        if journal.get('status') in {
+                'exact_catalog_root_install_verified',
+                'root_install_verified_freeze_unchanged',
+        }:
+            # Never reinterpret an already completed root install as
+            # authorization to promote images or write to Autotask.
+            self._unchanged(self.plan)
+            return {'status':'already_installed_no_recovery_required',
+                    'source_sha':self.plan['source_sha'],
+                    'promotion_approved':False,'provider_write_approved':False}
+        if journal.get('status') in {
+                'catalog_root_rolled_back_verified',
+                'exact_old_root_worker_and_freeze_rollback_verified',
+                'root_install_backup_failed_before_mutation',
+        }:
+            return {'status':'previous_attempt_already_resolved',
+                    'source_sha':self.plan['source_sha'],
+                    'promotion_approved':False,'provider_write_approved':False}
+        backup=self._ledger_dir('root-installer-backup')/'release-host-reconcile-worker.original'
+        if backup.is_file():
+            # A partial install may have swapped the worker. Restore
+            # exactly the recorded immutable original bytes and check
+            # the original freeze and all protected containers.
+            try:
+                self.restore_original_worker_units_and_state(self.plan)
+                self.independently_verify_rollback_and_freeze(self.plan)
+            except BaseException:
+                self.open_root_production_breaker('CATALOG_ROOT_INSTALL_ROLLBACK_UNVERIFIED')
+                self._audit('catalog_root_rollback_unverified')
+                raise
+        else:
+            # A missing backup is safe ONLY if no installed root change
+            # exists. Never guess that an incomplete journal was harmless.
+            if (ROOT_POLICY.exists() or BUNDLE_ROOT.exists()
+                    or sha256(secure_blob(WORKER,mode=0o755)).hexdigest()
+                       !=self.plan['rollback_root_worker_sha256']):
+                self.open_root_production_breaker('CATALOG_ROOT_INSTALL_ROLLBACK_UNVERIFIED')
+                fail('INTERRUPTED_INSTALL_MISSING_BACKUP_AFTER_MUTATION')
+            self._unchanged(self.plan)
+        self._audit('catalog_root_rolled_back_verified')
+        return {'status':'interrupted_exact_root_install_rolled_back_verified',
+                'source_sha':self.plan['source_sha'],
+                'original_freeze_restored':True,
+                'approval_reusable':False,
+                'runtime_mcp_promotion_approved':False,
+                'provider_write_approved':False}
 
 
 def load_bootstrap_plan(*,expected_plan_sha256:str,evidence_root:Path)->tuple[dict[str,Any],dict[str,Any]]:
@@ -884,12 +957,20 @@ def main()->int:
     cmd.add_argument('--check-only',action='store_true')
     cmd.add_argument('--execute',action='store_true')
     cmd.add_argument('--recover',action='store_true')
-    parser.add_argument('--exact-plan-sha256',required=True)
+    parser.add_argument('--exact-plan-sha256',default='')
     args=parser.parse_args()
     if os.geteuid()!=0 or sys.flags.isolated!=1 or Path(__file__).resolve()!=ENTRY:
         fail('ROOT_INSTALLED_ISOLATED_EXECUTION_REQUIRED')
+    exact=args.exact_plan_sha256
+    if args.recover and not exact:
+        # Root-owned hash-pinned trust policy binds automated recovery to the
+        # same reviewed installation, never to a caller-selected scope.
+        policy=json.loads(secure_blob(POLICY,mode=0o600,maximum=8192))
+        exact=str(policy.get('plan_sha256') or '')
+    if not exact or not HEX64.fullmatch(exact):
+        fail('EXACT_ROOT_INSTALL_PLAN_HASH_REQUIRED')
     plan,trust=load_bootstrap_plan(
-        expected_plan_sha256=args.exact_plan_sha256,
+        expected_plan_sha256=exact,
         evidence_root=Path('/srv/jason/archive/engineering-evidence/catalog-scoped-root-install-20261117'),
     )
     host=NativeRootInstaller(plan,Path('/srv/jason/archive/engineering-evidence/catalog-scoped-root-install-20261117'),trust)

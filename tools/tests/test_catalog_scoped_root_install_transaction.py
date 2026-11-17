@@ -85,6 +85,7 @@ class FakeRoot:
         assert approval_id not in self.consumed
         self.consumed.add(approval_id)
     def backup_original_worker_and_units(self,plan):self.action("backed_up_old_worker")
+    def activate_preinstall_recovery_watchdog(self,plan):self.action("bootstrap_watchdog_active")
     def install_exact_root_files(self,plan):self.action("installed_root_bundle")
     def install_root_policy(self,plan):
         self.action("installed_root_policy")
@@ -112,6 +113,7 @@ def test_exact_one_use_owner_install_success_and_distinct_promotion_gate(plan):
     assert host.installed is True
     assert host.events.index("journal")<host.events.index("consume_one_use_approval")
     assert host.events.index("consume_one_use_approval")<host.events.index("installed_root_bundle")
+    assert host.events.index("bootstrap_watchdog_active")<host.events.index("installed_root_bundle")
     assert host.events.index("installed_root_bundle")<host.events.index("timer_enabled")
     assert host.events.index("timer_enabled")<host.events.index("root_readback")
     assert host.events[-1]=="unlock"
@@ -167,7 +169,7 @@ def test_preapproval_or_preintent_error_has_zero_production_writes(plan,phase):
 
 
 @pytest.mark.parametrize("phase",[
-    "installed_root_bundle","installed_root_policy",
+    "bootstrap_watchdog_active","installed_root_bundle","installed_root_policy",
     "timer_enabled","root_readback","outcome:exact_catalog_root_install_verified",
 ])
 def test_partial_failure_rolls_back_old_worker_and_freeze(plan,phase):
