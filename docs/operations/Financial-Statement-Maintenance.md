@@ -124,8 +124,7 @@ and production activation remain unverified. A successful build or fixture tests
 
 Integration coordination: #2455 — its IT Glue write profile adds separate keys to the shared OpenBao secret map and provider provisioner. The SharePoint writer keys in this candidate are distinct; re-review those dictionaries if #2455 merges first.
 
-## November 17 Entra readback and process recovery
 
-In the signed-in AOT Entra admin center, the registration and tenant IDs matched this candidate. Graph `Sites.Selected` is configured as an application permission but shows **Not granted for Atlantic Office**. The app has zero certificates, zero client secrets, and zero federated credentials. The exact site permission inventory was not enumerated; do not infer a current site grant from the requested manifest. These are preparatory read-only observations, not consent or credential provisioning.
+## November 17 process recovery
 
 The isolated Compose service retries a fatal process exit at most five times. An intentionally disabled configuration exits successfully without creating a writer, so it does not restart. The normal per-cycle failure handler retains its one-minute loop and governed 15-minute retry eligibility. A repeated startup failure after the bounded attempts must be diagnosed and restarted through the release process; do not silently restart protected services.
