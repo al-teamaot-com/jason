@@ -79,3 +79,24 @@ Unit/failure tests cover manifest and scope drift, wrong tenant/site, Compose es
 - PR #2456 extends `_project_endpoint_read` for exact Datto device identifiers around line 841. This is a different function and provider-read projection; the component-release source does not modify endpoint reads. Preserve both independently when integrating.
 - **Integration coordination: #2522 #2456** is acknowledged only after reviewing those exact patches. This is not approval to merge either change or enable any catalog/Datto capability. Re-run the required integration/security checks if either merges before this PR.
 
+
+## Immutable source bundle preparation (source-only)
+
+The root installer must **not** import any Python code directly from a developer worktree or mutable production Git checkout. `tools/independent_component_release_bundle.py` prepares a separate, private staging directory from six exact Git blobs at the reviewed release-controller SHA: the controller, root entrypoint, host adapter, pinned PMv4 cross-release host guard, Kernel Ed25519 Owner-release verifier, and Kernel package marker. It rejects symbolic-link Git blobs, changed worktree bytes, source substitutions, extra bundle files, mutable staged source files, and any destination in protected production directories.
+
+Prepare **after** the final controller candidate SHA is immutable and CI has completed:
+
+```bash
+python3 tools/independent_component_release_bundle.py prepare \
+  --repo /srv/jason/archive/engineering-worktrees/independent-component-release-20261117 \
+  --source-sha EXACT_APPROVED_CONTROLLER_SHA \
+  --destination /home/al/.local/share/jason/independent-component-release-staging-EXACT_APPROVED_CONTROLLER_SHA
+
+python3 tools/independent_component_release_bundle.py verify \
+  --repo /srv/jason/archive/engineering-worktrees/independent-component-release-20261117 \
+  --source-sha EXACT_APPROVED_CONTROLLER_SHA \
+  --destination /home/al/.local/share/jason/independent-component-release-staging-EXACT_APPROVED_CONTROLLER_SHA
+```
+
+Both operations are **unprivileged source-only staging**. The resulting `source-bundle.json` binds the exact Git commit and each installed Python module's SHA256; it explicitly states `production_installation_performed=false` and `production_authority=false`. A *different* root-owned, exact-SHA governed installation transaction must reverify that manifest and protected CI, ensure dependencies are installed under the fixed pinned root, and reject any stale Owner proof before it can enable the root entrypoint. No `sudo`, systemd unit, Docker service, writable production path, or owner approval is consumed by the bundle builder.
+

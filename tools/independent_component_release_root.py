@@ -16,15 +16,21 @@ import os
 from pathlib import Path
 import sys
 
+# Launchable as an exact root-pinned file without importing any developer
+# worktree or ambient PYTHONPATH. Only that installed path may add the trusted
+# bundle root to Python's module search path.
+TRUSTED_ENTRYPOINT = Path(
+    "/opt/jason/independent-component-release/trusted/tools/independent_component_release_root.py"
+)
+if Path(__file__).resolve() == TRUSTED_ENTRYPOINT and os.geteuid() == 0:
+    sys.path.insert(0, str(TRUSTED_ENTRYPOINT.parent.parent))
+
 from tools.independent_component_release import (
     ComponentReleaseController, ComponentReleaseDenied,
     PRODUCTION_ROOT, trusted_file, _load_json, release_id,
 )
 from tools.independent_component_host_adapter import IndependentComponentHost
 
-TRUSTED_ENTRYPOINT = Path(
-    "/opt/jason/independent-component-release/trusted/tools/independent_component_release_root.py"
-)
 APPROVAL_OUTBOX = Path(
     "/var/lib/jason/openclaw/release-manager/independent-component-owner-approvals"
 )
