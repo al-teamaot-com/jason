@@ -13,13 +13,14 @@ from tools import catalog_scoped_promotion_host as h
 from tools import catalog_scoped_promotion_request as q
 from tools import catalog_scoped_promotion_root as root
 from tools import catalog_scoped_control_readback as readback
+from tools.tests.catalog_scoped_v2_fixture import synthetic_fresh_v2
 
 ROOT=Path(__file__).resolve().parents[2]
 MANIFEST=json.loads((ROOT/"config/catalog-scoped-release-admission.json").read_text())
 HISTORICAL=json.loads((ROOT/p.ADMISSION_EVIDENCE_PATH).read_text())
 
 
-def offer():return p.make_offer(MANIFEST,HISTORICAL,HISTORICAL)
+def offer():return p.make_offer(MANIFEST,HISTORICAL,synthetic_fresh_v2(MANIFEST,HISTORICAL))
 
 
 def test_root_host_denies_developer_checkout_execution():

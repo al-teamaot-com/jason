@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
+from pathlib import Path
 import json
 import re
 from typing import Any, Mapping, Protocol, ContextManager
@@ -29,6 +30,8 @@ ID = re.compile(r"^release-[a-f0-9]{16}$")
 PROFILE_ID = "aot-catalog-scoped-runtime-mcp-promotion-v1"
 ADMISSION_RECEIPT_SHA256 = "12c8fdeec4b3ffd361d06b40e51a94c8199dfb8f7b0bb30a6d7e6920defe9d31"
 ADMISSION_EVIDENCE_PATH = "docs/engineering/evidence/catalog-scope-admission-20261117.json"
+PREDECESSOR_MANIFEST_PATH = "docs/engineering/evidence/catalog-scope-original-manifest-20261117.json"
+PREDECESSOR_MANIFEST_SHA256 = "dd2480eb01508c9f53180775644dfa0343a631d1d6452d265c7c937fbf32a239"
 SCOPED_MANIFEST_PATH = "config/catalog-scoped-release-admission.json"
 PROTECTED_CONTAINERS = (
     "jason-teams-gateway", "jason-pmv4-shadow-gateway", "openbao",
@@ -65,6 +68,23 @@ def historical_receipt_verified(
     """Consume exact immutable admission, not a new approval or output text."""
     if not isinstance(historical, Mapping):
         fail("HISTORICAL_ADMISSION_MISSING")
+    # The Owner's previously verified receipt refers to the older *nine-file*
+    # source and images. Revalidate it against its exact frozen predecessor
+    # manifest rather than pretending those images contain the newer MCP
+    # release signer. The new images have their own fresh independent receipt.
+    previous_path=Path(__file__).resolve().parents[1]/PREDECESSOR_MANIFEST_PATH
+    if previous_path.is_symlink() or not previous_path.is_file():
+        fail("PREDECESSOR_MANIFEST_MISSING")
+    original=previous_path.read_bytes()
+    if sha256(original).hexdigest()!=PREDECESSOR_MANIFEST_SHA256:
+        fail("PREDECESSOR_MANIFEST_CHANGED")
+    try:
+        predecessor=json.loads(original)
+    except (ValueError,TypeError) as exc:
+        raise ScopedPromotionDenied("CATALOG_SCOPED_PROMOTION_PREDECESSOR_MANIFEST_INVALID") from exc
+    if (manifest.get("rollback_sha")!=predecessor.get("rollback_sha")
+            or manifest.get("snapshot_sha")==predecessor.get("snapshot_sha")):
+        fail("PREDECESSOR_AND_NEW_CANDIDATE_NOT_DISTINCT")
     source = historical.get("protected_source") or {}
     dual = historical.get("dual_image_rollback") or {}
     checks = historical.get("protected_ci") or {}
@@ -80,20 +100,20 @@ def historical_receipt_verified(
     if sha256(canonical(reconstructed)).hexdigest() != expected_sha256:
         fail("HISTORICAL_ADMISSION_CONTENT_CHANGED")
     expected_source = {
-        "snapshot_source_sha": manifest["snapshot_sha"],
-        "rollback_source_sha": manifest["rollback_sha"],
-        "verified_protected_feature_sha": manifest["protected_feature_sha"],
-        "source_diff_sha256": manifest["scope_sha256"],
+        "snapshot_source_sha": predecessor["snapshot_sha"],
+        "rollback_source_sha": predecessor["rollback_sha"],
+        "verified_protected_feature_sha": predecessor["protected_feature_sha"],
+        "source_diff_sha256": predecessor["scope_sha256"],
     }
     if not isinstance(source, Mapping) or any(source.get(k) != v for k, v in expected_source.items()):
         fail("HISTORICAL_ADMISSION_SOURCE_MISMATCH")
     for key, expected in (
-        ("candidate_runtime_image_id", manifest["runtime_image_id"]),
-        ("candidate_mcp_image_id", manifest["mcp_image_id"]),
-        ("rollback_runtime_image_id", manifest["rollback_runtime_image_id"]),
-        ("rollback_mcp_image_id", manifest["rollback_mcp_image_id"]),
-        ("rollback_sha", manifest["rollback_sha"]),
-        ("freeze_sha256", manifest["freeze_sha256"]),
+        ("candidate_runtime_image_id", predecessor["runtime_image_id"]),
+        ("candidate_mcp_image_id", predecessor["mcp_image_id"]),
+        ("rollback_runtime_image_id", predecessor["rollback_runtime_image_id"]),
+        ("rollback_mcp_image_id", predecessor["rollback_mcp_image_id"]),
+        ("rollback_sha", predecessor["rollback_sha"]),
+        ("freeze_sha256", predecessor["freeze_sha256"]),
     ):
         if dual.get(key) != expected:
             fail("HISTORICAL_ADMISSION_IMAGE_OR_FREEZE_CHANGED")
@@ -108,16 +128,16 @@ def historical_receipt_verified(
     if (not isinstance(checks, Mapping) or checks.get("passed") is not True
             or "governed-security-regressions" not in checks.get("required_checks", [])):
         fail("HISTORICAL_ADMISSION_SECURITY_CI_MISSING")
-    for kind, image in (("runtime", manifest["runtime_image_id"]),
-                        ("mcp", manifest["mcp_image_id"])):
+    for kind, image in (("runtime", predecessor["runtime_image_id"]),
+                        ("mcp", predecessor["mcp_image_id"])):
         result = preflights.get(kind) if isinstance(preflights, Mapping) else None
         if (not isinstance(result, Mapping) or result.get("preflight") != "PASS"
                 or result.get("image_id") != image
                 or result.get("additional_binds") != 0):
             fail("HISTORICAL_ADMISSION_PREFLIGHT_NOT_PROVEN")
     return {"receipt_sha256": expected_sha256,
-            "source_sha": manifest["snapshot_sha"],
-            "rollback_sha": manifest["rollback_sha"], "scope_sha256": manifest["scope_sha256"]}
+            "source_sha": predecessor["snapshot_sha"],
+            "rollback_sha": predecessor["rollback_sha"], "scope_sha256": predecessor["scope_sha256"]}
 
 
 def make_offer(

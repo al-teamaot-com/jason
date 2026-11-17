@@ -21,23 +21,27 @@ SHA = re.compile(r"^[a-f0-9]{40}$")
 IMAGE = re.compile(r"^sha256:[a-f0-9]{64}$")
 HEX = re.compile(r"^[a-f0-9]{64}$")
 PROFILE = "aot-autotask-catalog-runtime-mcp-v1"
-SNAPSHOT_REF = re.compile(r"^refs/heads/prep/catalog-identity-grants-isolated-[0-9]{8}(?:-[0-9a-f]{8})?$")
+SNAPSHOT_REF = re.compile(r"^refs/heads/prep/catalog-identity-grants-(?:owner-approval-)?isolated-[0-9]{8}(?:-[0-9a-f]{8})?$")
 MANIFEST_FILE = "config/catalog-scoped-release-admission.json"
 ALLOWED_FILES = frozenset({
     ".github/workflows/security-regressions.yml",
     "docs/engineering/reviews/CATALOG_EXACT_GRANT_ADMIN_20261117.md",
     "docs/engineering/reviews/CATALOG_SERVICE_IDENTITY_20261117.md",
+    "implementation/kernel/catalog_scoped_promotion_contract.py",
     "implementation/mcp_service/src/jason_mcp/catalog_grant_admin.py",
+    "implementation/mcp_service/src/jason_mcp/catalog_scoped_promotion_approval.py",
     "implementation/mcp_service/src/jason_mcp/server.py",
     "implementation/mcp_service/tests/test_autotask_catalog_grant_admin.py",
     "implementation/orchestrator/tests/test_execution_plan_binding.py",
     "implementation/runtime_service/src/jason_runtime/autotask_procurement.py",
     "implementation/runtime_service/tests/test_autotask_catalog_service_identity.py",
 })
-# Entire-file byte equality for catalog-owned modules/tests. Shared server.py
-# is compared at the exact reviewed function boundaries instead.
+# Whole-file byte equality for catalog-owned modules/tests. Shared server.py
+# is compared at the exact six reviewed function boundaries instead.
 EXACT_BLOBS = frozenset({
+    "implementation/kernel/catalog_scoped_promotion_contract.py",
     "implementation/mcp_service/src/jason_mcp/catalog_grant_admin.py",
+    "implementation/mcp_service/src/jason_mcp/catalog_scoped_promotion_approval.py",
     "implementation/mcp_service/tests/test_autotask_catalog_grant_admin.py",
     "implementation/orchestrator/tests/test_execution_plan_binding.py",
     "implementation/runtime_service/src/jason_runtime/autotask_procurement.py",
@@ -47,7 +51,7 @@ SERVER_PATH = "implementation/mcp_service/src/jason_mcp/server.py"
 SERVER_FUNCTIONS = frozenset({
     "_authority_admin_or_catalog_self", "_authority_grant_audit",
     "list_exact_authority_grants", "grant_exact_authority",
-    "revoke_exact_authority_grant",
+    "revoke_exact_authority_grant", "approve_catalog_scoped_runtime_mcp_release",
 })
 RUNTIME_MODE = {"JASON_AUTOTASK_CATALOG_AUTH_MODE": "jason_managed"}
 MCP_MODE = {"JASON_AUTOTASK_CATALOG_GRANT_ADMIN_PROFILE": "aot-catalog-self-owner-v1"}

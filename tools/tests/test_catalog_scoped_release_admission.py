@@ -45,7 +45,7 @@ def test_exact_pinned_manifest_profile_source_and_configuration():
     assert a.SERVER_FUNCTIONS == {
         "_authority_admin_or_catalog_self", "_authority_grant_audit",
         "list_exact_authority_grants", "grant_exact_authority",
-        "revoke_exact_authority_grant",
+        "revoke_exact_authority_grant", "approve_catalog_scoped_runtime_mcp_release",
     }
 
 
@@ -139,7 +139,7 @@ def test_protected_catalog_scope_source_checks(fake_source):
     result=validate_fake(manifest,state)
     assert result["changed_files"]==sorted(a.ALLOWED_FILES)
     assert result["blob_equality_count"]==len(a.EXACT_BLOBS)
-    assert result["shared_function_count"]==5
+    assert result["shared_function_count"]==6
     assert result["source_diff_sha256"]==manifest["scope_sha256"]
 
 
@@ -173,7 +173,7 @@ def test_shared_mcp_non_catalog_changes_are_allowed_but_catalog_changes_denied(f
     manifest,state=fake_source
     path=state["main"]+":"+a.SERVER_PATH
     state["override_blobs"][path]=("def unrelated_ticket_read():\n    return True\n\n"+state["shared"]).encode()
-    assert validate_fake(manifest,state)["shared_function_count"]==5
+    assert validate_fake(manifest,state)["shared_function_count"]==6
     state["override_blobs"][path]=(state["shared"].replace("return True", "return False", 1)).encode()
     with pytest.raises(a.CatalogScopeDenied,match="CATALOG_SHARED_FUNCTION_CHANGED"):
         validate_fake(manifest,state)

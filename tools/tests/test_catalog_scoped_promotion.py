@@ -10,6 +10,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from implementation.kernel.signed_owner_release import issue_exact_owner_release
 from tools import catalog_scoped_promotion as p
+from tools.tests.catalog_scoped_v2_fixture import synthetic_fresh_v2
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = json.loads((ROOT / "config/catalog-scoped-release-admission.json").read_text())
@@ -18,7 +19,7 @@ OWNER = "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
 
 
 def offer():
-    return p.make_offer(MANIFEST, EVIDENCE, EVIDENCE)
+    return p.make_offer(MANIFEST, EVIDENCE, synthetic_fresh_v2(MANIFEST, EVIDENCE))
 
 
 def signed(o, key, *, decision="approve"):
@@ -220,3 +221,33 @@ def test_freeze_restoration_verification_failure_opens_breaker():
     o=offer();key=Ed25519PrivateKey.generate();host=FakeHost(key,failure="verify_freeze_restored")
     with pytest.raises(RuntimeError):p.promote_scoped_catalog_pair(o,signed(o,key),host=host)
     assert host.breaker==["CATALOG_SCOPED_FREEZE_RESTORATION_UNVERIFIED"]
+
+
+def test_original_nine_file_receipt_is_not_fresh_v2_authorization():
+    with pytest.raises(p.ScopedPromotionDenied, match="FRESH_SOURCE_CHANGED"):
+        p.make_offer(MANIFEST, EVIDENCE, EVIDENCE)
+
+
+def test_new_v2_receipt_requires_separate_exact_candidate_and_ci():
+    from tools.tests.catalog_scoped_v2_fixture import synthetic_fresh_v2
+    actual = synthetic_fresh_v2(MANIFEST, EVIDENCE)
+    assert actual["receipt_sha256"] != EVIDENCE["receipt_sha256"]
+    assert actual["protected_source"]["snapshot_source_sha"] == MANIFEST["snapshot_sha"]
+    assert actual["dual_image_rollback"]["candidate_mcp_image_id"] == MANIFEST["mcp_image_id"]
+    changed = deepcopy(actual)
+    changed["dual_image_rollback"]["candidate_runtime_image_id"] = EVIDENCE["dual_image_rollback"]["candidate_runtime_image_id"]
+    with pytest.raises(p.ScopedPromotionDenied, match="FRESH_ARTIFACT_DRIFT"):
+        p.make_offer(MANIFEST, EVIDENCE, changed)
+    changed = deepcopy(actual)
+    changed["protected_ci"]["passed"] = False
+    with pytest.raises(p.ScopedPromotionDenied, match="FRESH_PROTECTED_CI_NOT_GREEN"):
+        p.make_offer(MANIFEST, EVIDENCE, changed)
+
+
+def test_original_manifest_pinned_hash_blocks_silent_predecessor_swap(monkeypatch, tmp_path):
+    from tools.tests.catalog_scoped_v2_fixture import synthetic_fresh_v2
+    predecessor = tmp_path / "replacement.json"
+    predecessor.write_text('{"rollback_sha":"a"}')
+    monkeypatch.setattr(p, "PREDECESSOR_MANIFEST_PATH", str(predecessor))
+    with pytest.raises(p.ScopedPromotionDenied, match="PREDECESSOR_MANIFEST_CHANGED"):
+        p.make_offer(MANIFEST, EVIDENCE, synthetic_fresh_v2(MANIFEST, EVIDENCE))

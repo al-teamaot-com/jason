@@ -29,6 +29,7 @@ FILES = (
     "implementation/kernel/catalog_scoped_promotion_contract.py",
     "implementation/kernel/signed_owner_release.py",
     "docs/engineering/evidence/catalog-scope-admission-20261117.json",
+    "docs/engineering/evidence/catalog-scope-original-manifest-20261117.json",
     "config/catalog-scoped-release-admission.json",
     "infrastructure/openclaw-operations/systemd/jason-catalog-scoped-recovery.service",
     "infrastructure/openclaw-operations/systemd/jason-catalog-scoped-recovery.timer",

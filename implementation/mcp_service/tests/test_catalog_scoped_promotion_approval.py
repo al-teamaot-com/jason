@@ -9,6 +9,7 @@ from jason_mcp.catalog_scoped_promotion_approval import (
 )
 from kernel.signed_owner_release import verify_exact_owner_release
 from tools.catalog_scoped_promotion import make_offer
+from tools.tests.catalog_scoped_v2_fixture import synthetic_fresh_v2
 
 ROOT=Path(__file__).resolve().parents[3]
 MANIFEST=json.loads((ROOT/"config/catalog-scoped-release-admission.json").read_text())
@@ -19,7 +20,7 @@ CLAIMS={"tid":"f7054323-d52b-4863-8c2f-1898f0b6077c",
 
 
 def prepared(tmp_path):
-    o=make_offer(MANIFEST,HISTORICAL,HISTORICAL)
+    o=make_offer(MANIFEST,HISTORICAL,synthetic_fresh_v2(MANIFEST,HISTORICAL))
     path=tmp_path/"offers"/(o["release_id"]+".json")
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(o))
@@ -74,6 +75,6 @@ def test_invalid_owner_or_scope_never_issues(tmp_path,override):
 
 
 def test_no_offer_cannot_be_signed(tmp_path):
-    o=make_offer(MANIFEST,HISTORICAL,HISTORICAL)
+    o=make_offer(MANIFEST,HISTORICAL,synthetic_fresh_v2(MANIFEST,HISTORICAL))
     with pytest.raises(CatalogScopedApprovalDenied):
         issue(tmp_path,o,Ed25519PrivateKey.generate())
