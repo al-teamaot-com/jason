@@ -52,6 +52,23 @@ def original() -> dict:
     return old
 
 
+def reviewed_candidate_policy(original: bytes) -> bytes:
+    """Change only the retention capacity needed by one extra rollback.
+
+    The stopped rollback inventory is housekeeping. The security/release
+    guard's actual service, container and allowed-identity checks remain
+    unchanged. Any unexpected source policy shape fails closed.
+    """
+    policy = json.loads(original)
+    need(isinstance(policy, dict) and
+         type(policy.get("max_stopped_rollback_containers")) is int and
+         policy["max_stopped_rollback_containers"] == 20 and
+         c.WORKER in policy.get("allowed_running_containers", []),
+         "REVIEWED_RETENTION_POLICY_UNEXPECTED")
+    policy["max_stopped_rollback_containers"] = 21
+    return (json.dumps(policy, indent=2, sort_keys=True) + "\n").encode()
+
+
 def packet(plan_path: Path) -> tuple[dict, dict]:
     need(os.geteuid() == 0, "ROOT_REQUIRED")
     plan = c.read_json(plan_path)
@@ -77,7 +94,11 @@ def packet(plan_path: Path) -> tuple[dict, dict]:
          plan["mcp_image_digest"] == prior["mcp_image_digest"] and
          plan["worker_image_digest"] == prior["worker_image_digest"] and
          plan["watchdog_base_sha256"] == prior["watchdog_base_sha256"] and
-         plan["watchdog_candidate_sha256"] == prior["watchdog_candidate_sha256"] and
+         plan["watchdog_candidate_sha256"] == c.sha(
+             reviewed_candidate_policy(
+                 (PRIOR / "production-desired-state.stage-c.json").read_bytes()
+             )
+         ) and
          plan["service_manifest_sha256"] == prior["service_manifest_sha256"],
          "UNREVIEWED_PREVIOUS_RESOURCE_SCOPE")
     # The old approved data identity is the only state source. No copy/rename.
@@ -145,6 +166,10 @@ def preflight(path: Path) -> tuple[dict, guard.IndependentHostGuard]:
          plan["production_lkg_sha"], "PRODUCTION_ROOT_CHANGED")
     need(c.sha((path.parent / "service-manifest.json").read_bytes()) ==
          plan["service_manifest_sha256"], "SERVICE_MANIFEST_CHANGED")
+    need((path.parent / "watchdog-candidate.json").read_bytes() ==
+         reviewed_candidate_policy(
+             (PRIOR / "production-desired-state.stage-c.json").read_bytes()),
+         "UNREVIEWED_WATCHDOG_CHANGE")
     need(c.sha((path.parent / "watchdog-base.json").read_bytes()) ==
          plan["watchdog_base_sha256"] and
          c.sha((path.parent / "watchdog-candidate.json").read_bytes()) ==

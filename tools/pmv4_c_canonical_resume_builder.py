@@ -91,11 +91,23 @@ def build() -> None:
     proof = resume.PRIOR / "root-oneowner-proof.json"
     need(proof.is_file(), "PREVIOUS_CUTOVER_APPROVAL_MISSING")
     base = (resume.PRIOR / "production-desired-state.base.json").read_bytes()
-    target = (resume.PRIOR / "production-desired-state.stage-c.json").read_bytes()
+    previous_target = (
+        resume.PRIOR / "production-desired-state.stage-c.json"
+    ).read_bytes()
     manifest = (resume.PRIOR / "service-manifest.json").read_bytes()
     need(sha(base) == previous["watchdog_base_sha256"] and
-         sha(target) == previous["watchdog_candidate_sha256"] and
-         sha(manifest) == previous["service_manifest_sha256"], "PRIOR_APPROVED_SOURCE_MISMATCH")
+         sha(previous_target) == previous["watchdog_candidate_sha256"] and
+         sha(manifest) == previous["service_manifest_sha256"],
+         "PRIOR_APPROVED_SOURCE_MISMATCH")
+    target = resume.reviewed_candidate_policy(previous_target)
+    original = json.loads(previous_target)
+    adjusted = json.loads(target)
+    need({k: v for k, v in adjusted.items()
+          if k != "max_stopped_rollback_containers"} ==
+         {k: v for k, v in original.items()
+          if k != "max_stopped_rollback_containers"} and
+         adjusted["max_stopped_rollback_containers"] == 21,
+         "UNREVIEWED_WATCHDOG_POLICY_CHANGE")
     runtime = existing._docker("jason-runtime")
     mcp = existing._docker("jason-mcp-pilot")
     runtime_env = existing._env(runtime)
