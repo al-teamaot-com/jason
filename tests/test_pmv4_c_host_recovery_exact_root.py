@@ -25,12 +25,15 @@ def test_approved_root_emergency_and_full_integrity_are_preserved_by_dropins():
         rendered=docs[name].decode()
         assert rendered.count("ExecStart=")==2
         assert "pmv4-c-canonical-health-v1/pmv4_c_authority_health_adapter.py" in rendered
-        assert "/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3" in rendered
+        assert ("/var/lib/jason/governed-ticket-shared/"
+                "orchestration-events.sqlite3") in rendered if name==builder.HEALTH[0] else (
+                "ReadWritePaths=/var/lib/jason/governed-ticket-shared" in rendered)
         assert "jason-runtime" not in rendered
         assert "reset-failed" not in rendered
     assert " --mode full" in docs[builder.HEALTH[1]].decode()
     assert "TimeoutStartSec=5700" in docs[builder.HEALTH[1]].decode()
     assert "ReadWritePaths=/var/lib/jason/governed-ticket-shared" in docs[builder.HEALTH[1]].decode()
+    assert "ReadOnlyPaths=/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3" not in docs[builder.HEALTH[1]].decode()
     assert "ReadWritePaths=/var/lib/jason/governed-ticket-shared" not in docs[builder.HEALTH[0]].decode()
     assert " --mode fast" in docs[builder.HEALTH[0]].decode()
 

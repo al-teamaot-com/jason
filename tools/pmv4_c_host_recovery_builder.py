@@ -49,9 +49,14 @@ def drops():
   # directory RW; no provider roles or external network are introduced.
   extra=("ReadWritePaths=/var/lib/jason/governed-ticket-shared\n"
          "TimeoutStartSec=5700\nNice=19\nIOSchedulingClass=idle\n") if kind=="full" else ""
+  # Fast health remains read-only. Full integrity explicitly requires WAL
+  # locking and may create/checkpoint SQLite sidecars, so its canonical shared
+  # directory must NOT simultaneously be constrained by a child ReadOnlyPaths.
+  # LKG protected ReadOnlyPaths=/opt/jason/current remains effective.
+  read_only=("ReadOnlyPaths=/var/lib/jason/governed-ticket-shared/"
+             "orchestration-events.sqlite3\n") if kind=="fast" else ""
   exact[unit]=("[Service]\nExecStart=\nExecStart=/usr/bin/python3 "+executable+
-               " --mode "+kind+"\nReadOnlyPaths=/var/lib/jason/governed-ticket-shared/"
-               "orchestration-events.sqlite3\n"+extra).encode()
+               " --mode "+kind+"\n"+read_only+extra).encode()
  need(set(exact)==set(HEALTH)|set(EXPORTERS),"HOST_BUILDER_DROPINS_FOREIGN")
  return exact
 def build():
