@@ -1,5 +1,7 @@
-ARG PYTHON_BASE_IMAGE=python:3.12-slim
-FROM ${PYTHON_BASE_IMAGE}
+ARG JASON_RUNTIME_DEPENDENCY_IMAGE=jason-runtime:production
+FROM ${JASON_RUNTIME_DEPENDENCY_IMAGE} AS runtime-deps
+
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -8,14 +10,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Reuse the exact reviewed runtime dependency set without network access.
+# The final stage is a fresh Python base, so HTTP EXPOSE/CMD metadata is not
+# inherited from the dependency image.
+COPY --from=runtime-deps /usr/local /usr/local
 COPY implementation /app/implementation
 COPY config /app/config
 
-RUN python -m pip install --no-cache-dir \
-      /app/implementation \
-      /app/implementation/connectors/openclaw \
-      /app/implementation/runtime_service \
-    && chown -R 0:1000 /app/implementation /app/config \
+RUN chown -R 0:1000 /app/implementation /app/config \
     && chmod -R go-w,g+rX /app/implementation /app/config
 
 USER 1000:1000
