@@ -57,8 +57,10 @@ def test_receipt_wrong_permissions_denied(pending):
 
 def test_receipt_foreign_duplicate_denied(pending):
     receipt,data=pending
-    (receipt.parent/("owner-"+"f"*32+".json")).write_text("{}")
-    with pytest.raises(rec.A1RecoveryDenied,match="RECEIPT_NOT_TRUSTED"):
+    foreign=receipt.parent/("owner-"+"f"*32+".json")
+    foreign.write_text("{}")
+    foreign.chmod(0o600)
+    with pytest.raises(rec.A1RecoveryDenied,match="UNTRUSTED_RECEIPT_OBJECT"):
         rec.read_exact_receipt(expected_uid=os.geteuid(),expected_gid=os.getegid())
 
 
