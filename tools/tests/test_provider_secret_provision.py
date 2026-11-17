@@ -452,3 +452,22 @@ def test_group_admin_read_write_provisioning_no_cross_provider_paths():
         assert spec["create_only_secret"] is True
         assert spec["secret_path"].startswith("secret/data/connectors/microsoft-graph/production/group-")
     assert read["secret_path"] != write["secret_path"]
+
+
+def test_microsoft_sharepoint_write_contract_is_isolated_and_site_scoped_by_design() -> None:
+    directory = PROVIDERS["microsoft_graph"]
+    sharepoint = PROVIDERS["microsoft_graph_sharepoint_write"]
+    assert sharepoint["logical_name"] == "microsoft_graph.sharepoint_write"
+    assert sharepoint["secret_path"] == (
+        "secret/data/connectors/microsoft-graph/production/sharepoint-write"
+    )
+    assert sharepoint["fields"] == directory["fields"]
+    assert sharepoint["required_fields"] == directory["fields"]
+    assert sharepoint["policy_name"] == "jason-microsoft-graph-sharepoint-write"
+    assert sharepoint["role_name"] == "jason-microsoft-graph-sharepoint-write"
+    assert sharepoint["connector_identity"] == "microsoft-graph-sharepoint-write"
+    assert Path(sharepoint["credential_dir"]) == Path(
+        "/var/lib/jason/runtime-secrets/openbao/microsoft-sharepoint-write-approle"
+    )
+    assert sharepoint["secret_path"] != directory["secret_path"]
+    assert sharepoint["role_name"] != directory["role_name"]
