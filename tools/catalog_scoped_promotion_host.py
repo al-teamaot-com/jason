@@ -298,7 +298,7 @@ class NativeCatalogHost:
         if (source['verified_main_sha']!=offer['protected_main_sha']
                 or live['rollback_sha']!=offer['rollback_sha']):
             fail('FRESH_SOURCE_OR_ROLLBACK_CHANGED')
-        result=verify_native_preflights(manifest)
+        result=verify_native_preflights(manifest,script=NATIVE)
         if result['runtime']['preflight']!='PASS' or result['mcp']['preflight']!='PASS':
             fail('NATIVE_PREFLIGHT_FAILED')
         self.freeze_before=frozen

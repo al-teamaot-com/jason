@@ -41,6 +41,9 @@ jobs:
             tools/tests/test_catalog_scoped_root_worker_request.py \
             tools/tests/test_catalog_scoped_promotion_bundle.py \
             implementation/mcp_service/tests/test_catalog_scoped_promotion_approval.py
+      - name: Catalog scoped native root installation preflight cannot install or elevate
+        run: |
+          python -m pytest -q tools/tests/test_catalog_scoped_root_install_plan.py
       - name: Prompt-injection evidence boundary regressions
         run: |
           python -m pytest -q \

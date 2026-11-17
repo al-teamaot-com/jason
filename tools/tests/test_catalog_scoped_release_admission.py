@@ -392,3 +392,30 @@ def test_future_catalog_manifests_are_configuration_changes_not_new_code(monkeyp
     changed["snapshot_ref"]="refs/heads/sneaky-change"
     with pytest.raises(a.CatalogScopeDenied,match="SNAPSHOT_REF_INVALID"):
         a.load_manifest(Path("/tmp/fixture"),main_sha=MANIFEST["protected_feature_sha"])
+
+
+def test_root_attestation_uses_exact_hash_pinned_helper_instead_of_live_copy(monkeypatch):
+    """A root worker must not execute the mutable current-release helper."""
+    manifest=deepcopy(MANIFEST)
+    main=manifest["protected_feature_sha"]
+    pinned=Path("/usr/local/lib/jason/catalog-scoped-promotion/tools/deploy_live_container.py")
+    fake_state={"path":None}
+    def fake_git(repo,*args):
+        if args==( "ls-remote","origin","refs/heads/main"):
+            return f"{main}\trefs/heads/main\n".encode()
+        if args==( "ls-remote","origin",manifest["snapshot_ref"]):
+            return f"{manifest['snapshot_sha']}\t{manifest['snapshot_ref']}\n".encode()
+        raise AssertionError(args)
+    monkeypatch.setattr(a,"git",fake_git)
+    monkeypatch.setattr(a,"load_manifest",lambda repo,*,main_sha:manifest)
+    monkeypatch.setattr(a,"verified_source_scope",lambda *args,**kwargs:{"verified_main_sha":main})
+    monkeypatch.setattr(a,"host_readback",lambda manifest:observed(manifest))
+    monkeypatch.setattr(a,"verify_live_image_evidence",lambda manifest,readback:{"rollback_sha":manifest["rollback_sha"]})
+    monkeypatch.setattr(a,"source_scope_receipt",lambda manifest,source,live,ci:{"schema_version":"1.0","receipt_sha256":"0"*64})
+    def fake_preflight(manifest, *,script=None):
+        fake_state["path"]=script
+        return {"runtime":{"preflight":"PASS"},"mcp":{"preflight":"PASS"}}
+    monkeypatch.setattr(a,"verify_native_preflights",fake_preflight)
+    r=a.attest_source_scope(Path("/tmp/nonexistent"),native_ci_checks=lambda sha:{"passed":True},preflight_script=pinned)
+    assert fake_state["path"]==pinned
+    assert r["receipt_sha256"]!="0"*64
