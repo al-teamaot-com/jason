@@ -115,6 +115,9 @@ or roll back `jason-runtime`, PMv4 or Teams. Service rollback stops future chang
 already completed SharePoint filing. Any provider reversal must use verified event item IDs/original paths
 and separate governed authorization; no destructive blanket undo or database deletion.
 
-November 17 evidence limitation: the connected SharePoint app requested reauthentication, and the dedicated
-writer host AppRole directory is absent. Provider write authority, dedicated-writer preflight and production
-activation remain unverified. A successful build or fixture tests cannot resolve those prerequisites.
+November 17 evidence limitation: Jason has no registered SharePoint writer tenant boundary and its dedicated
+writer host AppRole directory is absent at both documented locations. Use ONLY Jason-owned application
+credentials and the governed dedicated writer profile; the user's GPT SharePoint connection is not a runtime
+dependency and does not require reconnection for this objective. Existing directory/mail/group identities
+are not a fallback for missing SharePoint authority. Provider write authority, dedicated-writer preflight
+and production activation remain unverified. A successful build or fixture tests cannot resolve those prerequisites.
