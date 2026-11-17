@@ -9,6 +9,10 @@ import pytest
 from tools import pmv4_e_retirement_readiness as stage
 
 
+def test_default_ticket_ledger_uses_canonical_stage_c_location():
+    assert stage.TICKET_LEDGER == Path("/var/lib/jason/ticket-core/autonomy-operational-work.sqlite3")
+
+
 def runner(argv, **kwargs):
     assert kwargs["check"] is False
     assert kwargs["timeout"] == 12

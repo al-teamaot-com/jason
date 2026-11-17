@@ -18,7 +18,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 REPOSITORY_DESIRED = Path(__file__).resolve().parents[1] / "config/production-desired-state.json"
 PRODUCTION_CURRENT = Path("/opt/jason/current")
-TICKET_LEDGER = Path("/var/lib/jason/openclaw/autonomy-operational-work.sqlite3")
+TICKET_LEDGER = Path("/var/lib/jason/ticket-core/autonomy-operational-work.sqlite3")
 USER_LEGACY = (
     "jason-support-repair-worker.timer",
     "jason-release-manager.timer",
