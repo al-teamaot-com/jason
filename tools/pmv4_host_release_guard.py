@@ -136,18 +136,25 @@ class IndependentHostGuard:
         handles: list[int] = []
         try:
             for path in (self.old_lock, self.new_lock):
-                fd = self._open_lock(path)
+                try:
+                    fd = self._open_lock(path)
+                except HostGateDenied:
+                    raise
+                except OSError as exc:
+                    raise HostGateDenied("PMV4_HOST_TRANSACTION_UNAVAILABLE") from exc
                 handles.append(fd)
                 try:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError as exc:
                     raise HostGateDenied("PMV4_HOST_TRANSACTION_BUSY") from exc
+                except OSError as exc:
+                    raise HostGateDenied("PMV4_HOST_TRANSACTION_UNAVAILABLE") from exc
             self._held = True
+            # Critical: never reclassify errors raised INSIDE the protected
+            # release body as host-lock acquisition errors. OSError from
+            # Docker/filesystem/rollback must reach the root rollback handler
+            # with its original type and cause for accurate audited recovery.
             yield
-        except HostGateDenied:
-            raise
-        except OSError as exc:
-            raise HostGateDenied("PMV4_HOST_TRANSACTION_UNAVAILABLE") from exc
         finally:
             self._held = False
             for fd in reversed(handles):

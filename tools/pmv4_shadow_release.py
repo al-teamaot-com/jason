@@ -177,6 +177,39 @@ class VerifiedScope:
     approval_id: str
 
 
+def verify_shadow_compose_pair(
+    legacy: Path, candidate: Path, candidate_sha256: str,
+    legacy_sha256: str | None, *, production: bool = True,
+) -> None:
+    """Verify BOTH immutable sources; candidate for up, legacy for rollback.
+
+    The existing root A0 Compose is intentionally NOT the candidate Compose.
+    Never rewrite it merely to satisfy a new owner-signed manifest hash.
+    """
+    if (not isinstance(candidate_sha256,str)
+        or not HASH.fullmatch(candidate_sha256)
+        or not isinstance(legacy_sha256,str)
+        or not HASH.fullmatch(legacy_sha256)):
+        raise ShadowReleaseDenied("SHADOW_COMPOSE_PAIR_HASH_NOT_PINNED")
+    for path,expected,role in (
+        (legacy,legacy_sha256,"LEGACY"),
+        (candidate,candidate_sha256,"CANDIDATE"),
+    ):
+        if path.is_symlink() or not path.is_file():
+            raise ShadowReleaseDenied("SHADOW_"+role+"_COMPOSE_MISSING_OR_SYMLINK")
+        meta=path.lstat()
+        if (not stat.S_ISREG(meta.st_mode) or meta.st_nlink != 1
+            or meta.st_size <= 0 or meta.st_size > 128000):
+            raise ShadowReleaseDenied("SHADOW_"+role+"_COMPOSE_NOT_REGULAR")
+        if production and (meta.st_uid!=0
+                           or stat.S_IMODE(meta.st_mode)&0o022):
+            raise ShadowReleaseDenied("SHADOW_"+role+"_COMPOSE_UNTRUSTED")
+        if production and role=="CANDIDATE" and stat.S_IMODE(meta.st_mode)!=0o400:
+            raise ShadowReleaseDenied("SHADOW_CANDIDATE_COMPOSE_MODE_NOT_EXACT")
+        if digest_file(path)!=expected:
+            raise ShadowReleaseDenied("SHADOW_"+role+"_COMPOSE_DRIFT")
+
+
 class ShadowController:
     """Trusted host adapter, without any PMV3 release-manager dependency.
 
@@ -192,7 +225,9 @@ class ShadowController:
                  production: bool = True,
                  host_mutation_quiescent: Callable[[], bool] | None = None,
                  preexisting_core_health: Callable[[], bool] | None = None,
-                 host_release_transaction: Callable[[], ContextManager[None]] | None = None):
+                 host_release_transaction: Callable[[], ContextManager[None]] | None = None,
+                 compose_binding: str = "root",
+                 legacy_compose_sha256: str | None = None):
         self.root = safe_root(root, production=production)
         self.public_key_path = Path(public_key_path)
         if production and self.public_key_path != TRUST_PATH:
@@ -215,6 +250,15 @@ class ShadowController:
         if production and not callable(host_release_transaction):
             raise ShadowReleaseDenied("SHADOW_CROSS_RELEASE_LOCK_NOT_PROVISIONED")
         self.host_release_transaction = host_release_transaction or nullcontext
+        if compose_binding not in ("root","candidate"):
+            raise ShadowReleaseDenied("SHADOW_COMPOSE_BINDING_NOT_REVIEWED")
+        if compose_binding == "candidate" and (
+            not isinstance(legacy_compose_sha256,str)
+            or not HASH.fullmatch(legacy_compose_sha256)
+        ):
+            raise ShadowReleaseDenied("SHADOW_LEGACY_COMPOSE_BASELINE_NOT_PINNED")
+        self.compose_binding = compose_binding
+        self.legacy_compose_sha256 = legacy_compose_sha256
 
     def _paths(self) -> tuple[Path, Path, Path, Path]:
         for name in ("releases", "receipts", "control"):
@@ -299,14 +343,23 @@ class ShadowController:
                 if info.st_uid != 0 or stat.S_IMODE(info.st_mode) & 0o022:
                     raise ShadowReleaseDenied("SHADOW_BUNDLE_NOT_ROOT_TRUSTED")
         compose = self.root / "control" / "docker-compose.yml"
-        if not compose.is_file() or compose.is_symlink():
-            raise ShadowReleaseDenied("SHADOW_COMPOSE_NOT_PROVISIONED")
-        if digest_file(compose) != manifest["compose_sha256"]:
-            raise ShadowReleaseDenied("SHADOW_COMPOSE_DRIFT")
-        if self.production:
-            meta = compose.lstat()
-            if meta.st_uid != 0 or stat.S_IMODE(meta.st_mode) & 0o022:
-                raise ShadowReleaseDenied("SHADOW_COMPOSE_UNTRUSTED")
+        if self.compose_binding == "candidate":
+            verify_shadow_compose_pair(
+                compose,
+                bundle / "config" / "pmv4-shadow" / "docker-compose.yml",
+                manifest["compose_sha256"],
+                self.legacy_compose_sha256,
+                production=self.production,
+            )
+        else:
+            if not compose.is_file() or compose.is_symlink():
+                raise ShadowReleaseDenied("SHADOW_COMPOSE_NOT_PROVISIONED")
+            if digest_file(compose) != manifest["compose_sha256"]:
+                raise ShadowReleaseDenied("SHADOW_COMPOSE_DRIFT")
+            if self.production:
+                meta = compose.lstat()
+                if meta.st_uid != 0 or stat.S_IMODE(meta.st_mode) & 0o022:
+                    raise ShadowReleaseDenied("SHADOW_COMPOSE_UNTRUSTED")
         freeze_doc = read_json(freeze)
         if freeze_doc != {"schema_version": "1.0", "status": "active",
                           "service": "jason-pmv4-shadow"}:
