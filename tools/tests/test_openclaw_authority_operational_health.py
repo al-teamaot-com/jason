@@ -15,6 +15,15 @@ def _load_module():
     return module
 
 
+def test_default_orchestration_audit_uses_governed_ticket_shared_not_legacy():
+    module = _load_module()
+    expected = Path('/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3')
+    assert module.DEFAULT_ORCH == expected
+    args = module.parser().parse_args([])
+    assert args.orchestration_audit == expected
+    assert args.orchestration_audit != Path('/var/lib/jason/openclaw/orchestration-events.sqlite3')
+
+
 def test_backup_restore_proof_uses_requested_temp_root_and_cleans_up(tmp_path):
     module = _load_module()
     source = tmp_path / 'authority.sqlite3'

@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+
+def test_fast_health_uses_same_governed_audit_store_as_full_health():
+    from openclaw_authority_operational_health import DEFAULT_ORCH
+    from openclaw_authority_fast_health import DATABASES
+    assert DATABASES['orchestration_audit'] == DEFAULT_ORCH
+    assert 'governed-ticket-shared' in str(DEFAULT_ORCH)
+
+
 from datetime import datetime, timedelta, timezone
 import json
 import os

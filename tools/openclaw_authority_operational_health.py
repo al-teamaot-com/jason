@@ -16,7 +16,9 @@ from time import monotonic
 DEFAULT_AUTHORITY = Path('/var/lib/jason/authority/authority.sqlite3')
 DEFAULT_REPLAY = Path('/var/lib/jason/openclaw/replay.sqlite3')
 DEFAULT_SECURITY = Path('/var/lib/jason/openclaw/security-audit.sqlite3')
-DEFAULT_ORCH = Path('/var/lib/jason/openclaw/orchestration-events.sqlite3')
+# The ticket orchestrator writes to the isolated governed-ticket-shared mount.
+# The older openclaw path is no longer the live audit store; fail closed if absent.
+DEFAULT_ORCH = Path('/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3')
 DEFAULT_REGISTRY = Path('/var/lib/jason/openclaw/trusted-keys/registry.json')
 
 
