@@ -1285,6 +1285,7 @@ def _trusted_catalog_scoped_promotion_module(source_revision: str):
         "tools/catalog_scoped_release_admission.py",
         "tools/catalog_scoped_control_readback.py",
         "tools/release_manager_host_runner.py",
+        "tools/deploy_live_container.py",
         "tools/catalog_scoped_protected_ci.py",
         "tools/catalog_scoped_promotion_recovery.py",
         "implementation/kernel/catalog_scoped_promotion_contract.py",

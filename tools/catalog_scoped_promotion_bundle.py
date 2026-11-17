@@ -26,6 +26,7 @@ FILES = (
     "tools/catalog_scoped_protected_ci.py",
     "tools/release_manager_host_runner.py",
     "tools/release_host_reconcile_worker.py",
+    "tools/deploy_live_container.py",
     "implementation/kernel/catalog_scoped_promotion_contract.py",
     "implementation/kernel/signed_owner_release.py",
     "docs/engineering/evidence/catalog-scope-admission-20261117.json",

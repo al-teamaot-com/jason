@@ -30,6 +30,21 @@ The source verifier now requires **six** byte-matched catalog-only functions wit
 - Source-only tests PASS: 438 native, scoped admission, transaction, Owner signer, rollback/recovery, root routing and bundle regressions plus 5 subtests. MCP Owner signer no-network tests PASS 12/12
 - Original receipt is rejected as a **fresh** v2 receipt; only used as pinned predecessor. Source-only test fixture `tools/tests/catalog_scoped_v2_fixture.py` makes synthetic new evidence for offline adversarial tests only. It is never a real admission, Owner proof, release or provider record.
 
+## Hardening found during source review
+
+Follow-on source review discovered three trust-boundary issues and resolved them
+before source release: (1) exact live protected security CI is rechecked inside
+the root promotion transaction, not merely when an offer is staged; (2) the
+native deploy helper is supplied from an exact-source, root-owned immutable
+bundle rather than attempting to execute the group-writable live release copy;
+(3) the root-only watchdog handles an interruption before the freeze backup
+exists by verifying the original baseline without changing Docker, and opens
+the breaker if that proof fails. The root breaker file remains root-owned mode
+0600 inside the existing operator-owned 0700 Release Manager state directory;
+a specialized, exact-path, root-only atomic writer honors that native layout.
+The same protected root state and original freeze remain authoritative; this
+does not create a new Owner or root-control authority.
+
 ## Completion gates
 
 The v2 manifest update must become protected source with complete required CI before `catalog-scope-admit` can produce a **new real** read-only receipt. A source commit or a synthetic test fixture does not create a production-eligible release. Independently authorizing and installing root-owned Promotion Manager/worker/rollback components remains a **separate** governed production mutation and is explicitly **not authorized** in this source-only task. A new authenticated Owner exact-source/image/rollback release signature and separately approved Autotask test write/readback are also required. No independent human security-reviewer role is part of the project.

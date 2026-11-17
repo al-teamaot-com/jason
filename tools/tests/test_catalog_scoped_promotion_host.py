@@ -172,3 +172,77 @@ def test_root_watcher_refuses_uninstalled_source(monkeypatch):
     from tools import catalog_scoped_promotion_recovery as recovery
     with pytest.raises(p.ScopedPromotionDenied,match='RECOVERY_ROOT_INSTALLED_EXECUTION_REQUIRED'):
         recovery.run_once()
+
+
+def test_root_recovery_handles_crash_before_first_freeze_backup(monkeypatch, tmp_path):
+    """A journal alone never implies the native helper touched production."""
+    from contextlib import nullcontext
+    o=offer()
+    native=h.NativeCatalogHost(root=tmp_path)
+    protected={name:{'id':'original','started_at':'earlier','image':'pinned'}
+               for name in p.PROTECTED_CONTAINERS}
+    events=[]
+    journal={'release_id':o['release_id'],'candidate_sha':o['candidate_sha'],
+             'rollback_sha':o['rollback_sha'],'scope_sha256':o['scope_sha256'],
+             'manifest_sha256':o['manifest_sha256'],
+             'status':'owner_approval_consumed_no_mutation',
+             'protected_services_before':protected}
+    monkeypatch.setattr(native,'enforce_installed_production_trust',lambda:None)
+    monkeypatch.setattr(native,'transaction_lock',lambda offer:nullcontext())
+    monkeypatch.setattr(native,'_journal',lambda offer:dict(journal))
+    monkeypatch.setattr(native,'open_circuit_breaker',lambda code:events.append('breaker'))
+    monkeypatch.setattr(native,'_frozen',lambda offer:events.append('freeze_verified'))
+    monkeypatch.setattr(native,'verify_rollback_and_host',lambda offer:events.append('original_images_verified'))
+    monkeypatch.setattr(native,'verify_unchanged_protected_containers',lambda original:events.append('protected_services_verified'))
+    monkeypatch.setattr(native,'clear_scoped_control_readback',lambda offer:events.append('overlay_absent'))
+    monkeypatch.setattr(native,'_journal_status',lambda offer,status,**kw:events.append(status))
+    monkeypatch.setattr(native,'rollback_both',lambda offer:pytest.fail('unexpected Docker write before backup'))
+    reply=native.recover_interrupted(o)
+    assert reply['status']=='interrupted_before_unfreeze_verified'
+    assert reply['circuit_breaker_remains_open'] is True
+    assert events.count('freeze_verified')==2
+    assert 'original_images_verified' in events
+    assert 'protected_services_verified' in events
+    assert events[-1]=='interrupted_before_unfreeze_verified'
+
+
+def test_missing_freeze_backup_after_mutation_fails_closed(monkeypatch,tmp_path):
+    from contextlib import nullcontext
+    o=offer();native=h.NativeCatalogHost(root=tmp_path)
+    protected={name:{} for name in p.PROTECTED_CONTAINERS}
+    journal={'release_id':o['release_id'],'candidate_sha':o['candidate_sha'],
+        'rollback_sha':o['rollback_sha'],'scope_sha256':o['scope_sha256'],
+        'manifest_sha256':o['manifest_sha256'],'status':'mutating_jason_runtime',
+        'protected_services_before':protected}
+    evidence=[]
+    monkeypatch.setattr(native,'enforce_installed_production_trust',lambda:None)
+    monkeypatch.setattr(native,'transaction_lock',lambda offer:nullcontext())
+    monkeypatch.setattr(native,'_journal',lambda offer:dict(journal))
+    monkeypatch.setattr(native,'open_circuit_breaker',lambda reason:evidence.append('breaker_open'))
+    monkeypatch.setattr(native,'rollback_both',lambda offer:pytest.fail('cannot infer rollback backup'))
+    with pytest.raises(p.ScopedPromotionDenied,match='RECOVERY_FREEZE_BACKUP_MISSING_AFTER_MUTATION'):
+        native.recover_interrupted(o)
+    assert evidence==['breaker_open']
+
+
+def test_root_rechecks_protected_ci_at_promotion_not_only_staging(monkeypatch,tmp_path):
+    o=offer()
+    native=h.NativeCatalogHost(repo=tmp_path)
+    native.policy={'native_root_control_supported':True}
+    monkeypatch.setattr(h,'load_manifest',lambda repo,**kw:MANIFEST)
+    monkeypatch.setattr(h,'verified_source_scope',lambda repo,manifest,**kw:
+        {'verified_main_sha':o['protected_main_sha']})
+    from tools import catalog_scoped_protected_ci
+    monkeypatch.setattr(catalog_scoped_protected_ci,'check_catalog_protected_ci',
+        lambda sha,**kw:{'passed':False,'failures':['governed-security-regressions:failure']})
+    monkeypatch.setattr(native,'_frozen',lambda offer:pytest.fail('freeze readback after failed CI'))
+    monkeypatch.setattr(h,'verify_native_preflights',lambda offer:pytest.fail('Docker preflight after failed CI'))
+    with pytest.raises(p.ScopedPromotionDenied,match='LIVE_PROTECTED_SECURITY_CI_NOT_GREEN'):
+        native.fresh_source_and_live_admission(o)
+    assert native.freeze_before is None
+
+
+def test_protected_root_breaker_control_cannot_be_written_as_operator():
+    if os.geteuid()!=0:
+        with pytest.raises(p.ScopedPromotionDenied,match='ROOT_CONTROL_WRITER_REQUIRES_ROOT'):
+            h.atomic_root_protected_control({'schema_version':'1.0'})
