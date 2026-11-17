@@ -72,3 +72,10 @@ Do not promote if the source has not passed required CI, the candidate changes, 
 Unit/failure tests cover manifest and scope drift, wrong tenant/site, Compose escalation, signature expiry/replay/tamper, freeze drift, host-lock contention, one-service command construction, failed deployment rollback, protected runtime drift, interrupted rollback recovery, and inability to invoke the production controller from a source worktree.
 
 **Not a production acceptance claim:** CI and preproduction tests establish source correctness. The trusted root installer, protected CI attestor, Owner-signed component release offer, and first actual 05:00 operational run are *separate* installation and operational boundaries. They have not been executed in this engineering-only scope.
+
+## Active integration coordination (2026-11-17)
+
+- PR #2522 adds an opt-in, catalog-only exact-grant administration helper and modifies the existing `list_exact_authority_grants` / `grant_exact_authority` portions of `implementation/mcp_service/src/jason_mcp/server.py` around lines 4367–4672. The independent-component change adds a separate `approve_independent_component_release` tool near the existing release-approval tool around line 5330, and retains the existing `_release_approval_owner` verification. There is no overlapping function; when #2522 merges, preserve its catalog-only restrictions and this release-only Owner authorization without extending either.
+- PR #2456 extends `_project_endpoint_read` for exact Datto device identifiers around line 841. This is a different function and provider-read projection; the component-release source does not modify endpoint reads. Preserve both independently when integrating.
+- **Integration coordination: #2522 #2456** is acknowledged only after reviewing those exact patches. This is not approval to merge either change or enable any catalog/Datto capability. Re-run the required integration/security checks if either merges before this PR.
+
