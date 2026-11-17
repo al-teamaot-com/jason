@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 
-def test_fast_health_uses_same_governed_audit_store_as_full_health():
+def test_fast_health_targets_governed_store_without_modifying_pinned_full_checker():
+    from pathlib import Path
     from openclaw_authority_operational_health import DEFAULT_ORCH
     from openclaw_authority_fast_health import DATABASES
-    assert DATABASES['orchestration_audit'] == DEFAULT_ORCH
-    assert 'governed-ticket-shared' in str(DEFAULT_ORCH)
+    assert DATABASES['orchestration_audit'] == Path('/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3')
+    assert DATABASES['orchestration_audit'] != DEFAULT_ORCH
 
 
 from datetime import datetime, timedelta, timezone

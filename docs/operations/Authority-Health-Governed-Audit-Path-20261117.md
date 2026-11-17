@@ -1,17 +1,21 @@
-# Authority-health audit-store path correction (source only, November 17, 2026)
+# Source-only authority-health audit path correction — November 17, 2026
 
-**State:** source-only correction. NOT DEPLOYED. Do not clear a release breaker or replace a live health snapshot from this document.
+**Status:** NOT deployed, no protected breaker recovery, no new production proof.
 
-## Verified diagnosis
+## Verified live issue
 
-At November 17, 2026, 12:29 PM EST, the existing `jason-openclaw-authority-health.service` failed with exit code 2. The protected production drift watchdog opened the circuit breaker with problem kind `failed_system_unit`. The service override still executes `/usr/local/lib/jason/owner_emergency_fast_health.py`, whose local emergency degraded-health permission expired on November 12, 2026. It reports an actual failure, not a harmless warning.
+At 12:29 PM Eastern, the installed `jason-openclaw-authority-health.service` was failing, and the protected drift watchdog opened the release circuit breaker. Its read-only probe expects a now-missing legacy location: `/var/lib/jason/openclaw/orchestration-events.sqlite3`. The live 0600 `al:al` orchestration journal exists instead at `/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3`, with a successful read-only SQLite schema probe. The temporary emergency-health drop-in expired on November 12. Do **not** extend it, clear the breaker, create a symlink, rewrite immutable root recovery manifests, or restart services on this evidence alone.
 
-The check expects `/var/lib/jason/openclaw/orchestration-events.sqlite3`, which does not exist. The real, regular 0600 `al:al` orchestration audit database is `/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3` on the live runtime's separate `governed-ticket-shared` bind mount. A read-only SQL schema lookup succeeded there without provider credentials, restart, mount change, or file creation. The existing full-proof snapshot refers to the legacy location; it must be regenerated under a separately authorized and properly bounded full integrity check after this path fix is installed.
+## Exact source-only correction
 
-## Exact source change
+Only `tools/openclaw_authority_fast_health.py` changes its *frequent read-only* `DATABASES["orchestration_audit"]` to the verified live journal. The root-recovery-pinned `tools/openclaw_authority_operational_health.py` remains **byte-for-byte unchanged**, preserving the installed immutable full-integrity recovery source hash and all existing approvals. The unmodified full checker already has an explicit `--orchestration-audit` CLI parameter; a future separately governed full proof must supply that exact live path, validate all actual databases and backup/restore parity, and write newly verified evidence. The old full-proof snapshot is not accepted as new proof after the fast path is fixed.
 
-The one `DEFAULT_ORCH` declaration in `tools/openclaw_authority_operational_health.py` now points to the verified live governed-ticket-shared database. Both frequent-health and full-health modules import this single constant, preventing silent path disagreement. Two regression tests pin the same path for both modules. Their fail-closed checks are unchanged: missing/unreadable DB, unsafe file mode, bad/stale full proof or registry remain failures. No fallback to a legacy path or symlink was added.
+Regression tests verify both the fast path and the existing full-checker CLI override; the previous hash-pinned root policy remains untouched. This change is not authority to stage a new systemd override, alter the current root recovery policy, remediate a 41 GB SQLite database, revalidate the production breaker, activate PMv4, or deploy the independent financial service.
 
-**Production constraints:** Existing emergency override is expired and must NOT be renewed merely to make CI green. Installing these source bytes or updating the systemd override, rerunning a full integrity proof on the large audit database, clearing the protected breaker and deploying the independent-component release-control mechanism are **separate governed actions**, not authorized by this source-only change. The watchdog can only be reconciled through verified existing release controls. Preserve the Owner production freeze and protected runtime/MCP/PMv4.
+## Required downstream controls
 
-Tests: `test_openclaw_authority_operational_health.py`, `test_openclaw_authority_fast_health.py`, and `test_release_authority_fast_health_handoff.py` — 67 passed locally.
+1. Separately authorize and install the exact fast-health path correction through the governed release process.
+2. Independently authorize a bounded full integrity proof that passes `--orchestration-audit /var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3` to the existing pinned checker; audit actual integrity/backup/restore results, not a synthetic PASS.
+3. Only after true health PASS, use the existing protected drift-watchdog and circuit-breaker revalidation, preserving the owner freeze. Then separately install the approved independent-component release controls through a trusted signed root installer (currently absent).
+
+This PR cannot resolve the live failed unit by itself; the old emergency drop-in must be retired only under its own exact-scope protected production authorization.

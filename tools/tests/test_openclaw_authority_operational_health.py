@@ -15,13 +15,12 @@ def _load_module():
     return module
 
 
-def test_default_orchestration_audit_uses_governed_ticket_shared_not_legacy():
+def test_full_proof_supports_explicit_live_audit_path_without_changing_pinned_checker():
     module = _load_module()
-    expected = Path('/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3')
-    assert module.DEFAULT_ORCH == expected
-    args = module.parser().parse_args([])
-    assert args.orchestration_audit == expected
-    assert args.orchestration_audit != Path('/var/lib/jason/openclaw/orchestration-events.sqlite3')
+    live = Path('/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3')
+    assert module.DEFAULT_ORCH == Path('/var/lib/jason/openclaw/orchestration-events.sqlite3')
+    args = module.parser().parse_args(['--orchestration-audit', str(live)])
+    assert args.orchestration_audit == live
 
 
 def test_backup_restore_proof_uses_requested_temp_root_and_cleans_up(tmp_path):
