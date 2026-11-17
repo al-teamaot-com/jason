@@ -514,28 +514,128 @@ def _prepare_dir(path:Path)->None:
     need(info.st_uid==1000 and stat.S_IMODE(info.st_mode)==0o700,
          "C_TARGET_DIRECTORY_NOT_EXACT")
 
-def _repair_modes(plan:Mapping[str,Any])->dict[str,int]:
-    changed={}
-    for raw,expected in plan["db_identities"].items():
-        path=Path(raw)
-        original=expected["mode"]
-        if original==0o600:
-            continue
-        need(raw in (
-            "/var/lib/jason/openclaw/governed-execution.sqlite3",
-            "/var/lib/jason/openclaw/resolution-memory.sqlite3",
-        ) and original==0o644,"C_MODE_REPAIR_NOT_ALLOWLISTED")
-        os.chmod(path,0o600);changed[raw]=original
-        need(stat.S_IMODE(path.lstat().st_mode)==0o600,
-             "C_MODE_REPAIR_FAILED")
-    return changed
+# These exact legacy database families were independently observed at 0644
+# before the cutover. No other 0644 file is authorized. Canonical state must
+# be mode 0600 before any filesystem relocation or external worker admission.
+LEGACY_DB_MODE_REPAIR = frozenset((
+    "governed-execution.sqlite3",
+    "resolution-memory.sqlite3",
+))
+LEGACY_SIDECAR_MODE_REPAIR = frozenset((
+    "autonomy-targeted-wakes.sqlite3-wal",
+    "autonomy-targeted-wakes.sqlite3-shm",
+    "resolution-memory.sqlite3-wal",
+    "resolution-memory.sqlite3-shm",
+))
 
-def _restore_modes(changed:Mapping[str,int], *, target:bool)->None:
-    for raw,mode in changed.items():
+
+def _legacy_mode_changes(plan:Mapping[str,Any], *, uid:int=1000,
+                         gid:int|None=None,baseline:bool=True)->dict[str,int]:
+    """Review exact mode repairs, read-only, BEFORE authenticated Owner login.
+
+    All normal SQLite files are required to be 0600. Only the six reviewed
+    legacy paths may be 0644, and none may be writable by group or world.
+    Optional WAL/SHM sidecars can disappear after all producers quiesce.
+    """
+    approved=LEGACY_DB_MODE_REPAIR|LEGACY_SIDECAR_MODE_REPAIR
+    trusted_gid=uid if gid is None else gid
+    changes={}
+    source_info=TICKET_SOURCE.lstat()
+    need(not TICKET_SOURCE.is_symlink()
+         and stat.S_ISDIR(source_info.st_mode)
+         and source_info.st_uid==uid
+         and stat.S_IMODE(source_info.st_mode)==0o700,
+         "C_LEGACY_MODE_SOURCE_UNTRUSTED")
+    for raw,expected in plan["db_identities"].items():
+        p=Path(raw)
+        need(p.parent==TICKET_SOURCE,
+             "C_LEGACY_MODE_FOREIGN_DB")
+        actual=p.lstat()
+        need(not p.is_symlink() and stat.S_ISREG(actual.st_mode)
+             and actual.st_uid==uid and actual.st_gid==trusted_gid
+             and actual.st_nlink==1
+             and actual.st_dev==source_info.st_dev,
+             "C_LEGACY_MODE_MAIN_IDENTITY_CHANGED:"+p.name)
+        mode=stat.S_IMODE(actual.st_mode)
+        need(mode==expected["mode"] if baseline
+             else (mode==0o600 and
+                   (expected["mode"]==0o600 or
+                    (p.name in LEGACY_DB_MODE_REPAIR and
+                     expected["mode"]==0o644))),
+             "C_LEGACY_MODE_MAIN_BASELINE_CHANGED:"+p.name)
+        need(mode==0o600 or (p.name in approved and mode==0o644),
+             "C_LEGACY_MODE_UNREVIEWED:"+p.name)
+        if mode==0o644:changes[raw]=mode
+    names=sqlite_handoff.ALLOWED_TICKET+sqlite_handoff.ALLOWED_SHARED
+    for basename in names:
+        for suffix in ("-wal","-shm",".owner.lock"):
+            p=TICKET_SOURCE/(basename+suffix)
+            try: actual=p.lstat()
+            except FileNotFoundError: continue
+            mode=stat.S_IMODE(actual.st_mode)
+            need(not p.is_symlink() and stat.S_ISREG(actual.st_mode)
+                 and actual.st_uid==uid and actual.st_gid==trusted_gid
+                 and actual.st_nlink==1
+                 and actual.st_dev==source_info.st_dev,
+                 "C_LEGACY_MODE_SIDECAR_UNTRUSTED:"+p.name)
+            need(mode==0o600 or
+                 (p.name in LEGACY_SIDECAR_MODE_REPAIR and mode==0o644),
+                 "C_LEGACY_MODE_SIDECAR_UNREVIEWED:"+p.name)
+            if mode==0o644:changes[str(p)]=mode
+    need(set(Path(p).name for p in changes)<=approved,
+         "C_LEGACY_MODE_CHANGE_SCOPE_WIDENED")
+    return changes
+
+
+def _exact_mode_change(path:Path, *, before:int, after:int, uid:int,
+                       gid:int|None=None)->None:
+    """fchmod pinned inode without following a path swap or symlink."""
+    trusted_gid=uid if gid is None else gid
+    flags=os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW
+    fd=os.open(path,flags)
+    try:
+        info=os.fstat(fd)
+        need(stat.S_ISREG(info.st_mode) and info.st_uid==uid
+             and info.st_gid==trusted_gid and info.st_nlink==1
+             and stat.S_IMODE(info.st_mode) in (before,after),
+             "C_LEGACY_MODE_FD_CHANGED:"+path.name)
+        original=(info.st_dev,info.st_ino)
+        if stat.S_IMODE(info.st_mode)!=after:
+            os.fchmod(fd,after)
+        verified=os.fstat(fd)
+        current=path.lstat()
+        need((verified.st_dev,verified.st_ino)==original
+             and stat.S_IMODE(verified.st_mode)==after
+             and not path.is_symlink()
+             and (current.st_dev,current.st_ino)==original
+             and stat.S_IMODE(current.st_mode)==after,
+             "C_LEGACY_MODE_ATOMIC_READBACK_FAILED:"+path.name)
+    finally:
+        os.close(fd)
+
+
+def _repair_modes(plan:Mapping[str,Any], changed:dict[str,int], *,
+                  uid:int=1000,gid:int|None=None)->None:
+    """Record each proposed repair BEFORE mutation for exception rollback."""
+    proposed=_legacy_mode_changes(plan,uid=uid,gid=gid)
+    need(not changed,"C_LEGACY_MODE_JOURNAL_NOT_EMPTY")
+    for raw,mode in sorted(proposed.items()):
+        changed[raw]=mode
+        _exact_mode_change(Path(raw),before=mode,after=0o600,uid=uid,gid=gid)
+    need(_legacy_mode_changes(plan,uid=uid,gid=gid,baseline=False)=={},
+         "C_LEGACY_MODE_REPAIR_POSTCHECK_FAILED")
+
+
+def _restore_modes(changed:Mapping[str,int], *, target:bool,
+                   uid:int=1000,gid:int|None=None)->None:
+    for raw,original in sorted(changed.items(),reverse=True):
         src=Path(raw)
-        path=(SHARED_TARGET/src.name) if target else src
+        path=(SHARED_TARGET/src.name if src.name in
+              sqlite_handoff.ALLOWED_SHARED or
+              src.name.startswith("resolution-memory.sqlite3")
+              else TICKET_TARGET/src.name) if target else src
         if path.exists():
-            os.chmod(path,mode)
+            _exact_mode_change(path,before=0o600,after=original,uid=uid,gid=gid)
 
 def _clone_command(plan:Mapping[str,Any], source_name:str,
                    target_name:str, kind:str,
@@ -678,6 +778,9 @@ def preflight(plan_path:Path):
     host=_control_continuity(plan)
     _container_baseline(plan)
     _data_baseline(plan)
+    modes=_legacy_mode_changes(plan)
+    print("PMV4_C_EXACT_LEGACY_SQLITE_MODE_PREFLIGHT=PASS")
+    print("REVIEWED_MODE_0600_REPAIRS="+str(len(modes)))
     audit=_audit_path(plan)
     need(not audit.exists() and not audit.is_symlink(),
          "C_RELEASE_ALREADY_ATTEMPTED")
@@ -695,6 +798,7 @@ def execute(plan_path:Path)->None:
     host=_control_continuity(plan)
     _container_baseline(plan)
     _data_baseline(plan)
+    _legacy_mode_changes(plan)
     owner=_verify_owner(plan_path,plan)
     approval=owner["approval_id"]
     runtime_rb="jason-runtime-rollback-pmv4c-"+plan["candidate_sha"][:12]
@@ -734,7 +838,10 @@ def execute(plan_path:Path)->None:
             old_containers_renamed=True
             _verify_stopped(runtime_rb,mcp_rb)
             _prepare_dir(TICKET_TARGET);_prepare_dir(SHARED_TARGET)
-            changed_modes=_repair_modes(plan)
+            _repair_modes(plan,changed_modes)
+            _append(plan,approval,"legacy_mode_normalized",{
+                "paths":[Path(x).name for x in sorted(changed_modes)],
+                "count":len(changed_modes),"new_mode":"0600"})
             fence=lambda: need(host._held is True,
                                "C_NATIVE_HOST_RELEASE_LOCK_LOST")
             stopped=lambda: _verify_stopped(runtime_rb,mcp_rb)
