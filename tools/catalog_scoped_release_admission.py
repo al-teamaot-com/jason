@@ -70,7 +70,8 @@ def fail(reason: str) -> None:
 
 def git(repo: Path, *args: str) -> bytes:
     result = subprocess.run(
-        ["git", "-C", str(repo), *args], check=False, stdout=subprocess.PIPE,
+        ["git", "-c", f"safe.directory={repo}", "-C", str(repo), *args],
+        check=False, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
     if result.returncode:
@@ -174,10 +175,12 @@ def verified_source_scope(
     feature = exact_revision(manifest["protected_feature_sha"])
     snapshot = exact_revision(manifest["snapshot_sha"])
     rollback = exact_revision(manifest["rollback_sha"])
-    if subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", feature, main_sha],
+    if subprocess.run(["git", "-c", f"safe.directory={repo}", "-C", str(repo),
+                       "merge-base", "--is-ancestor", feature, main_sha],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
         fail("FEATURE_NOT_PROTECTED")
-    if subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", rollback, snapshot],
+    if subprocess.run(["git", "-c", f"safe.directory={repo}", "-C", str(repo),
+                       "merge-base", "--is-ancestor", rollback, snapshot],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
         fail("SNAPSHOT_BASELINE_MISMATCH")
     selected = git(repo, "diff", "--no-renames", "--name-only", rollback, snapshot).decode().splitlines()
