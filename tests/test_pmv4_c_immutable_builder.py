@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -17,16 +18,68 @@ def test_candidate_policy_adds_only_ticket_core(tmp_path):
             "jason-runtime","jason-mcp-pilot","jason-pmv4-shadow-gateway"
         ],
         "allowed_system_units":["a"],
+        "required_system_units":["c","b"],
+        "required_user_units":["z","a"],
     }
     raw=(json.dumps(base,indent=2)+"\n").encode()
     (config/"production-desired-state.json").write_bytes(raw)
     before,candidate_raw=builder._candidate_policy(tmp_path)
-    assert before==raw
+    normalized=json.loads(json.dumps(base))
+    for name in ("required_system_units","required_user_units"):
+        normalized[name].sort()
+    assert before==(json.dumps(normalized,indent=2,sort_keys=True)+"\n").encode()
+    assert json.loads(before)==normalized
     candidate=json.loads(candidate_raw)
     assert candidate["required_containers"]==base["required_containers"]
     assert candidate["allowed_system_units"]==base["allowed_system_units"]
     assert candidate["allowed_running_containers"]==(
         base["allowed_running_containers"]+[root.WORKER])
+
+def test_installed_watchdog_byte_shape_matches_root_observed_diff():
+    # A read-only privileged diff from 2026-11-17 proved that the active root
+    # policy has sorted object keys and alphabetically sorted required unit
+    # arrays, with NO addition/deletion of required/allowed entries.
+    source_root=Path(builder.__file__).resolve().parents[1]
+    raw=(source_root/"config/production-desired-state.json").read_bytes()
+    canonical,candidate=builder._candidate_policy(source_root)
+    assert hashlib.sha256(raw).hexdigest()==(
+        "db3eaf92b16ccfb3d0bad6bd351ab99bffb84bd9a338bb8321ac7c0691562b50")
+    assert hashlib.sha256(canonical).hexdigest()==(
+        "9d3d4a634f2b347b760da80e0dc2bb057d3b35ddcbaf88293bffd47971d0c804")
+    original=json.loads(raw)
+    root_format=json.loads(canonical)
+    assert set(original)==set(root_format)
+    assert all(
+        original[key]==root_format[key]
+        for key in original
+        if key not in ("required_system_units","required_user_units")
+    )
+    assert all(sorted(original[key])==root_format[key]
+               for key in ("required_system_units","required_user_units"))
+    next_policy=json.loads(candidate)
+    assert next_policy["allowed_running_containers"]==(
+        root_format["allowed_running_containers"]+[root.WORKER])
+    assert all(next_policy[key]==root_format[key]
+               for key in root_format if key!="allowed_running_containers")
+    # A deliberately different serialized source ordering cannot silently
+    # change any root guard: its exact byte checksum still binds the packet.
+    assert canonical!=raw
+
+
+def test_required_unit_sets_must_be_unique_and_string_only(tmp_path):
+    config=tmp_path/"config";config.mkdir()
+    template={"schema_version":"1.0","allowed_running_containers":[
+        "jason-runtime","jason-pmv4-shadow-gateway"],
+        "required_system_units":["a"],"required_user_units":["b"]}
+    for key,value in (("required_system_units",["a","a"]),
+                      ("required_user_units",["b",3])):
+        candidate=json.loads(json.dumps(template));candidate[key]=value
+        (config/"production-desired-state.json").write_text(json.dumps(candidate))
+        try:builder._candidate_policy(tmp_path)
+        except builder.BuilderDenied as exc:
+            assert "C_BUILD_WATCHDOG_REQUIRED_UNIT_SET_INVALID" in str(exc)
+        else:raise AssertionError("builder accepted untrusted required list")
+
 
 def test_generated_launcher_orders_root_preflight_before_owner_and_execute(tmp_path):
     plan={
