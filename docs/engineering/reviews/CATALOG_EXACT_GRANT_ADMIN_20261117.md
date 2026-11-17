@@ -92,6 +92,21 @@ They are **not** claimed as passing or as caused by this change. The two
 remaining Datto tests passed on both sources. Full provider-backed acceptance
 has not occurred.
 
+## Active source overlap with PR #2456 (reviewed)
+
+Integration coordination: #2456
+
+Draft #2456 implements a read-only Datto numeric device ID/UUID projection.
+Its `implementation/mcp_service/src/jason_mcp/server.py` patch is limited
+to `_project_endpoint_read` around lines 841-850. This candidate modifies
+`_authority_admin_or_catalog_self` around lines 4360, `_authority_grant_audit`
+and existing `list_exact_authority_grants`, `grant_exact_authority`, and
+`revoke_exact_authority_grant` near lines 4600+. The examined source hunks
+and behavior do not overlap; preserve both independently reviewed changes if
+either is later integrated. No Datto code or numeric-ID authorization was
+merged into this candidate. The overlap acknowledgment is **not** permission
+to merge #2456 or to deploy either PR.
+
 ## Remaining independent gates
 
 1. Independent security review of the exact fixed tenant/object, existing
