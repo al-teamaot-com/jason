@@ -7,8 +7,8 @@
 - Baseline registry: `implementation/kernel/system_registry/production-registry.json`
 - Lifecycle history: `implementation/kernel/system_registry/production-lifecycle-events.json`
 - Environment(s): `preproduction, production-pilot`
-- Registered entities: `237`
-- Effective lifecycle counts: `configured=9, proposed=2, registered=210, verified=16`
+- Registered entities: `241`
+- Effective lifecycle counts: `configured=9, proposed=2, registered=214, verified=16`
 
 ## Verified current operational entities
 
@@ -199,6 +199,7 @@
 | `component.central-orchestrator` | `component` | `registered` | `runtime-composition-source-and-health` |
 | `component.governed-execution-ledger` | `component` | `registered` | `source-and-regression-proof-v1` |
 | `component.jason-autonomy-flight-recorder` | `component` | `configured` | `docker-container-inspect-v1` |
+| `component.jason-financial-statements` | `component` | `registered` | `immutable-image-and-isolated-compose-preflight` |
 | `component.jason-kfs-postgres` | `component` | `configured` | `docker-container-inspect-v1` |
 | `component.jason-node-exporter` | `component` | `configured` | `docker-container-inspect-v1` |
 | `component.jason-ollama` | `component` | `configured` | `docker-container-inspect-v1` |
@@ -218,7 +219,9 @@
 | `credential.openbao.it-glue` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
 | `credential.openbao.kyocera-kfs` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
 | `credential.openbao.microsoft-graph-directory-read` | `credential_reference` | `registered` | `provider-credential-status` |
+| `credential.openbao.microsoft-graph-sharepoint-write` | `credential_reference` | `registered` | `isolated-approle-secret-readback` |
 | `credential.openbao.openai` | `credential_reference` | `registered` | `live-openbao-approle-mount-proof-v1` |
+| `deployment.jason-financial-statements` | `deployment` | `registered` | `governed-release-and-scheduled-readback` |
 | `governance.client-boundary` | `governance_gate` | `registered` | `source-and-regression-proof-v1` |
 | `governance.execution-plan-binding` | `governance_gate` | `registered` | `source-and-regression-proof-v1` |
 | `governance.information-release` | `governance_gate` | `registered` | `source-and-regression-proof-v1` |
@@ -253,6 +256,7 @@
 | `provider.it-glue` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
 | `provider.kyocera-kfs` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
 | `provider.microsoft-graph` | `provider` | `registered` | `microsoft-exact-user-read` |
+| `provider.microsoft-sharepoint-accounting` | `provider` | `registered` | `app-only-site-readback-and-selected-grant` |
 | `provider.microsoft-teams-gateway` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
 | `provider.resolution-memory` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
 | `provider.system-registry` | `provider` | `configured` | `governed-system-registry-read` |
