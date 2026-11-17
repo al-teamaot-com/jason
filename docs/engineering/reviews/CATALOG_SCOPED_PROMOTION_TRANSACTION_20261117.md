@@ -39,6 +39,35 @@ The original snapshot `d73f680864bd75cd714a89f36ae8a3190dc60e66` is based on liv
 
 The first verified receipt covers the old 9-file candidate. **It cannot by itself authorize a new MCP image containing the Owner approval tool.** A follow-on exact source/image admission receipt is mandatory before any executable release offer; the old receipt remains immutable predecessor evidence, not standing permission.
 
+## Nonproduction v2 image candidate (verified, not yet admitted)
+
+The precise missing-Owner-tool gap was resolved at the **isolated build** level
+without changing production: source snapshot
+`755fa5fe3f75958fee2427a0af0777dd242d8f00` is a descendant of the
+original isolated snapshot. Its diff against the running production baseline
+has **11** source paths and binary SHA256
+`d91998d980fc9b19105270e95067ded1a2068aaecf9ba59d5de642163dbc5ec9`.
+Only the new MCP Owner issuer, pure kernel offer contract and its one source
+tool registration were added relative to the previous catalog snapshot.
+The new runtime and MCP image identifiers are respectively
+`sha256:dbd4d017dcc2deaf83109f5a0c6e68b3473c6de13881a56aa17238b647bbce66`
+and `sha256:da57dd05bfde19321ddb4eca2b1910aff41aee7027905365fdb76a12aa1989f2`.
+Both images were built with exact 40-character source labels, and both passed
+the **existing** native deployment-script `--preflight` using one new scoped
+environment setting and no new read-only binds. The MCP image independently
+passed an unprivileged, no-network import of the signed Owner tool.
+
+**These are not yet production-eligible images.** A current protected-source
+scope admission must bind the v2 source and images and explicitly consume the
+original verified read-only receipt. Neither the original admission nor the
+source code merge is an exact-action production release approval.
+
+Integration coordination: #2456, #2525, #2527. #2456 edits the unrelated
+read-only Datto numeric identifier projection in the shared MCP server near
+the beginning of that module. This change adds an Owner-signed catalog release
+tool near the release approval functions. The reviewed functions do not
+intersect and no #2456 code is pulled into the frozen catalog snapshot.
+
 ## Verification
 
 All tested actions use a source worktree, fake root adapters, disposable temporary directories, no-network/non-root Docker test harness for MCP and no provider secret. Tests include forged Owner tenant/object, wrong/expired/used signature, scope or image drift, extra service or environment field, modified freeze, missing root installer, outsider untrusted request, partial Docker rename/crash, both-image rollback, unchanged protected service IDs, and failure to restore freeze. Tested integration is source-only. A local test pass does not claim a live root installation, native promotion, or provider write.
