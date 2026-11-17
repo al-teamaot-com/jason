@@ -106,6 +106,11 @@ def _worktree_source(candidate:str)->Path:
     return here
 
 def _candidate_policy(source:Path)->tuple[bytes,bytes]:
+    # The root-installed watchdog policy was serialized with sorted object
+    # keys and sorted required-unit lists. The tracked source uses editorial
+    # field order and preserves the original A1 source-level list ordering.
+    # Stage C must pin the exact installed bytes, NOT weaken its privileged
+    # byte-for-byte watchdog baseline check or rewrite production policy.
     raw=(source/"config/production-desired-state.json").read_bytes()
     base=json.loads(raw)
     need(isinstance(base,dict) and base.get("schema_version")=="1.0",
@@ -114,10 +119,18 @@ def _candidate_policy(source:Path)->tuple[bytes,bytes]:
     need(isinstance(allowed,list) and WORKER not in allowed
          and "jason-pmv4-shadow-gateway" in allowed,
          "C_BUILD_WATCHDOG_BASE_NOT_STAGE_C_READY")
-    candidate=json.loads(json.dumps(base))
+    installed=json.loads(json.dumps(base))
+    for key in ("required_system_units","required_user_units"):
+        values=installed.get(key)
+        need(isinstance(values,list) and all(isinstance(x,str) for x in values)
+             and len(values)==len(set(values)),
+             "C_BUILD_WATCHDOG_REQUIRED_UNIT_SET_INVALID:"+key)
+        installed[key]=sorted(values)
+    expected_bytes=(json.dumps(installed,indent=2,sort_keys=True)+"\n").encode()
+    candidate=json.loads(expected_bytes)
     candidate["allowed_running_containers"].append(WORKER)
-    rendered=(json.dumps(candidate,indent=2,sort_keys=False)+"\n").encode()
-    return raw,rendered
+    rendered=(json.dumps(candidate,indent=2,sort_keys=True)+"\n").encode()
+    return expected_bytes,rendered
 
 def _latest_scan()->tuple[str,str]:
     db=Path("/var/lib/jason/openclaw/autonomy-operational-work.sqlite3")
