@@ -45,7 +45,7 @@ def test_exact_pinned_manifest_profile_source_and_configuration():
     assert a.SERVER_FUNCTIONS == {
         "_authority_admin_or_catalog_self", "_authority_grant_audit",
         "list_exact_authority_grants", "grant_exact_authority",
-        "revoke_exact_authority_grant",
+        "revoke_exact_authority_grant", "approve_catalog_scoped_runtime_mcp_release",
     }
 
 
@@ -122,7 +122,7 @@ def fake_source(monkeypatch):
     monkeypatch.setattr(a, "git", fake_git)
     original_run=a.subprocess.run
     def fake_run(*args,**kwargs):
-        if args[0][0:4]==["git","-C",str(Path("/tmp/fixture")),"merge-base"]:
+        if args[0][0:6]==["git","-c","safe.directory=/tmp/fixture","-C",str(Path("/tmp/fixture")),"merge-base"]:
             return SimpleNamespace(returncode=0 if state["ancestor"] else 1)
         return original_run(*args,**kwargs)
     monkeypatch.setattr(a.subprocess,"run",fake_run)
@@ -139,7 +139,7 @@ def test_protected_catalog_scope_source_checks(fake_source):
     result=validate_fake(manifest,state)
     assert result["changed_files"]==sorted(a.ALLOWED_FILES)
     assert result["blob_equality_count"]==len(a.EXACT_BLOBS)
-    assert result["shared_function_count"]==5
+    assert result["shared_function_count"]==6
     assert result["source_diff_sha256"]==manifest["scope_sha256"]
 
 
@@ -173,7 +173,7 @@ def test_shared_mcp_non_catalog_changes_are_allowed_but_catalog_changes_denied(f
     manifest,state=fake_source
     path=state["main"]+":"+a.SERVER_PATH
     state["override_blobs"][path]=("def unrelated_ticket_read():\n    return True\n\n"+state["shared"]).encode()
-    assert validate_fake(manifest,state)["shared_function_count"]==5
+    assert validate_fake(manifest,state)["shared_function_count"]==6
     state["override_blobs"][path]=(state["shared"].replace("return True", "return False", 1)).encode()
     with pytest.raises(a.CatalogScopeDenied,match="CATALOG_SHARED_FUNCTION_CHANGED"):
         validate_fake(manifest,state)
@@ -364,7 +364,7 @@ def test_snapshot_baseline_drift_must_fail_even_when_feature_merged(fake_source,
     original_run=a.subprocess.run
     def baseline_missing(*args,**kw):
         if (isinstance(args[0],list) and len(args[0])>4
-                and args[0][3:5]==["merge-base","--is-ancestor"]
+                and args[0][5:7]==["merge-base","--is-ancestor"]
                 and args[0][-2:]==[manifest["rollback_sha"],manifest["snapshot_sha"]]):
             return SimpleNamespace(returncode=1)
         return original_run(*args,**kw)
@@ -392,3 +392,30 @@ def test_future_catalog_manifests_are_configuration_changes_not_new_code(monkeyp
     changed["snapshot_ref"]="refs/heads/sneaky-change"
     with pytest.raises(a.CatalogScopeDenied,match="SNAPSHOT_REF_INVALID"):
         a.load_manifest(Path("/tmp/fixture"),main_sha=MANIFEST["protected_feature_sha"])
+
+
+def test_root_attestation_uses_exact_hash_pinned_helper_instead_of_live_copy(monkeypatch):
+    """A root worker must not execute the mutable current-release helper."""
+    manifest=deepcopy(MANIFEST)
+    main=manifest["protected_feature_sha"]
+    pinned=Path("/usr/local/lib/jason/catalog-scoped-promotion/tools/deploy_live_container.py")
+    fake_state={"path":None}
+    def fake_git(repo,*args):
+        if args==( "ls-remote","origin","refs/heads/main"):
+            return f"{main}\trefs/heads/main\n".encode()
+        if args==( "ls-remote","origin",manifest["snapshot_ref"]):
+            return f"{manifest['snapshot_sha']}\t{manifest['snapshot_ref']}\n".encode()
+        raise AssertionError(args)
+    monkeypatch.setattr(a,"git",fake_git)
+    monkeypatch.setattr(a,"load_manifest",lambda repo,*,main_sha:manifest)
+    monkeypatch.setattr(a,"verified_source_scope",lambda *args,**kwargs:{"verified_main_sha":main})
+    monkeypatch.setattr(a,"host_readback",lambda manifest:observed(manifest))
+    monkeypatch.setattr(a,"verify_live_image_evidence",lambda manifest,readback:{"rollback_sha":manifest["rollback_sha"]})
+    monkeypatch.setattr(a,"source_scope_receipt",lambda manifest,source,live,ci:{"schema_version":"1.0","receipt_sha256":"0"*64})
+    def fake_preflight(manifest, *,script=None):
+        fake_state["path"]=script
+        return {"runtime":{"preflight":"PASS"},"mcp":{"preflight":"PASS"}}
+    monkeypatch.setattr(a,"verify_native_preflights",fake_preflight)
+    r=a.attest_source_scope(Path("/tmp/nonexistent"),native_ci_checks=lambda sha:{"passed":True},preflight_script=pinned)
+    assert fake_state["path"]==pinned
+    assert r["receipt_sha256"]!="0"*64

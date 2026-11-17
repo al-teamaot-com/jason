@@ -25,6 +25,7 @@ RELEASES = Path("/opt/jason/releases")
 OLD_RELEASE_LOCK = Path("/var/lib/jason/openclaw/release-manager/production-transaction.lock")
 NEW_RELEASE_LOCK = Path("/var/lib/jason/pmv4-shadow/control/host-mutation.lock")
 LEDGER = Path("/var/lib/jason/openclaw/autonomy-operational-work.sqlite3")
+STAGE_C_LEDGER = Path("/var/lib/jason/ticket-core/autonomy-operational-work.sqlite3")
 PROTECTED_CONTROL = Path(
     "/var/lib/jason/openclaw/release-manager/protected-readback/production-control-state.json"
 )
@@ -42,6 +43,38 @@ class HostGateDenied(PermissionError):
     pass
 
 
+def select_trusted_ticket_ledger(
+    legacy: Path=LEDGER,stage_c: Path=STAGE_C_LEDGER,*,uid:int=1000,
+)->Path:
+    """Select exactly one trusted canonical SQLite file; never follow aliases.
+
+    A subsequent Owner-bound Stage C recovery separately proves the new inode
+    against the immutable signed migration and root audit. This read-only
+    health selection grants no release/approval authority and does NOT close
+    any protected circuit breaker.
+    """
+    candidates=(Path(legacy),Path(stage_c))
+    present=[]
+    for path in candidates:
+        if path.is_symlink():
+            raise HostGateDenied("PMV4_TICKET_LEDGER_SYMLINK_DENIED")
+        try: f=path.lstat()
+        except FileNotFoundError: continue
+        root=path.parent
+        need_root=root.lstat()
+        if (root.is_symlink() or not stat.S_ISDIR(need_root.st_mode)
+            or need_root.st_uid!=uid
+            or stat.S_IMODE(need_root.st_mode)!=0o700
+            or not stat.S_ISREG(f.st_mode)
+            or f.st_uid!=uid or f.st_nlink!=1
+            or stat.S_IMODE(f.st_mode)!=0o600):
+            raise HostGateDenied("PMV4_TICKET_LEDGER_UNTRUSTED")
+        present.append(path)
+    if len(present)!=1:
+        raise HostGateDenied("PMV4_TICKET_LEDGER_CANONICAL_OWNER_AMBIGUOUS")
+    return present[0]
+
+
 class IndependentHostGuard:
     """Trusted host-installed callbacks for a separate PMv4 shadow release.
 
@@ -52,7 +85,7 @@ class IndependentHostGuard:
 
     def __init__(
         self, *, current: Path = CURRENT, releases: Path = RELEASES,
-        ledger: Path = LEDGER,
+        ledger: Path | None = None,
         old_lock: Path = OLD_RELEASE_LOCK, new_lock: Path = NEW_RELEASE_LOCK,
         control_path: Path = PROTECTED_CONTROL, drift_path: Path = PROTECTED_DRIFT,
         runner: Callable[..., Any] = subprocess.run,
@@ -63,16 +96,23 @@ class IndependentHostGuard:
     ):
         if production and (
             Path(current) != CURRENT or Path(releases) != RELEASES
-            or Path(ledger) != LEDGER
+            or (ledger is not None
+                and Path(ledger) not in (LEDGER,STAGE_C_LEDGER))
             or Path(old_lock) != OLD_RELEASE_LOCK or Path(new_lock) != NEW_RELEASE_LOCK
             or Path(control_path) != PROTECTED_CONTROL or Path(drift_path) != PROTECTED_DRIFT
         ):
             raise HostGateDenied("PMV4_TRUSTED_HOST_PATH_OVERRIDE")
+        if production and enforce_protected_control is False:
+            raise HostGateDenied("PMV4_PROTECTED_BREAKER_CANNOT_BE_DISABLED")
         if not 60 <= max_scan_age_seconds <= 900:
             raise HostGateDenied("PMV4_HOST_TICKET_FRESHNESS_INVALID")
+        canonical = select_trusted_ticket_ledger() if production else (
+            LEDGER if ledger is None else Path(ledger))
+        if production and ledger is not None and Path(ledger)!=canonical:
+            raise HostGateDenied("PMV4_TRUSTED_HOST_PATH_OVERRIDE")
         self.current = Path(current)
         self.releases = Path(releases)
-        self.ledger = Path(ledger)
+        self.ledger = canonical
         self.old_lock = Path(old_lock)
         self.new_lock = Path(new_lock)
         self.control_path = Path(control_path)
@@ -80,8 +120,6 @@ class IndependentHostGuard:
         self.runner = runner
         self.now = now
         self.production = production
-        if production and enforce_protected_control is False:
-            raise HostGateDenied("PMV4_PROTECTED_BREAKER_CANNOT_BE_DISABLED")
         self.enforce_protected_control = (
             production if enforce_protected_control is None
             else bool(enforce_protected_control)
@@ -312,6 +350,12 @@ class IndependentHostGuard:
                 health = state.get("Health")
                 if not isinstance(health, dict) or health.get("Status") != "healthy":
                     raise HostGateDenied("PMV4_TICKET_CORE_HEALTH_NOT_VERIFIED")
+        if self.production and self.ledger==STAGE_C_LEDGER:
+            runtime=self._container("jason-runtime")
+            env=((runtime.get("Config") or {}).get("Env"))
+            if (not isinstance(env,list) or
+                "JASON_AUTONOMY_WORKER_DB="+str(STAGE_C_LEDGER) not in env):
+                raise HostGateDenied("PMV4_TICKET_CANONICAL_RUNTIME_BIND_MISMATCH")
         scan = self._ticket_scan()
         return {
             "status": "verified", "source_sha": revision,

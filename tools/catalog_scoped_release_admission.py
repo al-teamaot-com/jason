@@ -21,23 +21,27 @@ SHA = re.compile(r"^[a-f0-9]{40}$")
 IMAGE = re.compile(r"^sha256:[a-f0-9]{64}$")
 HEX = re.compile(r"^[a-f0-9]{64}$")
 PROFILE = "aot-autotask-catalog-runtime-mcp-v1"
-SNAPSHOT_REF = re.compile(r"^refs/heads/prep/catalog-identity-grants-isolated-[0-9]{8}(?:-[0-9a-f]{8})?$")
+SNAPSHOT_REF = re.compile(r"^refs/heads/prep/catalog-identity-grants-(?:owner-approval-)?isolated-[0-9]{8}(?:-[0-9a-f]{8})?$")
 MANIFEST_FILE = "config/catalog-scoped-release-admission.json"
 ALLOWED_FILES = frozenset({
     ".github/workflows/security-regressions.yml",
     "docs/engineering/reviews/CATALOG_EXACT_GRANT_ADMIN_20261117.md",
     "docs/engineering/reviews/CATALOG_SERVICE_IDENTITY_20261117.md",
+    "implementation/kernel/catalog_scoped_promotion_contract.py",
     "implementation/mcp_service/src/jason_mcp/catalog_grant_admin.py",
+    "implementation/mcp_service/src/jason_mcp/catalog_scoped_promotion_approval.py",
     "implementation/mcp_service/src/jason_mcp/server.py",
     "implementation/mcp_service/tests/test_autotask_catalog_grant_admin.py",
     "implementation/orchestrator/tests/test_execution_plan_binding.py",
     "implementation/runtime_service/src/jason_runtime/autotask_procurement.py",
     "implementation/runtime_service/tests/test_autotask_catalog_service_identity.py",
 })
-# Entire-file byte equality for catalog-owned modules/tests. Shared server.py
-# is compared at the exact reviewed function boundaries instead.
+# Whole-file byte equality for catalog-owned modules/tests. Shared server.py
+# is compared at the exact six reviewed function boundaries instead.
 EXACT_BLOBS = frozenset({
+    "implementation/kernel/catalog_scoped_promotion_contract.py",
     "implementation/mcp_service/src/jason_mcp/catalog_grant_admin.py",
+    "implementation/mcp_service/src/jason_mcp/catalog_scoped_promotion_approval.py",
     "implementation/mcp_service/tests/test_autotask_catalog_grant_admin.py",
     "implementation/orchestrator/tests/test_execution_plan_binding.py",
     "implementation/runtime_service/src/jason_runtime/autotask_procurement.py",
@@ -47,7 +51,7 @@ SERVER_PATH = "implementation/mcp_service/src/jason_mcp/server.py"
 SERVER_FUNCTIONS = frozenset({
     "_authority_admin_or_catalog_self", "_authority_grant_audit",
     "list_exact_authority_grants", "grant_exact_authority",
-    "revoke_exact_authority_grant",
+    "revoke_exact_authority_grant", "approve_catalog_scoped_runtime_mcp_release",
 })
 RUNTIME_MODE = {"JASON_AUTOTASK_CATALOG_AUTH_MODE": "jason_managed"}
 MCP_MODE = {"JASON_AUTOTASK_CATALOG_GRANT_ADMIN_PROFILE": "aot-catalog-self-owner-v1"}
@@ -70,7 +74,8 @@ def fail(reason: str) -> None:
 
 def git(repo: Path, *args: str) -> bytes:
     result = subprocess.run(
-        ["git", "-C", str(repo), *args], check=False, stdout=subprocess.PIPE,
+        ["git", "-c", f"safe.directory={repo}", "-C", str(repo), *args],
+        check=False, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
     if result.returncode:
@@ -174,10 +179,12 @@ def verified_source_scope(
     feature = exact_revision(manifest["protected_feature_sha"])
     snapshot = exact_revision(manifest["snapshot_sha"])
     rollback = exact_revision(manifest["rollback_sha"])
-    if subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", feature, main_sha],
+    if subprocess.run(["git", "-c", f"safe.directory={repo}", "-C", str(repo),
+                       "merge-base", "--is-ancestor", feature, main_sha],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
         fail("FEATURE_NOT_PROTECTED")
-    if subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", rollback, snapshot],
+    if subprocess.run(["git", "-c", f"safe.directory={repo}", "-C", str(repo),
+                       "merge-base", "--is-ancestor", rollback, snapshot],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
         fail("SNAPSHOT_BASELINE_MISMATCH")
     selected = git(repo, "diff", "--no-renames", "--name-only", rollback, snapshot).decode().splitlines()
@@ -402,7 +409,7 @@ def verify_native_preflights(manifest: Mapping[str, Any], *, script: Path = Path
     return verified
 
 
-def attest_source_scope(repo: Path, *, native_ci_checks: Any) -> dict[str, Any]:
+def attest_source_scope(repo: Path, *, native_ci_checks: Any, preflight_script: Path | None = None) -> dict[str, Any]:
     """Nonmutating Production Manager admission command (NOT a release)."""
     remote = git(repo, "ls-remote", "origin", "refs/heads/main").decode().strip().split()
     if len(remote) != 2 or remote[1] != "refs/heads/main":
@@ -418,7 +425,12 @@ def attest_source_scope(repo: Path, *, native_ci_checks: Any) -> dict[str, Any]:
     live = verify_live_image_evidence(manifest, observed)
     ci = native_ci_checks(manifest["protected_feature_sha"])
     evidence = source_scope_receipt(manifest, source, live, ci)
-    evidence["native_readonly_preflight"] = verify_native_preflights(manifest)
+    # Root promotion paths must pass a separately SHA-pinned native helper.
+    # Only the unprivileged read-only CLI may use the live deployment copy.
+    if preflight_script is None:
+        evidence["native_readonly_preflight"] = verify_native_preflights(manifest)
+    else:
+        evidence["native_readonly_preflight"] = verify_native_preflights(manifest, script=preflight_script)
     # Bind the same exact preflight outcomes into the auditable final receipt.
     material = dict(evidence)
     material.pop("receipt_sha256")
