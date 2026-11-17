@@ -73,6 +73,8 @@ def test_complete_exact_install_plan_and_two_separate_owner_gates(mock_source):
     assert a["separate_autotask_provider_test_write_approval_required"] is True
     assert a["installation_executable_in_source_only_mode"] is False
     assert a["install_plan_sha256"]==sha256(p.canonical({k:v for k,v in a.items() if k!="install_plan_sha256"})).hexdigest()
+    assert a["installation_scope_sha256"]!=a["catalog_scope_sha256"]
+    assert a["installation_scope_sha256"]!=a["signed_promotion_manifest_sha256"]
 
 
 def test_root_worker_and_recovery_unit_destinations_are_exact():

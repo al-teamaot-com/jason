@@ -232,6 +232,18 @@ def build_install_plan(
         "owner_approval_recorded": False,
         "installation_executable_in_source_only_mode": False,
     }
+    # Domain-separate an installation decision from image promotion. Even a
+    # correctly signed catalog promotion proof cannot approve ROOT INSTALL.
+    install_intent = {
+        "action": "catalog_root_install_only_v1",
+        "source_sha": main_sha,
+        "rollback_source_sha": offer["rollback_sha"],
+        "rollback_root_worker_sha256": host_evidence["root_worker_before_sha256"],
+        "freeze_sha256": offer["freeze_sha256"],
+        "root_file_plan": plan["root_file_plan"],
+        "root_policy_target": str(POLICY),
+    }
+    plan["installation_scope_sha256"] = digest(canonical(install_intent))
     plan["install_plan_sha256"] = digest(canonical(plan))
     return plan
 
