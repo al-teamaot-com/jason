@@ -11,6 +11,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import stat
@@ -21,6 +22,7 @@ from typing import Any, Mapping
 from tools import pmv4_c_service_manifest as service_contract
 from tools import pmv4_c_atomic_root as root_contract
 from tools import pmv4_shadow_ci as protected_ci
+from tools.pmv4_ticket_core_exact_projection import PROVIDER_STATE
 
 ARTIFACTS=Path("/srv/jason/archive/engineering-artifacts")
 FREEZE=root_contract.FREEZE
@@ -203,6 +205,8 @@ echo "PMV4_LATER_PHASES_ARE_NOT_AUTHORIZED"
 
 def build(*,candidate:str,image_digest:str)->Path:
     need(os.geteuid()==1000,"C_BUILD_UID1000_REQUIRED")
+    need(re.fullmatch(r"[0-9a-f]{40}",candidate or "") is not None,
+         "C_BUILD_SOURCE_SHA_INVALID")
     source=_worktree_source(candidate)
     main=subprocess.check_output(
         ["/usr/bin/gh","api","repos/al-teamaot-com/jason/branches/main",
@@ -233,8 +237,10 @@ def build(*,candidate:str,image_digest:str)->Path:
         runtime_env,source_sha=candidate,image_digest=image_digest)
     base_policy,candidate_policy=_candidate_policy(source)
     baseline_cycle,baseline_scanned=_latest_scan()
-    artifact=ARTIFACTS/("pmv4-c-"+candidate)
-    need(not artifact.exists() and not artifact.is_symlink(),
+    final_artifact=ARTIFACTS/("pmv4-c-"+candidate)
+    artifact=ARTIFACTS/(".pmv4-c-"+candidate+".building")
+    need(not final_artifact.exists() and not final_artifact.is_symlink()
+         and not artifact.exists() and not artifact.is_symlink(),
          "C_BUILD_ARTIFACT_ALREADY_EXISTS")
     (artifact/"tools").mkdir(parents=True,mode=0o700)
     (artifact/"src"/"tools").mkdir(parents=True,mode=0o700)
@@ -254,7 +260,7 @@ def build(*,candidate:str,image_digest:str)->Path:
     db_identities={raw:_metadata(Path(raw)) for raw in DBS}
     provider_state={
         raw:_metadata(Path(raw),directory=True)
-        for raw in service_contract.PROVIDER_STATE
+        for raw in PROVIDER_STATE
     }
     credential_paths=sorted({
         str(m["Source"]) for m in service_manifest["mounts"]
@@ -304,8 +310,8 @@ def build(*,candidate:str,image_digest:str)->Path:
         os.chmod(f,0o400)
     lp=artifact/"tools/pmv4_c_one_owner_local.sh"
     lp.write_text(_launcher(
-        plan,artifact,plan["root_executor_sha256"],plan["owner_issuer_sha256"]),
-        encoding="utf-8")
+        plan,final_artifact,plan["root_executor_sha256"],
+        plan["owner_issuer_sha256"]),encoding="utf-8")
     os.chmod(lp,0o500)
     evidence={
         "schema_version":"1.0",
@@ -319,12 +325,13 @@ def build(*,candidate:str,image_digest:str)->Path:
     }
     (artifact/"evidence.json").write_bytes(canon(evidence))
     os.chmod(artifact/"evidence.json",0o400)
+    os.rename(artifact,final_artifact)
     print("PMV4_C_IMMUTABLE_RELEASE_PACKET=BUILT")
     print("SOURCE_SHA="+candidate)
     print("WORKER_IMAGE_DIGEST="+image_digest)
     print("SCOPE_SHA256="+plan["scope_sha256"])
     print("OWNER_APPROVAL_ISSUED=false; PRODUCTION_MUTATIONS=false")
-    return artifact
+    return final_artifact
 
 def main()->int:
     p=argparse.ArgumentParser()
@@ -335,6 +342,10 @@ def main()->int:
         build(candidate=args.source_sha,image_digest=args.image_digest)
         return 0
     except BaseException as exc:
+        if re.fullmatch(r"[0-9a-f]{40}",args.source_sha or ""):
+            partial=ARTIFACTS/(".pmv4-c-"+args.source_sha+".building")
+            if partial.exists() and not partial.is_symlink() and partial.is_dir():
+                shutil.rmtree(partial)
         code=str(exc)
         if len(code)>180: code="C_BUILD_INTERNAL_DENIED"
         print("PMV4_C_BUILD=DENIED "+type(exc).__name__+":"+code,
