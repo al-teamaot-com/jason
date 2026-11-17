@@ -55,7 +55,7 @@ class JsonPlaybookInterpreter:
             step_id=current,
             step_type=step_type,
             capability=(str(step.get("capability") or "").strip() or None),
-            arguments=dict(step.get("arguments") or {}),
+            arguments=self._bind_arguments(step.get("arguments") or {}, facts or {}),
             approval_classification=(
                 str(step.get("approval_classification") or "").strip() or None
             ),
@@ -77,6 +77,36 @@ class JsonPlaybookInterpreter:
         if kind == "remediation":
             return str(step["verification_step"])
         return str(step["next"])
+
+    @staticmethod
+    def _bind_arguments(
+        arguments: Mapping[str, Any], facts: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve explicit fact references, never arbitrary expressions.
+
+        Only the existing governed caller may supply trusted facts. This
+        interpreter does not grant provider authority or execute steps.
+        """
+        def resolve(value: Any, depth: int = 0) -> Any:
+            if depth > 8:
+                raise ValueError("PLAYBOOK_ARGUMENT_NESTING_EXCEEDED")
+            if isinstance(value, Mapping):
+                if "$fact" in value:
+                    if set(value) != {"$fact"}:
+                        raise ValueError("PLAYBOOK_FACT_REFERENCE_INVALID")
+                    key = value["$fact"]
+                    if not isinstance(key, str) or not key or len(key) > 128:
+                        raise ValueError("PLAYBOOK_FACT_REFERENCE_INVALID")
+                    if key not in facts:
+                        raise KeyError("PLAYBOOK_REQUIRED_FACT_MISSING")
+                    return facts[key]
+                return {str(key): resolve(item, depth + 1)
+                        for key, item in value.items()}
+            if isinstance(value, list):
+                return [resolve(item, depth + 1) for item in value]
+            return value
+
+        return resolve(arguments)
 
     @staticmethod
     def _decision_target(step: Mapping[str, Any], facts: Mapping[str, Any]) -> str:

@@ -293,6 +293,33 @@ class SQLitePlaybookRegistry:
         ).fetchall()
         return tuple(self._row(row) for row in rows)
 
+    def audited_read_only_snapshot(self) -> tuple[int, tuple[StoredPlaybook, ...]]:
+        """One immutable read transaction across active definitions and audit.
+
+        Used by independently hosted Runbook Management readers. A config
+        update never creates capability authority or invokes a provider.
+        """
+        if not self.read_only:
+            raise RuntimeError("PLAYBOOK_SNAPSHOT_READONLY_REQUIRED")
+        con = self._connection
+        con.execute("BEGIN")
+        try:
+            generation, active = self.active_snapshot()
+            events = self.lifecycle_events()
+            if generation < 0 or generation != len(events):
+                raise RuntimeError("PLAYBOOK_SNAPSHOT_AUDIT_MISMATCH")
+            for expected, event in enumerate(events):
+                if (type(event["generation_before"]) is not int
+                        or type(event["generation_after"]) is not int
+                        or event["generation_before"] != expected
+                        or event["generation_after"] != expected + 1):
+                    raise RuntimeError("PLAYBOOK_SNAPSHOT_AUDIT_CHAIN_INVALID")
+            if len(active) > 200 or len({item.document.playbook_id for item in active}) != len(active):
+                raise RuntimeError("PLAYBOOK_SNAPSHOT_ACTIVE_LIMIT_OR_DUPLICATE")
+            return generation, active
+        finally:
+            con.execute("ROLLBACK")
+
     def active_snapshot(self) -> tuple[int, tuple[StoredPlaybook, ...]]:
         rows = self._connection.execute(
             "SELECT * FROM json_playbooks WHERE state='active' ORDER BY playbook_id"

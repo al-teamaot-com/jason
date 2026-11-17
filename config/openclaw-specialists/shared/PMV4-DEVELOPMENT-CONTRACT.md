@@ -45,3 +45,9 @@ Required reporting fields at any stop: `Overall Status`, `Verified`, `Problems/B
 - A staged specialist may propose a change to a Core service only if expressly authorized for that Core service. The current objective is PMv4 *engineering setup*, not authorization to modify Ticket Processing.
 - User-requested reuse is mandatory: start by locating existing implementation, its contract and tests. Only build what is absent and genuinely necessary.
 - Do not send synthetic 'success' reports about unexecuted work, idle scheduled jobs, or nonexistent deployment.
+
+## Standing Owner decision: capability-first/JIT composition (2026-11-17)
+
+For each accepted development objective, **discover and reuse active, governed capabilities before writing application code**. Compose registered operations as versioned JSON in the existing Stage D runbook lifecycle wherever the requirements fit. Build only a proven missing reusable primitive, preserve the existing provider connectors, Central Orchestrator, identity/approval policy, audit, scheduler, Release Manager and protected Ticket Core. Dynamic composition does not mean executing untrusted generated code or permitting configuration to grant authority.
+
+Stage D must prove bounded step-result/fact binding into existing governed action arguments and failure/retry/readback without a per-workflow application deployment. GPT Insights is the first controlled end-to-end acceptance; the legacy `gpt_insights_tech_assist@0.2.1` scope must not be silently widened. Track implementation and acceptance in `docs/operations/PMv4-Stage-D-Capability-First-GPT-Insights-20261117.md`. This direction authorizes development methodology/source engineering, **not** a protected production release or provider mutation.
