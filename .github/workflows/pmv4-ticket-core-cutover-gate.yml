@@ -5,6 +5,8 @@ on:
       - "tools/pmv4_ticket_core_cutover_preflight.py"
       - "tests/test_pmv4_ticket_core_cutover_preflight.py"
       - "tools/pmv4_ticket_core_exact_projection.py"
+      - "tools/pmv4_c_sqlite_family_handoff.py"
+      - "tests/test_pmv4_c_sqlite_family_handoff.py"
       - "tests/test_pmv4_ticket_core_exact_projection.py"
       - "implementation/runtime_service/src/jason_runtime/maintenance_process.py"
       - "implementation/runtime_service/tests/test_ticket_core_worker_only_composition.py"
@@ -32,6 +34,6 @@ jobs:
           PYTHONPATH=implementation:. python -B -m pytest -q \
             tests/test_pmv4_ticket_core_cutover_preflight.py \
             tests/test_pmv4_ticket_core_ledger_snapshot.py \
-            tests/test_pmv4_ticket_core_exact_projection.py
+            tests/test_pmv4_ticket_core_exact_projection.py             tests/test_pmv4_c_sqlite_family_handoff.py
           test ! -e /var/lib/jason/openclaw/autonomy-operational-work.sqlite3
           test ! -e /var/lib/jason/ticket-core/autonomy-operational-work.sqlite3
