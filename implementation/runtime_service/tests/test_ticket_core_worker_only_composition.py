@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from jason_runtime.composition import (
-    TicketWorkerComponentRuntime, build_runtime_application,
+    TicketWorkerComponentRuntime, _shadow_processes_targeted_wakes,
+    build_runtime_application,
 )
 from jason_runtime.maintenance_process import ticket_worker_runtime_settings
 from test_composition import _settings
@@ -145,4 +146,17 @@ def test_ticket_settings_forbid_unrelated_schedulers_but_preserve_providers(tmp_
     assert scoped.owner_uat_mode == "off"
     assert scoped.backup_net_enabled is True
     assert scoped.dnsfilter_enabled is True
-    assert scoped.hosted_conversation_enabled is True
+    assert scoped.hosted_semantics_enabled == configured.hosted_semantics_enabled
+    assert scoped.hosted_conversation_enabled is False
+    scoped.validate()
+
+
+def test_external_hosting_never_leaves_targeted_wakes_to_auxiliary_shadow(tmp_path):
+    base=replace(_settings(tmp_path),autonomy_worker_enabled=False)
+    assert _shadow_processes_targeted_wakes(
+        replace(base,ticket_worker_hosting="embedded")) is True
+    assert _shadow_processes_targeted_wakes(
+        replace(base,ticket_worker_hosting="external")) is False
+    assert _shadow_processes_targeted_wakes(
+        replace(base,ticket_worker_hosting="external",autonomy_worker_enabled=True)
+    ) is False

@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from tools import pmv4_c_immutable_builder as builder
+from tools import pmv4_c_atomic_root as root
+
+SOURCE="a"*40
+
+def test_candidate_policy_adds_only_ticket_core(tmp_path):
+    config=tmp_path/"config";config.mkdir()
+    base={
+        "schema_version":"1.0",
+        "required_containers":["jason-runtime","jason-mcp-pilot"],
+        "allowed_running_containers":[
+            "jason-runtime","jason-mcp-pilot","jason-pmv4-shadow-gateway"
+        ],
+        "allowed_system_units":["a"],
+    }
+    raw=(json.dumps(base,indent=2)+"\n").encode()
+    (config/"production-desired-state.json").write_bytes(raw)
+    before,candidate_raw=builder._candidate_policy(tmp_path)
+    assert before==raw
+    candidate=json.loads(candidate_raw)
+    assert candidate["required_containers"]==base["required_containers"]
+    assert candidate["allowed_system_units"]==base["allowed_system_units"]
+    assert candidate["allowed_running_containers"]==(
+        base["allowed_running_containers"]+[root.WORKER])
+
+def test_generated_launcher_orders_root_preflight_before_owner_and_execute(tmp_path):
+    plan={
+        "candidate_sha":SOURCE,
+        "staged_source_files":{
+            "tools/a.py":"1"*64,
+            "tools/b.py":"2"*64,
+        },
+    }
+    text=builder._launcher(plan,tmp_path/"artifact","3"*64,"4"*64)
+    root_pre='sudo /usr/bin/python3 -I -B "$STAGED" --plan "$PLAN" --preflight'
+    owner='PYTHONPATH="$ART/src:." /usr/bin/python3 -B "$OWNER" --plan "$PLAN" --authorize'
+    execute='sudo /usr/bin/python3 -I -B "$STAGED" --plan "$PLAN" --execute'
+    post='sudo /usr/bin/python3 -I -B "$STAGED" --plan "$PLAN" --postflight'
+    assert text.index(root_pre) < text.index(owner) < text.index(execute)
+    assert text.index(execute) < text.index(post)
+    assert "sudo /usr/bin/install -o root -g root -m 0400" in text
+    assert "OWNER_APPROVAL_NOT_YET_USED=true; PRODUCTION_MUTATIONS=false" in text
+    assert "PMV4_LATER_PHASES_ARE_NOT_AUTHORIZED" in text
+    assert "teams" not in text.casefold()
+    assert "continue" not in text.casefold()
+
+def test_stage_c_support_set_contains_transaction_dependencies():
+    assert {
+        "tools/pmv4_c_sqlite_family_handoff.py",
+        "tools/pmv4_c_service_manifest.py",
+        "tools/pmv4_ticket_core_exact_projection.py",
+        "tools/pmv4_host_release_guard.py",
+        "tools/pmv4_shadow_ci.py",
+        "tools/deploy_live_container.py",
+        "tools/pmv4_mcp_projection.py",
+    } == set(builder.STAGED_FILES)
+
+def test_stage_c_db_allowlist_is_exact_and_bounded():
+    names={Path(x).name for x in builder.DBS}
+    assert names=={
+        "autonomy-operational-work.sqlite3",
+        "playbook-autonomy.sqlite3",
+        "autonomy-targeted-wakes.sqlite3",
+        "ticket-split.sqlite3",
+        "teams-identity-bindings.sqlite3",
+        "orchestration-events.sqlite3",
+        "governed-execution.sqlite3",
+        "reflection.sqlite3",
+        "resolution-memory.sqlite3",
+        "model-usage.sqlite3",
+    }
+    assert all(Path(x).parent==Path("/var/lib/jason/openclaw")
+               for x in builder.DBS)
+
+def test_ticket_core_dockerfile_has_no_http_exposure():
+    dockerfile=(
+        Path(builder.__file__).resolve().parents[1]/
+        "infrastructure/pmv4-ticket-core/Dockerfile"
+    ).read_text()
+    assert "\nEXPOSE " not in dockerfile
+    assert 'CMD ["python", "-m", "jason_runtime.ticket_worker_service"]' in dockerfile
+    assert "USER 1000:1000" in dockerfile
