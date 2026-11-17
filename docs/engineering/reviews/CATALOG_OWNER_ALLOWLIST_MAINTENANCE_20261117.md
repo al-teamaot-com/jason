@@ -1,16 +1,20 @@
 # Catalog write authorization: single-setting Owner maintenance
 
-**Source only. No live application, deployment, or provider write has occurred.**
+**DRAFT/HOLD: unsafe as a catalog-only authority change. No live application, deployment, or provider write occurred.**
 
 The production MCP still recognizes `person-al` as its only legacy Owner
 administrator under `JASON_DATTO_COMPONENT_APPROVAL_OWNER_IDENTITIES`. The
 regular, independently Entra-verified Owner principal
 `person-entra-bee80bdcffb04c50b453c09d4d411f5f` is currently rejected by
 `list_exact_authority_grants` with `AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED`.
-This one-time, exact-image helper adds that verified principal to the current
-Owner *administration* allowlist while retaining `person-al`. The two other
-Owner identities are not conflated. It does not itself issue any authority
-grant, approve any catalog mutation, or deploy code.
+This one-time, exact-image helper would add that verified principal to the
+shared Owner *administration* allowlist while retaining `person-al`. But the
+same setting governs Datto component approval, autonomy and playbook approval,
+procurement Owner exceptions, sensitive client-read Owner selection, and other
+Owner-only functions. This is **not** a catalog-specific privilege grant.
+Do **not** execute it without independent high-risk review and an exact
+authorization explicitly covering all cross-capability effects.
+It does not itself issue any authority grant or deploy code.
 
 - Source: `tools/owner_allowlist_same_image_20261117.py`
 - Scope SHA256: `dc949f7dcf419cc22ea6f6bd3668597a199422d58a630a4c48c95a1979e65ad8`
@@ -34,7 +38,8 @@ grant, approve any catalog mutation, or deploy code.
   independently displayed scope-challenge answer. It cannot be executed by a
   remote orchestration tool or treated as ChatGPT approval.
 
-After a permitted application, inspect the auditable transaction receipt,
+After separately approved full Owner-scope review (not granted by the catalog
+request), a permitted application would require an auditable transaction receipt,
 re-read the unchanged production freeze, confirm that only the Owner allowlist
 changed, then issue *only* the four specific catalog grants via Jason's native
 Owner tool with `approval_required=true` for the authenticated human. This

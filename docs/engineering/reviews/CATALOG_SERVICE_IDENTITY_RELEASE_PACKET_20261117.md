@@ -72,17 +72,20 @@ false source SHA or bypass the native Release Manager.
 The Owner admin grant path is separately unavailable: the installed MCP has
 `JASON_DATTO_COMPONENT_APPROVAL_OWNER_IDENTITIES=person-al` and the current
 regular Entra Owner's grant-admin call returns
-`AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED`. The exact-image Owner-local config
-maintenance is reviewed in `CATALOG_OWNER_ALLOWLIST_MAINTENANCE_20261117.md`.
-It has not been run and needs a fresh, individual local sudo/TTY exact-action
-challenge. After that, create *only* four explicit, approval-required grants
-via the already-supported native Jason grant administration surface.
+`AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED`. The proposed global-Owner allowlist maintenance is **DRAFT/HOLD**: expanding
+that shared list also broadens Datto component, procurement, autonomy and
+other Owner functions. See `CATALOG_OWNER_ALLOWLIST_MAINTENANCE_20261117.md`.
+It has not been run and is not authorized as a catalog-only change. Either
+separately approve the disclosed broader Owner authority or use a separately
+governed, strictly catalog-scoped privileged grant administration path; then
+issue only four explicit, approval-required grants via native Jason authority.
 
 ## Completion gates and rollback
 
-1. Review and authorize the exact one-setting MCP allowlist maintenance in a
-   genuine local Owner sudo session; validate its root audit, no unrelated
-   config difference, and preserved freeze. Do not run it remotely.
+1. Resolve requester grant administration **without accidental broad Owner
+   privilege expansion**. The proposed global allowlist helper is on HOLD,
+   and any broader-scope option needs separate exact Owner review. A
+   catalog-scoped privileged-admin path is safer if approved and available.
 2. Obtain a production-eligible, scope-reviewed **catalog-only** immutable
    candidate through an authorized Release Manager source/ancestry procedure
    or an independently approved component-specific release contract. The
