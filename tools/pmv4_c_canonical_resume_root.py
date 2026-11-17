@@ -297,10 +297,32 @@ def postflight(path: Path) -> None:
         need(c.sha(c.FREEZE.read_bytes()) == plan["freeze_sha256"] and
              c.sha(c.HOLD.read_bytes()) == plan["hold_sha256"], "PROTECTED_FREEZE_CHANGED")
         with guard.IndependentHostGuard().host_release_transaction():
+            host = guard.IndependentHostGuard()
+            host._assert_protected_release_state()
             c._append(plan, approval, "committed", {
                 "scan_cycle_ids": [scans[0][0], scans[1][0]],
                 "duplicate_items": [scans[0][4], scans[1][4]],
                 "no_database_relocation": True, "mcp_untouched": True})
+            receipt_path = c._receipt_path(plan, approval)
+            need(not receipt_path.exists() and not receipt_path.is_symlink(),
+                 "ACCEPTANCE_RECEIPT_EXISTS")
+            receipt = {
+                "schema_version": "1.0",
+                "status": "postmigration_stage_c_accepted",
+                "approval_id": approval,
+                "candidate_sha": plan["candidate_sha"],
+                "plan_sha256": c.sha(c.canon(plan)),
+                "scan_cycle_ids": [scans[0][0], scans[1][0]],
+                "no_database_relocation": True,
+                "mcp_restarts": 0,
+                "committed_at": datetime.now(timezone.utc).isoformat(),
+            }
+            fd = os.open(receipt_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                         os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as out:
+                out.write(c.canon(receipt))
+                out.flush()
+                os.fsync(out.fileno())
         print("PMV4_C_TWO_REAL_SCANS=PASS", flush=True)
         print("PMV4_C_INDEPENDENT_WORKER=ACCEPTED", flush=True)
     except BaseException:
