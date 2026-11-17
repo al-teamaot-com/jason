@@ -15,6 +15,14 @@ def _load_module():
     return module
 
 
+def test_full_proof_supports_explicit_live_audit_path_without_changing_pinned_checker():
+    module = _load_module()
+    live = Path('/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3')
+    assert module.DEFAULT_ORCH == Path('/var/lib/jason/openclaw/orchestration-events.sqlite3')
+    args = module.parser().parse_args(['--orchestration-audit', str(live)])
+    assert args.orchestration_audit == live
+
+
 def test_backup_restore_proof_uses_requested_temp_root_and_cleans_up(tmp_path):
     module = _load_module()
     source = tmp_path / 'authority.sqlite3'
