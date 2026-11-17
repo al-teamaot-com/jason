@@ -104,6 +104,7 @@ from connectors.datto_edr.threat_correlation import (
 )
 from pydantic import AnyHttpUrl
 from jason_mcp.release_approval_request import queue_release_approval_request
+from jason_mcp.independent_component_release_approval import queue_component_release_approval
 from jason_mcp.pmv4_entra_claims import verify_signed_entra_claims
 from jason_mcp.production_read_acceptance import record_authenticated_owner_read
 from starlette.requests import Request as StarletteRequest
@@ -5371,6 +5372,57 @@ def approve_release_candidate(
         "approved_by": request["approved_by"],
         "approval_source": request.get("source", "authenticated_jason_mcp_owner"),
         "promotion": "separate_release_manager_transaction",
+    }
+
+
+@mcp.tool()
+def approve_independent_component_release(
+    component_id: str,
+    candidate_sha: str,
+    image_digest: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Authenticated Owner: sign ONE prepared independent-component release.
+
+    Approval is never an install, a PMV3/PMv4 promotion, a global unfreeze, or
+    a standing permission. The root-installed component-only release controller
+    must independently validate and consume the time-limited signed receipt.
+    Disabled until a matching governed component offer and signer are present.
+    """
+    try:
+        principal, organization = _release_approval_owner()
+        signer_path = os.getenv("JASON_OWNER_RELEASE_ED25519_KEY_PATH", "").strip()
+        if not signer_path.startswith("/"):
+            raise PermissionError("COMPONENT_RELEASE_SIGNER_NOT_CONFIGURED")
+        from kernel.signed_owner_release import read_service_owner_signing_key
+        signer = read_service_owner_signing_key(Path(signer_path))
+        token = get_access_token()
+        if token is None:
+            raise PermissionError("COMPONENT_RELEASE_AUTHENTICATED_SESSION_REQUIRED")
+        result = queue_component_release_approval(
+            state_root=Path(os.getenv(
+                "JASON_RELEASE_MANAGER_STATE_ROOT",
+                "/var/lib/jason/openclaw/release-manager",
+            )),
+            component_id=component_id,
+            candidate_sha=candidate_sha,
+            image_digest=image_digest,
+            approved_by=principal,
+            organization_id=organization,
+            verified_token_claims=token.claims or {},
+            service_signer=signer,
+            confirmed_decision=affirmative_decision,
+        )
+    except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    return {
+        "status": "succeeded",
+        "release_id": result["release_id"],
+        "component_id": result["component_id"],
+        "candidate_sha": result["candidate_sha"],
+        "approved_by": result["approved_by"],
+        "approval_source": result["source"],
+        "promotion": "separate_root_governed_component_transaction",
     }
 
 
