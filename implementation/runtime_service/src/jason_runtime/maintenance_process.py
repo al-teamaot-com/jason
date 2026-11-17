@@ -64,6 +64,10 @@ def ticket_worker_runtime_settings(settings: RuntimeSettings) -> RuntimeSettings
         owner_uat_worker_enabled=False,
         drmm_recent_alert_reconciliation_enabled=False,
         windows_time_source_shadow_enabled=False,
+        # Hosted *conversation* requires dynamic conversation, which is
+        # intentionally disabled in the non-HTTP Ticket Core process.
+        # Hosted *semantics* stays enabled for governed ticket reasoning.
+        hosted_conversation_enabled=False,
         dynamic_conversation_enabled=False,
         conversation_experience_enabled=False,
     )

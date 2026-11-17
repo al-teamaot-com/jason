@@ -17,8 +17,12 @@ AUTHORITY = Path("/var/lib/jason/authority")
 SHARED = Path("/var/lib/jason/governed-ticket-shared")
 LEGACY = Path("/var/lib/jason/openclaw")
 
+PROVIDER_STATE = (
+    "/var/lib/jason/openclaw/dnsfilter-mcp",
+    "/var/lib/jason/openclaw/quickbooks-production",
+)
 STATE_MOUNTS = (
-    str(TICKET), str(AUTHORITY), str(SHARED),
+    str(TICKET), str(AUTHORITY), str(SHARED), *PROVIDER_STATE,
 )
 
 # Existing production source paths observed 2026-11-17; no provider password
@@ -26,6 +30,10 @@ STATE_MOUNTS = (
 # The separately governed root cutover must independently verify role scope,
 # realpath/UID/mode, and the current signed production-readback identifiers.
 CREDENTIAL_MOUNTS = (
+    ("/var/lib/jason/runtime-secrets/openbao/datto-rmm-read-approle/role-id",
+     "/run/jason-secrets/openbao/role_id"),
+    ("/var/lib/jason/runtime-secrets/openbao/datto-rmm-read-approle/secret-id",
+     "/run/jason-secrets/openbao/secret_id"),
     ("/run/jason-runtime-credentials/openbao/autotask/role_id",
      "/run/jason-secrets/openbao/autotask/role_id"),
     ("/run/jason-runtime-credentials/openbao/autotask/secret_id",
@@ -66,6 +74,24 @@ CREDENTIAL_MOUNTS = (
      "/run/jason-secrets/openbao/openai/role_id"),
     ("/opt/jason/bootstrap/secrets/openbao/openai-semantic-intent-approle/secret-id",
      "/run/jason-secrets/openbao/openai/secret_id"),
+    ("/var/lib/jason/runtime-secrets/openbao/darkwebid-approle/role-id",
+     "/run/jason-secrets/openbao/darkwebid/role_id"),
+    ("/var/lib/jason/runtime-secrets/openbao/darkwebid-approle/secret-id",
+     "/run/jason-secrets/openbao/darkwebid/secret_id"),
+    ("/var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle/role-id",
+     "/run/jason-secrets/openbao/dnsfilter/role_id"),
+    ("/var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle/secret-id",
+     "/run/jason-secrets/openbao/dnsfilter/secret_id"),
+    ("/run/jason-runtime-credentials/openbao/it-glue/role_id",
+     "/run/jason-secrets/openbao/it-glue/role_id"),
+    ("/run/jason-runtime-credentials/openbao/it-glue/secret_id",
+     "/run/jason-secrets/openbao/it-glue/secret_id"),
+    ("/var/lib/jason/runtime-secrets/openbao/quickbooks-production-oauth-client-approle/role-id",
+     "/run/jason-secrets/openbao/quickbooks-production/role_id"),
+    ("/var/lib/jason/runtime-secrets/openbao/quickbooks-production-oauth-client-approle/secret-id",
+     "/run/jason-secrets/openbao/quickbooks-production/secret_id"),
+    ("/var/lib/jason/openclaw/teams-proactive-token",
+     "/run/jason-secrets/teams-proactive-gateway/token"),
 )
 
 # These are the exact preprod durable stores opened by the reviewed ticket
@@ -81,7 +107,11 @@ STATE_PATHS = {
     "governed_execution_db": SHARED/"governed-execution.sqlite3",
     "resolution_memory_db": SHARED/"resolution-memory.sqlite3",
     "reflection_db": SHARED/"reflection.sqlite3",
+    # Hosted semantic intent writes usage before ticket-only early return.
+    "model_usage_db": SHARED/"model-usage.sqlite3",
     "microsoft_boundary_db": AUTHORITY/"client-boundaries.sqlite3",
+    "dnsfilter_mcp_oauth_db": Path(PROVIDER_STATE[0])/"oauth.sqlite3",
+    "quickbooks_oauth_db": Path(PROVIDER_STATE[1])/"oauth.sqlite3",
 }
 
 def expected_docker_mounts() -> tuple[dict[str,Any], ...]:

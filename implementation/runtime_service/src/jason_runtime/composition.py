@@ -1471,6 +1471,14 @@ class TicketWorkerComponentRuntime:
     maintenance: Any
 
 
+def _shadow_processes_targeted_wakes(settings: RuntimeSettings) -> bool:
+    """Only historical embedded hosting may leave targeted wakes to shadow."""
+    return (
+        settings.ticket_worker_hosting == "embedded"
+        and not settings.autonomy_worker_enabled
+    )
+
+
 def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile: str = "all",
                               health_probe=None, universal_approval_handler=None,
         teams_workflow_approval_handlers: Mapping[str, Any] | None = None
@@ -3049,7 +3057,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         interval_seconds=settings.autonomy_shadow_interval_seconds,
         failure_retry_seconds=settings.autonomy_shadow_failure_retry_seconds,
         targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
-        process_targeted_wakes=not settings.autonomy_worker_enabled,
+        process_targeted_wakes=_shadow_processes_targeted_wakes(settings),
     )
     autonomous_completion_notifier = build_autonomous_completion_notifier(
         enabled=autonomous_completion_notifications_enabled,
