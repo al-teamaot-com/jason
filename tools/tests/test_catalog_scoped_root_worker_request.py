@@ -4,6 +4,7 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 from tools import release_host_reconcile_worker as w
 from tools.catalog_scoped_promotion import ADMISSION_RECEIPT_SHA256
@@ -12,11 +13,15 @@ SHA='a'*40
 RELEASE='release-'+ 'b'*16
 
 @pytest.fixture(autouse=True)
-def isolated_operator_account(monkeypatch):
-    """GitHub hosted runners do not have Jason's real `al` Unix account."""
+def ci_only_owner_account(monkeypatch):
+    """Only on generic CI without the production al account, simulate UID."""
     original=w.pwd.getpwnam
-    monkeypatch.setattr(w.pwd,'getpwnam',lambda user:(
-        w.pwd.getpwuid(os.getuid()) if user=='al' else original(user)))
+    try:
+        original('al')
+    except KeyError:
+        monkeypatch.setattr(w.pwd,'getpwnam',lambda user:(
+            SimpleNamespace(pw_uid=os.getuid()) if user=='al'
+            else original(user)))
 
 
 def request(action='catalog_scope_stage'):
