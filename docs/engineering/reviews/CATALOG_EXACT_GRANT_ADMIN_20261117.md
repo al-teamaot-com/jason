@@ -3,9 +3,10 @@
 **2026-11-17 — source-only, not production-deployed, no authority grants issued.**
 **Risk:** high (authentication / authority administration). This candidate
 implements the Owner-approved *preparation* of a catalog-only path. It is not
-an authorization to merge without independent security review, promote a
-production image, modify an Owner global allowlist, grant live authority, or
-make an Autotask mutation.
+authorization to promote a production image, modify a global Owner
+allowlist, issue a live grant, or make an Autotask mutation. No separate human
+security-reviewer role exists in this project; the Owner requires existing
+protected-source CI, recorded security regression evidence and exact approvals.
 
 ## Problem and exact intent
 
@@ -92,9 +93,9 @@ They are **not** claimed as passing or as caused by this change. The two
 remaining Datto tests passed on both sources. Full provider-backed acceptance
 has not occurred.
 
-## Active source overlap with PR #2456 (reviewed)
+## Active source overlap with PRs #2456 and #2525 (reviewed)
 
-Integration coordination: #2456
+Integration coordination: #2456, #2525
 
 Draft #2456 implements a read-only Datto numeric device ID/UUID projection.
 Its `implementation/mcp_service/src/jason_mcp/server.py` patch is limited
@@ -107,11 +108,18 @@ either is later integrated. No Datto code or numeric-ID authorization was
 merged into this candidate. The overlap acknowledgment is **not** permission
 to merge #2456 or to deploy either PR.
 
-## Remaining independent gates
+PR #2525 adds a separate, source-only Compose component release action via
+its new import near line 104 and new tool near line 5324 of the same MCP
+server file; this catalog grant path changes only functions near 4360-4760.
+Diff hunks and authorization responsibilities are disjoint. Neither PR is
+implicitly merged or deployed by this coordination acknowledgement.
 
-1. Independent security review of the exact fixed tenant/object, existing
-   OAuth binding path, three modified MCP admin entrypoints, audit markers,
-   security test cases, and non-overlap with global Owner powers.
+## Remaining governed gates
+
+1. Source security validation through exact-commit SEC-007 and all protected
+   CI covering tenant/object binding, OAuth scope, three modified MCP tools,
+   audit markers, negative tests and no global Owner privilege expansion.
+   No nonexistent independent human security reviewer is required.
 2. Protected-source review and CI on exact candidate SHA. If merging source
    is separately approved, do so without treating the merge as deployment.
 3. Governed **catalog-only** release ancestry and native preproduction with
