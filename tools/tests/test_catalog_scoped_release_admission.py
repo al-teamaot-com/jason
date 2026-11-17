@@ -122,7 +122,7 @@ def fake_source(monkeypatch):
     monkeypatch.setattr(a, "git", fake_git)
     original_run=a.subprocess.run
     def fake_run(*args,**kwargs):
-        if args[0][0:4]==["git","-C",str(Path("/tmp/fixture")),"merge-base"]:
+        if args[0][0:6]==["git","-c","safe.directory=/tmp/fixture","-C",str(Path("/tmp/fixture")),"merge-base"]:
             return SimpleNamespace(returncode=0 if state["ancestor"] else 1)
         return original_run(*args,**kwargs)
     monkeypatch.setattr(a.subprocess,"run",fake_run)
@@ -364,7 +364,7 @@ def test_snapshot_baseline_drift_must_fail_even_when_feature_merged(fake_source,
     original_run=a.subprocess.run
     def baseline_missing(*args,**kw):
         if (isinstance(args[0],list) and len(args[0])>4
-                and args[0][3:5]==["merge-base","--is-ancestor"]
+                and args[0][5:7]==["merge-base","--is-ancestor"]
                 and args[0][-2:]==[manifest["rollback_sha"],manifest["snapshot_sha"]]):
             return SimpleNamespace(returncode=1)
         return original_run(*args,**kw)

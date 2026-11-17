@@ -5376,6 +5376,47 @@ def approve_release_candidate(
 
 
 @mcp.tool()
+def approve_catalog_scoped_runtime_mcp_release(
+    release_id: str,
+    candidate_sha: str,
+    manifest_sha256: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Entra-verified Owner signs ONE exact catalog-only dual-image release.
+
+    Returns approval metadata only; neither unfreezes nor promotes anything.
+    Host root independently rechecks public-key signature and full manifest.
+    """
+    try:
+        principal, organization = _release_approval_owner()
+        token = get_access_token()
+        if token is None:
+            raise PermissionError("CATALOG_SCOPED_OWNER_OAUTH_REQUIRED")
+        signer_path = os.getenv("JASON_OWNER_RELEASE_ED25519_KEY_PATH", "").strip()
+        if not signer_path.startswith("/"):
+            raise PermissionError("CATALOG_SCOPED_OWNER_SIGNER_REQUIRED")
+        from kernel.signed_owner_release import read_service_owner_signing_key
+        from jason_mcp.catalog_scoped_promotion_approval import (
+            queue_catalog_scoped_approval,
+        )
+        signer = read_service_owner_signing_key(Path(signer_path))
+        receipt = queue_catalog_scoped_approval(
+            state_root=Path("/var/lib/jason/authority/catalog-scoped-release"),
+            release_id=release_id,
+            candidate_sha=candidate_sha,
+            manifest_sha256=manifest_sha256,
+            approved_by=principal,
+            organization_id=organization,
+            verified_token_claims=token.claims or {},
+            service_signer=signer,
+            affirmative_decision=affirmative_decision,
+        )
+        return dict(receipt)
+    except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+
+@mcp.tool()
 def approve_independent_component_release(
     component_id: str,
     candidate_sha: str,
