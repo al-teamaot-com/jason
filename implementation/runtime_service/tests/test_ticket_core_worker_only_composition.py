@@ -105,3 +105,44 @@ def test_ticket_worker_disabled_profile_denied_without_maintenance_start(tmp_pat
     )
     with pytest.raises(RuntimeError,match="TICKET_CORE_WORKER_PROFILE_DISABLED"):
         build_runtime_application(settings,maintenance_profile="ticket_worker")
+
+
+def test_ticket_settings_forbid_unrelated_schedulers_but_preserve_providers(tmp_path):
+    configured=replace(
+        _settings(tmp_path),
+        autonomy_worker_enabled=True,
+        autonomy_shadow_enabled=True,
+        autonomy_review_enabled=True,
+        playbook_approval_ingress_enabled=True,
+        support_repair_autonomy_enabled=True,
+        universal_approval_mode="enforced",
+        universal_approval_worker_enabled=True,
+        release_mobile_approval_mode="owner_reviewed",
+        release_mobile_approval_worker_enabled=True,
+        owner_uat_mode="nonexecuting_test_only",
+        owner_uat_worker_enabled=True,
+        drmm_recent_alert_reconciliation_enabled=True,
+        windows_time_source_shadow_enabled=True,
+        dynamic_conversation_enabled=True,
+        conversation_experience_enabled=True,
+        backup_net_enabled=True,
+        dnsfilter_enabled=True,
+        hosted_conversation_enabled=True,
+    )
+    scoped=ticket_worker_runtime_settings(configured)
+    assert scoped.autonomy_worker_enabled is True
+    for flag in (
+        "autonomy_shadow_enabled","autonomy_review_enabled",
+        "playbook_approval_ingress_enabled","support_repair_autonomy_enabled",
+        "universal_approval_worker_enabled","release_mobile_approval_worker_enabled",
+        "owner_uat_worker_enabled","drmm_recent_alert_reconciliation_enabled",
+        "windows_time_source_shadow_enabled","dynamic_conversation_enabled",
+        "conversation_experience_enabled",
+    ):
+        assert getattr(scoped,flag) is False,flag
+    assert scoped.universal_approval_mode == "off"
+    assert scoped.release_mobile_approval_mode == "off"
+    assert scoped.owner_uat_mode == "off"
+    assert scoped.backup_net_enabled is True
+    assert scoped.dnsfilter_enabled is True
+    assert scoped.hosted_conversation_enabled is True
