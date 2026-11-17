@@ -1,0 +1,30 @@
+name: PMv4 Ticket Core Cutover Read-only Gate
+on:
+  pull_request:
+    paths:
+      - "tools/pmv4_ticket_core_cutover_preflight.py"
+      - "tests/test_pmv4_ticket_core_cutover_preflight.py"
+      - ".github/workflows/pmv4-ticket-core-cutover-gate.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cutover-baseline-no-production:
+    name: Stage C exact data and lock safety (no cutover)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify source-only evidence and fail-closed boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q pytest
+          PYTHONPATH=implementation:. python -B -m pytest -q tests/test_pmv4_ticket_core_cutover_preflight.py
+          test ! -e /var/lib/jason/openclaw/autonomy-operational-work.sqlite3
+          test ! -e /var/lib/jason/ticket-core/autonomy-operational-work.sqlite3
