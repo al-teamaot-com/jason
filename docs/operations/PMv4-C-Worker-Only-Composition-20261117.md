@@ -17,3 +17,13 @@ Before any production Stage C cutover, independently scoped state/credential pro
 ## Verification and release boundaries
 
 Existing Ticket Core lifecycle tests and all composition tests pass in nonproduction after the change; new tests prove no HTTP service/ingress, no Teams outbox sender, no auxiliary worker, and a bounded actual file-creation set. The live original embedded worker remains installed and healthy. A separate exact Owner release is necessary for any root data migration, change to HTTP worker mode, independent container credentials/mounts, or activation.
+
+## Concurrent implementation coordination
+
+Integration coordination: #2455 #2405 #2395
+
+- PR #2455's dormant IT Glue foundation adds imports and provider invokers upstream of this PR's branch; the worker-only early return retains the original governed registration path.
+- PR #2405 adds company classification registration and invoker upstream of the new branch; no overlapping edited lines.
+- PR #2395 changes V5 privileged-release approval policy and browser/Teams decision flows in settings and the later HTTP-only branch. This PR does not grant approval or alter these settings. A future merge must retain its independent authorization gates.
+
+Those PRs remain independent and are not implicitly approved by this source-only change. This review is the required concurrent-change record for source merge, not a production release.
