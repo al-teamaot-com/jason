@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "components": {
+    "financial-statements": {
+      "project": "jason-financial-statements",
+      "service": "financial-statements",
+      "network": "jason-core",
+      "role_id_path": "/var/lib/jason/runtime-secrets/openbao/microsoft-sharepoint-write-approle/role-id",
+      "secret_id_path": "/var/lib/jason/runtime-secrets/openbao/microsoft-sharepoint-write-approle/secret-id",
+      "state_dir": "/var/lib/jason/financial-statements"
+    }
+  }
+}
