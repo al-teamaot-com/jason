@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0",
+  "lifecycle": "source_only_unapproved_no_provider_mutation",
+  "scope": "aot_autotask_managed_services_catalog",
+  "purpose": "First inactive zero-price Service create/readback to verify Jason's API service execution identity, exact Owner authorization, and immutable audit before any AOT-MSA commercial catalog records.",
+  "capability": "service.service.create",
+  "provider": "autotask",
+  "execution_identity": "Jason dedicated autotask.write API-only resource; never requester impersonation",
+  "trusted_requester": "authenticated AOT human Owner through separately verified Entra session",
+  "human_approval_required": true,
+  "production_catalog_release_verified": false,
+  "exact_grant_verified": false,
+  "exact_action_approval_recorded": false,
+  "source_evidence": {
+    "protected_catalog_v2_main_sha": "1b804ea6cff8efedc4f9b29b3dddaf45e86e8f82",
+    "read_only_admission_sha256": "add8327f9cb6b0cdc9cb9a6006d8038ec71ed2b914e3e1fd6a144f7a55392272",
+    "service_name_absent_correlation_id": "corr_mcp_0717b158274145fd997609ea342945cc",
+    "billing_code_read_correlation_id": "corr_mcp_0edb0c35bc8f4856a75706177a990f06"
+  },
+  "exact_request": {
+    "capability": "service.service.create",
+    "arguments": {
+      "payload": {
+        "billingCodeID": 29682901,
+        "name": "AOT-MSA – Catalog Write Acceptance",
+        "periodType": 2,
+        "unitPrice": 0,
+        "unitCost": 0,
+        "description": "INTERNAL QA ONLY. Inactive nonbillable verification of Jason-owned Autotask catalog API writes. Never attach to customer contracts.",
+        "invoiceDescription": "INTERNAL QA ONLY - DO NOT BILL",
+        "isActive": false,
+        "sku": "AOT-MSA-CATALOG-TEST-001"
+      }
+    }
+  },
+  "preconditions": [
+    "Fresh governed search confirms no exact name or SKU duplicate",
+    "The scoped native root installer, rollback watchdog, runtime and MCP images are installed under a separately authenticated exact production release approval",
+    "Live runtime catalog authentication mode is jason_managed and MCP self-only catalog grant profile is active",
+    "Owner's exact service.service.create EXECUTE grant is independently verified with approval_required=true",
+    "A fresh exact-action Owner approval binds this entire payload and an authenticated requester",
+    "Autotask Service and billing-code native metadata remain compatible; any changed field requires a newly approved plan"
+  ],
+  "expected_postconditions": [
+    "One new Autotask Service ID is returned, then the same ID is read back via governed service.service.read",
+    "All intended fields match; isActive is false; unitPrice and unitCost are zero",
+    "No ImpersonationResourceId in provider request; execution credential is Jason's dedicated API account",
+    "Immutable audit binds the initiating authenticated human, exact payload, decision, provider operation and readback evidence",
+    "No contract, customer, invoice, posting, service bundle membership, notification or price is created or changed",
+    "A duplicate/denial/failure causes no second creation attempt; verify provider state before retrying"
+  ],
+  "failure_policy": "Fail closed. Do not auto-delete or activate the test Service. If created with a discrepancy, preserve evidence and require separately approved correction.",
+  "authorized_to_execute": false
+}
