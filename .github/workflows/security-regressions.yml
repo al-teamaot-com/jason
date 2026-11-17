@@ -46,6 +46,7 @@ jobs:
             implementation/connectors/tests/test_autotask_ticket_attachments.py \
             implementation/mcp_service/tests/test_contract_client_context.py \
             implementation/mcp_service/tests/test_authority_grant_admin.py \
+            implementation/mcp_service/tests/test_autotask_catalog_grant_admin.py \
             implementation/orchestrator/tests/test_governed_execution_replay.py \
             implementation/orchestrator/tests/test_approval_continuation_guard.py \
             implementation/tests/test_approval_continuation.py \
@@ -76,6 +77,7 @@ jobs:
           python -m pytest -q \
             implementation/runtime_service/tests/test_autotask_internal_note.py \
             implementation/runtime_service/tests/test_autotask_procurement_runtime.py \
+            implementation/runtime_service/tests/test_autotask_catalog_service_identity.py \
             implementation/runtime_service/tests/test_autotask_ticket_create.py \
             implementation/runtime_service/tests/test_autotask_ticket_update.py \
             implementation/runtime_service/tests/test_autotask_ticket_attachment_runtime.py \

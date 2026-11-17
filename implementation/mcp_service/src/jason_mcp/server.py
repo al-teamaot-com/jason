@@ -4367,6 +4367,32 @@ def _authority_admin_owner() -> tuple[str, str]:
     return principal, organization
 
 
+
+def _authority_admin_or_catalog_self(app: Any) -> tuple[str, str, bool]:
+    """Existing Owner admin, or separately enabled four-capability self grant.
+
+    The fallback never changes the shared Owner allowlist and cannot serve
+    unrelated admin actions. It reuses the already authenticated Entra binder.
+    """
+    try:
+        actor, organization = _authority_admin_owner()
+        return actor, organization, False
+    except PermissionError as exc:
+        if str(exc) != "AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED":
+            raise
+    from jason_mcp.catalog_grant_admin import verify_catalog_grant_admin_actor
+    principal, organization, assurance, client_id = _authenticated_write_identity()
+    token = get_access_token()
+    actor, organization = verify_catalog_grant_admin_actor(
+        principal=principal, organization=organization,
+        assurance=assurance, client_id=client_id,
+        claims=(getattr(token, "claims", None) or {}) if token is not None else {},
+        admin_profile=os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE", "").strip(),
+    )
+    _authority_grant_subject(app, actor, organization)
+    return actor, organization, True
+
+
 def _exact_authority_capability(app: Any, capability: str) -> str:
     requested = str(capability or "").strip()
     if not requested or any(token in requested for token in ("*", "?", "[", "]")):
@@ -4413,7 +4439,7 @@ def _authority_grant_id(*, subject: str, capability: str, organization: str, cli
     return f"grant_exact_{digest}"
 
 
-def _authority_grant_audit(*, app: Any, event_type: str, admin_principal: str, organization: str, capability: str, grant_id: str) -> None:
+def _authority_grant_audit(*, app: Any, event_type: str, admin_principal: str, organization: str, capability: str, grant_id: str, catalog_scope: bool = False) -> None:
     audit = app.identity_authority.audit
     if audit is None:
         raise RuntimeError("AUTHORITY_GRANT_AUDIT_UNAVAILABLE")
@@ -4424,7 +4450,9 @@ def _authority_grant_audit(*, app: Any, event_type: str, admin_principal: str, o
         organization_id=organization,
         capability=capability,
         outcome="succeeded",
-        reason_codes=("EXACT_GRANT_ADMIN", f"GRANT_ID:{grant_id}"),
+        reason_codes=("EXACT_GRANT_ADMIN",) + (
+            ("CATALOG_SELF_GRANT_ADMIN",) if catalog_scope else ()
+        ) + (f"GRANT_ID:{grant_id}",),
     )
 
 def _provider_health_canary_grant_ids(
@@ -4610,10 +4638,15 @@ def revoke_provider_health_canaries() -> dict[str, Any]:
 def list_exact_authority_grants(subject_id: str = "") -> dict[str, Any]:
     """Owner-only: list exact Jason authority grants for one active AOT subject."""
     try:
-        admin, organization = _authority_admin_owner()
         app = _runtime()
+        admin, organization, catalog_only = _authority_admin_or_catalog_self(app)
         subject = _authority_grant_subject(app, subject_id or admin, organization)
+        if catalog_only and subject != admin:
+            raise PermissionError("CATALOG_GRANT_ADMIN_SCOPE_DENIED")
         grants = app.identity_authority.grants.list_for_subject(subject)
+        if catalog_only:
+            from jason_mcp.catalog_grant_admin import catalog_visible_grant
+            grants = [grant for grant in grants if catalog_visible_grant(actor=admin, grant=grant)]
     except (PermissionError, ValueError, RuntimeError) as exc:
         return {"status":"rejected","error_code":str(exc)}
     return {
@@ -4639,8 +4672,17 @@ def grant_exact_authority(
 ) -> dict[str, Any]:
     """Owner-only: add one exact authority grant; execute grants always require approval."""
     try:
-        admin, organization = _authority_admin_owner()
         app = _runtime()
+        admin, organization, catalog_only = _authority_admin_or_catalog_self(app)
+        # Narrow fallback validates raw request before resolving another subject
+        # or an unrelated capability. Global Owner behavior is unchanged.
+        if catalog_only:
+            from jason_mcp.catalog_grant_admin import require_catalog_grant_scope
+            require_catalog_grant_scope(
+                actor=admin, subject=subject_id, capability=capability,
+                permission=str(permission or "").strip().casefold(),
+                approval_required=approval_required, client_id=client_id,
+            )
         subject = _authority_grant_subject(app, subject_id, organization)
         exact_capability = _exact_authority_capability(app, capability)
         normalized_client = None if client_id is None or not str(client_id).strip() else str(client_id).strip()
@@ -4668,11 +4710,13 @@ def grant_exact_authority(
             raise ValueError("AUTHORITY_GRANT_ID_CONFLICT")
         _authority_grant_audit(
             app=app,event_type="authority.grant.create.requested",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=exact_capability,grant_id=grant_id,
         )
         repo.put(candidate)
         _authority_grant_audit(
             app=app,event_type="authority.grant.created",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=exact_capability,grant_id=grant_id,
         )
     except (PermissionError, ValueError, RuntimeError) as exc:
@@ -4688,8 +4732,8 @@ def grant_exact_authority(
 def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
     """Owner-only: revoke one exact Jason authority grant by grant ID."""
     try:
-        admin, organization = _authority_admin_owner()
         app = _runtime()
+        admin, organization, catalog_only = _authority_admin_or_catalog_self(app)
         requested = str(grant_id or "").strip()
         if not requested:
             raise ValueError("AUTHORITY_GRANT_ID_REQUIRED")
@@ -4697,10 +4741,15 @@ def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
         current = repo.get(requested)
         if current is None:
             raise ValueError("AUTHORITY_GRANT_NOT_FOUND")
+        if catalog_only:
+            from jason_mcp.catalog_grant_admin import catalog_visible_grant
+            if not catalog_visible_grant(actor=admin, grant=current):
+                raise PermissionError("CATALOG_GRANT_ADMIN_SCOPE_DENIED")
         if current.organization_id != organization:
             raise PermissionError("AUTHORITY_GRANT_ORGANIZATION_MISMATCH")
         _authority_grant_audit(
             app=app,event_type="authority.grant.revoke.requested",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=current.capability,grant_id=requested,
         )
         revoked = repo.revoke(requested)
@@ -4708,6 +4757,7 @@ def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
             raise ValueError("AUTHORITY_GRANT_NOT_FOUND")
         _authority_grant_audit(
             app=app,event_type="authority.grant.revoked",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=revoked.capability,grant_id=requested,
         )
     except (PermissionError, ValueError, RuntimeError) as exc:
