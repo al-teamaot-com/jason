@@ -317,3 +317,54 @@ def test_disposable_root_timeout_fails_closed_and_rolls_back(
     assert result["full_integrity_pass"] is False
     assert removed and released == [5]
     assert expired.exists()
+
+
+def test_root_verifies_actual_ephemeral_owner_signature_and_exact_scope(
+        tmp_path, monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    import importlib.util
+    pinned = Path("/usr/local/lib/jason/owner_signed_release.py")
+    spec = importlib.util.spec_from_file_location("test_pinned_owner_signature", pinned)
+    signer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(signer)
+    key = Ed25519PrivateKey.generate()
+    sha = "a" * 40
+    manifest = {
+        "source_sha": sha, "rollback_sha": root.LKG,
+        "scope_sha256": "b" * 64, "freeze_sha256": root.FREEZE_SHA,
+    }
+    at = datetime.now(timezone.utc)
+    oid, principal = sorted(signer.EXACT_OWNER_OAUTH_SUBJECTS.items())[0]
+    signature = signer.issue_exact_owner_release(
+        approval_id="owner-mcp-" + "f" * 32,
+        release_id="release-" + sha[:16], candidate_sha=sha,
+        rollback_sha=root.LKG, scope_sha256=manifest["scope_sha256"],
+        manifest_sha256=root.digest(root.canonical(manifest)),
+        freeze_sha256=root.FREEZE_SHA,
+        verified_tenant_id=signer.TID, verified_owner_oid=oid,
+        verified_principal=principal, verified_organization_id="aot",
+        confirmed_decision="approve", at=at, private_key=key)
+    signed = {
+        "schema_version": "1.0", "action": root.ACTION,
+        "manifest_sha256": root.digest(root.canonical(manifest)),
+        "signed_owner_proof": signature,
+    }
+    packet = tmp_path / "signed"
+    packet.mkdir()
+    proof_file = packet / "owner-proof.json"
+    proof_file.write_text(json.dumps(signed))
+    proof_file.chmod(0o400)
+    original = signer.read_pinned_root_owner_public_key
+    monkeypatch.setattr(signer, "read_pinned_root_owner_public_key",
+                        lambda *a, **k: key.public_key())
+    monkeypatch.setattr(root, "read_pinned_owner_module", lambda: signer)
+    assert root.verify_owner(packet, manifest) == "owner-mcp-" + "f" * 32
+    tampered = dict(manifest)
+    tampered["scope_sha256"] = "c" * 64
+    with pytest.raises(signer.OwnerReleaseProofDenied,
+                       match="OWNER_RELEASE_TRANSACTION_BINDING_MISMATCH"):
+        signed["manifest_sha256"] = root.digest(root.canonical(tampered))
+        proof_file.chmod(0o600)
+        proof_file.write_text(json.dumps(signed))
+        proof_file.chmod(0o400)
+        root.verify_owner(packet, tampered)
