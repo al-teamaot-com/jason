@@ -7,7 +7,23 @@
       "network": "jason-core",
       "role_id_path": "/var/lib/jason/runtime-secrets/openbao/microsoft-sharepoint-write-approle/role-id",
       "secret_id_path": "/var/lib/jason/runtime-secrets/openbao/microsoft-sharepoint-write-approle/secret-id",
-      "state_dir": "/var/lib/jason/financial-statements"
+      "state_dir": "/var/lib/jason/financial-statements",
+      "environment_variables": {
+        "image": "JASON_FINANCIAL_IMAGE",
+        "config": "JASON_FINANCIAL_CONFIG",
+        "boundary": "JASON_FINANCIAL_BOUNDARY",
+        "role_id": "JASON_FINANCIAL_ROLE_ID",
+        "secret_id": "JASON_FINANCIAL_SECRET_ID",
+        "state": "JASON_FINANCIAL_STATE",
+        "network": "JASON_FINANCIAL_NETWORK"
+      },
+      "volume_targets": {
+        "config": "/etc/jason/financial-statements/config.json",
+        "boundary": "/etc/jason/financial-statements/boundary.sqlite3",
+        "role_id": "/run/jason-financial-secrets/role_id",
+        "secret_id": "/run/jason-financial-secrets/secret_id",
+        "state": "/var/lib/jason/financial-statements"
+      }
     }
   }
 }

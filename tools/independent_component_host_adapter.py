@@ -33,12 +33,16 @@ CI_EVIDENCE = Path("/var/lib/jason/independent-component-release/control/protect
 ROLE_ROOT = Path("/var/lib/jason/runtime-secrets/openbao")
 IMAGE_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 SHA = re.compile(r"^[a-f0-9]{40}$")
-FINANCIAL_PATHS = {
-    "JASON_FINANCIAL_IMAGE", "JASON_FINANCIAL_CONFIG",
-    "JASON_FINANCIAL_BOUNDARY", "JASON_FINANCIAL_ROLE_ID",
-    "JASON_FINANCIAL_SECRET_ID", "JASON_FINANCIAL_STATE",
-    "JASON_FINANCIAL_NETWORK",
+ENV_SOURCES = {
+    "image", "config", "boundary", "role_id", "secret_id", "state", "network",
 }
+BIND_SOURCES = {"config", "boundary", "role_id", "secret_id", "state"}
+ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{3,63}$")
+SLUG = re.compile(r"^[a-z][a-z0-9-]{2,63}$")
+PROTECTED_PATHS = (
+    "/var/lib/jason/authority", "/var/lib/jason/openclaw",
+    "/opt/jason", "/run/docker", "/var/run/docker",
+)
 
 
 class IndependentComponentHost:
@@ -81,30 +85,79 @@ class IndependentComponentHost:
         components = p["components"]
         if not isinstance(components, dict) or not components:
             raise ComponentReleaseDenied("COMPONENT_HOST_PROFILES_EMPTY")
+        for field in ("project", "state_dir", "role_id_path", "secret_id_path"):
+            values = [
+                entry.get(field) if isinstance(entry, dict) else None
+                for entry in components.values()
+            ]
+            if any(not isinstance(value, str) or not value for value in values) or len(set(values)) != len(values):
+                raise ComponentReleaseDenied("COMPONENT_HOST_PROFILE_ISOLATION_CONFLICT")
         return components
 
     def _profile(self, component_id: str) -> dict[str, Any]:
         p = self._profiles.get(component_id)
         if not isinstance(p, dict) or set(p) != {
             "project", "service", "network", "role_id_path",
-            "secret_id_path", "state_dir",
+            "secret_id_path", "state_dir", "environment_variables",
+            "volume_targets",
         }:
             raise ComponentReleaseDenied("COMPONENT_HOST_PROFILE_NOT_APPROVED")
-        if component_id != "financial-statements":
-            # Other components need a separately reviewed adapter profile.
-            raise ComponentReleaseDenied("COMPONENT_HOST_PROFILE_NOT_YET_SUPPORTED")
+        if not isinstance(component_id, str) or SLUG.fullmatch(component_id) is None:
+            raise ComponentReleaseDenied("COMPONENT_HOST_PROFILE_ID_INVALID")
         if (
-            p["project"] != "jason-financial-statements"
-            or p["service"] != "financial-statements"
+            p["project"] != "jason-" + component_id
+            or p["project"] in PROTECTED
+            or p["project"] in ("jason-mcp", "jason-pmv4-shadow")
+            or p["service"] != component_id
             or p["network"] != "jason-core"
-            or p["state_dir"] != "/var/lib/jason/financial-statements"
-            or p["role_id_path"] != str(ROLE_ROOT / "microsoft-sharepoint-write-approle/role-id")
-            or p["secret_id_path"] != str(ROLE_ROOT / "microsoft-sharepoint-write-approle/secret-id")
+            or p["state_dir"] != "/var/lib/jason/" + component_id
         ):
             raise ComponentReleaseDenied("COMPONENT_HOST_PROFILE_SCOPE_INVALID")
+        env_names = p["environment_variables"]
+        mounts = p["volume_targets"]
+        if (
+            not isinstance(env_names, dict) or set(env_names) != ENV_SOURCES
+            or not all(
+                isinstance(name, str) and name.startswith("JASON_")
+                and ENV_NAME.fullmatch(name) is not None
+                for name in env_names.values()
+            )
+            or len(set(env_names.values())) != len(ENV_SOURCES)
+            or not isinstance(mounts, dict) or set(mounts) != BIND_SOURCES
+        ):
+            raise ComponentReleaseDenied("COMPONENT_HOST_PROFILE_ENV_INVALID")
+        expected_prefix = "/etc/jason/" + component_id + "/"
+        for kind in BIND_SOURCES:
+            target = mounts[kind]
+            if (
+                not isinstance(target, str) or not target.startswith("/")
+                or ".." in Path(target).parts
+                or any(target.startswith(bad) for bad in PROTECTED_PATHS)
+            ):
+                raise ComponentReleaseDenied("COMPONENT_HOST_MOUNT_TARGET_INVALID")
+        if (
+            not mounts["config"].startswith(expected_prefix)
+            or not mounts["boundary"].startswith(expected_prefix)
+            or not mounts["role_id"].startswith("/run/")
+            or not mounts["secret_id"].startswith("/run/")
+            or mounts["state"] != p["state_dir"]
+            or len(set(mounts.values())) != len(BIND_SOURCES)
+        ):
+            raise ComponentReleaseDenied("COMPONENT_HOST_MOUNT_TARGET_INVALID")
+        role = Path(p["role_id_path"])
+        secret = Path(p["secret_id_path"])
+        if (
+            str(role) != str(role.absolute()) or ".." in role.parts
+            or role.parent != secret.parent
+            or not str(role).startswith(str(ROLE_ROOT) + "/")
+            or role.name != "role-id" or secret.name != "secret-id"
+            or not role.parent.name.endswith("-approle")
+        ):
+            raise ComponentReleaseDenied("COMPONENT_HOST_CREDENTIAL_ISOLATION_INVALID")
         if self.production:
-            for key in ("role_id_path", "secret_id_path"):
-                path = Path(p[key])
+            if role.parent.is_symlink() or not role.parent.is_dir():
+                raise ComponentReleaseDenied("COMPONENT_HOST_SECRET_DIRECTORY_UNTRUSTED")
+            for path in (role, secret):
                 if path.is_symlink() or not path.is_file():
                     raise ComponentReleaseDenied("COMPONENT_HOST_SECRET_FILE_UNAVAILABLE")
                 meta = path.lstat()
@@ -136,16 +189,20 @@ class IndependentComponentHost:
             raise ComponentReleaseDenied("COMPONENT_HOST_PROJECT_NOT_APPROVED")
         if not IMAGE_RE.fullmatch(str(m["image_digest"])):
             raise ComponentReleaseDenied("COMPONENT_HOST_IMAGE_NOT_IMMUTABLE")
-        values = {
-            "JASON_FINANCIAL_IMAGE": str(m["image_digest"]),
-            "JASON_FINANCIAL_CONFIG": str(bundle / "config.json"),
-            "JASON_FINANCIAL_BOUNDARY": str(bundle / "boundary.sqlite3"),
-            "JASON_FINANCIAL_ROLE_ID": str(p["role_id_path"]),
-            "JASON_FINANCIAL_SECRET_ID": str(p["secret_id_path"]),
-            "JASON_FINANCIAL_STATE": str(p["state_dir"]),
-            "JASON_FINANCIAL_NETWORK": str(p["network"]),
+        sources = {
+            "image": str(m["image_digest"]),
+            "config": str(bundle / "config.json"),
+            "boundary": str(bundle / "boundary.sqlite3"),
+            "role_id": str(p["role_id_path"]),
+            "secret_id": str(p["secret_id_path"]),
+            "state": str(p["state_dir"]),
+            "network": str(p["network"]),
         }
-        if set(values) != FINANCIAL_PATHS:
+        values = {
+            p["environment_variables"][kind]: value
+            for kind, value in sources.items()
+        }
+        if len(values) != len(ENV_SOURCES):
             raise ComponentReleaseDenied("COMPONENT_HOST_ENV_SCOPE_INVALID")
         return {"PATH": "/usr/bin:/bin", **values}
 
@@ -174,12 +231,16 @@ class IndependentComponentHost:
                 raise ValueError("unsafe resolved Compose")
             volumes = service["volumes"]
             profile = self._profile(str(m["component_id"]))
+            sources = {
+                "config": str(bundle / "config.json"),
+                "boundary": str(bundle / "boundary.sqlite3"),
+                "role_id": str(profile["role_id_path"]),
+                "secret_id": str(profile["secret_id_path"]),
+                "state": str(profile["state_dir"]),
+            }
             expected = {
-                "/etc/jason/financial-statements/config.json": (str(bundle / "config.json"), True),
-                "/etc/jason/financial-statements/boundary.sqlite3": (str(bundle / "boundary.sqlite3"), True),
-                "/run/jason-financial-secrets/role_id": (str(profile["role_id_path"]), True),
-                "/run/jason-financial-secrets/secret_id": (str(profile["secret_id_path"]), True),
-                "/var/lib/jason/financial-statements": (str(profile["state_dir"]), False),
+                profile["volume_targets"][kind]: (path, kind != "state")
+                for kind, path in sources.items()
             }
             actual = {
                 v["target"]: (v["source"], v.get("read_only", False))
@@ -190,7 +251,7 @@ class IndependentComponentHost:
                 raise ValueError("resolved mount mismatch")
             network = config.get("networks") or {}
             if len(network) != 1 or not any(
-                x.get("external") is True and x.get("name") == "jason-core"
+                x.get("external") is True and x.get("name") == profile["network"]
                 for x in network.values()
             ):
                 raise ValueError("unexpected network")

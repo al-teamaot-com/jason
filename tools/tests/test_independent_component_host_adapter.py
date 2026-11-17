@@ -22,6 +22,22 @@ def policy(tmp_path):
                 "role_id_path": "/var/lib/jason/runtime-secrets/openbao/microsoft-sharepoint-write-approle/role-id",
                 "secret_id_path": "/var/lib/jason/runtime-secrets/openbao/microsoft-sharepoint-write-approle/secret-id",
                 "state_dir": "/var/lib/jason/financial-statements",
+                "environment_variables": {
+                    "image": "JASON_FINANCIAL_IMAGE",
+                    "config": "JASON_FINANCIAL_CONFIG",
+                    "boundary": "JASON_FINANCIAL_BOUNDARY",
+                    "role_id": "JASON_FINANCIAL_ROLE_ID",
+                    "secret_id": "JASON_FINANCIAL_SECRET_ID",
+                    "state": "JASON_FINANCIAL_STATE",
+                    "network": "JASON_FINANCIAL_NETWORK",
+                },
+                "volume_targets": {
+                    "config": "/etc/jason/financial-statements/config.json",
+                    "boundary": "/etc/jason/financial-statements/boundary.sqlite3",
+                    "role_id": "/run/jason-financial-secrets/role_id",
+                    "secret_id": "/run/jason-financial-secrets/secret_id",
+                    "state": "/var/lib/jason/financial-statements",
+                },
             },
         },
     }
@@ -189,3 +205,62 @@ def test_root_entrypoint_denies_source_worktree_invocation_without_reading_produ
         main(["promote", "--candidate-sha", "a" * 40])
     with pytest.raises(ComponentReleaseDenied, match="ROOT_ENTRYPOINT_NOT_INSTALLED"):
         main(["recover-interrupted-rollback"])
+
+
+def test_second_component_can_be_added_by_governed_host_profile_without_code_change(tmp_path):
+    from copy import deepcopy
+    p = policy(tmp_path)
+    data = json.loads(p.read_text())
+    second = deepcopy(data["components"]["financial-statements"])
+    second["project"] = "jason-second-component"
+    second["service"] = "second-component"
+    second["state_dir"] = "/var/lib/jason/second-component"
+    second["role_id_path"] = "/var/lib/jason/runtime-secrets/openbao/second-component-approle/role-id"
+    second["secret_id_path"] = "/var/lib/jason/runtime-secrets/openbao/second-component-approle/secret-id"
+    second["environment_variables"] = {
+        kind: "JASON_SECOND_" + kind.upper()
+        for kind in second["environment_variables"]
+    }
+    second["volume_targets"] = {
+        "config": "/etc/jason/second-component/config.json",
+        "boundary": "/etc/jason/second-component/boundary.sqlite3",
+        "role_id": "/run/jason-second-secrets/role_id",
+        "secret_id": "/run/jason-second-secrets/secret_id",
+        "state": "/var/lib/jason/second-component",
+    }
+    data["components"]["second-component"] = second
+    p.write_text(json.dumps(data))
+    adapter = IndependentComponentHost(
+        production=False, runner=FakeRunner(), host_guard=Guard(),
+        profile_path=p, ci_path=tmp_path / "ci.json",
+    )
+    image = "sha256:" + "a" * 64
+    prepared = adapter._env(
+        tmp_path,
+        {
+            "component_id": "second-component",
+            "compose_project": "jason-second-component",
+            "compose_service": "second-component",
+            "image_digest": image,
+        },
+    )
+    assert prepared["JASON_SECOND_IMAGE"] == image
+    assert prepared["JASON_SECOND_STATE"] == "/var/lib/jason/second-component"
+    assert "JASON_FINANCIAL_ROLE_ID" not in prepared
+
+
+def test_profile_rejects_shared_credential_directory(tmp_path):
+    from copy import deepcopy
+    p = policy(tmp_path)
+    data = json.loads(p.read_text())
+    second = deepcopy(data["components"]["financial-statements"])
+    second["project"] = "jason-second-component"
+    second["service"] = "second-component"
+    second["state_dir"] = "/var/lib/jason/second-component"
+    data["components"]["second-component"] = second
+    p.write_text(json.dumps(data))
+    with pytest.raises(ComponentReleaseDenied, match="PROFILE_ISOLATION_CONFLICT"):
+        IndependentComponentHost(
+            production=False, runner=FakeRunner(), host_guard=Guard(),
+            profile_path=p, ci_path=tmp_path / "ci.json",
+        )
