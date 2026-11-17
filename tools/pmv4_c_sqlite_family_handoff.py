@@ -20,7 +20,7 @@ from typing import Callable, Iterable
 ALLOWED_SHARED = (
     "teams-identity-bindings.sqlite3", "orchestration-events.sqlite3",
     "governed-execution.sqlite3", "reflection.sqlite3",
-    "resolution-memory.sqlite3",
+    "resolution-memory.sqlite3", "model-usage.sqlite3",
 )
 ALLOWED_TICKET = (
     "autonomy-operational-work.sqlite3", "playbook-autonomy.sqlite3",

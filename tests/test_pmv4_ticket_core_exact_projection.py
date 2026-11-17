@@ -14,17 +14,16 @@ def test_exact_reviewed_state_and_individual_credentials_only():
     result=gate.validate_exact_mounts(mounts)
     assert result=={
         "mount_shape":"reviewed_exact_v1",
-        "state_mount_count":3,
-        "credential_mount_count":20,
+        "state_mount_count":5,
+        "credential_mount_count":31,
         "provider_requests_executed":False,
         "root_owner_release_verified":False,
     }
-    assert all(not m["Source"].startswith("/var/lib/jason/openclaw")
-               for m in mounts)
-    assert all(not m["Destination"].startswith("/var/lib/jason/openclaw")
-               for m in mounts)
-    assert all(m["RW"] is False for m in mounts[3:])
-    assert set(m["Destination"] for m in mounts[3:]) == set(
+    assert all(m["Source"] != "/var/lib/jason/openclaw" for m in mounts)
+    assert all(m["Destination"] != "/var/lib/jason/openclaw" for m in mounts)
+    assert set(gate.PROVIDER_STATE) <= {m["Source"] for m in mounts}
+    assert all(m["RW"] is False for m in mounts[len(gate.STATE_MOUNTS):])
+    assert set(m["Destination"] for m in mounts[len(gate.STATE_MOUNTS):]) == set(
         t for _,t in gate.CREDENTIAL_MOUNTS)
 
 
@@ -33,15 +32,15 @@ def test_exact_reviewed_state_and_individual_credentials_only():
     lambda m:m[0].update(Source="/var/lib/jason/openclaw"),
     lambda m:m[1].update(Source="/tmp/authority"),
     lambda m:m[2].update(Destination="/var/lib/jason/other"),
-    lambda m:m[3].update(RW=True),
-    lambda m:m[3].update(Source="/etc/shadow"),
-    lambda m:m[3].update(Destination="/run/jason-secrets/openbao/other"),
-    lambda m:m[3].update(Type="volume"),
-    lambda m:m[3].update(Source="/run/../jason-runtime-credentials/openbao/autotask/role_id"),
+    lambda m:m[len(gate.STATE_MOUNTS)].update(RW=True),
+    lambda m:m[len(gate.STATE_MOUNTS)].update(Source="/etc/shadow"),
+    lambda m:m[len(gate.STATE_MOUNTS)].update(Destination="/run/jason-secrets/openbao/other"),
+    lambda m:m[len(gate.STATE_MOUNTS)].update(Type="volume"),
+    lambda m:m[len(gate.STATE_MOUNTS)].update(Source="/run/../jason-runtime-credentials/openbao/autotask/role_id"),
     lambda m:m.append({"Type":"bind","Source":"/var/run/docker.sock",
                        "Destination":"/var/run/docker.sock","RW":False}),
-    lambda m:m.append(dict(m[3])),
-    lambda m:m.pop(3),
+    lambda m:m.append(dict(m[len(gate.STATE_MOUNTS)])),
+    lambda m:m.pop(len(gate.STATE_MOUNTS)),
 ])
 def test_foreign_mount_or_widened_credential_denied(change):
     mounts=[dict(x) for x in gate.expected_docker_mounts()]
@@ -89,6 +88,8 @@ def test_exact_state_paths_or_explicit_effective_default_required():
     ("reflection_db",Path("/var/lib/jason/openclaw/reflection.sqlite3")),
     ("resolution_memory_db",Path("/var/lib/jason/openclaw/resolution-memory.sqlite3")),
     ("microsoft_boundary_db",Path("/tmp/wrong-client-boundaries.sqlite3")),
+    ("dnsfilter_mcp_oauth_db",Path("/var/lib/jason/openclaw/dnsfilter-mcp/other.sqlite3")),
+    ("quickbooks_oauth_db",Path("/var/lib/jason/openclaw/quickbooks/oauth.sqlite3")),
 ])
 def test_shared_broad_or_wrong_state_path_denied(field,value):
     with pytest.raises(gate.ProjectionDenied,match="CORE_EXACT_"):
