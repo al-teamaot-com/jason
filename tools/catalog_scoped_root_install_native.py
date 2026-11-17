@@ -738,6 +738,9 @@ class NativeRootInstaller:
             try:active=run('systemctl','is-active',timer,timeout=20)
             except NativeBootstrapDenied:active='inactive'
             if active=='active':fail('CATALOG_RECOVERY_TIMER_STILL_ACTIVE')
+            try:enabled=run('systemctl','is-enabled',timer,timeout=20)
+            except NativeBootstrapDenied:enabled='disabled'
+            if enabled=='enabled':fail('CATALOG_RECOVERY_TIMER_STILL_ENABLED')
         for relative in ROOT_RECOVERY_UNITS:
             dest=Path('/etc/systemd/system')/Path(relative).name
             if dest.exists() or dest.is_symlink():
@@ -892,6 +895,8 @@ class NativeRootInstaller:
             return {'status':'already_installed_no_recovery_required',
                     'source_sha':self.plan['source_sha'],
                     'promotion_approved':False,'provider_write_approved':False}
+        if journal.get('status')=='catalog_root_rollback_unverified':
+            fail('PREVIOUS_ROOT_ROLLBACK_UNVERIFIED_REQUIRES_HUMAN')
         if journal.get('status') in {
                 'catalog_root_rolled_back_verified',
                 'exact_old_root_worker_and_freeze_rollback_verified',

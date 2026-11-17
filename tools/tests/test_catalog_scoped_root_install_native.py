@@ -281,7 +281,6 @@ def test_root_bootstrap_watchdog_precedes_first_worker_mutation(plan,monkeypatch
     monkeypatch.setattr(n,'BOOTSTRAP',root)
     monkeypatch.setattr(n,'secure_blob',lambda path,**kw:path.read_bytes())
     monkeypatch.setattr(n,'atomic_root_file',lambda dest,raw,**kw:events.append(('root_file',dest.name)))
-    monkeypatch.setattr(n.Path,'exists',lambda self:False if self.parent==Path('/etc/systemd/system') else Path.__dict__['exists'](self)) if False else None
     monkeypatch.setattr(host,'_audit',lambda state:events.append(('audit',state)))
     def run(*args,**kw):
         events.append(('systemctl',args))
