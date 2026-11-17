@@ -67,14 +67,66 @@ def test_canonical_packet_requires_prior_same_inode_and_no_old_file(tmp_path, mo
     prior_dir.mkdir()
     source_policy = {
         "schema_version": "1.0",
-        "allowed_running_containers": [root.c.WORKER],
+        "allowed_running_containers": [],
+        "allowed_system_units": ["jason-boot-recovery.service"],
         "max_stopped_rollback_containers": 20,
     }
     baseline = (json.dumps(source_policy, sort_keys=True, indent=2) + "\n").encode()
-    (prior_dir / "production-desired-state.stage-c.json").write_bytes(baseline)
-    prior["watchdog_candidate_sha256"] = root.c.sha(baseline)
+    (prior_dir / "production-desired-state.base.json").write_bytes(baseline)
+    stage_c_policy = dict(source_policy)
+    stage_c_policy["allowed_running_containers"] = [root.c.WORKER]
+    old_target = (json.dumps(stage_c_policy, sort_keys=True, indent=2) + "\n").encode()
+    (prior_dir / "production-desired-state.stage-c.json").write_bytes(old_target)
+    prior["watchdog_base_sha256"] = root.c.sha(baseline)
+    prior["watchdog_candidate_sha256"] = root.c.sha(old_target)
     (prior_dir / "root-release-plan.json").write_bytes(root.c.canon(prior))
     (prior_dir / "root-oneowner-proof.json").write_text("synthetic")
+
+    catalog_dir = tmp_path / ("pmv4-catalog-drift-" + root.CATALOG_SOURCE)
+    catalog_dir.mkdir()
+    approved_policy = dict(source_policy)
+    approved_policy["allowed_system_units"] = sorted(
+        source_policy["allowed_system_units"] + list(root.CATALOG_UNITS))
+    approved = (json.dumps(approved_policy, sort_keys=True, indent=2) + "\n").encode()
+    (catalog_dir / "baseline.json").write_bytes(baseline)
+    (catalog_dir / "candidate.json").write_bytes(approved)
+    catalog_plan = {
+        "action": "pmv4-catalog-four-unit-drift-policy-reconcile-v1",
+        "source_sha": root.CATALOG_SOURCE,
+        "candidate_sha": root.CATALOG_SOURCE,
+        "rollback_sha": prior["production_lkg_sha"],
+        "catalog_unit_names": list(root.CATALOG_UNITS),
+        "baseline_policy_sha256": root.c.sha(baseline),
+        "candidate_policy_sha256": root.c.sha(approved),
+        "owner_consents": 1,
+        "restart_containers": [],
+    }
+    catalog_plan["scope_sha256"] = root.c.sha(root.c.canon(catalog_plan))
+    (catalog_dir / "root-release-plan.json").write_bytes(root.c.canon(catalog_plan))
+    catalog_proof = {
+        "action": catalog_plan["action"],
+        "source_sha": root.CATALOG_SOURCE,
+        "scope_sha256": catalog_plan["scope_sha256"],
+        "plan_sha256": root.c.sha(root.c.canon(catalog_plan)),
+        "approval_id": "test-root-signed-owner",
+        "signed_release": {"test": True},
+    }
+    (catalog_dir / "root-oneowner-proof.json").write_bytes(root.c.canon(catalog_proof))
+    audit_dir = tmp_path / "catalog-accepted"
+    audit_dir.mkdir()
+    receipt = {
+        "status": "four_unit_catalog_policy_reconciled",
+        "action": catalog_plan["action"],
+        "source_sha": root.CATALOG_SOURCE,
+        "owner_approval_id": catalog_proof["approval_id"],
+        "candidate_policy_sha256": root.c.sha(approved),
+        "breaker_override": False,
+        "ticket_core_restarts": 0,
+        "mcp_restarts": 0,
+    }
+    (audit_dir / (root.CATALOG_SOURCE + "-accepted.json")).write_bytes(root.c.canon(receipt))
+    monkeypatch.setattr(root, "CATALOG_PACKET", catalog_dir)
+    monkeypatch.setattr(root, "CATALOG_AUDIT", audit_dir)
     monkeypatch.setattr(root, "PRIOR", prior_dir)
     monkeypatch.setattr(root, "ARTIFACTS", tmp_path)
     monkeypatch.setattr(root.c, "TICKET_TARGET", ticket)
@@ -90,8 +142,12 @@ def test_canonical_packet_requires_prior_same_inode_and_no_old_file(tmp_path, mo
         "runtime_image_digest": prior["runtime_image_digest"],
         "mcp_image_digest": prior["mcp_image_digest"],
         "worker_image_digest": prior["worker_image_digest"],
-        "watchdog_base_sha256": prior["watchdog_base_sha256"],
-        "watchdog_candidate_sha256": root.c.sha(root.reviewed_candidate_policy(baseline)),
+        "watchdog_base_sha256": root.c.sha(approved),
+        "watchdog_candidate_sha256": root.c.sha(root.reviewed_candidate_policy(approved)),
+        "catalog_policy_source_sha": root.CATALOG_SOURCE,
+        "catalog_policy_proof_sha256": root.c.sha(
+            (catalog_dir / "root-oneowner-proof.json").read_bytes()),
+        "catalog_policy_sha256": root.c.sha(approved),
         "service_manifest_sha256": prior["service_manifest_sha256"],
         "previous_plan_sha256": root.c.sha((prior_dir/"root-release-plan.json").read_bytes()),
         "previous_proof_sha256": root.c.sha((prior_dir/"root-oneowner-proof.json").read_bytes()),
@@ -106,6 +162,16 @@ def test_canonical_packet_requires_prior_same_inode_and_no_old_file(tmp_path, mo
         data["scope_sha256"] = root.c.sha(root.c.canon(tosign))
         (path/"root-release-plan.json").write_bytes(root.c.canon(data))
     save()
+    assert root.packet(path/"root-release-plan.json")[1] == prior
+    receipt_path = audit_dir / (root.CATALOG_SOURCE + "-accepted.json")
+    approved_receipt = receipt_path.read_bytes()
+    changed = dict(receipt)
+    changed["candidate_policy_sha256"] = "0" * 64
+    receipt_path.write_bytes(root.c.canon(changed))
+    with pytest.raises(root.c.StageCRootDenied,
+                       match="CATALOG_PRIOR_ROOT_ACCEPTANCE_NOT_PROVEN"):
+        root.packet(path/"root-release-plan.json")
+    receipt_path.write_bytes(approved_receipt)
     assert root.packet(path/"root-release-plan.json")[1] == prior
     (old_dir/key).write_bytes(b"unapproved legacy duplicate")
     with pytest.raises(root.c.StageCRootDenied, match="CANONICAL_INODE_CHANGED"):
@@ -242,23 +308,46 @@ def test_failure_attempts_same_canonical_data_rollback(tmp_path, monkeypatch):
 
 
 
-def test_retention_only_revises_one_guard_setting():
-    policy = {
+def test_original_worker_and_catalog_policy_join_exactly(tmp_path, monkeypatch):
+    original = {
         "schema_version": "1.0",
-        "allowed_running_containers": ["jason-runtime", root.c.WORKER],
-        "max_stopped_rollback_containers": 20,
+        "allowed_running_containers": ["jason-runtime"],
+        "allowed_system_units": ["jason-boot-recovery.service"],
         "required_containers": ["jason-runtime", "jason-mcp-pilot"],
+        "max_stopped_rollback_containers": 20,
         "forbidden_execution_prefixes": ["/unsafe"],
     }
-    raw = (json.dumps(policy, indent=2, sort_keys=True) + "\n").encode()
-    adjusted = json.loads(root.reviewed_candidate_policy(raw))
-    assert adjusted.pop("max_stopped_rollback_containers") == 21
-    assert {k:v for k,v in policy.items()
-            if k != "max_stopped_rollback_containers"} == adjusted
-    policy["max_stopped_rollback_containers"] = 21
-    with pytest.raises(root.c.StageCRootDenied, match="RETENTION_POLICY"):
-        root.reviewed_candidate_policy(json.dumps(policy).encode())
-    policy["max_stopped_rollback_containers"] = 20
-    policy["allowed_running_containers"] = ["jason-runtime"]
-    with pytest.raises(root.c.StageCRootDenied, match="RETENTION_POLICY"):
-        root.reviewed_candidate_policy(json.dumps(policy).encode())
+    stage_c = dict(original)
+    stage_c["allowed_running_containers"] = ["jason-runtime", root.c.WORKER]
+    stage_data = (json.dumps(stage_c, indent=2, sort_keys=True) + "\n").encode()
+    prior_dir = tmp_path / "stage-c-source"
+    prior_dir.mkdir()
+    (prior_dir / "production-desired-state.base.json").write_text(
+        json.dumps(original, indent=2, sort_keys=True) + "\n")
+    (prior_dir / "production-desired-state.stage-c.json").write_bytes(stage_data)
+    monkeypatch.setattr(root, "PRIOR", prior_dir)
+    monkeypatch.setattr(root, "original",
+                        lambda: {"watchdog_candidate_sha256": root.c.sha(stage_data)})
+    catalog = dict(original)
+    catalog["allowed_system_units"] = sorted(
+        original["allowed_system_units"] + list(root.CATALOG_UNITS))
+    approved = (json.dumps(catalog, indent=2, sort_keys=True) + "\n").encode()
+    adjusted = json.loads(root.reviewed_candidate_policy(approved))
+    assert adjusted["max_stopped_rollback_containers"] == 21
+    assert adjusted["allowed_running_containers"] == ["jason-runtime", root.c.WORKER]
+    assert adjusted["allowed_system_units"] == catalog["allowed_system_units"]
+    assert {k: v for k, v in adjusted.items()
+            if k not in ("max_stopped_rollback_containers", "allowed_running_containers")} == {
+                k: v for k, v in catalog.items()
+                if k not in ("max_stopped_rollback_containers", "allowed_running_containers")}
+    catalog["max_stopped_rollback_containers"] = 21
+    with pytest.raises(root.c.StageCRootDenied, match="CATALOG_STAGE_C_BASELINE_UNEXPECTED"):
+        root.reviewed_candidate_policy(json.dumps(catalog).encode())
+    catalog["max_stopped_rollback_containers"] = 20
+    catalog["allowed_running_containers"] = ["jason-runtime", root.c.WORKER]
+    with pytest.raises(root.c.StageCRootDenied, match="CATALOG_STAGE_C_BASELINE_UNEXPECTED"):
+        root.reviewed_candidate_policy(json.dumps(catalog).encode())
+    catalog["allowed_running_containers"] = ["jason-runtime"]
+    catalog["allowed_system_units"].remove(root.CATALOG_UNITS[0])
+    with pytest.raises(root.c.StageCRootDenied, match="CATALOG_STAGE_C_BASELINE_UNEXPECTED"):
+        root.reviewed_candidate_policy(json.dumps(catalog).encode())
