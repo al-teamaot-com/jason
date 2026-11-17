@@ -20,7 +20,8 @@
     "jason-ollama",
     "jason-autonomy-flight-recorder",
     "jason-work-item-exporter",
-    "jason-kfs-postgres"
+    "jason-kfs-postgres",
+    "jason-pmv4-shadow-gateway"
   ],
   "required_system_units": [
     "jason-client-posture-exporter.service",
