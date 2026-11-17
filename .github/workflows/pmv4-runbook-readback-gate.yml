@@ -1,0 +1,37 @@
+name: PMv4 Runbook Registry Independent Readback
+on:
+  pull_request:
+    paths:
+      - "tools/pmv4_runbook_registry_readback.py"
+      - "tests/test_pmv4_runbook_registry_readback.py"
+      - "tests/test_pmv4_runbook_readonly_path.py"
+      - "implementation/autonomous_remediation/playbook_store.py"
+      - "implementation/mcp_service/src/jason_mcp/json_playbook_admin.py"
+      - "implementation/mcp_service/src/jason_mcp/server.py"
+      - ".github/workflows/pmv4-runbook-readback-gate.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  read-only-registry-upgrade-check:
+    name: Stage D existing registry copied lifecycle proof (no production)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Prove copy-only registry migration, zero runtime authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q pytest
+          PYTHONPATH=implementation:implementation/mcp_service/src:tests:. python -B -m pytest -q \
+            tests/test_pmv4_runbook_registry_readback.py \
+            tests/test_pmv4_runbook_readonly_path.py \
+            implementation/autonomous_remediation/test_json_playbook_store.py
+          test ! -e /var/lib/jason/openclaw/json-playbooks.sqlite3
+          test ! -e /var/lib/jason/pmv4-runbook-management

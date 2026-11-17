@@ -151,7 +151,12 @@ class DockerShadowAdapter:
             or host.get("NanoCpus") != 1_000_000_000
             or host.get("PublishAllPorts") not in (None, False)
             or host.get("Devices") not in (None, [])
-            or host.get("Binds") not in (None, [])
+            # Docker 29/Compose represents an approved named volume in
+            # HostConfig.Binds as well as in Mounts. Permit ONLY that exact
+            # reserved volume syntax, never arbitrary host-path binds.
+            or host.get("Binds") not in (
+                None, [], ["jason-pmv4-shadow-state:/home/node/.openclaw:rw"],
+            )
         ):
             raise ShadowReleaseDenied("SHADOW_RUNTIME_SECURITY_PROFILE_DRIFT")
         # The reserved volume is the only persistent mount; a private tmpfs
