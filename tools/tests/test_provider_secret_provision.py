@@ -454,10 +454,32 @@ def test_group_admin_read_write_provisioning_no_cross_provider_paths():
     assert read["secret_path"] != write["secret_path"]
 
 
+def test_sharepoint_writer_uses_certificate_files_and_create_only_secret(monkeypatch):
+    import tools.provider_secret_provision as module
+
+    expected = {
+        "private_key_pem": "private-test-only",
+        "certificate_pem": "certificate-test-only",
+        "certificate_thumbprint": "A" * 40,
+        "generation": "test-only",
+    }
+    monkeypatch.setattr(module, "_collect_microsoft_graph_values", lambda: expected)
+    assert module.collect_values("microsoft_graph_sharepoint_write") == expected
+
+    calls = []
+    monkeypatch.setattr(module, "api_request", lambda *a, **kw: calls.append((a, kw)) or {})
+    module.write_provider_secret(
+        address="http://unused.invalid", admin_token="test",
+        provider="microsoft_graph_sharepoint_write", values=expected,
+    )
+    assert calls[0][1]["payload"] == {"data": expected, "options": {"cas": 0}}
+
+
 def test_microsoft_sharepoint_write_contract_is_isolated_and_site_scoped_by_design() -> None:
     directory = PROVIDERS["microsoft_graph"]
     sharepoint = PROVIDERS["microsoft_graph_sharepoint_write"]
     assert sharepoint["logical_name"] == "microsoft_graph.sharepoint_write"
+    assert sharepoint["create_only_secret"] is True
     assert sharepoint["secret_path"] == (
         "secret/data/connectors/microsoft-graph/production/sharepoint-write"
     )

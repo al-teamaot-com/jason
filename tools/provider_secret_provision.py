@@ -151,6 +151,7 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir": Path("/opt/jason/bootstrap/secrets/openbao/microsoft-graph-group-write-approle"),
     },
     "microsoft_graph_sharepoint_write": {
+        "create_only_secret": True,
         "logical_name": "microsoft_graph.sharepoint_write",
         "secret_path": "secret/data/connectors/microsoft-graph/production/sharepoint-write",
         "fields": (
@@ -447,7 +448,8 @@ def _collect_microsoft_graph_values() -> dict[str, str]:
 
 def collect_values(provider: str) -> dict[str, str]:
     if provider in {"microsoft_graph", "microsoft_graph_mail",
-                    "microsoft_graph_group_read", "microsoft_graph_group_write"}:
+                    "microsoft_graph_group_read", "microsoft_graph_group_write",
+                    "microsoft_graph_sharepoint_write"}:
         return _collect_microsoft_graph_values()
     values: dict[str, str] = {}
     spec = PROVIDERS[provider]
@@ -675,7 +677,7 @@ def write_provider_secret(
         "data": {field: values[field] for field in expected if field in values}
     }
     if spec.get("create_only_secret") is True:
-        # The two new Microsoft Graph group identities must be created once,
+        # Dedicated Microsoft Graph identities must be created once,
         # without overwriting existing credential material. In particular,
         # the protected OpenBao KV-v2 mount requires a CAS option.
         payload["options"] = {"cas": 0}
