@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
 from typing import Any, Mapping
 
 from tools import pmv4_c_service_manifest as service_contract

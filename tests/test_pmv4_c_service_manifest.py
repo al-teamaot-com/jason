@@ -70,6 +70,15 @@ def test_manifest_is_non_http_exact_bounded_worker():
     assert len(m["manifest_sha256"])==64
     assert len(m["environment_sha256"])==64
 
+def test_missing_legacy_worker_db_env_uses_protected_runtime_default():
+    source=live_env()
+    source.pop("JASON_AUTONOMY_WORKER_DB")
+    env=svc.reviewed_worker_environment(source)
+    assert env["JASON_AUTONOMY_WORKER_DB"] == (
+        "/var/lib/jason/ticket-core/autonomy-operational-work.sqlite3"
+    )
+
+
 def test_non_jason_and_raw_secret_env_never_copied():
     source=live_env()
     source["HOME"]="/root"
