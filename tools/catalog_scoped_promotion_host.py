@@ -32,7 +32,7 @@ from tools.catalog_scoped_release_admission import (
 )
 
 STATE=Path('/var/lib/jason/openclaw/release-manager')
-ROOT=Path('/var/lib/jason/catalog-scoped-promotion')
+ROOT=Path('/var/lib/jason-catalog-scoped-promotion')
 POLICY=Path('/etc/jason-owner-release/catalog-scoped-promotion-installed.json')
 TRUST=Path('/etc/jason-owner-release/verified-owner-public-key.json')
 INSTALLED=Path('/usr/local/lib/jason/catalog-scoped-promotion/tools/catalog_scoped_promotion_host.py')

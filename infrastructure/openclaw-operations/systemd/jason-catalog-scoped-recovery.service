@@ -13,7 +13,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/jason/catalog-scoped-promotion /var/lib/jason/openclaw/release-manager /var/run/docker.sock
+ReadWritePaths=/var/lib/jason-catalog-scoped-promotion /var/lib/jason/openclaw/release-manager /var/run/docker.sock
 ReadOnlyPaths=/opt/jason /usr/local/lib/jason /etc/jason-owner-release
 TimeoutStartSec=900
 
