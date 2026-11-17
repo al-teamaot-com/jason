@@ -140,9 +140,9 @@ def test_capability_first_rejects_mixed_expression_reference():
     payload["steps"][0]["arguments"] = {
         "ticket_id": {"$fact": "ticket_id", "default": 5},
     }
-    runtime = JsonPlaybookInterpreter(validate_playbook_document(payload))
-    with pytest.raises(ValueError, match="PLAYBOOK_FACT_REFERENCE_INVALID"):
-        runtime.instruction(facts={"ticket_id": 7})
+    with pytest.raises(PlaybookValidationError) as caught:
+        validate_playbook_document(payload)
+    assert "check_service:FACT_REFERENCE_INVALID" in caught.value.errors
 
 
 def test_capability_first_never_executes_provider_operation():
@@ -153,3 +153,11 @@ def test_capability_first_never_executes_provider_operation():
     second = runtime.instruction(facts={"ticket_id": 7})
     assert first == second
     assert runtime.next_step(first.step_id) == "service_state"
+
+
+def test_capability_first_forbids_expression_keys_at_validation():
+    payload = sample()
+    payload["steps"][0]["arguments"] = {"ticket_id": {"$eval": "danger"}}
+    with pytest.raises(PlaybookValidationError) as caught:
+        validate_playbook_document(payload)
+    assert "check_service:ARGUMENT_EXPRESSION_FORBIDDEN" in caught.value.errors
