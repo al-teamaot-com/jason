@@ -15,7 +15,7 @@ def config(tmp_path):
 def test_disabled_process_does_not_build_worker_or_contact_provider(tmp_path,monkeypatch):
     path=tmp_path/'config.json';path.write_text(json.dumps(config(tmp_path)))
     monkeypatch.setattr(p,'build_worker',lambda *_:pytest.fail('must not build disabled writer'))
-    with pytest.raises(SystemExit,match='disabled'):p.main(['--config',str(path)])
+    assert p.main(['--config',str(path)]) is None
 
 @pytest.mark.parametrize('key,value',[('root_path','other'),('run_hour',True),('tenant_id','invalid'),('enabled','true')])
 def test_rejects_unreviewed_or_malformed_config(tmp_path,key,value):

@@ -9,7 +9,7 @@ services:
     pids_limit: 64
     mem_limit: 512m
     cpus: 0.5
-    restart: "no"
+    restart: "on-failure:5"
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=32m
     volumes:

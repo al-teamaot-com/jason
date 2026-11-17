@@ -1,8 +1,8 @@
 {
   "status": "prepared_not_authorized_not_executed",
   "identity_source": "https://github.com/al-teamaot-com/jason/issues/2294#issuecomment-6748110803",
-  "identity_last_verified": "2026-11-09",
-  "current_entra_readback": "unavailable_no_active_governed_app_permission_read_capability",
+  "identity_last_verified": "2026-11-17",
+  "current_entra_readback": "2026-11-17 Entra admin center signed in as al_admin@teamaot.com; application and tenant IDs matched; Sites.Selected application permission is configured but Not granted for Atlantic Office; certificates 0, client secrets 0, federated credentials 0",
   "display_name": "Jason - AOT Accounting SharePoint Writer",
   "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
   "application_id": "3d362478-a873-4ba2-b8a5-c04e66ef2f32",
@@ -24,7 +24,9 @@
     "network_contacted": false,
     "provider": "microsoft_graph_sharepoint_write",
     "logical_secret": "microsoft_graph.sharepoint_write",
-    "dedicated_runtime_credential_directory_present": false
+    "dedicated_runtime_credential_directory_present": false,
+    "entra_certificate_count": 0,
+    "entra_client_secret_count": 0
   },
   "required_readback_before_any_grant": [
     "application_and_service_principal_identity",
@@ -68,5 +70,7 @@
     "drive_id_provider_readback",
     "dedicated_writer_readonly_preflight",
     "PR_CI_and_exact_release_review"
-  ]
+  ],
+  "current_application_role_assignments_readback": "not independently enumerated; Entra API permissions status shows Sites.Selected not granted",
+  "current_site_permissions_readback": "not independently enumerated"
 }

@@ -88,7 +88,8 @@ def main(argv=None):
     args=parser.parse_args(argv)
     cfg=load_config(args.config)
     if not cfg['enabled'] and not args.preflight:
-        raise SystemExit('financial statement component disabled')
+        print(json.dumps({'status':'disabled'}), flush=True)
+        return
     os.umask(0o077)
     STATE.mkdir(parents=True,exist_ok=True)
     # One process owns this component; a second instance must never race moves.
