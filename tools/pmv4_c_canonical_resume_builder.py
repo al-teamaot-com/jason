@@ -90,23 +90,24 @@ def build() -> None:
     previous = resume.original()
     proof = resume.PRIOR / "root-oneowner-proof.json"
     need(proof.is_file(), "PREVIOUS_CUTOVER_APPROVAL_MISSING")
-    base = (resume.PRIOR / "production-desired-state.base.json").read_bytes()
-    previous_target = (
-        resume.PRIOR / "production-desired-state.stage-c.json"
-    ).read_bytes()
+    original_base = (resume.PRIOR / "production-desired-state.base.json").read_bytes()
+    previous_target = (resume.PRIOR / "production-desired-state.stage-c.json").read_bytes()
     manifest = (resume.PRIOR / "service-manifest.json").read_bytes()
-    need(sha(base) == previous["watchdog_base_sha256"] and
+    need(sha(original_base) == previous["watchdog_base_sha256"] and
          sha(previous_target) == previous["watchdog_candidate_sha256"] and
          sha(manifest) == previous["service_manifest_sha256"],
          "PRIOR_APPROVED_SOURCE_MISMATCH")
-    target = resume.reviewed_candidate_policy(previous_target)
-    original = json.loads(previous_target)
+    base, catalog_proof = resume.accepted_catalog_policy()
+    target = resume.reviewed_candidate_policy(base)
+    original = json.loads(base)
     adjusted = json.loads(target)
     need({k: v for k, v in adjusted.items()
-          if k != "max_stopped_rollback_containers"} ==
+          if k not in ("max_stopped_rollback_containers", "allowed_running_containers")} ==
          {k: v for k, v in original.items()
-          if k != "max_stopped_rollback_containers"} and
-         adjusted["max_stopped_rollback_containers"] == 21,
+          if k not in ("max_stopped_rollback_containers", "allowed_running_containers")} and
+         adjusted["max_stopped_rollback_containers"] == 21 and
+         adjusted["allowed_running_containers"] ==
+           original["allowed_running_containers"] + [resume.c.WORKER],
          "UNREVIEWED_WATCHDOG_POLICY_CHANGE")
     runtime = existing._docker("jason-runtime")
     mcp = existing._docker("jason-mcp-pilot")
@@ -155,6 +156,9 @@ def build() -> None:
         "hold_sha256": sha(resume.c.HOLD.read_bytes()),
         "watchdog_base_sha256": sha(base),
         "watchdog_candidate_sha256": sha(target),
+        "catalog_policy_source_sha": resume.CATALOG_SOURCE,
+        "catalog_policy_proof_sha256": sha(catalog_proof),
+        "catalog_policy_sha256": sha(base),
         "service_manifest_sha256": sha(manifest),
         "root_sha256": sha((HERE/"tools/pmv4_c_canonical_resume_root.py").read_bytes()),
         "owner_sha256": sha((HERE/"tools/pmv4_c_canonical_resume_owner.py").read_bytes()),

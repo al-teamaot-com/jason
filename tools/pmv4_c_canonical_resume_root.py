@@ -28,6 +28,15 @@ ACTION = "pmv4-c-one-owner-existing-canonical-worker-handoff-v1"
 PREVIOUS = "13917410bb0ea1d5d37a314b3a3f131d416bf154"
 PRIOR = Path("/srv/jason/archive/engineering-artifacts") / ("pmv4-c-" + PREVIOUS)
 ARTIFACTS = Path("/srv/jason/archive/engineering-artifacts")
+CATALOG_SOURCE = "769d8cad698d092779def1dcfb8ba5e1fc896a9d"
+CATALOG_PACKET = ARTIFACTS / ("pmv4-catalog-drift-" + CATALOG_SOURCE)
+CATALOG_AUDIT = Path("/etc/jason-owner-release/pmv4-catalog-unit-drift-reconciliation")
+CATALOG_UNITS = (
+    "jason-catalog-root-bootstrap-recovery.service",
+    "jason-catalog-root-bootstrap-recovery.timer",
+    "jason-catalog-scoped-recovery.service",
+    "jason-catalog-scoped-recovery.timer",
+)
 SOURCE_FILES = (
     "tools/pmv4_c_atomic_root.py",
     "tools/pmv4_c_sqlite_family_handoff.py",
@@ -52,19 +61,70 @@ def original() -> dict:
     return old
 
 
-def reviewed_candidate_policy(original: bytes) -> bytes:
-    """Change only the retention capacity needed by one extra rollback.
+def accepted_catalog_policy() -> tuple[bytes, bytes]:
+    """Exact prior Owner-signed four-unit policy, not a new policy guess."""
+    prior = original()
+    base = (PRIOR / "production-desired-state.base.json").read_bytes()
+    need(c.sha(base) == prior["watchdog_base_sha256"], "ORIGINAL_POLICY_CHANGED")
+    catalog_baseline = (CATALOG_PACKET / "baseline.json").read_bytes()
+    need(catalog_baseline == base, "CATALOG_BASELINE_NOT_ORIGINAL")
+    source = c.read_json(CATALOG_PACKET / "root-release-plan.json")
+    unsigned = dict(source)
+    scope = unsigned.pop("scope_sha256", None)
+    need(source.get("action") ==
+         "pmv4-catalog-four-unit-drift-policy-reconcile-v1" and
+         source.get("source_sha") == CATALOG_SOURCE and
+         source.get("candidate_sha") == CATALOG_SOURCE and
+         source.get("rollback_sha") == prior["production_lkg_sha"] and
+         source.get("catalog_unit_names") == list(CATALOG_UNITS) and
+         source.get("baseline_policy_sha256") == c.sha(base) and
+         source.get("owner_consents") == 1 and
+         source.get("restart_containers") == [] and
+         isinstance(scope, str) and c.sha(c.canon(unsigned)) == scope,
+         "CATALOG_SIGNED_POLICY_SCOPE_UNTRUSTED")
+    proof_bytes = (CATALOG_PACKET / "root-oneowner-proof.json").read_bytes()
+    proof = c.read_json(CATALOG_PACKET / "root-oneowner-proof.json")
+    need(proof.get("action") == source["action"] and
+         proof.get("source_sha") == CATALOG_SOURCE and
+         proof.get("scope_sha256") == scope and
+         proof.get("plan_sha256") == c.sha(c.canon(source)) and
+         isinstance(proof.get("approval_id"), str) and
+         isinstance(proof.get("signed_release"), dict),
+         "CATALOG_PRIOR_OWNER_PROOF_INVALID")
+    new = (CATALOG_PACKET / "candidate.json").read_bytes()
+    baseline = json.loads(base)
+    expect = dict(baseline)
+    allowed = baseline.get("allowed_system_units")
+    need(isinstance(allowed, list) and
+         not any(unit in allowed for unit in CATALOG_UNITS),
+         "CATALOG_BASELINE_UNEXPECTED")
+    expect["allowed_system_units"] = sorted(allowed + list(CATALOG_UNITS))
+    need(new == (json.dumps(expect, indent=2, sort_keys=True) + "\n").encode() and
+         c.sha(new) == source["candidate_policy_sha256"],
+         "CATALOG_POLICY_NOT_EXACT_FOUR_UNITS")
+    return new, proof_bytes
 
-    The stopped rollback inventory is housekeeping. The security/release
-    guard's actual service, container and allowed-identity checks remain
-    unchanged. Any unexpected source policy shape fails closed.
-    """
-    policy = json.loads(original)
-    need(isinstance(policy, dict) and
-         type(policy.get("max_stopped_rollback_containers")) is int and
-         policy["max_stopped_rollback_containers"] == 20 and
-         c.WORKER in policy.get("allowed_running_containers", []),
-         "REVIEWED_RETENTION_POLICY_UNEXPECTED")
+
+def reviewed_candidate_policy(approved: bytes) -> bytes:
+    """Add original Ticket Core worker + one rollback slot; preserve catalog units."""
+    prior = original()
+    original_base = json.loads((PRIOR / "production-desired-state.base.json").read_bytes())
+    original_worker = json.loads(
+        (PRIOR / "production-desired-state.stage-c.json").read_bytes())
+    before = original_base.get("allowed_running_containers")
+    after = original_worker.get("allowed_running_containers")
+    need(isinstance(before, list) and isinstance(after, list) and
+         after == before + [c.WORKER] and
+         {k: v for k, v in original_base.items() if k != "allowed_running_containers"} ==
+         {k: v for k, v in original_worker.items() if k != "allowed_running_containers"} and
+         c.sha((PRIOR / "production-desired-state.stage-c.json").read_bytes()) ==
+         prior["watchdog_candidate_sha256"], "ORIGINAL_WORKER_SCOPE_CHANGED")
+    policy = json.loads(approved)
+    need(policy.get("max_stopped_rollback_containers") == 20 and
+         policy.get("allowed_running_containers") == before and
+         set(CATALOG_UNITS).issubset(set(policy.get("allowed_system_units", []))),
+         "CATALOG_STAGE_C_BASELINE_UNEXPECTED")
+    policy["allowed_running_containers"] = after
     policy["max_stopped_rollback_containers"] = 21
     return (json.dumps(policy, indent=2, sort_keys=True) + "\n").encode()
 
@@ -85,6 +145,25 @@ def packet(plan_path: Path) -> tuple[dict, dict]:
     scope = unsigned.pop("scope_sha256", None)
     need(isinstance(scope, str) and c.sha(c.canon(unsigned)) == scope, "SCOPE_HASH_INVALID")
     prior = original()
+    approved_policy, approved_proof = accepted_catalog_policy()
+    need(plan.get("catalog_policy_source_sha") == CATALOG_SOURCE and
+         plan.get("catalog_policy_proof_sha256") == c.sha(approved_proof) and
+         plan.get("catalog_policy_sha256") == c.sha(approved_policy),
+         "APPROVED_CATALOG_POLICY_BINDING_INVALID")
+    # The installed root-owned receipt proves this prior Owner-signed action
+    # was actually accepted, not merely approved in a developer packet.
+    receipt = c.read_json(CATALOG_AUDIT / (CATALOG_SOURCE + "-accepted.json"))
+    source_proof = c.read_json(CATALOG_PACKET / "root-oneowner-proof.json")
+    need(receipt.get("status") == "four_unit_catalog_policy_reconciled" and
+         receipt.get("action") ==
+           "pmv4-catalog-four-unit-drift-policy-reconcile-v1" and
+         receipt.get("source_sha") == CATALOG_SOURCE and
+         receipt.get("owner_approval_id") == source_proof["approval_id"] and
+         receipt.get("candidate_policy_sha256") == c.sha(approved_policy) and
+         receipt.get("breaker_override") is False and
+         receipt.get("ticket_core_restarts") == 0 and
+         receipt.get("mcp_restarts") == 0,
+         "CATALOG_PRIOR_ROOT_ACCEPTANCE_NOT_PROVEN")
     need(plan["previous_plan_sha256"] == c.sha((PRIOR / "root-release-plan.json").read_bytes()) and
          plan["previous_proof_sha256"] == c.sha((PRIOR / "root-oneowner-proof.json").read_bytes()),
          "PREVIOUS_PLAN_OR_APPROVAL_CHANGED")
@@ -93,12 +172,9 @@ def packet(plan_path: Path) -> tuple[dict, dict]:
          plan["runtime_image_digest"] == prior["runtime_image_digest"] and
          plan["mcp_image_digest"] == prior["mcp_image_digest"] and
          plan["worker_image_digest"] == prior["worker_image_digest"] and
-         plan["watchdog_base_sha256"] == prior["watchdog_base_sha256"] and
-         plan["watchdog_candidate_sha256"] == c.sha(
-             reviewed_candidate_policy(
-                 (PRIOR / "production-desired-state.stage-c.json").read_bytes()
-             )
-         ) and
+         plan["watchdog_base_sha256"] == c.sha(approved_policy) and
+         plan["watchdog_candidate_sha256"] ==
+             c.sha(reviewed_candidate_policy(approved_policy)) and
          plan["service_manifest_sha256"] == prior["service_manifest_sha256"],
          "UNREVIEWED_PREVIOUS_RESOURCE_SCOPE")
     # The old approved data identity is the only state source. No copy/rename.
@@ -166,9 +242,10 @@ def preflight(path: Path) -> tuple[dict, guard.IndependentHostGuard]:
          plan["production_lkg_sha"], "PRODUCTION_ROOT_CHANGED")
     need(c.sha((path.parent / "service-manifest.json").read_bytes()) ==
          plan["service_manifest_sha256"], "SERVICE_MANIFEST_CHANGED")
-    need((path.parent / "watchdog-candidate.json").read_bytes() ==
-         reviewed_candidate_policy(
-             (PRIOR / "production-desired-state.stage-c.json").read_bytes()),
+    accepted_policy, _ = accepted_catalog_policy()
+    need((path.parent / "watchdog-base.json").read_bytes() == accepted_policy and
+         (path.parent / "watchdog-candidate.json").read_bytes() ==
+           reviewed_candidate_policy(accepted_policy),
          "UNREVIEWED_WATCHDOG_CHANGE")
     need(c.sha((path.parent / "watchdog-base.json").read_bytes()) ==
          plan["watchdog_base_sha256"] and
