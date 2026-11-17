@@ -25,3 +25,16 @@ An **actual** full integrity and restore proof must complete with PASS on the **
 ## Tests and process safeguards
 
 No untrusted owner-controlled source imported by root before release source hash verification; native signer and source CI verifiers remain root pinned; no broad service glob, shell command injection or Docker socket exposure. Disposable source test exercises approved exact seven-unit projection, success path with persistent systemd full proof admission, inability to claim proof PASS early, rollback on an injected exporter failure, immutable audit-chain checks, rejection of re-entry, root-only privilege gate, no Owner approval from ordinary source, and both allowed Owner identity bindings. CI must pass; local tests alone are not approval.
+
+## Exact systemd WAL locking regression prevention
+
+The full-integrity proof opens SQLite in native read/write mode to acquire WAL
+locks while checking the real 41+ GiB orchestration audit. A child
+`ReadOnlyPaths=/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3`
+would contradict `ReadWritePaths=/var/lib/jason/governed-ticket-shared` in the
+same full-proof drop-in. The immutable full-proof drop-in therefore uses **only**
+`ReadWritePaths=/var/lib/jason/governed-ticket-shared` for that canonical
+family, preserving LKG `ReadOnlyPaths=/opt/jason/current` and existing
+`ProtectSystem=strict`. Fast health independently gets only the exact
+read-only file bind, with no shared-state `ReadWritePaths`. A source test proves
+the two service modes never combine conflicting writable/read-only rules.
