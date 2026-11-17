@@ -30,6 +30,9 @@ jobs:
             implementation/runtime_service/tests \
             implementation/mcp_service/src \
             implementation/mcp_service/tests
+      - name: Autotask catalog source-only Production Manager admission security
+        run: |
+          python -m pytest -q tools/tests/test_catalog_scoped_release_admission.py
       - name: Prompt-injection evidence boundary regressions
         run: |
           python -m pytest -q \
