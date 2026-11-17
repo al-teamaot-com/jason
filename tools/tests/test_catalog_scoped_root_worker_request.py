@@ -11,6 +11,13 @@ from tools.catalog_scoped_promotion import ADMISSION_RECEIPT_SHA256
 SHA='a'*40
 RELEASE='release-'+ 'b'*16
 
+@pytest.fixture(autouse=True)
+def isolated_operator_account(monkeypatch):
+    """GitHub hosted runners do not have Jason's real `al` Unix account."""
+    original=w.pwd.getpwnam
+    monkeypatch.setattr(w.pwd,'getpwnam',lambda user:(
+        w.pwd.getpwuid(os.getuid()) if user=='al' else original(user)))
+
 
 def request(action='catalog_scope_stage'):
     r={'schema_version':'1.0','request_id':'1'*32,
