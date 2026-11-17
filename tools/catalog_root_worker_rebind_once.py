@@ -42,7 +42,7 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 HEX = re.compile(r"^[0-9a-f]{64}$")
 PROTECTED_NAMES = ("jason-runtime", "jason-mcp-pilot", "jason-teams-gateway",
                    "jason-pmv4-shadow-gateway", "openbao")
-AL = pwd.getpwnam("al").pw_uid
+AL = 1000  # fixed production host UID; verified against passwd only at privileged execution
 
 def denied(why):
     raise PermissionError("CATALOG_ROOT_REBIND_DENIED_" + why)
@@ -147,6 +147,8 @@ def inspect_containers():
 def preflight():
     if os.geteuid() != 0 or os.environ.get("SUDO_USER") != "al":
         denied("INTERACTIVE_SUDO_FROM_AL_REQUIRED")
+    if pwd.getpwnam("al").pw_uid != AL:
+        denied("PINNED_HOST_UID_CHANGED")
     if not os.isatty(0):
         denied("INTERACTIVE_OWNER_TTY_REQUIRED")
     if (ROOT_SCRIPT.is_symlink() or ROOT_SCRIPT.lstat().st_uid != 0
