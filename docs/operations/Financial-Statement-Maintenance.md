@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`TODO-FIN-001` is the governed Jason maintenance workflow for AOT financial statements. It runs from Jason's existing auxiliary maintenance process at 05:00 `America/New_York`, recursively scans the configured SharePoint `Bank Checking Accounts Register` root, and normalizes verified bank, line-of-credit, and credit-card statements into `Bank Statements - Organized`.
+`TODO-FIN-001` is the governed Jason maintenance workflow for AOT financial statements. This independent Compose component schedules its own 05:00 `America/New_York` run, recursively scans the configured SharePoint `Bank Checking Accounts Register` root, and normalizes verified bank, line-of-credit, and credit-card statements into `Bank Statements - Organized`.
 
 The workflow is disabled by default. Deploying the code does not activate SharePoint mutation authority.
 
@@ -12,15 +12,11 @@ Use a dedicated Microsoft client boundary with provider `microsoft_sharepoint` a
 
 The dedicated OpenBao AppRole must resolve only the logical credential `microsoft_graph.sharepoint_write`. Directory-read or mail credentials are not accepted as a fallback.
 
-Required production settings:
+Required independent deployment inputs:
 
-- `JASON_FINANCIAL_STATEMENT_MAINTENANCE_ENABLED=true`
-- `JASON_FINANCIAL_STATEMENT_TENANT_ID=<validated AOT tenant id>`
-- `JASON_FINANCIAL_STATEMENT_DRIVE_ID=<AOT Accounting Documents drive id>`
-- `JASON_FINANCIAL_STATEMENT_ROOT_PATH=Bank Checking Accounts Register`
-- `JASON_FINANCIAL_STATEMENT_TIMEZONE=America/New_York`
-- `JASON_FINANCIAL_STATEMENT_RUN_HOUR=5`
-- dedicated SharePoint-write OpenBao role/secret host paths
+- Reviewed read-only `config.json` with `enabled=true`, validated AOT tenant and accounting drive IDs, `root_path=Bank Checking Accounts Register`, `timezone=America/New_York`, and `run_hour=5`.
+- Read-only validated SharePoint writer boundary snapshot and dedicated SharePoint-write OpenBao role/secret host paths.
+- Component-owned state directory and the exact immutable image ID in the separate Compose project.
 
 Activation requires the normal PMV3 exact-revision production authorization plus verified provider consent/site grant. Missing credentials, boundary validation, tenant/drive identifiers, or provider permission fail closed.
 
