@@ -1271,6 +1271,30 @@ def _process_stage_a0_request(request: dict[str, object]) -> str:
 
 
 
+def _catalog_scoped_installed_source_path(trusted: Path, relative: str) -> Path:
+    """Map a reviewed catalog blob to its actual installed root-owned path.
+
+    The 17-file root installation places systemd units in /etc/systemd/system
+    and replaces the existing root worker in /usr/local/lib/jason.  It never
+    copies those files into the immutable catalog source bundle. Checking the
+    nonexistent bundle/infrastructure directory is a false deployment failure.
+    Preserve exact Git blob and root ownership/digest checks at the *actual*
+    installed destination. No fallback or mutable operator path is allowed.
+    """
+    if (not isinstance(relative, str) or not relative
+            or Path(relative).is_absolute() or ".." in Path(relative).parts):
+        raise HostReconcileError("CATALOG_SCOPED_INSTALLED_SOURCE_PATH_INVALID")
+    fixed = {
+        "tools/release_host_reconcile_worker.py": Path(
+            "/usr/local/lib/jason/release_host_reconcile_worker.py"),
+        "infrastructure/openclaw-operations/systemd/jason-catalog-scoped-recovery.service": Path(
+            "/etc/systemd/system/jason-catalog-scoped-recovery.service"),
+        "infrastructure/openclaw-operations/systemd/jason-catalog-scoped-recovery.timer": Path(
+            "/etc/systemd/system/jason-catalog-scoped-recovery.timer"),
+    }
+    return fixed.get(relative, trusted / relative)
+
+
 def _trusted_catalog_scoped_promotion_module(source_revision: str):
     """Never execute root privilege from a mutable checkout or unpinned bundle."""
     trusted = Path("/usr/local/lib/jason/catalog-scoped-promotion")
@@ -1301,15 +1325,13 @@ def _trusted_catalog_scoped_promotion_module(source_revision: str):
         trusted / "implementation/kernel", trusted / "docs",
         trusted / "docs/engineering", trusted / "docs/engineering/evidence",
         trusted / "config",
-        trusted / "infrastructure", trusted / "infrastructure/openclaw-operations",
-        trusted / "infrastructure/openclaw-operations/systemd",
     ):
         meta = directory.lstat()
         if (directory.is_symlink() or not stat.S_ISDIR(meta.st_mode)
                 or meta.st_uid != 0 or (meta.st_mode & 0o022)):
             raise HostReconcileError("CATALOG_SCOPED_ROOT_DIRECTORY_UNTRUSTED")
     for relative in paths:
-        path = trusted / relative
+        path = _catalog_scoped_installed_source_path(trusted, relative)
         meta = path.lstat()
         if (path.is_symlink() or not stat.S_ISREG(meta.st_mode)
                 or meta.st_uid != 0 or (meta.st_mode & 0o022)
