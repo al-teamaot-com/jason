@@ -15,7 +15,9 @@
     "protected_catalog_v2_main_sha": "1b804ea6cff8efedc4f9b29b3dddaf45e86e8f82",
     "read_only_admission_sha256": "add8327f9cb6b0cdc9cb9a6006d8038ec71ed2b914e3e1fd6a144f7a55392272",
     "service_name_absent_correlation_id": "corr_mcp_0717b158274145fd997609ea342945cc",
-    "billing_code_read_correlation_id": "corr_mcp_0edb0c35bc8f4856a75706177a990f06"
+    "billing_code_read_correlation_id": "corr_mcp_0edb0c35bc8f4856a75706177a990f06",
+    "latest_protected_main_sha": "f0eeb4081346a39b4007e067fbc4ecdfca587c15",
+    "latest_read_only_admission_sha256": "f759f516d8f43525dbddecd50945395db184ad1479298e8360f6b0bf1cfd1a8b"
   },
   "exact_request": {
     "capability": "service.service.create",
