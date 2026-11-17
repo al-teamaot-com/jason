@@ -8606,6 +8606,12 @@ def main() -> int:
     # Source-only scoped catalog admission. This subcommand is read-only:
     # no release record, Owner decision, mutable state root or promotion.
     sub.add_parser("catalog-scope-admit")
+    for name in ("catalog-scope-stage", "catalog-scope-promote", "catalog-scope-recover"):
+        scoped = sub.add_parser(name)
+        scoped.add_argument("--release-id", required=True)
+        scoped.add_argument("--protected-main-sha", required=True)
+        if name != "catalog-scope-stage":
+            scoped.add_argument("--offer-sha256", required=True)
 
     sub.add_parser("promote-eligible")
     sub.add_parser("approval-only-held")
@@ -8629,6 +8635,46 @@ def main() -> int:
                     ["governed-security-regressions"]))),
         )
         print(json.dumps(result, indent=2))
+        return 0
+    if args.command in {
+        "catalog-scope-stage", "catalog-scope-promote", "catalog-scope-recover",
+    }:
+        from catalog_scoped_promotion_request import (
+            exact_request, precheck_scoped_offer, root_worker_installed,
+            submit_to_native_worker,
+        )
+        action = "catalog_scope_" + args.command.rsplit("-", 1)[-1]
+        source_sha = exact_sha(args.protected_main_sha, "protected_main_sha")
+        if args.command == "catalog-scope-stage":
+            from catalog_scoped_release_admission import attest_source_scope
+            evidence = attest_source_scope(
+                repo, native_ci_checks=lambda sha: github_checks(
+                    sha, list(dict.fromkeys(required_checks(repo) +
+                        ["governed-security-regressions"]))),
+            )
+            if (evidence.get("protected_source", {}).get("verified_main_sha") != source_sha
+                    or "release-" + evidence["protected_source"]["snapshot_source_sha"][:16]
+                    != args.release_id):
+                raise ReleaseManagerError("catalog stage source identity changed")
+            offer_hash = None
+        else:
+            checked = precheck_scoped_offer(
+                Path('/var/lib/jason/authority/catalog-scoped-release'),
+                args.release_id, source_sha,
+                for_promotion=args.command == "catalog-scope-promote",
+            )
+            if checked["manifest_sha256"] != args.offer_sha256:
+                raise ReleaseManagerError("catalog exact offer changed")
+            offer_hash = args.offer_sha256
+        # Never create a production state root, alter the global freeze, or
+        # grant permissions from a CLI argument. Root worker and root-pinned
+        # exact one-use Owner evidence independently decide all mutations.
+        root_worker_installed()
+        request = exact_request(action,
+            release_id=args.release_id,source_revision=source_sha,
+            offer_sha256=offer_hash,
+        )
+        print(json.dumps(submit_to_native_worker(state_root, request), indent=2))
         return 0
     state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
 

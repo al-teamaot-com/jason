@@ -120,6 +120,28 @@ def _read_request(path: Path) -> dict[str, str]:
                 or not isinstance(payload.get("signed_owner_proof"), dict)):
             raise HostReconcileError("PMV4_STAGE_A0_REQUEST_INVALID")
         return dict(payload)
+    if action in {"catalog_scope_stage", "catalog_scope_promote", "catalog_scope_recover"}:
+        # This is a typed exact-release request, not release authorization.
+        # An al-owned JSON request must never expand the trusted root action.
+        fields = {
+            "schema_version", "request_id", "source_revision", "action",
+            "release_id", "admission_receipt_sha256",
+        }
+        if action != "catalog_scope_stage":
+            fields.add("offer_sha256")
+        if (set(payload) != fields or stat.S_IMODE(meta.st_mode) != 0o600
+                or meta.st_nlink != 1 or meta.st_size > 4096
+                or payload.get("schema_version") != "1.0"
+                or not re.fullmatch(r"[0-9a-f]{32}", request_id)
+                or not re.fullmatch(r"release-[0-9a-f]{16}",
+                                    str(payload.get("release_id") or ""))
+                or payload.get("admission_receipt_sha256") !=
+                    "12c8fdeec4b3ffd361d06b40e51a94c8199dfb8f7b0bb30a6d7e6920defe9d31"
+                or (action != "catalog_scope_stage"
+                    and not re.fullmatch(r"[0-9a-f]{64}",
+                                         str(payload.get("offer_sha256") or "")))):
+            raise HostReconcileError("CATALOG_SCOPED_ROOT_REQUEST_INVALID")
+        return dict(payload)
     if action != "host_reconcile":
         raise HostReconcileError("UNSUPPORTED_ROOT_RECONCILE_REQUEST")
     # Do not accidentally narrow the historical ordinary host-reconcile
@@ -1248,6 +1270,81 @@ def _process_stage_a0_request(request: dict[str, object]) -> str:
     }
 
 
+
+def _trusted_catalog_scoped_promotion_module(source_revision: str):
+    """Never execute root privilege from a mutable checkout or unpinned bundle."""
+    trusted = Path("/usr/local/lib/jason/catalog-scoped-promotion")
+    entrypoint = trusted / "tools/catalog_scoped_promotion_root.py"
+    source_revision = str(source_revision or "")
+    if not SHA.fullmatch(source_revision):
+        raise HostReconcileError("CATALOG_SCOPED_TRUSTED_SOURCE_INVALID")
+    paths = (
+        "tools/catalog_scoped_promotion_root.py",
+        "tools/catalog_scoped_promotion_host.py",
+        "tools/catalog_scoped_promotion.py",
+        "tools/catalog_scoped_release_admission.py",
+        "tools/catalog_scoped_control_readback.py",
+        "tools/release_manager_host_runner.py",
+        "tools/catalog_scoped_protected_ci.py",
+        "tools/catalog_scoped_promotion_recovery.py",
+        "implementation/kernel/catalog_scoped_promotion_contract.py",
+        "implementation/kernel/signed_owner_release.py",
+        "docs/engineering/evidence/catalog-scope-admission-20261117.json",
+        "config/catalog-scoped-release-admission.json",
+        "infrastructure/openclaw-operations/systemd/jason-catalog-scoped-recovery.service",
+        "infrastructure/openclaw-operations/systemd/jason-catalog-scoped-recovery.timer",
+    )
+    for directory in (
+        trusted, trusted / "tools", trusted / "implementation",
+        trusted / "implementation/kernel", trusted / "docs",
+        trusted / "docs/engineering", trusted / "docs/engineering/evidence",
+        trusted / "config",
+        trusted / "infrastructure", trusted / "infrastructure/openclaw-operations",
+        trusted / "infrastructure/openclaw-operations/systemd",
+    ):
+        meta = directory.lstat()
+        if (directory.is_symlink() or not stat.S_ISDIR(meta.st_mode)
+                or meta.st_uid != 0 or (meta.st_mode & 0o022)):
+            raise HostReconcileError("CATALOG_SCOPED_ROOT_DIRECTORY_UNTRUSTED")
+    for relative in paths:
+        path = trusted / relative
+        meta = path.lstat()
+        if (path.is_symlink() or not stat.S_ISREG(meta.st_mode)
+                or meta.st_uid != 0 or (meta.st_mode & 0o022)
+                or meta.st_nlink != 1 or meta.st_size > 262144):
+            raise HostReconcileError("CATALOG_SCOPED_TRUSTED_FILE_INVALID")
+        expected = subprocess.check_output(
+            _git("show", source_revision + ":" + relative), timeout=15,
+        )
+        if hashlib.sha256(path.read_bytes()).digest() != hashlib.sha256(expected).digest():
+            raise HostReconcileError("CATALOG_SCOPED_TRUSTED_SOURCE_DRIFT")
+    # The root worker processes one request per process. Never inherit an
+    # imported mutable developer tools/implementation namespace.
+    import sys
+    import types
+    if any(name in sys.modules for name in (
+        "tools", "implementation", "implementation.kernel",
+    )):
+        raise HostReconcileError("CATALOG_SCOPED_ROOT_IMPORT_NAMESPACE_UNTRUSTED")
+    for package, source in (
+        ("tools", trusted / "tools"),
+        ("implementation", trusted / "implementation"),
+        ("implementation.kernel", trusted / "implementation/kernel"),
+    ):
+        module = types.ModuleType(package)
+        module.__path__ = [str(source)]
+        module.__package__ = package
+        sys.modules[package] = module
+    spec = importlib.util.spec_from_file_location(
+        "jason_trusted_catalog_scoped_promotion", entrypoint,
+    )
+    if spec is None or spec.loader is None:
+        raise HostReconcileError("CATALOG_SCOPED_ROOT_ENTRYPOINT_UNAVAILABLE")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _process(path: Path) -> None:
     request_id = path.stem
     source_revision = ""
@@ -1264,6 +1361,26 @@ def _process(path: Path) -> None:
                 success=receipt["status"] == "installed",
                 detail="PMV4_STAGE_A0=" + json.dumps(receipt, sort_keys=True),
             )
+            return
+        if request.get("action") in {
+            "catalog_scope_stage", "catalog_scope_promote", "catalog_scope_recover",
+        }:
+            _verify_main(source_revision)
+            # The trusted root module also requires its own root-owned policy,
+            # exact source and signed Owner proof; no root action from a chat
+            # or this ordinary operator-owned request alone.
+            trusted = _trusted_catalog_scoped_promotion_module(source_revision)
+            receipt = trusted.execute_native_catalog_scoped_request(request)
+            if (not isinstance(receipt, dict)
+                    or receipt.get("release_id") != request.get("release_id")
+                    or receipt.get("status") not in {
+                        "catalog_offer_staged_without_mutation",
+                        "production_pair_verified",
+                        "interrupted_recovered_rollback_verified",
+                    }):
+                raise HostReconcileError("CATALOG_SCOPED_ROOT_RECEIPT_INVALID")
+            _write_result(request_id, source_revision, success=True,
+                          detail="CATALOG_SCOPE=" + json.dumps(receipt, sort_keys=True))
             return
         _verify_main(source_revision)
 

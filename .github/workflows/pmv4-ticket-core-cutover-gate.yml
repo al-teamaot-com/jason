@@ -8,6 +8,11 @@ on:
       - "tools/pmv4_c_sqlite_family_handoff.py"
       - "tools/pmv4_c_host_consumer_projection.py"
       - "tools/pmv4_c_authority_health_adapter.py"
+      - "tools/pmv4_c_host_recovery_builder.py"
+      - "tools/pmv4_c_host_recovery_owner.py"
+      - "tools/pmv4_c_host_recovery_root.py"
+      - "tests/test_pmv4_c_host_recovery_exact_root.py"
+      - "tests/test_pmv4_c_host_recovery_synthetic_install.py"
       - "tools/pmv4_host_release_guard.py"
       - "tools/jason_self_heal_watchdog.py"
       - "tests/test_pmv4_c_host_consumer_projection.py"
@@ -63,6 +68,8 @@ jobs:
             tests/test_pmv4_c_legacy_sqlite_modes.py \
             tests/test_pmv4_c_host_consumer_projection.py \
             tests/test_pmv4_c_authority_health_adapter.py \
+            tests/test_pmv4_c_host_recovery_exact_root.py \
+            tests/test_pmv4_c_host_recovery_synthetic_install.py \
             tests/test_pmv4_c_ticket_state_pointer_reconciliation.py \
             tests/test_pmv4_host_release_guard.py \
             tests/test_pmv4_c_immutable_builder.py \

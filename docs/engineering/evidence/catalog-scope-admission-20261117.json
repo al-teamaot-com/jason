@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0",
+  "status": "SOURCE_SCOPE_VERIFIED_NOT_PRODUCTION_ELIGIBLE",
+  "profile": "aot-autotask-catalog-runtime-mcp-v1",
+  "protected_source": {
+    "verified_main_sha": "2085f4c46d6b78e9175d8a30d412d86c9bbd89e9",
+    "verified_protected_feature_sha": "b0e3b84415a83cb603c53c7efbf4867eab829665",
+    "snapshot_source_sha": "d73f680864bd75cd714a89f36ae8a3190dc60e66",
+    "rollback_source_sha": "d1b8c196dadd4b672ec8ba47075f27bb61c98d63",
+    "changed_files": [
+      ".github/workflows/security-regressions.yml",
+      "docs/engineering/reviews/CATALOG_EXACT_GRANT_ADMIN_20261117.md",
+      "docs/engineering/reviews/CATALOG_SERVICE_IDENTITY_20261117.md",
+      "implementation/mcp_service/src/jason_mcp/catalog_grant_admin.py",
+      "implementation/mcp_service/src/jason_mcp/server.py",
+      "implementation/mcp_service/tests/test_autotask_catalog_grant_admin.py",
+      "implementation/orchestrator/tests/test_execution_plan_binding.py",
+      "implementation/runtime_service/src/jason_runtime/autotask_procurement.py",
+      "implementation/runtime_service/tests/test_autotask_catalog_service_identity.py"
+    ],
+    "source_diff_sha256": "574361739ef89969a22932a9cb8731432b9b715a5a0a78fbdbd66d79a2494256",
+    "shared_function_count": 5,
+    "blob_equality_count": 5,
+    "protected_source_checks_present": true
+  },
+  "dual_image_rollback": {
+    "rollback_sha": "d1b8c196dadd4b672ec8ba47075f27bb61c98d63",
+    "rollback_runtime_image_id": "sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132",
+    "rollback_mcp_image_id": "sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477",
+    "candidate_runtime_image_id": "sha256:98f5d3f4a16e55b9a49fa424056dc30a8139dc443f4948d2aaf524ac4fa9dddf",
+    "candidate_mcp_image_id": "sha256:ea8a3fca67b9f75dbd2ec4156cb8d1a657c13efd72886b4d16e54046070de9b9",
+    "freeze_sha256": "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f",
+    "live_runtime_health": "healthy",
+    "live_mcp_running": true,
+    "global_owner_permissions_unchanged": true
+  },
+  "protected_ci": {
+    "passed": true,
+    "source_sha": "b0e3b84415a83cb603c53c7efbf4867eab829665",
+    "required_checks": [
+      "cap-001",
+      "cap-003",
+      "cap-007",
+      "system-registry",
+      "runtime-service",
+      "documentation",
+      "repository-hygiene",
+      "conversation-experience",
+      "teams-gateway",
+      "governed-security-regressions"
+    ]
+  },
+  "deployment_configuration": {
+    "runtime": {
+      "JASON_AUTOTASK_CATALOG_AUTH_MODE": "jason_managed"
+    },
+    "mcp": {
+      "JASON_AUTOTASK_CATALOG_GRANT_ADMIN_PROFILE": "aot-catalog-self-owner-v1"
+    }
+  },
+  "production_mutations": false,
+  "provider_writes": false,
+  "owner_approval_recorded": false,
+  "native_production_eligible_record_created": false,
+  "separate_exact_release_approval_required": true,
+  "separate_catalog_test_write_approval_required": true,
+  "existing_native_release_promotion_unchanged": true,
+  "receipt_sha256": "12c8fdeec4b3ffd361d06b40e51a94c8199dfb8f7b0bb30a6d7e6920defe9d31",
+  "native_readonly_preflight": {
+    "runtime": {
+      "preflight": "PASS",
+      "image_id": "sha256:98f5d3f4a16e55b9a49fa424056dc30a8139dc443f4948d2aaf524ac4fa9dddf",
+      "exact_env_key": "JASON_AUTOTASK_CATALOG_AUTH_MODE",
+      "additional_binds": 0
+    },
+    "mcp": {
+      "preflight": "PASS",
+      "image_id": "sha256:ea8a3fca67b9f75dbd2ec4156cb8d1a657c13efd72886b4d16e54046070de9b9",
+      "exact_env_key": "JASON_AUTOTASK_CATALOG_GRANT_ADMIN_PROFILE",
+      "additional_binds": 0
+    }
+  }
+}
