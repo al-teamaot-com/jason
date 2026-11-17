@@ -4,7 +4,26 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _ci_owner_identity_fixture(monkeypatch):
+    """Model the production 'al' UID only on generic CI hosts lacking that account.
+
+    The trusted production request parser remains unchanged and still checks
+    real file ownership and mode. This fixture affects these tests only.
+    """
+    original_getpwnam = w.pwd.getpwnam
+    try:
+        original_getpwnam('al')
+    except KeyError:
+        monkeypatch.setattr(
+            w.pwd, 'getpwnam',
+            lambda name: SimpleNamespace(pw_uid=os.getuid()) if name == 'al'
+            else original_getpwnam(name),
+        )
 from tools import release_host_reconcile_worker as w
 from tools.catalog_scoped_promotion import ADMISSION_RECEIPT_SHA256
 
