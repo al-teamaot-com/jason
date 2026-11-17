@@ -103,6 +103,54 @@ def exact_plan(path:Path)->dict[str,Any]:
          "C_OWNER_PRODUCTION_CONTROLS_CHANGED")
     return plan
 
+def release_id(plan:Mapping[str,Any])->str:
+    """The *pinned* native Owner signer requires release-{SHA[:16]}.
+
+    Stage C artifact paths and release transaction IDs are still pmv4-c-*;
+    that separate namespace must never be used for the cryptographic claim.
+    """
+    sha_value=plan.get("candidate_sha")
+    need(isinstance(sha_value,str) and len(sha_value)==40
+         and all(c in "0123456789abcdef" for c in sha_value),
+         "C_OWNER_RELEASE_ID_SOURCE_INVALID")
+    return "release-"+sha_value[:16]
+
+
+def signer_contract_preflight(signer:Any,plan:Mapping[str,Any])->None:
+    """Ephemeral in-memory sign+verify, before Entra login or production work.
+
+    Exercise BOTH allowed Owner OIDs using the real pinned signer schema.
+    No production signing key, token, Owner grant, receipt or provider call.
+    """
+    key=signer.Ed25519PrivateKey.generate()
+    instant=datetime.now(timezone.utc)
+    for oid,principal in sorted(signer.EXACT_OWNER_OAUTH_SUBJECTS.items()):
+        signed=signer.issue_exact_owner_release(
+            approval_id="owner-mcp-"+uuid.uuid4().hex,
+            release_id=release_id(plan),
+            candidate_sha=plan["candidate_sha"],
+            rollback_sha=plan["rollback_sha"],
+            scope_sha256=plan["scope_sha256"],
+            manifest_sha256=sha(canon(plan)),
+            freeze_sha256=plan["freeze_sha256"],
+            verified_tenant_id=signer.TID,
+            verified_owner_oid=oid,
+            verified_principal=principal,
+            verified_organization_id="aot",
+            confirmed_decision="approve",at=instant,private_key=key)
+        verified=signer.verify_exact_owner_release(
+            signed,public_key=key.public_key(),at=instant,
+            expected_candidate_sha=plan["candidate_sha"],
+            expected_rollback_sha=plan["rollback_sha"],
+            expected_release_id=release_id(plan),
+            expected_scope_sha256=plan["scope_sha256"],
+            expected_manifest_sha256=sha(canon(plan)),
+            expected_freeze_sha256=plan["freeze_sha256"])
+        need(verified["owner_oid"]==oid
+             and verified["release_id"]==release_id(plan),
+             "C_OWNER_SIGNER_SCHEMA_NOT_COMPATIBLE")
+
+
 def authenticate(auth:Any,plan:Mapping[str,Any])->str:
     endpoint=("https://login.microsoftonline.com/"+auth.TENANT+
               "/oauth2/v2.0/")
@@ -148,6 +196,9 @@ def authorize(path:Path)->None:
          "C_OWNER_REAL_LOCAL_TTY_REQUIRED")
     plan=exact_plan(path)
     signer=trusted(OWNER_SIGNER,OWNER_SIGNER_SHA,"c_owner_signer")
+    # A signed proof with a schema-invalid release ID must be caught BEFORE
+    # asking an Owner to authenticate, not after their affirmative consent.
+    signer_contract_preflight(signer,plan)
     auth=trusted(OAUTH,OAUTH_SHA,"c_owner_oauth")
     public=signer.read_pinned_root_owner_public_key(PUBLIC)
     oid=authenticate(auth,plan)
@@ -159,7 +210,7 @@ def authorize(path:Path)->None:
     at=datetime.now(timezone.utc)
     signed=signer.issue_exact_owner_release(
         approval_id=approval,
-        release_id="pmv4-c-"+plan["candidate_sha"][:16],
+        release_id=release_id(plan),
         candidate_sha=plan["candidate_sha"],
         rollback_sha=plan["rollback_sha"],
         scope_sha256=plan["scope_sha256"],
@@ -175,7 +226,7 @@ def authorize(path:Path)->None:
         signed,public_key=public,at=at,
         expected_candidate_sha=plan["candidate_sha"],
         expected_rollback_sha=plan["rollback_sha"],
-        expected_release_id="pmv4-c-"+plan["candidate_sha"][:16],
+        expected_release_id=release_id(plan),
         expected_scope_sha256=plan["scope_sha256"],
         expected_manifest_sha256=sha(canon(plan)),
         expected_freeze_sha256=plan["freeze_sha256"])
@@ -207,6 +258,10 @@ def main()->int:
     try:
         if args.check_only:
             plan=exact_plan(args.plan)
+            signer=trusted(OWNER_SIGNER,OWNER_SIGNER_SHA,"c_owner_signer")
+            signer_contract_preflight(signer,plan)
+            print("PMV4_C_PINNED_SIGNER_EXACT_PROOF_PREFLIGHT=PASS")
+            print("SYNTHETIC_SIGNER_CHECK_ONLY=true; OWNER_PROOF_ISSUED=false")
             print("PMV4_C_ONE_OWNER_EXACT_SCOPE_PREFLIGHT=PASS")
             print("EXACT_SCOPE_SHA256="+plan["scope_sha256"])
             print("OWNER_APPROVAL_USED=false; PRODUCTION_MUTATIONS=false")
