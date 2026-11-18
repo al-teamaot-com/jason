@@ -9,6 +9,8 @@ on:
       - "tools/tests/test_pmv4_e_native_systemd_adapter.py"
       - "tools/pmv4_e_systemd_root_ops.py"
       - "tools/tests/test_pmv4_e_systemd_root_ops.py"
+      - "tools/pmv4_e_native_backend_bridge.py"
+      - "tools/tests/test_pmv4_e_native_backend_bridge.py"
       - "tests/test_pmv4_*"
       - "infrastructure/pmv4-shadow-image/**"
       - "implementation/runtime_service/src/jason_runtime/ticket_worker_*"
