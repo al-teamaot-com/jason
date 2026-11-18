@@ -180,6 +180,7 @@ def collect(*,runner:Callable[...,Any]=subprocess.run)->dict[str,Any]:
     from tools import pmv4_e_root_receipt_readback as rootproof
     from tools import pmv4_e_canary_acceptance_readback as canaryproof
     from tools import pmv4_e_retirement_readiness as retirement
+    from tools import pmv4_e_ticket_owner_readback as ownerproof
     # Trusted attestors verify exact source and the historic root audit chain.
     historical=rootproof.inspect()
     canary=canaryproof.inspect()
@@ -195,6 +196,11 @@ def collect(*,runner:Callable[...,Any]=subprocess.run)->dict[str,Any]:
     # Fail closed if the parent has not been root-reviewed; the actual root
     # transaction must create the exact marker only after old units stop.
     scans=retirement.scan_summary()
+    owner=ownerproof.inspect(runner=runner)
+    require(owner.get("status")=="live_external_ticket_core_exclusive_owner_verified"
+            and owner.get("unique_owner") is True
+            and owner.get("exclusive_owner_count")==1,
+            "CURRENT_TICKET_DISPATCH_OWNER_UNVERIFIED")
     return {
         "uid":0,**details,
         "marker_absent":marker_absent,
@@ -207,7 +213,13 @@ def collect(*,runner:Callable[...,Any]=subprocess.run)->dict[str,Any]:
         # Fresh provider-backed scans are necessary but never sufficient to
         # assert one physical ticket dispatch owner. That needs a separate
         # root-owned live ticket-lock / controller attestation.
-        "ticket_unique_owner":False,
+        "ticket_unique_owner":True,
+        "ticket_owner_evidence":{
+            "lock_inode":owner["lock_inode"],
+            "lock_owner_pid":owner["lock_owner_pid"],
+            "container_init_pid":owner["container_init_pid"],
+            "exclusive_owner_count":owner["exclusive_owner_count"],
+        },
         "scan_fresh":scans.get("status")=="fresh",
         "duplicate_items":scans.get("duplicate_items"),
     }
