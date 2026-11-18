@@ -38,7 +38,8 @@ def canonical_regular(path:Path,*,root_only:bool)->bytes:
         x=path.lstat()
         require(stat.S_ISREG(x.st_mode) and not path.is_symlink()
                 and x.st_nlink==1 and 0<x.st_size<=1_000_000
-                and x.st_mode&0o022==0,
+                and x.st_mode&0o002==0
+                and (not root_only or x.st_mode&0o020==0),
                 "SOURCE_FILE_UNTRUSTED")
         if root_only:
             require(x.st_uid==0 and x.st_gid==0,
@@ -46,6 +47,8 @@ def canonical_regular(path:Path,*,root_only:bool)->bytes:
         raw=path.read_bytes()
         require(len(raw)==x.st_size,"SOURCE_CHANGED_DURING_COPY")
         return raw
+    except PMv4ERootTrustDenied:
+        raise
     except OSError as exc:
         raise PMv4ERootTrustDenied(
             "PMV4_E_ROOT_TRUST_SOURCE_READ_UNAVAILABLE") from exc
