@@ -301,3 +301,85 @@ def test_recovery_safety_does_not_allow_accepted_native_receipt_rewind():
     assert 'elif args.recover_existing_owner:recover_exact_consumed_v5()' in text
     assert 'mode.add_argument("--recover-existing-owner",action="store_true")' in text
     assert 'A1_V5_RECOVERY_SIGNED_OWNER_MISMATCH' in text
+
+
+def load_generated_reused_oci_predicate():
+    """Exercise actual generated root predicate without privileged imports."""
+    import ast
+    root=root_code()
+    tree=ast.parse(root)
+    exact=next(node for node in tree.body if isinstance(node,ast.FunctionDef)
+               and node.name=="reviewed_reused_shadow_image")
+    func=ast.Module(body=[exact],type_ignores=[])
+    def need(ok,code):
+        if not ok:
+            raise PermissionError(code)
+    variables={
+        "need":need,
+        "IMAGE":r.PRIOR_IMAGE,
+        "PRIOR_IMAGE":r.PRIOR_IMAGE,
+        "ROLLBACK":r.PRIOR,
+        "CANDIDATE":SHA,
+        "Any":object,
+    }
+    exec(compile(func,"rendered-root-OCI-identity","exec"),variables)
+    return variables["reviewed_reused_shadow_image"],root
+
+
+def test_reused_shadow_image_accepts_only_prior_reviewed_source_revision():
+    check,generated=load_generated_reused_oci_predicate()
+    actual=[{"Id":r.PRIOR_IMAGE,"Config":{"Labels":{
+        "com.aot.jason.component":"pmv4-shadow",
+        "com.aot.jason.lifecycle":"preproduction-only",
+        "com.aot.jason.production-core":"excluded",
+        "com.aot.jason.provider-mutations":"disabled",
+        "com.aot.jason.source_revision":r.PRIOR,
+    }}}]
+    assert check(actual) is None
+    assert 'reviewed_reused_shadow_image(item)' in generated
+    assert 'source_revision"]==CANDIDATE' not in generated
+
+
+@pytest.mark.parametrize("section,key,changed",[
+    ("labels","com.aot.jason.component","pmv4-production"),
+    ("labels","com.aot.jason.lifecycle","production"),
+    ("labels","com.aot.jason.production-core","included"),
+    ("labels","com.aot.jason.provider-mutations","enabled"),
+    ("labels","com.aot.jason.source_revision",SHA),
+    ("labels","com.aot.jason.source_revision","f"*40),
+    ("labels","com.aot.jason.source_revision","0"*40),
+    ("image","Id","sha256:"+"e"*64),
+])
+def test_reused_image_rejects_any_changed_digest_or_security_label(section,key,changed):
+    check,_=load_generated_reused_oci_predicate()
+    actual=[{"Id":r.PRIOR_IMAGE,"Config":{"Labels":{
+        "com.aot.jason.component":"pmv4-shadow",
+        "com.aot.jason.lifecycle":"preproduction-only",
+        "com.aot.jason.production-core":"excluded",
+        "com.aot.jason.provider-mutations":"disabled",
+        "com.aot.jason.source_revision":r.PRIOR,
+    }}}]
+    if section=="labels":
+        actual[0]["Config"]["Labels"][key]=changed
+    else:actual[0][key]=changed
+    with pytest.raises(PermissionError,match="A1_SHADOW_IMAGE_NOT_REVIEWED"):
+        check(actual)
+
+
+@pytest.mark.parametrize("bad",[[],[None], [{}], [None,None], None,
+                                [{"Config":{"Labels":None}}],
+                                [{"Id":r.PRIOR_IMAGE,"Config":None}],
+                                [{"Id":r.PRIOR_IMAGE,"Config":{"Labels":{}}}]])
+def test_reused_image_rejects_missing_or_ambiguous_oci_inspection(bad):
+    check,_=load_generated_reused_oci_predicate()
+    with pytest.raises(PermissionError,match="A1_SHADOW_IMAGE_NOT_REVIEWED"):
+        check(bad)
+
+
+def test_generated_reused_image_is_not_arbitrary_allowlisted_prior():
+    code=root_code()
+    assert 'and IMAGE==PRIOR_IMAGE' in code
+    assert 'and labels.get("com.aot.jason.source_revision")==ROLLBACK' in code
+    assert 'and labels.get("com.aot.jason.provider-mutations")=="disabled"' in code
+    assert 'and labels.get("com.aot.jason.production-core")=="excluded"' in code
+    assert code.count('A1_SHADOW_IMAGE_NOT_REVIEWED')==2
