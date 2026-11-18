@@ -20,6 +20,7 @@ import subprocess
 import sqlite3
 import stat
 import statistics
+import sys
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +48,16 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_MANAGER_SOURCE_LINK = Path.home() / ".local/lib/jason/release-manager-source"
 RELEASE_MANAGER_RUNNER = Path.home() / ".local/lib/jason/release_manager_host_runner.py"
 RELEASE_MANAGER_TIMER = Path.home() / ".config/systemd/user/jason-release-manager.timer"
+PMV4_E_RELEASE_MANAGER_TIMER = Path.home() / ".config/systemd/user/jason-pmv4-component-release.timer"
+PMV4_E_MARKER = Path("/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json")
+PMV4_E_GUARD = Path("/opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py")
+PMV4_E_TIMERS = (
+    "jason-pmv4-component-release.timer",
+    "jason-pmv4-engineering.timer",
+    "jason-self-heal-watchdog.timer",
+)
+PMV4_E_ENGINEERING_SERVICE = "jason-pmv4-engineering.service"
+PMV4_E_ROOT_RECONCILE_PATH = "jason-pmv4-component-reconcile.path"
 ENGINEERING_SOURCE_LINK = Path.home() / ".local/lib/jason/engineering-worker-source"
 CURRENT_RELEASE_LINK = Path("/opt/jason/current")
 ROOT_HOST_RECONCILER = Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
@@ -92,6 +103,48 @@ def run(args: list[str], *, timeout: int = 20, check: bool = False) -> subproces
         timeout=timeout,
         check=check,
     )
+
+
+def pmv4_e_controlplane_mode() -> str:
+    """Legacy until exact root acceptance; invalid acceptance DENIES repair.
+
+    Never interpret an untrusted file or CLI flag as Owner approval.
+    Only the root-owned pinned admission executable verifies the accepted
+    marker; this watchdog cannot issue or modify the marker itself.
+    """
+    try:
+        marker=PMV4_E_MARKER.lstat()
+    except FileNotFoundError:
+        return "legacy"
+    except OSError:
+        return "denied"
+    if (not stat.S_ISREG(marker.st_mode) or PMV4_E_MARKER.is_symlink()
+            or marker.st_uid!=0 or marker.st_gid!=0
+            or marker.st_nlink!=1 or stat.S_IMODE(marker.st_mode)!=0o444):
+        return "denied"
+    try:
+        guard=PMV4_E_GUARD.lstat()
+        if (not stat.S_ISREG(guard.st_mode) or PMV4_E_GUARD.is_symlink()
+                or guard.st_uid!=0 or guard.st_gid!=0
+                or guard.st_nlink!=1 or stat.S_IMODE(guard.st_mode)!=0o444):
+            return "denied"
+        result=run([
+            "/usr/bin/python3","-I","-B",str(PMV4_E_GUARD),
+            "--mode","engineering",
+        ],timeout=12)
+        if result.returncode!=0:
+            return "denied"
+        doc=json.loads(result.stdout)
+        if (isinstance(doc,dict)
+                and doc.get("status")=="accepted_for_one_configured_service"
+                and doc.get("role")=="engineering"
+                and doc.get("unit")=="jason-pmv4-engineering.timer"
+                and doc.get("production_changes_performed") is False
+                and doc.get("owner_authority_issued") is False):
+            return "replacement"
+    except (OSError,ValueError,TypeError,subprocess.TimeoutExpired):
+        pass
+    return "denied"
 
 
 def atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -171,6 +224,12 @@ def production_convergence_failures(
     """
     failures: list[str] = []
     evidence: dict[str, Any] = {}
+    control_mode=pmv4_e_controlplane_mode()
+    evidence["pmv4_e_controlplane_mode"]=control_mode
+    if control_mode=="denied":
+        return ["production_convergence_pmv4_e_acceptance_invalid"], evidence
+    if control_mode=="replacement" and installed_timer==RELEASE_MANAGER_TIMER:
+        installed_timer=PMV4_E_RELEASE_MANAGER_TIMER
     runtime_revision = _container_source_revision("jason-runtime")
     mcp_revision = _container_source_revision("jason-mcp-pilot")
     evidence["runtime_revision"] = runtime_revision
@@ -202,13 +261,14 @@ def production_convergence_failures(
     if installed_source != release_dir.resolve():
         failures.append("production_convergence_release_manager_source_drift")
 
+    timer_relative=(
+        "infrastructure/pmv4-e-scheduler/systemd/user/jason-pmv4-component-release.timer"
+        if control_mode=="replacement"
+        else "infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer"
+    )
     pairs = (
         ("runner", release_dir / "tools/release_manager_host_runner.py", installed_runner),
-        (
-            "timer",
-            release_dir / "infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer",
-            installed_timer,
-        ),
+        ("timer", release_dir / timer_relative, installed_timer),
     )
     artifact_evidence: dict[str, Any] = {}
     for name, desired, installed in pairs:
@@ -298,7 +358,9 @@ def production_convergence_failures(
 
     uid = os.getuid()
     timer_evidence: dict[str, bool] = {}
-    for timer_name in REQUIRED_USER_TIMERS:
+    expected_timers=(PMV4_E_TIMERS
+                     if control_mode=="replacement" else REQUIRED_USER_TIMERS)
+    for timer_name in expected_timers:
         timer_state = run(
             [
                 "/usr/bin/env",
@@ -316,9 +378,13 @@ def production_convergence_failures(
         if not active:
             failures.append(f"production_convergence_required_timer_inactive:{timer_name}")
     evidence["required_user_timers"] = timer_evidence
-    evidence["release_manager_timer_active"] = timer_evidence.get("jason-release-manager.timer", False)
+    current_manager=("jason-pmv4-component-release.timer"
+                     if control_mode=="replacement" else "jason-release-manager.timer")
+    evidence["release_manager_timer_active"] = timer_evidence.get(current_manager, False)
 
-    root_path = run(["systemctl", "is-active", "jason-release-host-reconcile.path"], timeout=10)
+    desired_root=(PMV4_E_ROOT_RECONCILE_PATH
+                  if control_mode=="replacement" else "jason-release-host-reconcile.path")
+    root_path = run(["systemctl", "is-active", desired_root], timeout=10)
     root_path_active = root_path.returncode == 0 and root_path.stdout.strip() == "active"
     evidence["root_host_reconcile_path_active"] = root_path_active
     if not root_path_active:
@@ -819,12 +885,16 @@ def non_disruptive_release_guard():
 
 def request_engineering_worker() -> str:
     """Bound watchdog worker activation to the same production mutex."""
+    control_mode=pmv4_e_controlplane_mode()
+    if control_mode=="denied":
+        return "deferred_pmv4_e_root_acceptance_invalid"
+    target=(PMV4_E_ENGINEERING_SERVICE
+            if control_mode=="replacement" else "jason-support-repair-worker.service")
     with non_disruptive_release_guard() as admitted:
         if not admitted:
             return "deferred_production_transaction_or_unavailable_lock"
         result = run(
-            ["systemctl", "--user", "start", "--no-block",
-             "jason-support-repair-worker.service"],
+            ["systemctl", "--user", "start", "--no-block",target],
             timeout=10,
         )
         return ("requested" if result.returncode == 0

@@ -12,6 +12,8 @@ on:
       - "tools/tests/test_pmv4_e_canary_release_root.py"
       - "tools/pmv4_e_canary_packet.py"
       - "tools/pmv4_e_scheduler_parity.py"
+      - "tools/jason_self_heal_watchdog.py"
+      - "tools/tests/test_pmv4_e_watchdog_retarget.py"
       - "tools/pmv4_e_unit_admission.py"
       - "tools/pmv4_e_replacement_unit_bundle.py"
       - "infrastructure/pmv4-e-scheduler/**"
@@ -41,13 +43,15 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check -q pytest cryptography PyYAML
-          PYTHONPATH=.:implementation:implementation/mcp_service/src python -B -m pytest -q \
+          PYTHONPATH=tools:.:implementation:implementation/mcp_service/src python -B -m pytest -q \
             tools/tests/test_pmv4_e_providerfree_canary.py \
             tools/tests/test_pmv4_e_canary_host.py \
             tests/test_pmv4_e_canary_drift_policy.py \
             tools/tests/test_pmv4_e_canary_release_root.py \
             tools/tests/test_pmv4_e_canary_packet.py \
             tests/test_pmv4_e_scheduler_parity.py \
+            tools/tests/test_pmv4_e_watchdog_retarget.py \
+            tools/tests/test_jason_self_heal_watchdog.py \
             tests/test_pmv4_e_unit_admission.py \
             tests/test_pmv4_e_replacement_unit_bundle.py \
             tools/tests/test_independent_component_release.py \
@@ -64,6 +68,7 @@ jobs:
             tools/pmv4_e_canary_release_root.py \
             tools/pmv4_e_canary_packet.py \
             tools/pmv4_e_scheduler_parity.py \
+            tools/jason_self_heal_watchdog.py \
             tools/pmv4_e_unit_admission.py \
             tools/pmv4_e_replacement_unit_bundle.py
           test ! -e /var/lib/jason/independent-component-release
