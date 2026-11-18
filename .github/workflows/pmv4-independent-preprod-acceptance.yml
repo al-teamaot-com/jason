@@ -5,6 +5,8 @@ on:
     paths:
       - "tools/pmv4_*"
       - "tools/tests/test_pmv4_e_native_six_unit_release.py"
+      - "tools/pmv4_e_native_systemd_adapter.py"
+      - "tools/tests/test_pmv4_e_native_systemd_adapter.py"
       - "tests/test_pmv4_*"
       - "infrastructure/pmv4-shadow-image/**"
       - "implementation/runtime_service/src/jason_runtime/ticket_worker_*"
