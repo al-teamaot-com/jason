@@ -42,6 +42,18 @@ def owner_fixture(tmp_path,monkeypatch):
         "signed_owner_proof":{"synthetic":True},
     }))
     proof.chmod(0o400)
+    # A GitHub Actions runner does not use AOT's UID 1000. The synthetic
+    # fixture emulates a reviewed AOT-owned proof without ever relaxing
+    # the production root verifier's exact UID check.
+    original_lstat=Path.lstat
+    def trusted_fixture_lstat(path):
+        meta=original_lstat(path)
+        if path==proof:
+            return SimpleNamespace(
+                st_mode=meta.st_mode,st_uid=1000,st_gid=meta.st_gid,
+                st_nlink=meta.st_nlink,st_size=meta.st_size)
+        return meta
+    monkeypatch.setattr(Path,"lstat",trusted_fixture_lstat)
     monkeypatch.setattr(root,"stage_dir",lambda x:folder)
     fake=FakeSigner()
     monkeypatch.setattr(root,"installed_signer",lambda:fake)
