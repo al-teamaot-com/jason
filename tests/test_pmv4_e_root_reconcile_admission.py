@@ -181,7 +181,7 @@ def test_shell_mode_output_contract_is_not_json(tmp_path,monkeypatch,capsys):
     monkeypatch.setattr(rootguard,"decide",lambda **_:{"mode":"replacement","cutover_accepted":True})
     assert rootguard.main(["--source-revision","a"*40,"--mode-only"])==0
     output=capsys.readouterr().out
-    assert output=="replacement\\n"
+    assert output=="replacement\n"
 
 
 def test_host_script_requests_scalar_mode_only():
