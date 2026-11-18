@@ -21,7 +21,10 @@ def runner(argv, **kwargs):
     if "--user" in argv:
         assert kwargs["env"]["XDG_RUNTIME_DIR"] == "/run/user/1000"
     if argv[0] == "/usr/bin/docker":
-        return SimpleNamespace(stdout="true\n",returncode=0)
+        result = ("external" if argv[3] == stage.STAGE_C_RUNTIME_HOST_FORMAT
+                  else "healthy" if argv[3] == stage.STAGE_C_HEALTH_FORMAT
+                  else "true")
+        return SimpleNamespace(stdout=result+"\n", returncode=0)
     return SimpleNamespace(stdout="active\n" if "is-active" in argv else "enabled\n",
                            returncode=0)
 
@@ -58,6 +61,10 @@ def test_end_to_end_source_only_never_claims_retirement(tmp_path):
     assert all(result["protected_containers_running"].values())
     assert result["ticket_scan"]["status"]=="fresh"
     assert "LEGACY_ENG_AND_RELEASE_CONTROLLERS_STILL_ACTIVE" in result["blocking_gates"]
+    assert result["stage_c_independent_worker"]["live"] is True
+    assert result["stage_c_independent_worker"]["root_acceptance_receipt_verified"] is False
+    assert "STAGE_C_ROOT_ACCEPTANCE_RECEIPT_NOT_READBACK" in result["blocking_gates"]
+    assert "STAGE_C_INDEPENDENT_WORKER_NOT_ACCEPTED" not in result["blocking_gates"]
     assert result["governed_release_authorized"] is False
     assert result["service_mutations"] is False
     assert result["provider_actions"] is False
@@ -116,3 +123,45 @@ def test_unit_readback_read_only_from_three_groups():
     assert len(d["legacy_system"])==len(stage.SYSTEM_LEGACY)
     assert len(d["continuity"])==len(stage.REQUIRED_CONTINUITY)
     assert all(x["enabled"]=="enabled" for group in d.values() for x in group)
+
+
+
+def test_stage_c_embedded_or_unhealthy_still_blocks(tmp_path):
+    def not_cutover(argv, **kwargs):
+        if argv[0] == "/usr/bin/docker" and argv[3] in (
+            stage.STAGE_C_RUNTIME_HOST_FORMAT, stage.STAGE_C_HEALTH_FORMAT,
+        ):
+            return SimpleNamespace(
+                stdout="embedded\n" if argv[3] == stage.STAGE_C_RUNTIME_HOST_FORMAT
+                else "unhealthy\n", returncode=0)
+        return runner(argv, **kwargs)
+    result = stage.inspect(policy=policy_fixture(tmp_path),
+                           db=db_fixture(tmp_path), runner=not_cutover)
+    assert result["stage_c_independent_worker"]["live"] is False
+    assert "STAGE_C_INDEPENDENT_WORKER_NOT_ACCEPTED" in result["blocking_gates"]
+    assert result["governed_release_authorized"] is False
+
+
+def test_stage_c_container_inspect_read_only_command_scope():
+    allowed = [
+        ["/usr/bin/docker", "inspect", "--format",
+         stage.STAGE_C_RUNTIME_HOST_FORMAT, "jason-runtime"],
+        ["/usr/bin/docker", "inspect", "--format",
+         stage.STAGE_C_HEALTH_FORMAT, stage.STAGE_C_WORKER],
+        ["/usr/bin/docker", "inspect", "--format",
+         "{{.State.Running}}", stage.STAGE_C_WORKER],
+    ]
+    for args in allowed:
+        assert stage.command(args, runner=runner) in ("external", "healthy", "true")
+    for args in (
+        ["/usr/bin/docker", "stop", stage.STAGE_C_WORKER],
+        ["/usr/bin/docker", "inspect", "--format",
+         "{{json .Config.Env}}", "jason-runtime"],
+        ["/usr/bin/docker", "inspect", "--format",
+         stage.STAGE_C_RUNTIME_HOST_FORMAT, stage.STAGE_C_WORKER],
+        ["/usr/bin/docker", "inspect", "--format",
+         stage.STAGE_C_HEALTH_FORMAT, "jason-runtime"],
+    ):
+        with pytest.raises(stage.RetirementEvidenceDenied):
+            stage.command(args,runner=lambda *a,**k: (_ for _ in ()).throw(
+                AssertionError("unsafe call attempted")))
