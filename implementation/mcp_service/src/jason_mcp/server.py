@@ -104,6 +104,7 @@ from connectors.datto_edr.threat_correlation import (
 )
 from pydantic import AnyHttpUrl
 from jason_mcp.release_approval_request import queue_release_approval_request
+from jason_mcp.independent_component_release_approval import queue_component_release_approval
 from jason_mcp.pmv4_entra_claims import verify_signed_entra_claims
 from jason_mcp.production_read_acceptance import record_authenticated_owner_read
 from starlette.requests import Request as StarletteRequest
@@ -4367,6 +4368,32 @@ def _authority_admin_owner() -> tuple[str, str]:
     return principal, organization
 
 
+
+def _authority_admin_or_catalog_self(app: Any) -> tuple[str, str, bool]:
+    """Existing Owner admin, or separately enabled four-capability self grant.
+
+    The fallback never changes the shared Owner allowlist and cannot serve
+    unrelated admin actions. It reuses the already authenticated Entra binder.
+    """
+    try:
+        actor, organization = _authority_admin_owner()
+        return actor, organization, False
+    except PermissionError as exc:
+        if str(exc) != "AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED":
+            raise
+    from jason_mcp.catalog_grant_admin import verify_catalog_grant_admin_actor
+    principal, organization, assurance, client_id = _authenticated_write_identity()
+    token = get_access_token()
+    actor, organization = verify_catalog_grant_admin_actor(
+        principal=principal, organization=organization,
+        assurance=assurance, client_id=client_id,
+        claims=(getattr(token, "claims", None) or {}) if token is not None else {},
+        admin_profile=os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE", "").strip(),
+    )
+    _authority_grant_subject(app, actor, organization)
+    return actor, organization, True
+
+
 def _exact_authority_capability(app: Any, capability: str) -> str:
     requested = str(capability or "").strip()
     if not requested or any(token in requested for token in ("*", "?", "[", "]")):
@@ -4413,7 +4440,7 @@ def _authority_grant_id(*, subject: str, capability: str, organization: str, cli
     return f"grant_exact_{digest}"
 
 
-def _authority_grant_audit(*, app: Any, event_type: str, admin_principal: str, organization: str, capability: str, grant_id: str) -> None:
+def _authority_grant_audit(*, app: Any, event_type: str, admin_principal: str, organization: str, capability: str, grant_id: str, catalog_scope: bool = False) -> None:
     audit = app.identity_authority.audit
     if audit is None:
         raise RuntimeError("AUTHORITY_GRANT_AUDIT_UNAVAILABLE")
@@ -4424,7 +4451,9 @@ def _authority_grant_audit(*, app: Any, event_type: str, admin_principal: str, o
         organization_id=organization,
         capability=capability,
         outcome="succeeded",
-        reason_codes=("EXACT_GRANT_ADMIN", f"GRANT_ID:{grant_id}"),
+        reason_codes=("EXACT_GRANT_ADMIN",) + (
+            ("CATALOG_SELF_GRANT_ADMIN",) if catalog_scope else ()
+        ) + (f"GRANT_ID:{grant_id}",),
     )
 
 def _provider_health_canary_grant_ids(
@@ -4610,10 +4639,15 @@ def revoke_provider_health_canaries() -> dict[str, Any]:
 def list_exact_authority_grants(subject_id: str = "") -> dict[str, Any]:
     """Owner-only: list exact Jason authority grants for one active AOT subject."""
     try:
-        admin, organization = _authority_admin_owner()
         app = _runtime()
+        admin, organization, catalog_only = _authority_admin_or_catalog_self(app)
         subject = _authority_grant_subject(app, subject_id or admin, organization)
+        if catalog_only and subject != admin:
+            raise PermissionError("CATALOG_GRANT_ADMIN_SCOPE_DENIED")
         grants = app.identity_authority.grants.list_for_subject(subject)
+        if catalog_only:
+            from jason_mcp.catalog_grant_admin import catalog_visible_grant
+            grants = [grant for grant in grants if catalog_visible_grant(actor=admin, grant=grant)]
     except (PermissionError, ValueError, RuntimeError) as exc:
         return {"status":"rejected","error_code":str(exc)}
     return {
@@ -4639,8 +4673,17 @@ def grant_exact_authority(
 ) -> dict[str, Any]:
     """Owner-only: add one exact authority grant; execute grants always require approval."""
     try:
-        admin, organization = _authority_admin_owner()
         app = _runtime()
+        admin, organization, catalog_only = _authority_admin_or_catalog_self(app)
+        # Narrow fallback validates raw request before resolving another subject
+        # or an unrelated capability. Global Owner behavior is unchanged.
+        if catalog_only:
+            from jason_mcp.catalog_grant_admin import require_catalog_grant_scope
+            require_catalog_grant_scope(
+                actor=admin, subject=subject_id, capability=capability,
+                permission=str(permission or "").strip().casefold(),
+                approval_required=approval_required, client_id=client_id,
+            )
         subject = _authority_grant_subject(app, subject_id, organization)
         exact_capability = _exact_authority_capability(app, capability)
         normalized_client = None if client_id is None or not str(client_id).strip() else str(client_id).strip()
@@ -4668,11 +4711,13 @@ def grant_exact_authority(
             raise ValueError("AUTHORITY_GRANT_ID_CONFLICT")
         _authority_grant_audit(
             app=app,event_type="authority.grant.create.requested",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=exact_capability,grant_id=grant_id,
         )
         repo.put(candidate)
         _authority_grant_audit(
             app=app,event_type="authority.grant.created",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=exact_capability,grant_id=grant_id,
         )
     except (PermissionError, ValueError, RuntimeError) as exc:
@@ -4688,8 +4733,8 @@ def grant_exact_authority(
 def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
     """Owner-only: revoke one exact Jason authority grant by grant ID."""
     try:
-        admin, organization = _authority_admin_owner()
         app = _runtime()
+        admin, organization, catalog_only = _authority_admin_or_catalog_self(app)
         requested = str(grant_id or "").strip()
         if not requested:
             raise ValueError("AUTHORITY_GRANT_ID_REQUIRED")
@@ -4697,10 +4742,15 @@ def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
         current = repo.get(requested)
         if current is None:
             raise ValueError("AUTHORITY_GRANT_NOT_FOUND")
+        if catalog_only:
+            from jason_mcp.catalog_grant_admin import catalog_visible_grant
+            if not catalog_visible_grant(actor=admin, grant=current):
+                raise PermissionError("CATALOG_GRANT_ADMIN_SCOPE_DENIED")
         if current.organization_id != organization:
             raise PermissionError("AUTHORITY_GRANT_ORGANIZATION_MISMATCH")
         _authority_grant_audit(
             app=app,event_type="authority.grant.revoke.requested",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=current.capability,grant_id=requested,
         )
         revoked = repo.revoke(requested)
@@ -4708,6 +4758,7 @@ def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
             raise ValueError("AUTHORITY_GRANT_NOT_FOUND")
         _authority_grant_audit(
             app=app,event_type="authority.grant.revoked",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=revoked.capability,grant_id=requested,
         )
     except (PermissionError, ValueError, RuntimeError) as exc:
@@ -5321,6 +5372,98 @@ def approve_release_candidate(
         "approved_by": request["approved_by"],
         "approval_source": request.get("source", "authenticated_jason_mcp_owner"),
         "promotion": "separate_release_manager_transaction",
+    }
+
+
+@mcp.tool()
+def approve_catalog_scoped_runtime_mcp_release(
+    release_id: str,
+    candidate_sha: str,
+    manifest_sha256: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Entra-verified Owner signs ONE exact catalog-only dual-image release.
+
+    Returns approval metadata only; neither unfreezes nor promotes anything.
+    Host root independently rechecks public-key signature and full manifest.
+    """
+    try:
+        principal, organization = _release_approval_owner()
+        token = get_access_token()
+        if token is None:
+            raise PermissionError("CATALOG_SCOPED_OWNER_OAUTH_REQUIRED")
+        signer_path = os.getenv("JASON_OWNER_RELEASE_ED25519_KEY_PATH", "").strip()
+        if not signer_path.startswith("/"):
+            raise PermissionError("CATALOG_SCOPED_OWNER_SIGNER_REQUIRED")
+        from kernel.signed_owner_release import read_service_owner_signing_key
+        from jason_mcp.catalog_scoped_promotion_approval import (
+            queue_catalog_scoped_approval,
+        )
+        signer = read_service_owner_signing_key(Path(signer_path))
+        receipt = queue_catalog_scoped_approval(
+            state_root=Path("/var/lib/jason/authority/catalog-scoped-release"),
+            release_id=release_id,
+            candidate_sha=candidate_sha,
+            manifest_sha256=manifest_sha256,
+            approved_by=principal,
+            organization_id=organization,
+            verified_token_claims=token.claims or {},
+            service_signer=signer,
+            affirmative_decision=affirmative_decision,
+        )
+        return dict(receipt)
+    except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+
+@mcp.tool()
+def approve_independent_component_release(
+    component_id: str,
+    candidate_sha: str,
+    image_digest: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Authenticated Owner: sign ONE prepared independent-component release.
+
+    Approval is never an install, a PMV3/PMv4 promotion, a global unfreeze, or
+    a standing permission. The root-installed component-only release controller
+    must independently validate and consume the time-limited signed receipt.
+    Disabled until a matching governed component offer and signer are present.
+    """
+    try:
+        principal, organization = _release_approval_owner()
+        signer_path = os.getenv("JASON_OWNER_RELEASE_ED25519_KEY_PATH", "").strip()
+        if not signer_path.startswith("/"):
+            raise PermissionError("COMPONENT_RELEASE_SIGNER_NOT_CONFIGURED")
+        from kernel.signed_owner_release import read_service_owner_signing_key
+        signer = read_service_owner_signing_key(Path(signer_path))
+        token = get_access_token()
+        if token is None:
+            raise PermissionError("COMPONENT_RELEASE_AUTHENTICATED_SESSION_REQUIRED")
+        result = queue_component_release_approval(
+            state_root=Path(os.getenv(
+                "JASON_RELEASE_MANAGER_STATE_ROOT",
+                "/var/lib/jason/openclaw/release-manager",
+            )),
+            component_id=component_id,
+            candidate_sha=candidate_sha,
+            image_digest=image_digest,
+            approved_by=principal,
+            organization_id=organization,
+            verified_token_claims=token.claims or {},
+            service_signer=signer,
+            confirmed_decision=affirmative_decision,
+        )
+    except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    return {
+        "status": "succeeded",
+        "release_id": result["release_id"],
+        "component_id": result["component_id"],
+        "candidate_sha": result["candidate_sha"],
+        "approved_by": result["approved_by"],
+        "approval_source": result["source"],
+        "promotion": "separate_root_governed_component_transaction",
     }
 
 
@@ -6346,11 +6489,11 @@ def stage_json_playbook(payload_json: str) -> dict[str, Any]:
 
 @mcp.tool()
 def list_json_playbooks() -> dict[str, Any]:
-    """List durable JSON playbook versions and the current active version."""
+    """Read existing JSON definitions without initializing or migrating schema."""
     registry = None
     try:
         _authenticated_identity()
-        registry = open_json_playbook_registry()
+        registry = open_json_playbook_registry(read_only=True)
         return {
             "status": "succeeded",
             "generation": registry.generation(),

@@ -1461,9 +1461,28 @@ def _deterministic_resource_contracts(
     return tuple(contracts)
 
 
+@dataclass(frozen=True, slots=True)
+class TicketWorkerComponentRuntime:
+    """No HTTP, Teams ingress, approval listener or PM auxiliary lifecycle.
+
+    This bounded component is only the ticket worker and its governed ports.
+    It is NOT itself an installation/authorization/credential projection.
+    """
+    maintenance: Any
+
+
+def _shadow_processes_targeted_wakes(settings: RuntimeSettings) -> bool:
+    """Only historical embedded hosting may leave targeted wakes to shadow."""
+    return (
+        settings.ticket_worker_hosting == "embedded"
+        and not settings.autonomy_worker_enabled
+    )
+
+
 def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile: str = "all",
                               health_probe=None, universal_approval_handler=None,
-        teams_workflow_approval_handlers: Mapping[str, Any] | None = None) -> RuntimeHttpApplication:
+        teams_workflow_approval_handlers: Mapping[str, Any] | None = None
+        ) -> RuntimeHttpApplication | TicketWorkerComponentRuntime:
     settings.validate()
     if maintenance_profile not in {"all", "ticket_worker", "auxiliary"}:
         raise ValueError("unknown maintenance profile")
@@ -2470,6 +2489,44 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         governed_execution_ledger=governed_execution_ledger,
     )
 
+    if maintenance_profile == "ticket_worker":
+        # Stage C component seam: build only the existing governed Ticket Core
+        # worker. Do NOT create the HTTP ingress/replay/continuation, Teams
+        # approval services, client-question HTTP flow, PM release watchers,
+        # procurement mailboxes, or auxiliary processes in this worker child.
+        # Its provider/orchestrator dependencies above remain governed and
+        # must be isolated separately before any production C cutover.
+        if not settings.autonomy_worker_enabled:
+            raise RuntimeError("TICKET_CORE_WORKER_PROFILE_DISABLED")
+        worker_completion_notifier = build_autonomous_completion_notifier(
+            enabled=autonomous_completion_notifications_enabled,
+            identity_authority=identity_authority,
+            capabilities=capabilities,
+            approvals=approval_repository,
+            execution_ledger=governed_execution_ledger,
+            orchestrator=orchestrator,
+            promotion_db=settings.autonomy_promotion_db,
+        )
+        worker_maintenance = build_autonomy_worker_maintenance(
+            enabled=True,
+            identity_authority=identity_authority,
+            capabilities=capabilities,
+            approvals=approval_repository,
+            execution_ledger=governed_execution_ledger,
+            orchestrator=orchestrator,
+            work_db=settings.autonomy_worker_db,
+            promotion_db=settings.autonomy_promotion_db,
+            targeted_wake_db=settings.autonomy_targeted_wake_db,
+            owned_autotask_resource_ids=settings.autonomy_owned_autotask_resource_ids,
+            max_active_work_items=settings.autonomy_max_active_work_items,
+            interval_seconds=settings.autonomy_worker_interval_seconds,
+            targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
+            audit=reflection_audit,
+            completion_notifier=worker_completion_notifier,
+        )
+        ticket_attention_relay.bind(worker_maintenance)
+        return TicketWorkerComponentRuntime(maintenance=worker_maintenance)
+
     resource_response_renderer = GovernedTeamsResourceResponseRenderer(
         interpreter=GovernedResourceEvidenceInterpreter(
             reasoner=OllamaResourceEvidenceReasoner(
@@ -3000,7 +3057,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         interval_seconds=settings.autonomy_shadow_interval_seconds,
         failure_retry_seconds=settings.autonomy_shadow_failure_retry_seconds,
         targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
-        process_targeted_wakes=not settings.autonomy_worker_enabled,
+        process_targeted_wakes=_shadow_processes_targeted_wakes(settings),
     )
     autonomous_completion_notifier = build_autonomous_completion_notifier(
         enabled=autonomous_completion_notifications_enabled,

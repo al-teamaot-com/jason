@@ -1,0 +1,12 @@
+[Unit]
+Description=Jason bounded catalog exact-image recovery watchdog (disabled until approved)
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=60s
+AccuracySec=15s
+Persistent=true
+Unit=jason-catalog-scoped-recovery.service
+
+[Install]
+WantedBy=timers.target

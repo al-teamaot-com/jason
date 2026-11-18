@@ -42,6 +42,7 @@ AUTONOMY_ANOMALY_WINDOW = 12
 AUTONOMY_RECENT_WINDOW = 3
 OUTCOME_CONTRACT_DIRNAME = "contracts"
 AUTONOMY_WORK_DB = Path("/var/lib/jason/openclaw/autonomy-operational-work.sqlite3")
+STAGE_C_WORK_DB = Path("/var/lib/jason/ticket-core/autonomy-operational-work.sqlite3")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_MANAGER_SOURCE_LINK = Path.home() / ".local/lib/jason/release-manager-source"
 RELEASE_MANAGER_RUNNER = Path.home() / ".local/lib/jason/release_manager_host_runner.py"
@@ -428,12 +429,39 @@ def operational_outcome_contract_failures(root: Path) -> tuple[list[str], list[d
 
 
 
+def canonical_autonomy_db(legacy:Path=AUTONOMY_WORK_DB,
+                          migrated:Path=STAGE_C_WORK_DB,*,uid:int=1000)->Path:
+    """No silent PASS when the sole authoritative ticket ledger has moved."""
+    present=[]
+    for file in (legacy,migrated):
+        if file.is_symlink():
+            raise ValueError("AUTONOMY_LEDGER_SYMLINKED")
+        try: info=file.lstat()
+        except FileNotFoundError:continue
+        parent=file.parent.lstat()
+        if (not stat.S_ISREG(info.st_mode)
+            or info.st_uid!=uid or info.st_nlink!=1
+            or stat.S_IMODE(info.st_mode)!=0o600
+            or not stat.S_ISDIR(parent.st_mode)
+            or parent.st_uid!=uid
+            or stat.S_IMODE(parent.st_mode)!=0o700):
+            raise ValueError("AUTONOMY_LEDGER_UNTRUSTED")
+        present.append(file)
+    if len(present)!=1:
+        raise ValueError("AUTONOMY_LEDGER_AMBIGUOUS")
+    return present[0]
+
+
 def autonomy_behavior_anomalies(
-    db_path: Path = AUTONOMY_WORK_DB,
+    db_path: Path | None = None,
     *,
     history_window: int = AUTONOMY_ANOMALY_WINDOW,
     recent_window: int = AUTONOMY_RECENT_WINDOW,
 ) -> tuple[list[str], dict[str, Any]]:
+    if db_path is None:
+        try:db_path=canonical_autonomy_db()
+        except (ValueError,OSError):
+            return ["autonomy_ledger_canonical_owner_not_verified"], {}
     if not db_path.exists():
         return [], {}
     try:
@@ -512,8 +540,12 @@ def autonomy_behavior_anomalies(
     return sorted(set(failures)), evidence
 
 def autonomy_admission_failures(
-    db_path: Path = AUTONOMY_WORK_DB,
+    db_path: Path | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
+    if db_path is None:
+        try:db_path=canonical_autonomy_db()
+        except (ValueError,OSError):
+            return ["autonomy_ledger_canonical_owner_not_verified"], {}
     if not db_path.exists():
         return [], {}
     try:
@@ -552,8 +584,12 @@ def autonomy_admission_failures(
     return failures, evidence
 
 def stale_operational_work_failures(
-    db_path: Path = AUTONOMY_WORK_DB,
+    db_path: Path | None = None,
 ) -> tuple[list[str], list[dict[str, Any]]]:
+    if db_path is None:
+        try:db_path=canonical_autonomy_db()
+        except (ValueError,OSError):
+            return ["autonomy_ledger_canonical_owner_not_verified"], []
     if not db_path.exists():
         return [], []
     failures: list[str] = []

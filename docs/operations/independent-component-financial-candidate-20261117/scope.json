@@ -1,0 +1,28 @@
+{
+  "boundary_sha256": "be0dcf36c442040d586237e0eed184e7596f7fa94d23728f82ad28246ccdde66",
+  "candidate_sha": "c205bb4ac163e7d433796f2f4839a90c7cc1f56b",
+  "component_id": "financial-statements",
+  "compose_project": "jason-financial-statements",
+  "compose_service": "financial-statements",
+  "compose_sha256": "2b0ba17c4b813f9c8b7bd29f9955b6a9a387016fe1a3c08611ec582033c8447f",
+  "config_sha256": "42e5f9bdc891bc1cc9e7ee92cc48f08c7764eec619d62b311ee10bd62ac68310",
+  "image_digest": "sha256:913322f47c96ae56f5ae9bb4c6e742ebe36691dc28ca56c202b124bf969ea195",
+  "protected_services": [
+    "jason-mcp-pilot",
+    "jason-pmv4-shadow-gateway",
+    "jason-runtime",
+    "jason-teams-gateway",
+    "openbao"
+  ],
+  "provider_scope": {
+    "application_id": "3d362478-a873-4ba2-b8a5-c04e66ef2f32",
+    "client_id": "client-aot-internal",
+    "profile": "sharepoint-write",
+    "provider": "microsoft_sharepoint",
+    "scope_id": "absolnet.sharepoint.com,8f4cd7bf-72b8-4f7e-9803-c47abcbb232f,e5b7a724-dc9b-406b-aed8-2961f1f71153",
+    "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c"
+  },
+  "rollback_mode": "remove-component-only",
+  "rollback_sha": "0000000000000000000000000000000000000000",
+  "schema_version": "1.0"
+}

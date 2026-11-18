@@ -7,6 +7,7 @@ verification. It cannot manage ordinary Jason production containers.
 """
 from __future__ import annotations
 
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -38,7 +39,7 @@ class DockerShadowAdapter:
         core_continuity_probe: Callable[[], bool],
         runner: Callable[..., Any] = subprocess.run,
         production: bool = True,
-        health_wait_seconds: float = 90,
+        health_wait_seconds: float = 210,
         clock: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
     ):
@@ -52,7 +53,7 @@ class DockerShadowAdapter:
         self.production = production
         if (not isinstance(health_wait_seconds, (int, float))
             or isinstance(health_wait_seconds, bool)
-            or not 0 <= health_wait_seconds <= 120
+            or not 0 <= health_wait_seconds <= 300
             or not callable(clock) or not callable(sleeper)):
             raise ShadowReleaseDenied("SHADOW_HEALTH_WAIT_INVALID")
         self.health_wait_seconds = float(health_wait_seconds)
@@ -84,8 +85,19 @@ class DockerShadowAdapter:
         except (OSError, subprocess.TimeoutExpired, ValueError, TypeError) as exc:
             raise ShadowReleaseDenied("SHADOW_INSPECT_UNAVAILABLE") from exc
         if result.returncode != 0:
-            if (result.returncode == 1 and isinstance(result.stderr, str)
-                and "No such object: " + SHADOW_NAME in result.stderr):
+            # Docker 29.6 emits lowercase "error: no such object: ..." and
+            # sometimes stdout="[]". Older Docker emits the capitalized form.
+            # Accept ONLY an exact missing *this* named container diagnostic:
+            # daemon outage, permission failure and arbitrary CLI errors still
+            # fail closed, never masquerading as an empty release baseline.
+            absent = {"Error: No such object: " + SHADOW_NAME,
+                      "error: no such object: " + SHADOW_NAME}
+            if (result.returncode == 1
+                and isinstance(result.stderr, str)
+                and result.stderr.rstrip("\n") in absent
+                and result.stderr in (result.stderr.rstrip("\n"),
+                                      result.stderr.rstrip("\n") + "\n")
+                and result.stdout in ("", "[]", "[]\n")):
                 return None
             raise ShadowReleaseDenied("SHADOW_INSPECT_UNAVAILABLE")
         try:
@@ -134,12 +146,17 @@ class DockerShadowAdapter:
             or host.get("Init") is not True
             or not isinstance(restart, dict)
             or restart.get("Name") not in ("no", "")
-            or host.get("PidsLimit") != 64
-            or host.get("Memory") != 512 * 1024 * 1024
-            or host.get("NanoCpus") != 500_000_000
+            or host.get("PidsLimit") != 256
+            or host.get("Memory") != 2 * 1024 * 1024 * 1024
+            or host.get("NanoCpus") != 1_000_000_000
             or host.get("PublishAllPorts") not in (None, False)
             or host.get("Devices") not in (None, [])
-            or host.get("Binds") not in (None, [])
+            # Docker 29/Compose represents an approved named volume in
+            # HostConfig.Binds as well as in Mounts. Permit ONLY that exact
+            # reserved volume syntax, never arbitrary host-path binds.
+            or host.get("Binds") not in (
+                None, [], ["jason-pmv4-shadow-state:/home/node/.openclaw:rw"],
+            )
         ):
             raise ShadowReleaseDenied("SHADOW_RUNTIME_SECURITY_PROFILE_DRIFT")
         # The reserved volume is the only persistent mount; a private tmpfs
@@ -202,6 +219,32 @@ class DockerShadowAdapter:
             raise ShadowReleaseDenied("SHADOW_TOKEN_INVALID")
         return token
 
+    def _candidate_compose(self, release_dir: Path) -> Path:
+        """Select only the exact SHA-bound, root-staged immutable Compose.
+
+        Root A0 control Compose is an older protected baseline and must not
+        silently override a newly reviewed A1 resource profile. Never edit
+        or substitute that A0 file as an engineering shortcut.
+        """
+        manifest = read_json(release_dir / "release-manifest.json")
+        expected = manifest.get("compose_sha256")
+        if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
+            raise ShadowReleaseDenied("SHADOW_COMPOSE_SOURCE_HASH_NOT_PINNED")
+        candidate = release_dir / "bundle" / "config" / "pmv4-shadow" / "docker-compose.yml"
+        if (release_dir.is_symlink() or candidate.is_symlink()
+            or not candidate.is_file()):
+            raise ShadowReleaseDenied("SHADOW_IMMUTABLE_COMPOSE_UNAVAILABLE")
+        meta = candidate.lstat()
+        if not stat.S_ISREG(meta.st_mode) or meta.st_nlink != 1:
+            raise ShadowReleaseDenied("SHADOW_IMMUTABLE_COMPOSE_INODE_UNTRUSTED")
+        if self.production and (meta.st_uid != 0 or meta.st_gid != 0
+                                or stat.S_IMODE(meta.st_mode) != 0o400):
+            raise ShadowReleaseDenied("SHADOW_IMMUTABLE_COMPOSE_ROOT_TRUST_MISSING")
+        blob = candidate.read_bytes()
+        if len(blob) > 128000 or sha256(blob).hexdigest() != expected:
+            raise ShadowReleaseDenied("SHADOW_IMMUTABLE_COMPOSE_HASH_MISMATCH")
+        return candidate
+
     def _manifest_image(self, release_dir: Path) -> str:
         doc = read_json(release_dir / "release-manifest.json")
         image = doc.get("image_digest")
@@ -211,6 +254,7 @@ class DockerShadowAdapter:
 
     def _up(self, release_dir: Path) -> None:
         image = self._manifest_image(release_dir)
+        compose = self._candidate_compose(release_dir)
         token = self._token()
         self._owned_or_absent()
         # Digest is a local OCI image ID and --pull never prohibits egress.
@@ -219,7 +263,7 @@ class DockerShadowAdapter:
                "PMV4_SHADOW_GATEWAY_TOKEN": token}
         self._exec(
             ["/usr/bin/docker", "compose", "--project-name", SHADOW_PROJECT,
-             "-f", str(self.compose_file),
+             "-f", str(compose),
              "up", "--detach", "--no-build", "--no-deps", "--pull", "never"],
             env=env,
         )
