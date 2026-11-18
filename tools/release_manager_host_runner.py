@@ -1385,18 +1385,104 @@ def unit_active(unit: str, *, user: bool) -> bool:
     return completed.returncode == 0 and completed.stdout.strip() == "active"
 
 
+# PMv4 Stage E replacement admission is a read-only, root-trusted contract.
+# A missing cutover marker retains the current PMv3 behavior. Once any
+# marker exists, invalid proof must DENY rather than reinstall PMv3.
+PMV4_E_ACCEPTED_MARKER = Path(
+    "/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json"
+)
+PMV4_E_UNIT_GUARD = Path(
+    "/opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py"
+)
+PMV4_E_USER_TIMERS = (
+    "jason-pmv4-engineering.timer",
+    "jason-pmv4-release-approval.timer",
+    "jason-pmv4-component-release.timer",
+    "jason-self-heal-watchdog.timer",
+)
+PMV4_E_ROOT_TRIGGERS = (
+    "jason-pmv4-component-transition.timer",
+    "jason-pmv4-component-readback.timer",
+    "jason-pmv4-component-reconcile.path",
+)
+PMV4_E_RETIRED_USER = (
+    "jason-support-repair-worker.timer",
+    "jason-release-manager.timer",
+    "jason-release-approval-only.timer",
+)
+PMV4_E_RETIRED_ROOT = (
+    "jason-release-control-transition.timer",
+    "jason-release-control-readback.timer",
+    "jason-release-host-reconcile.path",
+)
+
+
+def pmv4_e_scheduling_mode() -> str:
+    try:
+        PMV4_E_ACCEPTED_MARKER.lstat()
+    except FileNotFoundError:
+        return "legacy"
+    except OSError as exc:
+        raise ReleaseManagerError("PMv4 E acceptance marker unreadable") from exc
+    # Only an independently installed root-owned entrypoint may attest.
+    try:
+        trusted = PMV4_E_UNIT_GUARD.lstat()
+    except OSError as exc:
+        raise ReleaseManagerError("PMv4 E root unit guard missing") from exc
+    if (not PMV4_E_UNIT_GUARD.is_file()
+            or PMV4_E_UNIT_GUARD.is_symlink()
+            or trusted.st_uid != 0 or trusted.st_gid != 0
+            or trusted.st_mode & 0o022):
+        raise ReleaseManagerError("PMv4 E root unit guard untrusted")
+    checked = subprocess.run(
+        ["/usr/bin/python3", "-I", "-B", str(PMV4_E_UNIT_GUARD),
+         "--mode", "component-release"],
+        env=user_systemd_env(), text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if checked.returncode != 0:
+        raise ReleaseManagerError("PMv4 E root accepted scheduling proof denied")
+    try:
+        proof = json.loads(checked.stdout)
+    except (TypeError, ValueError) as exc:
+        raise ReleaseManagerError("PMv4 E unit guard returned invalid proof") from exc
+    if (not isinstance(proof, dict)
+            or proof.get("status") != "accepted_for_one_configured_service"
+            or proof.get("role") != "component-release"
+            or proof.get("unit") != "jason-pmv4-component-release.timer"
+            or proof.get("owner_authority_issued") is not False
+            or proof.get("production_changes_performed") is not False):
+        raise ReleaseManagerError("PMv4 E unit guard proof mismatch")
+    return "replacement"
+
+
 def scheduled_control_alignment() -> dict[str, str]:
+    mode = pmv4_e_scheduling_mode()
+    user_required = (PMV4_E_USER_TIMERS if mode == "replacement"
+                     else USER_CONTROL_TIMERS)
+    system_required = (SYSTEM_CONTROL_TIMERS + PMV4_E_ROOT_TRIGGERS
+                       if mode == "replacement" else SYSTEM_CONTROL_TIMERS)
     states: dict[str, str] = {}
-    for unit in USER_CONTROL_TIMERS:
+    for unit in user_required:
         active = unit_active(unit, user=True)
         states[unit] = "active" if active else "inactive"
         if not active:
             raise ReleaseManagerError(f"required user control timer is not active: {unit}")
-    for unit in SYSTEM_CONTROL_TIMERS:
+    for unit in system_required:
         active = unit_active(unit, user=False)
         states[unit] = "active" if active else "inactive"
         if not active:
             raise ReleaseManagerError(f"required system control timer is not active: {unit}")
+    if mode == "replacement":
+        # Both old and new triggers active would duplicate engineering claims.
+        for unit in PMV4_E_RETIRED_USER:
+            if unit_active(unit, user=True):
+                raise ReleaseManagerError(f"retired user control still active: {unit}")
+            states[unit] = "inactive"
+        for unit in PMV4_E_RETIRED_ROOT:
+            if unit_active(unit, user=False):
+                raise ReleaseManagerError(f"retired root control still active: {unit}")
+            states[unit] = "inactive"
     return states
 
 
@@ -2725,6 +2811,28 @@ def install_release_manager_from_current(expected_sha: str) -> dict[str, Any]:
         raise ReleaseManagerError(
             "immutable host release is not aligned before Release Manager install"
         )
+    if pmv4_e_scheduling_mode() == "replacement":
+        # After accepted retirement, never invoke an installer that can
+        # re-enable jason-release-manager.timer. The exact root transaction
+        # must already have staged an immutable replacement controller.
+        source_link = Path.home() / ".local" / "lib" / "jason" / "release-manager-source"
+        installed_runner = Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+        expected_runner = current / "tools" / "release_manager_host_runner.py"
+        if (source_link.resolve().name.casefold() != expected_sha
+                or not installed_runner.is_file() or not expected_runner.is_file()
+                or hashlib.sha256(installed_runner.read_bytes()).digest()
+                   != hashlib.sha256(expected_runner.read_bytes()).digest()):
+            raise ReleaseManagerError(
+                "PMv4 E immutable release controller not aligned; no legacy installer fallback"
+            )
+        scheduled_control_alignment()
+        return {
+            "source_revision": expected_sha,
+            "timer_active": True,
+            "source_link": str(source_link.resolve()),
+            "pmv4_replacement_verified": True,
+            "legacy_installer_invoked": False,
+        }
     installer = current / "tools" / "install_release_manager.py"
     if not installer.is_file():
         raise ReleaseManagerError(
