@@ -106,3 +106,20 @@ def test_no_security_or_production_change():
     assert "verify_installed_generic_controller()" in source
     for bad in ("chmod(", "os.chown(", "os.chmod(", "force_close_breaker", "systemctl stop"):
         assert bad not in source.split("def verify_installed_generic_controller",1)[1].split("def preflight",1)[0]
+
+
+def test_untrusted_symlink_target_is_never_read(tmp_path,monkeypatch):
+    fixture(tmp_path,monkeypatch)
+    p=tmp_path/"tools/independent_component_release.py"
+    target=tmp_path/"untrusted-sensitive-file"
+    target.write_bytes(b"do-not-read-me")
+    p.unlink()
+    p.symlink_to(target)
+    orig=Path.read_bytes
+    def safe_read(candidate):
+        if candidate==p or candidate==target:
+            raise AssertionError("untrusted symlink target must not be read")
+        return orig(candidate)
+    monkeypatch.setattr(Path,"read_bytes",safe_read)
+    with pytest.raises(root.Denied,match="INSTALLED_GENERIC_CONTROLLER_DRIFT"):
+        root.verify_installed_generic_controller()

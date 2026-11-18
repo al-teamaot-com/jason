@@ -350,14 +350,16 @@ def verify_installed_generic_controller()->list[dict[str,Any]]:
         p=TRUST/relative
         try:
             meta=p.lstat()
-            observed=digest(p.read_bytes())
             checks={
                 "regular_file":bool(stat.S_ISREG(meta.st_mode)),
                 "uid_zero":meta.st_uid==0,
                 "not_symlink":not p.is_symlink(),
                 "no_write_bits":meta.st_mode&0o222==0,
-                "exact_sha256":observed==expected,
             }
+            # Do not read from a symlink, nonroot or mutable path even for
+            # diagnostics. This preserves the original guard's short circuit.
+            observed=digest(p.read_bytes()) if all(checks.values()) else None
+            checks["exact_sha256"]=observed==expected
             item={
                 "path":relative,
                 "mode":format(stat.S_IMODE(meta.st_mode),"04o"),
