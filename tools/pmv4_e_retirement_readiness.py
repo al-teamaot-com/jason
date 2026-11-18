@@ -42,6 +42,21 @@ STAGE_C_WORKER = "jason-pmv4-ticket-core"
 STAGE_D_UNIT = "jason-runbook-management-read.service"
 STAGE_D_SOCKET = Path("/run/jason-runbook-management/read.sock")
 STAGE_D_UID = 1000
+# Pin the separately Owner-accepted isolated A1 v5 release. A new shadow
+# release must produce a new governed Stage E review; this is not a generic
+# "any healthy container" check.
+STAGE_A1_SHADOW = "jason-pmv4-shadow-gateway"
+STAGE_A1_SHA = "9859463e5255ecf7040de21d73e9f4062b46a18e"
+STAGE_A1_PRIOR_SHA = "75f2b4c0c48a15bd17d700b9f039fe56623e3f52"
+STAGE_A1_IMAGE = "sha256:679d3334efe7fbe32878b10fb06077912b57473bc3998316d26e9fd7a3d46bbd"
+STAGE_A1_POINTER = Path("/var/lib/jason/pmv4-shadow/current")
+STAGE_A1_SHADOW_FORMAT = (
+    "{{.State.Health.Status}}|{{.HostConfig.Memory}}|{{.Image}}|"
+    "{{.State.Running}}|{{.HostConfig.NetworkMode}}"
+)
+STAGE_A1_SHADOW_EXPECTED = (
+    "healthy|4294967296|" + STAGE_A1_IMAGE + "|true|none"
+)
 STAGE_C_HEALTH_FORMAT = "{{.State.Health.Status}}"
 STAGE_C_RUNTIME_HOST_FORMAT = (
     '{{range .Config.Env}}{{if eq . "JASON_TICKET_WORKER_HOSTING=external"}}'
@@ -73,7 +88,8 @@ def command(argv: Sequence[str], *, runner: Callable[..., Any] = subprocess.run)
             fmt == "{{.State.Running}}" and
             target in PROTECTED_CONTAINERS + (STAGE_C_WORKER,)
         ) or (fmt == STAGE_C_HEALTH_FORMAT and target == STAGE_C_WORKER
-        ) or (fmt == STAGE_C_RUNTIME_HOST_FORMAT and target == "jason-runtime")
+        ) or (fmt == STAGE_C_RUNTIME_HOST_FORMAT and target == "jason-runtime"
+        ) or (fmt == STAGE_A1_SHADOW_FORMAT and target == STAGE_A1_SHADOW)
         if not approved:
             raise RetirementEvidenceDenied("PMV4_E_DOCKER_TARGET_OUTSIDE_CORE")
     try:
@@ -178,6 +194,41 @@ def stage_d_readback(*,runner:Callable[...,Any]=subprocess.run)->dict[str,Any]:
     return result
 
 
+def stage_a1_readback(*, pointer:Path=STAGE_A1_POINTER,
+                      runner:Callable[...,Any]=subprocess.run)->dict[str,Any]:
+    """Observe the immutable A1 release, not a generic green Docker health."""
+    status={"pointer_exact":False,"shadow_healthy":False,
+            "network_disconnected":False,"signed_image_pinned":False,
+            "memory_bytes":None,"live":False,
+            "root_acceptance_receipt_verified":False}
+    try:
+        info=pointer.lstat()
+        status["pointer_exact"]=(
+            stat.S_ISLNK(info.st_mode)
+            and info.st_uid==0
+            and os.readlink(pointer)=="releases/"+STAGE_A1_SHA
+        )
+        if not status["pointer_exact"]:
+            return status
+        read=command(
+            ["/usr/bin/docker","inspect","--format",STAGE_A1_SHADOW_FORMAT,
+             STAGE_A1_SHADOW],runner=runner)
+        fields=read.split("|")
+        if len(fields)!=5:
+            return status
+        health,memory,image,running,network=fields
+        if not memory.isdecimal() or len(memory)>16:
+            return status
+        status["memory_bytes"]=int(memory)
+        status["shadow_healthy"]=health=="healthy" and running=="true"
+        status["network_disconnected"]=network=="none"
+        status["signed_image_pinned"]=image==STAGE_A1_IMAGE
+        status["live"]=read==STAGE_A1_SHADOW_EXPECTED
+    except (RetirementEvidenceDenied,OSError,ValueError,TypeError):
+        return status
+    return status
+
+
 def scan_summary(db:Path=TICKET_LEDGER)->dict[str,Any]:
     db=Path(db)
     if (not db.is_absolute() or not db.is_file() or db.is_symlink()):
@@ -267,6 +318,7 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
     stage_c["live"] = all(stage_c[k] for k in (
         "runtime_external", "worker_running", "worker_healthy"))
     stage_d=stage_d_readback(runner=runner)
+    stage_a1=stage_a1_readback(runner=runner)
     try:
         active_sha=Path(current).resolve(strict=True).name
     except OSError:
@@ -284,6 +336,12 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
         problems.append("PROTECTED_RUNTIME_OR_MCP_NOT_RUNNING")
     if scans.get("status")!="fresh":
         problems.append("TICKET_CORE_PROVIDER_SCAN_NOT_FRESH")
+    if not stage_a1["live"]:
+        problems.append("PMV4_A1_ISOLATED_SHADOW_RELEASE_NOT_ACCEPTED")
+    elif not stage_a1["root_acceptance_receipt_verified"]:
+        problems.append("PMV4_A1_ROOT_ACCEPTANCE_RECEIPT_NOT_READBACK")
+    # A1 proves one isolated ShadowController release, NOT that the generic
+    # controller replaces old engineering and release scheduler functions.
     problems.append("PMV4_REPLACEMENT_CONTROLLER_PARITY_NOT_ACCEPTED")
     problems.append(
         "STAGE_C_ROOT_ACCEPTANCE_RECEIPT_NOT_READBACK"
@@ -307,6 +365,7 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
         "protected_containers_running":prod,
         "stage_c_independent_worker":stage_c,
         "stage_d_independent_runbook_management":stage_d,
+        "stage_a1_isolated_shadow":stage_a1,
         "legacy_dependency_units":state,
         "ticket_scan":scans,
         "production_source":active_sha,

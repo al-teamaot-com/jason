@@ -281,3 +281,122 @@ def test_stage_d_unix_socket_rejects_provider_authority_response(tmp_path,monkey
             stage.runbook_socket_status(path=p)
         thread.join(timeout=3)
         assert not thread.is_alive()
+
+
+def fake_root_pointer(monkeypatch, tmp_path, *, target=None, owner=0):
+    ptr=tmp_path/"shadow-current"
+    ptr.symlink_to("releases/"+(target or stage.STAGE_A1_SHA))
+    original=Path.lstat
+    def lstat(path):
+        found=original(path)
+        if path==ptr:
+            return SimpleNamespace(st_mode=found.st_mode,st_uid=owner)
+        return found
+    monkeypatch.setattr(Path,"lstat",lstat)
+    return ptr
+
+
+def test_live_a1_immutable_source_exact_oci_memory_and_disconnected_network(
+    tmp_path,monkeypatch,
+):
+    pointer=fake_root_pointer(monkeypatch,tmp_path)
+    requests=[]
+    def observed(argv,**kw):
+        requests.append(argv)
+        assert argv==[
+            "/usr/bin/docker","inspect","--format",
+            stage.STAGE_A1_SHADOW_FORMAT,stage.STAGE_A1_SHADOW,
+        ]
+        return SimpleNamespace(stdout=stage.STAGE_A1_SHADOW_EXPECTED+"\n",
+                               returncode=0)
+    result=stage.stage_a1_readback(pointer=pointer,runner=observed)
+    assert result=={
+        "pointer_exact":True,"shadow_healthy":True,
+        "network_disconnected":True,"signed_image_pinned":True,
+        "memory_bytes":4294967296,"live":True,
+        "root_acceptance_receipt_verified":False,
+    }
+    assert len(requests)==1
+
+
+@pytest.mark.parametrize("bad",[
+    "healthy|2147483648|"+stage.STAGE_A1_IMAGE+"|true|none",
+    "unhealthy|4294967296|"+stage.STAGE_A1_IMAGE+"|true|none",
+    "healthy|4294967296|sha256:"+"f"*64+"|true|none",
+    "healthy|4294967296|"+stage.STAGE_A1_IMAGE+"|true|bridge",
+    "healthy|4294967296|"+stage.STAGE_A1_IMAGE+"|false|none",
+    "healthy|unknown|"+stage.STAGE_A1_IMAGE+"|true|none",
+    "healthy|4294967296|"+stage.STAGE_A1_IMAGE+"|true",
+    "",
+])
+def test_a1_wrong_docker_readback_never_accepted(tmp_path,monkeypatch,bad):
+    pointer=fake_root_pointer(monkeypatch,tmp_path)
+    def observed(argv,**kw):
+        return SimpleNamespace(stdout=bad+"\n",returncode=0 if bad else 1)
+    result=stage.stage_a1_readback(pointer=pointer,runner=observed)
+    assert result["pointer_exact"] is True
+    assert result["root_acceptance_receipt_verified"] is False
+    assert result["live"] is False
+
+
+@pytest.mark.parametrize("target,owner",[
+    ("f"*40,0),(None,1000),
+])
+def test_foreign_or_untrusted_release_pointer_blocks_docker_inspect(
+    tmp_path,monkeypatch,target,owner,
+):
+    pointer=fake_root_pointer(monkeypatch,tmp_path,target=target,owner=owner)
+    def denied(*a,**kw):
+        raise AssertionError("Docker must not be queried for untrusted pointer")
+    result=stage.stage_a1_readback(pointer=pointer,runner=denied)
+    assert result["live"] is False
+    assert result["pointer_exact"] is False
+
+
+def test_stage_e_recognizes_live_a1_but_still_requires_root_receipts_and_parity(
+    tmp_path,monkeypatch,
+):
+    monkeypatch.setattr(stage,"stage_a1_readback",lambda **kw:{
+        "pointer_exact":True,"shadow_healthy":True,
+        "network_disconnected":True,"signed_image_pinned":True,
+        "memory_bytes":4294967296,"live":True,
+        "root_acceptance_receipt_verified":False,
+    })
+    result=stage.inspect(policy=policy_fixture(tmp_path),db=db_fixture(tmp_path),
+                         runner=runner)
+    assert result["stage_a1_isolated_shadow"]["live"] is True
+    assert "PMV4_A1_ROOT_ACCEPTANCE_RECEIPT_NOT_READBACK" in result["blocking_gates"]
+    assert "PMV4_A1_ISOLATED_SHADOW_RELEASE_NOT_ACCEPTED" not in result["blocking_gates"]
+    assert "PMV4_REPLACEMENT_CONTROLLER_PARITY_NOT_ACCEPTED" in result["blocking_gates"]
+    assert result["governed_release_authorized"] is False
+    assert result["service_mutations"] is False
+    assert result["provider_actions"] is False
+
+
+def test_stage_e_a1_false_status_blocks_release_even_after_other_gates(
+    tmp_path,monkeypatch,
+):
+    monkeypatch.setattr(stage,"stage_a1_readback",lambda **kw:{
+        "pointer_exact":False,"shadow_healthy":False,
+        "network_disconnected":False,"signed_image_pinned":False,
+        "memory_bytes":None,"live":False,
+        "root_acceptance_receipt_verified":False,
+    })
+    result=stage.inspect(policy=policy_fixture(tmp_path),db=db_fixture(tmp_path),
+                         runner=runner)
+    assert "PMV4_A1_ISOLATED_SHADOW_RELEASE_NOT_ACCEPTED" in result["blocking_gates"]
+    assert result["governed_release_authorized"] is False
+
+
+@pytest.mark.parametrize("args",[
+    ["/usr/bin/docker","restart",stage.STAGE_A1_SHADOW],
+    ["/usr/bin/docker","stop",stage.STAGE_A1_SHADOW],
+    ["/usr/bin/docker","inspect","--format",stage.STAGE_A1_SHADOW_FORMAT,
+     "jason-runtime"],
+    ["/usr/bin/docker","inspect","--format","{{.Config.Env}}",
+     stage.STAGE_A1_SHADOW],
+])
+def test_stage_e_docker_can_only_inspect_the_fixed_shadow_status(args):
+    with pytest.raises(stage.RetirementEvidenceDenied):
+        stage.command(args,runner=lambda *a,**k:
+                      (_ for _ in ()).throw(AssertionError("forbidden")))
