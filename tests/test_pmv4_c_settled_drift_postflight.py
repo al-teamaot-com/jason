@@ -55,6 +55,11 @@ def harness(tmp_path,monkeypatch):
         lambda baseline:(actions.append("two_real_scans") or
             (("scan1",None,None,None,0),("scan2",None,None,None,0))))
     def run(args, **kwargs):
+        if args[1].endswith("production_drift_guard.py") or args[1].endswith(
+            "production_drift_watchdog.py"
+        ):
+            assert kwargs["env"]["PATH"] == "/usr/sbin:/usr/bin:/bin"
+            assert kwargs["timeout"] == 45
         if args[1].endswith("production_drift_guard.py"):
             assert args[2:] == ["--config",str(release/"watchdog-candidate.json")]
             assert args[3]!=str(root.c.WATCHDOG)
@@ -148,3 +153,35 @@ def test_tampered_candidate_policy_fails_closed(harness):
         root.postflight(path)
     assert actions==["two_real_scans","protected_transaction","safe_rollback"]
     assert not (path.parent/"receipt.json").exists()
+
+
+
+def test_root_execution_path_resolves_all_native_probe_commands(monkeypatch):
+    """Reproduce the actual root-branch FileNotFoundError without sudo."""
+    import importlib.util
+    import os
+    import shutil
+    source = Path("/opt/jason/current/tools/production_drift_guard.py")
+    spec = importlib.util.spec_from_file_location("pmv4_native_drift_probe", source)
+    assert spec is not None and spec.loader is not None
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    monkeypatch.setattr(guard.os, "geteuid", lambda: 0)
+    command, _ = guard.systemctl_command(["list-units", "--all"], user=True)
+    assert command[0] == "runuser"
+    restricted = "/usr/local/bin:/usr/bin:/bin"
+    assert shutil.which("runuser", path=restricted) is None
+    trusted = "/usr/sbin:/usr/bin:/bin"
+    assert shutil.which("runuser", path=trusted) == "/usr/sbin/runuser"
+    for executable in ("runuser", "systemctl", "docker", "env"):
+        assert shutil.which(executable, path=trusted)
+    # A nonprivileged read-only invocation demonstrates the same error
+    # and that the trusted PATH fixes executable discovery.
+    import subprocess
+    with pytest.raises(FileNotFoundError):
+        subprocess.run(["runuser", "--help"], env={**os.environ, "PATH": restricted},
+                       capture_output=True, text=True, timeout=5)
+    result = subprocess.run(["runuser", "--help"],
+                            env={**os.environ, "PATH": trusted},
+                            capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0

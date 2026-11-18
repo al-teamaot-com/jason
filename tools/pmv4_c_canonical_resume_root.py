@@ -401,9 +401,16 @@ def postflight(path: Path) -> None:
         need(c.sha(candidate_bytes) == plan["watchdog_candidate_sha256"] and
              c.WATCHDOG.read_bytes() == candidate_bytes,
              "POSTFLIGHT_INSTALLED_POLICY_NOT_EXACT")
+        # Root's exact release process may inherit a restricted PATH without
+        # /usr/sbin. The native guard invokes runuser for user-systemd reads;
+        # without /usr/sbin this raises FileNotFoundError, not host drift.
+        # Keep all subprocess executables within trusted root-owned dirs.
+        native_probe_env = os.environ.copy()
+        native_probe_env["PATH"] = "/usr/sbin:/usr/bin:/bin"
         drift = c._run([
             "/usr/bin/python3", "/opt/jason/current/tools/production_drift_guard.py",
-            "--config", str(candidate_path)], check=False, capture=True, timeout=45)
+            "--config", str(candidate_path)], check=False, capture=True,
+            timeout=45, env=native_probe_env)
         if drift.returncode != 0:
             # Preserve a bounded, structural reason in the visible failed
             # postflight. No secrets, credentials or provider payloads.
@@ -431,7 +438,8 @@ def postflight(path: Path) -> None:
         need(drift.returncode == 0, "POSTFLIGHT_FINAL_DRIFT_DENIED")
         watchdog = c._run([
             "/usr/bin/python3", "/opt/jason/current/tools/production_drift_watchdog.py",
-            "--config", str(c.WATCHDOG)], check=False, capture=True, timeout=45)
+            "--config", str(c.WATCHDOG)], check=False, capture=True,
+            timeout=45, env=native_probe_env)
         need(watchdog.returncode == 0, "POSTFLIGHT_WATCHDOG_FAILED")
         need(c.sha(c.FREEZE.read_bytes()) == plan["freeze_sha256"] and
              c.sha(c.HOLD.read_bytes()) == plan["hold_sha256"], "PROTECTED_FREEZE_CHANGED")

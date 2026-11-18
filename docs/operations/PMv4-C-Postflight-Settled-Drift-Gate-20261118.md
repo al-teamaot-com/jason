@@ -69,3 +69,25 @@ or mismatched policies fail closed and roll back.
 
 Previous Owner proof is consumed and cannot authorize this changed release.
 No production mutation is made by this source correction.
+
+## November 18, 06:44 EST: root child-executable search path
+
+The next Owner-approved source 85aec2fce36014dd2c4668fd83789f831e262ab9
+passed two genuine ticket scans and SHA-bound policy validation, but the
+standalone root drift Python process exited 1 with a FileNotFoundError.
+The protected root cutover correctly rolled back and production was verified
+healthy in embedded mode (breaker CLOSED, native drift PASS).
+
+The existing native guard executes bare `runuser` for its user-systemd
+inventory when effective UID is root. On this host `runuser` is at
+`/usr/sbin/runuser`. A restricted child PATH without `/usr/sbin`
+reproduces the exact FileNotFoundError; a trusted PATH containing
+`/usr/sbin:/usr/bin:/bin` resolves the required native commands.
+The exact root process's PATH was not independently captured, so this is
+a high-confidence diagnosis with a direct reproduction, not a new drift waiver.
+
+The minimal correction passes `PATH=/usr/sbin:/usr/bin:/bin` **only** to
+the existing final read-only drift guard and native drift watchdog subprocesses
+after two actual scans. Approved policy bytes, freeze, breaker, native watchdog,
+signature checks, result statuses, one-use approval and rollback are unchanged.
+Tested success and failures; no production changes in this source PR.
