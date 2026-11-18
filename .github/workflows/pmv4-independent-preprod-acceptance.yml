@@ -13,6 +13,8 @@ on:
       - "tools/tests/test_pmv4_e_native_backend_bridge.py"
       - "tools/pmv4_e_exact_release_packet.py"
       - "tools/tests/test_pmv4_e_exact_release_packet.py"
+      - "tools/pmv4_e_root_trust_stage.py"
+      - "tools/tests/test_pmv4_e_root_trust_stage.py"
       - "tests/test_pmv4_*"
       - "infrastructure/pmv4-shadow-image/**"
       - "implementation/runtime_service/src/jason_runtime/ticket_worker_*"
