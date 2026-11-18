@@ -71,7 +71,9 @@ def test_unknown_file_in_staging_denies_recovery(tmp_path):
     b=stager(tmp_path)
     hashes=bundle_hashes()
     b.stage(source_sha="b"*40,exact_hashes=hashes)
+    b.target.chmod(0o700)  # simulate privileged out-of-band tamper
     (b.target/"foreign.txt").write_text("unknown")
+    b.target.chmod(0o555)
     with pytest.raises(trust.PMv4ERootTrustDenied,match="RECOVERY_EXTRA_FILE"):
         b.recover_inert_stage(hashes)
     assert (b.target/"foreign.txt").is_file()
@@ -84,6 +86,7 @@ def test_partial_exact_source_prefix_recovers_after_power_loss(tmp_path):
     target=b.target/"tools/pmv4_e_native_systemd_adapter.py"
     data=target.read_bytes()
     assert len(data)>100
+    target.chmod(0o644)  # simulate interrupted root write
     target.write_bytes(data[:100])
     target.chmod(0o444)
     b.recover_inert_stage(hashes)
