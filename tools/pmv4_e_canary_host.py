@@ -107,10 +107,22 @@ class PinnedCanaryHost:
         ids=[x for x in raw.splitlines() if x.strip()]
         if not ids:return None
         require(len(ids)==1,"AMBIGUOUS_PROJECT")
-        objects=json.loads(self.legacy._run(["/usr/bin/docker","inspect",ids[0]]))
-        require(isinstance(objects,list) and len(objects)==1,
-                "DOCKER_OBSERVATION_AMBIGUOUS")
-        item=objects[0]
+        deadline=time.monotonic()+35
+        while True:
+            objects=json.loads(self.legacy._run(
+                ["/usr/bin/docker","inspect",ids[0]]))
+            require(isinstance(objects,list) and len(objects)==1,
+                    "DOCKER_OBSERVATION_AMBIGUOUS")
+            item=objects[0]
+            state=item.get("State") or {}
+            status=(state.get("Health") or {}).get("Status")
+            if status=="healthy":
+                break
+            require(state.get("Running") is True
+                    and status=="starting"
+                    and time.monotonic()<deadline,
+                    "ISOLATED_CONTAINER_STARTUP_OR_HEALTH_DENIED")
+            time.sleep(1)
         state=item.get("State") or {}
         host=item.get("HostConfig") or {}
         labels=(item.get("Config") or {}).get("Labels") or {}
