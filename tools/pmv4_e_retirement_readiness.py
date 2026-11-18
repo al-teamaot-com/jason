@@ -12,7 +12,10 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import socket
 import sqlite3
+import stat
+import struct
 import subprocess
 from typing import Any, Callable, Mapping, Sequence
 
@@ -36,6 +39,9 @@ REQUIRED_CONTINUITY = (
 )
 PROTECTED_CONTAINERS = ("jason-runtime", "jason-mcp-pilot")
 STAGE_C_WORKER = "jason-pmv4-ticket-core"
+STAGE_D_UNIT = "jason-runbook-management-read.service"
+STAGE_D_SOCKET = Path("/run/jason-runbook-management/read.sock")
+STAGE_D_UID = 1000
 STAGE_C_HEALTH_FORMAT = "{{.State.Health.Status}}"
 STAGE_C_RUNTIME_HOST_FORMAT = (
     '{{range .Config.Env}}{{if eq . "JASON_TICKET_WORKER_HOSTING=external"}}'
@@ -54,7 +60,7 @@ def command(argv: Sequence[str], *, runner: Callable[..., Any] = subprocess.run)
     if argv[0] == "/usr/bin/systemctl":
         # No systemd mutation, no start, stop, reload, reset-failed, etc.
         if not all(arg in ("--user", "is-active", "is-enabled") or arg in (
-            USER_LEGACY + SYSTEM_LEGACY + REQUIRED_CONTINUITY
+            USER_LEGACY + SYSTEM_LEGACY + REQUIRED_CONTINUITY + (STAGE_D_UNIT,)
         ) for arg in argv[1:]):
             raise RetirementEvidenceDenied("PMV4_E_SYSTEMD_MUTATION_DENIED")
         if len(argv) not in (3,4) or argv[-2] not in ("is-active", "is-enabled"):
@@ -105,6 +111,71 @@ def units_readback(*, runner:Callable[...,Any]=subprocess.run)->dict[str,Any]:
             entries.append({"unit":name,"active":active,"enabled":enabled})
         observed[group]=entries
     return observed
+
+
+def runbook_socket_status(*, path:Path=STAGE_D_SOCKET)->dict[str,Any]:
+    """Read only the fixed status operation from the same-UID local service."""
+    try:
+        folder=path.parent.lstat()
+        meta=path.lstat()
+        if (path.is_symlink() or path.parent.is_symlink()
+            or not stat.S_ISDIR(folder.st_mode) or folder.st_uid!=STAGE_D_UID
+            or stat.S_IMODE(folder.st_mode)!=0o700
+            or not stat.S_ISSOCK(meta.st_mode) or meta.st_uid!=STAGE_D_UID
+            or stat.S_IMODE(meta.st_mode)!=0o600):
+            raise RetirementEvidenceDenied("PMV4_E_RUNBOOK_SOCKET_UNTRUSTED")
+        with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as peer:
+            peer.settimeout(4)
+            peer.connect(str(path))
+            _,uid,_=struct.unpack("3i",peer.getsockopt(socket.SOL_SOCKET,
+                                                       socket.SO_PEERCRED,12))
+            if uid!=STAGE_D_UID:
+                raise RetirementEvidenceDenied("PMV4_E_RUNBOOK_SERVICE_UID_CHANGED")
+            peer.sendall(b'{"operation":"status"}\n')
+            with peer.makefile("rb") as stream:
+                line=stream.readline(8193)
+        if not line or len(line)>8192 or not line.endswith(b"\n"):
+            raise RetirementEvidenceDenied("PMV4_E_RUNBOOK_READBACK_INVALID")
+        result=json.loads(line)
+        if (not isinstance(result,dict)
+            or result.get("status")!="healthy"
+            or type(result.get("registry_generation")) is not int
+            or result["registry_generation"]<0
+            or type(result.get("active_count")) is not int
+            or result["active_count"]<0
+            or result.get("provider_calls") is not False
+            or result.get("execution_authority") is not False
+            or result.get("configuration_mutations") is not False):
+            raise RetirementEvidenceDenied("PMV4_E_RUNBOOK_READBACK_NOT_READONLY")
+        return {
+            "registry_generation":result["registry_generation"],
+            "active_count":result["active_count"],
+            "provider_calls":False,"execution_authority":False,
+            "configuration_mutations":False,
+        }
+    except (OSError,ValueError,TypeError,struct.error) as exc:
+        raise RetirementEvidenceDenied("PMV4_E_RUNBOOK_READ_UNAVAILABLE") from exc
+
+
+def stage_d_readback(*,runner:Callable[...,Any]=subprocess.run)->dict[str,Any]:
+    result={"unit_active":False,"unit_enabled":False,"socket_healthy":False,
+            "registry_generation":None,"active_count":None,"live":False,
+            "root_acceptance_receipt_verified":False}
+    try:
+        result["unit_active"]=(command(
+            ["/usr/bin/systemctl","is-active",STAGE_D_UNIT],runner=runner)=="active")
+        result["unit_enabled"]=(command(
+            ["/usr/bin/systemctl","is-enabled",STAGE_D_UNIT],runner=runner)=="enabled")
+        if result["unit_active"] and result["unit_enabled"]:
+            state=runbook_socket_status()
+            result["socket_healthy"]=True
+            result["registry_generation"]=state["registry_generation"]
+            result["active_count"]=state["active_count"]
+    except RetirementEvidenceDenied:
+        pass
+    result["live"]=all(result[k] for k in (
+        "unit_active","unit_enabled","socket_healthy"))
+    return result
 
 
 def scan_summary(db:Path=TICKET_LEDGER)->dict[str,Any]:
@@ -195,6 +266,7 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
             stage_c[key] = False
     stage_c["live"] = all(stage_c[k] for k in (
         "runtime_external", "worker_running", "worker_healthy"))
+    stage_d=stage_d_readback(runner=runner)
     try:
         active_sha=Path(current).resolve(strict=True).name
     except OSError:
@@ -217,8 +289,11 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
         "STAGE_C_ROOT_ACCEPTANCE_RECEIPT_NOT_READBACK"
         if stage_c["live"] else "STAGE_C_INDEPENDENT_WORKER_NOT_ACCEPTED"
     )
+    problems.append(
+        "STAGE_D_ROOT_ACCEPTANCE_RECEIPT_NOT_READBACK"
+        if stage_d["live"] else "STAGE_D_INDEPENDENT_RUNBOOK_MANAGEMENT_NOT_ACCEPTED"
+    )
     problems.extend((
-        "STAGE_D_INDEPENDENT_RUNBOOK_MANAGEMENT_NOT_ACCEPTED",
         "ROOT_PROTECTED_LIVE_DESIRED_STATE_NOT_READBACK",
         "EXACT_OWNER_RELEASE_FOR_RETIREMENT_NOT_RECORDED",
     ))
@@ -231,6 +306,7 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
         "required_monitoring_active":continuity,
         "protected_containers_running":prod,
         "stage_c_independent_worker":stage_c,
+        "stage_d_independent_runbook_management":stage_d,
         "legacy_dependency_units":state,
         "ticket_scan":scans,
         "production_source":active_sha,

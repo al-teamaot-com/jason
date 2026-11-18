@@ -165,3 +165,119 @@ def test_stage_c_container_inspect_read_only_command_scope():
         with pytest.raises(stage.RetirementEvidenceDenied):
             stage.command(args,runner=lambda *a,**k: (_ for _ in ()).throw(
                 AssertionError("unsafe call attempted")))
+
+
+def test_stage_d_live_read_only_does_not_waive_root_receipt(tmp_path,monkeypatch):
+    monkeypatch.setattr(stage,"runbook_socket_status",lambda:{
+        "registry_generation":0,"active_count":0,
+        "provider_calls":False,"execution_authority":False,
+        "configuration_mutations":False,
+    })
+    result=stage.inspect(policy=policy_fixture(tmp_path),
+                         db=db_fixture(tmp_path),runner=runner)
+    d=result["stage_d_independent_runbook_management"]
+    assert d=={"unit_active":True,"unit_enabled":True,
+               "socket_healthy":True,"registry_generation":0,"active_count":0,
+               "live":True,"root_acceptance_receipt_verified":False}
+    assert "STAGE_D_ROOT_ACCEPTANCE_RECEIPT_NOT_READBACK" in result["blocking_gates"]
+    assert "STAGE_D_INDEPENDENT_RUNBOOK_MANAGEMENT_NOT_ACCEPTED" not in result["blocking_gates"]
+    assert result["governed_release_authorized"] is False
+    assert result["service_mutations"] is False
+
+
+def test_stage_d_inactive_or_bad_socket_is_not_accepted(tmp_path,monkeypatch):
+    db=db_fixture(tmp_path)
+    monkeypatch.setattr(stage,"runbook_socket_status",
+                        lambda:(_ for _ in ()).throw(stage.RetirementEvidenceDenied("bad socket")))
+    result=stage.inspect(policy=policy_fixture(tmp_path),
+                         db=db,runner=runner)
+    assert not result["stage_d_independent_runbook_management"]["live"]
+    assert "STAGE_D_INDEPENDENT_RUNBOOK_MANAGEMENT_NOT_ACCEPTED" in result["blocking_gates"]
+
+    def stopped(argv,**kwargs):
+        if argv[-1]==stage.STAGE_D_UNIT and "is-active" in argv:
+            return SimpleNamespace(stdout="inactive\n",returncode=3)
+        return runner(argv,**kwargs)
+    result=stage.inspect(policy=policy_fixture(tmp_path),
+                         db=db,runner=stopped)
+    assert result["stage_d_independent_runbook_management"]["unit_active"] is False
+    assert result["governed_release_authorized"] is False
+
+
+def test_stage_d_prohibited_systemd_mutations_still_denied():
+    for action in ("start","restart","stop","disable","enable","mask","reset-failed"):
+        with pytest.raises(stage.RetirementEvidenceDenied):
+            stage.command(["/usr/bin/systemctl",action,stage.STAGE_D_UNIT],
+                          runner=lambda *a,**k: (_ for _ in ()).throw(
+                              AssertionError("mutation must never run")))
+
+
+def test_stage_d_unix_socket_same_uid_and_readonly_payload(tmp_path,monkeypatch):
+    import os
+    import socket
+    import threading
+    p=tmp_path/"read.sock"
+    monkeypatch.setattr(stage,"STAGE_D_UID",os.getuid())
+    received=[]
+    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as server:
+        server.bind(str(p))
+        p.chmod(0o600)
+        server.listen(1)
+        def serve():
+            client,_=server.accept()
+            with client:
+                line=client.makefile("rb").readline()
+                received.append(line)
+                client.sendall((json.dumps({
+                    "status":"healthy","registry_generation":0,"active_count":0,
+                    "provider_calls":False,"configuration_mutations":False,
+                    "execution_authority":False,
+                })+"\n").encode())
+        thread=threading.Thread(target=serve,daemon=True)
+        thread.start()
+        read=stage.runbook_socket_status(path=p)
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+    assert received==[b'{"operation":"status"}\n']
+    assert read=={"registry_generation":0,"active_count":0,
+                  "provider_calls":False,"execution_authority":False,
+                  "configuration_mutations":False}
+
+
+def test_stage_d_unix_socket_wrong_mode_denied_before_connect(tmp_path,monkeypatch):
+    import os
+    import socket
+    monkeypatch.setattr(stage,"STAGE_D_UID",os.getuid())
+    p=tmp_path/"read.sock"
+    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as server:
+        server.bind(str(p))
+        p.chmod(0o666)
+        with pytest.raises(stage.RetirementEvidenceDenied,
+                           match="RUNBOOK_SOCKET_UNTRUSTED"):
+            stage.runbook_socket_status(path=p)
+
+
+def test_stage_d_unix_socket_rejects_provider_authority_response(tmp_path,monkeypatch):
+    import os
+    import socket
+    import threading
+    monkeypatch.setattr(stage,"STAGE_D_UID",os.getuid())
+    p=tmp_path/"read.sock"
+    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as server:
+        server.bind(str(p));p.chmod(0o600);server.listen(1)
+        def serve():
+            client,_=server.accept()
+            with client:
+                client.makefile("rb").readline()
+                client.sendall((json.dumps({
+                    "status":"healthy","registry_generation":0,"active_count":0,
+                    "provider_calls":True,"configuration_mutations":False,
+                    "execution_authority":False,
+                })+"\n").encode())
+        thread=threading.Thread(target=serve,daemon=True)
+        thread.start()
+        with pytest.raises(stage.RetirementEvidenceDenied,
+                           match="RUNBOOK_READBACK_NOT_READONLY"):
+            stage.runbook_socket_status(path=p)
+        thread.join(timeout=3)
+        assert not thread.is_alive()
