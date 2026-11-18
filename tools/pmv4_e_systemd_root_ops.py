@@ -68,6 +68,16 @@ class ExactSystemdSurface:
                  system_dir==SYSTEM_UNIT_ROOT and
                  trusted_dir==TRUSTED_UNITS,
                  "NONCANONICAL_PRODUCTION_PATH")
+        if production:
+            for protected in (TRUSTED_UNITS, TRUSTED_UNITS.parent,
+                              TRUSTED_UNITS.parent.parent,
+                              TRUSTED_UNITS.parent.parent.parent):
+                info=protected.lstat()
+                need(stat.S_ISDIR(info.st_mode)
+                     and not protected.is_symlink()
+                     and info.st_uid==0 and info.st_gid==0
+                     and info.st_mode&0o022==0,
+                     "TRUSTED_SOURCE_DIRECTORY_MUTABLE")
         self.runner=runner
         self.production=production
         self.user_dir=Path(user_dir)
@@ -139,7 +149,11 @@ class ExactSystemdSurface:
             fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|
                        getattr(os,"O_NOFOLLOW",0),0o644)
             try:
-                os.write(fd,body)
+                offset=0
+                while offset<len(body):
+                    wrote=os.write(fd,body[offset:])
+                    need(wrote>0,"UNIT_WRITE_INCOMPLETE")
+                    offset+=wrote
                 os.fsync(fd)
             finally:
                 os.close(fd)
@@ -150,6 +164,34 @@ class ExactSystemdSurface:
         self._call(user=True,action="daemon-reload")
         self._call(user=False,action="daemon-reload")
         return tuple(created)
+
+    def unstage_exact(self,approved_hashes:Mapping[str,str])->None:
+        """Recovery-only: remove only reviewed newly staged units by exact hash.
+
+        This must follow root-marker revocation and disabled PMv4 triggers.
+        Missing targets are accepted for interrupted partial staging; modified
+        or symlink targets are denied and left for supervised recovery.
+        """
+        expected=bundle.generate(base=self.trusted_dir.parents[3])
+        need(set(expected)==set(approved_hashes),"ROLLBACK_HASH_SET_INVALID")
+        for rel,data in sorted(expected.items()):
+            need(sha256(data).hexdigest()==approved_hashes[rel],
+                 "ROLLBACK_REVIEWED_HASH_CHANGED")
+            p=Path(rel)
+            side=p.parts[-2]
+            target=(self.user_dir if side=="user" else self.system_dir)/p.name
+            if not target.exists() and not target.is_symlink():
+                continue
+            info=target.lstat()
+            need(stat.S_ISREG(info.st_mode) and not target.is_symlink()
+                 and info.st_nlink==1 and target.read_bytes()==data,
+                 "ROLLBACK_UNIT_DRIFT")
+            if self.production:
+                need(info.st_uid==0 and info.st_gid==0,
+                     "ROLLBACK_TARGET_NOT_ROOT_OWNED")
+            target.unlink()
+        self._call(user=True,action="daemon-reload")
+        self._call(user=False,action="daemon-reload")
 
     def disable_legacy(self)->None:
         for user,units in ((True,OLD_USER),(False,OLD_ROOT)):
