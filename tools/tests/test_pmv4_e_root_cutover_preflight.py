@@ -129,3 +129,33 @@ def test_source_module_no_mutation_apis():
                       "systemctl stop","systemctl disable","docker restart",
                       "os.replace(","requests.post("):
         assert forbidden not in s
+
+
+@pytest.mark.skipif(__import__("os").geteuid()!=0,reason="isolated privileged CI only")
+def test_root_only_file_readback_permission_boundary(tmp_path):
+    import os,json
+    protected=tmp_path/"root-policy.json"
+    protected.write_text(json.dumps({"schema_version":"1.0"}))
+    protected.chmod(0o600)
+    assert protected.stat().st_uid==0
+    assert gate._root_json(protected)=={"schema_version":"1.0"}
+    protected.chmod(0o666)
+    with pytest.raises(gate.RootPreflightDenied):
+        gate._root_json(protected)
+    protected.chmod(0o600)
+    link=tmp_path/"link.json"
+    link.symlink_to(protected)
+    with pytest.raises(gate.RootPreflightDenied):
+        gate._root_json(link)
+
+
+@pytest.mark.skipif(__import__("os").geteuid()!=0,reason="isolated privileged CI only")
+def test_root_readback_recognizes_exact_service_user_owned_records(tmp_path):
+    import os,json
+    protected=tmp_path/"control.json"
+    protected.write_text(json.dumps({"circuit_breaker":{"state":"closed"}}))
+    protected.chmod(0o600)
+    os.chown(protected,1000,1000)
+    assert gate._root_json(protected,allowed_uid=1000)["circuit_breaker"]["state"]=="closed"
+    with pytest.raises(gate.RootPreflightDenied):
+        gate._root_json(protected,allowed_uid=0)
