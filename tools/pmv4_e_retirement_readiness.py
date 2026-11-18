@@ -19,6 +19,11 @@ import struct
 import subprocess
 from typing import Any, Callable, Mapping, Sequence
 
+try:
+    import pmv4_e_controlplane_dependencies as controlplane
+except ModuleNotFoundError:
+    from tools import pmv4_e_controlplane_dependencies as controlplane
+
 REPOSITORY_DESIRED = Path(__file__).resolve().parents[1] / "config/production-desired-state.json"
 PRODUCTION_CURRENT = Path("/opt/jason/current")
 TICKET_LEDGER = Path("/var/lib/jason/ticket-core/autonomy-operational-work.sqlite3")
@@ -320,6 +325,20 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
     stage_d=stage_d_readback(runner=runner)
     stage_a1=stage_a1_readback(runner=runner)
     try:
+        dependencies=controlplane.inspect(
+            source_root=Path(__file__).resolve().parents[1])
+    except (controlplane.ControlplaneEvidenceDenied,OSError,ValueError):
+        dependencies={
+            "status":"source_unavailable_denied",
+            "legacy_dependencies":{},
+            "blocking_gates":[
+                "PMV4_E_CONTROLPLANE_SOURCE_CANNOT_BE_VERIFIED",
+                "PMV4_E_REPLACEMENT_CONTROLPLANE_ROOT_ACCEPTANCE_MISSING",
+            ],
+            "replacement_controller_root_acceptance_verified":False,
+            "production_mutations":False,
+        }
+    try:
         active_sha=Path(current).resolve(strict=True).name
     except OSError:
         active_sha="unverified"
@@ -351,6 +370,7 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
         "STAGE_D_ROOT_ACCEPTANCE_RECEIPT_NOT_READBACK"
         if stage_d["live"] else "STAGE_D_INDEPENDENT_RUNBOOK_MANAGEMENT_NOT_ACCEPTED"
     )
+    problems.extend(dependencies["blocking_gates"])
     problems.extend((
         "ROOT_PROTECTED_LIVE_DESIRED_STATE_NOT_READBACK",
         "EXACT_OWNER_RELEASE_FOR_RETIREMENT_NOT_RECORDED",
@@ -366,6 +386,7 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
         "stage_c_independent_worker":stage_c,
         "stage_d_independent_runbook_management":stage_d,
         "stage_a1_isolated_shadow":stage_a1,
+        "source_controlplane_dependencies":dependencies,
         "legacy_dependency_units":state,
         "ticket_scan":scans,
         "production_source":active_sha,
