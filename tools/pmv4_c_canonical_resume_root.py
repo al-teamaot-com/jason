@@ -391,9 +391,19 @@ def postflight(path: Path) -> None:
         # final state. Do NOT weaken the actual native drift/watchdog gate.
         baseline = rows[0]["details"]["baseline_at"]
         scans = c._wait_two_scans(baseline)
+        # The live protected policy is root-only. A standalone drift probe
+        # against its path has failed with exit 1 and no structured drift
+        # report even though the native watchdog independently passed.
+        # Run this redundant read-only probe on the exact SHA-reviewed
+        # candidate bytes, but REQUIRE the installed root policy to match.
+        candidate_path = path.parent / "watchdog-candidate.json"
+        candidate_bytes = candidate_path.read_bytes()
+        need(c.sha(candidate_bytes) == plan["watchdog_candidate_sha256"] and
+             c.WATCHDOG.read_bytes() == candidate_bytes,
+             "POSTFLIGHT_INSTALLED_POLICY_NOT_EXACT")
         drift = c._run([
             "/usr/bin/python3", "/opt/jason/current/tools/production_drift_guard.py",
-            "--config", str(c.WATCHDOG)], check=False, capture=True, timeout=45)
+            "--config", str(candidate_path)], check=False, capture=True, timeout=45)
         if drift.returncode != 0:
             # Preserve a bounded, structural reason in the visible failed
             # postflight. No secrets, credentials or provider payloads.
@@ -409,8 +419,15 @@ def postflight(path: Path) -> None:
                       json.dumps(kinds[:12], sort_keys=True)[:2400],
                       file=sys.stderr, flush=True)
             except (ValueError, TypeError, AttributeError):
+                # Only the exception class; never emit paths, credentials, or
+                # arbitrary stderr payloads from the native probe.
+                lines = (getattr(drift, "stderr", None) or "").strip().splitlines()
+                fault = lines[-1].split(":", 1)[0] if lines else "unknown"
+                if not fault.isidentifier() or len(fault) > 64:
+                    fault = "unknown"
                 print("PMV4_C_FINAL_DRIFT_PROBE_FAILED=" +
-                      str(drift.returncode), file=sys.stderr, flush=True)
+                      str(drift.returncode) + ";exception=" + fault,
+                      file=sys.stderr, flush=True)
         need(drift.returncode == 0, "POSTFLIGHT_FINAL_DRIFT_DENIED")
         watchdog = c._run([
             "/usr/bin/python3", "/opt/jason/current/tools/production_drift_watchdog.py",
