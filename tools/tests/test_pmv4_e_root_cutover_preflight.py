@@ -96,7 +96,7 @@ def test_root_collect_never_forges_ticket_ownership(tmp_path,monkeypatch):
     calls=[]
     def run(cmd,**kwargs):
         calls.append(tuple(cmd))
-        return SimpleNamespace(returncode=0,stdout="active\\n")
+        return SimpleNamespace(returncode=0,stdout="active\n")
     result=gate.collect(runner=run)
     assert len(calls)==len(gate.OLD_USER|gate.NEW_USER|gate.PRESERVE_USER)+len(
         gate.OLD_ROOT|gate.NEW_ROOT|gate.PRESERVE_ROOT)
