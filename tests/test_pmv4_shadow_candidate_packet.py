@@ -131,3 +131,32 @@ def test_offline_derivative_dockerfile_has_no_downloads_or_secrets():
     assert not any(line.split(" ", 1)[0] in {
         "RUN", "COPY", "ADD", "EXPOSE"
     } for line in lines)
+
+
+
+def test_current_shadow_release_can_be_explicit_prior_rollback(scope):
+    parent=candidate.REVIEWED_OOM_RECOVERY_ROLLBACK
+    result=candidate.prepare(
+        source_sha=SHA,image_digest=IMAGE,read_source=fake_read,
+        target=scope,current_main_ok=lambda rev: rev==SHA,
+        rollback_sha=parent,
+    )
+    m=json.loads((scope/"release"/"release-manifest.json").read_text())
+    reviewed=json.loads((scope/"reviewed-scope.json").read_text())
+    assert result["rollback_sha"]==parent
+    assert m["rollback_sha"]==parent
+    assert reviewed["rollback_sha"]==parent
+    assert m["scope_sha256"]==hashlib.sha256(canonical(reviewed)).hexdigest()
+    assert result["shadow_activation_performed"] is False
+    assert not (scope/"root-oneowner-proof.json").exists()
+
+
+@pytest.mark.parametrize("bad",["0"*39, "f"*40, "not-sha", "a"*40])
+def test_other_or_self_rollback_never_generates_shadow_packet(scope,bad):
+    with pytest.raises(ShadowReleaseDenied,match="ROLLBACK_NOT_EXACT_REVIEWED_RELEASE"):
+        candidate.prepare(
+            source_sha=SHA,image_digest=IMAGE,read_source=fake_read,
+            target=scope,current_main_ok=lambda rev:True,
+            rollback_sha=bad,
+        )
+    assert not scope.exists()
