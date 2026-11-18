@@ -56,10 +56,14 @@ class RootTrustStager:
                  native_signed_started:Callable[[],bool],
                  native_host_locked:Callable[[],bool],
                  native_freeze_locked:Callable[[],bool],
+                 native_marker_absent:Callable[[],bool],
+                 native_replacements_inert:Callable[[],bool],
                  production:bool=True):
         require(callable(native_signed_started)
                 and callable(native_host_locked)
-                and callable(native_freeze_locked),
+                and callable(native_freeze_locked)
+                and callable(native_marker_absent)
+                and callable(native_replacements_inert),
                 "NATIVE_RELEASE_BOUNDARY_MISSING")
         if production:
             require(os.geteuid()==0 and target==TARGET,
@@ -69,6 +73,8 @@ class RootTrustStager:
         self.native_signed_started=native_signed_started
         self.native_host_locked=native_host_locked
         self.native_freeze_locked=native_freeze_locked
+        self.native_marker_absent=native_marker_absent
+        self.native_replacements_inert=native_replacements_inert
         self.production=production
 
     def _governed(self):
@@ -110,6 +116,9 @@ class RootTrustStager:
     def stage(self,*,source_sha:str,
               exact_hashes:Mapping[str,str])->dict[str,Any]:
         self._governed()
+        require(self.native_marker_absent() is True and
+                self.native_replacements_inert() is True,
+                "INERT_STAGE_PRECONDITION_FAILED")
         require(isinstance(source_sha,str) and SHA40.fullmatch(source_sha)
                 is not None,"SOURCE_SHA_INVALID")
         require(isinstance(exact_hashes,Mapping)
@@ -203,6 +212,9 @@ class RootTrustStager:
 
     def recover_inert_stage(self,exact_hashes:Mapping[str,str])->None:
         self._governed()
+        require(self.native_marker_absent() is True and
+                self.native_replacements_inert() is True,
+                "LIVE_REPLACEMENT_RECOVERY_DENIED")
         require(set(exact_hashes)==set(packet.REVIEWED_PATHS),
                 "RECOVERY_FILE_SCOPE_CHANGED")
         require(self.target.is_dir() and not self.target.is_symlink(),
@@ -212,16 +224,32 @@ class RootTrustStager:
         # A symlink, unknown path or altered byte denies destructive cleanup.
         files=sorted((p for p in self.target.rglob("*") if p.is_file()),
                      key=lambda p:len(p.parts),reverse=True)
-        for p in files:
-            relative=p.relative_to(self.target).as_posix()
-            require(relative in exact_hashes
-                    and not p.is_symlink() and
-                    sha256(p.read_bytes()).hexdigest()==exact_hashes[relative],
-                    "RECOVERY_FILE_DRIFT")
+        source={rel:self._source(rel,exact_hashes[rel])
+                for rel in exact_hashes}
+        seen=set()
+        for p in self.target.rglob("*"):
+            require(not p.is_symlink()
+                    and (p.is_file() or p.is_dir()),
+                    "RECOVERY_UNREVIEWED_OBJECT")
+            if p.is_file():
+                relative=p.relative_to(self.target).as_posix()
+                require(relative in exact_hashes,
+                        "RECOVERY_EXTRA_FILE")
+                value=p.read_bytes()
+                require(len(value)<=len(source[relative])
+                        and source[relative].startswith(value)
+                        and p.stat().st_mode&0o022==0,
+                        "RECOVERY_FILE_DRIFT")
+                seen.add(relative)
+        directories=sorted(
+            (p for p in self.target.rglob("*") if p.is_dir()),
+            key=lambda p:len(p.parts))
+        # Restore root write on only exact previously verified directories.
+        self.target.chmod(0o700)
+        for directory in directories:
+            directory.chmod(0o700)
         for p in files:
             p.unlink()
-        dirs=sorted((p for p in self.target.rglob("*") if p.is_dir()),
-                    key=lambda p:len(p.parts),reverse=True)
-        for p in dirs:
-            p.rmdir()
+        for directory in reversed(directories):
+            directory.rmdir()
         self.target.rmdir()
