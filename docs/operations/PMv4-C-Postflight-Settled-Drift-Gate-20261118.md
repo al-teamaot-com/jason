@@ -41,3 +41,31 @@ because the prior one-use release approval was consumed.
 The test coverage exercises success ordering, negative unknown-container
 drift, withheld acceptance receipt, redacted failure diagnostics and
 rollback on native watchdog failure.
+
+## November 18 follow-up: use reviewed candidate bytes for the redundant read-only probe
+
+The Owner-approved cutover on source e9c64032d2ab984d559fb90cc756e9f653762a4c
+successfully started the separate worker and completed two genuine ticket scans,
+both with zero duplicates. Its additional standalone drift command returned
+code 1 and no JSON result (PMV4_C_FINAL_DRIFT_PROBE_FAILED=1), so the root
+transaction correctly rolled back to healthy embedded-worker mode.
+
+The standalone command had used the root-only
+/etc/jason/release-readback-recovery/production-desired-state.json path.
+The same command returns a Python PermissionError against that path under the
+unprivileged host account; this matches the observed code 1 but is not
+independent proof of the exact exception in the root context because the
+postflight did not expose stderr. Executing the existing production guard
+read-only against the SHA-pinned and reviewed watchdog-candidate.json returns
+PASS with zero problems.
+
+The minimally corrected postflight rechecks BOTH the candidate SHA-256 bound
+into the exact Owner-approved plan AND byte-for-byte equality with the
+installed root-owned production policy before running the standalone read-only
+guard against those candidate bytes. The regular native root drift watchdog,
+the protected breaker and readback gate, two real scans, freeze, immutable
+release source and rollback remain unchanged and mandatory. Missing, tampered
+or mismatched policies fail closed and roll back.
+
+Previous Owner proof is consumed and cannot authorize this changed release.
+No production mutation is made by this source correction.

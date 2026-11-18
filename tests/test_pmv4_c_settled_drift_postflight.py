@@ -22,6 +22,10 @@ def harness(tmp_path,monkeypatch):
     hold.write_bytes(b"hold")
     monkeypatch.setattr(root.c,"FREEZE",freeze)
     monkeypatch.setattr(root.c,"HOLD",hold)
+    policy = work/"installed-policy.json"
+    policy.write_bytes(b'{"schema_version":"1.0"}')
+    (release/"watchdog-candidate.json").write_bytes(policy.read_bytes())
+    monkeypatch.setattr(root.c,"WATCHDOG",policy)
     plan={
         "candidate_sha":"b"*40,
         "runtime_image_digest":"sha256:"+"1"*64,
@@ -29,6 +33,7 @@ def harness(tmp_path,monkeypatch):
         "mcp_image_digest":"sha256:"+"2"*64,
         "freeze_sha256":root.c.sha(b"freeze"),
         "hold_sha256":root.c.sha(b"hold"),
+        "watchdog_candidate_sha256":root.c.sha(policy.read_bytes()),
     }
     monkeypatch.setattr(root,"packet",lambda path:(plan,{}))
     monkeypatch.setattr(root,"release_sources",lambda *_:None)
@@ -51,6 +56,8 @@ def harness(tmp_path,monkeypatch):
             (("scan1",None,None,None,0),("scan2",None,None,None,0))))
     def run(args, **kwargs):
         if args[1].endswith("production_drift_guard.py"):
+            assert args[2:] == ["--config",str(release/"watchdog-candidate.json")]
+            assert args[3]!=str(root.c.WATCHDOG)
             actions.append("native_final_drift")
             return SimpleNamespace(returncode=0,stdout='{"status":"pass","problems":[]}')
         if args[1].endswith("production_drift_watchdog.py"):
@@ -121,4 +128,23 @@ def test_final_watchdog_failure_rolls_back_despite_drift_pass(harness,monkeypatc
         root.postflight(path)
     assert actions[:3]==["two_real_scans","native_final_drift","native_final_watchdog"]
     assert actions[-1]=="safe_rollback"
+    assert not (path.parent/"receipt.json").exists()
+
+
+
+def test_installed_policy_mismatch_rolls_back_before_drift(harness):
+    path, actions=harness
+    root.c.WATCHDOG.write_bytes(b'{"schema_version":"1.1"}')
+    with pytest.raises(root.c.StageCRootDenied,match="POSTFLIGHT_INSTALLED_POLICY_NOT_EXACT"):
+        root.postflight(path)
+    assert actions==["two_real_scans","protected_transaction","safe_rollback"]
+    assert not (path.parent/"receipt.json").exists()
+
+
+def test_tampered_candidate_policy_fails_closed(harness):
+    path, actions=harness
+    (path.parent/"watchdog-candidate.json").write_bytes(b"unapproved")
+    with pytest.raises(root.c.StageCRootDenied,match="POSTFLIGHT_INSTALLED_POLICY_NOT_EXACT"):
+        root.postflight(path)
+    assert actions==["two_real_scans","protected_transaction","safe_rollback"]
     assert not (path.parent/"receipt.json").exists()
