@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - "tools/pmv4_e_retirement_readiness.py"
+      - "tools/pmv4_e_controlplane_dependencies.py"
+      - "tests/test_pmv4_e_controlplane_dependencies.py"
       - "tools/pmv4_e_root_receipt_readback.py"
       - "tests/test_pmv4_e_retirement_readiness.py"
       - "tests/test_pmv4_e_root_receipt_readback.py"
@@ -26,6 +28,6 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check -q pytest
-          PYTHONPATH=implementation:. python -B -m pytest -q tests/test_pmv4_e_retirement_readiness.py tests/test_pmv4_e_root_receipt_readback.py
+          PYTHONPATH=implementation:. python -B -m pytest -q tests/test_pmv4_e_retirement_readiness.py tests/test_pmv4_e_root_receipt_readback.py tests/test_pmv4_e_controlplane_dependencies.py
           test ! -e /var/lib/jason/openclaw/autonomy-operational-work.sqlite3
           test ! -e /etc/jason/release-readback-recovery/production-desired-state.json
