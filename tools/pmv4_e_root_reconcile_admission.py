@@ -92,13 +92,15 @@ def decide(*,source_revision:str,
 def main(argv=None)->int:
     parser=argparse.ArgumentParser()
     parser.add_argument("--source-revision",required=True)
+    parser.add_argument("--mode-only",action="store_true",
+                        help="Emit only the validated mode for shell admission")
     args=parser.parse_args(argv)
     try:
         # Only the installed root-owned file is the deployable entrypoint.
         need(Path(__file__).resolve()==TRUST_ENTRY,
              "REVIEWED_ROOT_ENTRYPOINT_NOT_INSTALLED")
-        print(json.dumps(decide(source_revision=args.source_revision),
-                         sort_keys=True))
+        result=decide(source_revision=args.source_revision)
+        print(result["mode"] if args.mode_only else json.dumps(result,sort_keys=True))
         return 0
     except RootReconcileAdmissionDenied as exc:
         print(str(exc)[:180],file=sys.stderr)
