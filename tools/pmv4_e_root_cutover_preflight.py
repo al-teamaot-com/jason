@@ -99,11 +99,11 @@ def _active(unit:str,*,user:bool,runner:Callable[...,Any]=subprocess.run)->bool:
     return p.returncode==0 and result=="active"
 
 
-def _root_json(path:Path, *, maximum:int=120000)->dict[str,Any]:
+def _root_json(path:Path, *, maximum:int=120000, allowed_uid:int=0)->dict[str,Any]:
     try:
         meta=path.lstat()
         require(stat.S_ISREG(meta.st_mode) and not path.is_symlink()
-                and meta.st_uid==0 and meta.st_gid==0
+                and meta.st_uid==allowed_uid and meta.st_gid==allowed_uid
                 and meta.st_nlink==1 and meta.st_mode&0o022==0
                 and 0<meta.st_size<=maximum,
                 "ROOT_PROTECTED_FILE_UNTRUSTED")
@@ -130,7 +130,10 @@ def _root_evidence(*, historical:Mapping[str,Any], canary:Mapping[str,Any])->dic
             and canary.get("active_pointer_absent") is True,
             "NATIVE_CANARY_UNVERIFIED")
     protected=_root_json(ROOT_POLICY)
-    source=_root_json(SOURCE_POLICY)
+    # The installed current-release tree has historically allowed group
+    # write on some files. Treat it as evidence ONLY, not release authority;
+    # never use it to grant a production action or select the candidate SHA.
+    source=json.loads(SOURCE_POLICY.read_bytes())
     require(protected.get("schema_version")=="1.0"
             and source.get("schema_version")=="1.0",
             "SOURCE_POLICY_SCHEMA_NOT_REVIEWED")
@@ -147,14 +150,15 @@ def _root_evidence(*, historical:Mapping[str,Any], canary:Mapping[str,Any])->dic
             and set(protected_plan["add_user_units"])==set(source_plan["add_user_units"])
             and set(protected_plan["add_system_units"])==set(source_plan["add_system_units"]),
             "SOURCE_POLICY_UNIT_SCOPE_CHANGED")
-    state=_root_json(CONTROL_STATE)
-    drift=_root_json(DRIFT_STATE)
+    state=_root_json(CONTROL_STATE,allowed_uid=1000)
+    drift=_root_json(DRIFT_STATE,allowed_uid=1000)
     require(drift.get("status")=="pass" and drift.get("problems")==[],
             "PRODUCTION_DRIFT_NOT_PASS")
     try:
         freeze_meta=FREEZE.lstat()
         require(stat.S_ISREG(freeze_meta.st_mode) and not FREEZE.is_symlink()
-                and freeze_meta.st_uid==0 and freeze_meta.st_mode&0o022==0
+                and freeze_meta.st_uid==1000 and freeze_meta.st_gid==1000
+                and stat.S_IMODE(freeze_meta.st_mode)==0o600
                 and sha256(FREEZE.read_bytes()).hexdigest()==FREEZE_SHA,
                 "PRODUCTION_FREEZE_CHANGED")
     except OSError as exc:
