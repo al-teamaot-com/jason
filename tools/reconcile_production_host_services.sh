@@ -73,7 +73,7 @@ PMV4_E_MARKER="/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.j
 PMV4_E_HOST_GUARD="/opt/jason/pmv4-e-trusted/tools/pmv4_e_root_reconcile_admission.py"
 PMV4_E_HOST_MODE=legacy
 if [ -e "$PMV4_E_MARKER" ] || [ -L "$PMV4_E_MARKER" ]; then
-  PMV4_E_HOST_MODE="$(/usr/bin/python3 -I -B "$PMV4_E_HOST_GUARD" --source-revision "$SOURCE_REVISION")" || {
+  PMV4_E_HOST_MODE="$(/usr/bin/python3 -I -B "$PMV4_E_HOST_GUARD" --source-revision "$SOURCE_REVISION" --mode-only)" || {
     echo "ERROR: PMv4 E accepted root reconciliation admission denied" >&2
     exit 14
   }
