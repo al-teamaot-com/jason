@@ -1,4 +1,5 @@
 [Unit]
+ConditionPathExists=!/var/lib/jason/openclaw/support-repair/pmv3-engineering-owner-pause.json
 Description=Jason autonomous engineering production-window worker
 After=network-online.target
 Wants=network-online.target
