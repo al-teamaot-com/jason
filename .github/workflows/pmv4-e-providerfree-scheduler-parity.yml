@@ -22,6 +22,8 @@ on:
       - "tools/pmv4_e_retirement_readiness.py"
       - "tests/test_pmv4_e_root_reconcile_admission.py"
       - "tools/pmv4_e_replacement_unit_bundle.py"
+      - "tools/pmv4_e_six_unit_transaction_model.py"
+      - "tools/tests/test_pmv4_e_six_unit_transaction_model.py"
       - "infrastructure/pmv4-e-scheduler/**"
       - "tests/test_pmv4_e_unit_admission.py"
       - "tests/test_pmv4_e_replacement_unit_bundle.py"
@@ -61,6 +63,7 @@ jobs:
             tests/test_pmv4_e_unit_admission.py \
             tests/test_pmv4_e_root_reconcile_admission.py \
             tools/tests/test_pmv4_e_release_manager_convergence.py \
+            tools/tests/test_pmv4_e_six_unit_transaction_model.py \
             tools/tests/test_reconcile_production_host_services.py \
             tests/test_pmv4_e_replacement_unit_bundle.py \
             tools/tests/test_independent_component_release.py \
@@ -81,6 +84,7 @@ jobs:
             tools/pmv4_e_unit_admission.py \
             tools/pmv4_e_root_reconcile_admission.py \
             tools/release_manager_host_runner.py \
+            tools/pmv4_e_six_unit_transaction_model.py \
             tools/pmv4_e_replacement_unit_bundle.py
           bash -n tools/reconcile_production_host_services.sh
           test ! -e /var/lib/jason/independent-component-release
