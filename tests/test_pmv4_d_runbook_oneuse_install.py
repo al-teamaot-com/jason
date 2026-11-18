@@ -300,3 +300,53 @@ def test_native_drift_failure_can_be_reverified_after_rollback(fake_root_transac
     outcome=json.loads((auditroot/(p["source_sha"]+"-rollback.json")).read_text())
     assert outcome["status"]=="rolled_back"
     assert outcome["rollback_verified"] is True
+
+
+def test_actual_owner_uid_socket_readback_uses_valid_inline_python(tmp_path,monkeypatch):
+    """Prevent a root-only postflight typo from burning another Owner approval."""
+    import os
+    import socket
+    import subprocess
+    import sys
+    import time
+    from autonomous_remediation.playbook_store import SQLitePlaybookRegistry
+    registry=tmp_path/"json-playbooks.sqlite3"
+    store=SQLitePlaybookRegistry(registry)
+    store.close()
+    socket_path=tmp_path/"read.sock"
+    runner=subprocess.Popen(
+        [sys.executable,"-m","autonomous_remediation.runbook_management_read_service",
+         "--registry",str(registry),"--socket",str(socket_path)],
+        env={**os.environ,"PYTHONPATH":"implementation"},
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
+    )
+    try:
+        for n in range(100):
+            if socket_path.is_socket():break
+            if runner.poll() is not None:
+                raise AssertionError(runner.stderr.read()[:300])
+            time.sleep(0.03)
+        else: raise AssertionError("socket not ready")
+        original_path=Path
+        monkeypatch.setattr(root,"Path",
+            lambda x: socket_path if str(x)=="/run/jason-runbook-management/read.sock"
+            else original_path(x))
+        def systemctl(*a,**kw):
+            assert a[0] in ("is-active","is-enabled")
+            return SimpleNamespace(stdout="active\n" if a[0]=="is-active" else "enabled\n")
+        monkeypatch.setattr(root,"systemctl",systemctl)
+        def fake_run(args,**kw):
+            assert args[:2]==["/usr/bin/python3","-c"]
+            assert kw.get("user") is True
+            # Already running under same uid as service; do not use sudo.
+            return subprocess.run(args,capture_output=True,text=True,timeout=10,check=True)
+        monkeypatch.setattr(root,"run",fake_run)
+        received=root.service_readback()
+        assert received["status"]=="healthy"
+        assert received["registry_generation"]==0
+        assert received["active_count"]==0
+        assert received["provider_calls"] is False
+    finally:
+        runner.terminate()
+        try:runner.communicate(timeout=3)
+        except subprocess.TimeoutExpired:runner.kill();runner.communicate()
