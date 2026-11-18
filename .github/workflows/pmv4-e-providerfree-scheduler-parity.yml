@@ -70,6 +70,14 @@ jobs:
           import json,sys
           from tools import pmv4_e_canary_contract as contract
           with open(sys.argv[1],encoding="utf-8") as f:
-              contract.validate_resolved_compose(json.load(f),candidate_sha="a"*40)
+              resolved=json.load(f)
+          try:
+              contract.validate_resolved_compose(resolved,candidate_sha="a"*40)
+          except Exception:
+              # This fixture contains only fixed nonsecret source fields.
+              # Show exact Compose serialization to diagnose v2/v5 differences.
+              print("PMV4_E_SOURCE_ONLY_CONFIG="+json.dumps(
+                  resolved,sort_keys=True,separators=(",",":")))
+              raise
           print("PMV4_E_CANARY_DOCKER_COMPOSE_READONLY=PASS")
           PY

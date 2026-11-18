@@ -46,7 +46,13 @@ and stops a fresh approval attempt. Source-only tests are NOT live
 production parity.
 
 tools/pmv4_e_canary_contract.py validates one exact Docker Compose
-projection and image labels. tools/pmv4_e_canary_packet.py verifies
+projection and image labels. It normalizes only the harmless v2/v5
+representation differences for an unchanged source-specific bind:
+Docker Compose v2 may print an implied create_host_path=true whereas
+v5 prints an empty bind object. The trusted root transaction still
+must verify the single pinned config source file exists, is regular,
+root-owned and immutable before allowing Docker activation. No other
+source mount, mode, extra volume or environment is permitted. tools/pmv4_e_canary_packet.py verifies
 exact protected-main Git blobs, CI, immutable prior OCI image identity,
 reviewed manifest/scope and frozen source SHA. It stages an unprivileged
 source packet only; no Owner proof, Docker creation or provider action.

@@ -300,3 +300,32 @@ def test_canary_source_only_does_not_grant_retirement():
     assert result["root_installed"] is False
     assert result["native_controller_production_parity_accepted"] is False
     assert result["production_mutations"] is False
+
+
+def test_compose_v2_bind_and_numeric_memory_encoding_does_not_broaden_scope():
+    actual=resolved()
+    service=actual["services"][canary.CANARY_ID]
+    service["volumes"][0]["bind"]={"create_host_path":True}
+    service["mem_limit"]=canary.MEMORY_BYTES
+    service["networks"]={"isolation":{}}
+    canary.validate_resolved_compose(actual,candidate_sha=CANDIDATE)
+
+
+@pytest.mark.parametrize("bind",[
+    {"create_host_path":False},
+    {"create_host_path":True,"propagation":"shared"},
+    {"create_host_path":"true"},
+    {"propagation":"shared"},
+])
+def test_unknown_or_overridden_bind_policy_denied(bind):
+    actual=resolved()
+    actual["services"][canary.CANARY_ID]["volumes"][0]["bind"]=bind
+    with pytest.raises(core.ComponentReleaseDenied,match="UNPINNED_CONFIG_BIND"):
+        canary.validate_resolved_compose(actual,candidate_sha=CANDIDATE)
+
+
+def test_compose_short_bind_never_substitutes_untrusted_path():
+    actual=resolved()
+    actual["services"][canary.CANARY_ID]["volumes"][0]["source"]="/etc/shadow"
+    with pytest.raises(core.ComponentReleaseDenied,match="UNPINNED_CONFIG_BIND"):
+        canary.validate_resolved_compose(actual,candidate_sha=CANDIDATE)

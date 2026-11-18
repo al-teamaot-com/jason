@@ -79,14 +79,37 @@ def validate_resolved_compose(data:Mapping[str,Any],*,candidate_sha:str)->None:
         "security_opt","user","volumes",
     }:
         deny("SERVICE_EXTRA_CAPABILITY")
+    # Compose v2 and v5 differ only in how they serialize a short-syntax
+    # bind's implied host-path creation flag. The root controller MUST
+    # verify the immutable source file exists before any Docker operation.
+    volumes=c.get("volumes")
+    if not isinstance(volumes,list) or len(volumes)!=1:
+        deny("UNPINNED_CONFIG_BIND")
+    volume=volumes[0]
+    if not isinstance(volume,dict):
+        deny("UNPINNED_CONFIG_BIND")
+    binder=volume.get("bind",{})
+    if not isinstance(binder,dict) or not (
+        binder=={} or (set(binder)=={"create_host_path"}
+                        and binder["create_host_path"] is True)
+    ):
+        deny("UNPINNED_CONFIG_BIND")
+    if ({k:v for k,v in volume.items() if k!="bind"}!={
+        "type":"bind","source":mount_source(candidate_sha),
+        "target":"/canary/config.json","read_only":True,
+    }):
+        deny("UNPINNED_CONFIG_BIND")
+    memory=c.get("mem_limit")
+    mem_exact=((type(memory) is int and memory==MEMORY_BYTES)
+               or (type(memory) is str and memory==str(MEMORY_BYTES)))
     if (c.get("image")!=IMAGE
         or c.get("read_only") is not True
         or c.get("user")!="1000:1000"
         or c.get("cap_drop")!=["ALL"]
         or c.get("security_opt")!=["no-new-privileges:true"]
         or c.get("labels")!={"com.aot.jason.release_sha":candidate_sha}
-        or c.get("networks")!={"isolation":None}
-        or c.get("mem_limit")!=str(MEMORY_BYTES)
+        or c.get("networks") not in ({"isolation":None},{"isolation":{}})
+        or not mem_exact
         or c.get("pids_limit")!=64
         or c.get("restart")!="no"
         or c.get("pull_policy")!="never"
@@ -96,11 +119,7 @@ def validate_resolved_compose(data:Mapping[str,Any],*,candidate_sha:str)->None:
         or c.get("healthcheck")!={"test":[
             "CMD","node","-e","process.exit(0)"],
             "timeout":"3s","interval":"10s","retries":3}
-        or c.get("volumes")!=[{
-            "type":"bind","source":mount_source(candidate_sha),
-            "target":"/canary/config.json",
-            "read_only":True,"bind":{},
-        }]):
+        ):
         deny("ISOLATION_OR_PROTECTED_MOUNT_CHANGED")
 
 
