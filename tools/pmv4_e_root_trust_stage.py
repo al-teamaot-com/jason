@@ -177,6 +177,12 @@ class RootTrustStager:
                 "VERIFY_FILE_SET_CHANGED")
         require(self.target.is_dir() and not self.target.is_symlink(),
                 "INSTALLED_ROOT_ABSENT")
+        root_meta=self.target.lstat()
+        require(stat.S_IMODE(root_meta.st_mode)==0o555,
+                "INSTALLED_ROOT_NOT_SEALED")
+        if self.production:
+            require(root_meta.st_uid==0 and root_meta.st_gid==0,
+                    "INSTALLED_ROOT_NOT_ROOT_OWNED")
         seen=set()
         for path in self.target.rglob("*"):
             require(not path.is_symlink(),"INSTALLED_SYMLINK_UNTRUSTED")
