@@ -43,7 +43,17 @@ def test_each_unit_preserves_existing_backend_while_refusing_unauthorized_start(
     assert service.count(guard_line)==1
     assert service.count("[Service]")==1
     assert service.count("Type=oneshot")==1
-    assert service.replace(guard_line,"")==old_service
+    stripped=service.replace(guard_line,"")
+    for condition in (unit.OWNER_PAUSE_CONDITION,
+                      unit.RELEASE_HOLD_CONDITION,
+                      unit.DRIFT_PREFLIGHT_CONDITION):
+        stripped=stripped.replace(condition,"",1)
+    assert stripped==old_service
+    if pair.mode=="engineering":
+        assert service.count(unit.OWNER_PAUSE_CONDITION)==1
+    elif pair.mode=="component-release":
+        assert service.count(unit.RELEASE_HOLD_CONDITION)==1
+        assert service.count(unit.DRIFT_PREFLIGHT_CONDITION)==1
     assert trigger.replace("Unit="+pair.new_service,
                            "Unit="+pair.old_service)==old_trigger
     assert "Unit="+pair.new_service in trigger
@@ -147,3 +157,19 @@ def test_generator_is_pure_and_has_no_automatic_activation():
         "break_circuit",'"owner_approval_issued":True',
     ):
         assert forbidden not in source
+
+
+
+def test_live_owner_pause_and_release_stability_hold_survive_service_rename():
+    generated=unit.generate()
+    user=unit.TARGET/"user"
+    engineering=generated[str(user/"jason-pmv4-engineering.service")].decode()
+    release=generated[str(user/"jason-pmv4-component-release.service")].decode()
+    approval=generated[str(user/"jason-pmv4-release-approval.service")].decode()
+    assert unit.OWNER_PAUSE_CONDITION in engineering
+    assert unit.RELEASE_HOLD_CONDITION in release
+    assert unit.DRIFT_PREFLIGHT_CONDITION in release
+    assert "age<=120" in unit.DRIFT_PREFLIGHT_CONDITION
+    assert "auto-promotion-incident-hold" in approval
+    assert "promote-eligible" in release
+    assert "approval-only-held" in approval
