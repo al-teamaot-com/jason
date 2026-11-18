@@ -386,12 +386,32 @@ def postflight(path: Path) -> None:
         need(runtime["Image"] == plan["runtime_image_digest"] and
              mcp["Id"] == plan["mcp_container_id"] and
              mcp["Image"] == plan["mcp_image_digest"], "POSTFLIGHT_PROTECTED_CORE_CHANGED")
+        # Startup/transitional drift is not a production acceptance signal.
+        # Require two authoritative ticket scans before evaluating the exact
+        # final state. Do NOT weaken the actual native drift/watchdog gate.
+        baseline = rows[0]["details"]["baseline_at"]
+        scans = c._wait_two_scans(baseline)
         drift = c._run([
             "/usr/bin/python3", "/opt/jason/current/tools/production_drift_guard.py",
             "--config", str(c.WATCHDOG)], check=False, capture=True, timeout=45)
-        need(drift.returncode == 0, "POSTFLIGHT_DRIFT_DENIED")
-        baseline = rows[0]["details"]["baseline_at"]
-        scans = c._wait_two_scans(baseline)
+        if drift.returncode != 0:
+            # Preserve a bounded, structural reason in the visible failed
+            # postflight. No secrets, credentials or provider payloads.
+            try:
+                observed = json.loads(drift.stdout)
+                kinds = [
+                    {key: val for key, val in item.items()
+                     if key in ("kind", "unit", "container", "count", "maximum", "state")}
+                    for item in observed.get("problems", [])
+                    if isinstance(item, dict)
+                ]
+                print("PMV4_C_FINAL_DRIFT_PROBLEMS=" +
+                      json.dumps(kinds[:12], sort_keys=True)[:2400],
+                      file=sys.stderr, flush=True)
+            except (ValueError, TypeError, AttributeError):
+                print("PMV4_C_FINAL_DRIFT_PROBE_FAILED=" +
+                      str(drift.returncode), file=sys.stderr, flush=True)
+        need(drift.returncode == 0, "POSTFLIGHT_FINAL_DRIFT_DENIED")
         watchdog = c._run([
             "/usr/bin/python3", "/opt/jason/current/tools/production_drift_watchdog.py",
             "--config", str(c.WATCHDOG)], check=False, capture=True, timeout=45)
