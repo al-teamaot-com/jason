@@ -27,8 +27,8 @@ NEW=frozenset(NEW_USER+NEW_ROOT)
 PINNED_ACTION="pmv4-e-oneowner-six-unit-replacement-and-retirement-v1"
 STEPS=(
     "check_exact_baseline",
-    "stage_reviewed_units_inert",
     "checkpoint_durable_claims",
+    "stage_reviewed_units_inert",
     "stop_six_legacy",
     "commit_exact_policy_and_convergence",
     "commit_root_accepted_marker",
