@@ -15,6 +15,10 @@ on:
       - "tools/jason_self_heal_watchdog.py"
       - "tools/tests/test_pmv4_e_watchdog_retarget.py"
       - "tools/pmv4_e_unit_admission.py"
+      - "tools/pmv4_e_root_reconcile_admission.py"
+      - "tools/reconcile_production_host_services.sh"
+      - "tools/pmv4_e_retirement_readiness.py"
+      - "tests/test_pmv4_e_root_reconcile_admission.py"
       - "tools/pmv4_e_replacement_unit_bundle.py"
       - "infrastructure/pmv4-e-scheduler/**"
       - "tests/test_pmv4_e_unit_admission.py"
@@ -53,6 +57,8 @@ jobs:
             tools/tests/test_pmv4_e_watchdog_retarget.py \
             tools/tests/test_jason_self_heal_watchdog.py \
             tests/test_pmv4_e_unit_admission.py \
+            tests/test_pmv4_e_root_reconcile_admission.py \
+            tools/tests/test_reconcile_production_host_services.py \
             tests/test_pmv4_e_replacement_unit_bundle.py \
             tools/tests/test_independent_component_release.py \
             tools/tests/test_independent_component_host_adapter.py \
@@ -70,7 +76,9 @@ jobs:
             tools/pmv4_e_scheduler_parity.py \
             tools/jason_self_heal_watchdog.py \
             tools/pmv4_e_unit_admission.py \
+            tools/pmv4_e_root_reconcile_admission.py \
             tools/pmv4_e_replacement_unit_bundle.py
+          bash -n tools/reconcile_production_host_services.sh
           test ! -e /var/lib/jason/independent-component-release
           test ! -e /etc/jason/release-readback-recovery/production-desired-state.json
       - name: Compose parse only, never activate

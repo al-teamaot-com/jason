@@ -19,10 +19,9 @@ import struct
 import subprocess
 from typing import Any, Callable, Mapping, Sequence
 
-try:
-    import pmv4_e_controlplane_dependencies as controlplane
-except ModuleNotFoundError:
-    from tools import pmv4_e_controlplane_dependencies as controlplane
+# Canonical import avoids two live exception-class identities if the
+# project tools directory is also present on PYTHONPATH.
+from tools import pmv4_e_controlplane_dependencies as controlplane
 
 REPOSITORY_DESIRED = Path(__file__).resolve().parents[1] / "config/production-desired-state.json"
 PRODUCTION_CURRENT = Path("/opt/jason/current")
