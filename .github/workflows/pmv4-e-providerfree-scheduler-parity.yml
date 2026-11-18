@@ -4,6 +4,12 @@ on:
     paths:
       - "infrastructure/pmv4-e-canary/**"
       - "tools/pmv4_e_canary_contract.py"
+      - "tools/pmv4_e_canary_host.py"
+      - "tools/pmv4_e_canary_drift_policy.py"
+      - "tests/test_pmv4_e_canary_drift_policy.py"
+      - "tools/tests/test_pmv4_e_canary_host.py"
+      - "tools/pmv4_e_canary_release_root.py"
+      - "tools/tests/test_pmv4_e_canary_release_root.py"
       - "tools/pmv4_e_canary_packet.py"
       - "tools/pmv4_e_scheduler_parity.py"
       - "tools/tests/test_pmv4_e_providerfree_canary.py"
@@ -32,6 +38,9 @@ jobs:
           python -m pip install --disable-pip-version-check -q pytest cryptography PyYAML
           PYTHONPATH=.:implementation:implementation/mcp_service/src python -B -m pytest -q \
             tools/tests/test_pmv4_e_providerfree_canary.py \
+            tools/tests/test_pmv4_e_canary_host.py \
+            tests/test_pmv4_e_canary_drift_policy.py \
+            tools/tests/test_pmv4_e_canary_release_root.py \
             tools/tests/test_pmv4_e_canary_packet.py \
             tests/test_pmv4_e_scheduler_parity.py \
             tools/tests/test_independent_component_release.py \
@@ -43,6 +52,9 @@ jobs:
             tests/test_pmv4_e_root_receipt_readback.py
           python -B -m py_compile \
             tools/pmv4_e_canary_contract.py \
+            tools/pmv4_e_canary_host.py \
+            tools/pmv4_e_canary_drift_policy.py \
+            tools/pmv4_e_canary_release_root.py \
             tools/pmv4_e_canary_packet.py \
             tools/pmv4_e_scheduler_parity.py
           test ! -e /var/lib/jason/independent-component-release
@@ -52,6 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           export JASON_PMV4_E_CONFIG=/var/lib/jason/independent-component-release/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/config.json
+          export JASON_PMV4_E_SOURCE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           docker compose -f infrastructure/pmv4-e-canary/compose.yaml config --format json > "$RUNNER_TEMP/pmv4-e-canary-config.json"
           PYTHONPATH=. python -B - "$RUNNER_TEMP/pmv4-e-canary-config.json" <<'PY'
           import json,sys

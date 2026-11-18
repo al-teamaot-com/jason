@@ -188,6 +188,7 @@ def resolved():
         },
         "image":canary.IMAGE,
         "mem_limit":str(canary.MEMORY_BYTES),
+        "labels":{"com.aot.jason.release_sha":CANDIDATE},
         "networks":{"isolation":None},
         "pids_limit":64,"pull_policy":"never",
         "read_only":True,"restart":"no",

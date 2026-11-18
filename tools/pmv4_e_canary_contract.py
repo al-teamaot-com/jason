@@ -15,6 +15,7 @@ from tools import independent_component_release as native
 
 CANARY_ID="pmv4-e-canary"
 CANARY_PROJECT="jason-pmv4-e-canary"
+CANARY_CONTAINER_NAME="jason-pmv4-e-canary-pmv4-e-canary-1"
 IMAGE_SOURCE="75f2b4c0c48a15bd17d700b9f039fe56623e3f52"
 IMAGE="sha256:679d3334efe7fbe32878b10fb06077912b57473bc3998316d26e9fd7a3d46bbd"
 MEMORY_BYTES=134217728
@@ -74,7 +75,7 @@ def validate_resolved_compose(data:Mapping[str,Any],*,candidate_sha:str)->None:
     c=data["services"][CANARY_ID]
     if not isinstance(c,dict) or set(c)!={
         "cap_drop","command","entrypoint","healthcheck","image","mem_limit",
-        "networks","pids_limit","pull_policy","read_only","restart",
+        "labels","networks","pids_limit","pull_policy","read_only","restart",
         "security_opt","user","volumes",
     }:
         deny("SERVICE_EXTRA_CAPABILITY")
@@ -83,6 +84,7 @@ def validate_resolved_compose(data:Mapping[str,Any],*,candidate_sha:str)->None:
         or c.get("user")!="1000:1000"
         or c.get("cap_drop")!=["ALL"]
         or c.get("security_opt")!=["no-new-privileges:true"]
+        or c.get("labels")!={"com.aot.jason.release_sha":candidate_sha}
         or c.get("networks")!={"isolation":None}
         or c.get("mem_limit")!=str(MEMORY_BYTES)
         or c.get("pids_limit")!=64

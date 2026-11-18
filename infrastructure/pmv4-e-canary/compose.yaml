@@ -2,6 +2,8 @@ name: jason-pmv4-e-canary
 services:
   pmv4-e-canary:
     image: sha256:679d3334efe7fbe32878b10fb06077912b57473bc3998316d26e9fd7a3d46bbd
+    labels:
+      com.aot.jason.release_sha: "${JASON_PMV4_E_SOURCE}"
     entrypoint: ["node", "-e", "setInterval(() => {}, 30000)"]
     user: "1000:1000"
     read_only: true

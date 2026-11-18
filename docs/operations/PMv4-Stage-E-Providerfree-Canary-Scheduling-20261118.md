@@ -50,9 +50,15 @@ projection and image labels. tools/pmv4_e_canary_packet.py verifies
 exact protected-main Git blobs, CI, immutable prior OCI image identity,
 reviewed manifest/scope and frozen source SHA. It stages an unprivileged
 source packet only; no Owner proof, Docker creation or provider action.
-A distinct root-owned, SHA-pinned canary host callback is still needed
-to activate the canary through the existing generic controller while
-leaving installed financial core/adapter untouched.
+A distinct root-owned, SHA-pinned canary companion host callback and
+exact Owner-outbox root entrypoint have been authored as source-only
+tools/pmv4_e_canary_host.py and tools/pmv4_e_canary_release_root.py.
+Their code reuses the installed original generic controller and its
+original financial host adapter's host locks, freeze and protected
+readback, and validates actual Docker isolation including private
+network internal=true and exactly one peer. Neither module has been
+root-installed. A separately Owner-approved immutable root bundle and
+protected CI attestation are still required before live invocation.
 
 ## Replacement scheduling tests
 
@@ -72,6 +78,18 @@ have NOT yet been installed or accepted. These tests are preparatory
 and must not be treated as source/production parity.
 
 ## Production NO-GO
+
+The native production drift watchdog rejects undeclared running Docker
+containers. Because the current protected policy has no canary allowance,
+a live canary MUST be preceded by a separately approved exact protected
+policy transition adding only the canonical Compose container name
+jason-pmv4-e-canary-pmv4-e-canary-1. The source-only planner
+tools/pmv4_e_canary_drift_policy.py verifies the original root policy
+byte hash and generates the one-name allowance; it preserves all other
+fields. On cleanup, stop and verify the canary absent BEFORE restoring
+the old protected policy bytes; deny if the current protected policy
+differs from the approved candidate. No watchdog suppression, general
+container allowlist or breaker bypass.
 
 Before a live canary: pin and install a root-owned canary host adapter
 under separately reviewed exact Owner proof; generate root-owned
