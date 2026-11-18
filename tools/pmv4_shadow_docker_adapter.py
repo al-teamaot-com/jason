@@ -109,7 +109,16 @@ class DockerShadowAdapter:
         return data[0]
 
     @staticmethod
-    def _check_container_ownership(data: Mapping[str, Any]) -> None:
+    def _check_container_ownership(
+        data: Mapping[str, Any], *, expected_memory_bytes: int | None = None
+    ) -> None:
+        # During an A1 version transition the previous live container may
+        # still use 2 GiB while a new signed candidate requests 4 GiB.
+        # Inspect both only against these two bounded, reviewed generations.
+        # Post-Compose and postflight MUST match the exact signed candidate.
+        approved = (2 * 1024 ** 3, 4 * 1024 ** 3)
+        if expected_memory_bytes is not None and expected_memory_bytes not in approved:
+            raise ShadowReleaseDenied("SHADOW_UNAPPROVED_MEMORY_PROFILE")
         config = data.get("Config")
         host = data.get("HostConfig")
         if not isinstance(config, dict) or not isinstance(host, dict):
@@ -147,7 +156,10 @@ class DockerShadowAdapter:
             or not isinstance(restart, dict)
             or restart.get("Name") not in ("no", "")
             or host.get("PidsLimit") != 256
-            or host.get("Memory") != 2 * 1024 * 1024 * 1024
+            or type(host.get("Memory")) is not int
+            or host["Memory"] not in approved
+            or (expected_memory_bytes is not None
+                and host["Memory"] != expected_memory_bytes)
             or host.get("NanoCpus") != 1_000_000_000
             or host.get("PublishAllPorts") not in (None, False)
             or host.get("Devices") not in (None, [])
@@ -195,10 +207,14 @@ class DockerShadowAdapter:
         ):
             raise ShadowReleaseDenied("SHADOW_PROHIBITED_PROVIDER_CREDENTIAL_ENV")
 
-    def _owned_or_absent(self) -> dict[str, Any] | None:
+    def _owned_or_absent(
+        self, *, expected_memory_bytes: int | None = None
+    ) -> dict[str, Any] | None:
         existing = self._inspect()
         if existing is not None:
-            self._check_container_ownership(existing)
+            self._check_container_ownership(
+                existing, expected_memory_bytes=expected_memory_bytes
+            )
         return existing
 
     def _token(self) -> str:
@@ -245,6 +261,19 @@ class DockerShadowAdapter:
             raise ShadowReleaseDenied("SHADOW_IMMUTABLE_COMPOSE_HASH_MISMATCH")
         return candidate
 
+    def _signed_memory_bytes(self, release_dir: Path) -> int:
+        # The exact reviewed Compose blob is SHA-bound to the release
+        # manifest before reading its memory value. Never infer memory
+        # limits from untrusted Docker state or editable root controls.
+        candidate = self._candidate_compose(release_dir)
+        raw = candidate.read_bytes()
+        matches = re.findall(
+            rb'(?m)^    mem_limit: "(2g|4g)"\r?$', raw
+        )
+        if len(matches) != 1:
+            raise ShadowReleaseDenied("SHADOW_SIGNED_MEMORY_PROFILE_INVALID")
+        return (2 if matches[0] == b"2g" else 4) * 1024 ** 3
+
     def _manifest_image(self, release_dir: Path) -> str:
         doc = read_json(release_dir / "release-manifest.json")
         image = doc.get("image_digest")
@@ -255,6 +284,7 @@ class DockerShadowAdapter:
     def _up(self, release_dir: Path) -> None:
         image = self._manifest_image(release_dir)
         compose = self._candidate_compose(release_dir)
+        expected_memory = self._signed_memory_bytes(release_dir)
         token = self._token()
         self._owned_or_absent()
         # Digest is a local OCI image ID and --pull never prohibits egress.
@@ -267,7 +297,7 @@ class DockerShadowAdapter:
              "up", "--detach", "--no-build", "--no-deps", "--pull", "never"],
             env=env,
         )
-        self._owned_or_absent()
+        self._owned_or_absent(expected_memory_bytes=expected_memory)
 
     def activate_shadow(self, release_dir: Path) -> None:
         self._up(release_dir)
@@ -295,9 +325,10 @@ class DockerShadowAdapter:
         # the isolated shadow, for a bounded period, and never restart or
         # change any service to make the test pass. Wrong identity fails fast.
         image = self._manifest_image(candidate_dir)
+        expected_memory = self._signed_memory_bytes(candidate_dir)
         deadline = self.clock() + self.health_wait_seconds
         while True:
-            info = self._owned_or_absent()
+            info = self._owned_or_absent(expected_memory_bytes=expected_memory)
             if info is None or info.get("Image") != image:
                 return False
             state = info.get("State")
