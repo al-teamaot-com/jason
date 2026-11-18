@@ -328,6 +328,15 @@ def test_actual_owner_uid_socket_readback_uses_valid_inline_python(tmp_path,monk
             time.sleep(0.03)
         else: raise AssertionError("socket not ready")
         original_path=Path
+        original_lstat=Path.lstat
+        def synthetic_lstat(path):
+            found=original_lstat(path)
+            if path==socket_path:
+                # GitHub runner UID is not necessarily Jason's service UID
+                # 1000. Simulate the reviewed unit's User=al socket owner.
+                return SimpleNamespace(st_uid=1000,st_mode=found.st_mode)
+            return found
+        monkeypatch.setattr(Path,"lstat",synthetic_lstat)
         monkeypatch.setattr(root,"Path",
             lambda x: socket_path if str(x)=="/run/jason-runbook-management/read.sock"
             else original_path(x))
