@@ -335,6 +335,51 @@ def exact_modules(build_sha:str)->None:
          "RUNNING_ROOT_CODE_NOT_PINNED")
 
 
+def verify_installed_generic_controller()->list[dict[str,Any]]:
+    """Evidence for each exact preinstalled root file, with no bypass.
+
+    This is diagnostic evidence, not a user-controlled trust source. All
+    existing fixed SHA-256, root UID, regular-file and no-write gates remain.
+    """
+    records=[]
+    for relative,expected in (
+        ("tools/independent_component_release.py",CONTROLLER_SHA),
+        ("tools/independent_component_host_adapter.py",ADAPTER_SHA),
+        ("tools/independent_component_release_root.py",ROOT_ENTRY_SHA),
+    ):
+        p=TRUST/relative
+        try:
+            meta=p.lstat()
+            observed=digest(p.read_bytes())
+            checks={
+                "regular_file":bool(stat.S_ISREG(meta.st_mode)),
+                "uid_zero":meta.st_uid==0,
+                "not_symlink":not p.is_symlink(),
+                "no_write_bits":meta.st_mode&0o222==0,
+                "exact_sha256":observed==expected,
+            }
+            item={
+                "path":relative,
+                "mode":format(stat.S_IMODE(meta.st_mode),"04o"),
+                "uid":meta.st_uid,
+                "expected_sha256":expected,
+                "actual_sha256":observed,
+                "checks":checks,
+            }
+        except OSError as exc:
+            print("PMV4_E_GENERIC_ROOT_FILE_READ_DENIED="+relative,
+                  flush=True)
+            raise Denied("PMV4_E_INSTALLED_GENERIC_CONTROLLER_UNREADABLE") from exc
+        records.append(item)
+        # Always print before denying to identify the precise failed field.
+        # No trust decision is made from this printed report.
+        print("PMV4_E_GENERIC_ROOT_FILE="+json.dumps(item,sort_keys=True),
+              flush=True)
+        need(all(checks.values()),
+             "INSTALLED_GENERIC_CONTROLLER_DRIFT:"+relative)
+    return records
+
+
 def preflight(build_sha:str,*,strict_root:bool)->dict:
     if strict_root:
         need(os.geteuid()==0 and sys.flags.isolated==1,
@@ -355,17 +400,7 @@ def preflight(build_sha:str,*,strict_root:bool)->dict:
              and not (OUTBOX/("release-"+CANDIDATE[:16]+".json")).exists(),
              "ONEUSE_ROOT_ALREADY_ATTEMPTED")
         # Existing controller exact trusted installed source; NOT modified.
-        for relative,expected in (
-            ("tools/independent_component_release.py",CONTROLLER_SHA),
-            ("tools/independent_component_host_adapter.py",ADAPTER_SHA),
-            ("tools/independent_component_release_root.py",ROOT_ENTRY_SHA),
-        ):
-            p=TRUST/relative
-            x=p.lstat()
-            need(stat.S_ISREG(x.st_mode) and x.st_uid==0
-                 and not p.is_symlink() and x.st_mode&0o222==0
-                 and digest(p.read_bytes())==expected,
-                 "INSTALLED_GENERIC_CONTROLLER_DRIFT")
+        verify_installed_generic_controller()
         need(CI.is_file() is False,"COMPONENT_CI_ALREADY_CONFLICTING")
         need(OUTBOX.is_dir(),"CANARY_APPROVAL_OUTBOX_MISSING")
         need(not subprocess.run(["/usr/bin/docker","ps","-aq",
