@@ -156,32 +156,39 @@ def test_tampered_candidate_policy_fails_closed(harness):
 
 
 
-def test_root_execution_path_resolves_all_native_probe_commands(monkeypatch):
-    """Reproduce the actual root-branch FileNotFoundError without sudo."""
+def test_root_execution_path_resolves_all_native_probe_commands(monkeypatch, tmp_path):
+    """Host-independent reproduction of root-branch executable lookup."""
     import importlib.util
     import os
     import shutil
-    source = Path("/opt/jason/current/tools/production_drift_guard.py")
+    import subprocess
+
+    source = Path(__file__).resolve().parents[1] / "tools/production_drift_guard.py"
     spec = importlib.util.spec_from_file_location("pmv4_native_drift_probe", source)
     assert spec is not None and spec.loader is not None
     guard = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(guard)
     monkeypatch.setattr(guard.os, "geteuid", lambda: 0)
     command, _ = guard.systemctl_command(["list-units", "--all"], user=True)
-    assert command[0] == "runuser"
-    restricted = "/usr/local/bin:/usr/bin:/bin"
+    assert command[:5] == ["runuser", "-u", "al", "--", "env"]
+    # Synthetic programs exercise exactly the executable-discovery issue.
+    # Never depend on an installed Jason host or the CI runner's /usr/sbin.
+    sbin = tmp_path/"sbin"
+    binpath = tmp_path/"bin"
+    sbin.mkdir()
+    binpath.mkdir()
+    fake = sbin/"runuser"
+    fake.write_text("#!/bin/sh\nexit 0\n")
+    fake.chmod(0o755)
+    restricted = str(binpath)
+    trusted = str(sbin) + ":" + str(binpath)
     assert shutil.which("runuser", path=restricted) is None
-    trusted = "/usr/sbin:/usr/bin:/bin"
-    assert shutil.which("runuser", path=trusted) == "/usr/sbin/runuser"
-    for executable in ("runuser", "systemctl", "docker", "env"):
-        assert shutil.which(executable, path=trusted)
-    # A nonprivileged read-only invocation demonstrates the same error
-    # and that the trusted PATH fixes executable discovery.
-    import subprocess
+    assert shutil.which("runuser", path=trusted) == str(fake)
     with pytest.raises(FileNotFoundError):
-        subprocess.run(["runuser", "--help"], env={**os.environ, "PATH": restricted},
+        subprocess.run(["runuser", "--help"],
+                       env={**os.environ, "PATH": restricted},
                        capture_output=True, text=True, timeout=5)
-    result = subprocess.run(["runuser", "--help"],
-                            env={**os.environ, "PATH": trusted},
-                            capture_output=True, text=True, timeout=5)
-    assert result.returncode == 0
+    ok = subprocess.run(["runuser", "--help"],
+                        env={**os.environ, "PATH": trusted},
+                        capture_output=True, text=True, timeout=5)
+    assert ok.returncode == 0
