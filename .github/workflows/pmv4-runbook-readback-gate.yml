@@ -3,6 +3,11 @@ on:
   pull_request:
     paths:
       - "tools/pmv4_runbook_registry_readback.py"
+      - "tools/pmv4_d_runbook_read_install_root.py"
+      - "tools/pmv4_d_runbook_read_install_builder.py"
+      - "tests/test_pmv4_d_runbook_oneuse_install.py"
+      - "infrastructure/pmv4-runbook-management/jason-runbook-management-read.service"
+      - "implementation/autonomous_remediation/runbook_management_read_service.py"
       - "tests/test_pmv4_runbook_registry_readback.py"
       - "tests/test_pmv4_runbook_readonly_path.py"
       - "implementation/autonomous_remediation/playbook_store.py"
@@ -35,3 +40,10 @@ jobs:
             implementation/autonomous_remediation/test_json_playbook_store.py
           test ! -e /var/lib/jason/openclaw/json-playbooks.sqlite3
           test ! -e /var/lib/jason/pmv4-runbook-management
+      - name: Test one-use runbook service install, rollback and failure gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=implementation:implementation/mcp_service/src:tests:. python -B -m pytest -q \
+            tests/test_pmv4_d_runbook_oneuse_install.py \
+            tests/test_pmv4_runbook_management_read_service.py
