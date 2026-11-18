@@ -81,25 +81,45 @@ def test_nonroot_collect_fails_before_any_host_command(monkeypatch):
         gate.collect(runner=fail)
 
 
-def test_root_collect_never_forges_other_authority_evidence(tmp_path,monkeypatch):
+def test_root_collect_never_forges_ticket_ownership(tmp_path,monkeypatch):
     from tools import pmv4_e_root_receipt_readback as historical
     from tools import pmv4_e_canary_acceptance_readback as canary
+    from tools import pmv4_e_retirement_readiness as retirement
     monkeypatch.setattr(gate.os,"geteuid",lambda:0)
     monkeypatch.setattr(historical,"inspect",lambda:{"status":"pre_retirement_root_acceptance_verified"})
     monkeypatch.setattr(canary,"inspect",lambda:{"status":"native_providerfree_canary_accepted_and_removed"})
+    monkeypatch.setattr(gate,"_root_evidence",lambda **kw:{"root_cda1":"verified",
+        "root_canary":"verified","root_policy_valid":True,
+        "source_policy_valid":True,"breaker":"closed","freeze":"unchanged"})
+    monkeypatch.setattr(retirement,"scan_summary",lambda:{"status":"fresh","duplicate_items":0})
     monkeypatch.setattr(gate,"MARKER",tmp_path/"absent-marker")
     calls=[]
     def run(cmd,**kwargs):
         calls.append(tuple(cmd))
-        return SimpleNamespace(returncode=0,stdout="active\n")
+        return SimpleNamespace(returncode=0,stdout="active\\n")
     result=gate.collect(runner=run)
     assert len(calls)==len(gate.OLD_USER|gate.NEW_USER|gate.PRESERVE_USER)+len(
         gate.OLD_ROOT|gate.NEW_ROOT|gate.PRESERVE_ROOT)
     assert all("is-active" in c for c in calls)
-    assert result["source_policy_valid"] is False
-    assert result["breaker"]=="unknown"
-    with pytest.raises(gate.RootPreflightDenied):
+    assert result["root_policy_valid"] is True
+    assert result["ticket_unique_owner"] is False
+    with pytest.raises(gate.RootPreflightDenied,match="TICKET_DISPATCH_OWNER_UNVERIFIED"):
         gate.evaluate(result)
+
+
+def test_root_evidence_rejects_fake_historical_receipts():
+    with pytest.raises(gate.RootPreflightDenied,match="C_D_A1_ROOT_RECEIPT_UNVERIFIED"):
+        gate._root_evidence(historical={"status":"arbitrary"},
+                            canary={"status":"native_providerfree_canary_accepted_and_removed"})
+
+
+def test_root_evidence_rejects_fake_canary_without_absence_checks():
+    h={"status":"pre_retirement_root_acceptance_verified",
+       "stage_c_root_acceptance_verified":True,
+       "stage_d_root_acceptance_verified":True,
+       "a1_root_acceptance_verified":True}
+    with pytest.raises(gate.RootPreflightDenied,match="NATIVE_CANARY_UNVERIFIED"):
+        gate._root_evidence(historical=h,canary={"status":"native_providerfree_canary_accepted_and_removed"})
 
 
 def test_source_module_no_mutation_apis():
