@@ -65,3 +65,26 @@ Production completion requires root preflight, Owner intent receipt, single
 timer transition, native drift PASS, native breaker revalidation, two fresh
 Ticket Core scans and unchanged protected runtime/MCP. Stage C cutover,
 Stage D runbook deployment and Stage E retirement remain independent gates.
+
+## November 18, 05:53 EST - protected preflight shadow correction
+
+Two local attempts of source 322ee349edd114dc4ea28760fccf75257665d66a
+stopped during root preflight with
+BOOTSTRAP_TIMER_PROTECTED_CONTAINER_NOT_RUNNING:jason-pmv4-shadow-gateway.
+Neither attempt reached Entra Owner consent or mutation.
+
+Read-only Docker inspect independently proved the optional shadow gateway
+exists but is OOMKilled, exited (137), and not an active provider pathway.
+The live jason-runtime remains healthy and jason-mcp-pilot is running.
+The previous root preflight incorrectly required this separately governed
+shadow gateway running. The corrected release plan pins the exact shadow
+container ID, image digest, OOM flag, exit code, running/status state, start
+and finish timestamps. Root readback must match before mutation and after
+postflight. The repair DOES NOT start, restart, delete, claim healthy, or
+reconfigure the OOM-killed shadow gateway. Its independent operational health
+is unresolved and must be addressed through separately governed acceptance.
+
+The Owner verifier's OAuth device-code token grant URN is also corrected to
+the standard grant-type form used by the installed native Entra verifier.
+The source SHA and exact scope are new; the old packet is invalid, and no
+previous Owner consent can be reused.

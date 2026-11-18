@@ -47,8 +47,9 @@ OWNER_HELPER = Path("/usr/local/lib/jason/owner_signer_recovery.py")
 OWNER_HELPER_SHA = "24d3632a4b0aa60851a1c82ccb15539eb823dd26afa5a1a2cc8c7afc54d72153"
 PROTECTED_CONTAINERS = (
     "jason-runtime", "jason-mcp-pilot", "jason-teams-gateway",
-    "jason-pmv4-shadow-gateway", "openbao",
+    "openbao",
 )
+SHADOW = "jason-pmv4-shadow-gateway"
 SHA40 = re.compile(r"^[a-f0-9]{40}$")
 SHA64 = re.compile(r"^[a-f0-9]{64}$")
 
@@ -96,14 +97,11 @@ def systemd_status(unit: str, action: str) -> str:
     return r.stdout.strip()
 
 def protected_containers():
+    """Only independently healthy required services must be running."""
     rows={}
     for name in PROTECTED_CONTAINERS:
         r=subprocess.run(["/usr/bin/docker","inspect",name],
                          capture_output=True,text=True,timeout=25)
-        if name=="jason-pmv4-shadow-gateway" and r.returncode!=0:
-            # Optional isolated shadow is absent on this host: it must REMAIN absent.
-            rows[name]=None
-            continue
         need(r.returncode==0,"PROTECTED_CONTAINER_NOT_FOUND:"+name)
         item=json.loads(r.stdout)[0]
         need(item["State"]["Running"] is True,"PROTECTED_CONTAINER_NOT_RUNNING:"+name)
@@ -112,6 +110,38 @@ def protected_containers():
                  "PROTECTED_TICKET_CORE_NOT_HEALTHY")
         rows[name]=(item["Id"],item["Image"],item["State"]["StartedAt"])
     return rows
+
+
+def shadow_identity():
+    """Snapshot the shadow as found; never infer that OOM exit is healthy.
+
+    The Owner-signed release pins exactly the stopped state, ID, image,
+    OOM marker, exit code, and start/finish timestamps. This recovery
+    neither starts nor removes the shadow gateway.
+    """
+    result=subprocess.run(["/usr/bin/docker","inspect",SHADOW],
+                          capture_output=True,text=True,timeout=25)
+    need(result.returncode==0,"SHADOW_CONTAINER_INVENTORY_UNAVAILABLE")
+    doc=json.loads(result.stdout)
+    need(isinstance(doc,list) and len(doc)==1 and isinstance(doc[0],dict),
+         "SHADOW_CONTAINER_IDENTITY_UNTRUSTED")
+    item=doc[0]
+    state=item.get("State",{})
+    need(isinstance(state,dict) and
+         isinstance(item.get("Id"),str) and
+         isinstance(item.get("Image"),str) and
+         state.get("Status") in ("running","exited","created") and
+         type(state.get("OOMKilled")) is bool and
+         type(state.get("ExitCode")) is int and
+         isinstance(state.get("StartedAt"),str) and
+         isinstance(state.get("FinishedAt"),str),
+         "SHADOW_CONTAINER_STATE_INVALID")
+    return {
+        "id":item["Id"],"image":item["Image"],
+        "status":state["Status"],"running":state.get("Running"),
+        "exit_code":state["ExitCode"],"oom_killed":state["OOMKilled"],
+        "started_at":state["StartedAt"],"finished_at":state["FinishedAt"],
+    }
 
 
 def packet(planfile: Path):
@@ -125,6 +155,7 @@ def packet(planfile: Path):
         "scope_sha256","root_sha256","freeze_sha256","old_timer_unit_sha256",
         "scoped_timer_unit_sha256","owner_consents","production_mutations",
         "standing_authority","no_runtime_or_mcp_restart","later_stages_authorized",
+        "shadow_identity",
     },"EXACT_PACKET_SCHEMA")
     need(plan["schema_version"]=="1.0" and plan["action"]==ACTION
          and plan["candidate_sha"]==plan["source_sha"] and
@@ -135,6 +166,11 @@ def packet(planfile: Path):
          and plan["owner_consents"]==1 and plan["standing_authority"] is False
          and plan["later_stages_authorized"] is False
          and plan["no_runtime_or_mcp_restart"] is True
+         and isinstance(plan["shadow_identity"],dict)
+         and set(plan["shadow_identity"])=={
+             "id","image","status","running","exit_code","oom_killed",
+             "started_at","finished_at",
+         }
          and plan["production_mutations"]==[
              "disable_completed_bootstrap_recovery_timer",
              "reset_failed_completed_bootstrap_service",
@@ -254,6 +290,8 @@ def verify(plan: dict, *, strict_drift: bool = True):
     need(drift.get("status")=="drift_detected" and
          ("failed_system_unit",OLD_SERVICE) in kinds and
          kinds.issubset(allowed),"UNRELATED_PRODUCTION_DRIFT")
+    need(shadow_identity()==plan["shadow_identity"],
+         "REVIEWED_SHADOW_STATE_CHANGED")
     return protected_containers()
 
 @contextmanager
@@ -301,7 +339,7 @@ def authenticated_owner(plan) -> str:
     interval=max(5,int(token.get("interval",5)))
     while time.monotonic()<deadline:
         response=signer._form(endpoint+"token",{
-            "grant_type":"urn:ietf:params:oauth:grant_type:device_code",
+            "grant_type":"urn:ietf:params:oauth:grant-type:device_code",
             "client_id":signer.CLIENT_ID,"device_code":token["device_code"]})
         if isinstance(response.get("access_token"),str):
             oid=signer.jwt_owner(response["access_token"])
@@ -364,6 +402,7 @@ def execute(planpath: Path):
                  systemd_status(SCOPED_TIMER,"is-enabled")=="enabled",
                  "INDEPENDENT_CATALOG_RECOVERY_CHANGED")
             need(protected_containers()==before and
+                 shadow_identity()==plan["shadow_identity"] and
                  digest(secure_file(FREEZE,uid=1000,mode=0o600))==
                  plan["freeze_sha256"] and
                  HOST_LKG.resolve(strict=True).name==plan["rollback_sha"],

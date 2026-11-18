@@ -105,6 +105,7 @@ def build():
         "standing_authority":False,
         "later_stages_authorized":False,
         "no_runtime_or_mcp_restart":True,
+        "shadow_identity":root.shadow_identity(),
         "production_mutations":[
             "disable_completed_bootstrap_recovery_timer",
             "reset_failed_completed_bootstrap_service",
