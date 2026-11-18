@@ -7,6 +7,8 @@ on:
       - "tools/tests/test_pmv4_e_native_systemd_adapter.py"
       - "tools/pmv4_e_systemd_root_ops.py"
       - "tools/tests/test_pmv4_e_systemd_root_ops.py"
+      - "tools/pmv4_e_native_backend_bridge.py"
+      - "tools/tests/test_pmv4_e_native_backend_bridge.py"
       - "tools/pmv4_e_six_unit_transaction_model.py"
       - "tools/independent_component_release.py"
       - "implementation/kernel/signed_owner_release.py"
@@ -37,6 +39,7 @@ jobs:
             "$python_exe" -B -m pytest -q \
               tools/tests/test_pmv4_e_native_six_unit_release.py \
               tools/tests/test_pmv4_e_native_systemd_adapter.py \
-              tools/tests/test_pmv4_e_systemd_root_ops.py
+              tools/tests/test_pmv4_e_systemd_root_ops.py \
+              tools/tests/test_pmv4_e_native_backend_bridge.py
           test ! -e /var/lib/jason/independent-component-release
           test ! -e /etc/jason/release-readback-recovery/production-desired-state.json
