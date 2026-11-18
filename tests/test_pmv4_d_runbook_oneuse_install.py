@@ -359,3 +359,63 @@ def test_actual_owner_uid_socket_readback_uses_valid_inline_python(tmp_path,monk
         runner.terminate()
         try:runner.communicate(timeout=3)
         except subprocess.TimeoutExpired:runner.kill();runner.communicate()
+
+
+def test_runbook_socket_bounded_wait_until_listener_ready(tmp_path,monkeypatch):
+    import os
+    import socket
+    import threading
+    import time
+    sock_path=tmp_path/"read.sock"
+    root_dir=Path("/run/jason-runbook-management/read.sock")
+    old_path=Path
+    old_lstat=Path.lstat
+    monkeypatch.setattr(root,"Path",
+        lambda x:sock_path if str(x)==str(root_dir) else old_path(x))
+    def fake_lstat(path):
+        metadata=old_lstat(path)
+        return (SimpleNamespace(st_uid=1000,st_mode=metadata.st_mode)
+                if path==sock_path else metadata)
+    monkeypatch.setattr(Path,"lstat",fake_lstat)
+    monkeypatch.setattr(root,"systemctl",
+        lambda *a,**kw:SimpleNamespace(stdout="active\n" if a[0]=="is-active"
+                                      else "enabled\n"))
+    def read_only_probe(*a,**kw):
+        return SimpleNamespace(stdout=json.dumps({
+            "status":"healthy","provider_calls":False,"execution_authority":False,
+            "configuration_mutations":False,"registry_generation":0,
+            "active_count":0}))
+    monkeypatch.setattr(root,"run",read_only_probe)
+    started=threading.Event()
+    def delayed_socket():
+        time.sleep(0.15)
+        with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as sock:
+            sock.bind(str(sock_path))
+            os.chmod(sock_path,0o600)
+            started.set()
+            time.sleep(0.3)
+    t=threading.Thread(target=delayed_socket)
+    t.start()
+    try:
+        assert root.service_readback()["status"]=="healthy"
+        assert started.is_set()
+    finally:
+        t.join(timeout=2)
+
+
+def test_runbook_socket_wrong_permissions_denied_without_waiver(tmp_path,monkeypatch):
+    import os
+    import socket
+    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as listener:
+        endpoint=tmp_path/"read.sock"
+        listener.bind(str(endpoint))
+        os.chmod(endpoint,0o666)
+        original_path=Path
+        monkeypatch.setattr(root,"Path",lambda x:endpoint if str(x)==
+                            "/run/jason-runbook-management/read.sock" else original_path(x))
+        monkeypatch.setattr(root,"systemctl",lambda *a,**kw:
+                            SimpleNamespace(stdout="active\n" if a[0]=="is-active"
+                                            else "enabled\n"))
+        with pytest.raises(root.RunbookInstallDenied,
+                           match="RUNBOOK_SOCKET_NOT_TRUSTED"):
+            root.service_readback()
