@@ -107,6 +107,7 @@ def transaction(tmp_path, monkeypatch):
     monkeypatch.setattr(m,"preflight", lambda:(plan,original_worker,original_policy,
         {str(m.WORKER):worker,str(m.PROJECTION):module},original_live))
     monkeypatch.setattr(m,"auth_owner",lambda p:"bee80bdc-ffb0-4c50-b453-c09d4d411f5f")
+    monkeypatch.setattr(m,"verify_accepted_bootstrap_retirement",lambda sha:"verified-retirement-owner")
     monkeypatch.setattr(m,"root_directory",lambda *a,**k:None)
     @contextmanager
     def no_op_lock():
@@ -114,7 +115,7 @@ def transaction(tmp_path, monkeypatch):
     monkeypatch.setattr(m,"hold_locks",no_op_lock)
     monkeypatch.setattr(m,"inspect_containers",lambda:original_live)
     monkeypatch.setattr(m,"file",lambda path,**kw:Path(path).read_bytes())
-    timer={"active":True,"enabled":True}
+    timer={"active":False,"enabled":False}
     fault={"mcp":False}
     calls=[]
     def execute(*args,**kwargs):
@@ -174,6 +175,6 @@ def test_exact_root_rebind_rolls_back_after_mcp_preflight_failure(transaction):
     assert m.WORKER.read_bytes()==old_worker
     assert m.ROOT_POLICY.read_bytes()==old_policy
     assert not m.PROJECTION.exists()
-    assert timer["active"] and timer["enabled"]
+    assert not timer["active"] and not timer["enabled"]
     assert json.loads((m.LEDGER/"failed.json").read_text())["rollback_verified"] is True
     assert not (m.LEDGER/"verified.json").exists()
