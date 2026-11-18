@@ -173,3 +173,17 @@ def test_host_reconciliation_is_shell_parse_valid():
     run=subprocess.run(["/usr/bin/bash","-n",str(source)],
         capture_output=True,text=True,timeout=10)
     assert run.returncode==0,run.stderr
+
+
+def test_shell_mode_output_contract_is_not_json(tmp_path,monkeypatch,capsys):
+    monkeypatch.setattr(rootguard.os,"geteuid",lambda:0)
+    monkeypatch.setattr(rootguard,"TRUST_ENTRY",Path(rootguard.__file__).resolve())
+    monkeypatch.setattr(rootguard,"decide",lambda **_:{"mode":"replacement","cutover_accepted":True})
+    assert rootguard.main(["--source-revision","a"*40,"--mode-only"])==0
+    output=capsys.readouterr().out
+    assert output=="replacement\\n"
+
+
+def test_host_script_requests_scalar_mode_only():
+    source=(SOURCE/"tools/reconcile_production_host_services.sh").read_text()
+    assert '--source-revision "$SOURCE_REVISION" --mode-only)' in source
