@@ -186,14 +186,24 @@ class RootTrustStager:
         if self.production:
             require(root_meta.st_uid==0 and root_meta.st_gid==0,
                     "INSTALLED_ROOT_NOT_ROOT_OWNED")
+        expected_dirs={self.target}
+        for relative in exact_hashes:
+            parent=(self.target/relative).parent
+            while parent!=self.target:
+                expected_dirs.add(parent)
+                parent=parent.parent
         seen=set()
         for path in self.target.rglob("*"):
             require(not path.is_symlink(),"INSTALLED_SYMLINK_UNTRUSTED")
             x=path.lstat()
             if path.is_dir():
-                require(stat.S_ISDIR(x.st_mode) and
+                require(path in expected_dirs and
+                        stat.S_ISDIR(x.st_mode) and
                         stat.S_IMODE(x.st_mode)==0o555,
                         "INSTALLED_DIR_NOT_SEALED")
+                if self.production:
+                    require(x.st_uid==0 and x.st_gid==0,
+                            "INSTALLED_DIR_NOT_ROOT_OWNED")
             elif path.is_file():
                 relative=path.relative_to(self.target).as_posix()
                 require(relative in exact_hashes and
@@ -235,11 +245,23 @@ class RootTrustStager:
                      key=lambda p:len(p.parts),reverse=True)
         source={rel:self._source(rel,exact_hashes[rel])
                 for rel in exact_hashes}
+        expected_dirs={self.target}
+        for relative in exact_hashes:
+            parent=(self.target/relative).parent
+            while parent!=self.target:
+                expected_dirs.add(parent)
+                parent=parent.parent
         seen=set()
         for p in self.target.rglob("*"):
             require(not p.is_symlink()
                     and (p.is_file() or p.is_dir()),
                     "RECOVERY_UNREVIEWED_OBJECT")
+            if p.is_dir():
+                require(p in expected_dirs,"RECOVERY_EXTRA_DIRECTORY")
+                if self.production:
+                    info=p.lstat()
+                    require(info.st_uid==0 and info.st_gid==0,
+                            "RECOVERY_DIRECTORY_NOT_ROOT_OWNED")
             if p.is_file():
                 relative=p.relative_to(self.target).as_posix()
                 require(relative in exact_hashes,
