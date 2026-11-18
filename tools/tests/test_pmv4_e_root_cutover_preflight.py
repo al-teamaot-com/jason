@@ -81,12 +81,22 @@ def test_nonroot_collect_fails_before_any_host_command(monkeypatch):
         gate.collect(runner=fail)
 
 
-def test_root_collect_never_forges_other_authority_evidence(tmp_path,monkeypatch):
+def test_root_collect_never_forges_ticket_ownership(tmp_path,monkeypatch):
     from tools import pmv4_e_root_receipt_readback as historical
     from tools import pmv4_e_canary_acceptance_readback as canary
+    from tools import pmv4_e_retirement_readiness as retirement
+    from tools import pmv4_e_ticket_owner_readback as ownerproof
     monkeypatch.setattr(gate.os,"geteuid",lambda:0)
     monkeypatch.setattr(historical,"inspect",lambda:{"status":"pre_retirement_root_acceptance_verified"})
     monkeypatch.setattr(canary,"inspect",lambda:{"status":"native_providerfree_canary_accepted_and_removed"})
+    monkeypatch.setattr(gate,"_root_evidence",lambda **kw:{"root_cda1":"verified",
+        "root_canary":"verified","root_policy_valid":True,
+        "source_policy_valid":True,"breaker":"closed","freeze":"unchanged"})
+    monkeypatch.setattr(retirement,"scan_summary",lambda:{"status":"fresh","duplicate_items":0})
+    monkeypatch.setattr(ownerproof,"inspect",lambda **kw:{"status":
+        "live_external_ticket_core_exclusive_owner_verified","unique_owner":True,
+        "exclusive_owner_count":1,"lock_inode":123,"lock_owner_pid":550,
+        "container_init_pid":501})
     monkeypatch.setattr(gate,"MARKER",tmp_path/"absent-marker")
     calls=[]
     def run(cmd,**kwargs):
@@ -96,10 +106,26 @@ def test_root_collect_never_forges_other_authority_evidence(tmp_path,monkeypatch
     assert len(calls)==len(gate.OLD_USER|gate.NEW_USER|gate.PRESERVE_USER)+len(
         gate.OLD_ROOT|gate.NEW_ROOT|gate.PRESERVE_ROOT)
     assert all("is-active" in c for c in calls)
-    assert result["source_policy_valid"] is False
-    assert result["breaker"]=="unknown"
-    with pytest.raises(gate.RootPreflightDenied):
+    assert result["root_policy_valid"] is True
+    assert result["ticket_unique_owner"] is True
+    assert result["ticket_owner_evidence"]["lock_owner_pid"]==550
+    with pytest.raises(gate.RootPreflightDenied,match="UNIT_STATE_MISMATCH"):
         gate.evaluate(result)
+
+
+def test_root_evidence_rejects_fake_historical_receipts():
+    with pytest.raises(gate.RootPreflightDenied,match="C_D_A1_ROOT_RECEIPT_UNVERIFIED"):
+        gate._root_evidence(historical={"status":"arbitrary"},
+                            canary={"status":"native_providerfree_canary_accepted_and_removed"})
+
+
+def test_root_evidence_rejects_fake_canary_without_absence_checks():
+    h={"status":"pre_retirement_root_acceptance_verified",
+       "stage_c_root_acceptance_verified":True,
+       "stage_d_root_acceptance_verified":True,
+       "a1_root_acceptance_verified":True}
+    with pytest.raises(gate.RootPreflightDenied,match="NATIVE_CANARY_UNVERIFIED"):
+        gate._root_evidence(historical=h,canary={"status":"native_providerfree_canary_accepted_and_removed"})
 
 
 def test_source_module_no_mutation_apis():
@@ -109,3 +135,52 @@ def test_source_module_no_mutation_apis():
                       "systemctl stop","systemctl disable","docker restart",
                       "os.replace(","requests.post("):
         assert forbidden not in s
+
+
+@pytest.mark.skipif(__import__("os").geteuid()!=0,reason="isolated privileged CI only")
+def test_root_only_file_readback_permission_boundary(tmp_path):
+    import os,json
+    protected=tmp_path/"root-policy.json"
+    protected.write_text(json.dumps({"schema_version":"1.0"}))
+    protected.chmod(0o600)
+    assert protected.stat().st_uid==0
+    assert gate._root_json(protected)=={"schema_version":"1.0"}
+    protected.chmod(0o666)
+    with pytest.raises(gate.RootPreflightDenied):
+        gate._root_json(protected)
+    protected.chmod(0o600)
+    link=tmp_path/"link.json"
+    link.symlink_to(protected)
+    with pytest.raises(gate.RootPreflightDenied):
+        gate._root_json(link)
+
+
+@pytest.mark.skipif(__import__("os").geteuid()!=0,reason="isolated privileged CI only")
+def test_root_readback_recognizes_exact_service_user_owned_records(tmp_path):
+    import os,json
+    protected=tmp_path/"control.json"
+    protected.write_text(json.dumps({"circuit_breaker":{"state":"closed"}}))
+    protected.chmod(0o600)
+    os.chown(protected,1000,1000)
+    assert gate._root_json(protected,allowed_uid=1000)["circuit_breaker"]["state"]=="closed"
+    with pytest.raises(gate.RootPreflightDenied):
+        gate._root_json(protected,allowed_uid=0)
+
+
+
+def test_root_collect_rejects_unverified_live_kernel_owner(monkeypatch):
+    from tools import pmv4_e_root_receipt_readback as historical
+    from tools import pmv4_e_canary_acceptance_readback as canary
+    from tools import pmv4_e_retirement_readiness as retirement
+    from tools import pmv4_e_ticket_owner_readback as ownerproof
+    monkeypatch.setattr(gate.os,"geteuid",lambda:0)
+    monkeypatch.setattr(historical,"inspect",lambda:{"status":"pre_retirement_root_acceptance_verified"})
+    monkeypatch.setattr(canary,"inspect",lambda:{"status":"native_providerfree_canary_accepted_and_removed"})
+    monkeypatch.setattr(gate,"_root_evidence",lambda **kw:{"root_cda1":"verified",
+        "root_canary":"verified","root_policy_valid":True,
+        "source_policy_valid":True,"breaker":"closed","freeze":"unchanged"})
+    monkeypatch.setattr(retirement,"scan_summary",lambda:{"status":"fresh","duplicate_items":0})
+    monkeypatch.setattr(ownerproof,"inspect",lambda **kw:{"status":"unverified","unique_owner":False})
+    with pytest.raises(gate.RootPreflightDenied,match="CURRENT_TICKET_DISPATCH_OWNER_UNVERIFIED"):
+        gate.collect(runner=lambda *a,**kw:SimpleNamespace(
+            returncode=0,stdout="inactive\\n"))

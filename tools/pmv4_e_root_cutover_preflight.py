@@ -8,8 +8,10 @@ production prerequisite is absent.
 """
 from __future__ import annotations
 
+from hashlib import sha256
 import json
 import os
+import stat
 from pathlib import Path
 import subprocess
 from typing import Any, Callable, Mapping
@@ -24,6 +26,12 @@ NEW_ROOT=parity.ROOT_REPLACEMENT
 PRESERVE_USER=parity.CONTINUITY_USER
 PRESERVE_ROOT=parity.CONTINUITY_ROOT
 SOURCE_POLICY=Path("/opt/jason/current/config/production-desired-state.json")
+ROOT_POLICY=Path("/etc/jason/release-readback-recovery/production-desired-state.json")
+CONTROL_STATE=Path("/var/lib/jason/openclaw/release-manager/protected-readback/production-control-state.json")
+DRIFT_STATE=Path("/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json")
+FREEZE=Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
+FREEZE_SHA="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
+
 
 
 class RootPreflightDenied(PermissionError):
@@ -91,37 +99,129 @@ def _active(unit:str,*,user:bool,runner:Callable[...,Any]=subprocess.run)->bool:
     return p.returncode==0 and result=="active"
 
 
+def _root_json(path:Path, *, maximum:int=120000, allowed_uid:int=0)->dict[str,Any]:
+    try:
+        meta=path.lstat()
+        require(stat.S_ISREG(meta.st_mode) and not path.is_symlink()
+                and meta.st_uid==allowed_uid and meta.st_gid==allowed_uid
+                and meta.st_nlink==1 and meta.st_mode&0o022==0
+                and 0<meta.st_size<=maximum,
+                "ROOT_PROTECTED_FILE_UNTRUSTED")
+        raw=path.read_bytes()
+        require(len(raw)==meta.st_size,"ROOT_PROTECTED_FILE_CHANGED")
+        value=json.loads(raw)
+        require(isinstance(value,dict),"ROOT_PROTECTED_JSON_INVALID")
+        return value
+    except (OSError,ValueError,TypeError) as exc:
+        raise RootPreflightDenied("PMV4_E_ROOT_PREFLIGHT_ROOT_FILE_UNAVAILABLE") from exc
+
+
+def _root_evidence(*, historical:Mapping[str,Any], canary:Mapping[str,Any])->dict[str,Any]:
+    """Read only root-owned release state, never derive permissions from caller flags."""
+    require(historical.get("status")=="pre_retirement_root_acceptance_verified"
+            and historical.get("stage_c_root_acceptance_verified") is True
+            and historical.get("stage_d_root_acceptance_verified") is True
+            and historical.get("a1_root_acceptance_verified") is True,
+            "C_D_A1_ROOT_RECEIPT_UNVERIFIED")
+    require(canary.get("status")=="native_providerfree_canary_accepted_and_removed"
+            and canary.get("stage_c_d_a1_root_acceptance") is True
+            and canary.get("canary_container_absent") is True
+            and canary.get("canary_network_absent") is True
+            and canary.get("active_pointer_absent") is True,
+            "NATIVE_CANARY_UNVERIFIED")
+    protected=_root_json(ROOT_POLICY)
+    # The installed current-release tree has historically allowed group
+    # write on some files. Treat it as evidence ONLY, not release authority;
+    # never use it to grant a production action or select the candidate SHA.
+    source=json.loads(SOURCE_POLICY.read_bytes())
+    require(protected.get("schema_version")=="1.0"
+            and source.get("schema_version")=="1.0",
+            "SOURCE_POLICY_SCHEMA_NOT_REVIEWED")
+    # Both checked-in source and live root must retain the exact historical
+    # old six-control baseline; only the future authorized delta changes them.
+    try:
+        protected_plan=parity.plan_exact_unit_delta(protected)
+        source_plan=parity.plan_exact_unit_delta(source)
+    except (ValueError,TypeError,PermissionError) as exc:
+        raise RootPreflightDenied(
+            "PMV4_E_ROOT_PREFLIGHT_PRECUTOVER_POLICY_NOT_EXACT") from exc
+    require(set(protected_plan["retire_user_units"])==set(source_plan["retire_user_units"])
+            and set(protected_plan["retire_system_units"])==set(source_plan["retire_system_units"])
+            and set(protected_plan["add_user_units"])==set(source_plan["add_user_units"])
+            and set(protected_plan["add_system_units"])==set(source_plan["add_system_units"]),
+            "SOURCE_POLICY_UNIT_SCOPE_CHANGED")
+    state=_root_json(CONTROL_STATE,allowed_uid=1000)
+    drift=_root_json(DRIFT_STATE,allowed_uid=1000)
+    require(drift.get("status")=="pass" and drift.get("problems")==[],
+            "PRODUCTION_DRIFT_NOT_PASS")
+    try:
+        freeze_meta=FREEZE.lstat()
+        require(stat.S_ISREG(freeze_meta.st_mode) and not FREEZE.is_symlink()
+                and freeze_meta.st_uid==1000 and freeze_meta.st_gid==1000
+                and stat.S_IMODE(freeze_meta.st_mode)==0o600
+                and sha256(FREEZE.read_bytes()).hexdigest()==FREEZE_SHA,
+                "PRODUCTION_FREEZE_CHANGED")
+    except OSError as exc:
+        raise RootPreflightDenied("PMV4_E_ROOT_PREFLIGHT_FREEZE_UNAVAILABLE") from exc
+    return {
+        "source_policy_valid":True,"root_policy_valid":True,
+        "breaker":(state.get("circuit_breaker") or {}).get("state"),
+        "freeze":"unchanged","root_cda1":"verified","root_canary":"verified",
+        "protected_policy_before_sha256":historical.get(
+            "protected_live_policy_sha256"),
+        "protected_policy_candidate_sha256":protected_plan.get(
+            "candidate_policy_sha256"),
+    }
+
+
 def collect(*,runner:Callable[...,Any]=subprocess.run)->dict[str,Any]:
-    """Live root probe; never issues commands other than read-only is-active."""
+    """Live root observation, never grant production release authority."""
     require(os.geteuid()==0,"ROOT_ONLY")
-    # Reuse the existing strict root-owned C/D/A1 and canary proof chains.
     from tools import pmv4_e_root_receipt_readback as rootproof
     from tools import pmv4_e_canary_acceptance_readback as canaryproof
-    root_receipts=rootproof.inspect()
+    from tools import pmv4_e_retirement_readiness as retirement
+    from tools import pmv4_e_ticket_owner_readback as ownerproof
+    # Trusted attestors verify exact source and the historic root audit chain.
+    historical=rootproof.inspect()
     canary=canaryproof.inspect()
-    require(root_receipts.get("status") not in ("not_verified",None),
-            "C_D_A1_ROOT_RECEIPT_UNVERIFIED")
-    require(canary.get("status") not in ("not_verified",None),
-            "NATIVE_CANARY_UNVERIFIED")
-    # The exact protected live policy is independently checked by rootproof.
-    # Additional freeze/breaker/scan evidence must be supplied by the
-    # existing native root release controller, not inferred here.
+    details=_root_evidence(historical=historical,canary=canary)
+    try:
+        MARKER.lstat()
+    except FileNotFoundError:
+        marker_absent=True
+    except OSError as exc:
+        raise RootPreflightDenied("PMV4_E_ROOT_PREFLIGHT_MARKER_NOT_READABLE") from exc
+    else:
+        marker_absent=False
+    # Fail closed if the parent has not been root-reviewed; the actual root
+    # transaction must create the exact marker only after old units stop.
+    scans=retirement.scan_summary()
+    owner=ownerproof.inspect(runner=runner)
+    require(owner.get("status")=="live_external_ticket_core_exclusive_owner_verified"
+            and owner.get("unique_owner") is True
+            and owner.get("exclusive_owner_count")==1,
+            "CURRENT_TICKET_DISPATCH_OWNER_UNVERIFIED")
     return {
-        "uid":0, "root_cda1":"verified", "root_canary":"verified",
-        "root_policy_valid":True,
-        "marker_absent":not MARKER.exists() and not MARKER.is_symlink(),
+        "uid":0,**details,
+        "marker_absent":marker_absent,
         "user_active_old":{u:_active(u,user=True,runner=runner) for u in OLD_USER},
         "root_active_old":{u:_active(u,user=False,runner=runner) for u in OLD_ROOT},
         "user_active_new":{u:_active(u,user=True,runner=runner) for u in NEW_USER},
         "root_active_new":{u:_active(u,user=False,runner=runner) for u in NEW_ROOT},
         "user_monitoring":{u:_active(u,user=True,runner=runner) for u in PRESERVE_USER},
         "root_monitoring":{u:_active(u,user=False,runner=runner) for u in PRESERVE_ROOT},
-        # Intentionally unspecified: root controller must inject separate
-        # fresh trusted freeze, breaker and provider-backed scan evidence.
-        "source_policy_valid":False,
-        "breaker":"unknown","freeze":"unknown",
-        "ticket_unique_owner":False,"scan_fresh":False,
-        "duplicate_items":None,
+        # Fresh provider-backed scans are necessary but never sufficient to
+        # assert one physical ticket dispatch owner. That needs a separate
+        # root-owned live ticket-lock / controller attestation.
+        "ticket_unique_owner":True,
+        "ticket_owner_evidence":{
+            "lock_inode":owner["lock_inode"],
+            "lock_owner_pid":owner["lock_owner_pid"],
+            "container_init_pid":owner["container_init_pid"],
+            "exclusive_owner_count":owner["exclusive_owner_count"],
+        },
+        "scan_fresh":scans.get("status")=="fresh",
+        "duplicate_items":scans.get("duplicate_items"),
     }
 
 
