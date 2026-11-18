@@ -35,6 +35,12 @@ REQUIRED_CONTINUITY = (
     "jason-openclaw-authority-health.timer",
 )
 PROTECTED_CONTAINERS = ("jason-runtime", "jason-mcp-pilot")
+STAGE_C_WORKER = "jason-pmv4-ticket-core"
+STAGE_C_HEALTH_FORMAT = "{{.State.Health.Status}}"
+STAGE_C_RUNTIME_HOST_FORMAT = (
+    '{{range .Config.Env}}{{if eq . "JASON_TICKET_WORKER_HOSTING=external"}}'
+    'external{{end}}{{end}}'
+)
 
 
 class RetirementEvidenceDenied(RuntimeError):
@@ -54,9 +60,15 @@ def command(argv: Sequence[str], *, runner: Callable[..., Any] = subprocess.run)
         if len(argv) not in (3,4) or argv[-2] not in ("is-active", "is-enabled"):
             raise RetirementEvidenceDenied("PMV4_E_SYSTEMD_ARGS_INVALID")
     else:
-        if len(argv) != 5 or argv[1:4] != ["inspect", "--format", "{{.State.Running}}"]:
+        if len(argv) != 5 or argv[1:3] != ["inspect", "--format"]:
             raise RetirementEvidenceDenied("PMV4_E_DOCKER_MUTATION_DENIED")
-        if argv[-1] not in PROTECTED_CONTAINERS:
+        fmt, target = argv[3], argv[4]
+        approved = (
+            fmt == "{{.State.Running}}" and
+            target in PROTECTED_CONTAINERS + (STAGE_C_WORKER,)
+        ) or (fmt == STAGE_C_HEALTH_FORMAT and target == STAGE_C_WORKER
+        ) or (fmt == STAGE_C_RUNTIME_HOST_FORMAT and target == "jason-runtime")
+        if not approved:
             raise RetirementEvidenceDenied("PMV4_E_DOCKER_TARGET_OUTSIDE_CORE")
     try:
         env=dict(os.environ)
@@ -164,6 +176,25 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
         except RetirementEvidenceDenied:
             prod[name]=False
     scans=scan_summary(db)
+    # A live independent Stage C worker is not the same as the root-owned
+    # final acceptance receipt, which must still be verified separately.
+    stage_c = {"runtime_external": False, "worker_running": False,
+               "worker_healthy": False, "live": False,
+               "root_acceptance_receipt_verified": False}
+    for key, args, expected in (
+        ("runtime_external", ["/usr/bin/docker", "inspect", "--format",
+                              STAGE_C_RUNTIME_HOST_FORMAT, "jason-runtime"], "external"),
+        ("worker_running", ["/usr/bin/docker", "inspect", "--format",
+                            "{{.State.Running}}", STAGE_C_WORKER], "true"),
+        ("worker_healthy", ["/usr/bin/docker", "inspect", "--format",
+                            STAGE_C_HEALTH_FORMAT, STAGE_C_WORKER], "healthy"),
+    ):
+        try:
+            stage_c[key] = command(args, runner=runner) == expected
+        except RetirementEvidenceDenied:
+            stage_c[key] = False
+    stage_c["live"] = all(stage_c[k] for k in (
+        "runtime_external", "worker_running", "worker_healthy"))
     try:
         active_sha=Path(current).resolve(strict=True).name
     except OSError:
@@ -181,9 +212,12 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
         problems.append("PROTECTED_RUNTIME_OR_MCP_NOT_RUNNING")
     if scans.get("status")!="fresh":
         problems.append("TICKET_CORE_PROVIDER_SCAN_NOT_FRESH")
+    problems.append("PMV4_REPLACEMENT_CONTROLLER_PARITY_NOT_ACCEPTED")
+    problems.append(
+        "STAGE_C_ROOT_ACCEPTANCE_RECEIPT_NOT_READBACK"
+        if stage_c["live"] else "STAGE_C_INDEPENDENT_WORKER_NOT_ACCEPTED"
+    )
     problems.extend((
-        "PMV4_REPLACEMENT_CONTROLLER_PARITY_NOT_ACCEPTED",
-        "STAGE_C_INDEPENDENT_WORKER_NOT_ACCEPTED",
         "STAGE_D_INDEPENDENT_RUNBOOK_MANAGEMENT_NOT_ACCEPTED",
         "ROOT_PROTECTED_LIVE_DESIRED_STATE_NOT_READBACK",
         "EXACT_OWNER_RELEASE_FOR_RETIREMENT_NOT_RECORDED",
@@ -196,6 +230,7 @@ def inspect(*, policy:Path=REPOSITORY_DESIRED,
         "legacy_observation_complete":legacy_observation_complete,
         "required_monitoring_active":continuity,
         "protected_containers_running":prod,
+        "stage_c_independent_worker":stage_c,
         "legacy_dependency_units":state,
         "ticket_scan":scans,
         "production_source":active_sha,
