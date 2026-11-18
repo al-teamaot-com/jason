@@ -34,6 +34,8 @@ FREEZE = Path("/var/lib/jason/openclaw/release-manager/production-deployment-fre
 DRIFT = Path("/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json")
 CONTROL = Path("/var/lib/jason/openclaw/release-manager/protected-readback/production-control-state.json")
 BOOTSTRAP_TIMER = "jason-catalog-root-bootstrap-recovery.timer"
+RETIREMENT_AUDIT = Path("/etc/jason-owner-release/pmv4-bootstrap-timer-recovery")
+RETIREMENT_ACTION = "pmv4-completed-catalog-bootstrap-timer-supersession-v1"
 SCOPED_TIMER = "jason-catalog-scoped-recovery.timer"
 RELEASE_LOCK = Path("/var/lib/jason/openclaw/release-manager/production-transaction.lock")
 PMV4_LOCK = Path("/var/lib/jason/pmv4-shadow/control/host-mutation.lock")
@@ -144,6 +146,51 @@ def inspect_containers():
         out[name] = (d.get("Id"), d.get("Image"), d.get("State",{}).get("StartedAt"))
     return out
 
+def verify_accepted_bootstrap_retirement(current_main):
+    """Accept only the already Owner-signed, root-audited exact timer retirement."""
+    root_directory(RETIREMENT_AUDIT, 0o700)
+    accepted = list(RETIREMENT_AUDIT.glob("*-accepted.json"))
+    if len(accepted) != 1:
+        denied("COMPLETED_TIMER_RETIREMENT_RECEIPT_REQUIRED")
+    receipt_path = accepted[0]
+    source = receipt_path.name.removesuffix("-accepted.json")
+    if not SHA.fullmatch(source):
+        denied("TIMER_RETIREMENT_SOURCE_INVALID")
+    consumed = json.loads(file(RETIREMENT_AUDIT/(source+"-attempt.json"),
+                               uid=0, mode=0o600, limit=8192))
+    receipt = json.loads(file(receipt_path, uid=0, mode=0o600, limit=8192))
+    if (receipt.get("schema_version") != "1.0"
+            or receipt.get("status") != "completed_bootstrap_timer_superseded"
+            or receipt.get("action") != RETIREMENT_ACTION
+            or receipt.get("source_sha") != source
+            or not HEX.fullmatch(str(receipt.get("scope_sha256")))
+            or receipt.get("drift") != "pass"
+            or receipt.get("scoped_recovery_timer_active") is not True
+            or receipt.get("breaker_force_closed") is not False
+            or receipt.get("production_freeze_changed") is not False
+            or receipt.get("protected_containers_restarted") != 0
+            or consumed.get("status") != "owner_consumed_before_mutation"
+            or consumed.get("action") != RETIREMENT_ACTION
+            or consumed.get("source_sha") != source
+            or consumed.get("scope_sha256") != receipt["scope_sha256"]
+            or consumed.get("approval_id") != receipt.get("approval_id")
+            or not consumed.get("owner_oid")):
+        denied("TIMER_RETIREMENT_OWNER_AUDIT_INVALID")
+    # The accepted recovery source must precede this protected main; no arbitrary
+    # branch or post-dated receipt can be used to skip the live timer guard.
+    old = subprocess.run(("runuser","-u","al","--","git","-C",str(REPO),
+                          "merge-base","--is-ancestor",source,current_main),
+                         capture_output=True,timeout=15)
+    if old.returncode != 0:
+        denied("TIMER_RETIREMENT_SOURCE_NOT_ANCESTOR")
+    for action, expected in (("is-active","inactive"),("is-enabled","disabled")):
+        result = subprocess.run(("systemctl",action,BOOTSTRAP_TIMER),
+                                capture_output=True,text=True,timeout=15)
+        if result.stdout.strip() != expected:
+            denied("SUPERSEDED_BOOTSTRAP_TIMER_REACTIVATED")
+    return receipt["approval_id"]
+
+
 def preflight():
     if os.geteuid() != 0 or os.environ.get("SUDO_USER") != "al":
         denied("INTERACTIVE_SUDO_FROM_AL_REQUIRED")
@@ -187,9 +234,10 @@ def preflight():
     drift = json.loads(file(DRIFT, uid=AL, mode=0o600, limit=150000))
     if readback.get("circuit_breaker",{}).get("state") != "closed" or drift.get("status") != "pass" or drift.get("problems") != []:
         denied("NATIVE_BREAKER_OR_DRIFT_NOT_HEALTHY")
-    for timer in (BOOTSTRAP_TIMER,SCOPED_TIMER):
-        if systemctl("is-active",timer) != "active" or systemctl("is-enabled",timer) != "enabled":
-            denied("RECOVERY_TIMER_NOT_ACTIVE_" + timer)
+    if (systemctl("is-active",SCOPED_TIMER) != "active"
+            or systemctl("is-enabled",SCOPED_TIMER) != "enabled"):
+        denied("SCOPED_RECOVERY_TIMER_NOT_ACTIVE")
+    verify_accepted_bootstrap_retirement(plan["current_protected_main_sha"])
     if LEDGER.exists():
         denied("ROOT_REBIND_ALREADY_ATTEMPTED")
     targets = plan.get("root_install_targets")
@@ -304,13 +352,10 @@ def execute():
         changed_worker=False
         changed_policy=False
         created_projection=False
-        stopped_timer=False
         try:
-            run("systemctl","disable","--now",BOOTSTRAP_TIMER,timeout=65)
-            stopped_timer=True
-            enabled_check=subprocess.run(("systemctl","is-enabled",BOOTSTRAP_TIMER),capture_output=True,text=True,timeout=15)
-            if enabled_check.stdout.strip()!="disabled":
-                denied("BOOTSTRAP_TIMER_NOT_DISABLED")
+            # The previously approved one-use retirement already disabled the
+            # obsolete timer. This rebind must never re-enable it or act twice.
+            verify_accepted_bootstrap_retirement(plan["current_protected_main_sha"])
             atomic_root(WORKER,blobs[str(WORKER)],0o755)
             changed_worker=True
             fd=os.open(PROJECTION,os.O_CREAT|os.O_EXCL|os.O_WRONLY|getattr(os,"O_NOFOLLOW",0),0o644)
@@ -373,8 +418,6 @@ def execute():
                     if digest(file(WORKER,uid=0,mode=0o755,limit=300000))!=digest(blobs[str(WORKER)]):
                         denied("UNKNOWN_WORKER_DRIFT")
                     atomic_root(WORKER,worker_before,0o755)
-                if stopped_timer:
-                    run("systemctl","enable","--now",BOOTSTRAP_TIMER,timeout=65)
                 if (file(WORKER,uid=0,mode=0o755,limit=300000)!=worker_before
                         or file(ROOT_POLICY,uid=0,mode=0o600,limit=12000)!=policy_before
                         or inspect_containers()!=containers):
