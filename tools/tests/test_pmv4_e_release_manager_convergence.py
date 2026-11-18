@@ -23,9 +23,9 @@ def _install_synthetic_marker_and_guard(tmp_path, monkeypatch):
     marker = tmp_path / "accepted.json"
     marker.write_text("{}")
     monkeypatch.setattr(runner, "PMV4_E_ACCEPTED_MARKER", marker)
-    # Installed /usr/bin/python3 is root-owned and not group/world writable.
+    # Installed /usr/bin/bash is root-owned and not group/world writable.
     # The command itself is mocked, so no real unit guard is invoked.
-    monkeypatch.setattr(runner, "PMV4_E_UNIT_GUARD", Path("/usr/bin/python3"))
+    monkeypatch.setattr(runner, "PMV4_E_UNIT_GUARD", Path("/usr/bin/bash"))
     return marker
 
 
