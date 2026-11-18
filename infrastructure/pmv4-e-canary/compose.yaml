@@ -1,0 +1,25 @@
+name: jason-pmv4-e-canary
+services:
+  pmv4-e-canary:
+    image: sha256:679d3334efe7fbe32878b10fb06077912b57473bc3998316d26e9fd7a3d46bbd
+    entrypoint: ["node", "-e", "setInterval(() => {}, 30000)"]
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    mem_limit: "128m"
+    pids_limit: 64
+    pull_policy: never
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    volumes:
+      - ${JASON_PMV4_E_CONFIG}:/canary/config.json:ro
+    networks: [isolation]
+networks:
+  isolation:
+    internal: true
+    name: jason-pmv4-e-canary-private

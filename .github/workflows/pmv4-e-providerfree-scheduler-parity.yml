@@ -1,0 +1,62 @@
+name: PMv4 E Provider-Free Canary & Scheduling Source Only
+on:
+  pull_request:
+    paths:
+      - "infrastructure/pmv4-e-canary/**"
+      - "tools/pmv4_e_canary_contract.py"
+      - "tools/pmv4_e_canary_packet.py"
+      - "tools/pmv4_e_scheduler_parity.py"
+      - "tools/tests/test_pmv4_e_providerfree_canary.py"
+      - "tools/tests/test_pmv4_e_canary_packet.py"
+      - "tests/test_pmv4_e_scheduler_parity.py"
+      - ".github/workflows/pmv4-e-providerfree-scheduler-parity.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  providerfree-controller-and-durable-schedule:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Offline signed controller, provider-free image and scheduler tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q pytest cryptography PyYAML
+          PYTHONPATH=.:implementation:implementation/mcp_service/src python -B -m pytest -q \
+            tools/tests/test_pmv4_e_providerfree_canary.py \
+            tools/tests/test_pmv4_e_canary_packet.py \
+            tests/test_pmv4_e_scheduler_parity.py \
+            tools/tests/test_independent_component_release.py \
+            tools/tests/test_independent_component_host_adapter.py \
+            tools/tests/test_independent_component_release_bundle.py \
+            tools/tests/test_independent_component_control_install_root.py \
+            implementation/mcp_service/tests/test_independent_component_release_approval.py \
+            tests/test_pmv4_e_retirement_readiness.py \
+            tests/test_pmv4_e_root_receipt_readback.py
+          python -B -m py_compile \
+            tools/pmv4_e_canary_contract.py \
+            tools/pmv4_e_canary_packet.py \
+            tools/pmv4_e_scheduler_parity.py
+          test ! -e /var/lib/jason/independent-component-release
+          test ! -e /etc/jason/release-readback-recovery/production-desired-state.json
+      - name: Compose parse only, never activate
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JASON_PMV4_E_CONFIG=/var/lib/jason/independent-component-release/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/config.json
+          docker compose -f infrastructure/pmv4-e-canary/compose.yaml config --format json > "$RUNNER_TEMP/pmv4-e-canary-config.json"
+          PYTHONPATH=. python -B - "$RUNNER_TEMP/pmv4-e-canary-config.json" <<'PY'
+          import json,sys
+          from tools import pmv4_e_canary_contract as contract
+          with open(sys.argv[1],encoding="utf-8") as f:
+              contract.validate_resolved_compose(json.load(f),candidate_sha="a"*40)
+          print("PMV4_E_CANARY_DOCKER_COMPOSE_READONLY=PASS")
+          PY
