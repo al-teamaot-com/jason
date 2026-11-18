@@ -35,6 +35,9 @@ EXACT_SOURCE_FILES = (
     "tools/pmv4_shadow_release.py",
 )
 ARTIFACT_PARENT = Path("/srv/jason/archive/engineering-artifacts")
+# Exact current committed shadow release; historical zero-baseline receipts
+# must never be used as the rollback for a later OOM recovery.
+REVIEWED_OOM_RECOVERY_ROLLBACK = "75f2b4c0c48a15bd17d700b9f039fe56623e3f52"
 
 
 def git_file(repo: Path, revision: str, name: str) -> bytes:
@@ -56,10 +59,14 @@ def prepare(
     read_source: Callable[[str, str], bytes],
     target: Path,
     current_main_ok: Callable[[str], bool],
+    rollback_sha: str = EMPTY_BASELINE,
 ) -> dict:
     """Build a *source-only*, non-root candidate packet in an empty directory."""
     if not SHA.fullmatch(source_sha) or not IMAGE.fullmatch(image_digest):
         raise ShadowReleaseDenied("A1_SOURCE_OR_IMAGE_DIGEST_INVALID")
+    if (rollback_sha not in (EMPTY_BASELINE, REVIEWED_OOM_RECOVERY_ROLLBACK)
+        or source_sha == rollback_sha):
+        raise ShadowReleaseDenied("A1_ROLLBACK_NOT_EXACT_REVIEWED_RELEASE")
     if current_main_ok(source_sha) is not True:
         raise ShadowReleaseDenied("A1_PROTECTED_MAIN_CI_UNVERIFIED")
     target = Path(target)
@@ -94,7 +101,7 @@ def prepare(
         scope = {
             "schema_version": "1.0", "service": "jason-pmv4-shadow",
             "candidate_sha": source_sha,
-            "rollback_sha": EMPTY_BASELINE,
+            "rollback_sha": rollback_sha,
             "bundle_sha256": bundle_sha,
             "files": list(EXACT_SOURCE_FILES),
             "protected_core": [PROTECTED_CORE],
@@ -104,7 +111,7 @@ def prepare(
             "schema_version": "1.0", "service": "jason-pmv4-shadow",
             "release_mode": "owner-signed-isolated-shadow",
             "repository": REPO, "candidate_sha": source_sha,
-            "rollback_sha": EMPTY_BASELINE,
+            "rollback_sha": rollback_sha,
             "scope_sha256": sha256(canonical(scope)).hexdigest(),
             "bundle_sha256": bundle_sha,
             "compose_sha256": hashes["config/pmv4-shadow/docker-compose.yml"],
@@ -135,7 +142,7 @@ def prepare(
             "single_owner_exact_approval_required": True,
             "production_mutations": False,
             "shadow_activation_performed": False,
-            "rollback_sha": EMPTY_BASELINE,
+            "rollback_sha": rollback_sha,
         }
         out = target / "evidence.json"
         out.write_bytes(canonical(packet))
