@@ -15,10 +15,12 @@ def _fixture(tmp_path,monkeypatch):
     lock=tmp_path/"autonomy-operational-work.sqlite3.owner.lock"
     lock.touch()
     lock.chmod(0o600)
-    if os.geteuid()==0:
+    if os.getuid()==0:
         os.chown(lock,1000,1000)
-    else:
+    elif os.getuid()==1000:
         assert lock.stat().st_uid==1000
+    else:
+        pytest.skip("exact UID1000 ownership requires isolated root or Jason service user")
     s=lock.stat()
     pid=550
     container=501
