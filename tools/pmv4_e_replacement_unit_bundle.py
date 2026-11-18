@@ -21,6 +21,28 @@ ROOT=Path(__file__).resolve().parents[1]
 SOURCE=Path("infrastructure/openclaw-operations/systemd")
 TARGET=Path("infrastructure/pmv4-e-scheduler/systemd")
 ADMISSION="/opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py"
+# Mirror mandatory live production drop-ins when replacing service identities.
+# New names do not inherit the legacy .service.d/ controls.
+OWNER_PAUSE_CONDITION=(
+    "ConditionPathExists=!/var/lib/jason/openclaw/support-repair/"
+    "pmv3-engineering-owner-pause.json\n"
+)
+RELEASE_HOLD_CONDITION=(
+    "ConditionPathExists=!/var/lib/jason/openclaw/release-manager/"
+    "auto-promotion-incident-hold\n"
+)
+DRIFT_PREFLIGHT_CONDITION=(
+    'ExecCondition=/usr/bin/python3 -c "import datetime,json,sys;'
+    "from pathlib import Path;"
+    "p=Path('/var/lib/jason/openclaw/release-manager/"
+    "protected-readback/production-drift.json');"
+    "d=json.loads(p.read_text());"
+    "age=(datetime.datetime.now(datetime.timezone.utc)-"
+    "datetime.datetime.fromisoformat(d['observed_at'].replace("
+    "'Z','+00:00'))).total_seconds();"
+    "sys.exit(0 if d.get('status')=='pass' and not d.get('problems')"
+    ' and 0<=age<=120 else 1)"\n'
+)
 
 
 class PMv4EUnitBundleDenied(PermissionError):
@@ -115,6 +137,14 @@ def generate(*,base:Path=ROOT)->dict[str,bytes]:
         guard=("ExecCondition=/usr/bin/python3 "+ADMISSION+
                " --mode "+pair.mode+"\n")
         service=service.replace("[Service]\n","[Service]\n"+guard,1)
+        if pair.mode=="engineering":
+            service=service.replace("[Unit]\n",
+                                    "[Unit]\n"+OWNER_PAUSE_CONDITION,1)
+        elif pair.mode=="component-release":
+            service=service.replace("[Unit]\n",
+                                    "[Unit]\n"+RELEASE_HOLD_CONDITION,1)
+            service=service.replace("[Service]\n",
+                                    "[Service]\n"+DRIFT_PREFLIGHT_CONDITION,1)
         need(trigger.count("Unit="+pair.old_service)==1
              and trigger.count("[Timer]" if pair.trigger=="timer" else "[Path]")==1,
              "LEGACY_TRIGGER_FORMAT_CHANGED")
