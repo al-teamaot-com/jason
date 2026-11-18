@@ -114,6 +114,9 @@ class StageEUnitAdapter:
         require(self.backend.native_started_receipt_verified(
             candidate_sha,rollback_sha,scope_sha256) is True,
             "SIGNED_NATIVE_RECEIPT_MISSING")
+        # The immutable before-image is committed immediately after the
+        # existing native signed STARTED receipt, ahead of all phase faults.
+        self.backend.persist_root_before_image(before)
         completed=[]
         try:
             for step in STEPS:
@@ -124,7 +127,6 @@ class StageEUnitAdapter:
                     require(not set(self.backend.active_triggers())&NEW,
                             "INERT_STAGE_DISPATCHED")
                 elif step=="checkpoint_durable_claims":
-                    self.backend.persist_root_before_image(before)
                     self.backend.quiesce_and_verify_claims()
                 elif step=="stop_six_legacy":
                     self.backend.stop_disable_exact(OLD_USER,OLD_ROOT)
