@@ -123,3 +123,17 @@ def test_untrusted_symlink_target_is_never_read(tmp_path,monkeypatch):
     monkeypatch.setattr(Path,"read_bytes",safe_read)
     with pytest.raises(root.Denied,match="INSTALLED_GENERIC_CONTROLLER_DRIFT"):
         root.verify_installed_generic_controller()
+
+
+
+def test_all_three_production_hash_pins_match_exact_checked_in_controller_sources():
+    """Catches any typo in production root pins before protected CI approval."""
+    tree=Path(__file__).resolve().parents[2]
+    for path,pinned in (
+        ("tools/independent_component_release.py",root.CONTROLLER_SHA),
+        ("tools/independent_component_host_adapter.py",root.ADAPTER_SHA),
+        ("tools/independent_component_release_root.py",root.ROOT_ENTRY_SHA),
+    ):
+        actual=sha256((tree/path).read_bytes()).hexdigest()
+        assert len(pinned)==64 and all(c in "0123456789abcdef" for c in pinned)
+        assert actual==pinned, f"unreviewed or mistyped root SHA pin: {path}"
