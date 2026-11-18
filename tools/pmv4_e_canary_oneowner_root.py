@@ -52,15 +52,6 @@ TRUST_NEW=(
     "tools/pmv4_e_canary_host.py",
     "tools/pmv4_e_canary_release_root.py",
 )
-CI_NAMES=frozenset({
-    "GitGuardian Security Checks","validate-provider-secret-provisioning",
-    "cap-003","system-registry","documentation","validate-kfs-foundation",
-    "cap-007","runtime-service","repository-hygiene",
-    "governed-security-regressions","cap-001","unit-tests",
-    "governed-provider-reads","constant-contact-source",
-    "conversation-experience","reflect-001","teams-gateway",
-    "autotask-mutation-foundation",
-})
 RECEIPT_ID="owner-mcp"
 
 
@@ -100,9 +91,15 @@ def git_file(sha:str,name:str)->bytes:
         "tools/pmv4_e_canary_drift_policy.py",
         "tools/pmv4_e_canary_oneowner_local.sh",
     }, "UNAPPROVED_GIT_SOURCE")
-    p=subprocess.run(
-        ["/usr/bin/git","-C",str(REPO),"show",sha+":"+name],
-        capture_output=True,timeout=25)
+    # Root must not trust its ambient Git safe.directory or alter Git
+    # configuration. Read the immutable git blob through the repository's
+    # unprivileged owner, whose identity owns the review worktree.
+    git=["/usr/bin/git","-C",str(REPO),"show",sha+":"+name]
+    if os.geteuid()==0:
+        git=["/usr/sbin/runuser","-u","al","--",*git]
+    else:
+        need(os.geteuid()==1000,"UNPRIVILEGED_GIT_READER_NOT_OWNER")
+    p=subprocess.run(git,capture_output=True,timeout=25)
     need(p.returncode==0 and 0<len(p.stdout)<200_000,
          "REVIEWED_GIT_BLOB_MISSING")
     return p.stdout
@@ -183,24 +180,115 @@ def gh_api(endpoint:str,query:str)->dict:
 
 
 def verify_ci(sha:str)->dict:
-    comparison=gh_api("repos/al-teamaot-com/jason/compare/"+sha+"...main",
-                      "{status,merge_base:.merge_base_commit.sha}")
+    """Live GitHub protected main + native REQUIRED checks, not noisy totals.
+
+    Nonrequired workflow-routing jobs may be intentionally skipped. Neither
+    an arbitrary green status nor an unprotected branch can authorize root.
+    """
+    from datetime import timedelta
+    main=gh_api("repos/al-teamaot-com/jason/branches/main",
+                "{sha:.commit.sha,name:.name,protected:.protected}")
+    head=main.get("sha")
+    need(main.get("name")=="main"
+         and main.get("protected") is True
+         and isinstance(head,str) and len(head)==40,
+         "CURRENT_PROTECTED_MAIN_UNVERIFIED")
+    comparison=gh_api(
+        "repos/al-teamaot-com/jason/compare/"+sha+"..."+head,
+        "{status,merge_base_sha:.merge_base_commit.sha}")
     need(comparison.get("status") in ("ahead","identical")
-         and comparison.get("merge_base")==sha,
-         "PROTECTED_MAIN_ANCESTRY_DENIED")
-    runs=gh_api("repos/al-teamaot-com/jason/commits/"+sha+
-                "/check-runs?per_page=100",
-                "{count:.total_count,checks:[.check_runs[]|{name,status,conclusion}]}")
-    checks=runs.get("checks") or []
-    need(20<=len(checks)<=100 and runs.get("count")==len(checks)
-         and all(x.get("status")=="completed" and
-                 x.get("conclusion")=="success" for x in checks)
-         and CI_NAMES.issubset({x.get("name") for x in checks}),
-         "PROTECTED_REQUIRED_CI_DENIED")
-    return {"candidate_sha":sha,"protected_main_ancestor":True,
-            "required_ci_passed":True,
-            "verified_at":datetime.now(timezone.utc).isoformat(),
-            "check_count":len(checks),"required_checks":sorted(CI_NAMES)}
+         and comparison.get("merge_base_sha")==sha,
+         "REVIEWED_SOURCE_NOT_PROTECTED_MAIN_ANCESTOR")
+    policy=gh_api(
+        "repos/al-teamaot-com/jason/branches/main/protection/required_status_checks",
+        "{strict,checks}")
+    checks=policy.get("checks")
+    need(policy.get("strict") is True and isinstance(checks,list)
+         and 8<=len(checks)<=60,
+         "NATIVE_PROTECTED_REQUIRED_STATUS_POLICY_UNAVAILABLE")
+    expected={}
+    for record in checks:
+        need(isinstance(record,dict)
+             and isinstance(record.get("context"),str)
+             and isinstance(record.get("app_id"),int)
+             and record["app_id"]==15368
+             and record["context"] not in expected,
+             "PROTECTED_REQUIRED_STATUS_APP_UNTRUSTED")
+        expected[record["context"]]=record["app_id"]
+    baseline={
+        "cap-001","cap-003","cap-007","system-registry",
+        "runtime-service","repository-hygiene",
+        "conversation-experience","teams-gateway",
+    }
+    need(baseline.issubset(expected),
+         "PROTECTED_REQUIRED_STATUS_BASELINE_MISSING")
+    now=datetime.now(timezone.utc)
+    oldest=now-(timedelta(hours=24) if sha==head else timedelta(days=7))
+    # One trusted check-suite fetch instead of eight independent API calls;
+    # the exact required contexts/app IDs are still validated individually.
+    checked=gh_api(
+        "repos/al-teamaot-com/jason/commits/"+sha+
+        "/check-runs?per_page=100",
+        "{count:.total_count,rows:[.check_runs[]|"
+        "{name:.name,sha:.head_sha,status:.status,"
+        "conclusion:.conclusion,app:.app.id,at:.completed_at}]}")
+    rows=checked.get("rows")
+    need(isinstance(rows,list) and 8<=len(rows)<=100
+         and checked.get("count")==len(rows),
+         "REQUIRED_CHECK_SUITE_UNAVAILABLE")
+    for name,app_id in sorted(expected.items()):
+        matching=[r for r in rows if r.get("name")==name]
+        need(len(matching)==1,"REQUIRED_CHECK_RUN_MISSING_OR_AMBIGUOUS")
+        row=matching[0]
+        need(row.get("sha")==sha
+             and row.get("app")==app_id
+             and row.get("status")=="completed"
+             and row.get("conclusion")=="success"
+             and isinstance(row.get("at"),str),
+             "NATIVE_REQUIRED_CHECK_NOT_SUCCESSFUL")
+        at=datetime.fromisoformat(row["at"].replace("Z","+00:00"))
+        need(at.tzinfo is not None and oldest<=at<=now,
+             "NATIVE_REQUIRED_CHECK_STALE")
+    workflow=gh_api(
+        "repos/al-teamaot-com/jason/actions/runs?head_sha="+sha+
+        "&event=push&per_page=100",
+        "{total:.total_count,rows:[.workflow_runs[]|"
+        "{name:.name,sha:.head_sha,branch:.head_branch,event:.event,"
+        "status:.status,conclusion:.conclusion,at:.updated_at}]}")
+    rows=workflow.get("rows")
+    need(isinstance(rows,list) and len(rows)<=100
+         and workflow.get("total")==len(rows),
+         "REQUIRED_PROTECTED_WORKFLOW_RUNS_INVALID")
+    required={
+        "Validate Jason","SEC-007 Security Regressions",
+        "Validate Jason Teams Gateway",
+        "Validate Conversation Experience Foundation",
+    }
+    found=set()
+    for item in rows:
+        name=item.get("name")
+        if name not in required:continue
+        need(item.get("sha")==sha and item.get("branch")=="main"
+             and item.get("event")=="push"
+             and item.get("status")=="completed"
+             and item.get("conclusion")=="success"
+             and isinstance(item.get("at"),str),
+             "REQUIRED_PROTECTED_WORKFLOW_NOT_SUCCESSFUL")
+        at=datetime.fromisoformat(item["at"].replace("Z","+00:00"))
+        need(at.tzinfo is not None and oldest<=at<=now,
+             "REQUIRED_PROTECTED_WORKFLOW_STALE")
+        found.add(name)
+    need(found==required,"REQUIRED_PROTECTED_WORKFLOW_MISSING")
+    return {
+        "candidate_sha":sha,
+        "protected_main_ancestor":True,
+        "required_ci_passed":True,
+        "verified_at":now.isoformat(),
+        "required_checks":sorted(expected),
+        "required_workflows":sorted(required),
+        "check_count":len(expected),
+        "protected_main":head,
+    }
 
 
 def protected_status()->dict[str,tuple]:
