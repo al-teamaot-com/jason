@@ -35,6 +35,8 @@ on:
       - "tools/tests/test_pmv4_e_systemd_root_ops.py"
       - "tools/pmv4_e_native_backend_bridge.py"
       - "tools/tests/test_pmv4_e_native_backend_bridge.py"
+      - "tools/pmv4_e_exact_release_packet.py"
+      - "tools/tests/test_pmv4_e_exact_release_packet.py"
       - "infrastructure/pmv4-e-scheduler/**"
       - "tests/test_pmv4_e_unit_admission.py"
       - "tests/test_pmv4_e_replacement_unit_bundle.py"
@@ -79,6 +81,7 @@ jobs:
             tools/tests/test_pmv4_e_native_systemd_adapter.py \
             tools/tests/test_pmv4_e_systemd_root_ops.py \
             tools/tests/test_pmv4_e_native_backend_bridge.py \
+            tools/tests/test_pmv4_e_exact_release_packet.py \
             tools/tests/test_pmv4_e_root_cutover_preflight.py \
             tools/tests/test_pmv4_e_ticket_owner_readback.py \
             tools/tests/test_reconcile_production_host_services.py \
