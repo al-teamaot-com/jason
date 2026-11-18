@@ -170,7 +170,17 @@ def approve(build_sha:str)->None:
         "signed_owner_proof":signed,
     }
     p=root.stage_dir(build_sha)/"owner-proof.json"
-    root.root_file(p,root.canonical(wrapper)+b"\n",0o400,uid=1000)
+    # This code executes as UID 1000, not root: do not attempt fchown
+    # or root writes. Atomically create its own 0400 exact proof.
+    raw=root.canonical(wrapper)+b"\n"
+    fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL|
+               getattr(os,"O_NOFOLLOW",0),0o400)
+    with os.fdopen(fd,"wb") as out:
+        out.write(raw);out.flush();os.fsync(out.fileno())
+    root.need(p.lstat().st_uid==1000
+              and stat.S_IMODE(p.lstat().st_mode)==0o400
+              and p.read_bytes()==raw,
+              "OWNER_EXACT_PROOF_WRITE_NOT_VERIFIED")
     print("PMV4_E_ONE_OWNER_AUTHENTICATED_EXACT_SIGNATURE=VERIFIED")
     print("PRODUCTION_MUTATIONS=false; SIGNATURE_ONLY=true")
 

@@ -8,6 +8,7 @@ on:
       - "tools/pmv4_e_canary_oneowner_builder.py"
       - "tools/pmv4_e_canary_host.py"
       - "tools/tests/test_pmv4_e_canary_oneowner_root.py"
+      - "tools/tests/test_pmv4_e_oneowner_ci_gate.py"
       - "tools/tests/test_pmv4_e_canary_oneowner_builder.py"
       - ".github/workflows/pmv4-e-canary-oneowner-root.yml"
   workflow_dispatch:
@@ -33,6 +34,7 @@ jobs:
           PYTHONPATH=.:implementation:implementation/mcp_service/src python -B -m pytest -q \
             tools/tests/test_pmv4_e_canary_oneowner_builder.py \
             tools/tests/test_pmv4_e_canary_oneowner_root.py \
+            tools/tests/test_pmv4_e_oneowner_ci_gate.py \
             tools/tests/test_pmv4_e_canary_host.py \
             tools/tests/test_pmv4_e_canary_release_root.py \
             tools/tests/test_pmv4_e_providerfree_canary.py \
