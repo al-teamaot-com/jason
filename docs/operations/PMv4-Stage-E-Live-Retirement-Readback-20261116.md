@@ -28,3 +28,22 @@ The independent test suite simulates source/list readback and denies mutating sh
 6. Verify post-retirement all old PMv3-only execution references are absent, but legacy immutable audit/rollback history retained, all required service health and ticket workflows continue, no surprise timers or duplicated work and no pay-per-token API fallback.
 
 **Current Stage E disposition:** NO-GO. This source-only assessment is NOT an invitation to stop legacy release, approval, support-repair, drift, boot or reconciliation services.
+
+## November 18, 2026 independent read-only recheck
+
+At 05:33 EST, the host read-only retirement gate returned
+`status=not_ready_for_pmv3_retirement` with seven explicit blockers:
+legacy source policy and live execution units remain required; the
+replacement release/engineering controller parity is not accepted;
+Stage C independent Ticket Core and Stage D independent Runbook Management
+are not accepted; a root-protected live desired-state readback and
+an exact Owner retirement authorization are outstanding.
+
+All six legacy user/root release and work units remain active/enabled;
+drift, boot and authority monitoring timers remain active/enabled;
+both protected containers are running. The observed latest ticket
+scan had zero duplicates. Thirteen focused negative/positive tests PASS.
+This is NOT production acceptance or permission to remove legacy timers.
+The current native production breaker is separately OPEN due to a
+catalog bootstrap-recovery service failure; restoration of that breaker
+is a prior release boundary, not a reason to retire PMv3 prematurely.
