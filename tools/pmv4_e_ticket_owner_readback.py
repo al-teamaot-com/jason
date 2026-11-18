@@ -18,9 +18,9 @@ CONTAINER="jason-pmv4-ticket-core"
 LOCKS=Path("/proc/locks")
 PROC=Path("/proc")
 LOCK_RE=re.compile(
-    r"^\\d+:\\s+(FLOCK|POSIX|OFDLCK)\\s+ADVISORY\\s+"
-    r"(READ|WRITE)\\s+(-?\\d+)\\s+([0-9a-fA-F]+):"
-    r"([0-9a-fA-F]+):(\\d+)\\s+\\d+\\s+(?:EOF|\\d+)$"
+    r"^\d+:\s+(FLOCK|POSIX|OFDLCK)\s+ADVISORY\s+"
+    r"(READ|WRITE)\s+(-?\d+)\s+([0-9a-fA-F]+):"
+    r"([0-9a-fA-F]+):(\d+)\s+\d+\s+(?:EOF|\d+)$"
 )
 ID_RE=re.compile(r"^[0-9a-f]{64}$")
 
@@ -57,7 +57,7 @@ def locks_for_inode(raw:str,meta:os.stat_result)->list[tuple[str,str,int]]:
         if not m:
             # Unknown lock rows may belong to the target inode. Never
             # silently trust malformed rows that mention the exact inode.
-            if re.search(r":%s\\s" % re.escape(str(meta.st_ino)),line):
+            if re.search(r":%s\s" % re.escape(str(meta.st_ino)),line):
                 raise TicketOwnerReadbackDenied("PMV4_E_TICKET_OWNER_LOCK_RECORD_UNKNOWN")
             continue
         typ,mode,pid,major,minor,inode=m.groups()
@@ -72,7 +72,7 @@ def docker_state(*,runner:Callable[...,Any]=subprocess.run)->tuple[str,int]:
     fmt="{{.Id}}|{{.State.Pid}}|{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}"
     p=runner(["/usr/bin/docker","inspect","--format",fmt,CONTAINER],
              capture_output=True,text=True,timeout=18,check=False)
-    require(p.returncode==0 and len(p.stdout)<200 and "\\n" not in p.stdout.strip(),
+    require(p.returncode==0 and len(p.stdout)<200 and "\n" not in p.stdout.strip(),
             "TICKET_CONTAINER_UNAVAILABLE")
     values=p.stdout.strip().split("|")
     require(len(values)==4 and ID_RE.fullmatch(values[0]) is not None
