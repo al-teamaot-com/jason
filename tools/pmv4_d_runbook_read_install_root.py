@@ -367,9 +367,19 @@ def service_readback():
     need(systemctl("is-enabled",UNIT).stdout.strip()=="enabled",
          "RUNBOOK_UNIT_NOT_ENABLED")
     socket_path=Path("/run/jason-runbook-management/read.sock")
-    need(socket_path.is_socket() and
-         stat.S_IMODE(socket_path.lstat().st_mode)==0o600 and
-         socket_path.lstat().st_uid==1000,"RUNBOOK_SOCKET_NOT_TRUSTED")
+    # Type=simple means systemd 'is-active' can return before the Python
+    # listener binds the Unix socket. Wait only for the first bind; never
+    # waive socket ownership, access mode or later protocol verification.
+    deadline=time.monotonic()+12
+    while not socket_path.is_socket() and time.monotonic()<deadline:
+        time.sleep(0.2)
+    need(socket_path.is_socket() and not socket_path.is_symlink(),
+         "RUNBOOK_SOCKET_NOT_READY")
+    meta=socket_path.lstat()
+    need(stat.S_ISSOCK(meta.st_mode) and
+         stat.S_IMODE(meta.st_mode)==0o600 and
+         meta.st_uid==1000,
+         "RUNBOOK_SOCKET_NOT_TRUSTED")
     probe=(
         "import json,socket,sys;"
         "s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);"
