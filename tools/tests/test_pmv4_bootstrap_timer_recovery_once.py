@@ -68,6 +68,8 @@ def test_recovery_requires_single_existing_drift_kind(monkeypatch):
           "reason":"continuous_production_drift_detected",
           "problem_kinds":["failed_system_unit"]}})
     monkeypatch.setattr(r,"protected_containers",lambda:{"jason-runtime":("one","image","started")})
+    plan["shadow_identity"]={"id":"unmodified-shadow","status":"exited","oom_killed":True}
+    monkeypatch.setattr(r,"shadow_identity",lambda:plan["shadow_identity"])
     monkeypatch.setattr(r,"observed_drift",lambda:{
         "schema_version":"1.0","status":"drift_detected",
         "problems":[{"kind":"failed_system_unit","unit":r.OLD_SERVICE}]})
@@ -94,7 +96,8 @@ def isolated(tmp_path,monkeypatch):
     monkeypatch.setattr(Path, "lstat", synthetic_root_audit_stat)
     source="a"*40
     plan={"source_sha":source,"rollback_sha":"b"*40,"scope_sha256":"c"*64,
-          "freeze_sha256":r.digest(b"freeze")}
+          "freeze_sha256":r.digest(b"freeze"),
+          "shadow_identity":{"id":"shadow-unchanged","status":"exited","oom_killed":True}}
     monkeypatch.setattr(r,"packet",lambda p:plan)
     previous={"jason-runtime":("runtime","img","time"),"jason-mcp-pilot":("mcp","img","time")}
     monkeypatch.setattr(r,"verify",lambda p:previous)
@@ -105,6 +108,7 @@ def isolated(tmp_path,monkeypatch):
         yield
     monkeypatch.setattr(r,"native_locks",fake_locks)
     monkeypatch.setattr(r,"protected_containers",lambda:previous)
+    monkeypatch.setattr(r,"shadow_identity",lambda:plan["shadow_identity"])
     monkeypatch.setattr(r,"secure_file",lambda path,**kwargs:b"freeze")
     monkeypatch.setattr(r.HOST_LKG.__class__,"resolve",
         lambda path,strict=False:Path("/opt/jason/releases/"+"b"*40))
@@ -229,3 +233,57 @@ def test_unauthorized_timer_and_breaker_mutations_not_exposed():
         r.systemd_status("jason-runtime.service","is-active")
     with pytest.raises(r.BootstrapTimerRecoveryDenied,match="SYSTEMD_READ_SCOPE_INVALID"):
         r.systemd_status(r.OLD_TIMER,"stop")
+
+
+
+def test_oom_killed_shadow_is_immutable_not_assumed_healthy(monkeypatch):
+    from types import SimpleNamespace
+    item = {
+        "Id": "exact-shadow-container-id", "Image": "sha256:" + "a"*64,
+        "State": {"Running": False, "Status": "exited",
+                  "OOMKilled": True, "ExitCode": 137,
+                  "StartedAt": "2026-11-17T11:46:51.858627709Z",
+                  "FinishedAt": "2026-11-18T06:20:58.92618648Z"},
+    }
+    monkeypatch.setattr(r.subprocess,"run",lambda *a,**kw:
+        SimpleNamespace(returncode=0,stdout=json.dumps([item])))
+    actual = r.shadow_identity()
+    assert actual["status"]=="exited" and actual["running"] is False
+    assert actual["oom_killed"] is True and actual["exit_code"]==137
+    assert actual["id"]=="exact-shadow-container-id"
+    assert actual["finished_at"]=="2026-11-18T06:20:58.92618648Z"
+    # Signing a no-restart packet must preserve this state, not start shadow.
+    assert "jason-pmv4-shadow-gateway" not in r.PROTECTED_CONTAINERS
+    assert r.SHADOW == "jason-pmv4-shadow-gateway"
+    item["State"]["Status"]="running"
+    item["State"]["Running"]=True
+    assert r.shadow_identity()!=actual
+    item["State"]["Status"]="exited"
+    item["State"]["Running"]=False
+    item["Id"]="different-container"
+    assert r.shadow_identity()!=actual
+
+
+def test_missing_shadow_is_not_silently_ignored(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(r.subprocess,"run",lambda *a,**kw:
+        SimpleNamespace(returncode=1,stdout=""))
+    with pytest.raises(r.BootstrapTimerRecoveryDenied,
+                       match="SHADOW_CONTAINER_INVENTORY_UNAVAILABLE"):
+        r.shadow_identity()
+
+
+def test_owner_device_code_uses_standard_grant_urn():
+    src=Path(r.__file__).read_text()
+    assert "urn:ietf:params:oauth:grant-type:device_code" in src
+    assert "urn:ietf:params:oauth:grant_type:device_code" not in src
+    assert "jwt_owner" in src and "EXACT_OWNER_CONFIRMATION_MISSING" in src
+
+
+def test_shadow_state_bound_to_exact_signed_plan():
+    src=Path(r.__file__).read_text()
+    builder=Path(b.__file__).read_text()
+    assert '"shadow_identity":root.shadow_identity()' in builder
+    assert 'shadow_identity()==plan["shadow_identity"]' in src
+    assert 'set(plan["shadow_identity"])' in src
+    assert '"shadow_identity",' in src
