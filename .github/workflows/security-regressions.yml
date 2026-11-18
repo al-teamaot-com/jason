@@ -57,6 +57,9 @@ jobs:
       - name: One-use catalog root worker rebind Owner boundary and rollback safety
         run: |
           python -m pytest -q tools/tests/test_catalog_root_worker_rebind_once.py
+      - name: PMv4 one-use completed catalog bootstrap timer recovery exact-scope safety
+        run: |
+          python -m pytest -q tools/tests/test_pmv4_bootstrap_timer_recovery_once.py
       - name: Prompt-injection evidence boundary regressions
         run: |
           python -m pytest -q \
