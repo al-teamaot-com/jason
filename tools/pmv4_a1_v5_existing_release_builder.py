@@ -349,12 +349,55 @@ def recover_exact_consumed_v5()->None:
 
 
 
+REVIEWED_REUSED_IMAGE = r'''def reviewed_reused_shadow_image(item:list[dict[str,Any]])->None:
+    """Accept only the exact prior accepted OCI bytes and immutable labels.
+
+    The reused image was built for ROLLBACK, not the new source-only Compose
+    revision CANDIDATE. Never accept arbitrary image tags or revisions.
+    """
+    need(isinstance(item,list) and len(item)==1
+         and isinstance(item[0],dict), "A1_SHADOW_IMAGE_NOT_REVIEWED")
+    image=item[0]
+    config=image.get("Config")
+    labels=config.get("Labels") if isinstance(config,dict) else None
+    need(isinstance(labels,dict)
+         and image.get("Id")==IMAGE
+         and IMAGE==PRIOR_IMAGE
+         and labels.get("com.aot.jason.component")=="pmv4-shadow"
+         and labels.get("com.aot.jason.lifecycle")=="preproduction-only"
+         and labels.get("com.aot.jason.production-core")=="excluded"
+         and labels.get("com.aot.jason.provider-mutations")=="disabled"
+         and labels.get("com.aot.jason.source_revision")==ROLLBACK,
+         "A1_SHADOW_IMAGE_NOT_REVIEWED")
+'''
+
+
 def render_root(source:str,sha:str,image:str)->str:
     """Create exact new root from protected source; never patch installed v4."""
     need(bool(v4.SHA.fullmatch(sha) and v4.IMAGE.fullmatch(image)),
          "SOURCE_OR_IMAGE_NOT_PINNED")
     text=v4.render_root(source,sha,image)
     text=replace_once(text,'ROLLBACK="0"*40','ROLLBACK="'+PRIOR+'"')
+    # Exact v4 first-install identity originally expects the freshly built
+    # image label to equal the new source SHA. V5 explicitly REUSES the
+    # previously accepted OCI digest, whose immutable label is PRIOR.
+    # Keep digest and every security label pinned, not merely allow any
+    # previous image.
+    original_oci="""    item=json.loads(image.stdout)
+    need(len(item)==1 and item[0]["Id"]==IMAGE
+         and item[0]["Config"]["Labels"]["com.aot.jason.component"]=="pmv4-shadow"
+         and item[0]["Config"]["Labels"]["com.aot.jason.lifecycle"]=="preproduction-only"
+         and item[0]["Config"]["Labels"]["com.aot.jason.source_revision"]==CANDIDATE,
+         "A1_SHADOW_IMAGE_NOT_REVIEWED")
+    return host"""
+    reviewed_oci="""    item=json.loads(image.stdout)
+    reviewed_reused_shadow_image(item)
+    return host"""
+    text=replace_once(text,original_oci,reviewed_oci)
+    text=replace_once(text,
+        "def protected_source_and_health()->guard_lib.IndependentHostGuard:",
+        REVIEWED_REUSED_IMAGE
+        +"def protected_source_and_health()->guard_lib.IndependentHostGuard:")
     text=replace_once(text,
         'ACTION="'+v4.NEW_ACTION+'"','ACTION="'+ACTION+'"')
     text=replace_once(text,
