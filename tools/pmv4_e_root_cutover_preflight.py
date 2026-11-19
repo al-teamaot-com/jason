@@ -93,8 +93,16 @@ def _active(unit:str,*,user:bool,runner:Callable[...,Any]=subprocess.run)->bool:
         if user else ["/usr/bin/systemctl","is-active",unit]
     )
     p=runner(args,capture_output=True,text=True,timeout=15,check=False)
-    require(p.returncode in (0,3),"SYSTEMD_READBACK_UNAVAILABLE")
     result=p.stdout.strip()
+    # Live Jason systemctl returns exit 4 / "inactive" for the six PMv4
+    # timers/paths not yet installed. Inert/absent NEW triggers are precisely
+    # the expected pre-cutover state. Never extend this exception to old
+    # legacy triggers or protected monitoring units.
+    replacement=(NEW_USER if user else NEW_ROOT)
+    if unit in replacement and p.returncode==4:
+        require(result=="inactive","NEW_TRIGGER_ABSENCE_AMBIGUOUS")
+        return False
+    require(p.returncode in (0,3),"SYSTEMD_READBACK_UNAVAILABLE")
     require(result in ("active","inactive","failed"),"SYSTEMD_READBACK_UNKNOWN")
     return p.returncode==0 and result=="active"
 
