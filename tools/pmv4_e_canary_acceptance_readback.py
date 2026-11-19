@@ -37,6 +37,8 @@ ROOT_SIGNER=Path("/opt/jason/independent-component-release/trusted/implementatio
 ROOT_SIGNER_SHA="f50eea90102d9a1de82b3753ec8d0cd225280d385ac7a658ae2c2a303934a0e3"
 ROOT_OWNER_PUBLIC=Path("/etc/jason-owner-release/verified-owner-public-key.json")
 FREEZE_PATH=Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
+FREEZE_UID=1000
+FREEZE_GID=1000
 POLICY_PATH=Path("/etc/jason/release-readback-recovery/production-desired-state.json")
 CANARY_NAME="jason-pmv4-e-canary-pmv4-e-canary-1"
 CANARY_PROJECT="jason-pmv4-e-canary"
@@ -70,6 +72,38 @@ def root_data(path:Path,*,mode:int=0o600,maximum:int=100000)->bytes:
     except OSError as exc:
         raise CanaryAcceptanceDenied(
             "PMV4_E_CANARY_READBACK_ROOT_FILE_UNAVAILABLE:"+path.name) from exc
+
+
+def validate_service_file_meta(meta:Any,*,path_name:str,
+                               expected_uid:int=FREEZE_UID,
+                               expected_gid:int=FREEZE_GID,mode:int=0o600,
+                               maximum:int=100000)->None:
+    need(stat.S_ISREG(meta.st_mode) and meta.st_uid==expected_uid
+         and meta.st_gid==expected_gid and meta.st_nlink==1
+         and stat.S_IMODE(meta.st_mode)==mode
+         and 0<meta.st_size<=maximum,
+         "SERVICE_FILE_UNTRUSTED:"+path_name)
+
+
+def service_owned_data(path:Path,*,expected_uid:int=FREEZE_UID,
+                       expected_gid:int=FREEZE_GID,mode:int=0o600,
+                       maximum:int=100000)->bytes:
+    """Read the service-user-owned freeze without treating it as root data."""
+    try:
+        meta=path.lstat()
+        need(not path.is_symlink(),"SERVICE_FILE_UNTRUSTED:"+path.name)
+        validate_service_file_meta(
+            meta,path_name=path.name,expected_uid=expected_uid,
+            expected_gid=expected_gid,mode=mode,maximum=maximum)
+        raw=path.read_bytes()
+        need(len(raw)==meta.st_size,
+             "SERVICE_FILE_MODIFIED_DURING_READ:"+path.name)
+        return raw
+    except CanaryAcceptanceDenied:
+        raise
+    except OSError as exc:
+        raise CanaryAcceptanceDenied(
+            "PMV4_E_CANARY_READBACK_SERVICE_FILE_UNAVAILABLE:"+path.name) from exc
 
 
 def exact_json(path:Path,*,mode:int=0o600,maximum:int=100000)->dict[str,Any]:
@@ -207,10 +241,11 @@ def probe_clean_host(*,runner=subprocess.run,
     for expected in (expected_freeze_sha,expected_policy_sha):
         need(isinstance(expected,str) and SHA256.fullmatch(expected) is not None,
              "EXPECTED_SOURCE_DIGEST_INVALID")
-    for path,expected in ((FREEZE_PATH,expected_freeze_sha),
-                          (POLICY_PATH,expected_policy_sha)):
-        need(sha256(root_data(path)).hexdigest()==expected,
-             "PRODUCTION_FREEZE_OR_POLICY_CHANGED")
+    freeze=service_owned_data(FREEZE_PATH)
+    need(sha256(freeze).hexdigest()==expected_freeze_sha,
+         "PRODUCTION_FREEZE_CHANGED")
+    need(sha256(root_data(POLICY_PATH)).hexdigest()==expected_policy_sha,
+         "PRODUCTION_POLICY_CHANGED")
     for argv in (
         ["/usr/bin/docker","ps","-aq","--filter",
          "label=com.docker.compose.project="+CANARY_PROJECT],
