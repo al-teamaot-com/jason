@@ -83,3 +83,9 @@ def test_fail_closed_root_file_meta(monkeypatch,tmp_path):
     file.unlink();file.symlink_to(tmp_path/'other')
     with pytest.raises(fix.Denied,match='ROOT_FILE_NOT_REGULAR'):
         fix.read(file,0o600)
+
+
+def test_root_git_ancestry_checks_al_owned_repo_with_pinned_safe_directory():
+    code=SRC.read_text()
+    assert "'git','-c',f'safe.directory={SOURCE}','-C',str(SOURCE)" in code
+    assert "'merge-base','--is-ancestor',reviewed,sha" in code

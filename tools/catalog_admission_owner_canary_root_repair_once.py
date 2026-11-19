@@ -83,7 +83,8 @@ def clean_main(reviewed):
     sha=main[0]
     need(git('rev-parse','refs/remotes/origin/main').decode().strip()==sha,
          'PROTECTED_MAIN_NOT_FETCHED')
-    p=subprocess.run(['git','-C',str(SOURCE),'merge-base','--is-ancestor',reviewed,sha],
+    p=subprocess.run(['git','-c',f'safe.directory={SOURCE}','-C',str(SOURCE),
+        'merge-base','--is-ancestor',reviewed,sha],
         stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=20)
     need(p.returncode==0,'REVIEWED_SOURCE_NOT_PROTECTED_ANCESTOR')
     need(git('show',f'{sha}:{REPAIR_REL}')==git('show',f'{reviewed}:{REPAIR_REL}')
