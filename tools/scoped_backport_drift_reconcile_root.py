@@ -250,20 +250,33 @@ def apply(path):
         need(digest(file_bytes(FREEZE,uid=1000))==plan["freeze_sha256"] and
              CURRENT.resolve(strict=True).name==plan["rollback_sha"],
              "PROTECTED_PRODUCTION_CHANGED")
-        # Reuse the existing immutable root-governed breaker revalidation.
-        # This verifies the live LKG manifest, protected components and fresh
-        # root watchdog evidence; never edit the breaker JSON directly.
-        runner=CURRENT/"tools/release_manager_host_runner.py"
-        need(runner.is_file() and not runner.is_symlink(),"NATIVE_BREAKER_RUNNER_MISSING")
-        sys.path.insert(0,str(CURRENT/"tools"))
-        spec=importlib.util.spec_from_file_location("scoped_backport_pinned_lkg_runner",runner)
-        need(spec is not None and spec.loader is not None,"NATIVE_BREAKER_RUNNER_UNLOADABLE")
-        trusted=importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(trusted)
-        revalidated=trusted.revalidate_circuit_breaker(
-            Path("/var/lib/jason/openclaw/release-manager"))
-        need((revalidated.get("circuit_breaker") or {}).get("state")=="closed",
-             "NATIVE_BREAKER_NOT_CLOSED")
+        # The existing native operator -> root transition is mandatory.
+        # The Release Manager checks its LKG source under uid 1000; running
+        # that client as root would fail its identity/source alignment check.
+        trusted_runner=CURRENT/"tools/release_manager_host_runner.py"
+        need(digest(file_bytes(trusted_runner,mode=0o664,limit=600000))==
+             "7208832ecb575d549721788f196f85c7d6bd609794680fe099f6ff60401626a9",
+             "NATIVE_OPERATOR_REVALIDATOR_CHANGED")
+        snippet=(
+            "from pathlib import Path;import sys;"
+            "sys.path.insert(0,'/opt/jason/current/tools');"
+            "import release_manager_host_runner as r;"
+            "r.revalidate_circuit_breaker("
+            "Path('/var/lib/jason/openclaw/release-manager'))"
+        )
+        result=subprocess.run([
+            "/usr/sbin/runuser","-u","al","--",
+            "/usr/bin/python3","-I","-c",snippet],
+            capture_output=True,text=True,timeout=145)
+        need(result.returncode==0,"NATIVE_BREAKER_REVALIDATION_DENIED")
+        protected=json.loads(file_bytes(Path(
+            "/var/lib/jason/openclaw/release-manager/production-control-state.json"),
+            mode=0o600,limit=131072))
+        breaker=protected.get("circuit_breaker") or {}
+        need(breaker.get("state")=="closed"
+             and breaker.get("reason")=="root_verified_revalidate"
+             and breaker.get("revalidated_revision")==plan["rollback_sha"],
+             "ROOT_NATIVE_BREAKER_CLOSEOUT_UNVERIFIED")
     except BaseException:
         # Exact automatic rollback is part of the SAME Owner scope, not a
         # second approval or unrelated mutation. Never clobber another root

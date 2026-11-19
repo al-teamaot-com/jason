@@ -104,8 +104,8 @@ def test_root_write_uses_root_protected_baseline_not_mutable_packet_bytes():
 def test_no_direct_breaker_state_edits_or_guard_bypass():
     code=Path(root.__file__).read_text()
     assert "revalidate_circuit_breaker" in code
-    assert 'trusted.revalidate_circuit_breaker(' in code
-    assert '"NATIVE_BREAKER_NOT_CLOSED"' in code
+    assert 'r.revalidate_circuit_breaker(' in code
+    assert '"ROOT_NATIVE_BREAKER_CLOSEOUT_UNVERIFIED"' in code
     assert '"root_scoped_backport_four_unit_allowlist"' in code
     assert '"breaker_override":False' in code
     assert '"scoped_backport_unit_names"' in code
@@ -113,3 +113,13 @@ def test_no_direct_breaker_state_edits_or_guard_bypass():
     assert '"jason-scoped-backport-recovery.timer"' in code
     assert '"jason-scoped-backport-requests.path"' in code
     assert '"root_scoped_backport_four_unit_allowlist"' in Path(builder.__file__).read_text()
+
+
+def test_native_revalidation_uses_operator_identity_and_hash_pinned_immutable_runner():
+    code=Path(root.__file__).read_text()
+    assert '"/usr/sbin/runuser","-u","al","--"' in code
+    assert '"/usr/bin/python3","-I","-c",snippet' in code
+    assert 'CURRENT/"tools/release_manager_host_runner.py"' in code
+    assert '"NATIVE_OPERATOR_REVALIDATOR_CHANGED"' in code
+    assert '"root_verified_revalidate"' in code
+    assert 'plan["rollback_sha"]' in code
