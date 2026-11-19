@@ -105,6 +105,12 @@ class ExactSystemdSurface:
         need(name in valid,"OUT_OF_SCOPE_STATUS")
         active=self._call(user=user,action="is-active",names=(name,))
         enabled=self._call(user=user,action="is-enabled",names=(name,))
+        # An uninstalled PMv4 replacement legitimately reports not-found
+        # (systemctl exit=4), especially during partial-stage rollback. This
+        # must never normalize a MISSING legacy control into healthy.
+        if name in NEW_USER|NEW_ROOT and enabled=="not-found":
+            need(active=="inactive", "MISSING_REPLACEMENT_DISPATCH_RUNNING")
+            return "inactive","not-found"
         need(active in {"active","inactive","failed"}
              and enabled in {"enabled","disabled","static","masked"},
              "SYSTEMD_STATE_UNKNOWN")
@@ -209,11 +215,28 @@ class ExactSystemdSurface:
                 need(self.status(name,user=user)==("active","enabled"),
                      "NEW_TRIGGER_NOT_ACTIVE")
 
-    def restore_legacy(self)->None:
+    def stop_disable_replacement_if_present(self)->None:
+        """Recovery is idempotent when a replacement trigger was never staged.
+
+        Missing is permitted only for reviewed NEW timers/paths. Actual
+        installed replacement triggers are stopped and disabled with the same
+        systemd operations as before. All legacy targets remain strict.
+        """
         for user,units in ((True,NEW_USER),(False,NEW_ROOT)):
             for name in sorted(units):
-                self._call(user=user,action="stop",names=(name,))
-                self._call(user=user,action="disable",names=(name,))
+                active,enabled=self.status(name,user=user)
+                if enabled=="not-found":
+                    need(active=="inactive","ABSENT_NEW_TRIGGER_ACTIVE")
+                    continue
+                if active in ("active","failed"):
+                    self._call(user=user,action="stop",names=(name,))
+                if enabled=="enabled":
+                    self._call(user=user,action="disable",names=(name,))
+                need(self.status(name,user=user)[0]!="active",
+                     "REPLACEMENT_DISPATCH_STILL_ACTIVE")
+
+    def restore_legacy(self)->None:
+        self.stop_disable_replacement_if_present()
         for user,units in ((True,OLD_USER),(False,OLD_ROOT)):
             for name in sorted(units):
                 self._call(user=user,action="enable",names=(name,))
