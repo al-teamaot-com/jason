@@ -136,7 +136,7 @@ def main() -> int:
     result = provision(
         os.environ.get("JASON_GRAFANA_URL", "http://127.0.0.1:3000"),
         credential, control_token,
-        source_root / "infrastructure/showcase/grafana/dashboards/jason-sharepoint-site-access.json",
+        source_root / "infrastructure/sharepoint-site-control/grafana/jason-sharepoint-site-access.json",
         apply=args.apply,
     )
     print(json.dumps(result, sort_keys=True))

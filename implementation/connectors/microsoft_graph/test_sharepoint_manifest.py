@@ -4,7 +4,7 @@ from connectors.microsoft_graph.sharepoint_manifest import build_sharepoint_read
 def test_sharepoint_manifest_is_reusable_and_read_only():
     manifest = build_sharepoint_read_manifest()
     assert manifest.integration_id == "microsoft_graph_sharepoint_reader"
-    assert manifest.provider_id == "microsoft_graph"
+    assert manifest.provider_id == "microsoft_graph_sharepoint"
     operations = [
         operation for resource in manifest.resources for operation in resource.operations
     ]

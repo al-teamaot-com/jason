@@ -13,6 +13,7 @@ services:
     user: "1000:1000"
     environment:
       JASON_SHAREPOINT_AOT_TENANT_ID: ${JASON_SHAREPOINT_AOT_TENANT_ID:?required}
+      JASON_SHAREPOINT_AOT_HOSTNAMES: ${JASON_SHAREPOINT_AOT_HOSTNAMES:?required}
       JASON_SHAREPOINT_BOUNDARY_DB: /run/jason-boundaries/clients.sqlite3
       JASON_SHAREPOINT_SITE_ACCESS_DB: /var/lib/jason/sharepoint/sites.sqlite3
       JASON_OPENBAO_URL: http://openbao:8200

@@ -58,6 +58,10 @@ def main() -> int:
     )
     manager = build_sharepoint_site_management(
         runtime=runtime, tenant_id=tenant, state_db=state_db, transport=transport,
+        allowed_sharepoint_hosts=frozenset(
+            h.strip().casefold() for h in
+            os.environ['JASON_SHAREPOINT_AOT_HOSTNAMES'].split(',') if h.strip()
+        ),
     )
     if args.action == "discover":
         count = manager.daily_discovery.run()

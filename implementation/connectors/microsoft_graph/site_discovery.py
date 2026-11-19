@@ -24,6 +24,7 @@ class SharePointSiteDiscovery:
     tokens: AppOnlyTokens
     transport: HttpTransport
     registry: SharePointSiteAccess
+    allowed_sharepoint_hosts: frozenset[str] = frozenset({"absolnet.sharepoint.com"})
     max_pages: int = 1000
     max_sites: int = 100000
 
@@ -31,6 +32,11 @@ class SharePointSiteDiscovery:
         UUID(self.tenant_id)
         if self.tenant_id != self.registry.tenant_id:
             raise PermissionError("Site registry tenant binding mismatch")
+        if not self.allowed_sharepoint_hosts or any(
+            not host or host != host.casefold() or not host.endswith(".sharepoint.com")
+            for host in self.allowed_sharepoint_hosts
+        ):
+            raise PermissionError("Explicit AOT SharePoint hostnames required")
         if not (1 <= self.max_pages <= 1000 and 1 <= self.max_sites <= 100000):
             raise ValueError("Discovery limits invalid")
 
@@ -39,9 +45,7 @@ class SharePointSiteDiscovery:
         parsed = urlsplit(url)
         if (parsed.scheme != "https" or parsed.netloc != "graph.microsoft.com"
                 or parsed.username is not None or parsed.password is not None
-                or parsed.fragment or not (
-                    parsed.path == "/v1.0/sites/getAllSites"
-                    or parsed.path == "/v1.0/sites/oneDrive.getAllSites")):
+                or parsed.fragment or parsed.path != "/v1.0/sites/getAllSites"):
             raise ConnectorTransportError("Untrusted Graph site pagination URL")
         return url
 
@@ -75,8 +79,10 @@ class SharePointSiteDiscovery:
                     if not all(isinstance(x, str) and x.strip() for x in (site_id, name, web_url)):
                         raise ConnectorTransportError("Incomplete site identity")
                     host = urlsplit(web_url)
-                    if host.scheme != "https" or not host.hostname or not host.hostname.endswith(".sharepoint.com"):
-                        raise ConnectorTransportError("Invalid SharePoint site URL")
+                    if (host.scheme != "https" or host.hostname not in self.allowed_sharepoint_hosts
+                            or host.username is not None or host.password is not None
+                            or host.port is not None):
+                        raise ConnectorTransportError("Site outside configured AOT SharePoint hosts")
                     discovered[site_id] = {
                         "tenant_id": self.tenant_id, "site_id": site_id,
                         "name": name, "web_url": web_url,

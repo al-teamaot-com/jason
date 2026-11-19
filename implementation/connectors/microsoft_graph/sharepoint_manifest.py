@@ -9,7 +9,7 @@ from orchestrator.integration_broker import (
     IntegrationManifest, IntegrationOperation, OperationKind,
     ResourceDefinition, ResourceObservation, SelectorDefinition,
 )
-from orchestrator.provider_read_capability_catalog import MICROSOFT_GRAPH_PROVIDER
+from orchestrator.sharepoint_capability_catalog import SHAREPOINT_PROVIDER
 
 
 def build_sharepoint_read_manifest() -> IntegrationManifest:
@@ -26,7 +26,7 @@ def build_sharepoint_read_manifest() -> IntegrationManifest:
         integration_id="microsoft_graph_sharepoint_reader",
         display_name="Reusable Governed SharePoint Reader",
         manifest_version="1.0",
-        provider_id=MICROSOFT_GRAPH_PROVIDER,
+        provider_id=SHAREPOINT_PROVIDER,
         resources=(
             ResourceDefinition(
                 resource_type="knowledge_library",

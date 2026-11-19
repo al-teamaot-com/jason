@@ -16,8 +16,7 @@ The control service is reachable only inside the observability Docker network,
 not published on the host. Grafana is not permitted to choose a user identity
 or arbitrary tenant through any request body.
 
-Provision the datasource and dashboard with Grafana's approved provisioning
-process or authenticated API, with dashboard UID
+Install the standalone datasource and dashboard by the narrow authenticated Grafana API installer, never by the global observability auto-reconciler, with dashboard UID
 `jason-sharepoint-site-access`. Confirm the dynamic site listing, owner-denied
 and owner-allowed paths, and an on/off round-trip with database readback.
 The supported operations are:

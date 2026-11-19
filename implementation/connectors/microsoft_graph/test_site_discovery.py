@@ -7,7 +7,7 @@ TENANT="f7054323-d52b-4863-8c2f-1898f0b6077c"
 SITE={"id":"absolnet.sharepoint.com,aaa,bbb","name":"AOT Accounting",
       "webUrl":"https://absolnet.sharepoint.com/sites/AOTAccountingDocuments",
       "siteCollection":{"hostName":"absolnet.sharepoint.com"}}
-NEXT="https://graph.microsoft.com/v1.0/sites/oneDrive.getAllSites?$skiptoken=ABC"
+NEXT="https://graph.microsoft.com/v1.0/sites/getAllSites?$skiptoken=ABC"
 
 class Tokens:
     def access_token_for_tenant(self, *, microsoft_tenant_id):
@@ -59,3 +59,10 @@ def test_daily_scan_never_reenables_disabled_or_changes_existing_switch(tmp_path
     d2,r,tr2=make(tmp_path,[{"value":[SITE]}])
     d2.run()
     assert r.sites()[0]["enabled"]==1
+
+def test_site_outside_configured_aot_sharepoint_hosts_denied(tmp_path):
+    foreign={**SITE,"webUrl":"https://unknown.sharepoint.com/sites/Other"}
+    d,r,tr=make(tmp_path,[{"value":[foreign]}])
+    with pytest.raises(Exception): d.run()
+    assert r.sites()==[]
+    assert r.last_discovery()["success"]==0
