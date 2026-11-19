@@ -20,16 +20,16 @@ One reusable Jason workload identity for every AOT-owned SharePoint site; site-l
 - Representative smoke: JSON playbook store/document tests, Autotask ticket create/update, release-manager gate.
 - `docker compose config --quiet` on isolated sidecar: passed with inert placeholder environment.
 - Grafana target-only installer now supports read-only preflight and reviewed exact-SHA application, verified datasource/dashboard UID and existing Jason folder. No running Grafana service is restarted by its API workflow.
-- Current host recheck (2026-11-19): the dedicated reader AppRole and Owner-approved ACL remain valid. In Jason’s existing runtime image, the exact candidate preflight verified the OpenBao certificate/private-key match, app-only token tenant/application/service-principal claims including application `Sites.Read.All`, and a complete Graph enumeration of 51 sites. The observed host counts were `absolnet.sharepoint.com` (50) and `absolnet-web.sharepoint.com` (1); the allowlist is restricted to those exact hosts. No site names or document contents were emitted, and no boundary row was written. The validated SharePoint boundary remains absent; the Grafana authenticated-user proxy header remains disabled; governed SharePoint runtime capabilities remain inactive. No production boundary, Grafana, runtime or timer state has changed.
+- Current host recheck (2026-11-19): the dedicated reader AppRole and Owner-approved ACL remain valid. In Jason’s existing runtime image, the exact candidate preflight verified the OpenBao certificate/private-key match, app-only token tenant/application/service-principal claims including application `Sites.Read.All`, and a complete Graph enumeration of 51 sites. The observed host counts were `absolnet.sharepoint.com` (50) and `absolnet-web.sharepoint.com` (1); the allowlist is restricted to those exact hosts. No site names or document contents were emitted, and no boundary row was written. The production runtime remains healthy on its existing image with the SharePoint profile unset; Grafana’s authenticated-user proxy header is unset; no SharePoint control sidecar is running; and the discovery timer/service are not installed or active. No production boundary, Grafana, runtime or timer state has changed.
 - No production image build or deployment was initiated. No OpenBao credential values were printed or modified.
 
 ## Mandatory missing evidence / hard gates
 1. **Verified:** the OpenBao private key matches Jason’s registered certificate; the app-only token matches the expected tenant, application and service principal and includes application `Sites.Read.All`; authenticated enumeration returned 51 sites across the two exact AOT SharePoint hosts.
 2. **Pending exact Owner approval:** create and read back one validated dedicated client boundary, then exercise the governed reader against AOT Accounting and one second site using metadata-only reads. The current preflight enumerated tenant sites but did not create a durable boundary or read site content.
 3. Governed runtime read catalog, manifest, and Owner-bound invoker are now staged behind an OFF-by-default exact activation profile. Still required: production activation and real MCP read registration/readback, dedicated app credential mounts, persistent site-policy store shared into the runtime, and independent preproduction verification. No provider bypass.
-4. Actual sidecar image build at exact immutable base digest, package SBOM/security scan, isolated network and secret mount review, unprivileged read/write access verification.
+4. **Verified:** the isolated sidecar image was built from the exact candidate against the pinned runtime base with network disabled. Still required before production: package SBOM/security scan, production secret/token mount review, and installed-service read/write permissions.
 5. Grafana authenticated datasource and dashboard live-readback; Owner enable/disable without restart; no unauthorized operator access. Existing Grafana lacks the authenticated-user proxy header setting; enabling it is a **separately approved, controlled Grafana configuration change/restart** with observability rollback and canary, not a side effect of this source change.
-6. A full AOT tenant daily discovery scan with accurate pagination; new site disabled; error handling verified.
+6. **Preproduction verified:** the complete 51-site app-only discovery code path paginated successfully, inserted every site disabled in a temporary registry, and its failure/partial-scan behavior is covered by CI. **Production still required:** install and enable the daily systemd timer, then verify a scheduled run and persistent-site readback.
 7. Negative permissions, content sensitivity and cross-tenant isolation tests; bank-statement location uses same authorized connector.
 8. Production regression and baseline after installation: PMv4 protected ticket processing, services/bundles, and JSON playbook migration unaffected.
 9. PMV3 exact candidate SHA, manifest/scope SHA256, rollback SHA, frozen-state check, signed Owner approval and Release Manager acceptance.
@@ -51,14 +51,22 @@ Integration coordination: #2455
 
 ## Updated isolated preproduction evidence and prerequisites (2026-11-19)
 
-- Built standalone source image from the **unchanged running runtime image**
-  `sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132`
-  using a locally tagged reference that resolved to that exact immutable ID. Preprod image
-  ID: `sha256:d6fd9d5d0ab14bdadc4c57b0cddb4a0b4c3bd38f1e1376b7794cb5b58830fbaa`.
-  This is local build evidence, **not a release-signable production artifact**.
+- On exact integration source SHA `f63f9f748850fc2495001c5d9fcf5c17c4119dd5`,
+  built the isolated site-control image with network access disabled and the pinned
+  base `jason-runtime@sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132`.
+  Candidate image ID: `sha256:817515deee8de80331a9672d3c86f6befab84ffc1ab3912e105d57ddedcefc14`.
+  This image is local preproduction evidence only; it is not deployed.
 - Offline image imports and AOT SharePoint site-state test PASS. Separate ephemeral
   containers shared the same synthetic policy SQLite file and demonstrated
   discovered=disabled, explicitly enabled and immediate runtime readback.
+- On that same source SHA, the read-only app-only preflight and isolated provider
+  canary passed: 51 tenant sites were discovered across the two exact hosts, all
+  51 entries remained disabled in a temporary registry, and metadata-only Graph
+  reads succeeded for AOT Accounting plus one site on the second host. No document
+  content was read and no production boundary was changed. All 16 GitHub workflows
+  passed on the exact source SHA, including the PMv4 read-only gate and SharePoint
+  reader workflow. The candidate timer expression validates as daily at 04:30
+  America/New_York; the production timer/service remain not-found and inactive.
 - Canonical root-protected AppRole provisioner requires `microsoft_graph_sharepoint`
   and its `role-id` / `secret-id` files in
   `/opt/jason/bootstrap/secrets/openbao/microsoft-graph-sharepoint-read-approle`.
