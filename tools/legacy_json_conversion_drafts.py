@@ -27,6 +27,20 @@ ALREADY_DETAILED = frozenset({
     "drmm_recent_alert_reconciliation",
     "windows_time_source",
     "offline_ticket_context_augmentation",
+    "jason_activity_log",
+    "gpt_insights_tech_assist",
+    "unexpected_shutdown",
+    "client_information_request",
+    "low_disk_space",
+    "disk_bad_block_event_7",
+    "post_error_investigation",
+    "vulscan_multi_device_split",
+    "datto_edr_av",
+    "backupiq_endpoint_backup",
+    "vulscan_missing_patch",
+    "dns_agent_diagnostic",
+    "idle_log_off",
+    "security_log_self_heal",
 })
 
 
@@ -38,114 +52,6 @@ ALREADY_DETAILED = frozenset({
 # conversion review but intentionally do not implement complex fanout,
 # provider-output normalization, exact approval policy, or all remediation.
 WORKFLOWS = {
-    "backupiq_endpoint_backup": {
-        "entry": "service.ticket.search", "diagnose": "backup.endpoint.asset.search",
-        "verify": "backup.endpoint.backup.search", "action": "automation.component.execute",
-        "clean": "new_backup_verified", "repair": "agent_reinstall_authorized",
-        "wait": "waiting_for_new_successful_backup",
-        "missing": ["exact cross-provider BackupIQ asset identity", "24h/2h recheck and provider backup outcome correlation", "one-time approved installer job with exact idempotency", "ticket lifecycle and release-slot persistence"],
-    },
-    "datto_edr_av": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.security.status.read",
-        "verify": "endpoint.security.status.read", "action": "automation.component.execute",
-        "clean": "verified_product_and_security_healthy", "repair": "approved_bounded_health_repair",
-        "wait": "reboot_approval_or_device_wait",
-        "missing": ["Python security classifier and cross-provider threat posture", "bounded job continuation and exact approved component arguments", "per-run reboot authorization and 03:30 recheck", "security-incident independent verification and closure"],
-    },
-    "disk_bad_block_event_7": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.alert.history.search",
-        "verify": "endpoint.alert.history.search", "action": "endpoint.alert.resolve",
-        "clean": "removable_classification_verified_no_open_alert",
-        "repair": "exact_removable_media_alert_resolution_approved",
-        "wait": "waiting_approved_storage_diagnostic",
-        "missing": ["authoritative HarddiskX physical-model bus map and SMART evidence", "read-only component-control diagnostics and job persistence", "internal-disk note/escalation and approved client notification", "exact Autotask notes/ticket closing and post-write readback"],
-    },
-    "dns_agent_diagnostic": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.software.search",
-        "verify": "endpoint.alert.search", "action": "automation.component.execute",
-        "clean": "dnsfilter_health_verified", "repair": "approved_bounded_dnsfilter_install_or_reinstall",
-        "wait": "waiting_endpoint_or_job",
-        "missing": ["native DNSFilter site/agent corroboration and policy-specific exclusions", "approved diagnostic-vs-remediation component selection", "bounded execution and job-output state", "DNS and service stability interval before exact alert/ticket closure"],
-    },
-    "gpt_insights_tech_assist": {
-        "entry": "service.ticket.search", "diagnose": "service.ticket.notes.search",
-        "verify": "service.ticket.notes.search", "action": "service.ticket.note.create",
-        "clean": "material_insight_fingerprint_current",
-        "repair": "new_internal_insight_required",
-        "wait": "waiting_material_evidence_change",
-        "missing": ["legacy Python category classification and rendering governed data capability", "same-company CI/endpoint/related-ticket optional reads", "existing note update branch with exact Jason creator attribution", "durable fingerprint and provider note revision audit"],
-    },
-    "idle_log_off": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.alert.search",
-        "verify": "endpoint.alert.search", "action": "automation.component.execute",
-        "clean": "policy_compliance_proven", "repair": "approved_setter_component_required",
-        "wait": "waiting_idletime_monitor_recheck",
-        "missing": ["workstation/site policy scope and approved setter fingerprint", "component terminal job/StdErr bound verification", "post-job monitor propagation and stable observation", "exact alert/ticket completion and output provenance"],
-    },
-    "jason_activity_log": {
-        "entry": "service.ticket.search", "diagnose": "service.ticket.notes.search",
-        "verify": "service.ticket.notes.search", "action": "service.ticket.note.create",
-        "clean": "persisted_activity_chunk_current", "repair": "new_jason_activity_chunk_required",
-        "wait": "waiting_new_activity_transition",
-        "missing": ["governed read of persisted autonomy_ticket_activity state", "stable append-only chunk renderer/rollover and deterministic dedup", "approved Jason creator/visibility protected note update path", "full before/after revision SHA evidence and provider readback"],
-    },
-    "low_disk_space": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.audit.read",
-        "verify": "endpoint.audit.read", "action": "automation.component.execute",
-        "clean": "free_space_and_alert_recovered",
-        "repair": "approved_bounded_cleanup_warranted",
-        "wait": "waiting_monitor_propagation_or_device",
-        "missing": ["protected server/workstation role and volume eligibility", "safe file/object allowlist and dry-run candidate collection", "bounded cleanup component arguments and job state", "independent post-cleanup disk/monitor and ticket readback"],
-    },
-    "post_error_investigation": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.alert.history.search",
-        "verify": "endpoint.alert.history.search", "action": "endpoint.alert.resolve",
-        "clean": "isolated_healthy_post_alert_already_resolved",
-        "repair": "isolated_workstation_exact_post_alert_resolution",
-        "wait": "waiting_current_health_evidence",
-        "missing": ["WHEA/storage/BSOD recurrence and protected hypervisor detection", "exact alert resolution evidence and negative hardware-risk classification", "follow-up Autotask internal-note and ticket closure", "role-specific protected human-review escalation"],
-    },
-    "security_log_self_heal": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.alert.search",
-        "verify": "endpoint.alert.history.search", "action": "automation.component.execute",
-        "clean": "security_event_log_healthy",
-        "repair": "approved_security_log_self_heal_needed",
-        "wait": "waiting_healthy_quick_test_or_job",
-        "missing": ["read-only Quick Test component and job-output parser", "one time sensitive event-log mutation with SOC authorization", "independent repeated Quick Test and exact alert closure", "same-device/time/technique side-effect ticket correlation"],
-    },
-    "unexpected_shutdown": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.alert.history.search",
-        "verify": "service.ticket.read", "action": "service.ticket.update",
-        "clean": "clean_site_correlated_ticket_already_complete",
-        "repair": "site_correlated_workstation_clean_closure",
-        "wait": "waiting_site_peer_health",
-        "missing": ["physical-site peer grouping and timing threshold ±15 minutes", "VM exclusion and per-device storage/BSOD/WHEA verifier", "bounded endpoint PowerShell event extraction", "note/alert independent closure and protected device escalation"],
-    },
-    "vulscan_missing_patch": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.patch.search",
-        "verify": "endpoint.patch.search", "action": "automation.component.execute",
-        "clean": "exact_kb_installed_or_superseded",
-        "repair": "approved_patch_stack_repair_warranted",
-        "wait": "waiting_normal_patch_window_or_approval",
-        "missing": ["exact KB approval/window and device-patch identity", "multi-device ticket split prerequisite", "user impact/reboot approval and bounded WU repair flags", "exact KB/build/supersedence and ticket verification"],
-    },
-    "vulscan_multi_device_split": {
-        "entry": "service.ticket.search", "diagnose": "service.configuration.search",
-        "verify": "service.ticket.search", "action": "service.ticket.create",
-        "clean": "all_exact_child_tickets_already_exist",
-        "repair": "all_nodes_same_company_resolved_and_split_approved",
-        "wait": "waiting_source_split_reconciliation",
-        "missing": ["bounded Affected Nodes parser and exact CI/DRMM lookup", "multi-child fanout and idempotent create receipts", "one-device child lineage and source completion", "source work ownership and post-write readback"],
-    },
-    "client_information_request": {
-        "entry": "service.ticket.read", "diagnose": "service.contact.read",
-        "verify": "service.notification.history.search",
-        "action": "service.ticket.client.notification.create",
-        "clean": "approved_question_already_sent_and_verified",
-        "repair": "one_approved_missing_information_question_ready",
-        "wait": "waiting_verified_client_reply",
-        "missing": ["all 120 source-approved question template/gap mappings", "same-company contact identity and approved profile", "one-use external notification with provider receipt", "verified newer matching client reply and originating playbook resume"],
-    },
 }
 
 
@@ -179,7 +85,7 @@ def _verification(step_id: str, capability: str, next_step: str) -> dict:
 def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
     identifier = row["id"]
     item = WORKFLOWS[identifier]
-    caps = [item[k] for k in ("entry", "diagnose", "verify", "action")]
+    caps = [item[k] for k in ("entry", "diagnose", "verify", "action") if item[k]]
     unavailable = sorted(set(caps) - snapshot)
     if unavailable:
         raise ValueError(f"{identifier}:UNREGISTERED_CAPABILITIES:{unavailable}")
@@ -196,7 +102,7 @@ def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
               _fact("server_verified_diagnostic_read_arguments"), "classification_gate"),
         _decision("classification_gate", "verified_legacy_disposition", [
             (item["clean"], "verified_no_action_gate"),
-            (item["repair"], "exact_authority_gate"),
+            (item["repair"], "exact_authority_gate" if item["action"] else "human_review"),
             (item["wait"], "wait_for_source"),
         ], "human_review"),
         _decision("verified_no_action_gate", "authoritative_healthy_state_proven",
@@ -206,13 +112,15 @@ def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
         _decision("approved_action_args_gate", "server_action_arguments_exact_and_authorized",
                   [(True, "propose_approved_action")], "human_review"),
         {
-            "id": "propose_approved_action", "type": "remediation",
-            "capability": item["action"],
-            "arguments": _fact("server_verified_exact_action_arguments"),
-            "approval_classification": "modifying",
-            "approval_required": True,
-            "retry": {"max_attempts": 1},
-            "verification_step": "read_independent_verification",
+            "id": "propose_approved_action",
+            "type": "remediation" if item["action"] else "human_review",
+            **({"capability": item["action"],
+                "arguments": _fact("server_verified_exact_action_arguments"),
+                "approval_classification": "modifying",
+                "approval_required": True,
+                "retry": {"max_attempts": 1},
+                "verification_step": "read_independent_verification"}
+               if item["action"] else {}),
         },
         _verification("read_independent_verification", item["verify"],
                       "independent_verification_gate"),
@@ -226,6 +134,17 @@ def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
         {"id": "bounded_wait_terminal", "type": "human_review"},
         {"id": "human_review", "type": "human_review"},
     ]
+    if item["action"] is None:
+        # Original authoritative registry denies the requested mutation.
+        # Remove the entire unreachable action chain (rather than leaving
+        # phantom executable capabilities in an inactive JSON artifact).
+        blocked_action_steps = {
+            "exact_authority_gate", "approved_action_args_gate",
+            "propose_approved_action", "read_independent_verification",
+            "independent_verification_gate", "remediation_verified",
+        }
+        steps = [step for step in steps
+                 if step["id"] not in blocked_action_steps]
     version = str(row["version"]) + "-migration.1"
     # The legacy registry does not carry target_type. Preserve an explicit
     # declaration from the source; where absent, use a narrowly reviewed
@@ -285,7 +204,7 @@ def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
             "activation": "shadow",
             "allowed_capabilities": sorted(set(caps)),
             "disruptive_branches": [],
-            "approval_bound_branches": ["propose_approved_action"],
+            "approval_bound_branches": (["propose_approved_action"] if item["action"] else []),
         },
         "migration": {
             "source_conversion": "structural_partial_not_accepted",
@@ -300,7 +219,10 @@ def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
                 "waiting": item["wait"],
                 "all_else": "human_review",
             },
-            "missing_or_unimplemented_parity": item["missing"],
+            "missing_or_unimplemented_parity": item["missing"] + (
+                ["Legacy registry does not authorize the requested mutation; this action is blocked pending separately governed source correction and authority."]
+                if item["action"] is None else []
+            ),
             "additional_required_compatibility": [
                 "trusted provider result-to-fact normalizer for each step",
                 "exact capability argument schema and approved source identity",
