@@ -24,6 +24,7 @@ ACTION="pmv4-e-oneowner-six-unit-replacement-and-retirement-v1"
 EXPECTED_PRIOR_ROOT_POLICY="4c9db0f4bbd12e1892b480a759d2d89b9749b84187eb2a753a260ecf326b7953"
 EXPECTED_FREEZE="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 ROOT_TO_INSTALL=(
+    "config/production-desired-state.json",
     "tools/pmv4_e_unit_admission.py",
     "tools/pmv4_e_scheduler_parity.py",
     "tools/pmv3_work_engine.py",
@@ -40,6 +41,7 @@ ROOT_TO_INSTALL=(
     "tools/pmv4_e_native_systemd_adapter.py",
     "tools/pmv4_e_systemd_root_ops.py",
     "tools/pmv4_e_native_backend_bridge.py",
+    "tools/pmv4_e_native_release_contract.py",
 )
 ROOT_COMPONENTS_PREINSTALLED=(
     "tools/independent_component_release.py",

@@ -132,7 +132,7 @@ def test_sealed_root_imports_exact_packet_with_no_developer_checkout(tmp_path):
     hashes=bundle_hashes()
     assert "tools/pmv4_e_exact_release_packet.py" in hashes
     b.stage(source_sha="b"*40,exact_hashes=hashes)
-    assert len(hashes)==47
+    assert len(hashes)==len(packet.REVIEWED_PATHS)
     script=(
         "from pathlib import Path\n"
         "import sys\n"
@@ -142,7 +142,7 @@ def test_sealed_root_imports_exact_packet_with_no_developer_checkout(tmp_path):
         "from tools import pmv4_e_exact_release_packet as packet\n"
         "assert Path(stage.__file__).resolve()==root/'tools/pmv4_e_root_trust_stage.py'\n"
         "assert Path(packet.__file__).resolve()==root/'tools/pmv4_e_exact_release_packet.py'\n"
-        "assert len(packet.REVIEWED_PATHS)==47\n"
+        "assert 'tools/pmv4_e_native_release_contract.py' in packet.REVIEWED_PATHS\n"
     )
     # Root can bypass 0555 permissions: -B is essential to prevent __pycache__
     # creation inside the reviewed sealed tree during native execution.
