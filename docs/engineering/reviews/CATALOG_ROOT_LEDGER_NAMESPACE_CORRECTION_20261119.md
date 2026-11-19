@@ -8,6 +8,10 @@ This was not an Entra failure. The original governed root catalog installer writ
 
 The first exact Owner signed runtime/MCP approval (`owner-mcp-64357f084a4d414ea82ea312017347c1`) remained unconsumed but expired 2026-11-19 17:41:57Z. It cannot authorize production after that time or be altered/replayed.
 
+## Independent native production-breaker recovery (verified)
+
+At 2026-11-19T18:02:47Z, the separate root drift watchdog opened the release breaker on an `undeclared_running_container` observation. Later independent drift returned PASS and zero problems; neither passing drift nor source CI by itself closed the breaker. The existing **unmodified LKG-pinned** `release_breaker_recovery_manager.py` (SHA256 `0da723693829172171ae663a5f65e0c25864887f551a7dcb45ef747ee8a568c8`) was run against its exact Git revision `d1b8c196dadd4b672ec8ba47075f27bb61c98d63`. It required three distinct clean root drift observations (`18:19:54Z`, `18:21:55Z`, `18:22:55Z`), consumed one bounded native revalidation request, and recorded `root_verified_closed`. Root independently revalidated revision `d1b8c196...` and set the protected breaker `closed` at **18:23:58Z**. The original production freeze SHA, runtime/MCP image pair, and PMv4 Ticket/Runbook processes remained unchanged. Historical incident evidence and recovery ledger were preserved.
+
 ## Narrow production correction
 
 Exactly three root-owned catalog-only trust files are proposed for a separately approved, one-use installation:
