@@ -1295,6 +1295,24 @@ def _catalog_scoped_installed_source_path(trusted: Path, relative: str) -> Path:
     return fixed.get(relative, trusted / relative)
 
 
+CATALOG_SCOPED_ORIGINAL_ROOT_SOURCE = "01ba71c54d9dd0391734b16a92d0b292fc457ae9"
+CATALOG_SCOPED_PINNED_RUNNER_SHA256 = "b194084a9a54fe024ae89784e2e75d54a26e1369ed65d824abed4ce958f58edf"
+
+
+def _catalog_scoped_trusted_source_ref(relative: str, requested_main_sha: str) -> str:
+    """Use independently approved original root source for its unchanged native runner."""
+    original = relative == "tools/release_manager_host_runner.py"
+    sha = CATALOG_SCOPED_ORIGINAL_ROOT_SOURCE if original else requested_main_sha
+    return sha + ":" + relative
+
+
+def _catalog_scoped_trusted_file_size_limit(relative: str) -> int:
+    """Only the immutable native release-runner blob exceeds the default guard."""
+    if relative == "tools/release_manager_host_runner.py":
+        return 524288
+    return 262144
+
+
 def _trusted_catalog_scoped_promotion_module(source_revision: str):
     """Never execute root privilege from a mutable checkout or unpinned bundle."""
     trusted = Path("/usr/local/lib/jason/catalog-scoped-promotion")
@@ -1339,11 +1357,16 @@ def _trusted_catalog_scoped_promotion_module(source_revision: str):
         meta = path.lstat()
         if (path.is_symlink() or not stat.S_ISREG(meta.st_mode)
                 or meta.st_uid != 0 or (meta.st_mode & 0o022)
-                or meta.st_nlink != 1 or meta.st_size > 262144):
+                or meta.st_nlink != 1 or
+                meta.st_size > _catalog_scoped_trusted_file_size_limit(relative)):
             raise HostReconcileError("CATALOG_SCOPED_TRUSTED_FILE_INVALID")
         expected = subprocess.check_output(
-            _git("show", source_revision + ":" + relative), timeout=15,
+            _git("show", _catalog_scoped_trusted_source_ref(relative, source_revision)),
+            timeout=15,
         )
+        if relative == "tools/release_manager_host_runner.py":
+            if hashlib.sha256(expected).hexdigest() != CATALOG_SCOPED_PINNED_RUNNER_SHA256:
+                raise HostReconcileError("CATALOG_SCOPED_ORIGINAL_RUNNER_SOURCE_DRIFT")
         if hashlib.sha256(path.read_bytes()).digest() != hashlib.sha256(expected).digest():
             raise HostReconcileError("CATALOG_SCOPED_TRUSTED_SOURCE_DRIFT")
     # The root worker processes one request per process. Never inherit an
