@@ -150,18 +150,21 @@ def test_root_git_read_uses_only_exact_aot_worktree_safe_directory(monkeypatch):
                         "-C", str(ins.REPO), "rev-parse", "HEAD"]
 
 
-def test_source_object_cache_read_is_exact_safe_directory(monkeypatch):
+def test_source_object_cache_read_is_exact_safe_directory(monkeypatch, tmp_path):
     import json
     from types import SimpleNamespace
     manifest = json.loads((ins.REPO / "config/scoped-backport-m365-release.json").read_text())
     calls = []
+    cache = tmp_path / "reviewed-source-cache"
+    cache.mkdir()
+    (cache / ".git").mkdir()
+    monkeypatch.setattr(ins, "SOURCE_CACHE", cache)
     monkeypatch.setattr(ins, "git", lambda *args: pytest.fail("must not fetch in this readback"))
     def fake_run(argv, **kwargs):
         calls.append(argv)
         return SimpleNamespace(returncode=0)
     monkeypatch.setattr(ins.subprocess, "run", fake_run)
     ins.verified_release_objects_available("1" * 40, "2" * 40)
-    cache = Path("/home/al/.local/lib/jason/engineering-source-repo")
     assert len(calls) == 5
     assert all(argv[:5] == ["git", "-c", f"safe.directory={cache}",
                             "-C", str(cache)] for argv in calls)

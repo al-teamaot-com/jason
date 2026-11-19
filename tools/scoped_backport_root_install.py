@@ -28,6 +28,7 @@ from typing import Any
 from uuid import uuid4
 
 REPO = Path(__file__).resolve().parents[1]
+SOURCE_CACHE = Path("/home/al/.local/lib/jason/engineering-source-repo")
 sys.path.insert(0, str(REPO))
 
 
@@ -137,7 +138,7 @@ def source_tree(sha: str, reviewed_ci_sha: str) -> dict[str, bytes]:
 
 def verified_release_objects_available(sha: str, reviewed_ci_sha: str) -> None:
     """Source evidence must already be prefetched by unprivileged engineering."""
-    cache = Path("/home/al/.local/lib/jason/engineering-source-repo")
+    cache = SOURCE_CACHE
     if cache.is_symlink() or not (cache / ".git").exists():
         deny("INSTALL_REVIEWED_SOURCE_CACHE_UNAVAILABLE")
     manifest = json.loads((REPO / "config/scoped-backport-m365-release.json").read_text())
