@@ -6,9 +6,11 @@ on:
       - "docs/playbooks/json/migration/**"
       - "implementation/autonomous_remediation/playbook_runtime.py"
       - "implementation/autonomous_remediation/playbook_document.py"
+      - "implementation/autonomous_remediation/playbook_ticket_evidence.py"
       - "implementation/autonomous_remediation/playbook_registry.json"
       - "tests/test_legacy_json_*.py"
       - "tests/test_json_playbook_isolated_trace.py"
+      - "tests/test_playbook_ticket_evidence.py"
       - "tools/json_playbook_isolated_trace.py"
       - "tools/legacy_json_migration_inventory.py"
       - ".github/workflows/legacy-json-migration-source.yml"
@@ -43,6 +45,7 @@ jobs:
             tests/test_legacy_json_migration_candidate.py \
             tests/test_legacy_json_behavioral_parity.py \
             tests/test_json_playbook_isolated_trace.py \
+            tests/test_playbook_ticket_evidence.py \
             implementation/autonomous_remediation/test_json_playbook_document.py \
             implementation/autonomous_remediation/test_json_playbook_store.py
       - name: Verify immutable synthetic shadow-trace evidence
