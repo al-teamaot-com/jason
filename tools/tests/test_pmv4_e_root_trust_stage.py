@@ -1,4 +1,4 @@
-"""Signed-root-only inert trust stage: exact 46-file source and rollback."""
+"""Signed-root-only inert trust stage: exact 47-file source and rollback."""
 from __future__ import annotations
 
 from hashlib import sha256
@@ -122,3 +122,59 @@ def test_install_root_can_never_be_mutated_from_chat_or_ambient_shell():
     for forbidden in ("subprocess.Popen(","os.system(","shell=True",
                       "systemctl restart","docker restart","requests.post("):
         assert forbidden not in source
+
+
+def test_sealed_root_imports_exact_packet_with_no_developer_checkout(tmp_path):
+    """No ambient project PYTHONPATH may silently satisfy a missing root import."""
+    import subprocess
+    import sys
+    b=stager(tmp_path)
+    hashes=bundle_hashes()
+    assert "tools/pmv4_e_exact_release_packet.py" in hashes
+    b.stage(source_sha="b"*40,exact_hashes=hashes)
+    assert len(hashes)==47
+    script=(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "root=Path(sys.argv[1])\n"
+        "sys.path.insert(0,str(root))\n"
+        "from tools import pmv4_e_root_trust_stage as stage\n"
+        "from tools import pmv4_e_exact_release_packet as packet\n"
+        "assert Path(stage.__file__).resolve()==root/'tools/pmv4_e_root_trust_stage.py'\n"
+        "assert Path(packet.__file__).resolve()==root/'tools/pmv4_e_exact_release_packet.py'\n"
+        "assert len(packet.REVIEWED_PATHS)==47\n"
+    )
+    # Root can bypass 0555 permissions: -B is essential to prevent __pycache__
+    # creation inside the reviewed sealed tree during native execution.
+    result=subprocess.run([sys.executable,"-I","-B","-c",script,str(b.target)],
+                          cwd=tmp_path,capture_output=True,text=True,check=False,
+                          timeout=15)
+    assert result.returncode==0, result.stderr
+    assert not any(x.name=="__pycache__" for x in b.target.rglob("*"))
+    b.recover_inert_stage(hashes)
+    assert not b.target.exists()
+
+
+def test_reviewed_root_sources_include_all_local_python_dependencies():
+    """Fail when a future staged Python file imports another unpinned local file."""
+    import ast
+    root=packet.ROOT
+    reviewed=set(packet.REVIEWED_PATHS)
+    for relative in packet.ROOT_TO_INSTALL:
+        parsed=ast.parse((root/relative).read_text())
+        for node in ast.walk(parsed):
+            imports=[]
+            if isinstance(node,ast.ImportFrom):
+                if node.module=="tools":
+                    imports.extend("tools/"+alias.name+".py" for alias in node.names)
+                elif node.module and node.module.startswith("tools."):
+                    imports.append(node.module.replace(".","/")+".py")
+                elif node.module and node.module.startswith("implementation."):
+                    imports.append(node.module.replace(".","/")+".py")
+            elif isinstance(node,ast.Import):
+                imports.extend(alias.name.replace(".","/")+".py"
+                               for alias in node.names
+                               if alias.name.startswith(("tools.","implementation.")))
+            for path in imports:
+                if (root/path).is_file():
+                    assert path in reviewed,(relative,path)
