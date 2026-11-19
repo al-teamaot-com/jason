@@ -7,6 +7,8 @@ on:
       - 'implementation/connectors/microsoft_graph/site_discovery.py'
       - 'implementation/connectors/microsoft_graph/site_gated_connector.py'
       - 'implementation/connectors/microsoft_graph/site_access_admin.py'
+      - 'implementation/connectors/microsoft_graph/aot_site_document_policy.py'
+      - 'implementation/connectors/microsoft_graph/test_aot_site_document_policy.py'
       - 'implementation/connectors/microsoft_graph/site_control_http.py'
       - 'implementation/connectors/microsoft_graph/test_site_control_http.py'
       - 'tools/sharepoint_site_access_service.py'
@@ -32,6 +34,8 @@ on:
       - 'implementation/connectors/microsoft_graph/site_discovery.py'
       - 'implementation/connectors/microsoft_graph/site_gated_connector.py'
       - 'implementation/connectors/microsoft_graph/site_access_admin.py'
+      - 'implementation/connectors/microsoft_graph/aot_site_document_policy.py'
+      - 'implementation/connectors/microsoft_graph/test_aot_site_document_policy.py'
       - 'implementation/connectors/microsoft_graph/site_control_http.py'
       - 'implementation/connectors/microsoft_graph/test_site_control_http.py'
       - 'tools/sharepoint_site_access_service.py'
@@ -72,10 +76,11 @@ jobs:
           python -m py_compile implementation/connectors/microsoft_graph/site_discovery.py
           python -m py_compile implementation/connectors/microsoft_graph/site_gated_connector.py
           python -m py_compile implementation/connectors/microsoft_graph/site_access_admin.py
+          python -m py_compile implementation/connectors/microsoft_graph/aot_site_document_policy.py
           python -m py_compile implementation/connectors/microsoft_graph/site_control_http.py
           python -m py_compile tools/sharepoint_site_access_service.py
           python -m py_compile implementation/runtime_service/src/jason_runtime/microsoft_sharepoint.py
-          python -m pytest -q implementation/connectors/microsoft_graph/test_site_access_registry.py implementation/connectors/microsoft_graph/test_site_discovery.py implementation/connectors/microsoft_graph/test_site_gated_connector.py implementation/connectors/microsoft_graph/test_site_access_admin.py implementation/connectors/microsoft_graph/test_site_control_http.py implementation/connectors/microsoft_graph/test_sharepoint_reader.py implementation/connectors/microsoft_graph/test_sharepoint_connector.py implementation/connectors/microsoft_graph/test_sharepoint_manifest.py implementation/connectors/microsoft_graph/test_aot_document_policy.py implementation/runtime_service/tests/test_microsoft_sharepoint.py tools/tests/test_provider_secret_provision.py
+          python -m pytest -q implementation/connectors/microsoft_graph/test_site_access_registry.py implementation/connectors/microsoft_graph/test_site_discovery.py implementation/connectors/microsoft_graph/test_site_gated_connector.py implementation/connectors/microsoft_graph/test_site_access_admin.py implementation/connectors/microsoft_graph/test_aot_site_document_policy.py implementation/connectors/microsoft_graph/test_site_control_http.py implementation/connectors/microsoft_graph/test_sharepoint_reader.py implementation/connectors/microsoft_graph/test_sharepoint_connector.py implementation/connectors/microsoft_graph/test_sharepoint_manifest.py implementation/connectors/microsoft_graph/test_aot_document_policy.py implementation/runtime_service/tests/test_microsoft_sharepoint.py tools/tests/test_provider_secret_provision.py
       - name: Verify no-network lifecycle preflight
         run: |
           python tools/provider_secret.py create microsoft_graph_sharepoint --check-only > /tmp/check.json

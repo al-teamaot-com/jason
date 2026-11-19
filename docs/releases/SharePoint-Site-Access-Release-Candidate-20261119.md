@@ -14,6 +14,7 @@ One reusable Jason workload identity for every AOT-owned SharePoint site; site-l
 - No protected ticket core, Autotask catalog write path or JSON playbook migration implementation files changed in the site-control diff. Full production non-regression proof is still required.
 
 ## Verification completed in engineering
+- Unactivated reusable reader now performs a mandatory site policy check internally when a trusted site access registry is injected; existing exact-file workload remains unchanged. New AOT site-scoped workload profile may enumerate only when backed by a validated service binding and enabled site. Site browsing does not grant unreviewed financial document content release.
 - Unit tests: site discovery pagination, unknown/cross-tenant denial, new-sites-disabled, retained switches, atomic scan failure, manual site toggles with optimistic revisions, signed Grafana proxy header denial and authorized readback.
 - Focused Jason runtime SharePoint composition tests.
 - Representative smoke: JSON playbook store/document tests, Autotask ticket create/update, release-manager gate.
