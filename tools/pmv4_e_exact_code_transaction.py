@@ -198,12 +198,35 @@ class StageECodeTransaction:
             need(digest(raw)==expected,
                  "REVIEWED_SOURCE_BYTES_CHANGED")
             bodies[name]=raw
+        # The repository policy is a SOURCE scope proof, never the bytes
+        # permitted to overwrite a separately root-controlled policy.
+        # In production those two inputs can legitimately differ in
+        # protected container allowances. Derive the minimal reviewed
+        # six-unit delta from the ACTUAL exact root-owned old policy.
         source_policy=safe_json(read_exact(self.source_root/POLICY))
-        candidate_policy=parity.plan_exact_unit_delta(source_policy)
-        need(candidate_policy["candidate_policy_sha256"]==
+        source_plan=parity.plan_exact_unit_delta(source_policy)
+        need(source_plan["candidate_policy_sha256"]==
              scope["source_candidate_policy_sha256"],
              "REVIEWED_POLICY_DIGEST_MISMATCH")
-        bodies[POLICY]=parity.canon(candidate_policy["candidate_policy"])
+        root_prior=read_exact(self.targets[POLICY])
+        need(digest(root_prior)==self.prior_sha256[POLICY],
+             "ORIGINAL_ROOT_POLICY_BYTES_CHANGED")
+        root_policy=safe_json(root_prior)
+        root_plan=parity.plan_exact_unit_delta(root_policy)
+        for field in ("retire_user_units","retire_system_units",
+                      "add_user_units","add_system_units"):
+            need(root_plan[field]==source_plan[field],
+                 "ROOT_AND_REVIEWED_UNIT_DELTA_MISMATCH")
+        allowed_changes=frozenset({
+            "required_user_units","required_system_units",
+            "allowed_user_units","allowed_system_units",
+        })
+        before=root_plan["candidate_policy"]
+        need(set(before)==set(root_policy)
+             and all(before[k]==root_policy[k]
+                     for k in root_policy if k not in allowed_changes),
+             "UNREVIEWED_ROOT_POLICY_FIELDS_CHANGED")
+        bodies[POLICY]=parity.canon(before)
         return bodies
 
     def prepare(self,*,candidate:str,scope:Mapping[str,Any])->dict[str,Any]:

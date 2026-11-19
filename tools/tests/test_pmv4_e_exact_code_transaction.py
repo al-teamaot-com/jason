@@ -41,7 +41,9 @@ def sample(tmp_path):
         # A production file has verified old SHA, but test needs a synthetic
         # independently sealed old baseline. Caller cannot substitute hashes
         # in production mode.
-        target.write_bytes(("legacy-exact-before:"+name).encode("utf-8"))
+        target.write_bytes(
+            (source/code.POLICY).read_bytes() if name==code.POLICY
+            else ("legacy-exact-before:"+name).encode("utf-8"))
         target.chmod(0o600)
         targets[name]=target
         oldhashes[name]=sha256(target.read_bytes()).hexdigest()
@@ -161,3 +163,45 @@ def test_snapshot_not_accidentally_production_authority(tmp_path):
     assert record["code_mutations"] is False
     assert not record.get("owner_approval_issued",False)
     assert not record.get("native_release_accepted",False)
+
+
+def test_protected_root_policy_approvals_preserved_not_replaced_from_source(
+        tmp_path):
+    c,state,targets,scope=sample(tmp_path)
+    p=targets[code.POLICY]
+    original=json.loads(p.read_bytes())
+    # A protected policy can include separate historical monitoring and
+    # container allowances absent from the public source copy.
+    allowed=list(original.get("allowed_running_containers") or [])
+    allowed.append("aot-root-only-existing-protected-monitor")
+    original["allowed_running_containers"]=sorted(set(allowed))
+    raw=code.parity.canon(original)
+    p.write_bytes(raw)
+    c.prior_sha256[code.POLICY]=code.digest(raw)
+    c.prepare(candidate="b"*40,scope=scope)
+    c.apply(candidate="b"*40,scope=scope)
+    new=json.loads(p.read_bytes())
+    assert new["allowed_running_containers"]==original["allowed_running_containers"]
+    assert new["schema_version"]==original["schema_version"]
+    assert new["required_system_units"]!=original["required_system_units"]
+    assert new["required_user_units"]!=original["required_user_units"]
+    c.restore(candidate="b"*40,scope=scope)
+    assert p.read_bytes()==raw
+
+
+def test_root_only_legacy_unit_mismatch_rejected_before_writing_snapshot(
+        tmp_path):
+    c,state,targets,scope=sample(tmp_path)
+    p=targets[code.POLICY]
+    original=json.loads(p.read_bytes())
+    original["required_system_units"]=[
+        x for x in original["required_system_units"]
+        if x!="jason-release-host-reconcile.path"
+    ]
+    raw=code.parity.canon(original)
+    p.write_bytes(raw)
+    c.prior_sha256[code.POLICY]=code.digest(raw)
+    with pytest.raises((code.StageECodeTransactionDenied,
+                        code.parity.PMv4SchedulingDenied)):
+        c.prepare(candidate="b"*40,scope=scope)
+    assert list(c.before_root.iterdir())==[]
