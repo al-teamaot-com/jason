@@ -352,6 +352,48 @@ class ComponentReleaseController:
         self.verify_component = verify_component
         self._test_key = trusted_public_key
 
+    def _resource_name(self, manifest: Mapping[str, Any]) -> str:
+        """Default Compose observation identity; specialized modes must be typed."""
+        return manifest["compose_project"]
+
+    def _previous_bundle(self, releases: Path, rollback: str) -> Path | None:
+        """Preserve Compose rollback; a typed host adapter may use a physical before-image."""
+        return None if rollback == ZERO else releases / rollback
+
+    def _validate_recovery_manifest(self, manifest: Mapping[str, Any]) -> None:
+        validate_manifest(manifest)
+
+    def _validate_recovery_previous(
+        self, previous: Path, rollback: str, component: str,
+    ) -> Mapping[str, Any]:
+        prior = _load_json(trusted_file(
+            previous / "manifest.json", production=self.production,
+        ))
+        validate_manifest(prior)
+        if prior["candidate_sha"] != rollback or prior["component_id"] != component:
+            raise ComponentReleaseDenied("COMPONENT_RECOVERY_PRIOR_INVALID")
+        self._bundle(prior)
+        return prior
+
+    def _restore_recovery_pointer(
+        self, active: Path, *, component: str, candidate: str,
+        rollback: str, active_sha: str | None,
+        prior: Mapping[str, Any] | None,
+    ) -> None:
+        active_path = active / (component + ".json")
+        if rollback == ZERO and (active_path.exists() or active_path.is_symlink()):
+            if active_sha != candidate:
+                raise ComponentReleaseDenied("COMPONENT_RECOVERY_ACTIVE_POINTER_MISMATCH")
+            active_path.unlink()
+        elif rollback != ZERO and active_sha == candidate:
+            if prior is None:
+                raise ComponentReleaseDenied("COMPONENT_RECOVERY_PRIOR_INVALID")
+            _replace_json(active_path, {
+                "component_id": component,
+                "candidate_sha": rollback,
+                "manifest_sha256": digest(canonical(prior)),
+            })
+
     def _paths(self) -> tuple[Path, Path, Path, Path]:
         trusted_dir(self.root, production=self.production)
         releases = self.root / "releases"
@@ -447,7 +489,7 @@ class ComponentReleaseController:
         rollback = manifest["rollback_sha"]
         if prev != (None if rollback == ZERO else rollback):
             raise ComponentReleaseDenied("COMPONENT_ROLLBACK_NOT_CURRENT")
-        observed = self.observe_component(manifest["compose_project"])
+        observed = self.observe_component(self._resource_name(manifest))
         if observed != prev:
             raise ComponentReleaseDenied("COMPONENT_INSTALLED_BASELINE_MISMATCH")
         bundle = self._bundle(manifest)
@@ -504,7 +546,7 @@ class ComponentReleaseController:
                 verified, bundle, baseline = self.preflight(manifest, signed_approval)
                 _, receipts, _, _ = self._paths()
                 receipt = receipts / ("owner-" + verified.approval_id + ".json")
-                previous = None if verified.rollback_sha == ZERO else self.root / "releases" / verified.rollback_sha
+                previous = self._previous_bundle(self.root / "releases", verified.rollback_sha)
                 journal: dict[str, Any] = {
                     "schema_version": "1.0", "state": "started",
                     "component_id": verified.component_id, "release_id": release_id(verified.candidate_sha),
@@ -522,7 +564,7 @@ class ComponentReleaseController:
                     with self.freeze_transaction(manifest["freeze_sha256"]):
                         try:
                             self.activate_component(bundle, manifest)
-                            if self.observe_component(manifest["compose_project"]) != verified.candidate_sha:
+                            if self.observe_component(self._resource_name(manifest)) != verified.candidate_sha:
                                 raise ComponentReleaseDenied("COMPONENT_ACTIVATION_READBACK_FAILED")
                             if self.verify_component(bundle, manifest) is not True:
                                 raise ComponentReleaseDenied("COMPONENT_ACCEPTANCE_FAILED")
@@ -532,7 +574,7 @@ class ComponentReleaseController:
                         except BaseException:
                             try:
                                 self.restore_component(previous, manifest)
-                                if self.observe_component(manifest["compose_project"]) != (
+                                if self.observe_component(self._resource_name(manifest)) != (
                                     None if previous is None else verified.rollback_sha
                                 ):
                                     raise ComponentReleaseDenied("COMPONENT_ROLLBACK_READBACK_FAILED")
@@ -616,7 +658,7 @@ class ComponentReleaseController:
                 manifest = _load_json(trusted_file(
                     bundle / "manifest.json", production=self.production,
                 ))
-                validate_manifest(manifest)
+                self._validate_recovery_manifest(manifest)
                 if (
                     manifest["candidate_sha"] != candidate
                     or manifest["rollback_sha"] != rollback
@@ -659,22 +701,16 @@ class ComponentReleaseController:
                 active_sha = self._active(component)
                 if active_sha not in (None, rollback, candidate):
                     raise ComponentReleaseDenied("COMPONENT_RECOVERY_ACTIVE_DRIFT")
-                observed = self.observe_component(manifest["compose_project"])
+                observed = self.observe_component(self._resource_name(manifest))
                 if observed not in (None, rollback, candidate):
                     raise ComponentReleaseDenied("COMPONENT_RECOVERY_CONTAINER_DRIFT")
-                previous = None if rollback == ZERO else releases / rollback
-                if previous is not None:
-                    prior = _load_json(trusted_file(
-                        previous / "manifest.json", production=self.production,
-                    ))
-                    validate_manifest(prior)
-                    if prior["candidate_sha"] != rollback or prior["component_id"] != component:
-                        raise ComponentReleaseDenied("COMPONENT_RECOVERY_PRIOR_INVALID")
-                    self._bundle(prior)
+                previous = self._previous_bundle(releases, rollback)
+                prior = (self._validate_recovery_previous(previous, rollback, component)
+                         if previous is not None else None)
                 self._freeze_bytes(manifest)
                 with self.freeze_transaction(manifest["freeze_sha256"]):
                     self.restore_component(previous, manifest)
-                    if self.observe_component(manifest["compose_project"]) != (
+                    if self.observe_component(self._resource_name(manifest)) != (
                         None if rollback == ZERO else rollback
                     ):
                         raise ComponentReleaseDenied("COMPONENT_RECOVERY_ROLLBACK_FAILED")
@@ -683,17 +719,10 @@ class ComponentReleaseController:
                     if not self._same_protected(before, self._verify_protected_snapshot()):
                         raise ComponentReleaseDenied("COMPONENT_RECOVERY_PROTECTED_CHANGED")
                 self._freeze_bytes(manifest)
-                active_path = active / (component + ".json")
-                if rollback == ZERO and (active_path.exists() or active_path.is_symlink()):
-                    if active_sha != candidate:
-                        raise ComponentReleaseDenied("COMPONENT_RECOVERY_ACTIVE_POINTER_MISMATCH")
-                    active_path.unlink()
-                elif rollback != ZERO and active_sha == candidate:
-                    _replace_json(active_path, {
-                        "component_id": component,
-                        "candidate_sha": rollback,
-                        "manifest_sha256": digest(canonical(prior)),
-                    })
+                self._restore_recovery_pointer(
+                    active, component=component, candidate=candidate,
+                    rollback=rollback, active_sha=active_sha, prior=prior,
+                )
                 journal["state"] = "rolled_back"
                 journal["reconciled"] = True
                 journal["finished_at"] = datetime.now(timezone.utc).isoformat()
