@@ -183,7 +183,9 @@ def candidate_policy(baseline: bytes) -> tuple[dict, bytes]:
          and all(isinstance(k, str) for k in allowed + required)
          and all(k not in allowed + required for k in UNIT_NAMES),
          "POLICY_EXACT_FOUR_UNIT_GAP_NOT_PRESENT")
-    need(doc.get("max_stopped_rollback_containers") == 20,
+    # The governed PMv4-D root overlay approved 21 retained rollback images.
+    # Preserve this exact baseline and reject obsolete or relaxed values.
+    need(doc.get("max_stopped_rollback_containers") == 21,
          "POLICY_ROLLBACK_CAPACITY_CHANGED")
     doc["allowed_system_units"] = sorted(allowed + list(UNIT_NAMES))
     return doc, (json.dumps(doc, sort_keys=True, indent=2) + "\n").encode()
@@ -306,7 +308,9 @@ def inspect(*, source_sha: str, reviewed_sha: str) -> dict:
     for unit in UNIT_NAMES:
         p = Path("/etc/systemd/system") / unit
         expected = installed[ROOT_UNIT_DIGESTS[unit]]
-        need(sha256(read_root(p, mode=0o644)).hexdigest() == expected,
+        # The approved root installer deliberately materialized read-only
+        # systemd units as root:root 0444. Enforce the ACTUAL reviewed mode.
+        need(sha256(read_root(p, mode=0o444)).hexdigest() == expected,
              "INSTALLED_UNIT_BYTES_CHANGED")
     upgrade = root_control_upgrade(
         installed, source_sha=source_sha, reviewed_sha=reviewed_sha)
@@ -476,35 +480,49 @@ def listener_action(action: str) -> None:
              "SCOPED_LISTENER_STATE_NOT_" + expected.upper())
 
 
-def read_only_stage_probe() -> str:
-    """No release record, no Owner proof, no container swap, no breaker bypass.
+def ensure_scoped_oneshots_quiescent() -> None:
+    """Never replace root code while either scoped root worker is executing."""
+    for name in ("jason-scoped-backport-requests.service",
+                 "jason-scoped-backport-recovery.service"):
+        result = subprocess.run(["/usr/bin/systemctl", "is-active", name],
+                                capture_output=True, timeout=12)
+        need(result.stdout.strip() == b"inactive",
+             "ROOT_WORKER_NOT_QUIESCENT")
 
-    Assess source, native root attestation, four credential-file ACLs, image
-    provenance and candidate Docker preflights. A closed breaker is still
-    mandatory during the subsequent actual native stage.
+
+def read_only_stage_probe() -> str:
+    """Run ONLY the independently installed root worker's read-only probe.
+
+    Never import caller-worktree code in the root process or treat a
+    developer-owned PYTHONPATH as trusted code. The root-installed handler
+    independently re-verifies pinned SHA policy and all source/images.
     """
+    path = ROOT_INSTALL_DIR / "tools/scoped_backport_native_root.py"
     try:
-        if ROOT_INSTALL_DIR.is_symlink() or ROOT_INSTALL_DIR.stat().st_uid != 0:
-            return "SCOPED_BACKPORT_ROOT_INSTALL_UNTRUSTED"
-        sys.path.insert(0, str(ROOT_INSTALL_DIR))
-        from tools.scoped_backport_native_host import NativeScopedBackportHost
-        from tools.scoped_backport_native_root import (
-            _offer_from_protected_source, _native_preflight,
-            bounded_stage_denial_code,
-        )
-        host = NativeScopedBackportHost()
-        host.enforce_installed_root_trust()
-        offer = _offer_from_protected_source(
-            host, host.policy["trusted_source_sha"])
-        with host.release_lock(offer):
-            host.freshly_validate_live_scope(offer)
-            _native_preflight(offer, host)
-        return "pass_nonmutating_scoped_source_and_docker_preflights"
-    except Exception as exc:
-        try:
-            return bounded_stage_denial_code(exc)
-        except (NameError, ImportError):
-            return "SCOPED_BACKPORT_UNCLASSIFIED_DENIAL"
+        result = subprocess.run(
+            ["/usr/bin/python3", "-I", str(path), "--probe-stage"],
+            capture_output=True, timeout=130, check=False)
+        if len(result.stdout) > 4096:
+            return "SCOPED_BACKPORT_STAGE_PROBE_RESULT_TOO_LARGE"
+        doc = json.loads(result.stdout)
+        if (not isinstance(doc, dict)
+                or doc.get("production_mutations") is not False
+                or doc.get("provider_writes") is not False):
+            return "SCOPED_BACKPORT_STAGE_PROBE_OUTPUT_UNTRUSTED"
+        if (result.returncode == 0 and
+                doc.get("status") == "scoped_native_readonly_stage_preflight_pass"
+                and doc.get("release_eligibility_created") is False
+                and doc.get("owner_approval_recorded") is False):
+            return "pass_nonmutating_scoped_source_and_docker_preflights"
+        if (result.returncode == 2 and
+                doc.get("status") == "scoped_native_readonly_stage_preflight_denied"):
+            reason = doc.get("denial_code")
+            if isinstance(reason, str) and re.fullmatch(
+                    r"SCOPED_BACKPORT_[A-Z0-9_]{2,96}", reason):
+                return reason
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return "SCOPED_BACKPORT_UNCLASSIFIED_STAGE_PROBE_DENIAL"
 
 
 def audit_once(path: Path, doc: dict) -> None:
@@ -620,8 +638,9 @@ def apply(*, source_sha: str, reviewed_sha: str) -> dict:
             # Only the newly installed scoped release-controller listeners
             # are paused. Existing Ticket Core, runtime, MCP, OpenBao,
             # release manager, and network remain untouched.
-            listener_action("stop")
             listeners_stopped = True
+            listener_action("stop")
+            ensure_scoped_oneshots_quiescent()
             for path, old_bytes, new_bytes, mode in changes:
                 attempted_changes.append((path, old_bytes, new_bytes, mode))
                 atomic_exact_root_file(path, old_bytes, new_bytes, mode)

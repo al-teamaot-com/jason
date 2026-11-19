@@ -14,6 +14,8 @@ from tools import scoped_backport_four_unit_drift_reconcile as fix
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = json.loads((ROOT / "config/production-desired-state.json").read_text())
+# Current approved PMv4-D protected root overlay (public release config is older).
+BASE["max_stopped_rollback_containers"] = 21
 
 
 def candidate(original=None):
@@ -265,3 +267,109 @@ def test_scoped_listeners_only_paused_not_existing_production_services():
     assert fix.SCOPED_PATH not in fix.PROTECTED
     assert fix.SCOPED_TIMER not in fix.PROTECTED
     assert "jason-production-drift-watchdog.timer" not in (fix.SCOPED_PATH, fix.SCOPED_TIMER)
+
+
+def test_stage_probe_invokes_pinned_installed_root_worker_only(monkeypatch):
+    import json
+    captured = []
+    def fake_run(args, **kw):
+        captured.append(args)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({
+                "status": "scoped_native_readonly_stage_preflight_pass",
+                "production_mutations": False, "provider_writes": False,
+                "release_eligibility_created": False,
+                "owner_approval_recorded": False,
+            }).encode())
+    monkeypatch.setattr(fix.subprocess, "run", fake_run)
+    assert fix.read_only_stage_probe() == (
+        "pass_nonmutating_scoped_source_and_docker_preflights")
+    assert captured == [[
+        "/usr/bin/python3", "-I",
+        str(fix.ROOT_INSTALL_DIR / "tools/scoped_backport_native_root.py"),
+        "--probe-stage",
+    ]]
+
+
+def test_stage_probe_returns_only_bounded_failure_code(monkeypatch):
+    def fake_run(args, **kw):
+        return SimpleNamespace(
+            returncode=2,
+            stdout=json.dumps({
+                "status": "scoped_native_readonly_stage_preflight_denied",
+                "denial_code": "SCOPED_BACKPORT_GROUP_APPROLE_FILE_SCOPE_DRIFT",
+                "production_mutations": False, "provider_writes": False,
+            }).encode(),
+            stderr=b"secret private endpoint refused credential",
+        )
+    monkeypatch.setattr(fix.subprocess, "run", fake_run)
+    assert fix.read_only_stage_probe() == (
+        "SCOPED_BACKPORT_GROUP_APPROLE_FILE_SCOPE_DRIFT")
+
+
+def test_stage_probe_rejects_forged_success_and_bearer_payload(monkeypatch):
+    def fake_run(args, **kw):
+        return SimpleNamespace(
+            returncode=2,
+            stdout=json.dumps({
+                "status": "scoped_native_readonly_stage_preflight_denied",
+                "denial_code": "Bearer secret-123",
+                "production_mutations": False, "provider_writes": False,
+            }).encode())
+    monkeypatch.setattr(fix.subprocess, "run", fake_run)
+    assert fix.read_only_stage_probe() == (
+        "SCOPED_BACKPORT_UNCLASSIFIED_STAGE_PROBE_DENIAL")
+
+
+def test_installed_systemd_unit_expected_mode_matches_actual_root_installer():
+    import inspect
+    source = inspect.getsource(fix.inspect)
+    assert 'read_root(p, mode=0o444)' in source
+    assert 'read_root(p, mode=0o644)' not in source
+
+
+def test_root_install_code_patch_denied_while_scoped_worker_active(monkeypatch):
+    states = {
+        "jason-scoped-backport-requests.service": b"inactive\n",
+        "jason-scoped-backport-recovery.service": b"active\n",
+    }
+    def fake_run(args, **kwargs):
+        return SimpleNamespace(stdout=states[args[-1]], returncode=0)
+    monkeypatch.setattr(fix.subprocess, "run", fake_run)
+    with pytest.raises(fix.DriftCorrectionDenied,
+                       match="ROOT_WORKER_NOT_QUIESCENT"):
+        fix.ensure_scoped_oneshots_quiescent()
+
+
+def test_scoped_workers_only_need_to_be_quiescent_during_root_code_upgrade(monkeypatch):
+    calls = []
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(stdout=b"inactive\n", returncode=3)
+    monkeypatch.setattr(fix.subprocess, "run", fake_run)
+    fix.ensure_scoped_oneshots_quiescent()
+    assert len(calls) == 2
+    assert set(row[-1] for row in calls) == {
+        "jason-scoped-backport-requests.service",
+        "jason-scoped-backport-recovery.service",
+    }
+
+
+def test_root_candidate_preserves_approved_pmv4_d_rollback_limit():
+    approved, _ = fix.candidate_policy(json.dumps(BASE).encode())
+    assert approved["max_stopped_rollback_containers"] == 21
+    for forbidden in (20, 22, 200):
+        stale_or_relaxed = deepcopy(BASE)
+        stale_or_relaxed["max_stopped_rollback_containers"] = forbidden
+        with pytest.raises(fix.DriftCorrectionDenied,
+                           match="POLICY_ROLLBACK_CAPACITY_CHANGED"):
+            candidate(stale_or_relaxed)
+
+
+def test_host_verified_scoped_installed_unit_mode_matches_reviewed_root():
+    import inspect
+    source = inspect.getsource(fix.inspect)
+    assert "read_root(p, mode=0o444)" in source
+    assert "read_root(p, mode=0o644)" not in source
+    assert "INSTALLED_UNIT_BYTES_CHANGED" in source

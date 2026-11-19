@@ -1,0 +1,24 @@
+name: Exact Jason Owner-only scoped MCP release (source only)
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  owner-scoped-release-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - name: Fetch exact frozen Owner-only source and protected main refs
+        run: |
+          git fetch --no-tags origin refs/heads/prep/jason-owner-only-20261119:refs/remotes/origin/prep/jason-owner-only-20261119
+          test "$(git rev-parse refs/remotes/origin/prep/jason-owner-only-20261119)" = "ec891ae49428357ccae8fa3b990c021a124b41d9"
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+      - name: Read-only Owner-only release manifest and rollback scope tests
+        run: PYTHONPATH=. python -m pytest -q tools/tests/test_jason_owner_scoped_release_admission.py
