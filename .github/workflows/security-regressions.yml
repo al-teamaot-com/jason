@@ -56,7 +56,11 @@ jobs:
             tools/tests/test_catalog_scoped_root_install_native.py
       - name: Catalog root-bootstrap and MCP release consumption-ledger namespace safety
         run: |
-          python -m pytest -q tools/tests/test_catalog_consumption_ledger_namespaces.py tools/tests/test_catalog_root_consumption_ledger_repair_once.py
+          python -m pytest -q \
+            tools/tests/test_catalog_consumption_ledger_namespaces.py \
+            tools/tests/test_catalog_root_consumption_ledger_repair_once.py \
+            tools/tests/test_catalog_scoped_owner_approval_renewal.py \
+            tools/tests/test_catalog_unsigned_offer_safe_restage.py
       - name: Catalog unsigned-offer source-only restage, PMv4 rollback and Owner-root install safety
         run: |
           python -m pytest -q \

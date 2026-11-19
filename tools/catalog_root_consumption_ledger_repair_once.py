@@ -37,6 +37,9 @@ ROOT_WORKER_SHA="dca0c480265426c3c73f9cf8f7b8a9a4c5ab555640bd6953eb127cf3963a189
 ROOT_POLICY_SHA="7a4f43b7c58d31ba69a6fe08891e3193a218fe39991457dd4c278f0c44cdbdba"
 OWNER_HELPER_SHA="24d3632a4b0aa60851a1c82ccb15539eb823dd26afa5a1a2cc8c7afc54d72153"
 ROOT_MODULE=Path("/usr/local/lib/jason/catalog-scoped-promotion/tools/catalog_scoped_promotion_host.py")
+ROOT_ROUTER=Path("/usr/local/lib/jason/catalog-scoped-promotion/tools/catalog_scoped_promotion_root.py")
+OLD_ROUTER_SHA="382cadc5a199788cb36a14317611dc808fee8105df81022c2bb67f2453b4c5a9"
+NEW_ROUTER_SHA="9d34a497012816cc8b4c1dbcbe5ee5c55a644a3bc0ceb188f2e5e3c908160e66"
 ROOT_WORKER=Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
 ROOT_POLICY=Path("/etc/jason-owner-release/catalog-scoped-promotion-installed.json")
 ROOT_ENTRY=Path("/root/catalog-root-consumption-ledger-namespace-repair-once.py")
@@ -172,6 +175,9 @@ def preflight():
            run("git","-C",str(REPO),"show",verified_main()+":tools/catalog_root_consumption_ledger_repair_once.py",as_al=True)):
         fail("PINNED_ROOT_INSTALLER_SOURCE_CHANGED")
     if digest(trusted(ROOT_MODULE))!=OLD_MODULE_SHA:fail("ROOT_MODULE_BEFORE_IMAGE_CHANGED")
+    if digest(trusted(ROOT_ROUTER))!=OLD_ROUTER_SHA:fail("ROOT_ROUTER_BEFORE_IMAGE_CHANGED")
+    original_policy=trusted(ROOT_POLICY,mode=0o600,max_bytes=16384)
+    if digest(original_policy)!=ROOT_POLICY_SHA:fail("ROOT_POLICY_BEFORE_IMAGE_CHANGED")
     if digest(trusted(ROOT_WORKER,mode=0o755))!=ROOT_WORKER_SHA:fail("ROOT_WORKER_CHANGED")
     if digest(trusted(ROOT_POLICY,mode=0o600))!=ROOT_POLICY_SHA:fail("ROOT_POLICY_CHANGED")
     if digest(trusted(ROOT_OWNER_HELPER,mode=0o555,max_bytes=60000))!=OWNER_HELPER_SHA:
@@ -190,9 +196,18 @@ def preflight():
     current=verified_main()
     ci_green(current)
     new=run("git","-C",str(REPO),"show",current+":tools/catalog_scoped_promotion_host.py",as_al=True)
+    router=run("git","-C",str(REPO),"show",current+":tools/catalog_scoped_promotion_root.py",as_al=True)
     if digest(new)!=NEW_MODULE_SHA:fail("REVIEWED_CONSUMPTION_MODULE_NOT_CURRENT_SOURCE")
+    if digest(router)!=NEW_ROUTER_SHA:fail("REVIEWED_OWNER_LINEAGE_ROUTER_NOT_CURRENT_SOURCE")
+    old=json.loads(original_policy)
+    updated=dict(old,source_sha=current,host_module_sha256=NEW_MODULE_SHA)
+    if (set(updated)!=set(old)
+            or any(updated[k]!=old[k] for k in old if k not in
+                   ("source_sha","host_module_sha256"))):
+        fail("ROOT_TRUST_POLICY_SCOPE_EXPANDED")
+    new_policy=(json.dumps(updated,sort_keys=True,separators=(",",":"))+"\n").encode()
     bound_release_and_ledger_checked(new)
-    return current,new,container_snapshot(),original_freeze
+    return current,new,router,new_policy,container_snapshot(),original_freeze
 
 def auth_owner(source,module_sha):
     spec=importlib.util.spec_from_file_location("pinned_existing_jason_entra_owner",ROOT_OWNER_HELPER)
@@ -229,10 +244,10 @@ def auth_owner(source,module_sha):
         elif status!="authorization_pending":fail("ENTRA_OWNER_LOGIN_FAILED")
     fail("ENTRA_OWNER_LOGIN_EXPIRED")
 
-def replace(path:Path,data:bytes):
+def replace(path:Path,data:bytes,mode:int=0o644):
     fd,temp=tempfile.mkstemp(prefix=".catalog-ledger-reader-",dir=path.parent)
     try:
-        os.fchown(fd,0,0);os.fchmod(fd,0o644)
+        os.fchown(fd,0,0);os.fchmod(fd,mode)
         with os.fdopen(fd,"wb") as out:
             out.write(data);out.flush();os.fsync(out.fileno())
         os.replace(temp,path)
@@ -253,10 +268,12 @@ def trusted_release_lock(handle,path,expected_uid):
 
 
 def execute():
-    source,new,before,marker=preflight()
-    owner=auth_owner(source,digest(new))
-    latest,refreshed,protected,freeze=preflight()
-    if (latest!=source or refreshed!=new or protected!=before or freeze!=marker):
+    source,new_host,new_router,new_policy,before,marker=preflight()
+    print("NEW_ROUTER_SHA256="+digest(new_router),flush=True)
+    print("EXACT_NEW_ROOT_POLICY_SHA256="+digest(new_policy),flush=True)
+    owner=auth_owner(source,digest(new_host))
+    latest,host2,router2,policy2,protected,freeze=preflight()
+    if (latest,host2,router2,policy2,protected,freeze)!=(source,new_host,new_router,new_policy,before,marker):
         fail("EXACT_SOURCE_OR_HOST_CHANGED_DURING_OWNER_AUTH")
     fd=os.open(NATIVE_LOCK,os.O_RDWR|getattr(os,"O_NOFOLLOW",0))
     shadow=os.open(SHADOW_LOCK,os.O_RDWR|getattr(os,"O_NOFOLLOW",0))
@@ -266,54 +283,78 @@ def execute():
                 fail("NATIVE_RELEASE_LOCK_UNTRUSTED")
             try:fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
             except BlockingIOError:fail("OTHER_GOVERNED_RELEASE_IN_PROGRESS")
-        current,actual,still,frozen=preflight()
-        if (current,actual,still,frozen)!=(source,new,before,marker):
+        current,actual,installed_router,new_policy2,still,frozen=preflight()
+        if (current,actual,installed_router,new_policy2,still,frozen)!=(
+                source,new_host,new_router,new_policy,before,marker):
             fail("EXACT_SOURCE_CHANGED_WHILE_LOCKED")
         LEDGER.mkdir(mode=0o700)
         intent="owner-"+uuid4().hex
-        record_original=trusted(ROOT_MODULE)
-        record("original-root-module.bin",record_original)
+        original_host=trusted(ROOT_MODULE)
+        original_router=trusted(ROOT_ROUTER)
+        original_policy=trusted(ROOT_POLICY,mode=0o600,max_bytes=16384)
+        record("original-root-host.bin",original_host)
+        record("original-root-router.bin",original_router)
+        record("original-root-policy.bin",original_policy)
         record("owner-intent.json",{
             "status":"consumed_before_mutation","action":ACTION,"approval_id":intent,
-            "owner_oid":owner,"source_sha":source,"original_sha256":OLD_MODULE_SHA,
-            "candidate_sha256":NEW_MODULE_SHA,"freeze_sha256":FREEZE_SHA,
+            "owner_oid":owner,"source_sha":source,
+            "old_host_sha256":OLD_MODULE_SHA,"new_host_sha256":NEW_MODULE_SHA,
+            "old_router_sha256":OLD_ROUTER_SHA,"new_router_sha256":NEW_ROUTER_SHA,
+            "old_policy_sha256":ROOT_POLICY_SHA,"new_policy_sha256":digest(new_policy),
+            "freeze_sha256":FREEZE_SHA,
             "approved_at":datetime.now(timezone.utc).isoformat(),
             "image_promotion_approved":False,"autotask_provider_writes_approved":False,
         })
-        changed=False
         try:
-            replace(ROOT_MODULE,new)
-            changed=True
-            if digest(trusted(ROOT_MODULE))!=NEW_MODULE_SHA:
-                fail("ROOT_MODULE_NEW_HASH_MISMATCH")
+            replace(ROOT_MODULE,new_host)
+            replace(ROOT_ROUTER,new_router)
+            replace(ROOT_POLICY,new_policy,mode=0o600)
+            if (digest(trusted(ROOT_MODULE))!=NEW_MODULE_SHA
+                    or digest(trusted(ROOT_ROUTER))!=NEW_ROUTER_SHA
+                    or digest(trusted(ROOT_POLICY,mode=0o600,max_bytes=16384))!=digest(new_policy)):
+                fail("AFTER_INSTALL_ROOT_DIGEST_MISMATCH")
             spec=importlib.util.spec_from_file_location("reviewed_existing_trusted_root_worker",ROOT_WORKER)
-            root=importlib.util.module_from_spec(spec);spec.loader.exec_module(root)
-            verified=root._trusted_catalog_scoped_promotion_module(source)
+            worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
+            verified=worker._trusted_catalog_scoped_promotion_module(source)
             if not callable(verified.execute_native_catalog_scoped_request):
                 fail("NATIVE_ROOT_CATALOG_HANDLER_MISSING")
+            # The installed root catalog source and policy are now coherent.
+            host=verified.CatalogPMv4ProtectedHost(repo=REPO)
+            host.enforce_installed_production_trust()
             if container_snapshot()!=before:fail("PMV4_OR_CATALOG_CONTAINER_CHANGED")
             if trusted(STATE/"production-deployment-freeze",owner=1000,mode=0o600,max_bytes=4096)!=marker:
                 fail("PRODUCTION_FREEZE_CHANGED")
             if verified_main()!=source:fail("PROTECTED_MAIN_CHANGED_DURING_INSTALL")
             record("verified.json",{
-                "status":"exact_catalog_consumption_namespace_root_module_verified",
-                "approval_id":intent,"source_sha":source,"module_sha256":NEW_MODULE_SHA,
-                "original_sha256":OLD_MODULE_SHA,"freeze_unchanged":True,
-                "pmv4_containers_unchanged":True,"image_promotion":False,"provider_writes":False,
+                "status":"exact_catalog_bootstrap_mcp_ledger_reader_verified",
+                "approval_id":intent,"source_sha":source,
+                "host_sha256":NEW_MODULE_SHA,"router_sha256":NEW_ROUTER_SHA,
+                "root_policy_sha256":digest(new_policy),
+                "freeze_unchanged":True,"pmv4_containers_unchanged":True,
+                "image_promotion":False,"provider_writes":False,
+                "historical_ledger_entries_changed":False,
             })
-            print("CATALOG_CONSUMPTION_NAMESPACE_ROOT_MODULE_VERIFIED="+intent,flush=True)
+            print("CATALOG_LEDGER_AND_SIGNED_RENEWAL_ROOT_MODULES_VERIFIED="+intent,flush=True)
         except BaseException:
             restored=False
             try:
-                if changed:
-                    if digest(trusted(ROOT_MODULE))!=NEW_MODULE_SHA:
-                        fail("UNKNOWN_ROOT_MODULE_STATE_DO_NOT_OVERWRITE")
-                    replace(ROOT_MODULE,record_original)
-                restored=(digest(trusted(ROOT_MODULE))==OLD_MODULE_SHA)
-            except BaseException:restored=False
+                expected=((ROOT_POLICY,original_policy,new_policy,0o600),
+                          (ROOT_ROUTER,original_router,new_router,0o644),
+                          (ROOT_MODULE,original_host,new_host,0o644))
+                for path,original,replacement,mode in expected:
+                    observed=trusted(path,mode=mode,max_bytes=16384 if path==ROOT_POLICY else 550000)
+                    if observed==replacement:
+                        replace(path,original,mode=mode)
+                    elif observed!=original:
+                        fail("ROOT_UNKNOWN_INTERMEDIATE_BYTES_DO_NOT_OVERWRITE")
+                restored=(digest(trusted(ROOT_MODULE))==OLD_MODULE_SHA
+                          and digest(trusted(ROOT_ROUTER))==OLD_ROUTER_SHA
+                          and digest(trusted(ROOT_POLICY,mode=0o600,max_bytes=16384))==ROOT_POLICY_SHA)
+            except BaseException:
+                restored=False
             record("failed.json",{"status":"rolled_back" if restored else "rollback_unverified",
                                   "rollback_verified":restored})
-            if not restored:fail("ROOT_MODULE_ROLLBACK_UNVERIFIED")
+            if not restored:fail("ROOT_MODULES_ROLLBACK_UNVERIFIED")
             raise
     finally:
         for handle in (shadow,fd):
@@ -328,10 +369,12 @@ def main():
     mode.add_argument("--execute",action="store_true")
     parsed=cli.parse_args()
     if parsed.check_only:
-        source,new,baseline,_=preflight()
-        print(json.dumps({"status":"READONLY_ROOT_RESTAGE_INSTALL_PREFLIGHT_PASS",
-            "source_sha":source,"old_module_sha256":OLD_MODULE_SHA,
-            "new_module_sha256":digest(new),"protected_container_count":len(baseline["containers"]),
+        source,host,router,policy,baseline,_=preflight()
+        print(json.dumps({"status":"READONLY_LEDGER_AND_RENEWAL_ROOT_PREFLIGHT_PASS",
+            "source_sha":source,"old_host_sha256":OLD_MODULE_SHA,
+            "new_host_sha256":digest(host),"new_router_sha256":digest(router),
+            "new_policy_sha256":digest(policy),
+            "protected_container_count":len(baseline["containers"]),
             "owner_approval_recorded":False,"production_mutations":False},sort_keys=True))
     else:
         execute()
