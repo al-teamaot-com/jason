@@ -115,6 +115,15 @@ jobs:
             implementation/connectors/tests/test_openbao_secrets.py \
             tools/tests/test_provider_secret_provision.py \
             tools/tests/test_microsoft_group_admin_identity_bootstrap.py
+      - name: Scoped source-pinned backport, exact Owner proof and paired rollback regressions
+        run: |
+          python -m pytest -q \
+            tools/tests/test_scoped_backport_release.py \
+            tools/tests/test_scoped_backport_release_request.py \
+            tools/tests/test_scoped_backport_native_host.py \
+            tools/tests/test_scoped_backport_native_worker.py \
+            tools/tests/test_scoped_backport_root_install.py \
+            tools/tests/test_scoped_backport_owner_local_approval.py
       - name: Microsoft group dormant and exact AOT activation composition
         run: |
           python -m pytest -q implementation/runtime_service/tests/test_composition.py -k group_admin
