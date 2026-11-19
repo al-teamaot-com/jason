@@ -178,3 +178,60 @@ def test_exact_root_rebind_rolls_back_after_mcp_preflight_failure(transaction):
     assert not timer["active"] and not timer["enabled"]
     assert json.loads((m.LEDGER/"failed.json").read_text())["rollback_verified"] is True
     assert not (m.LEDGER/"verified.json").exists()
+
+
+def test_entra_device_flow_uses_exact_rfc_grant_type_without_network(monkeypatch, capsys):
+    """Regression: underscore in grant_type was rejected before Owner confirmation."""
+    from types import SimpleNamespace
+
+    calls = []
+    fake = SimpleNamespace(
+        TENANT="synthetic-tenant", CLIENT_ID="synthetic-client", SCOPE="Jason.Read",
+        jwt_owner=lambda token: "synthetic-verified-owner"
+    )
+    def only_synthetic_response(url, args):
+        calls.append((url, dict(args)))
+        if url.endswith("/devicecode"):
+            return {"device_code": "never-real-device-code",
+                    "user_code": "synthetic-display-code",
+                    "verification_uri": "https://login.microsoft.com/device",
+                    "expires_in": 600, "interval": 5}
+        assert url.endswith("/token")
+        if args["grant_type"] != "urn:ietf:params:oauth:grant-type:device_code":
+            return {"error": "invalid_request"}
+        assert args["device_code"] == "never-real-device-code"
+        assert args["client_id"] == "synthetic-client"
+        return {"access_token": "synthetic-never-real-access-token"}
+    fake._form = only_synthetic_response
+    spec = SimpleNamespace(loader=SimpleNamespace(exec_module=lambda mod: None))
+    monkeypatch.setattr(m.importlib.util, "spec_from_file_location", lambda *a: spec)
+    monkeypatch.setattr(m.importlib.util, "module_from_spec", lambda spec: fake)
+    monkeypatch.setattr(m, "file", lambda *a, **kw: b"synthetic-checked-pinned-verifier")
+    monkeypatch.setattr(m, "digest", lambda data: m.OWNER_HELPER_SHA)
+    monkeypatch.setattr("builtins.input", lambda prompt: m.CONFIRM)
+    approved = m.auth_owner({"current_protected_main_sha": "a"*40,
+                             "plan_sha256": "b"*64})
+    assert approved == "synthetic-verified-owner"
+    assert [u.rsplit("/",1)[-1] for u,_ in calls] == ["devicecode", "token"]
+    assert calls[1][1]["grant_type"] == "urn:ietf:params:oauth:grant-type:device_code"
+    assert "synthetic-never-real-access-token" not in capsys.readouterr().out
+
+
+def test_entra_owner_confirmation_remains_mandatory(monkeypatch):
+    from types import SimpleNamespace
+    fake = SimpleNamespace(
+        TENANT="synthetic-tenant", CLIENT_ID="synthetic-client", SCOPE="Jason.Read",
+        jwt_owner=lambda token: "synthetic-verified-owner")
+    fake._form = lambda url, args: (
+        {"device_code": "no-real-code", "user_code": "synthetic",
+         "verification_uri": "https://login.microsoft.com/device",
+         "expires_in": 600, "interval": 5}
+        if url.endswith("/devicecode") else {"access_token": "synthetic-never-real-token"})
+    spec = SimpleNamespace(loader=SimpleNamespace(exec_module=lambda mod: None))
+    monkeypatch.setattr(m.importlib.util, "spec_from_file_location", lambda *a: spec)
+    monkeypatch.setattr(m.importlib.util, "module_from_spec", lambda spec: fake)
+    monkeypatch.setattr(m, "file", lambda *a, **kw: b"synthetic-pinned-verifier")
+    monkeypatch.setattr(m, "digest", lambda data: m.OWNER_HELPER_SHA)
+    monkeypatch.setattr("builtins.input", lambda prompt: "NOT APPROVED")
+    with pytest.raises(PermissionError, match="EXACT_OWNER_CONFIRMATION_MISSING"):
+        m.auth_owner({"current_protected_main_sha": "a"*40, "plan_sha256": "b"*64})
