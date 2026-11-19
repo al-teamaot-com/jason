@@ -118,7 +118,7 @@ class ExactSystemdSurface:
         """
         expected={
             str(rel):data
-            for rel,data in bundle.generate(base=self.trusted_dir.parents[3]).items()
+            for rel,data in bundle.generate(base=self.trusted_dir.parents[2]).items()
         }
         # No silently accepted extra unit files or source path aliases.
         need(set(approved_hashes)==set(expected) and len(expected)==12,
@@ -172,7 +172,7 @@ class ExactSystemdSurface:
         Missing targets are accepted for interrupted partial staging; modified
         or symlink targets are denied and left for supervised recovery.
         """
-        expected=bundle.generate(base=self.trusted_dir.parents[3])
+        expected=bundle.generate(base=self.trusted_dir.parents[2])
         need(set(expected)==set(approved_hashes),"ROLLBACK_HASH_SET_INVALID")
         for rel,data in sorted(expected.items()):
             need(sha256(data).hexdigest()==approved_hashes[rel],
