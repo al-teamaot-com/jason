@@ -48,8 +48,7 @@ administration, catalog grant, lifecycle and release identity regressions.
 Rollback: revert this scoped source commit prior to any separately governed
 native MCP release. No on-host activation is part of source merge.
 
-**Classification:** Identity/authorization source change; require independent
-security review and protected CI before source merge. Native MCP release
+**Classification:** Identity/authorization source change; require protected CI, automated security and scope validation before source merge. AOT has no separate human security reviewer. Native MCP release
 requires exact SHA, scope, rollback and separate production authorization.
 Production freeze, PMv4 Ticket Core and Stage E remain unchanged.
 
