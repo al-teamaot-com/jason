@@ -1,9 +1,11 @@
 # Source-isolated AOT Entra group management preproduction candidate.
 # Reuses EXACT running LKG MCP image, not moving registry tags.
-FROM sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477
+ARG BASE_IMAGE=jason-mcp:release-d1b8c196dadd-fc0a7a286bba
+FROM ${BASE_IMAGE}
 USER root
 COPY --chown=0:1000 implementation/ /opt/jason-src/implementation/
 COPY --chown=0:1000 implementation/mcp_service/src/jason_mcp/server.py /usr/local/lib/python3.12/site-packages/jason_mcp/server.py
 RUN chmod -R go-w,g+rX /opt/jason-src/implementation && chmod 0444 /usr/local/lib/python3.12/site-packages/jason_mcp/server.py
-LABEL org.opencontainers.image.revision="688a90654313405cdc7a8be7fdf3e8595ca4cdf2"
+ARG CANDIDATE_SHA
+LABEL org.opencontainers.image.revision=${CANDIDATE_SHA}
 USER 1000:1000
