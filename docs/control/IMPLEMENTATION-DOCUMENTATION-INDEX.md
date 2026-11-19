@@ -94,6 +94,7 @@ If a package README contains a material architecture, authority, security, or op
 | `infrastructure/openclaw-jason-bridge/README.md` | OpenClaw Jason bridge deployment/plugin mechanics | ADR-005/ADR-006, INF-014, OpenClaw operational runbooks, System Registry for deployed bridge state |
 | `infrastructure/showcase/README.md` | Command Center/showcase deployment mechanics, observability components, local-model visibility, and bounded dashboard security notes | `docs/architecture/`; `docs/components/`; `docs/operations/`; governed roadmap and System Registry for authoritative current deployment/readiness state |
 
+| `infrastructure/microsoft_graph/README.md` | AOT Microsoft Graph group-management LKG-pinned source-only staging overlays; not an authorized production installer | `docs/operations/AOT-M365-LKG-Backport-Release-20261119.md`; protected production release governance and system registry for deployed state |
 | `infrastructure/isolated-services/README.md` | Independent read-only shadow service/timer deployment-package mechanics; no installation or authority by itself | `docs/engineering/PMV3-Isolated-Service-Separation-Plan.md`; PMV3 release governance and System Registry for any later deployed state |
 
 ## How future sessions maintain this index
