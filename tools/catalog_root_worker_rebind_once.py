@@ -302,7 +302,7 @@ def auth_owner(plan):
     deadline=time.monotonic()+min(int(code.get("expires_in",600)),600)
     interval=max(5,int(code.get("interval",5)))
     while time.monotonic()<deadline:
-        response=helper._form(endpoint+"token",{"grant_type":"urn:ietf:params:oauth:grant_type:device_code",
+        response=helper._form(endpoint+"token",{"grant_type":"urn:ietf:params:oauth:grant-type:device_code",
                               "client_id":helper.CLIENT_ID,"device_code":code["device_code"]})
         if isinstance(response.get("access_token"),str):
             oid=helper.jwt_owner(response["access_token"])
