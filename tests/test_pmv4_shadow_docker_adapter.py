@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from hashlib import sha256
 import json
 from pathlib import Path
 import subprocess
@@ -34,9 +35,10 @@ RUNNING = {
         "CapDrop": ["ALL"], "CapAdd": None,
         "SecurityOpt": ["no-new-privileges:true"],
         "Init": True, "RestartPolicy": {"Name": "no"},
-        "PidsLimit": 64, "Memory": 512 * 1024 * 1024,
-        "NanoCpus": 500_000_000, "PublishAllPorts": False,
-        "Devices": None, "Binds": None,
+        "PidsLimit": 256, "Memory": 2 * 1024 * 1024 * 1024,
+        "NanoCpus": 1_000_000_000, "PublishAllPorts": False,
+        "Devices": None,
+        "Binds": ["jason-pmv4-shadow-state:/home/node/.openclaw:rw"],
     },
     "Mounts": [
         {"Type": "volume", "Name": "jason-pmv4-shadow-state",
@@ -59,8 +61,14 @@ class DockerAdapterTests(unittest.TestCase):
         token.chmod(0o600)
         self.release = self.root / "releases" / ("a"*40)
         self.release.mkdir(parents=True)
+        bundle = self.release / "bundle" / "config" / "pmv4-shadow"
+        bundle.mkdir(parents=True)
+        (bundle / "docker-compose.yml").write_text(
+            'services:\n  pmv4-shadow-gateway:\n    mem_limit: "2g"\n'
+        )
+        self.compose_sha = sha256((bundle / "docker-compose.yml").read_bytes()).hexdigest()
         (self.release / "release-manifest.json").write_text(json.dumps({
-            "image_digest": DIGEST,
+            "image_digest": DIGEST, "compose_sha256": self.compose_sha,
         }))
         self.commands = []
         self.inspect_data = None
@@ -99,10 +107,171 @@ class DockerAdapterTests(unittest.TestCase):
         flattened = [" ".join(cmd) for cmd, _ in self.commands]
         self.assertTrue(any("--project-name " + SHADOW_PROJECT in command
                             and "up --detach" in command and "--pull never" in command
+                            and str(self.release / "bundle" / "config" / "pmv4-shadow" / "docker-compose.yml") in command
                             for command in flattened))
         self.assertTrue(all(SHADOW_NAME in cmd or "pmv4-shadow" in " ".join(cmd)
                             or "image inspect" in " ".join(cmd)
                             for cmd, _ in self.commands))
+
+    def test_immutable_candidate_compose_replaces_outdated_root_template(self):
+        self.adapter.activate_shadow(self.release)
+        up = [args for args, _ in self.commands if "up" in args]
+        self.assertEqual(len(up), 1)
+        self.assertEqual(up[0][up[0].index("-f")+1],
+                         str(self.release / "bundle" / "config" /
+                             "pmv4-shadow" / "docker-compose.yml"))
+        self.assertNotIn(str(self.root / "control" / "docker-compose.yml"),
+                         up[0])
+        self.assertEqual(self.inspect_data["HostConfig"]["Memory"],
+                         2 * 1024 * 1024 * 1024)
+        self.assertEqual(self.inspect_data["HostConfig"]["PidsLimit"], 256)
+
+    def _set_signed_memory(self, value: str) -> None:
+        path = self.release / "bundle" / "config" / "pmv4-shadow" / "docker-compose.yml"
+        prior = path.read_text()
+        self.assertEqual(prior.count('mem_limit: "2g"'),1)
+        path.write_text(prior.replace('mem_limit: "2g"',
+                                      f'mem_limit: "{value}"'))
+        doc = self.release / "release-manifest.json"
+        manifest = json.loads(doc.read_text())
+        manifest["compose_sha256"] = sha256(path.read_bytes()).hexdigest()
+        doc.write_text(json.dumps(manifest))
+
+    def test_approved_signed_4gb_accepts_only_4gb_actual_runtime(self):
+        self._set_signed_memory("4g")
+        old_run = self.adapter.runner
+        def fixed_runner(argv,**kw):
+            completed=old_run(argv,**kw)
+            if "up" in argv:
+                self.inspect_data["HostConfig"]["Memory"]=4*1024**3
+            return completed
+        self.adapter.runner=fixed_runner
+        self.adapter.activate_shadow(self.release)
+        self.assertEqual(self.inspect_data["HostConfig"]["Memory"],4*1024**3)
+        self.assertTrue(self.adapter.verify_shadow_and_core(self.release))
+        self.assertEqual(self.adapter._signed_memory_bytes(self.release),4*1024**3)
+
+    def test_signed_4gb_rejects_successful_compose_with_2gb_actual(self):
+        self._set_signed_memory("4g")
+        with self.assertRaisesRegex(PermissionError,
+                                    "SHADOW_RUNTIME_SECURITY_PROFILE_DRIFT"):
+            self.adapter.activate_shadow(self.release)
+        with self.assertRaisesRegex(PermissionError,
+                                    "SHADOW_RUNTIME_SECURITY_PROFILE_DRIFT"):
+            self.adapter.verify_shadow_and_core(self.release)
+
+    def test_exact_signed_2gb_rollback_after_4gb_container(self):
+        original_release=self.release
+        newer=self.root / "releases" / ("b"*40)
+        newer.mkdir()
+        old_path=original_release / "bundle" / "config" / "pmv4-shadow" / "docker-compose.yml"
+        new_path=newer / "bundle" / "config" / "pmv4-shadow" / "docker-compose.yml"
+        new_path.parent.mkdir(parents=True)
+        new_path.write_text(old_path.read_text().replace(
+            'mem_limit: "2g"','mem_limit: "4g"'
+        ))
+        (newer/"release-manifest.json").write_text(json.dumps({
+            "image_digest":DIGEST,"compose_sha256":sha256(new_path.read_bytes()).hexdigest()
+        }))
+        old_run=self.adapter.runner
+        def transition_runner(argv,**kw):
+            completed=old_run(argv,**kw)
+            if "up" in argv:
+                compose=argv[argv.index("-f")+1]
+                self.inspect_data["HostConfig"]["Memory"]=(
+                    4*1024**3 if str(new_path)==compose else 2*1024**3
+                )
+            return completed
+        self.adapter.runner=transition_runner
+        self.adapter.activate_shadow(newer)
+        self.assertEqual(self.inspect_data["HostConfig"]["Memory"],4*1024**3)
+        self.assertTrue(self.adapter.verify_shadow_and_core(newer))
+        self.adapter.restore_shadow(original_release)
+        self.assertEqual(self.inspect_data["HostConfig"]["Memory"],2*1024**3)
+        self.assertTrue(self.adapter.verify_shadow_and_core(original_release))
+        up=[args[args.index("-f")+1] for args,_ in self.commands if "up" in args]
+        self.assertEqual(up,[str(new_path),str(old_path)])
+
+    def test_unpinned_memory_five_gigabytes_fails_closed(self):
+        self._set_signed_memory("5g")
+        with self.assertRaisesRegex(PermissionError,
+                                    "SHADOW_SIGNED_MEMORY_PROFILE_INVALID"):
+            self.adapter.activate_shadow(self.release)
+        self.assertFalse(any("up" in args for args,_ in self.commands))
+
+    def test_signed_memory_duplicate_or_unexpected_value_denied(self):
+        for profile in ('    mem_limit: "2g"\n    mem_limit: "4g"\n',
+                        '    mem_limit: "512m"\n',
+                        '    mem_limit: "0"\n'):
+            with self.subTest(profile=profile):
+                self.commands.clear()
+                path=self.release/"bundle"/"config"/"pmv4-shadow"/"docker-compose.yml"
+                path.write_text('services:\n  pmv4-shadow-gateway:\n'+profile)
+                manifest=self.release/"release-manifest.json"
+                doc=json.loads(manifest.read_text())
+                doc["compose_sha256"]=sha256(path.read_bytes()).hexdigest()
+                manifest.write_text(json.dumps(doc))
+                with self.assertRaisesRegex(PermissionError,
+                                            "SHADOW_SIGNED_MEMORY_PROFILE_INVALID"):
+                    self.adapter.activate_shadow(self.release)
+                self.assertFalse(any("up" in args for args,_ in self.commands))
+
+    def test_trusted_inspection_only_allows_reviewed_generation_limits(self):
+        for memory in (0,1*1024**3,3*1024**3,5*1024**3,
+                       "4294967296", True):
+            with self.subTest(memory=memory):
+                self.inspect_data=copy.deepcopy(RUNNING)
+                self.inspect_data["HostConfig"]["Memory"]=memory
+                with self.assertRaisesRegex(PermissionError,
+                                            "SHADOW_RUNTIME_SECURITY_PROFILE_DRIFT"):
+                    self.adapter._owned_or_absent()
+        self.inspect_data=copy.deepcopy(RUNNING)
+        self.inspect_data["HostConfig"]["Memory"]=4*1024**3
+        self.assertIsNotNone(self.adapter._owned_or_absent())
+        with self.assertRaisesRegex(PermissionError,
+                                    "SHADOW_RUNTIME_SECURITY_PROFILE_DRIFT"):
+            self.adapter._owned_or_absent(expected_memory_bytes=2*1024**3)
+        self.assertIsNotNone(self.adapter._owned_or_absent(
+            expected_memory_bytes=4*1024**3))
+
+    def test_candidate_compose_source_tamper_denied_before_any_docker_up(self):
+        path = self.release / "bundle" / "config" / "pmv4-shadow" / "docker-compose.yml"
+        path.write_text("arbitrary-change-after-reviewed-manifest")
+        with self.assertRaisesRegex(PermissionError,
+                                    "SHADOW_IMMUTABLE_COMPOSE_HASH_MISMATCH"):
+            self.adapter.activate_shadow(self.release)
+        self.assertFalse(any("up" in x[0] for x in self.commands))
+
+    def test_manifest_hash_substitution_is_not_trusted(self):
+        manifest = self.release / "release-manifest.json"
+        manifest.write_text(json.dumps({
+            "image_digest": DIGEST,
+            "compose_sha256": "0" * 64,
+        }))
+        with self.assertRaisesRegex(PermissionError,
+                                    "SHADOW_IMMUTABLE_COMPOSE_HASH_MISMATCH"):
+            self.adapter.activate_shadow(self.release)
+        self.assertFalse(any("up" in x[0] for x in self.commands))
+
+    def test_old_and_expanded_resource_profiles_both_rejected(self):
+        for pids,mem,cpus in ((64,512*1024*1024,500_000_000),
+                              (512,4*1024*1024*1024,2_000_000_000)):
+            self.inspect_data = copy.deepcopy(RUNNING)
+            self.inspect_data["HostConfig"].update(
+                PidsLimit=pids,Memory=mem,NanoCpus=cpus)
+            with self.subTest(pids=pids):
+                with self.assertRaisesRegex(PermissionError,
+                                            "SHADOW_RUNTIME_SECURITY_PROFILE_DRIFT"):
+                    self.adapter.activate_shadow(self.release)
+        self.assertFalse(any("up" in x[0] for x in self.commands))
+
+    def test_health_wait_budget_covers_120sec_start_period(self):
+        probe = DockerShadowAdapter(
+            root=self.root, core_continuity_probe=lambda: True,
+            runner=self.adapter.runner, production=False,
+        )
+        self.assertGreater(probe.health_wait_seconds, 120)
+        self.assertLessEqual(probe.health_wait_seconds, 300)
 
     def test_core_probe_must_confirm(self):
         self.adapter.activate_shadow(self.release)
@@ -179,6 +348,33 @@ class DockerAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(PermissionError, "SHADOW_INSPECT_UNAVAILABLE"):
             self.adapter.activate_shadow(self.release)
 
+    def test_real_docker_29_missing_object_format_is_exactly_absent(self):
+        def docker29(argv,**kwargs):
+            self.assertEqual(argv,
+                             ["/usr/bin/docker","inspect",SHADOW_NAME])
+            return subprocess.CompletedProcess(
+                argv,1,"[]\n","error: no such object: "+SHADOW_NAME+"\n",
+            )
+        self.adapter.runner=docker29
+        self.assertIsNone(self.adapter._owned_or_absent())
+
+    def test_docker29_missing_object_requires_exact_name_and_diagnostic(self):
+        for code,out,err in (
+            (1,"[]\n","error: no such object: unrelated-container\n"),
+            (1,"[]\n","permission denied\n"),
+            (1,"[]\n","Cannot connect to the Docker daemon\n"),
+            (1,"other","error: no such object: "+SHADOW_NAME+"\n"),
+            (1,"[]\n","error: no such object: "+SHADOW_NAME+"\nextra"),
+            (2,"[]\n","error: no such object: "+SHADOW_NAME+"\n"),
+        ):
+            def incorrect(argv,**kwargs):
+                return subprocess.CompletedProcess(argv,code,out,err)
+            self.adapter.runner=incorrect
+            with self.subTest(code=code,err=err):
+                with self.assertRaisesRegex(PermissionError,
+                                            "SHADOW_INSPECT_UNAVAILABLE"):
+                    self.adapter._owned_or_absent()
+
     def test_initial_empty_baseline_rolls_back_only_shadow_project(self):
         self.inspect_data = copy.deepcopy(RUNNING)
         baseline = self.root / "releases" / ("0"*40)
@@ -205,6 +401,30 @@ class DockerAdapterTests(unittest.TestCase):
         }))
         with self.assertRaisesRegex(PermissionError, "SHADOW_IMAGE_NOT_PINNED"):
             self.adapter.activate_shadow(self.release)
+
+    def test_real_docker29_named_volume_bind_and_mount_are_accepted(self):
+        self.inspect_data = copy.deepcopy(RUNNING)
+        self.assertEqual(self.inspect_data["HostConfig"]["Binds"], [
+            "jason-pmv4-shadow-state:/home/node/.openclaw:rw",
+        ])
+        self.assertTrue(self.adapter._owned_or_absent())
+
+    def test_only_exact_approved_named_volume_bind_is_permitted(self):
+        variants = (
+            ["/etc:/etc:ro"],
+            ["jason-pmv4-shadow-state:/home/node/.openclaw:ro"],
+            ["jason-pmv4-shadow-state:/tmp:rw"],
+            ["other-volume:/home/node/.openclaw:rw"],
+            ["jason-pmv4-shadow-state:/home/node/.openclaw:rw",
+             "/var/lib/jason:/mnt:ro"],
+        )
+        for value in variants:
+            with self.subTest(value=value):
+                self.inspect_data = copy.deepcopy(RUNNING)
+                self.inspect_data["HostConfig"]["Binds"] = value
+                with self.assertRaisesRegex(PermissionError,
+                                            "SHADOW_RUNTIME_SECURITY_PROFILE_DRIFT"):
+                    self.adapter._owned_or_absent()
 
     def test_inspect_requires_readback_of_effective_security_restrictions(self):
         from copy import deepcopy

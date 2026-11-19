@@ -1,0 +1,13 @@
+[Unit]
+Description=Jason root-governed release control transitions
+After=docker.service
+
+[Service]
+ExecCondition=/usr/bin/python3 -I -B /opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py --mode component-transition
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /usr/local/lib/jason/release_control_transition_worker.py
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/jason/openclaw/release-manager
+ProtectHome=read-only

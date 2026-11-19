@@ -1,0 +1,37 @@
+name: PMv4 E Isolated Privileged Root Preflight
+on:
+  pull_request:
+    paths:
+      - "tools/pmv4_e_root_cutover_preflight.py"
+      - "tools/pmv4_e_ticket_owner_readback.py"
+      - "tools/tests/test_pmv4_e_ticket_owner_readback.py"
+      - "tools/tests/test_pmv4_e_root_cutover_preflight.py"
+      - ".github/workflows/pmv4-e-root-preflight-isolated.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-uid0-readback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Isolated UID0 trust, owner and symlink negative tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q pytest cryptography PyYAML
+          python_exe="$(command -v python)"
+          # GitHub runner temporary workspace only; no Jason mounts,
+          # credentials, production host calls or provider connectivity.
+          sudo -n env PYTHONPATH=tools:.:implementation:implementation/mcp_service/src \
+            "$python_exe" -B -m pytest -q \
+              tools/tests/test_pmv4_e_root_cutover_preflight.py \
+              tools/tests/test_pmv4_e_ticket_owner_readback.py
+          test ! -e /var/lib/jason/independent-component-release
+          test ! -e /etc/jason/release-readback-recovery/production-desired-state.json

@@ -1,0 +1,11 @@
+{
+  "boundary_version": "json-preprod-v1",
+  "mode": "isolated_preproduction",
+  "reviewed_main_sha": "510243494efcd592a1585c681a3fa28a29296e17",
+  "production_activation_allowed": false,
+  "legacy_retirement_allowed": false,
+  "cases": [],
+  "scope_status": "NO_LIVE_PROVIDER_TEST_TARGETS_APPROVED",
+  "owner_status": "AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED",
+  "required": "independently authenticated owner, exact service-identity provider test tenancy, target-scoped read and write receipt verification, duplicate legacy dispatch excluded"
+}

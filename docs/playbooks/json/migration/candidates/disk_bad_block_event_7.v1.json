@@ -1,0 +1,309 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "endpoint.alert.history.search",
+      "endpoint.audit.read",
+      "endpoint.device.read",
+      "service.ticket.note.create",
+      "service.ticket.notes.search",
+      "service.ticket.read",
+      "service.ticket.update"
+    ],
+    "approval_bound_branches": [
+      "create_note",
+      "handoff_ticket"
+    ],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "Human Review; no autonomous alert resolution because original registry lacks endpoint.alert.resolve"
+  },
+  "expected_state": {
+    "classification": [
+      "physical_disk_mapping_human_review",
+      "waiting_device_access"
+    ],
+    "exact_alert_and_device_required": true,
+    "source_authorized_alert_resolve": false,
+    "source_authorized_ticket_note": true,
+    "physical_changes_forbidden": true
+  },
+  "migration": {
+    "source_conversion": "installed_readonly_hardware_classifier_and_governed_handoff_intent_not_accepted",
+    "legacy_source_blob_sha": "01c64d2118e39f8372808d9f6a83953cdbf8e147",
+    "legacy_registry_version": "1.0.0",
+    "source_map": "docs/playbooks/json/migration/source_maps/disk_bad_block_event_7.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "Full original authored playbook includes alert resolution but original registry does NOT authorize endpoint.alert.resolve; exact-scope governed approval and source change needed",
+      "Exact physical disk model/serial/HarddiskX mapping (Event 7) or POST firmware/WHEA/boot evidence requires independent controlled diagnostic job and source-scoped normalization",
+      "Bounded provider component job status and useful StdOut readback, no duplicate execution, and available safe diagnostic capability must be independently validated",
+      "Owner-promoted note/handoff and provider readback plus full outcome/restart tests pending",
+      "Isolated provider-connected live preproduction acceptance pending"
+    ],
+    "accepted_for_execution": false,
+    "production_activation_authorized": false
+  },
+  "playbook": {
+    "id": "disk_bad_block_event_7",
+    "lifecycle": "pilot",
+    "name": "Jason - Windows Disk Bad Block Event ID 7",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-Windows-Disk-Bad-Block-Event-ID-7.md",
+    "target_type": "endpoint",
+    "version": "1.0.0-migration.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "no_hardware_mutation": true,
+    "no_firmware_changes": true,
+    "no_alert_resolution_without_separate_authority": true,
+    "no_disruptive_action": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "company_id",
+      "device_uid",
+      "hostname",
+      "source_alert_uid",
+      "event_timestamp",
+      "device_classification",
+      "notes_fingerprint",
+      "handoff_state",
+      "last_recheck_at"
+    ],
+    "no_duplicate_action_after_uncertain_result": true
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_gate"
+    },
+    {
+      "id": "ticket_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_ticket_client_ci_owner_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_endpoint"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_endpoint",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "endpoint_gate"
+    },
+    {
+      "id": "endpoint_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_device_uid_hostname_and_online",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_alerts"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_alerts",
+      "type": "diagnostic",
+      "capability": "endpoint.alert.history.search",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "alert_gate"
+    },
+    {
+      "id": "alert_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_incident_alert_current_scope_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_audit"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_audit",
+      "type": "diagnostic",
+      "capability": "endpoint.audit.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "classification_gate"
+    },
+    {
+      "id": "classification_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "source_diagnostic_and_human_review_disposition_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "note_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_approved_note_and_same_ticket_intent",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "create_note"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "create_note",
+      "type": "remediation",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "$fact": "trusted_exact_internal_note_create_args"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "read_note"
+    },
+    {
+      "id": "read_note",
+      "type": "verification",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "note_readback_gate"
+    },
+    {
+      "id": "note_readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_internal_note_provider_readback",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "handoff_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "handoff_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_owner_promotion_to_helpdesk_human_review",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "handoff_ticket"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "handoff_ticket",
+      "type": "remediation",
+      "capability": "service.ticket.update",
+      "arguments": {
+        "$fact": "trusted_exact_helpdesk_human_review_args"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_ticket"
+    },
+    {
+      "id": "verify_ticket",
+      "type": "verification",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_readback_gate"
+    },
+    {
+      "id": "ticket_readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_ticket_helpdesk_human_review_readback",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "human_review"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Autotask/Datto RMM",
+    "source_specific_exact_alert": true,
+    "type": "Windows Event ID 7 bad block"
+  },
+  "verification": {
+    "authoritative_source": "exact current Autotask ticket, DRMM endpoint/alert history and read-only device audit; ticket note and handoff readback",
+    "success_condition": "same source incident identified, hardware untouched, exact technician evidence and Human Review verified"
+  }
+}

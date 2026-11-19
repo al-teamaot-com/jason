@@ -1,0 +1,50 @@
+name: PMv4 A1 v3 native candidate Compose and no-repeat-approval acceptance
+on:
+  pull_request:
+    paths:
+      - "tools/pmv4_shadow_release.py"
+      - "tools/pmv4_a1_v2_immutable_builder.py"
+      - "tests/test_pmv4_a1_v3_native_compose_pair.py"
+      - "tests/test_pmv4_a1_v3_source_module_binding.py"
+      - "tests/test_pmv4_a1_v2_immutable_builder.py"
+      - ".github/workflows/pmv4-a1-v3-native-compose-acceptance.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-native-compose-before-owner:
+    name: Separate rollback and activation Compose and preflight before Owner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Complete source-only A1 v3 and native rollback regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q pytest cryptography
+          PYTHONPATH=implementation:implementation/mcp_service/src:tests:. python -B -m pytest -q \
+            tests/test_pmv4_a1_v3_native_compose_pair.py \
+            tests/test_pmv4_a1_v3_source_module_binding.py \
+            tests/test_pmv4_a1_v2_immutable_builder.py \
+            tests/test_pmv4_a1_atomic_shadow_root.py \
+            tests/test_pmv4_a1_atomic_one_owner.py \
+            tests/test_pmv4_shadow_candidate_packet.py \
+            tests/test_pmv4_shadow_release.py \
+            tests/test_pmv4_shadow_ci.py \
+            tests/test_pmv4_shadow_docker_adapter.py \
+            tests/test_pmv4_shadow_owner_issuer.py \
+            tests/test_pmv4_shadow_runtime_profile.py \
+            tests/test_pmv4_host_release_guard.py \
+            tests/test_pmv4_a1_shadow_resource_capacity.py \
+            tests/test_pmv4_a1_shadow_host_error_propagation.py \
+            tests/test_pmv4_a1_watchdog_source_convergence.py
+          python -B -m py_compile tools/pmv4_shadow_release.py tools/pmv4_a1_v2_immutable_builder.py
+          bash -n tools/pmv4_a1_one_owner_local.sh
+          test ! -e /var/lib/jason/pmv4-shadow/receipts

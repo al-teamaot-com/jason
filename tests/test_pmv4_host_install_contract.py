@@ -78,7 +78,15 @@ def test_parent_symlink_outside_temp_is_denied(tmp_path):
 
 
 def test_live_inspection_does_not_install_or_claim_approval():
-    report = install.inspect_live()
+    # A GitHub runner does not possess the protected host's canonical ticket
+    # ledger. Refusal is the correct, fail-closed result; do not fabricate a
+    # trusted production ledger in CI or weaken the independent host guard.
+    from tools.pmv4_host_release_guard import HostGateDenied
+    try:
+        report = install.inspect_live()
+    except HostGateDenied as exc:
+        assert str(exc) == "PMV4_TICKET_LEDGER_CANONICAL_OWNER_AMBIGUOUS"
+        return
     assert report["production_mutation"] is False
     assert report["production_install_authorized"] is False
     assert report["status"] == "inspection_only"

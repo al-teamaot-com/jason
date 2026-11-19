@@ -1,0 +1,53 @@
+name: Legacy JSON governed preproduction boundary and isolated parity
+on:
+  pull_request:
+    paths:
+      - "tools/legacy_json_preprod_boundary.py"
+      - "tools/legacy_json_preprod_matrix.py"
+      - "tools/legacy_json_preprod_report.py"
+      - "tests/test_legacy_json_preprod_boundary.py"
+      - "tests/test_legacy_json_preprod_matrix.py"
+      - "tests/test_legacy_json_preprod_recovery_all19.py"
+      - "docs/playbooks/json/migration/governed-preprod-boundary-v1.json"
+      - ".github/workflows/legacy-json-preprod-boundary.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-nonprovider-preproduction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install source-test dependencies only
+        run: python -m pip install --disable-pip-version-check pytest jsonschema
+      - name: Verify exact source inventory, owner denial and target boundary
+        env:
+          PYTHONPATH: .:implementation:implementation/runtime_service/src
+        run: python -m pytest -q tests/test_legacy_json_preprod_boundary.py tests/test_legacy_json_preprod_matrix.py
+      - name: Run all nineteen isolated source parity and shared recovery suites
+        env:
+          PYTHONPATH: .
+        run: python tools/legacy_json_preprod_matrix.py
+      - name: Verify no tracked source, production activation or retirement changed
+        run: |
+          git diff --exit-code
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('tmp/json-preprod-parity-recovery/matrix-results.json')
+          r=json.loads(p.read_text())
+          assert r['status']=='isolated_synthetic_matrix_pass'
+          assert len(r['cases'])==19 and r['fully_accepted']==0
+          assert r['live_preproduction_provider_calls']==0
+          assert r['live_preproduction_provider_writes']==0
+          assert r['production_json_registry_modified'] is False
+          assert r['legacy_retirement_actions']==0
+          assert all(row['isolated_draft_interruption_reopen']=='pass'
+                     for row in r['cases'].values())
+          assert r['governance_boundary_test_totals']['passed']>0
+          assert r['shared_recovery_test_totals']['passed']>0
+          PY

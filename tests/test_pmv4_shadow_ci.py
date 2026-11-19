@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -50,11 +51,14 @@ def fake_runner(*, sha=SHA, workflows=None, branch="main", event="push", rc=0,
             ]}
         elif "/check-runs?" in argv[-1]:
             assert SHA in argv[-1]
-            payload = {"total_count": len(check_runs) if total is None else total,
-                       "check_runs": check_runs}
+            check_name = parse_qs(urlparse(argv[-1]).query)["check_name"][0]
+            matching = [x for x in check_runs if x["name"] == check_name]
+            payload = {"total_count": len(matching) if total is None else total,
+                       "check_runs": matching}
         else:
             assert "head_sha=" + SHA in argv[-1]
-            payload = {"workflow_runs": workflows}
+            assert "event=push" in argv[-1]
+            payload = {"workflow_runs": workflows, "total_count": len(workflows)}
         return subprocess.CompletedProcess(argv, rc, json.dumps(payload), "")
     return run
 
@@ -124,6 +128,24 @@ class GitHubVerifierTests(unittest.TestCase):
         self.assertFalse(protected_main_ci_verified(SHA, runner=fake_runner(
             check_runs=green, total=101,
         ), at=NOW))
+
+    def test_required_checks_not_lost_amid_unrelated_check_noise(self):
+        noise = [dict(name="classify", head_sha=SHA, status="completed",
+                      conclusion="skipped", completed_at=NOW.isoformat(),
+                      app={"id": GITHUB_ACTIONS_APP_ID}) for _ in range(300)]
+        good = [dict(name=name, head_sha=SHA, status="completed",
+                     conclusion="success", completed_at=NOW.isoformat(),
+                     app={"id": GITHUB_ACTIONS_APP_ID})
+                for name in sorted(BASELINE_REQUIRED_CHECKS)]
+        self.assertTrue(protected_main_ci_verified(
+            SHA, runner=fake_runner(check_runs=noise+good), at=NOW))
+
+    def test_required_check_missing_amid_noise_denied(self):
+        noise = [dict(name="classify", head_sha=SHA, status="completed",
+                      conclusion="skipped", completed_at=NOW.isoformat(),
+                      app={"id": GITHUB_ACTIONS_APP_ID}) for _ in range(300)]
+        self.assertFalse(protected_main_ci_verified(
+            SHA, runner=fake_runner(check_runs=noise), at=NOW))
 
     def test_branch_protection_drift_fails_closed(self):
         self.assertFalse(protected_main_ci_verified(

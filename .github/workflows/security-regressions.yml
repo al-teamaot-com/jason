@@ -30,6 +30,61 @@ jobs:
             implementation/runtime_service/tests \
             implementation/mcp_service/src \
             implementation/mcp_service/tests
+      - name: Autotask catalog source-only Production Manager admission security
+        run: |
+          python -m pytest -q tools/tests/test_catalog_scoped_release_admission.py
+      - name: Exact catalog runtime MCP promotion, root routing and rollback security
+        run: |
+          python -m pytest -q \
+            tools/tests/test_catalog_scoped_promotion.py \
+            tools/tests/test_catalog_scoped_promotion_host.py \
+            tools/tests/test_catalog_scoped_root_worker_request.py \
+            tools/tests/test_catalog_scoped_promotion_bundle.py \
+            implementation/mcp_service/tests/test_catalog_scoped_promotion_approval.py
+      - name: Catalog scoped native root installation preflight cannot install or elevate
+        run: |
+          python -m pytest -q \
+            tools/tests/test_catalog_scoped_root_install_plan.py \
+            tools/tests/test_catalog_scoped_trusted_install_paths.py \
+            tools/tests/test_catalog_scoped_native_projection_closure.py \
+            tools/tests/test_catalog_scoped_projection_rebind_plan.py
+      - name: Owner-authenticated single-use catalog root bootstrap source security
+        run: |
+          python -m pytest -q \
+            tools/tests/test_catalog_scoped_root_install_transaction.py \
+            tools/tests/test_catalog_scoped_root_bootstrap_packet.py \
+            tools/tests/test_catalog_scoped_root_install_native.py
+      - name: Scoped Backport exact four-unit desired-state reconciliation security
+        run: |
+          python -m pytest -q tests/test_scoped_backport_drift_reconcile.py
+      - name: Catalog root fresh-process trust verification and exact rollback
+        run: |
+          python -m pytest -q tools/tests/test_catalog_root_consumption_ledger_repair_v2_once.py
+      - name: Catalog Owner operator root-private transaction boundary and native one-use enforcement
+        run: |
+          python -m pytest -q tools/tests/test_catalog_owner_renewal_operator_v3.py
+      - name: Catalog root-bootstrap and MCP release consumption-ledger namespace safety
+        run: |
+          python -m pytest -q \
+            tools/tests/test_catalog_consumption_ledger_namespaces.py \
+            tools/tests/test_catalog_root_consumption_ledger_repair_once.py \
+            tools/tests/test_catalog_scoped_owner_approval_renewal.py \
+            tools/tests/test_catalog_unsigned_offer_safe_restage.py
+      - name: Catalog unsigned-offer source-only restage, PMv4 rollback and Owner-root install safety
+        run: |
+          python -m pytest -q \
+            tools/tests/test_catalog_unsigned_offer_safe_restage.py \
+            tools/tests/test_catalog_pmv4_transaction_rollback_gate.py \
+            tools/tests/test_catalog_root_unsigned_offer_restage_install_once.py
+      - name: Catalog historical pinned runner trust and one-use root repair rollback
+        run: |
+          python -m pytest -q tools/tests/test_catalog_scoped_trusted_original_runner.py tools/tests/test_catalog_root_trusted_runner_repair_once.py
+      - name: One-use catalog root worker rebind Owner boundary and rollback safety
+        run: |
+          python -m pytest -q tools/tests/test_catalog_root_worker_rebind_once.py tools/tests/test_catalog_root_worker_rebind_retired_timer.py
+      - name: PMv4 one-use completed catalog bootstrap timer recovery exact-scope safety
+        run: |
+          python -m pytest -q tools/tests/test_pmv4_bootstrap_timer_recovery_once.py
       - name: Prompt-injection evidence boundary regressions
         run: |
           python -m pytest -q \
@@ -46,16 +101,48 @@ jobs:
             implementation/connectors/tests/test_autotask_ticket_attachments.py \
             implementation/mcp_service/tests/test_contract_client_context.py \
             implementation/mcp_service/tests/test_authority_grant_admin.py \
+            implementation/mcp_service/tests/test_autotask_catalog_grant_admin.py \
             implementation/orchestrator/tests/test_governed_execution_replay.py \
             implementation/orchestrator/tests/test_approval_continuation_guard.py \
             implementation/tests/test_approval_continuation.py \
             implementation/tests/test_approval_recovery.py \
             implementation/tests/test_approval_recovery_retry.py
+      - name: Microsoft 365 group admin scoped-execution and consent-boundary regressions
+        run: |
+          python -m pytest -q \
+            implementation/connectors/microsoft_graph/test_governed_operations.py \
+            implementation/connectors/microsoft_graph/test_group_reader.py \
+            implementation/connectors/microsoft_graph/test_group_executor.py \
+            implementation/connectors/microsoft_graph/test_group_preflight.py \
+            implementation/connectors/microsoft_graph/test_group_pilot_manifest.py \
+            implementation/orchestrator/tests/test_microsoft_group_admin_catalog.py \
+            implementation/runtime_service/tests/test_microsoft_group_admin.py \
+            implementation/runtime_service/tests/test_microsoft_group_admin_activation.py \
+            implementation/mcp_service/tests/test_microsoft_group_admin_mcp.py \
+            tools/tests/test_microsoft_group_admin_release.py \
+            tools/tests/test_deploy_live_container_extensions.py \
+            implementation/connectors/tests/test_openbao_secrets.py \
+            tools/tests/test_provider_secret_provision.py \
+            tools/tests/test_microsoft_group_admin_identity_bootstrap.py
+      - name: Scoped source-pinned backport, exact Owner proof and paired rollback regressions
+        run: |
+          python -m pytest -q \
+            tools/tests/test_scoped_backport_release.py \
+            tools/tests/test_scoped_backport_release_request.py \
+            tools/tests/test_scoped_backport_native_host.py \
+            tools/tests/test_scoped_backport_native_worker.py \
+            tools/tests/test_scoped_backport_root_install.py \
+            tools/tests/test_scoped_backport_owner_local_approval.py \
+            tools/tests/test_scoped_backport_four_unit_drift_reconcile.py
+      - name: Microsoft group dormant and exact AOT activation composition
+        run: |
+          python -m pytest -q implementation/runtime_service/tests/test_composition.py -k group_admin
       - name: Active write-provider execution-plan regressions
         run: |
           python -m pytest -q \
             implementation/runtime_service/tests/test_autotask_internal_note.py \
             implementation/runtime_service/tests/test_autotask_procurement_runtime.py \
+            implementation/runtime_service/tests/test_autotask_catalog_service_identity.py \
             implementation/runtime_service/tests/test_autotask_ticket_create.py \
             implementation/runtime_service/tests/test_autotask_ticket_update.py \
             implementation/runtime_service/tests/test_autotask_ticket_attachment_runtime.py \

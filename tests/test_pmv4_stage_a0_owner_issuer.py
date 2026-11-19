@@ -164,19 +164,37 @@ def test_live_path_and_identity_cannot_be_overridden_by_client(call):
         issuer.issue_stage_a0_request(**args)
 
 
-def test_source_deploy_profile_has_explicit_default_off():
+def test_source_issuer_activation_requires_explicit_on_profile_and_trusted_signer():
     repo = Path(__file__).resolve().parents[1]
     cfg = json.loads((repo / "config/pmv4-stage-a0-issuer-activation.json").read_text())
     assert cfg == {
         "schema_version": "1.0",
-        "service": "pmv4-stage-a0-host-bootstrap", "mode": "off",
+        "service": "pmv4-stage-a0-host-bootstrap", "mode": "on",
     }
+    # This source-only PR prepares an ON profile; it does not change the
+    # running environment. A separate exact Owner-approved MCP release is
+    # required to deploy the profile and replace the running container.
     script = (repo / "infrastructure/jason-mcp/production-deploy.sh").read_text()
+    assert "PMV4_STAGE_A0_MODE" in script
+    assert 'elif [ "$PMV4_STAGE_A0_MODE" = "on" ]; then' in script
+    assert 'if [ "${#OWNER_SIGNER_ARGS[@]}" -eq 0 ]; then' in script
     assert "JASON_PMV4_STAGE_A0_ISSUER_ENABLED=false" in script
     assert "JASON_PMV4_STAGE_A0_ISSUER_ENABLED=true" in script
+    assert 'if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then' in script
     server = (repo / "implementation/mcp_service/src/jason_mcp/server.py").read_text()
     assert "def authorize_pmv4_stage_a0_install(" in server
     assert 'JASON_PMV4_STAGE_A0_ISSUER_ENABLED") != "true"' in server
+
+
+def test_activation_profile_does_not_create_standing_owner_authority():
+    repo = Path(__file__).resolve().parents[1]
+    source = (repo / "implementation/mcp_service/src/jason_mcp/pmv4_stage_a0_owner_issuer.py").read_text()
+    assert "confirmed_decision=\"approve\"" in source
+    assert "verify_entra_bearer(bearer_token)" in source
+    assert "exact_owner_consent(binding)" in source
+    assert "_publish_exact_request(" in source
+    assert '"standing_authority": False' in source
+    assert 'issue_exact_owner_release(' in source
 
 
 def test_one_use_request_publishes_only_after_complete_spool_atomic_rename(

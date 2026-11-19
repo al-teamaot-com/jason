@@ -27,6 +27,13 @@ from connectors.dnsfilter.connector import DnsFilterConnector
 from connectors.dnsfilter.mcp_connector import DnsFilterMcpConnector
 from connectors.darkwebid.connector import DarkWebIdConnector
 from connectors.dnsfilter.mcp_oauth import DnsFilterMcpOAuthStore
+from jason_runtime.microsoft_group_admin_activation import (
+    register_group_admin_from_env, ensure_group_admin_owner_authority,
+)
+from jason_runtime.microsoft_group_admin import (
+    build_microsoft_group_admin_openbao_invoker,
+    register_microsoft_group_admin_invoker,
+)
 from jason_runtime.dnsfilter_mcp_mutation import (
     build_dnsfilter_mcp_mutation_invoker,
     register_dnsfilter_mcp_mutation_invokers,
@@ -1454,9 +1461,28 @@ def _deterministic_resource_contracts(
     return tuple(contracts)
 
 
+@dataclass(frozen=True, slots=True)
+class TicketWorkerComponentRuntime:
+    """No HTTP, Teams ingress, approval listener or PM auxiliary lifecycle.
+
+    This bounded component is only the ticket worker and its governed ports.
+    It is NOT itself an installation/authorization/credential projection.
+    """
+    maintenance: Any
+
+
+def _shadow_processes_targeted_wakes(settings: RuntimeSettings) -> bool:
+    """Only historical embedded hosting may leave targeted wakes to shadow."""
+    return (
+        settings.ticket_worker_hosting == "embedded"
+        and not settings.autonomy_worker_enabled
+    )
+
+
 def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile: str = "all",
                               health_probe=None, universal_approval_handler=None,
-        teams_workflow_approval_handlers: Mapping[str, Any] | None = None) -> RuntimeHttpApplication:
+        teams_workflow_approval_handlers: Mapping[str, Any] | None = None
+        ) -> RuntimeHttpApplication | TicketWorkerComponentRuntime:
     settings.validate()
     if maintenance_profile not in {"all", "ticket_worker", "auxiliary"}:
         raise ValueError("unknown maintenance profile")
@@ -1549,6 +1575,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             providers=providers,
             now=now,
         )
+    )
+    group_admin_activation = register_group_admin_from_env(
+        capabilities=capabilities, providers=providers, now=now,
     )
     register_email_send(capabilities=capabilities, providers=providers)
     constant_contact_activation = register_constant_contact_runtime_foundation(
@@ -1723,6 +1752,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     )
     ensure_aot_staff_internal_note_authority(
         identity_authority, enabled=staff_internal_note_enabled,
+    )
+    ensure_group_admin_owner_authority(
+        identity_authority, enabled=group_admin_activation.enabled,
     )
     ensure_teams_message_send_authority(
         identity_authority, enabled=configured_teams_message_send(),
@@ -1964,6 +1996,23 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             environment=quickbooks_activation.environment or "sandbox",
         )
         if quickbooks_activation.enabled
+        else None
+    )
+    # Dormant unless the separately authorized exact AOT pilot profile is active.
+    # Existing Microsoft directory identity and ticket/core composition stay intact.
+    microsoft_group_admin_invoker = (
+        build_microsoft_group_admin_openbao_invoker(
+            boundaries=SQLiteClientBoundaryRepository(microsoft_directory.store),
+            openbao_url=settings.openbao_url,
+            read_role_id_path=Path("/run/jason-secrets/openbao/microsoft-group-read/role_id"),
+            read_secret_id_path=Path("/run/jason-secrets/openbao/microsoft-group-read/secret_id"),
+            write_role_id_path=Path("/run/jason-secrets/openbao/microsoft-group-write/role_id"),
+            write_secret_id_path=Path("/run/jason-secrets/openbao/microsoft-group-write/secret_id"),
+            transport=http_transport,
+            entitlement=None,  # exact active Owner/AOT pilot policy, never broad default
+            audit=ConnectorEventAudit(orchestration_events),
+        )
+        if group_admin_activation.enabled
         else None
     )
     ticket_create_invoker = build_autotask_ticket_create_invoker(
@@ -2291,6 +2340,11 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             invokers=invokers,
             invoker=quickbooks_read_invoker,
         )
+    if microsoft_group_admin_invoker is not None:
+        register_microsoft_group_admin_invoker(
+            invokers=invokers,
+            invoker=microsoft_group_admin_invoker,
+        )
     register_autotask_ticket_create_invoker(
         invokers=invokers,
         invoker=ticket_create_invoker,
@@ -2434,6 +2488,44 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         require_authority_context=True,
         governed_execution_ledger=governed_execution_ledger,
     )
+
+    if maintenance_profile == "ticket_worker":
+        # Stage C component seam: build only the existing governed Ticket Core
+        # worker. Do NOT create the HTTP ingress/replay/continuation, Teams
+        # approval services, client-question HTTP flow, PM release watchers,
+        # procurement mailboxes, or auxiliary processes in this worker child.
+        # Its provider/orchestrator dependencies above remain governed and
+        # must be isolated separately before any production C cutover.
+        if not settings.autonomy_worker_enabled:
+            raise RuntimeError("TICKET_CORE_WORKER_PROFILE_DISABLED")
+        worker_completion_notifier = build_autonomous_completion_notifier(
+            enabled=autonomous_completion_notifications_enabled,
+            identity_authority=identity_authority,
+            capabilities=capabilities,
+            approvals=approval_repository,
+            execution_ledger=governed_execution_ledger,
+            orchestrator=orchestrator,
+            promotion_db=settings.autonomy_promotion_db,
+        )
+        worker_maintenance = build_autonomy_worker_maintenance(
+            enabled=True,
+            identity_authority=identity_authority,
+            capabilities=capabilities,
+            approvals=approval_repository,
+            execution_ledger=governed_execution_ledger,
+            orchestrator=orchestrator,
+            work_db=settings.autonomy_worker_db,
+            promotion_db=settings.autonomy_promotion_db,
+            targeted_wake_db=settings.autonomy_targeted_wake_db,
+            owned_autotask_resource_ids=settings.autonomy_owned_autotask_resource_ids,
+            max_active_work_items=settings.autonomy_max_active_work_items,
+            interval_seconds=settings.autonomy_worker_interval_seconds,
+            targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
+            audit=reflection_audit,
+            completion_notifier=worker_completion_notifier,
+        )
+        ticket_attention_relay.bind(worker_maintenance)
+        return TicketWorkerComponentRuntime(maintenance=worker_maintenance)
 
     resource_response_renderer = GovernedTeamsResourceResponseRenderer(
         interpreter=GovernedResourceEvidenceInterpreter(
@@ -2965,7 +3057,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         interval_seconds=settings.autonomy_shadow_interval_seconds,
         failure_retry_seconds=settings.autonomy_shadow_failure_retry_seconds,
         targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
-        process_targeted_wakes=not settings.autonomy_worker_enabled,
+        process_targeted_wakes=_shadow_processes_targeted_wakes(settings),
     )
     autonomous_completion_notifier = build_autonomous_completion_notifier(
         enabled=autonomous_completion_notifications_enabled,

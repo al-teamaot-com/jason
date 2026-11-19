@@ -22,8 +22,8 @@ def registry_path() -> Path:
     return Path(os.environ.get(JSON_PLAYBOOK_DB_ENV, JSON_PLAYBOOK_DB_DEFAULT).strip())
 
 
-def open_registry() -> SQLitePlaybookRegistry:
-    return SQLitePlaybookRegistry(registry_path())
+def open_registry(*, read_only: bool = False) -> SQLitePlaybookRegistry:
+    return SQLitePlaybookRegistry(registry_path(), read_only=read_only)
 
 
 def parse_payload(payload_json: str) -> Mapping[str, Any]:
