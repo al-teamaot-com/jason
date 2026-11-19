@@ -64,14 +64,12 @@ Integration coordination: #2455
   `/opt/jason/bootstrap/secrets/openbao/microsoft-graph-sharepoint-read-approle`.
   The unprivileged operator session **cannot inspect** that protected directory;
   unverified access is FAIL-CLOSED, not proof of file absence. Production client-boundary
-  database query returned zero SharePoint profile rows. On 2026-11-19, the authenticated
-  Atlantic Office Entra admin-center readback verified Microsoft Graph application
-  permission `Sites.Read.All` as Granted for Atlantic Office on the single-tenant app
-  `Jason SharePoint Reader - AOT Accounting` (client ID
-  `c5692fec-3f78-44db-9a15-59c3e3bcac58`, tenant
-  `f7054323-d52b-4863-8c2f-1898f0b6077c`). The app overview showed one certificate and
-  zero client secrets; certificate thumbprint/expiry and an actual app-only token or
-  Graph enumeration remain unverified.
+  database query returned zero SharePoint profile rows. An authenticated Entra
+  admin-center readback on 2026-11-19 verified Microsoft Graph application permission
+  `Sites.Read.All` as granted for the existing dedicated Jason SharePoint reader app.
+  The app overview showed one certificate and zero client secrets; certificate
+  thumbprint/expiry and an actual app-only token or Graph enumeration remain
+  unverified.
 - Microsoft Graph `sites/getAllSites` requires **application** `Sites.Read.All`,
   with tenant admin consent. The documented nextLink can use
   `/v1.0/sites/oneDrive.getAllSites?$skiptoken=...`; the bounded pagination validator
