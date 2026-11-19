@@ -113,6 +113,9 @@ def test_sharepoint_site_management_uses_isolated_app_token_source(tmp_path: Pat
         state_db=tmp_path / "sharepoint-sites.db", transport=object(),
     )
     assert manager.daily_discovery.tokens is runtime.reader.tokens
+    assert manager.daily_discovery.allowed_sharepoint_hosts == frozenset({
+        "absolnet.sharepoint.com", "absolnet-web.sharepoint.com",
+    })
     assert manager.site_access.sites() == []
     with pytest.raises(PermissionError):
         manager.site_access.require_site_access(

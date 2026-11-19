@@ -24,7 +24,9 @@ class SharePointSiteDiscovery:
     tokens: AppOnlyTokens
     transport: HttpTransport
     registry: SharePointSiteAccess
-    allowed_sharepoint_hosts: frozenset[str] = frozenset({"absolnet.sharepoint.com"})
+    allowed_sharepoint_hosts: frozenset[str] = frozenset({
+        "absolnet.sharepoint.com", "absolnet-web.sharepoint.com",
+    })
     max_pages: int = 1000
     max_sites: int = 100000
 

@@ -112,7 +112,9 @@ class MicrosoftSharePointSiteManagement:
 def build_sharepoint_site_management(
     *, runtime: MicrosoftSharePointRuntime,
     tenant_id: str, state_db: Path, transport: UrlLibJsonHttpTransport,
-    allowed_sharepoint_hosts: frozenset[str] = frozenset({"absolnet.sharepoint.com"}),
+    allowed_sharepoint_hosts: frozenset[str] = frozenset({
+        "absolnet.sharepoint.com", "absolnet-web.sharepoint.com",
+    }),
 ) -> MicrosoftSharePointSiteManagement:
     """Use the EXISTING dedicated SharePoint app token provider.
 

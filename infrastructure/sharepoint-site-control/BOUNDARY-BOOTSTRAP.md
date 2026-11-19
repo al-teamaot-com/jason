@@ -16,7 +16,9 @@ Run from the clean release worktree as the authenticated AOT operator with
 - `JASON_SHAREPOINT_SERVICE_PRINCIPAL_ID`: its Enterprise Application object ID.
 - `JASON_SHAREPOINT_EXPECTED_CERT_THUMBPRINT`: registered public certificate thumbprint.
 - `JASON_SHAREPOINT_AOT_DOMAIN`: `teamaot.com`.
-- `JASON_SHAREPOINT_AOT_HOSTNAMES`: `absolnet.sharepoint.com`.
+- `JASON_SHAREPOINT_AOT_HOSTNAMES`: comma-separated exact allowlist
+  `absolnet.sharepoint.com,absolnet-web.sharepoint.com` (the two exact hosts
+  observed in authenticated tenant discovery).
 - `JASON_OPENBAO_URL`: local OpenBao URL.
 - `JASON_SHAREPOINT_OPENBAO_ROLE_ID_PATH` and
   `JASON_SHAREPOINT_OPENBAO_SECRET_ID_PATH`: dedicated AppRole files.

@@ -38,6 +38,17 @@ def test_multi_page_discovery_new_sites_disabled(tmp_path):
     assert tr.calls[1]["url"]==NEXT
     assert all(x["method"]=="GET" for x in tr.calls)
 
+def test_observed_secondary_aot_host_is_allowed_by_default(tmp_path):
+    second_host = {
+        "id": "absolnet-web.sharepoint.com,ccc,ddd",
+        "name": "Observed AOT site",
+        "webUrl": "https://absolnet-web.sharepoint.com/sites/Observed",
+    }
+    d,r,tr=make(tmp_path,[{"value":[second_host]}])
+    assert d.run()==1
+    assert r.sites()[0]["site_id"] == second_host["id"]
+
+
 def test_graph_failure_does_not_commit_partial_site_list(tmp_path):
     d,r,tr=make(tmp_path,[{"value":[SITE],"@odata.nextLink":NEXT},
                           RuntimeError("Graph throttling")])
