@@ -67,6 +67,7 @@ class Host:
         self.changed = False
         self.busy = False
         self.freeze_active = False
+        self.root_gate_pass = True
 
     @contextmanager
     def lock(self):
@@ -96,6 +97,19 @@ class Host:
                 "running":True,"health":"healthy","id":s+"-"+v,
                 "image":"sha256:"+"f"*64,"started_at":"2026-11-19T12:00:00Z",
             } for s in original.PROTECTED
+        }
+
+    def root_gate(self):
+        if not self.root_gate_pass:
+            return {"status":"not_ready_for_six_unit_cutover",
+                    "production_mutations":False}
+        return {
+            "status":"read_only_root_preflight_source_conditions_passed",
+            "production_mutations":False,
+            "owner_release_authorized":False,
+            "pmv3_retirement_authorized":False,
+            "legacy_triggers_verified":6,
+            "replacement_triggers_verified_inert":6,
         }
 
     def source(self, sha):
@@ -130,6 +144,7 @@ class Host:
 def ctl(root, host):
     c = native.StageESignedNativeLedger(
         root=root, source_root=packet.ROOT,
+        verify_stage_e_preflight=host.root_gate,
         host_transaction=host.lock, freeze_transaction=host.freeze,
         verify_protected=host.protected, verify_source_and_ci=host.source,
         verify_image=lambda *_: False,
@@ -168,6 +183,7 @@ def test_current_source_only_module_denies_real_production_instantiation(tmp_pat
     with pytest.raises(original.ComponentReleaseDenied, match="ROOT_INSTALLED_PIN_REQUIRED"):
         native.StageESignedNativeLedger(
             root=root, source_root=packet.ROOT,
+            verify_stage_e_preflight=h.root_gate,
             host_transaction=h.lock, freeze_transaction=h.freeze,
             verify_protected=h.protected, verify_source_and_ci=h.source,
             verify_image=lambda *_: False, observe_component=h.observe,
@@ -178,7 +194,7 @@ def test_current_source_only_module_denies_real_production_instantiation(tmp_pat
 
 @pytest.mark.parametrize("scenario", [
     "invalid_signature", "expired", "scope", "provider",
-    "baseline", "source", "replay",
+    "baseline", "source", "replay", "root_preflight",
 ])
 def test_invalid_approval_source_or_scope_does_not_activate(tmp_path, scenario):
     root, manifest=fixture(tmp_path)
@@ -198,6 +214,8 @@ def test_invalid_approval_source_or_scope_does_not_activate(tmp_path, scenario):
         host.installed="c"*40
     elif scenario == "source":
         host.fail_source=True
+    elif scenario == "root_preflight":
+        host.root_gate_pass=False
     elif scenario == "replay":
         (root/"receipts"/("owner-"+"owner-mcp-"+"4"*32+".json")).write_text(
             json.dumps({"approval_id":"owner-mcp-"+"4"*32,"state":"accepted"}))
