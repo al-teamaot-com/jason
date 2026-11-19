@@ -284,44 +284,37 @@ def test_different_owner_signature_cannot_recover_started(tmp_path):
     assert records(root)[0]["state"] == "started"
 
 
-def test_root_attestor_gate_is_required_before_signed_owner_when_production(
+def test_root_attestor_validates_exact_bytes_before_accepting_scope(
         tmp_path, monkeypatch):
-    """Disposable production-mode preflight must refuse missing native trust.
+    """An isolated negative of the canonical UID0-attestor result.
 
-    This is NOT a privileged root acceptance test. Constructor's production
-    canonical-path guard remains enforced separately.
+    Does not fake a production controller constructor, root path, or release.
     """
     from tools import pmv4_e_native_root_manifest_attestation as root_attestor
     root, manifest = fixture(tmp_path)
     host = Host()
     candidate = ctl(root, host)
-    candidate.production = True
-    candidate._paths = lambda: (
-        root/"releases", root/"receipts", root/"control", root/"active")
-    candidate._active = lambda component: None
-    candidate._bundle = lambda record: root/"releases"/CANDIDATE
-    candidate._verify_protected_snapshot = host.protected
-    candidate._freeze_bytes = lambda record: b'{"status":"active"}'
-    candidate._root_stage_e_preflight = host.root_gate
-
     observed = []
-    def invalid_attestor(**kwargs):
+
+    def bad_attestation(**kwargs):
         observed.append(kwargs)
         return {
             "status":"root_source_attested_no_release_authority",
             "candidate_sha":CANDIDATE,
             "rollback_sha":ROLLBACK,
             "scope_sha256":manifest["source_scope_sha256"],
-            "manifest_sha256":"0"*64,
+            "manifest_sha256":"0"*64,  # Wrong signed exact manifest
             "file_count":len(packet.REVIEWED_PATHS),
             "production_mutations":False,
             "release_authorized":False,
             "owner_proof_issued":False,
         }
-    monkeypatch.setattr(root_attestor, "inspect", invalid_attestor)
+    monkeypatch.setattr(root_attestor, "inspect", bad_attestation)
     with pytest.raises(original.ComponentReleaseDenied,
                        match="INSTALLED_ROOT_ATTESTATION_NOT_EXACT"):
-        candidate.preflight(manifest, approval(manifest))
+        candidate._attest_installed_root(
+            manifest=manifest,candidate=CANDIDATE,previous=ROLLBACK,
+            verified_bundle=root/"releases"/CANDIDATE)
     assert len(observed)==1
     assert observed[0]["production"] is True
     assert observed[0]["source_root"] == root_attestor.TRUST_ROOT
