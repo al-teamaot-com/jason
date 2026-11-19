@@ -231,3 +231,39 @@ def test_notfound_new_unit_nonfour_failure_code_denied():
         with pytest.raises(gate.RootPreflightDenied,
                            match="SYSTEMD_READBACK_UNAVAILABLE"):
             gate._active(unit,user=True,runner=runner)
+
+
+def test_canary_freeze_readback_accepts_exact_service_user_owned_file(tmp_path,monkeypatch):
+    import hashlib,os
+    from tools import pmv4_e_canary_acceptance_readback as canary
+    freeze=tmp_path/"production-deployment-freeze"
+    raw=b"frozen-production-state\n"
+    freeze.write_bytes(raw)
+    freeze.chmod(0o600)
+    monkeypatch.setattr(canary,"FREEZE_PATH",freeze)
+    monkeypatch.setattr(canary,"FREEZE_UID",freeze.stat().st_uid)
+    monkeypatch.setattr(canary,"FREEZE_GID",freeze.stat().st_gid)
+    monkeypatch.setattr(canary,"root_data",lambda path,**kwargs:b"protected-policy")
+    monkeypatch.setattr(canary,"ACTIVE",tmp_path/"absent-active-pointer")
+    def runner(*args,**kwargs):
+        return SimpleNamespace(returncode=0,stdout="",stderr="")
+    result=canary.probe_clean_host(
+        runner=runner,expected_freeze_sha=hashlib.sha256(raw).hexdigest(),
+        expected_policy_sha=hashlib.sha256(b"protected-policy").hexdigest())
+    assert result["freeze_sha256"]==hashlib.sha256(raw).hexdigest()
+
+
+@pytest.mark.parametrize("field,value",[
+    ("st_uid",2000),("st_gid",2000),("st_mode",0o100640),
+    ("st_mode",0o120777),("st_nlink",2),("st_size",0),
+])
+def test_canary_freeze_metadata_rejects_wrong_identity_or_mode(field,value):
+    from types import SimpleNamespace
+    from tools import pmv4_e_canary_acceptance_readback as canary
+    metadata={"st_mode":0o100600,"st_uid":1000,"st_gid":1000,
+              "st_nlink":1,"st_size":10}
+    metadata[field]=value
+    with pytest.raises(canary.CanaryAcceptanceDenied,
+                       match="SERVICE_FILE_UNTRUSTED"):
+        canary.validate_service_file_meta(
+            SimpleNamespace(**metadata),path_name="production-deployment-freeze")

@@ -1,0 +1,318 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "service.ticket.read",
+      "endpoint.device.read",
+      "endpoint.alert.history.search",
+      "endpoint.powershell.read",
+      "service.ticket.note.create",
+      "service.ticket.notes.search",
+      "service.ticket.update"
+    ],
+    "approval_bound_branches": [
+      "create_internal_note",
+      "complete_ticket"
+    ],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "verified clean site shutdown ticket only; all other cases human review"
+  },
+  "expected_state": {
+    "physical_threshold": 3,
+    "incident_window_minutes": 15,
+    "recurrence_window_days": 30,
+    "recurrence_threshold": 2,
+    "clean_site_event_requires_health_verified_each_endpoint": true,
+    "no_independent_storage_or_whea_risk": true
+  },
+  "migration": {
+    "source_conversion": "isolated_classifier_and_governed_completion_intent_only_not_accepted",
+    "legacy_source_blob_sha": "238c644b741ef82a104318e92b99f42dd10dbea1",
+    "legacy_registry_version": "1.1.0",
+    "source_map": "docs/playbooks/json/migration/source_maps/unexpected_shutdown.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "Bounded all-same-company site peer enumeration and exact \u00b115 minute grouping is not wired into the JSON runtime",
+      "Read-only five-command per-device event/WHEA/physical disk/reliability/volume telemetry and parser fanout is not connected end-to-end",
+      "All device health observations and protected host branch need independently reviewed current source fingerprints",
+      "Durable 30-day recurrence and 15-minute site incident recheck not wired into existing JSON scheduler",
+      "Approved exact note and ticket actions and provider readbacks not independently validated in live isolated preproduction"
+    ],
+    "accepted_for_execution": false,
+    "production_activation_authorized": false
+  },
+  "playbook": {
+    "id": "unexpected_shutdown",
+    "lifecycle": "pilot",
+    "name": "Jason - Windows Unexpected Shutdown Site Correlation",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-Windows-Unexpected-Shutdown-Site-Correlation.md",
+    "target_type": "ticket",
+    "version": "1.1.0-migration.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "protected_server_no_autonomous_close": true,
+    "virtual_devices_excluded_from_site_threshold": true,
+    "no_disruptive_actions": true,
+    "source_only": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "client_id",
+      "device_uid",
+      "site_uid",
+      "incident_timestamp_ms",
+      "source_alert_uid",
+      "site_event_id",
+      "physical_peer_count",
+      "storage_risk_fingerprint",
+      "note_id",
+      "action_correlation",
+      "next_due_at"
+    ],
+    "recheck_trigger": "new authoritative event/device evidence",
+    "no_auto_retry_after_uncertain_write": true
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "scope_gate"
+    },
+    {
+      "id": "scope_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_company_ticket_device_and_owner_proven",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_endpoint"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_endpoint",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "endpoint_gate"
+    },
+    {
+      "id": "endpoint_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_device_uid_site_and_role_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_alerts"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_alerts",
+      "type": "diagnostic",
+      "capability": "endpoint.alert.history.search",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "read_events"
+    },
+    {
+      "id": "read_events",
+      "type": "diagnostic",
+      "capability": "endpoint.powershell.read",
+      "arguments": {
+        "device_uid": {
+          "$fact": "device_uid"
+        },
+        "command": {
+          "$fact": "approved_shutdown_event_readonly_command"
+        },
+        "timeout_seconds": 45
+      },
+      "next": "source_evidence_gate"
+    },
+    {
+      "id": "source_evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "all_readonly_health_evidence_exact_and_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "classification"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "classification",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "verified_shutdown_disposition",
+            "operator": "eq",
+            "value": "site_environmental_classified"
+          },
+          "next": "safe_site_gate"
+        },
+        {
+          "when": {
+            "fact": "verified_shutdown_disposition",
+            "operator": "eq",
+            "value": "waiting_device_access"
+          },
+          "next": "wait_device"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "safe_site_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "all_devices_no_storage_risk_and_exact_owner_promotion",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "create_internal_note"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "create_internal_note",
+      "type": "remediation",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "$fact": "trusted_exact_internal_note_create_args"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_note"
+    },
+    {
+      "id": "verify_note",
+      "type": "verification",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "note_gate"
+    },
+    {
+      "id": "note_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_new_note_provider_readback_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "complete_ticket"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "complete_ticket",
+      "type": "remediation",
+      "capability": "service.ticket.update",
+      "arguments": {
+        "$fact": "trusted_exact_complete_ticket_args"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_ticket"
+    },
+    {
+      "id": "verify_ticket",
+      "type": "verification",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_gate"
+    },
+    {
+      "id": "ticket_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_complete_ticket_provider_readback_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "complete"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "wait_device",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "human_review"
+    },
+    {
+      "id": "complete",
+      "type": "complete"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Autotask/DRMM",
+    "matches": "Windows unexpected shutdown / Event ID 6008 or 41",
+    "requires_exact_incident_timestamp": true,
+    "source_playbook_registry_id": "unexpected_shutdown"
+  },
+  "verification": {
+    "authoritative_source": "existing scoped DRMM alert/endpoint read, Windows PowerShell nonmutating telemetry, Autotask ticket/note readback",
+    "success_condition": "no protected role or storage risk; independently proven site group and each device healthy; approved note and ticket completion readback"
+  }
+}

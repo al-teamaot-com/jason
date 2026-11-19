@@ -1,0 +1,288 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "service.ticket.read",
+      "service.ticket.create",
+      "service.ticket.note.create",
+      "service.ticket.notes.search",
+      "service.ticket.update"
+    ],
+    "approval_bound_branches": [
+      "create_child",
+      "create_lineage_note",
+      "complete_source"
+    ],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "source complete only after each target has exactly one verified Jason/New child; child remediation remains independently governed"
+  },
+  "expected_state": {
+    "one_verified_child_per_unique_same_client_ci": true,
+    "all_children_in_Jason_New": true,
+    "source_remains_open_until_all_child_readbacks": true
+  },
+  "migration": {
+    "source_conversion": "source_specific_split_planner_and_single_child_json_intent_not_accepted",
+    "legacy_source_blob_sha": "72048d28a449e253715f46a69ddc35d65d196113",
+    "legacy_registry_version": "1.0.0",
+    "source_map": "docs/playbooks/json/migration/source_maps/vulscan_multi_device_split.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "JSON v1 interpreter lacks persisted foreach-target orchestration and source-version-aware resume; must REUSE existing TicketSplitExecutor, never implement duplicate engine",
+      "No independently verified Owner-promoted real provider child creation/readback for all nodes in isolated preproduction",
+      "Source ticket claim -> child creates -> note -> completion entire transactional/saga boundary not yet wired end-to-end",
+      "Interrupted or uncertain child create reconciliation must confirm exact marker/provider child before any retry",
+      "Full source lineage and source-completion rollback/partial failure tests not yet accepted"
+    ],
+    "accepted_for_execution": false,
+    "production_activation_authorized": false
+  },
+  "playbook": {
+    "id": "vulscan_multi_device_split",
+    "lifecycle": "pilot",
+    "name": "Jason - VulScan Multi-Device Ticket Split",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-VulScan-Multi-Device-Split.md",
+    "target_type": "ticket",
+    "version": "1.0.0-migration.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "no_endpoint_remediation": true,
+    "one_ci_per_child": true,
+    "must_reuse_existing_ticket_split_runtime": true,
+    "source_only": true
+  },
+  "state_model": {
+    "entry_step": "read_source",
+    "persist": [
+      "source_ticket_id",
+      "source_ticket_number",
+      "company_id",
+      "source_version",
+      "split_plan_sha",
+      "target_key",
+      "target_device_uid",
+      "child_ticket_id",
+      "child_readback_sha",
+      "source_note_id",
+      "completed_child_count"
+    ],
+    "runtime": "existing SQLiteTicketSplitStore + TicketSplitExecutor",
+    "no_duplicate_child_creation": true
+  },
+  "steps": [
+    {
+      "id": "read_source",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "source_gate"
+    },
+    {
+      "id": "source_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_multi_node_same_company_ticket_and_split_plan",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "target_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "target_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "all_target_CIs_and_device_UIDs_verified_by_existing_split_planner",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "split_ledger_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "split_ledger_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "existing_ticket_split_state_exact_and_idempotent",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "create_child"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "create_child",
+      "type": "remediation",
+      "capability": "service.ticket.create",
+      "arguments": {
+        "$fact": "trusted_exact_next_child_create_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_child"
+    },
+    {
+      "id": "verify_child",
+      "type": "verification",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "created_child_ticket_id"
+        }
+      },
+      "next": "child_gate"
+    },
+    {
+      "id": "child_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_created_child_CI_company_and_lineage_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "all_children_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "all_children_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "all_unique_children_provider_verified_and_no_targets_missing",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "create_lineage_note"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "create_lineage_note",
+      "type": "remediation",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "$fact": "trusted_exact_source_split_note_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_note"
+    },
+    {
+      "id": "verify_note",
+      "type": "verification",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "note_gate"
+    },
+    {
+      "id": "note_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_jason_internal_source_lineage_note_readback",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "complete_source"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "complete_source",
+      "type": "remediation",
+      "capability": "service.ticket.update",
+      "arguments": {
+        "$fact": "trusted_exact_source_completion_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_source"
+    },
+    {
+      "id": "verify_source",
+      "type": "verification",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "source_completion_gate"
+    },
+    {
+      "id": "source_completion_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_source_complete_and_all_children_still_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "complete"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "complete",
+      "type": "complete"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Autotask",
+    "exact_source_ticket_required": true,
+    "minimum_nodes": 2,
+    "maximum_nodes": 40,
+    "vulscan_affected_nodes_source_only": true
+  },
+  "verification": {
+    "authoritative_source": "exact same-company Autotask CI/child ticket readback, DRMM endpoint UID/hostname, existing SQLiteTicketSplitStore lineage",
+    "success_condition": "all exact child tickets uniquely created once and independently read back, source note and completion verified"
+  }
+}

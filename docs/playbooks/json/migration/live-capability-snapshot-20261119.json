@@ -1,0 +1,200 @@
+{
+  "snapshot_date": "2026-11-19",
+  "source": "Jason live governed discover_capabilities, independently checked",
+  "count": 32,
+  "items": [
+    {
+      "name": "automation.component.execute",
+      "lifecycle": "active",
+      "read_only": false,
+      "write_capability": true
+    },
+    {
+      "name": "automation.component.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "automation.job.output.read",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "automation.job.read",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "backup.backupiq.alert.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "backup.endpoint.asset.read",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "backup.endpoint.asset.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "backup.endpoint.backup.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "endpoint.alert.history.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "endpoint.alert.resolve",
+      "lifecycle": "active",
+      "read_only": false,
+      "write_capability": true
+    },
+    {
+      "name": "endpoint.alert.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "endpoint.audit.read",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "endpoint.device.read",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "endpoint.device.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "endpoint.patch.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "endpoint.powershell.read",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "endpoint.security.detection.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "endpoint.security.status.read",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "endpoint.software.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "management.alert.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "service.configuration.read",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "service.configuration.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "service.contact.read",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "service.notification.history.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "service.ticket.client.notification.create",
+      "lifecycle": "active",
+      "read_only": false,
+      "write_capability": true
+    },
+    {
+      "name": "service.ticket.create",
+      "lifecycle": "active",
+      "read_only": false,
+      "write_capability": true
+    },
+    {
+      "name": "service.ticket.note.create",
+      "lifecycle": "active",
+      "read_only": false,
+      "write_capability": true
+    },
+    {
+      "name": "service.ticket.note.update",
+      "lifecycle": "active",
+      "read_only": false,
+      "write_capability": true
+    },
+    {
+      "name": "service.ticket.notes.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "service.ticket.read",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "service.ticket.search",
+      "lifecycle": "active",
+      "read_only": true,
+      "write_capability": false
+    },
+    {
+      "name": "service.ticket.update",
+      "lifecycle": "active",
+      "read_only": false,
+      "write_capability": true
+    }
+  ],
+  "read_write_metadata_verified": true
+}

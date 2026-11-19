@@ -1,0 +1,88 @@
+{
+  "authority_granted": false,
+  "facts_sha256": "9e1847b91146e50d44201be4449538066bf2a29c797cc46a24b9bd9903866a18",
+  "fingerprint": "5c8388351ff72d0cbe8e8bac7950c8b99f27bff310f61ff7ae7c2197ade2c662",
+  "instructions": [
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "page_size": 2,
+        "resource_id": 143305
+      },
+      "capability": "service.ticket.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_triage_human_review",
+      "step_id": "read_ticket",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "ticket_id": 143305
+      },
+      "capability": "service.ticket.notes.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_triage_human_review",
+      "step_id": "read_notes",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "arguments": {
+        "payload": {
+          "id": 143305,
+          "queueID": "Help Desk I",
+          "status": "Human Review"
+        }
+      },
+      "capability": "service.ticket.update",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_triage_human_review",
+      "step_id": "handoff_update",
+      "step_type": "remediation",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "page_size": 2,
+        "resource_id": 143305
+      },
+      "capability": "service.ticket.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_triage_human_review",
+      "step_id": "readback",
+      "step_type": "verification",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {},
+      "capability": null,
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_triage_human_review",
+      "step_id": "handoff_complete",
+      "step_type": "complete",
+      "terminal": true,
+      "version": "1.0.0-migration.1"
+    }
+  ],
+  "mode": "synthetic_shadow_trace",
+  "operational_acceptance": false,
+  "playbook_id": "unsupported_triage_human_review",
+  "provider_calls": 0,
+  "provider_mutations": 0,
+  "terminal_step": "handoff_complete",
+  "version": "1.0.0-migration.1"
+}

@@ -131,6 +131,10 @@ def evidence(tmp_path,monkeypatch):
     files={p for k,p in paths.items() if k!="active"}
     def fake_lstat(path):
         orig=original_lstat(path)
+        if path==paths["freeze"]:
+            return SimpleNamespace(st_mode=orig.st_mode,
+                 st_uid=a.FREEZE_UID,st_gid=a.FREEZE_GID,
+                 st_nlink=orig.st_nlink,st_size=orig.st_size)
         if path in files:
             return SimpleNamespace(st_mode=orig.st_mode,st_uid=0,st_gid=0,
                  st_nlink=orig.st_nlink,st_size=orig.st_size)
