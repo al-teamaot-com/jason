@@ -340,15 +340,82 @@ class NativeCatalogHost:
         return read_pinned_root_owner_public_key(TRUST)
 
     def consumed_approval_ids(self)->frozenset[str]:
+        """Preserve the root bootstrap namespace without granting it MCP authority.
+
+        The original root bootstrap created this same immutable directory and
+        consumed `catalog-root-owner-...` approvals. Those are NOT reusable
+        image-promotion grants. Validate their complete root-install evidence,
+        then expose only `owner-mcp-...` IDs to the promotion replay guard.
+        An unexpected file, link, schema or orphan still fails closed.
+        """
         ledger=self.root/'consumed-owner-approvals'
-        if not ledger.is_dir() or ledger.is_symlink() or ledger.stat().st_uid!=0:
+        if (not ledger.is_dir() or ledger.is_symlink()
+                or ledger.stat().st_uid!=0 or ledger.stat().st_mode&0o022):
             fail('CONSUMPTION_LEDGER_MISSING')
         entries=[]
+        bootstrap_count=0
         for entry in ledger.iterdir():
-            if not ID.fullmatch(entry.stem) or entry.suffix!='.json':
+            if (entry.suffix!='.json' or
+                    (ID.fullmatch(entry.stem) is None and
+                     re.fullmatch(r'catalog-root-owner-[0-9a-f]{32}',entry.stem) is None)):
                 fail('CONSUMPTION_LEDGER_UNEXPECTED_FILE')
-            secure_read(entry,max_bytes=4096)
-            entries.append(entry.stem)
+            name=entry.stem
+            raw=secure_read(entry,max_bytes=4096)
+            try:record=json.loads(raw)
+            except (ValueError,TypeError) as exc:
+                raise ScopedPromotionDenied(
+                    'CATALOG_SCOPED_PROMOTION_CONSUMPTION_LEDGER_INVALID_JSON') from exc
+            if ID.fullmatch(name):
+                # Only genuine image-promotion ID records participate in
+                # verification of signed release replay/consumption.
+                if (not isinstance(record,dict)
+                        or set(record)!={
+                            'schema_version','approval_id','release_id',
+                            'consumed_at','one_use'}
+                        or record['schema_version']!='1.0'
+                        or record['approval_id']!=name
+                        or record['one_use'] is not True
+                        or not re.fullmatch(r'release-[0-9a-f]{16}',
+                                          str(record['release_id']))):
+                    fail('CONSUMPTION_LEDGER_MCP_PROOF_INVALID')
+                entries.append(name)
+            elif re.fullmatch(r'catalog-root-owner-[0-9a-f]{32}',name):
+                # Separate exact historical bootstrap permit (not a catalog
+                # runtime/MCP permit). Prove it against the original root-only
+                # installer journal; never delete, migrate or relabel evidence.
+                bootstrap_count+=1
+                if bootstrap_count!=1:
+                    fail('CONSUMPTION_LEDGER_ROOT_BOOTSTRAP_MULTIPLE')
+                if (not isinstance(record,dict)
+                        or set(record)!={
+                            'schema_version','action','approval_id','source_sha',
+                            'plan_sha256','owner_oid','consumed_at','one_use'}
+                        or record['schema_version']!='1.0'
+                        or record['action']!='catalog_root_install_only_v1'
+                        or record['approval_id']!=name
+                        or record['one_use'] is not True
+                        or SHA.fullmatch(str(record['source_sha'])) is None
+                        or re.fullmatch(r'[0-9a-f]{64}',
+                                          str(record['plan_sha256'])) is None
+                        or re.fullmatch(r'[0-9a-f-]{36}',
+                                          str(record['owner_oid'])) is None):
+                    fail('CONSUMPTION_LEDGER_ROOT_BOOTSTRAP_INVALID')
+                audit=self.root/'root-installer-audit'/(
+                    'release-'+record['source_sha'][:16]+'.json')
+                try:journal=json.loads(secure_read(audit,max_bytes=30000))
+                except (ValueError,TypeError,OSError) as exc:
+                    raise ScopedPromotionDenied(
+                        'CATALOG_SCOPED_PROMOTION_ROOT_AUDIT_INVALID') from exc
+                if (not isinstance(journal,dict)
+                        or journal.get('status')!='exact_catalog_root_install_verified'
+                        or journal.get('action')!=record['action']
+                        or journal.get('approval_id')!=record['approval_id']
+                        or journal.get('source_sha')!=record['source_sha']
+                        or journal.get('plan_sha256')!=record['plan_sha256']
+                        or journal.get('verified_owner_oid')!=record['owner_oid']):
+                    fail('CONSUMPTION_LEDGER_ROOT_BOOTSTRAP_AUDIT_DRIFT')
+            else:
+                fail('CONSUMPTION_LEDGER_UNEXPECTED_FILE')
         return frozenset(entries)
 
     def protected_container_snapshot(self)->Mapping[str,Any]:
