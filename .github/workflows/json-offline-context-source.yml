@@ -1,0 +1,35 @@
+name: Offline Context JSON read-only source acceptance
+
+on:
+  pull_request:
+    paths:
+      - "implementation/runtime_service/src/jason_runtime/json_offline_context_*.py"
+      - "implementation/runtime_service/tests/test_json_offline_context_*.py"
+      - "docs/playbooks/json/migration/candidates/offline_ticket_context_augmentation.v1.json"
+      - "docs/playbooks/json/migration/OFFLINE-CONTEXT-READONLY-PARITY.md"
+      - ".github/workflows/json-offline-context-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-readonly-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check pytest jsonschema
+      - name: Exact client and site-bound read-only classification with no provider writes
+        env:
+          PYTHONPATH: .:implementation:implementation/runtime_service/src
+        run: |
+          python -m pytest -q \
+            implementation/runtime_service/tests/test_json_offline_context_shadow.py \
+            implementation/runtime_service/tests/test_json_offline_context_preprod.py \
+            implementation/runtime_service/tests/test_json_playbook_readonly_preprod.py \
+            implementation/autonomous_remediation/test_json_playbook_document.py \
+            implementation/autonomous_remediation/test_json_playbook_store.py
