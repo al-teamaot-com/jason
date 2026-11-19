@@ -50,3 +50,16 @@ def test_owner_requested_stage_e_cannot_expand_to_other_paths():
         "/var/lib/jason/independent-component-release/releases")
     assert once.ENTRY.parent.parent==once.TRUST
     assert not hasattr(once,"approve_release")
+
+
+def test_inert_recovery_reuses_root_signed_started_and_never_issues_new_grant():
+    source=Path(once.__file__).read_text()
+    assert 'mode.add_argument("--recover-inert"' in source
+    assert '"NATIVE_RELEASE_HAS_STARTED_MUST_USE_LEDGER_RECOVERY"' in source
+    assert "phase.signed_started(" in source
+    assert "root.recover_inert_stage(hashes)" in source
+    assert "source.recover_inert(" in source
+    assert "owner_approval_reusable" in source
+    assert "phase.begin(request)" in source
+    assert source.index("phase.begin(request)") < source.index(
+        "source.stage(candidate=candidate,exact_hashes=hashes)")
