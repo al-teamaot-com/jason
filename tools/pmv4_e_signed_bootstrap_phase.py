@@ -233,7 +233,7 @@ class SignedInertBootstrap:
                 production=self.production)
         except StageEBootstrapDenied:
             return False
-        return (
+        if not (
             record.get("status")=="bootstrap_started"
             and record.get("action")==BOOTSTRAP_ACTION
             and record.get("candidate_sha")==candidate_sha
@@ -241,4 +241,30 @@ class SignedInertBootstrap:
             and record.get("approval_id")==approval_id
             and record.get("native_systemd_release_authorized") is False
             and record.get("no_unit_mutations") is True
-        )
+            and record.get("source_file_count")==len(packet.REVIEWED_PATHS)
+        ):
+            return False
+        # A root-owned STARTED JSON is necessary but not sufficient. Check
+        # the original verified Entra-Owner signature and precise immutable
+        # release fields AGAIN before the stager uses it as authority.
+        proof=record.get("signed_owner_proof")
+        if (not isinstance(proof,dict)
+            or sha256(canonical(proof)).hexdigest()!=
+                record.get("signed_owner_proof_sha256")):
+            return False
+        try:
+            started=datetime.fromisoformat(record["started_at"])
+            key=(read_pinned_root_owner_public_key(OWNER_TRUST)
+                 if self.production else self.test_owner_public_key)
+            signer=verify_exact_owner_release(
+                proof,public_key=key,
+                expected_release_id=release_id(candidate_sha),
+                expected_candidate_sha=candidate_sha,
+                expected_rollback_sha=record["rollback_sha"],
+                expected_scope_sha256=scope_sha256,
+                expected_manifest_sha256=record["manifest_sha256"],
+                expected_freeze_sha256=record["freeze_sha256"],
+                at=started)
+            return signer["approval_id"]==approval_id
+        except (PermissionError,KeyError,ValueError,TypeError):
+            return False
