@@ -20,11 +20,11 @@ One reusable Jason workload identity for every AOT-owned SharePoint site; site-l
 - Representative smoke: JSON playbook store/document tests, Autotask ticket create/update, release-manager gate.
 - `docker compose config --quiet` on isolated sidecar: passed with inert placeholder environment.
 - Grafana target-only installer now supports read-only preflight and reviewed exact-SHA application, verified datasource/dashboard UID and existing Jason folder. No running Grafana service is restarted by its API workflow.
-- 2026-11-19 read-only host preflight: SharePoint AppRole RoleID/SecretID missing, validated production microsoft_graph_sharepoint client boundary missing, Grafana authenticated-user proxy header disabled, governed SharePoint runtime read capabilities inactive. No provider changes made.
-- No image build or deployment initiated on the production host. No OpenBao secret read/write performed.
+- Current host recheck (2026-11-19): the validated SharePoint boundary is still absent, the Grafana authenticated-user proxy header is disabled, and governed SharePoint runtime read capabilities are inactive. Root-only OpenBao `status` and `verify` checks pass for the dedicated reader AppRole; artifacts are complete, the secret is present, runtime access is active, no token is persisted, and no secret values were printed. The Owner-approved ACL is `750 root:al` on the AppRole directory and `640 root:al` on both files; read-only access was verified as UID 1000. The certificate/private-key match, app-only token claims, and Graph enumeration remain pending the read-only bootstrap preflight. No boundary row has been written.
+- No production image build or deployment was initiated. No OpenBao credential values were printed or modified.
 
 ## Mandatory missing evidence / hard gates
-1. Dedicated Entra app certificate and OpenBao credential/profile under *Jason's own identity*, validated current, not merely previously documented.
+1. A real app-only token proving that the OpenBao private key matches Jason’s verified Entra certificate, with the tenant, service-principal and `Sites.Read.All` claims validated.
 2. Validated dedicated Microsoft Graph SharePoint client boundary and app-only read of AOT Accounting and a second AOT site.
 3. Governed runtime read catalog, manifest, and Owner-bound invoker are now staged behind an OFF-by-default exact activation profile. Still required: production activation and real MCP read registration/readback, dedicated app credential mounts, persistent site-policy store shared into the runtime, and independent preproduction verification. No provider bypass.
 4. Actual sidecar image build at exact immutable base digest, package SBOM/security scan, isolated network and secret mount review, unprivileged read/write access verification.
@@ -62,14 +62,7 @@ Integration coordination: #2455
 - Canonical root-protected AppRole provisioner requires `microsoft_graph_sharepoint`
   and its `role-id` / `secret-id` files in
   `/opt/jason/bootstrap/secrets/openbao/microsoft-graph-sharepoint-read-approle`.
-  The unprivileged operator session **cannot inspect** that protected directory;
-  unverified access is FAIL-CLOSED, not proof of file absence. Production client-boundary
-  database query returned zero SharePoint profile rows. An authenticated Entra
-  admin-center readback on 2026-11-19 verified Microsoft Graph application permission
-  `Sites.Read.All` as granted for the existing dedicated Jason SharePoint reader app.
-  The app overview showed one certificate and zero client secrets; certificate
-  thumbprint/expiry and an actual app-only token or Graph enumeration remain
-  unverified.
+  A root-only host readback on 2026-11-19 verified the AppRole artifacts, and a separate credential ACL check confirmed read-only access for runtime UID 1000. The production client-boundary database has no validated SharePoint profile row. Authenticated Entra admin-center readback verified application `Sites.Read.All` consent for Jason’s dedicated SharePoint reader app. The app overview showed one active certificate and zero client secrets; its thumbprint and expiry were verified. The certificate/private-key match, app-only token, and Graph enumeration remain pending.
 - Microsoft Graph `sites/getAllSites` requires **application** `Sites.Read.All`,
   with tenant admin consent. The documented nextLink can use
   `/v1.0/sites/oneDrive.getAllSites?$skiptoken=...`; the bounded pagination validator
@@ -82,25 +75,13 @@ Integration coordination: #2455
   standalone runtime overlay is **off by default**. Controlled release activation
   must mount this volume and dedicated AppRole into the governed runtime; no
   deployment or restarts are effected by adding the overlay source.
-- Tenant-wide application `Sites.Read.All` consent has now been verified in Entra.
-  Standalone preproduction still lacks an app-only Graph token and site enumeration,
-  Accounting bank-statement readback, live Grafana Owner session and daily timer until
-  the credential and deployment controls are established.
+- Tenant-wide application `Sites.Read.All` consent has been verified in Entra. OpenBao lifecycle status/contract verification and the approved UID 1000 read-only credential access have passed. The app-only Graph token and enumeration, Accounting bank-statement readback, live Grafana Owner session, and daily timer verification remain outstanding.
 
 ### Exact remaining authorized sequence
 
-1. Verify the dedicated app certificate thumbprint/expiry and service principal, and
-   retain the current `Sites.Read.All` grant readback with the applicable signed Owner
-   evidence. Entra already shows the application permission Granted for Atlantic
-   Office; do not request duplicate consent. Never create a validation row from
-   claimed IDs or delegated-user access alone.
-2. Run existing canonical root-protected `provider_secret` lifecycle for
-   `microsoft_graph_sharepoint`, with the matching certificate material; verify
-   AppRole readback and restricted runtime group permissions without exposing secret
-   values or reusing directory/mail/SharePoint writer credentials.
-3. Perform a real app-only Graph token and complete all-sites enumeration, verify
-   tenant and expected host, then persist a single validated AOT reader boundary via
-   canonical Kernel repository under exact governed approval. Revalidate on readback.
+1. **Verified:** authenticated Entra readback confirms the dedicated Jason app, active certificate thumbprint/expiry and tenant-wide application `Sites.Read.All` grant. Do not request duplicate consent; do not use delegated Owner access.
+2. **Verified:** root-only OpenBao `status` and `verify` pass; dedicated AppRole artifacts exist, the secret is present, runtime access is active, and UID 1000 has read-only file access. No credential values were printed.
+3. **Pending:** run the exact-SHA read-only bootstrap to prove certificate/key match, app-only token claims and full AOT site enumeration. Only after that succeeds, obtain exact Owner approval for the boundary-only write, persist one validated AOT boundary through the canonical Kernel repository, and verify the readback.
 4. In isolated preprod, enable only two approved test sites, exercise search,
    metadata, forbidden cross-tenant/content reads, refresh and revoke, and confirm
    all newly discovered other sites remain disabled. Use the same reader for the
