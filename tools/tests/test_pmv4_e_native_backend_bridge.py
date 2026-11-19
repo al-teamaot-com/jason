@@ -26,8 +26,14 @@ class Native(FakeRootBackend):
     def all_root_triggers(self):return adapter.OLD_ROOT+adapter.NEW_ROOT
     def reviewed_twelve_unit_hashes(self):return self.hashes
 
+    def commit_reviewed_root_marker(self,*args):
+        assert self.sys.active==set(adapter.NEW_USER+adapter.NEW_ROOT)
+        assert self.sys.enabled==set(adapter.NEW_USER+adapter.NEW_ROOT)
+        self.marker=True
+
     def verify_six_callbacks_and_protected(self,b):
         assert self.sys.active==set(adapter.NEW_USER+adapter.NEW_ROOT)
+        assert self.marker is False
 
     def verify_rollback(self,b):
         assert self.sys.active==set(adapter.OLD_USER+adapter.OLD_ROOT)
