@@ -4474,11 +4474,27 @@ def _provider_health_canary_grant_ids(
     }
 
 
+def _preprod_observe_status_owner() -> tuple[str, str]:
+    """Exact AOT release Owner may OBSERVE preproduction readiness only.
+
+    The existing `_release_approval_owner` verifies the Entra bearer,
+    tenant, object ID, active Jason binding, and AOT organization. This
+    helper additionally rejects client-scoped accounts. It never authorizes
+    grant administration, promotions, provider writes, or JSON activation.
+    """
+    principal, organization = _release_approval_owner()
+    bound_principal, bound_org, assurance, client_id = _authenticated_write_identity()
+    if (principal != bound_principal or organization != bound_org
+            or assurance != "entra-oauth-bearer" or client_id is not None):
+        raise PermissionError("PREPROD_STATUS_EXACT_AOT_OWNER_REQUIRED")
+    return principal, organization
+
+
 @mcp.tool()
 def provider_health_canary_status() -> dict[str, Any]:
-    """Owner-only: report exact observe authority for provider health canaries."""
+    """Verified AOT Owner read-only provider canary readiness; no grant."""
     try:
-        admin, organization = _authority_admin_owner()
+        admin, organization = _preprod_observe_status_owner()
         app = _runtime()
         identity = app.identity_authority.identities.get(
             PROVIDER_HEALTH_CANARY_PRINCIPAL
@@ -5062,9 +5078,9 @@ def _active_autonomy_acceptance_promotion():
 
 @mcp.tool()
 def autonomy_execution_acceptance_status() -> dict[str, Any]:
-    """Owner-only: report the exact first autonomous-write acceptance authority state."""
+    """Verified AOT Owner read-only first-acceptance readiness; no approval."""
     try:
-        principal, _ = _authority_admin_owner()
+        principal, _ = _preprod_observe_status_owner()
         app = _runtime()
         grants = app.identity_authority.grants.list_for_subject(
             "jason-autonomy-worker"

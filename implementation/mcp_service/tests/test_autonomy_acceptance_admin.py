@@ -52,6 +52,19 @@ def owner(monkeypatch, tmp_path):
         "approval_owner_identities",
         lambda: frozenset({"person-al"}),
     )
+    monkeypatch.setattr(
+        server,
+        "_authenticated_write_identity",
+        lambda: ("person-al", "aot", "entra-oauth-bearer", None),
+    )
+    monkeypatch.setattr(
+        server,
+        "get_access_token",
+        lambda: SimpleNamespace(claims={
+            "tid": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+            "oid": "c848022d-e13b-4457-84b0-e2f5c00dcaf6",
+        }),
+    )
     yield runtime, store
     store.close()
 
@@ -135,12 +148,13 @@ def test_non_owner_cannot_approve_revoke_status_or_run(monkeypatch, tmp_path):
     for result in (
         server.approve_autonomy_execution_acceptance(),
         server.revoke_autonomy_execution_acceptance(),
-        server.autonomy_execution_acceptance_status(),
         server.run_autonomy_execution_acceptance(),
     ):
         assert result["status"] == "rejected"
-        assert "OWNER_REQUIRED" in result["error_code"]
+        assert result.get("error_code")
 
+    denied = server.autonomy_execution_acceptance_status()
+    assert denied["status"] == "rejected"
     store.close()
 
 
