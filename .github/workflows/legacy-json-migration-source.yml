@@ -40,6 +40,8 @@ jobs:
       - name: Install isolated validation dependencies
         run: python -m pip install --disable-pip-version-check pytest jsonschema
       - name: Regenerate inventory and verify deterministic source binding
+        env:
+          PYTHONPATH: .
         run: |
           python tools/legacy_json_migration_inventory.py
           python tools/legacy_json_migration_source_maps.py
