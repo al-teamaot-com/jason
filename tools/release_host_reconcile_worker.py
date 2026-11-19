@@ -150,6 +150,73 @@ def _read_request(path: Path) -> dict[str, str]:
     return {"request_id": request_id, "source_revision": source_revision}
 
 
+PMV4_E_MARKER=Path(
+    "/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json")
+PMV4_E_ROOT_GUARD=Path(
+    "/opt/jason/pmv4-e-trusted/tools/pmv4_e_root_reconcile_admission.py")
+
+
+def _verified_host_mcp_baseline(
+    *, requested_controlplane_sha: str, live_mcp_sha: str,
+    marker: Path=PMV4_E_MARKER,
+    guard: Path=PMV4_E_ROOT_GUARD,
+    runner=subprocess.run,
+) -> dict[str, str]:
+    """Only the accepted root-owned Stage E marker may split source SHAs.
+
+    The old generic host release is unchanged: live MCP == requested SHA.
+    After Stage E a checked, root-owned guard must independently attest
+    the exact accepted controlplane SHA and the original rollback MCP SHA.
+    An al-owned request, caller env or Git branch cannot select a baseline.
+    """
+    if not SHA.fullmatch(requested_controlplane_sha) or not SHA.fullmatch(live_mcp_sha):
+        raise HostReconcileError("PMV4_E_ROOT_HOST_SOURCE_SHA_NOT_EXACT")
+    try:
+        marker.lstat()
+    except FileNotFoundError:
+        if live_mcp_sha!=requested_controlplane_sha:
+            raise HostReconcileError(
+                "live MCP revision does not match requested host release")
+        return {
+            "mode":"legacy",
+            "controlplane_sha":requested_controlplane_sha,
+            "runtime_mcp_sha":live_mcp_sha,
+        }
+    except OSError as exc:
+        raise HostReconcileError("PMV4_E_ROOT_HOST_ACCEPTED_MARKER_UNREADABLE") from exc
+    # A present-but-invalid acceptance cannot silently fall back to legacy.
+    if marker!=PMV4_E_MARKER or guard!=PMV4_E_ROOT_GUARD:
+        raise HostReconcileError("PMV4_E_ROOT_HOST_GUARD_PATH_UNTRUSTED")
+    try:
+        doc=guard.lstat()
+        if (guard.is_symlink() or not stat.S_ISREG(doc.st_mode)
+            or doc.st_uid!=0 or doc.st_gid!=0
+            or stat.S_IMODE(doc.st_mode)!=0o444
+            or doc.st_nlink!=1):
+            raise HostReconcileError("PMV4_E_ROOT_HOST_GUARD_NOT_IMMUTABLE")
+    except OSError as exc:
+        raise HostReconcileError("PMV4_E_ROOT_HOST_GUARD_NOT_INSTALLED") from exc
+    try:
+        result=runner([
+            "/usr/bin/python3","-I","-B",str(guard),
+            "--source-revision",requested_controlplane_sha,
+            "--runtime-baseline-only",
+        ],capture_output=True,text=True,check=False,timeout=20,
+        cwd="/",env={"PATH":"/usr/bin:/bin"})
+    except (OSError,subprocess.SubprocessError) as exc:
+        raise HostReconcileError("PMV4_E_ROOT_HOST_BASELINE_NOT_ATTESTED") from exc
+    source=result.stdout.strip()
+    if (result.returncode!=0 or not SHA.fullmatch(source)
+        or source!=live_mcp_sha
+        or source==requested_controlplane_sha):
+        raise HostReconcileError("PMV4_E_ROOT_HOST_BASELINE_MISMATCH")
+    return {
+        "mode":"replacement",
+        "controlplane_sha":requested_controlplane_sha,
+        "runtime_mcp_sha":source,
+    }
+
+
 def _mcp_revision() -> str:
     value = subprocess.check_output(
         [
@@ -1413,10 +1480,10 @@ def _process(path: Path) -> None:
         _verify_main(source_revision)
 
         live_mcp = _mcp_revision()
-        if live_mcp != source_revision:
-            raise HostReconcileError(
-                "live MCP revision does not match requested host release"
-            )
+        _verified_host_mcp_baseline(
+            requested_controlplane_sha=source_revision,
+            live_mcp_sha=live_mcp,
+        )
 
         # The audited root overlay must be restored before installing a
         # previous immutable release that no longer declares its new units.

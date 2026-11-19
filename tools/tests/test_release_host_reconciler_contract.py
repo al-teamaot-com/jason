@@ -963,3 +963,69 @@ def test_host_reconciler_requires_installed_worker_gate_alignment():
 ' in shell
     assert 'installed worker differs from production source' in shell
     assert shell.index('step_start protected_root_policy_stage') < shell.index('step_start user_worker_reconciliation')
+
+
+def test_legacy_worker_still_requires_exact_mcp_equals_source_when_no_marker(tmp_path):
+    import importlib.util
+    from pathlib import Path
+    import pytest
+    path=ROOT/"tools/release_host_reconcile_worker.py"
+    spec=importlib.util.spec_from_file_location("stage_e_dual_sha_worker",path)
+    worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
+    missing=tmp_path/"not-present"
+    sha="a"*40
+    result=worker._verified_host_mcp_baseline(
+        requested_controlplane_sha=sha,live_mcp_sha=sha,marker=missing)
+    assert result["mode"]=="legacy"
+    assert result["runtime_mcp_sha"]==sha
+    with pytest.raises(worker.HostReconcileError,
+                       match="live MCP revision does not match"):
+        worker._verified_host_mcp_baseline(
+            requested_controlplane_sha=sha,live_mcp_sha="b"*40,marker=missing)
+
+
+def test_root_accepted_controlplane_never_accepts_unpinned_request_mode(tmp_path):
+    import importlib.util
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import pytest
+    source=ROOT/"tools/release_host_reconcile_worker.py"
+    spec=importlib.util.spec_from_file_location("stage_e_accepted_dual_sha",source)
+    worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
+    marker=tmp_path/"accepted-marker"
+    marker.write_text("root accepted")
+    # Caller-supplied paths may not replace canonical accepted marker/guard.
+    with pytest.raises(worker.HostReconcileError,
+                       match="GUARD_PATH_UNTRUSTED"):
+        worker._verified_host_mcp_baseline(
+            requested_controlplane_sha="b"*40,live_mcp_sha="a"*40,
+            marker=marker,guard=tmp_path/"fake.py",
+            runner=lambda *_a,**_kw:SimpleNamespace(
+                returncode=0,stdout="a"*40+"\n"))
+    assert marker.read_text()=="root accepted"
+
+
+def test_installed_trusted_root_guard_must_verify_exact_mcp_rollback_before_reconcile(
+        tmp_path):
+    import importlib.util
+    import os
+    import stat
+    from pathlib import Path
+    from types import SimpleNamespace
+    import pytest
+    source=ROOT/"tools/release_host_reconcile_worker.py"
+    spec=importlib.util.spec_from_file_location("stage_e_guarded_worker",source)
+    worker=importlib.util.module_from_spec(spec);spec.loader.exec_module(worker)
+    tmpguard=tmp_path/"root-guard.py"
+    tmpguard.write_text("# tested guard")
+    tmpguard.chmod(0o444)
+    # Strict canonical guard path is not injectable in production. For an
+    # isolated unit test, monkeypatch the PINNED module constant only.
+    worker.PMV4_E_ROOT_GUARD=tmpguard
+    worker.PMV4_E_MARKER=tmp_path/"marker.json"
+    worker.PMV4_E_MARKER.write_text("{}")
+    with pytest.raises(worker.HostReconcileError,
+                       match="GUARD_NOT_IMMUTABLE"):
+        worker._verified_host_mcp_baseline(
+            requested_controlplane_sha="b"*40,live_mcp_sha="a"*40,
+            marker=worker.PMV4_E_MARKER,guard=worker.PMV4_E_ROOT_GUARD)
