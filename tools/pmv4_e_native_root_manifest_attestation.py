@@ -122,9 +122,13 @@ def inspect(*, source_root: Path = TRUST_ROOT,
     except (ValueError, TypeError) as exc:
         raise StageERootAttestationDenied(
             "PMV4_E_ROOT_ATTEST_JSON_INVALID") from exc
+    need(type(manifest) is dict and type(scope) is dict,
+         "JSON_OBJECT_REQUIRED")
     if production:
         need(manifest.get("candidate_sha") == release_dir.name,
              "RELEASE_DIRECTORY_SHA_MISMATCH")
+    need(type(scope.get("exact_replacement_files_sha256")) is dict,
+         "SOURCE_HASH_MAP_INVALID")
     for rel in packet.REVIEWED_PATHS:
         actual = sha256(_regular(source_root / rel,
                                  production=production)).hexdigest()
