@@ -478,6 +478,16 @@ def listener_action(action: str) -> None:
              "SCOPED_LISTENER_STATE_NOT_" + expected.upper())
 
 
+def ensure_scoped_oneshots_quiescent() -> None:
+    """Never replace root code while either scoped root worker is executing."""
+    for name in ("jason-scoped-backport-requests.service",
+                 "jason-scoped-backport-recovery.service"):
+        result = subprocess.run(["/usr/bin/systemctl", "is-active", name],
+                                capture_output=True, timeout=12)
+        need(result.stdout.strip() == b"inactive",
+             "ROOT_WORKER_NOT_QUIESCENT")
+
+
 def read_only_stage_probe() -> str:
     """Run ONLY the independently installed root worker's read-only probe.
 
@@ -626,8 +636,9 @@ def apply(*, source_sha: str, reviewed_sha: str) -> dict:
             # Only the newly installed scoped release-controller listeners
             # are paused. Existing Ticket Core, runtime, MCP, OpenBao,
             # release manager, and network remain untouched.
-            listener_action("stop")
             listeners_stopped = True
+            listener_action("stop")
+            ensure_scoped_oneshots_quiescent()
             for path, old_bytes, new_bytes, mode in changes:
                 attempted_changes.append((path, old_bytes, new_bytes, mode))
                 atomic_exact_root_file(path, old_bytes, new_bytes, mode)

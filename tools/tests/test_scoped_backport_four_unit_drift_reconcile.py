@@ -325,3 +325,30 @@ def test_installed_systemd_unit_expected_mode_matches_actual_root_installer():
     source = inspect.getsource(fix.inspect)
     assert 'read_root(p, mode=0o444)' in source
     assert 'read_root(p, mode=0o644)' not in source
+
+
+def test_root_install_code_patch_denied_while_scoped_worker_active(monkeypatch):
+    states = {
+        "jason-scoped-backport-requests.service": b"inactive\n",
+        "jason-scoped-backport-recovery.service": b"active\n",
+    }
+    def fake_run(args, **kwargs):
+        return SimpleNamespace(stdout=states[args[-1]], returncode=0)
+    monkeypatch.setattr(fix.subprocess, "run", fake_run)
+    with pytest.raises(fix.DriftCorrectionDenied,
+                       match="ROOT_WORKER_NOT_QUIESCENT"):
+        fix.ensure_scoped_oneshots_quiescent()
+
+
+def test_scoped_workers_only_need_to_be_quiescent_during_root_code_upgrade(monkeypatch):
+    calls = []
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(stdout=b"inactive\n", returncode=3)
+    monkeypatch.setattr(fix.subprocess, "run", fake_run)
+    fix.ensure_scoped_oneshots_quiescent()
+    assert len(calls) == 2
+    assert set(row[-1] for row in calls) == {
+        "jason-scoped-backport-requests.service",
+        "jason-scoped-backport-recovery.service",
+    }
