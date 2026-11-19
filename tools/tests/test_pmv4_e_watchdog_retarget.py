@@ -159,9 +159,12 @@ def test_invalid_acceptance_production_convergence_fails_before_other_probes(
 def test_replacement_production_convergence_expects_only_new_timer(probe,monkeypatch,tmp_path):
     revision="a"*40
     releases=tmp_path/"releases"
-    release=releases/revision
+    candidate="b"*40
+    release=releases/candidate
     release.mkdir(parents=True)
     monkeypatch.setattr(m,"pmv4_e_controlplane_mode",lambda:"replacement")
+    monkeypatch.setattr(m,"pmv4_e_accepted_source_identity",
+                        lambda:{"candidate_sha":candidate,"rollback_sha":revision})
     monkeypatch.setattr(m,"_container_source_revision",lambda name:revision)
     problems,evidence=m.production_convergence_failures(
         releases_root=releases,verify_scheduled_surfaces=False)
@@ -169,6 +172,7 @@ def test_replacement_production_convergence_expects_only_new_timer(probe,monkeyp
     assert "production_convergence_release_source_missing" not in problems
     assert "production_convergence_release_manager_source_drift" in problems
     assert evidence["pmv4_e_controlplane_mode"]=="replacement"
+    assert evidence["desired_revision"]==candidate
 
 
 def test_source_preserves_existing_release_mutex_and_no_disruptive_change():
