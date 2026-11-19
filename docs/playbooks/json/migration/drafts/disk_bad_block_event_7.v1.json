@@ -3,12 +3,9 @@
     "activation": "shadow",
     "allowed_capabilities": [
       "endpoint.alert.history.search",
-      "endpoint.alert.resolve",
       "service.ticket.search"
     ],
-    "approval_bound_branches": [
-      "propose_approved_action"
-    ],
+    "approval_bound_branches": [],
     "disruptive_branches": []
   },
   "completion": {
@@ -40,7 +37,8 @@
       "authoritative HarddiskX physical-model bus map and SMART evidence",
       "read-only component-control diagnostics and job persistence",
       "internal-disk note/escalation and approved client notification",
-      "exact Autotask notes/ticket closing and post-write readback"
+      "exact Autotask notes/ticket closing and post-write readback",
+      "Legacy registry does not authorize the requested mutation; this action is blocked pending separately governed source correction and authority."
     ],
     "production_activation_authorized": false,
     "source_conversion": "structural_partial_not_accepted",
@@ -115,7 +113,7 @@
           }
         },
         {
-          "next": "exact_authority_gate",
+          "next": "human_review",
           "when": {
             "fact": "verified_legacy_disposition",
             "operator": "eq",
@@ -151,79 +149,7 @@
       "type": "decision"
     },
     {
-      "branches": [
-        {
-          "next": "approved_action_args_gate",
-          "when": {
-            "fact": "exact_owner_promotion_verified",
-            "operator": "eq",
-            "value": true
-          }
-        }
-      ],
-      "default": "human_review",
-      "id": "exact_authority_gate",
-      "type": "decision"
-    },
-    {
-      "branches": [
-        {
-          "next": "propose_approved_action",
-          "when": {
-            "fact": "server_action_arguments_exact_and_authorized",
-            "operator": "eq",
-            "value": true
-          }
-        }
-      ],
-      "default": "human_review",
-      "id": "approved_action_args_gate",
-      "type": "decision"
-    },
-    {
-      "approval_classification": "modifying",
-      "approval_required": true,
-      "arguments": {
-        "$fact": "server_verified_exact_action_arguments"
-      },
-      "capability": "endpoint.alert.resolve",
-      "id": "propose_approved_action",
-      "retry": {
-        "max_attempts": 1
-      },
-      "type": "remediation",
-      "verification_step": "read_independent_verification"
-    },
-    {
-      "arguments": {
-        "$fact": "server_verified_post_action_read_arguments"
-      },
-      "capability": "endpoint.alert.history.search",
-      "id": "read_independent_verification",
-      "next": "independent_verification_gate",
-      "type": "verification"
-    },
-    {
-      "branches": [
-        {
-          "next": "remediation_verified",
-          "when": {
-            "fact": "authoritative_post_action_health_and_readback_proven",
-            "operator": "eq",
-            "value": true
-          }
-        }
-      ],
-      "default": "human_review",
-      "id": "independent_verification_gate",
-      "type": "decision"
-    },
-    {
       "id": "read_only_complete",
-      "type": "complete"
-    },
-    {
-      "id": "remediation_verified",
       "type": "complete"
     },
     {

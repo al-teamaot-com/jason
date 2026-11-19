@@ -27,6 +27,9 @@ ALREADY_DETAILED = frozenset({
     "drmm_recent_alert_reconciliation",
     "windows_time_source",
     "offline_ticket_context_augmentation",
+    "jason_activity_log",
+    "gpt_insights_tech_assist",
+    "unexpected_shutdown",
 })
 
 
@@ -54,7 +57,7 @@ WORKFLOWS = {
     },
     "disk_bad_block_event_7": {
         "entry": "service.ticket.search", "diagnose": "endpoint.alert.history.search",
-        "verify": "endpoint.alert.history.search", "action": "endpoint.alert.resolve",
+        "verify": "endpoint.alert.history.search", "action": None,
         "clean": "removable_classification_verified_no_open_alert",
         "repair": "exact_removable_media_alert_resolution_approved",
         "wait": "waiting_approved_storage_diagnostic",
@@ -67,27 +70,12 @@ WORKFLOWS = {
         "wait": "waiting_endpoint_or_job",
         "missing": ["native DNSFilter site/agent corroboration and policy-specific exclusions", "approved diagnostic-vs-remediation component selection", "bounded execution and job-output state", "DNS and service stability interval before exact alert/ticket closure"],
     },
-    "gpt_insights_tech_assist": {
-        "entry": "service.ticket.search", "diagnose": "service.ticket.notes.search",
-        "verify": "service.ticket.notes.search", "action": "service.ticket.note.create",
-        "clean": "material_insight_fingerprint_current",
-        "repair": "new_internal_insight_required",
-        "wait": "waiting_material_evidence_change",
-        "missing": ["legacy Python category classification and rendering governed data capability", "same-company CI/endpoint/related-ticket optional reads", "existing note update branch with exact Jason creator attribution", "durable fingerprint and provider note revision audit"],
-    },
     "idle_log_off": {
         "entry": "service.ticket.search", "diagnose": "endpoint.alert.search",
         "verify": "endpoint.alert.search", "action": "automation.component.execute",
         "clean": "policy_compliance_proven", "repair": "approved_setter_component_required",
         "wait": "waiting_idletime_monitor_recheck",
         "missing": ["workstation/site policy scope and approved setter fingerprint", "component terminal job/StdErr bound verification", "post-job monitor propagation and stable observation", "exact alert/ticket completion and output provenance"],
-    },
-    "jason_activity_log": {
-        "entry": "service.ticket.search", "diagnose": "service.ticket.notes.search",
-        "verify": "service.ticket.notes.search", "action": "service.ticket.note.create",
-        "clean": "persisted_activity_chunk_current", "repair": "new_jason_activity_chunk_required",
-        "wait": "waiting_new_activity_transition",
-        "missing": ["governed read of persisted autonomy_ticket_activity state", "stable append-only chunk renderer/rollover and deterministic dedup", "approved Jason creator/visibility protected note update path", "full before/after revision SHA evidence and provider readback"],
     },
     "low_disk_space": {
         "entry": "service.ticket.search", "diagnose": "endpoint.audit.read",
@@ -99,7 +87,7 @@ WORKFLOWS = {
     },
     "post_error_investigation": {
         "entry": "service.ticket.search", "diagnose": "endpoint.alert.history.search",
-        "verify": "endpoint.alert.history.search", "action": "endpoint.alert.resolve",
+        "verify": "endpoint.alert.history.search", "action": None,
         "clean": "isolated_healthy_post_alert_already_resolved",
         "repair": "isolated_workstation_exact_post_alert_resolution",
         "wait": "waiting_current_health_evidence",
@@ -113,17 +101,9 @@ WORKFLOWS = {
         "wait": "waiting_healthy_quick_test_or_job",
         "missing": ["read-only Quick Test component and job-output parser", "one time sensitive event-log mutation with SOC authorization", "independent repeated Quick Test and exact alert closure", "same-device/time/technique side-effect ticket correlation"],
     },
-    "unexpected_shutdown": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.alert.history.search",
-        "verify": "service.ticket.read", "action": "service.ticket.update",
-        "clean": "clean_site_correlated_ticket_already_complete",
-        "repair": "site_correlated_workstation_clean_closure",
-        "wait": "waiting_site_peer_health",
-        "missing": ["physical-site peer grouping and timing threshold ±15 minutes", "VM exclusion and per-device storage/BSOD/WHEA verifier", "bounded endpoint PowerShell event extraction", "note/alert independent closure and protected device escalation"],
-    },
     "vulscan_missing_patch": {
         "entry": "service.ticket.search", "diagnose": "endpoint.patch.search",
-        "verify": "endpoint.patch.search", "action": "automation.component.execute",
+        "verify": "endpoint.patch.search", "action": None,
         "clean": "exact_kb_installed_or_superseded",
         "repair": "approved_patch_stack_repair_warranted",
         "wait": "waiting_normal_patch_window_or_approval",
@@ -179,7 +159,7 @@ def _verification(step_id: str, capability: str, next_step: str) -> dict:
 def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
     identifier = row["id"]
     item = WORKFLOWS[identifier]
-    caps = [item[k] for k in ("entry", "diagnose", "verify", "action")]
+    caps = [item[k] for k in ("entry", "diagnose", "verify", "action") if item[k]]
     unavailable = sorted(set(caps) - snapshot)
     if unavailable:
         raise ValueError(f"{identifier}:UNREGISTERED_CAPABILITIES:{unavailable}")
@@ -196,7 +176,7 @@ def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
               _fact("server_verified_diagnostic_read_arguments"), "classification_gate"),
         _decision("classification_gate", "verified_legacy_disposition", [
             (item["clean"], "verified_no_action_gate"),
-            (item["repair"], "exact_authority_gate"),
+            (item["repair"], "exact_authority_gate" if item["action"] else "human_review"),
             (item["wait"], "wait_for_source"),
         ], "human_review"),
         _decision("verified_no_action_gate", "authoritative_healthy_state_proven",
@@ -206,13 +186,15 @@ def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
         _decision("approved_action_args_gate", "server_action_arguments_exact_and_authorized",
                   [(True, "propose_approved_action")], "human_review"),
         {
-            "id": "propose_approved_action", "type": "remediation",
-            "capability": item["action"],
-            "arguments": _fact("server_verified_exact_action_arguments"),
-            "approval_classification": "modifying",
-            "approval_required": True,
-            "retry": {"max_attempts": 1},
-            "verification_step": "read_independent_verification",
+            "id": "propose_approved_action",
+            "type": "remediation" if item["action"] else "human_review",
+            **({"capability": item["action"],
+                "arguments": _fact("server_verified_exact_action_arguments"),
+                "approval_classification": "modifying",
+                "approval_required": True,
+                "retry": {"max_attempts": 1},
+                "verification_step": "read_independent_verification"}
+               if item["action"] else {}),
         },
         _verification("read_independent_verification", item["verify"],
                       "independent_verification_gate"),
@@ -226,6 +208,17 @@ def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
         {"id": "bounded_wait_terminal", "type": "human_review"},
         {"id": "human_review", "type": "human_review"},
     ]
+    if item["action"] is None:
+        # Original authoritative registry denies the requested mutation.
+        # Remove the entire unreachable action chain (rather than leaving
+        # phantom executable capabilities in an inactive JSON artifact).
+        blocked_action_steps = {
+            "exact_authority_gate", "approved_action_args_gate",
+            "propose_approved_action", "read_independent_verification",
+            "independent_verification_gate", "remediation_verified",
+        }
+        steps = [step for step in steps
+                 if step["id"] not in blocked_action_steps]
     version = str(row["version"]) + "-migration.1"
     # The legacy registry does not carry target_type. Preserve an explicit
     # declaration from the source; where absent, use a narrowly reviewed
@@ -285,7 +278,7 @@ def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
             "activation": "shadow",
             "allowed_capabilities": sorted(set(caps)),
             "disruptive_branches": [],
-            "approval_bound_branches": ["propose_approved_action"],
+            "approval_bound_branches": (["propose_approved_action"] if item["action"] else []),
         },
         "migration": {
             "source_conversion": "structural_partial_not_accepted",
@@ -300,7 +293,10 @@ def build_one(row: dict, audit: dict, snapshot: set[str]) -> dict:
                 "waiting": item["wait"],
                 "all_else": "human_review",
             },
-            "missing_or_unimplemented_parity": item["missing"],
+            "missing_or_unimplemented_parity": item["missing"] + (
+                ["Legacy registry does not authorize the requested mutation; this action is blocked pending separately governed source correction and authority."]
+                if item["action"] is None else []
+            ),
             "additional_required_compatibility": [
                 "trusted provider result-to-fact normalizer for each step",
                 "exact capability argument schema and approved source identity",

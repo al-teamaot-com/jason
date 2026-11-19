@@ -153,3 +153,56 @@ See `OFFLINE-CONTEXT-READONLY-PARITY.md`. It is not an accepted replacement.
 
 The 19-source reconciliation now contains **five detailed candidates,
 14 structural partial drafts, 0 fully accepted legacy replacements**.
+
+## November 19 follow-on engineering — source authority gate and advisory note projections
+
+Revalidated the 19 enabled legacy sources and the governing source registry.
+The live `discover_capabilities` data for all 32 migration-used capabilities
+now records the provider read-only/write classification, not just names.
+`legacy_json_acceptance_ledger.py` rejects every JSON declared mutation that
+is not authorized in the corresponding original legacy registry entry, and
+fails closed if the capability's live risk metadata is unknown.
+
+Three unsafe generic drafts previously named an unauthorized mutation:
+`disk_bad_block_event_7` and `post_error_investigation` proposed
+`endpoint.alert.resolve`; `vulscan_missing_patch` proposed
+`automation.component.execute`. All three now route the attempted
+remediation to `human_review` and list the missing exact authority
+as an unresolved blocker. Tests cover the negative grant and source
+mutation expansion; these are NOT accepted replacements.
+
+Two advisory note workflows now have source-specific JSON definitions:
+`jason_activity_log@1.0.0-migration.2` and
+`gpt_insights_tech_assist@0.2.1-migration.2`.
+They reuse original deployed deterministic pure rendering/classification
+logic and authoritatively scoped, source-only note mutation *plans*.
+No proposed note write is executed. Test suites include deduplication,
+rollover, append-only updates, creation and update branches, source
+identity, creator/internal-visibility, stale/ambiguous note rejection,
+and missing-promotion/approval guards. See
+`JASON-ACTIVITY-JSON-PROJECTION.md` and
+`GPT-INSIGHTS-JSON-PROJECTION.md`. Both still need full governed
+provider write/readback, durable scheduling and independent preproduction
+acceptance before they can replace legacy.
+
+**Ledger:** 19 source-mapped JSON artifacts, 7 detailed partial candidates,
+12 structural partial drafts, **0/19 fully accepted**. No production JSON
+activation, no legacy retirement, no protected Core/Stage E change.
+
+## Unexpected Shutdown read-only deterministic classification
+
+The source-bound `unexpected_shutdown@1.1.0-migration.2` JSON
+candidate preserves current source classifiers for Windows Event 41/6008,
+physical-only site correlation, +/-15-minute incident grouping, the
+three-physical-device threshold, deterministic site event ID, protected
+server guard, WHEA/storage risk and 30-day independent recurrence gate.
+`json_shutdown_classification.py` uses the original
+`unexpected_shutdown_analysis.py` pure helpers, never a second provider
+execution engine. Tests prove synthetic same-source site/risk parity,
+virtual-device exclusion, wrong client/site/timestamp, offline devices
+and separate note/ticket approval gates.
+
+Cross-endpoint source fanout, five independent Windows telemetry reads,
+durable recurrence, governed approval, exact note and ticket post-write
+readback and isolated live preproduction acceptance remain incomplete.
+See `UNEXPECTED-SHUTDOWN-JSON-CLASSIFICATION.md`.

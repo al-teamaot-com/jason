@@ -23,7 +23,7 @@ def test_unconverted_population_is_complete_and_unique(docs):
         (ROOT / "implementation/autonomous_remediation/playbook_registry.json").read_text())
     enabled = {item["id"] for item in registry["playbooks"] if item["enabled"]}
     assert enabled == ALREADY_DETAILED | set(docs)
-    assert len(docs) == 14
+    assert len(docs) == 11
     assert not (ALREADY_DETAILED & set(docs))
 
 
@@ -71,9 +71,10 @@ def test_initial_and_negative_safety_gates_block_untrusted_facts(docs, playbook_
     assert interpreter.instruction(
         step_id="classification_gate", facts={}
     ).step_id == "human_review"
-    assert interpreter.instruction(
-        step_id="exact_authority_gate", facts={}
-    ).step_id == "human_review"
+    if WORKFLOWS[playbook_id]["action"]:
+        assert interpreter.instruction(
+            step_id="exact_authority_gate", facts={}
+        ).step_id == "human_review"
 
 
 @pytest.mark.parametrize("playbook_id", sorted(WORKFLOWS))
@@ -97,11 +98,15 @@ def test_positive_intents_are_approval_bound_not_executed(docs, playbook_id):
             },
         },
     )
-    assert action.step_id == "propose_approved_action"
-    assert action.capability == choice["action"]
-    assert action.approval_required is True
-    assert action.arguments == {"synthetic": "NO_PROVIDER_EXECUTION"}
-    assert action.approval_classification == "modifying"
+    if choice["action"] is None:
+        assert action.step_id == "human_review"
+        assert action.terminal is True
+    else:
+        assert action.step_id == "propose_approved_action"
+        assert action.capability == choice["action"]
+        assert action.approval_required is True
+        assert action.arguments == {"synthetic": "NO_PROVIDER_EXECUTION"}
+        assert action.approval_classification == "modifying"
     denied = interpreter.instruction(
         step_id="classification_gate",
         facts={"verified_legacy_disposition": choice["repair"],
@@ -126,17 +131,17 @@ def test_wait_is_bounded_and_leads_to_review_not_duplicate_action(docs, playbook
 
 
 def test_all_drafts_stage_as_immutable_inactive_versions_in_existing_registry(tmp_path, docs):
-    store = SQLitePlaybookRegistry(tmp_path / "all-16-draft-registry.sqlite3")
+    store = SQLitePlaybookRegistry(tmp_path / "all-source-draft-registry.sqlite3")
     for identifier, item in docs.items():
         staged = store.stage(item, actor="source-only-inventory-test")
         assert staged.state == "draft"
         assert store.active(identifier) is None
-    assert store.generation() == 14
-    assert len(store.lifecycle_events()) == 14
+    assert store.generation() == 11
+    assert len(store.lifecycle_events()) == 11
     store.close()
-    reopened = SQLitePlaybookRegistry(tmp_path / "all-16-draft-registry.sqlite3")
-    assert reopened.generation() == 14
-    assert len(reopened.list_all()) == 14
+    reopened = SQLitePlaybookRegistry(tmp_path / "all-source-draft-registry.sqlite3")
+    assert reopened.generation() == 11
+    assert len(reopened.list_all()) == 11
     assert reopened.active_snapshot()[1] == ()
     reopened.close()
 
@@ -152,4 +157,4 @@ def test_source_draft_generation_deterministic(docs):
         for filename in OUTPUT.glob("*.json")
     }
     assert before == after
-    assert len(after) == len(docs) == 14
+    assert len(after) == len(docs) == 11

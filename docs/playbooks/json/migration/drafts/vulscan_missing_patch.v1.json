@@ -2,13 +2,10 @@
   "autonomy": {
     "activation": "shadow",
     "allowed_capabilities": [
-      "automation.component.execute",
       "endpoint.patch.search",
       "service.ticket.search"
     ],
-    "approval_bound_branches": [
-      "propose_approved_action"
-    ],
+    "approval_bound_branches": [],
     "disruptive_branches": []
   },
   "completion": {
@@ -40,7 +37,8 @@
       "exact KB approval/window and device-patch identity",
       "multi-device ticket split prerequisite",
       "user impact/reboot approval and bounded WU repair flags",
-      "exact KB/build/supersedence and ticket verification"
+      "exact KB/build/supersedence and ticket verification",
+      "Legacy registry does not authorize the requested mutation; this action is blocked pending separately governed source correction and authority."
     ],
     "production_activation_authorized": false,
     "source_conversion": "structural_partial_not_accepted",
@@ -115,7 +113,7 @@
           }
         },
         {
-          "next": "exact_authority_gate",
+          "next": "human_review",
           "when": {
             "fact": "verified_legacy_disposition",
             "operator": "eq",
@@ -151,79 +149,7 @@
       "type": "decision"
     },
     {
-      "branches": [
-        {
-          "next": "approved_action_args_gate",
-          "when": {
-            "fact": "exact_owner_promotion_verified",
-            "operator": "eq",
-            "value": true
-          }
-        }
-      ],
-      "default": "human_review",
-      "id": "exact_authority_gate",
-      "type": "decision"
-    },
-    {
-      "branches": [
-        {
-          "next": "propose_approved_action",
-          "when": {
-            "fact": "server_action_arguments_exact_and_authorized",
-            "operator": "eq",
-            "value": true
-          }
-        }
-      ],
-      "default": "human_review",
-      "id": "approved_action_args_gate",
-      "type": "decision"
-    },
-    {
-      "approval_classification": "modifying",
-      "approval_required": true,
-      "arguments": {
-        "$fact": "server_verified_exact_action_arguments"
-      },
-      "capability": "automation.component.execute",
-      "id": "propose_approved_action",
-      "retry": {
-        "max_attempts": 1
-      },
-      "type": "remediation",
-      "verification_step": "read_independent_verification"
-    },
-    {
-      "arguments": {
-        "$fact": "server_verified_post_action_read_arguments"
-      },
-      "capability": "endpoint.patch.search",
-      "id": "read_independent_verification",
-      "next": "independent_verification_gate",
-      "type": "verification"
-    },
-    {
-      "branches": [
-        {
-          "next": "remediation_verified",
-          "when": {
-            "fact": "authoritative_post_action_health_and_readback_proven",
-            "operator": "eq",
-            "value": true
-          }
-        }
-      ],
-      "default": "human_review",
-      "id": "independent_verification_gate",
-      "type": "decision"
-    },
-    {
       "id": "read_only_complete",
-      "type": "complete"
-    },
-    {
-      "id": "remediation_verified",
       "type": "complete"
     },
     {
