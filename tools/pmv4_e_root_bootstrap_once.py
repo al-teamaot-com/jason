@@ -177,7 +177,7 @@ def safe_release_records(candidate:str,reviewed:dict,packet)->None:
          "NATIVE_RELEASE_RECORD_INVENTORY_DRIFT")
 
 
-def run_once(candidate:str,*,stage_only:bool)->dict:
+def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False)->dict:
     bind_original_native()
     from tools import pmv4_e_signed_bootstrap_phase as signed
     from tools import pmv4_e_immutable_source_stage as immutable
@@ -250,12 +250,61 @@ def run_once(candidate:str,*,stage_only:bool)->dict:
         native_marker_absent=marker_absent,
         native_replacements_inert=replacements_inert,
         production=True)
+    # Deny any release artifact conflicts BEFORE consuming the one-use
+    # approval. Native receipt state is independently inspected on recovery.
+    if not recover_inert:
+        need(not (RELEASES/candidate).exists()
+             and not (RELEASES/candidate).is_symlink()
+             and not (trust.TARGET).exists()
+             and not (trust.TARGET).is_symlink()
+             and not (NATIVE_RECORDS/candidate).exists()
+             and not (NATIVE_RECORDS/candidate).is_symlink(),
+             "ONE_USE_STAGE_TARGET_ALREADY_PRESENT")
     with core.host_transaction():
         state["host"]=True
         try:
             with core.freeze_transaction(reviewed["manifest"]["freeze_sha256"]):
                 state["freeze"]=True
                 try:
+                    if recover_inert:
+                        approval_id=request["signed_owner_proof"]["payload"]["approval_id"]
+                        need(phase.signed_started(
+                            candidate_sha=candidate,
+                            scope_sha256=reviewed["manifest"]["source_scope_sha256"],
+                            approval_id=approval_id),
+                             "RECOVERY_ORIGINAL_SIGNED_BOOTSTRAP_MISSING")
+                        for item in NATIVE_RECEIPTS.iterdir():
+                            row=signed.root_record(item,production=True)
+                            need(row.get("candidate_sha")!=candidate,
+                                 "NATIVE_RELEASE_HAS_STARTED_MUST_USE_LEDGER_RECOVERY")
+                        if trust.TARGET.exists() or trust.TARGET.is_symlink():
+                            root.recover_inert_stage(hashes)
+                        if (NATIVE_RECORDS/candidate).exists() or (
+                                NATIVE_RECORDS/candidate).is_symlink():
+                            dest=NATIVE_RECORDS/candidate
+                            checked_root_dir(dest,mode=0o555)
+                            need({p.name for p in dest.iterdir()}==
+                                 {"manifest.json","source-scope.json"},
+                                 "INERT_RECORD_SET_CHANGED")
+                            for name,key in (("manifest.json","manifest"),
+                                             ("source-scope.json","source_scope")):
+                                need(checked_root_file(dest/name)==
+                                     packet.canonical(reviewed[key]),
+                                     "INERT_RELEASE_RECORD_BYTES_CHANGED")
+                            dest.chmod(0o700)
+                            (dest/"manifest.json").unlink()
+                            (dest/"source-scope.json").unlink()
+                            dest.rmdir()
+                        if (RELEASES/candidate).exists() or (
+                                RELEASES/candidate).is_symlink():
+                            source.recover_inert(
+                                candidate=candidate,exact_hashes=hashes)
+                        return {
+                            "status":"signed_inert_bootstrap_recovered",
+                            "candidate_sha":candidate,
+                            "legacy_six_unchanged":True,
+                            "owner_approval_reusable":False,
+                        }
                     # The original signed phase binds exact current source,
                     # protected CI, signer, pre-cutover state and replay.
                     phase.begin(request)
@@ -305,9 +354,12 @@ def main(argv=None)->int:
     mode=parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--stage-only",action="store_true")
     mode.add_argument("--stage-and-promote",action="store_true")
+    mode.add_argument("--recover-inert",action="store_true")
     args=parser.parse_args(argv)
     candidate=candidate_arg(args.candidate_sha)
-    result=run_once(candidate,stage_only=args.stage_only)
+    result=run_once(
+        candidate,stage_only=args.stage_only,
+        recover_inert=args.recover_inert)
     print(json.dumps(result,sort_keys=True))
     return 0
 
