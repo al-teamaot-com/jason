@@ -8,6 +8,8 @@ from connectors.core.http_transport import UrlLibJsonHttpTransport
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.microsoft_graph.openbao_credentials import OpenBaoMicrosoftCredentialSource
 from connectors.microsoft_graph.sharepoint_reader import MicrosoftGraphSharePointReader
+from connectors.microsoft_graph.site_access_registry import SharePointSiteAccess
+from connectors.microsoft_graph.site_discovery import SharePointSiteDiscovery
 from connectors.microsoft_graph.tenant_tokens import GovernedTenantApplicationTokenProvider
 from connectors.microsoft_graph.token import MsalCertificateTokenProvider, default_msal_application_factory
 from kernel.client_boundaries import (
@@ -98,3 +100,29 @@ def require_validated_sharepoint_service_boundary(
         raise PermissionError(
             "Dedicated validated Microsoft Graph SharePoint service binding is required"
         )
+
+
+@dataclass(frozen=True, slots=True)
+class MicrosoftSharePointSiteManagement:
+    """Isolated components; no scheduler or provider action activated here."""
+    site_access: SharePointSiteAccess
+    daily_discovery: SharePointSiteDiscovery
+
+
+def build_sharepoint_site_management(
+    *, runtime: MicrosoftSharePointRuntime,
+    tenant_id: str, state_db: Path, transport: UrlLibJsonHttpTransport,
+) -> MicrosoftSharePointSiteManagement:
+    """Use the EXISTING dedicated SharePoint app token provider.
+
+    Only the existing Jason scheduler should call daily_discovery.run().
+    Provider publication must always use SiteGatedSharePointConnector.
+    """
+    site_access = SharePointSiteAccess(str(state_db), tenant_id=tenant_id)
+    return MicrosoftSharePointSiteManagement(
+        site_access=site_access,
+        daily_discovery=SharePointSiteDiscovery(
+            tenant_id=tenant_id, tokens=runtime.reader.tokens,
+            transport=transport, registry=site_access,
+        ),
+    )
