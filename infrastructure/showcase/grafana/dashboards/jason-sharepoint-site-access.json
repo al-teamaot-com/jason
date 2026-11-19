@@ -181,11 +181,81 @@
         }
       ],
       "options": {
-        "initial": {
-          "code": "const frame = context.panel.data.series?.[0];\nif (!frame) { context.grafana.notifyError(['SharePoint Access','Site registry unavailable']); return; }\nconst values = name => { const f=frame.fields.find(x=>x.name===name);return f ? Array.from(f.values):[]; };\nconst ids=values('Site ID'), names=values('Site'), states=values('Enabled'), revisions=values('Revision');\nconst options=ids.map((id,i)=>({id:String(id),label:String(names[i])+' ['+(states[i]?'Enabled':'Disabled')+']',value:String(id)}));\nconst selected=options[0]?.value||'';\nconst h=(opts=[])=>({showIf:()=>true,disableIf:()=>false,getOptions:()=>opts});\ncontext.panel.onChangeElements([\n {uid:'site',id:'site',title:'SharePoint site',type:'select',optionsSource:'Custom',options,allowCustomValue:false,value:selected,labelWidth:20,section:'Site access',tooltip:'Discovered sites only',helpers:h(options)},\n {uid:'enable',id:'enable',title:'Enable Jason access',type:'checkbox',value:false,labelWidth:20,section:'Site access',tooltip:'Site gate only; does not grant provider writes or document disclosure',helpers:h()},\n {uid:'apply',id:'apply',title:'Apply',type:'button',buttonLabel:'Apply Site Access',show:'form',size:'md',variant:'primary',labelWidth:20,section:'Site access',helpers:h(),customCode:`const get=id=>context.panel.elements.find(e=>e.id===id)?.value;\nconst site_id=String(get('site')||''), enabled=get('enable')===true;\nconst url='/api/datasources/proxy/uid/jason-sharepoint-control/sharepoint-control/sites';\nfetch(url,{credentials:'same-origin'}).then(async r=>{if(!r.ok)throw Error('Cannot read live site policy');return r.json()})\n.then(data=>{const row=(data.sites||[]).find(s=>s.site_id===site_id);if(!row)throw Error('Site not found');\nif(!window.confirm((enabled?'Enable':'Disable')+' Jason access to '+row.name+'?'))return null;\nreturn fetch('/api/datasources/proxy/uid/jason-sharepoint-control/sharepoint-control/site-access',{\nmethod:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},\nbody:JSON.stringify({site_id,enabled,expected_revision:row.revision,reason:'Grafana SharePoint Site Access'})})})\n.then(async r=>{if(!r)return;const b=await r.json();if(!r.ok)throw Error(b.error||'Change denied');context.grafana.notifySuccess(['SharePoint Access','Setting verified; refresh dashboard']);context.grafana.locationService.reload();})\n.catch(e=>context.grafana.notifyError(['SharePoint Access',String(e.message||e)]));`},\n {uid:'refresh',id:'refresh',title:'Refresh',type:'button',buttonLabel:'Refresh site list',show:'form',size:'md',variant:'secondary',labelWidth:20,section:'Site access',helpers:h(),customCode:'context.grafana.locationService.reload();'}\n]);"
+        "buttonGroup": {
+          "orientation": "center",
+          "size": "md"
         },
-        "updateEnabled": "disabled",
-        "sync": true
+        "confirmModal": {
+          "body": "Confirm exact SharePoint site access decision",
+          "cancel": "Cancel",
+          "columns": {
+            "include": [
+              "name",
+              "oldValue",
+              "newValue"
+            ],
+            "name": "Label",
+            "oldValue": "Old Value",
+            "newValue": "New Value"
+          },
+          "confirm": "Confirm",
+          "elementDisplayMode": "modified",
+          "title": "Confirm site change"
+        },
+        "elementValueChanged": "",
+        "elements": [],
+        "initial": {
+          "code": "const frame = context.panel.data.series?.[0];\nif (!frame) { context.grafana.notifyError(['SharePoint Access','Site registry unavailable']); return; }\nconst values = name => { const f=frame.fields.find(x=>x.name===name);return f ? Array.from(f.values):[]; };\nconst ids=values('Site ID'), names=values('Site'), states=values('Enabled'), revisions=values('Revision');\nconst options=ids.map((id,i)=>({id:String(id),label:String(names[i])+' ['+(states[i]?'Enabled':'Disabled')+']',value:String(id)}));\nconst selected=options[0]?.value||'';\nconst h=(opts=[])=>({showIf:()=>true,disableIf:()=>false,getOptions:()=>opts});\ncontext.panel.onChangeElements([\n {uid:'site',id:'site',title:'SharePoint site',type:'select',optionsSource:'Custom',options,allowCustomValue:false,value:selected,labelWidth:20,section:'Site access',tooltip:'Discovered sites only',helpers:h(options)},\n {uid:'enable',id:'enable',title:'Enable Jason access',type:'checkbox',value:false,labelWidth:20,section:'Site access',tooltip:'Site gate only; does not grant provider writes or document disclosure',helpers:h()},\n {uid:'apply',id:'apply',title:'Apply',type:'button',buttonLabel:'Apply Site Access',show:'form',size:'md',variant:'primary',labelWidth:20,section:'Site access',helpers:h(),customCode:`const get=id=>context.panel.elements.find(e=>e.id===id)?.value;\nconst site_id=String(get('site')||''), enabled=get('enable')===true;\nconst url='/api/datasources/proxy/uid/jason-sharepoint-control/sharepoint-control/sites';\nfetch(url,{credentials:'same-origin'}).then(async r=>{if(!r.ok)throw Error('Cannot read live site policy');return r.json()})\n.then(data=>{const row=(data.sites||[]).find(s=>s.site_id===site_id);if(!row)throw Error('Site not found');\nif(!window.confirm((enabled?'Enable':'Disable')+' Jason access to '+row.name+'?'))return null;\nreturn fetch('/api/datasources/proxy/uid/jason-sharepoint-control/sharepoint-control/site-access',{\nmethod:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},\nbody:JSON.stringify({site_id,enabled,expected_revision:row.revision,reason:'Grafana SharePoint Site Access'})})})\n.then(async r=>{if(!r)return;const b=await r.json();if(!r.ok)throw Error(b.error||'Change denied');context.grafana.notifySuccess(['SharePoint Access','Setting verified; refresh dashboard']);context.grafana.locationService.reload();})\n.catch(e=>context.grafana.notifyError(['SharePoint Access',String(e.message||e)]));`},\n {uid:'refresh',id:'refresh',title:'Refresh',type:'button',buttonLabel:'Refresh site list',show:'form',size:'md',variant:'secondary',labelWidth:20,section:'Site access',helpers:h(),customCode:'context.grafana.locationService.reload();'}\n]);",
+          "contentType": "application/json",
+          "getPayload": "return {};",
+          "highlight": false,
+          "highlightColor": "red",
+          "method": "-",
+          "payload": {}
+        },
+        "layout": {
+          "orientation": "vertical",
+          "padding": 10,
+          "sectionVariant": "default",
+          "variant": "single"
+        },
+        "reset": {
+          "backgroundColor": "",
+          "foregroundColor": "",
+          "icon": "process",
+          "text": "Reset",
+          "variant": "hidden"
+        },
+        "resetAction": {
+          "code": "",
+          "confirm": false,
+          "getPayload": "return {};",
+          "mode": "initial",
+          "payload": {}
+        },
+        "saveDefault": {
+          "icon": "save",
+          "text": "Save Default",
+          "variant": "hidden"
+        },
+        "submit": {
+          "backgroundColor": "",
+          "foregroundColor": "",
+          "icon": "cloud-upload",
+          "text": "Submit",
+          "variant": "hidden"
+        },
+        "sync": true,
+        "update": {
+          "code": "",
+          "confirm": false,
+          "contentType": "application/json",
+          "getPayload": "return {};",
+          "method": "-",
+          "payload": {},
+          "payloadMode": "all"
+        },
+        "updateEnabled": "disabled"
       }
     }
   ]

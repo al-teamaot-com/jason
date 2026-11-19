@@ -19,6 +19,7 @@ One reusable Jason workload identity for every AOT-owned SharePoint site; site-l
 - Focused Jason runtime SharePoint composition tests.
 - Representative smoke: JSON playbook store/document tests, Autotask ticket create/update, release-manager gate.
 - `docker compose config --quiet` on isolated sidecar: passed with inert placeholder environment.
+- Grafana target-only installer now supports read-only preflight and reviewed exact-SHA application, verified datasource/dashboard UID and existing Jason folder. No running Grafana service is restarted by its API workflow.
 - No image build or deployment initiated on the production host. No OpenBao secret read/write performed.
 
 ## Mandatory missing evidence / hard gates

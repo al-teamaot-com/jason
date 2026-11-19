@@ -104,7 +104,7 @@
     },
     {
       "path": "infrastructure/showcase/grafana/dashboards/jason-sharepoint-site-access.json",
-      "sha256": "a5319d19e4d1a41548b1d6985bf020d2ee777ec27980715fbfe9378749ec7849",
+      "sha256": "51e90a3315c2e608f47423eada2e56a02ccc54e9b89fbfc41f22883ee3f696bb",
       "title": "Jason SharePoint Site Access",
       "uid": "jason-sharepoint-site-access"
     },
