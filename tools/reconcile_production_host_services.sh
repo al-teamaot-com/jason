@@ -72,6 +72,11 @@ fi
 PMV4_E_MARKER="/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json"
 PMV4_E_HOST_GUARD="/opt/jason/pmv4-e-trusted/tools/pmv4_e_root_reconcile_admission.py"
 PMV4_E_HOST_MODE=legacy
+# The runtime/MCP images stay pinned at PMv3 LKG when only the Stage E
+# control-plane transitions. A root-owned accepted marker is the sole
+# permissible source for a different exact baseline. An untrusted env var
+# or a new Git SHA cannot override the running images.
+PMV4_E_EXPECTED_MCP_REVISION="$SOURCE_REVISION"
 if [ -e "$PMV4_E_MARKER" ] || [ -L "$PMV4_E_MARKER" ]; then
   PMV4_E_HOST_MODE="$(/usr/bin/python3 -I -B "$PMV4_E_HOST_GUARD" --source-revision "$SOURCE_REVISION" --mode-only)" || {
     echo "ERROR: PMv4 E accepted root reconciliation admission denied" >&2
@@ -79,6 +84,14 @@ if [ -e "$PMV4_E_MARKER" ] || [ -L "$PMV4_E_MARKER" ]; then
   }
   if [ "$PMV4_E_HOST_MODE" != replacement ]; then
     echo "ERROR: PMv4 E reconciliation cannot select obsolete mode after acceptance" >&2
+    exit 14
+  fi
+  PMV4_E_EXPECTED_MCP_REVISION="$(/usr/bin/python3 -I -B "$PMV4_E_HOST_GUARD" --source-revision "$SOURCE_REVISION" --runtime-baseline-only)" || {
+    echo "ERROR: PMv4 E root-authenticated runtime/MCP baseline not verified" >&2
+    exit 14
+  }
+  if [[ ! "$PMV4_E_EXPECTED_MCP_REVISION" =~ ^[0-9a-f]{40}$ ]] || [ "$PMV4_E_EXPECTED_MCP_REVISION" = "$SOURCE_REVISION" ]; then
+    echo "ERROR: PMv4 E root-accepted baseline is not a distinct exact SHA" >&2
     exit 14
   fi
 fi
@@ -163,7 +176,7 @@ fi
 git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}"
 
 LIVE_MCP_REVISION="$(docker inspect jason-mcp-pilot --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
-if [ "$LIVE_MCP_REVISION" != "$SOURCE_REVISION" ]; then
+if [ "$LIVE_MCP_REVISION" != "$PMV4_E_EXPECTED_MCP_REVISION" ]; then
   echo "ERROR: live MCP revision does not match requested host release." >&2
   echo "LIVE_MCP_REVISION=$LIVE_MCP_REVISION" >&2
   echo "REQUESTED_SOURCE_REVISION=$SOURCE_REVISION" >&2
@@ -171,7 +184,7 @@ if [ "$LIVE_MCP_REVISION" != "$SOURCE_REVISION" ]; then
 fi
 
 mkdir -p "$RELEASE_ROOT" "$BACKUP_DIR" /var/lib/jason
-printf 'JASON_EXPECTED_MCP_SOURCE_REVISION=%s\n' "$SOURCE_REVISION" > /var/lib/jason/production-health.env
+printf 'JASON_EXPECTED_MCP_SOURCE_REVISION=%s\n' "$PMV4_E_EXPECTED_MCP_REVISION" > /var/lib/jason/production-health.env
 chown root:root /var/lib/jason/production-health.env
 chmod 0644 /var/lib/jason/production-health.env
 if [ ! -d "$RELEASE_DIR" ]; then
@@ -916,6 +929,10 @@ fi
 step_pass itglue_read_owner_helper_install
 
 if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+  if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+    echo "ERROR: Stage E controlplane-only release cannot restart protected runtime/MCP" >&2
+    exit 14
+  fi
   step_start provider_identity_release_recovery
   /usr/bin/python3 /usr/local/lib/jason/openbao_identity_lifecycle.py \
     recover-release --source-revision "$SOURCE_REVISION"
