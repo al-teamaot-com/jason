@@ -60,7 +60,9 @@ def test_default_host_without_installed_root_handler_fails_closed(tmp_path):
     spool = tmp_path / "requests"
     spool.mkdir(mode=0o700)
     with pytest.raises(core.ScopedBackportDenied, match="ROOT_HANDLER_OR_POLICY_UNAVAILABLE"):
-        req.submit(x, spool=spool)
+        req.submit(x, spool=spool,
+                   handler=tmp_path / "uninstalled-handler.py",
+                   policy=tmp_path / "uninstalled-policy.json")
     assert tuple(spool.iterdir()) == ()
 
 

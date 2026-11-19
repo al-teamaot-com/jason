@@ -217,12 +217,14 @@ def stage(host: NativeScopedBackportHost, offer: dict) -> dict:
             "provider_writes": False,
         }
         path = host.root / "offers" / (offer["release_id"] + ".json")
-        atomic_root_json(path, {"source_offer": offer, "stage_receipt": receipt,
-                                "eligible": _offer_record(offer, stage_receipt=receipt)})
-        # Public offer and status are inputs for signed-Owner issuance only;
-        # the root retains its own exact source and preflight evidence.
-        _publish_public("offers", offer["release_id"], offer)
+        # One canonical eligibility record across the root-private and
+        # public receipt; a second timestamp can otherwise differ and make
+        # a valid later signed promotion fail its equality gate.
         record = _offer_record(offer, stage_receipt=receipt)
+        atomic_root_json(path, {"source_offer": offer, "stage_receipt": receipt,
+                                "eligible": record})
+        # Public offer/status is display material, never release authority.
+        _publish_public("offers", offer["release_id"], offer)
         _publish_public("eligibility", offer["release_id"], record)
         return record
 
@@ -278,6 +280,15 @@ def dispatch_one(request_id: str) -> dict:
     return result
 
 
+def bounded_stage_denial_code(exc: BaseException) -> str:
+    """No caller-controlled error detail crosses from root to operator."""
+    if isinstance(exc, ScopedBackportDenied):
+        msg = str(exc)
+        if re.fullmatch(r"SCOPED_BACKPORT_[A-Z0-9_]{2,96}", msg):
+            return msg
+    return "SCOPED_BACKPORT_UNCLASSIFIED_DENIAL"
+
+
 def drain() -> dict:
     """Consume bounded one-use request files; no blind side-effect retry."""
     if os.geteuid() != 0 or Path(__file__).resolve(strict=True) != INSTALLED_ENTRY:
@@ -301,15 +312,18 @@ def drain() -> dict:
             status = "handled_" + str(result.get("status"))
         except (ScopedBackportDenied, PermissionError, ValueError,
                 OSError, subprocess.SubprocessError) as exc:
-            # A typed root request failing validation is not permission to
-            # retry a release. Persist a root-owned failure receipt and
-            # reconcile interrupted work using the independent watchdog.
+            # Report only exact, bounded *constant* gate codes. No raw
+            # provider errors, paths, stdout, OAuth tokens or secrets.
             status = "denied_" + type(exc).__name__
+            denial = bounded_stage_denial_code(exc)
+        else:
+            denial = None
         receipt = {
             "schema_version": "1.0", "request_id": item,
             "status": status, "processed_at": utcnow(),
             "owner_approval_issued": False,
             "provider_mutations_approved": False,
+            "denial_code": denial,
         }
         atomic_root_json(host.root / "requests" / (item + ".json"), receipt)
         os.replace(path, completed / path.name)
