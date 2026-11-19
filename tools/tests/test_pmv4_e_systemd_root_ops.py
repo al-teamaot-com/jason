@@ -205,3 +205,60 @@ def test_exact_stage_reads_from_verified_sealed_root_not_parent(tmp_path):
         assert target.read_bytes() == body
     surface.unstage_exact(hashes)
     assert all(not Path(path).exists() for path in installed)
+
+
+def test_missing_new_units_are_valid_rollback_absence_not_active_status(tmp_path, monkeypatch):
+    """Matches real systemctl exit=4/not-found on Jason, not a friendly fake."""
+    from types import SimpleNamespace
+
+    root, fake, hashes, generated, user_dir, system_dir = make(
+        tmp_path, monkeypatch)
+
+    class RealisticMissing(FakeSystemctl):
+        def __call__(self, argv, **kw):
+            user = "/usr/sbin/runuser" in argv
+            at = argv.index("/usr/bin/systemctl") if user else 0
+            parts = argv[at+1:]
+            if user:
+                assert parts[0]=="--user"
+                parts=parts[1:]
+            action=parts[0]
+            name=parts[1] if len(parts)>1 else None
+            if name in ops.NEW_USER|ops.NEW_ROOT:
+                directory=user_dir if user else system_dir
+                if not (directory/name).exists():
+                    if action in ("is-active","is-enabled"):
+                        out="inactive" if action=="is-active" else "not-found"
+                        return SimpleNamespace(
+                            returncode=4,stdout=out+"\n",stderr="")
+                    if action in ("stop","disable","enable","start"):
+                        return SimpleNamespace(
+                            returncode=5,stdout="",stderr="Unit not found")
+            return super().__call__(argv,**kw)
+
+    runner=RealisticMissing()
+    root.runner=runner
+    assert root.verify_final(replacement=False) is True
+    assert root.status("jason-pmv4-engineering.timer",user=True)==(
+        "inactive","not-found")
+    root.stop_disable_replacement_if_present()
+    root.restore_legacy()
+    assert root.verify_final(replacement=False) is True
+    assert runner.active==set(ops.OLD_USER|ops.OLD_ROOT)
+    assert runner.enabled==set(ops.OLD_USER|ops.OLD_ROOT)
+
+
+def test_missing_original_legacy_unit_still_denied(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    root, fake, hashes, generated, user_dir, system_dir = make(
+        tmp_path, monkeypatch)
+    previous=fake
+    def missing_old(argv, **kwargs):
+        if argv[-1]=="jason-release-manager.timer":
+            if "is-enabled" in argv:
+                return SimpleNamespace(
+                    returncode=4,stdout="not-found\n",stderr="")
+        return previous(argv,**kwargs)
+    root.runner=missing_old
+    with pytest.raises(ops.StageESystemdDenied,match="SYSTEMD_STATE_UNKNOWN"):
+        root.status("jason-release-manager.timer",user=True)

@@ -77,10 +77,7 @@ class StageERootBridge:
             self.systemd.disable_legacy()
         elif (u_set==set(self.native.new_user_units())
               and r_set==set(self.native.new_root_units())):
-            for user,names in ((True,u),(False,r)):
-                for name in names:
-                    self.systemd._call(user=user,action="stop",names=(name,))
-                    self.systemd._call(user=user,action="disable",names=(name,))
+            self.systemd.stop_disable_replacement_if_present()
         else:
             raise StageEAdapterDenied("PMV4_E_NATIVE_ADAPTER_STOP_SET_NOT_EXACT")
 
