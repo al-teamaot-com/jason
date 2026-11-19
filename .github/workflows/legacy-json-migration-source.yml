@@ -12,6 +12,8 @@ on:
       - "implementation/autonomous_remediation/playbook_registry.json"
       - "tests/test_legacy_json_*.py"
       - "tools/legacy_json_migration_source_maps.py"
+      - "tools/legacy_json_conversion_drafts.py"
+      - "tools/legacy_json_acceptance_ledger.py"
       - "tests/test_json_playbook_isolated_trace.py"
       - "tests/test_json_governed_shadow_integration.py"
       - "tests/test_json_readonly_shadow_pilot_acceptance.py"
@@ -41,7 +43,9 @@ jobs:
         run: |
           python tools/legacy_json_migration_inventory.py
           python tools/legacy_json_migration_source_maps.py
-          git diff --exit-code -- docs/playbooks/json/migration/source-audit-20261119.json docs/playbooks/json/migration/source_maps/
+          python tools/legacy_json_conversion_drafts.py
+          python tools/legacy_json_acceptance_ledger.py
+          git diff --exit-code -- docs/playbooks/json/migration/source-audit-20261119.json docs/playbooks/json/migration/source_maps/ docs/playbooks/json/migration/drafts/ docs/playbooks/json/migration/acceptance-ledger-20261119.json
       - name: Validate migration, exact worker-intent parity and interpreter regression
         env:
           PYTHONPATH: .:implementation:implementation/runtime_service/src
@@ -49,6 +53,8 @@ jobs:
           python -m pytest -q \
             tests/test_legacy_json_inventory.py \
             tests/test_legacy_json_source_maps.py \
+            tests/test_legacy_json_conversion_drafts.py \
+            tests/test_legacy_json_acceptance_ledger.py \
             tests/test_legacy_json_migration_candidate.py \
             tests/test_legacy_json_behavioral_parity.py \
             tests/test_json_playbook_isolated_trace.py \

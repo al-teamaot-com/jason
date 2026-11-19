@@ -1,0 +1,131 @@
+{
+  "snapshot_date": "2026-11-19",
+  "source": "Jason MCP live capability discovery; limited to migration-referenced names",
+  "count": 31,
+  "items": [
+    {
+      "name": "automation.component.execute",
+      "lifecycle": "active"
+    },
+    {
+      "name": "automation.component.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "automation.job.read",
+      "lifecycle": "active"
+    },
+    {
+      "name": "automation.job.output.read",
+      "lifecycle": "active"
+    },
+    {
+      "name": "backup.backupiq.alert.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "backup.endpoint.asset.read",
+      "lifecycle": "active"
+    },
+    {
+      "name": "backup.endpoint.asset.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "backup.endpoint.backup.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "endpoint.alert.history.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "endpoint.alert.resolve",
+      "lifecycle": "active"
+    },
+    {
+      "name": "endpoint.alert.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "endpoint.audit.read",
+      "lifecycle": "active"
+    },
+    {
+      "name": "endpoint.device.read",
+      "lifecycle": "active"
+    },
+    {
+      "name": "endpoint.patch.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "endpoint.powershell.read",
+      "lifecycle": "active"
+    },
+    {
+      "name": "endpoint.security.detection.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "endpoint.security.status.read",
+      "lifecycle": "active"
+    },
+    {
+      "name": "endpoint.software.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "management.alert.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.configuration.read",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.configuration.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.contact.read",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.notification.history.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.ticket.client.notification.create",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.ticket.create",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.ticket.note.create",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.ticket.note.update",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.ticket.notes.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.ticket.read",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.ticket.search",
+      "lifecycle": "active"
+    },
+    {
+      "name": "service.ticket.update",
+      "lifecycle": "active"
+    }
+  ]
+}

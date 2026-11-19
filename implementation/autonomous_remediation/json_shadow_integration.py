@@ -165,7 +165,10 @@ class GovernedJsonShadowIntegration:
         # The shared read port must be constructed by a trusted authority
         # factory scoped to the same client. Merely putting client_id in JSON
         # or in a request payload does not prove tenant isolation.
-        if str(getattr(self.read_port, "bound_client_id", "") or "") != client_id:
+        port_client_id = getattr(self.read_port, "client_id", None)
+        if port_client_id is None:
+            port_client_id = getattr(self.read_port, "bound_client_id", None)
+        if str(port_client_id or "") != client_id:
             raise JsonShadowBoundaryError("GOVERNED_READ_PORT_CLIENT_SCOPE_UNVERIFIED")
         row = self.state.get(run_id)
         if row is None:

@@ -60,3 +60,41 @@ Implement/verify a **single reusable governed JSON state/fact adapter inside the
 
 ## Mandatory runtime integration boundary
 The currently deployed JSON Runbook Management can validate and store immutable JSON definitions, but the inspected source interpreter itself does not supply runtime fact provenance, iterative multi-ticket/multi-alert execution, durable step scheduling/retry state, exact approval binding or provider verification. Reimplementing those ad hoc in each JSON definition would create unsafe duplicate execution paths and violate the project's shared-capability architecture. The reusable fact guard is an initial source-only capability, **not** a complete replacement for those missing services. No production Ticket Core change is authorized. Complete shared JSON execution/fact/state integration through a separately governed component interface and prove it with isolated end-to-end acceptance before any candidate is counted ready; preserve PMv4 Stage E isolation.
+
+
+## November 19 continuation — exact 19-artifact reconciliation
+
+The live Jason capability catalog was read through governed discovery. The
+migration-scoped allowlist of **31 named active capabilities** (name and
+lifecycle only) is recorded as `live-capability-snapshot-20261119.json`.
+This catalog proves capability *names exist*, not a valid execution grant,
+provider implementation health, approved arguments or sufficient semantics.
+
+Every one of the 19 legacy entries now has a corresponding **canonical JSON
+source artifact**. Three are detailed but unaccepted candidates:
+`unsupported_readonly_triage_note`, `unsupported_triage_human_review`, and
+`drmm_recent_alert_reconciliation`. The other sixteen are explicitly
+**structural partial drafts** under `drafts/<id>.v1.json`. Their source and
+versions, named governed capabilities, primary disposition labels, fail-closed
+gates, read-only evidence and one approval-bound write intent are captured;
+they **do not implement** the legacy-specific full state machine, user-impact
+boundaries, exact provider inputs, retries, fan-out or full readback. They must
+not be treated as installed runbooks or deployed into active production.
+
+The generator `tools/legacy_json_conversion_drafts.py` validates all
+sixteen against the canonical JSON validator and the recorded live capability
+names. `tests/test_legacy_json_conversion_drafts.py` runs per-source schema,
+semantic, positive/negative branch, missing approval, bounded wait and
+isolated draft-stage/restart checks; these are **source structural tests only**,
+not complete per-playbook behavioral parity. The reproducible
+`tools/legacy_json_acceptance_ledger.py` reconciles all 19 definitions to
+exact source SHAs, JSON fingerprints and explicit incomplete acceptance gates
+in `acceptance-ledger-20261119.json`.
+
+**Accepted replacements: 0/19.** The independent source-only read-only
+diagnostic pilot is not an original legacy ID and does not count as a
+conversion. It passes isolated synthetic acceptance against the existing
+interpreter and the actual existing governed Observe Port *with mocked
+authority/orchestrator*, but no real preproduction provider session or
+production Core integration was exercised. Full migration readiness and source
+merge as a completed migration remain prohibited until independently proven.

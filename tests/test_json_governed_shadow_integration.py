@@ -372,3 +372,59 @@ def test_unbound_or_cross_client_read_port_never_invoked(tmp_path):
         run(runner)
     assert port.calls == []
     state.close()
+
+
+def test_existing_central_orchestrator_read_port_contract_is_reused(tmp_path):
+    """No substitute port: real existing Observe Port wraps mocked JKD calls."""
+    from types import SimpleNamespace
+    from jason_runtime.autonomy_shadow_runtime import GovernedAutonomyReadPort
+
+    observations = FakeGovernedObserve(case="healthy")
+    requests = []
+
+    class GovernedRequestFactory:
+        def build_observe(self, **kwargs):
+            requests.append(dict(kwargs))
+            return SimpleNamespace(
+                capability_name=kwargs["capability_name"],
+                arguments=kwargs["arguments"], client_id=kwargs["client_id"],
+                policy_id=kwargs["policy_id"],
+            )
+
+    class CentralOrchestratorMock:
+        def execute(self, request):
+            assert request.client_id == "company-1"
+            observed = observations.execute(request.capability_name, request.arguments)
+            return SimpleNamespace(
+                status=SimpleNamespace(value=observed["status"]),
+                stage=SimpleNamespace(value="completed"),
+                capability_name=request.capability_name,
+                provider_id="isolated-fixture", reason_codes=(),
+                error_code=None, correlation_id="synthetic-only",
+                output=observed["evidence"],
+            )
+
+    port = GovernedAutonomyReadPort(
+        request_factory=GovernedRequestFactory(),
+        orchestrator=CentralOrchestratorMock(),
+        client_id="company-1",
+        policy_id="json-migration-isolated-read-only-v1",
+    )
+    doc = validate_playbook_document(json.loads(CANDIDATE.read_text()))
+    state = SQLiteJsonShadowState(tmp_path / "existing-governed-port.sqlite3")
+    runner = GovernedJsonShadowIntegration(
+        document=doc, state=state, read_port=port,
+        read_capabilities=READS,
+        normalize=lambda cap, result, facts: reduce_daily_drmm_alert(
+            cap, result, facts, at=NOW),
+        clock=lambda: NOW,
+    )
+    result = run(runner)
+    assert result.status == "completed_readonly"
+    assert result.step_id == "skip_no_mutation"
+    assert len(requests) == 4
+    assert all(req["client_id"] == "company-1" for req in requests)
+    assert all(req["policy_id"] == "json-migration-isolated-read-only-v1"
+               for req in requests)
+    assert not observations.mutations
+    state.close()
