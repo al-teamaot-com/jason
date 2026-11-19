@@ -12,8 +12,8 @@ def test_all_19_have_exact_source_and_valid_json_but_zero_accepted():
     assert report["verified_inventory"] == 19
     assert report["source_mapped"] == 19
     assert report["canonical_json_source_artifacts"] == 19
-    assert report["detailed_candidates"] == 13
-    assert report["structural_unaccepted_drafts"] == 6
+    assert report["detailed_candidates"] == 19
+    assert report["structural_unaccepted_drafts"] == 0
     time_source = next(
         e for e in report["entries"] if e["id"] == "windows_time_source"
     )
@@ -109,5 +109,9 @@ def test_no_json_artifact_expands_source_write_authority():
         assert "endpoint.alert.resolve" not in row["source_declared_write_capabilities"]
         assert "does not authorize" in " ".join(row["unresolved_gaps"]).lower()
     row = next(x for x in report["entries"] if x["id"] == "vulscan_missing_patch")
-    assert not row["source_declared_write_capabilities"]
-    assert "authority" in " ".join(row["unresolved_gaps"]).lower()
+    assert set(row["source_declared_write_capabilities"]) == {
+        "service.ticket.client.notification.create",
+        "service.ticket.note.create", "service.ticket.update",
+    }
+    assert "automation.component.execute" not in row["source_declared_write_capabilities"]
+    assert "does not authorize" in " ".join(row["unresolved_gaps"]).lower()

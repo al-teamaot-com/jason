@@ -35,6 +35,12 @@ ALREADY_DETAILED = frozenset({
     "disk_bad_block_event_7",
     "post_error_investigation",
     "vulscan_multi_device_split",
+    "datto_edr_av",
+    "backupiq_endpoint_backup",
+    "vulscan_missing_patch",
+    "dns_agent_diagnostic",
+    "idle_log_off",
+    "security_log_self_heal",
 })
 
 
@@ -46,50 +52,6 @@ ALREADY_DETAILED = frozenset({
 # conversion review but intentionally do not implement complex fanout,
 # provider-output normalization, exact approval policy, or all remediation.
 WORKFLOWS = {
-    "backupiq_endpoint_backup": {
-        "entry": "service.ticket.search", "diagnose": "backup.endpoint.asset.search",
-        "verify": "backup.endpoint.backup.search", "action": "automation.component.execute",
-        "clean": "new_backup_verified", "repair": "agent_reinstall_authorized",
-        "wait": "waiting_for_new_successful_backup",
-        "missing": ["exact cross-provider BackupIQ asset identity", "24h/2h recheck and provider backup outcome correlation", "one-time approved installer job with exact idempotency", "ticket lifecycle and release-slot persistence"],
-    },
-    "datto_edr_av": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.security.status.read",
-        "verify": "endpoint.security.status.read", "action": "automation.component.execute",
-        "clean": "verified_product_and_security_healthy", "repair": "approved_bounded_health_repair",
-        "wait": "reboot_approval_or_device_wait",
-        "missing": ["Python security classifier and cross-provider threat posture", "bounded job continuation and exact approved component arguments", "per-run reboot authorization and 03:30 recheck", "security-incident independent verification and closure"],
-    },
-    "dns_agent_diagnostic": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.software.search",
-        "verify": "endpoint.alert.search", "action": "automation.component.execute",
-        "clean": "dnsfilter_health_verified", "repair": "approved_bounded_dnsfilter_install_or_reinstall",
-        "wait": "waiting_endpoint_or_job",
-        "missing": ["native DNSFilter site/agent corroboration and policy-specific exclusions", "approved diagnostic-vs-remediation component selection", "bounded execution and job-output state", "DNS and service stability interval before exact alert/ticket closure"],
-    },
-    "idle_log_off": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.alert.search",
-        "verify": "endpoint.alert.search", "action": "automation.component.execute",
-        "clean": "policy_compliance_proven", "repair": "approved_setter_component_required",
-        "wait": "waiting_idletime_monitor_recheck",
-        "missing": ["workstation/site policy scope and approved setter fingerprint", "component terminal job/StdErr bound verification", "post-job monitor propagation and stable observation", "exact alert/ticket completion and output provenance"],
-    },
-    "security_log_self_heal": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.alert.search",
-        "verify": "endpoint.alert.history.search", "action": "automation.component.execute",
-        "clean": "security_event_log_healthy",
-        "repair": "approved_security_log_self_heal_needed",
-        "wait": "waiting_healthy_quick_test_or_job",
-        "missing": ["read-only Quick Test component and job-output parser", "one time sensitive event-log mutation with SOC authorization", "independent repeated Quick Test and exact alert closure", "same-device/time/technique side-effect ticket correlation"],
-    },
-    "vulscan_missing_patch": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.patch.search",
-        "verify": "endpoint.patch.search", "action": None,
-        "clean": "exact_kb_installed_or_superseded",
-        "repair": "approved_patch_stack_repair_warranted",
-        "wait": "waiting_normal_patch_window_or_approval",
-        "missing": ["exact KB approval/window and device-patch identity", "multi-device ticket split prerequisite", "user impact/reboot approval and bounded WU repair flags", "exact KB/build/supersedence and ticket verification"],
-    },
 }
 
 

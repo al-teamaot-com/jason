@@ -248,3 +248,36 @@ monitor and free-space verification passes. See
 
 Ledger: **13 detailed partial candidates, 6 structural drafts,
 0 of 19 fully accepted.** No production JSON activation or legacy retirement.
+
+## Full 19-source detailed candidate reconciliation — source-only (November 19)
+
+All fourteen originally structural partial JSON drafts now have
+source-specific canonical JSON candidate definitions in
+`docs/playbooks/json/migration/candidates/`. The original five detailed
+candidates remain separate. This moves the **structural conversion**
+inventory to **19 detailed candidates and 0 generic structural drafts**.
+
+Every candidate is schema-valid and bound to a verified legacy SHA,
+immutable JSON fingerprint and actual live named read/write capability.
+A new source reconciliation test stages ALL 19 only in a separate
+temporary immutable JSON registry, verifies exactly nineteen draft
+receipts and no active versions on restart, tests fail-closed branches,
+denies unbound mutation steps and confirms no legacy write expansion.
+The private isolated test registry is not the production registry.
+
+The source-specific pure classifiers and planners for EDR/AV, BackupIQ,
+VulScan patch, DNS Agent, Windows Idle Log Off, and Security Log Self-Heal
+now have synthetic positive/negative tests using the original existing
+legacy helpers where applicable. Security Log event clearing requires
+exact signed Owner approval and must not be inferred from a standing-safe
+classification. Original registry does not authorize `endpoint.alert.resolve`
+for DNS Agent or Windows Idle Log Off; their JSON candidates route unresolved
+provider alerts to Human Review, never silently assuming completion.
+Original registry likewise does not authorize VulScan patch install.
+
+**None of these read-only classifiers is a complete executable replacement.**
+Each current candidate still has unresolved full legacy behavior parity,
+independent full provider readback/retry/interrupt acceptance and real
+preproduction service-identity client-bound execution gates. The
+`ALL-19-ACCEPTANCE-MATRIX.md` lists exact source versions and remaining
+gaps; production activation and legacy retirement remain **0**.

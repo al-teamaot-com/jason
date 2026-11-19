@@ -1,11 +1,11 @@
 {
   "accepted_only_when_all_independent_gates_pass": true,
   "canonical_json_source_artifacts": 19,
-  "detailed_candidates": 13,
+  "detailed_candidates": 19,
   "entries": [
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "backupiq_endpoint_backup",
@@ -13,22 +13,24 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "19d163be9664d937b0faac2a7ca088d03573b166a4665cb6b7450fd7d37b702a",
+      "json_fingerprint": "18d2ab42682ac126e346b9d34adb758e1340e8b9f28edc647de348d435906562",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/backupiq_endpoint_backup.v1.json",
-      "json_version": "1.2.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/backupiq_endpoint_backup.v1.json",
+      "json_version": "1.3.0-migration.2",
       "legacy_registry_version": "1.2.0",
       "legacy_retired": false,
       "legacy_source": "docs/playbooks/Jason-BackupIQ-Datto-Endpoint-Backup.md",
       "legacy_source_blob_sha": "9dde241866ddca31f9640d3deb1e0b3ed5a19228",
       "legacy_source_sha256": "6af554f37ea21ba753d6a17f727c7c239563348ab7096aab7c591087e9921931",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "no_legacy_registry_mutation_authority_expansion": true,
       "production_json_activated": false,
       "source_declared_write_capabilities": [
-        "automation.component.execute"
+        "automation.component.execute",
+        "service.ticket.note.create",
+        "service.ticket.update"
       ],
       "source_legacy_allowed_write_capabilities": [
         "automation.component.execute",
@@ -37,15 +39,16 @@
       ],
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "exact cross-provider BackupIQ asset identity",
-        "24h/2h recheck and provider backup outcome correlation",
-        "one-time approved installer job with exact idempotency",
-        "ticket lifecycle and release-slot persistence"
+        "OpenBao-backed verified backup_net customer-to-Autotask company binding and zero-asset customer proof not yet connected to JSON runtime",
+        "Original provider asset, backup success and alert result parser normalization, existing agent components/site variable reads and linked job output not fully wired",
+        "Durable one-reinstall job and 1-hour/10-day waiting state and reverse-recheck/readback continuation must be proven",
+        "Exact one authorized reinstall and post-install new backup/current alert verification plus ticket note/provider readback not accepted in isolated preproduction",
+        "Potential BackupIQ false-positive provider statuses and protected asset exceptions need independent synthetic/live acceptance"
       ]
     },
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "datto_edr_av",
@@ -53,22 +56,24 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "d125ddd001dae14ddb77be0358967079b59dd1946401acc6d077d71f8236e40d",
+      "json_fingerprint": "08cca798a22392ad71c94ce95a49ff988c735a30a6e9d13c982b9676c95d967c",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/datto_edr_av.v1.json",
-      "json_version": "1.3.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/datto_edr_av.v1.json",
+      "json_version": "1.3.0-migration.2",
       "legacy_registry_version": "1.3.0",
       "legacy_retired": false,
       "legacy_source": "implementation/autonomous_remediation/datto_edr_av_playbook.py",
       "legacy_source_blob_sha": "c3645b2c003e6f4079b62d32572e27b00cdd57b9",
       "legacy_source_sha256": "84858da6eeb8569923a0ab9d3d758741cb2899d143b754318fd6f51a2751c99e",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "no_legacy_registry_mutation_authority_expansion": true,
       "production_json_activated": false,
       "source_declared_write_capabilities": [
-        "automation.component.execute"
+        "automation.component.execute",
+        "service.ticket.note.create",
+        "service.ticket.update"
       ],
       "source_legacy_allowed_write_capabilities": [
         "automation.component.execute",
@@ -77,10 +82,11 @@
       ],
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "Python security classifier and cross-provider threat posture",
-        "bounded job continuation and exact approved component arguments",
-        "per-run reboot authorization and 03:30 recheck",
-        "security-incident independent verification and closure"
+        "Normal Python PlaybookRun persisted state and step-specific job identity not yet wired to canonical JSON interpreter",
+        "Existing Python security threat classifier, clean-scan/detection/recurrence requirements need end-to-end JSON evidence normalization and approval integration",
+        "Governed AV Force Update predefined command and recovery clean uninstall policy-gated branches are not executable by approved JSON capabilities",
+        "02:30 scheduled reboot/03:30 verification remain separately exact Owner-approved and MUST NOT be auto-dispatched",
+        "Job reconciliation, protected source/JSON takeover, Autotask ticket notes and provider-connected preproduction acceptance not done"
       ]
     },
     {
@@ -126,7 +132,7 @@
     },
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "dns_agent_diagnostic",
@@ -134,22 +140,23 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "0012076c5c8fd8c5b61c3b9c2d4753b1d0540098802b7452f78932a91d287b04",
+      "json_fingerprint": "a0f12074057afef7a1583a0f0f849ce88aef3980ec1bf96051df73d3b6b17a55",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/dns_agent_diagnostic.v1.json",
-      "json_version": "1.0.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/dns_agent_diagnostic.v1.json",
+      "json_version": "1.0.0-migration.2",
       "legacy_registry_version": "1.0.0",
       "legacy_retired": false,
       "legacy_source": "docs/playbooks/Jason-DNSFilter-DNS-Agent-Diagnostic.md",
       "legacy_source_blob_sha": "fa1dbb6375a0cb58a01c7948edc168bf55131e14",
       "legacy_source_sha256": "1067c93ce79f235d77a42ad2aa5eaa1c0e744e6ff60f9766b6ee5c6ae1da0194",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "no_legacy_registry_mutation_authority_expansion": true,
       "production_json_activated": false,
       "source_declared_write_capabilities": [
-        "automation.component.execute"
+        "automation.component.execute",
+        "service.ticket.note.create"
       ],
       "source_legacy_allowed_write_capabilities": [
         "automation.component.execute",
@@ -158,10 +165,12 @@
       ],
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "native DNSFilter site/agent corroboration and policy-specific exclusions",
-        "approved diagnostic-vs-remediation component selection",
-        "bounded execution and job-output state",
-        "DNS and service stability interval before exact alert/ticket closure"
+        "Dedicated diagnostic component stdout and both service states exact parser, native client-safe DNSFilter site/agent/policy posture integration incomplete",
+        "Existing standing-approved diagnostic component UID is bound in persisted state but provider job execution/orchestrator/authorization must be independently validated",
+        "Exact registered install/reinstall component versions, customer-scoped OpenBao keys, one uninstall/install cycle and no network changes need side-effect readback and explicit promotion",
+        "Full post install/reinstall service-manager DNS health check, DRMM exact alert resolution and ticket readback not yet independently accepted",
+        "Failure/retry/reboot denial, restart and cross-tenant scenario tests need isolated real provider preproduction",
+        "Original legacy registry does not authorize endpoint.alert.resolve; healthy state cannot complete the original alert/ticket until separate exact-scope authorization and source amendment. The JSON healthy branch currently goes to Human Review."
       ]
     },
     {
@@ -250,7 +259,7 @@
     },
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "idle_log_off",
@@ -258,22 +267,24 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "a35432917adb809fdd3121ce9fb9a023e8f8a63dbc84de0e231538ea5c5f3a13",
+      "json_fingerprint": "6520da707d310448b15de77d01b4fbc92e5fdaaf7c4156c83297737665884cf4",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/idle_log_off.v1.json",
-      "json_version": "1.1.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/idle_log_off.v1.json",
+      "json_version": "1.1.0-migration.2",
       "legacy_registry_version": "1.1.0",
       "legacy_retired": false,
       "legacy_source": "docs/playbooks/Jason-Windows-Idle-Log-Off-Compliance-Repair.md",
       "legacy_source_blob_sha": "ef5b3e7b437a268a351370398f6417ff607d1c0b",
       "legacy_source_sha256": "4b2a91976a5eee04ed32fdfe502059e9fb9c57934e3aa4563854764308a7bb63",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "no_legacy_registry_mutation_authority_expansion": true,
       "production_json_activated": false,
       "source_declared_write_capabilities": [
-        "automation.component.execute"
+        "automation.component.execute",
+        "service.ticket.note.create",
+        "service.ticket.update"
       ],
       "source_legacy_allowed_write_capabilities": [
         "automation.component.execute",
@@ -282,10 +293,11 @@
       ],
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "workstation/site policy scope and approved setter fingerprint",
-        "component terminal job/StdErr bound verification",
-        "post-job monitor propagation and stable observation",
-        "exact alert/ticket completion and output provenance"
+        "Source original registry does NOT authorize endpoint.alert.resolve, despite authored document; exact separate approved grant/source amendment needed",
+        "Exact current client/site required idle duration, component version and variables must be bound through live governed site policy and Owner promotion",
+        "Monitor provider output/UID/cadence and setter job/error response must be fully parsed into trusted JSON source facts",
+        "One setter lifecycle, existing job polling, monitor normal 15-minute refresh and exact completion readback require end-to-end isolated acceptance",
+        "No provider-connected preproduction or live confirmation of same client/role/CI and no production dispatcher selection tested"
       ]
     },
     {
@@ -449,7 +461,7 @@
     },
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "security_log_self_heal",
@@ -457,22 +469,23 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "a120f441445729cd28372a5c1a63ecfc5af6a713f1d0e963ad270454c2790627",
+      "json_fingerprint": "76e458c394689a153fb43bfd3b911b341324528231344058e9811f5e1f7ca959",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/security_log_self_heal.v1.json",
-      "json_version": "1.0.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/security_log_self_heal.v1.json",
+      "json_version": "1.0.0-migration.2",
       "legacy_registry_version": "1.0.0",
       "legacy_retired": false,
       "legacy_source": "docs/playbooks/Security-Log-Self-Heal-Playbook.md",
       "legacy_source_blob_sha": "60fbcc32388d59f0dab029ca440d905a87a51c44",
       "legacy_source_sha256": "46c1f9fee5698d92832a9b12676720503902c02be6176fb6e4622ebdb4bd0569",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "no_legacy_registry_mutation_authority_expansion": true,
       "production_json_activated": false,
       "source_declared_write_capabilities": [
-        "automation.component.execute"
+        "automation.component.execute",
+        "service.ticket.note.create"
       ],
       "source_legacy_allowed_write_capabilities": [
         "automation.component.execute",
@@ -481,10 +494,11 @@
       ],
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "read-only Quick Test component and job-output parser",
-        "one time sensitive event-log mutation with SOC authorization",
-        "independent repeated Quick Test and exact alert closure",
-        "same-device/time/technique side-effect ticket correlation"
+        "Security Log self-heal clears security audit history and requires exact authenticated Owner approval bound to production-sensitive component and current incident, not merely a generic standing-safe label",
+        "Original registry does NOT authorize endpoint.alert.resolve or SOC/EDR alert cleanup; full authored side-effect cleanup and original-alert resolution cannot execute without separately governed source amendment",
+        "Secure exact SOC correlation of all event-log-cleared side effects and original ticket closure must be implemented through existing governed provider readback",
+        "Independent fresh Quick Test after one Security Log Self-Heal job requires separately persisted job identity and output, no speculative command replay",
+        "No isolated real-provider preproduction approval, safe target or production Core coexistence acceptance has been verified"
       ]
     },
     {
@@ -530,7 +544,7 @@
     },
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "vulscan_missing_patch",
@@ -538,21 +552,25 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "e8c50657b6bdeca200e996a5fa84be6240d0df797bb9d9d6bf767e2af13a8fc2",
+      "json_fingerprint": "a486a0561d85d6fa3b3af90f61512ea6b43d927d5f0670ba79fe2c1bcdb44022",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/vulscan_missing_patch.v1.json",
-      "json_version": "1.1.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/vulscan_missing_patch.v1.json",
+      "json_version": "1.1.0-migration.2",
       "legacy_registry_version": "1.1.0",
       "legacy_retired": false,
       "legacy_source": "docs/playbooks/Jason-Windows-Update-VulScan-Missing-Patch.md",
       "legacy_source_blob_sha": "c44b06dabd07b5c6755c16fe8ebd91974cc8f5d6",
       "legacy_source_sha256": "807ed1eeed83ae046b734d2a9568fe533fa512d72959f2fd30580d9f20ca8e23",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "no_legacy_registry_mutation_authority_expansion": true,
       "production_json_activated": false,
-      "source_declared_write_capabilities": [],
+      "source_declared_write_capabilities": [
+        "service.ticket.client.notification.create",
+        "service.ticket.note.create",
+        "service.ticket.update"
+      ],
       "source_legacy_allowed_write_capabilities": [
         "service.ticket.client.notification.create",
         "service.ticket.note.create",
@@ -560,11 +578,11 @@
       ],
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "exact KB approval/window and device-patch identity",
-        "multi-device ticket split prerequisite",
-        "user impact/reboot approval and bounded WU repair flags",
-        "exact KB/build/supersedence and ticket verification",
-        "Legacy registry does not authorize the requested mutation; this action is blocked pending separately governed source correction and authority."
+        "The authored Windows Update repair and patch install require automation.component.execute, which original registry does NOT authorize; cannot make that JSON action executable without separately governed authority",
+        "Exact KB supersedence and update install-error data parse, Patch Window policy and 10-day persisted state must be integrated with JSON interpreter",
+        "Normal user session, safe reboot timing and protected servers require separately approved action and source",
+        "Multi-device VulScan source must use existing ticket split primitive and verified child creation instead of direct JSON fanout",
+        "Owner-promoted exact note/optional client notification/terminal ticket readback and real isolated preproduction acceptance remain incomplete"
       ]
     },
     {
@@ -773,6 +791,6 @@
     "live_preproduction_provider_acceptance": false,
     "version": "0.1.0"
   },
-  "structural_unaccepted_drafts": 6,
+  "structural_unaccepted_drafts": 0,
   "verified_inventory": 19
 }

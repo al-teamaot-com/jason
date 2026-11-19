@@ -28,6 +28,13 @@ on:
       - "implementation/runtime_service/tests/test_json_hardware_triage.py"
       - "implementation/runtime_service/src/jason_runtime/json_vulscan_split_plan.py"
       - "implementation/runtime_service/tests/test_json_vulscan_split_plan.py"
+      - "implementation/runtime_service/src/jason_runtime/json_backupiq_classifier.py"
+      - "implementation/runtime_service/src/jason_runtime/json_edr_av_planner.py"
+      - "implementation/runtime_service/src/jason_runtime/json_vulscan_patch_classifier.py"
+      - "implementation/runtime_service/src/jason_runtime/json_dns_agent_classifier.py"
+      - "implementation/runtime_service/src/jason_runtime/json_idle_logoff_classifier.py"
+      - "implementation/runtime_service/src/jason_runtime/json_security_log_classifier.py"
+      - "tests/test_all_legacy_json_candidates_isolated_registry.py"
       - "implementation/runtime_service/tests/test_json_playbook_readonly_preprod.py"
       - "implementation/runtime_service/tests/test_json_readonly_shadow_pilot_legacy_parity.py"
       - "implementation/autonomous_remediation/playbook_registry.json"
@@ -97,6 +104,13 @@ jobs:
             implementation/runtime_service/tests/test_json_low_disk_classification.py \
             implementation/runtime_service/tests/test_json_hardware_triage.py \
             implementation/runtime_service/tests/test_json_vulscan_split_plan.py \
+            implementation/runtime_service/tests/test_json_backupiq_classifier.py \
+            implementation/runtime_service/tests/test_json_edr_av_planner.py \
+            implementation/runtime_service/tests/test_json_vulscan_patch_classifier.py \
+            implementation/runtime_service/tests/test_json_dns_agent_classifier.py \
+            implementation/runtime_service/tests/test_json_idle_logoff_classifier.py \
+            implementation/runtime_service/tests/test_json_security_log_classifier.py \
+            tests/test_all_legacy_json_candidates_isolated_registry.py \
             tests/test_playbook_ticket_evidence.py \
             implementation/autonomous_remediation/test_json_playbook_document.py \
             implementation/autonomous_remediation/test_json_playbook_store.py
