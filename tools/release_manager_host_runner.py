@@ -8711,6 +8711,19 @@ def main() -> int:
     recovery.add_argument("--revision", required=True)
     recovery.add_argument("--owner-approved", action="store_true")
 
+    # Generic exact-source backport admission; does NOT bypass main-only
+    # native production create/prepare/approve/promote or create a release.
+    backport = sub.add_parser("scoped-backport-admit")
+    backport.add_argument("--trusted-main-sha", required=True)
+
+    for name in ("scoped-backport-stage", "scoped-backport-promote",
+                 "scoped-backport-recover"):
+        typed = sub.add_parser(name)
+        typed.add_argument("--trusted-main-sha", required=True)
+        typed.add_argument("--release-id", required=True)
+        if name != "scoped-backport-stage":
+            typed.add_argument("--offer-sha256", required=True)
+
     # Source-only scoped catalog admission. This subcommand is read-only:
     # no release record, Owner decision, mutable state root or promotion.
     sub.add_parser("catalog-scope-admit")
@@ -8732,6 +8745,51 @@ def main() -> int:
     args = parser.parse_args()
     repo = args.repo.expanduser().resolve()
     state_root = args.state_root.expanduser().resolve()
+    if args.command == "scoped-backport-admit":
+        from tools.scoped_backport_release import (
+            source_admission, make_offer, validate_manifest, RELEASE_MANIFEST,
+            _git,
+        )
+        # This accepts ONLY protected-main manifest bytes and independently
+        # verifies an immutable LKG-descendant backport. No state-root write.
+        source = source_admission(repo, trusted_main_sha=args.trusted_main_sha)
+        pinned = validate_manifest(json.loads(
+            _git(repo, "show", args.trusted_main_sha + ":" + RELEASE_MANIFEST)))
+        offer = make_offer(pinned, main_sha=args.trusted_main_sha)
+        print(json.dumps({
+            "status": "source_admitted_not_production_eligible",
+            "source": source,
+            "offer": offer,
+            "native_release_record_created": False,
+            "owner_approval_recorded": False,
+            "production_mutations": False,
+            "provider_writes": False,
+            "root_installer_and_rollback_admission_required": True,
+        }, sort_keys=True, indent=2))
+        return 0
+    if args.command in {
+        "scoped-backport-stage", "scoped-backport-promote",
+        "scoped-backport-recover",
+    }:
+        from tools.scoped_backport_release import (
+            source_admission, make_offer, validate_manifest,
+            RELEASE_MANIFEST, _git,
+        )
+        from tools.scoped_backport_release_request import request, submit
+        source_admission(repo, trusted_main_sha=args.trusted_main_sha)
+        pinned = validate_manifest(json.loads(
+            _git(repo, "show", args.trusted_main_sha + ":" + RELEASE_MANIFEST)))
+        offer = make_offer(pinned, main_sha=args.trusted_main_sha)
+        if args.release_id != offer["release_id"]:
+            raise ReleaseManagerError("scoped backport release id is not exact")
+        action = "scoped_backport_" + args.command.rsplit("-", 1)[-1]
+        req = request(action, offer,
+                      offer_sha256=getattr(args, "offer_sha256", None))
+        # This is *not* native production approval. An independently
+        # installed, root-attested handler must validate each request.
+        # Currently absent: fail closed instead of creating an approval.
+        print(json.dumps(submit(req), sort_keys=True, indent=2))
+        return 0
     if args.command == "catalog-scope-admit":
         from catalog_scoped_release_admission import attest_source_scope
         # All inputs come from immutable protected source, the published
