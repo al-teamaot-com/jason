@@ -127,8 +127,9 @@ def test_untrusted_signer_denied_before_root_write(tmp_path):
 def test_bootstrap_cannot_replay_native_approved_release(tmp_path):
     b,request,state,root,receipts=fixtures(tmp_path)
     signed_id=request["signed_owner_proof"]["payload"]["approval_id"]
-    (receipts/("owner-"+signed_id+".json")).write_text(
-        json.dumps({"approval_id":signed_id,"state":"accepted"}))
+    receipt=receipts/("owner-"+signed_id+".json")
+    receipt.write_text(json.dumps({"approval_id":signed_id,"state":"accepted"}))
+    receipt.chmod(0o600)
     with pytest.raises(PermissionError,match="ONE_USE_REPLAY"):
         b.begin(request)
     assert list(root.iterdir())==[]
