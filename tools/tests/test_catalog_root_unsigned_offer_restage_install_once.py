@@ -68,16 +68,7 @@ def scenario(tmp_path,monkeypatch):
     monkeypatch.setattr(m,"verified_main",lambda:"a"*40)
     monkeypatch.setattr(m,"replace",lambda path,data:Path(path).write_bytes(data))
     # The root-only production lock remains enforced in the actual installer.
-    real_fstat=os.fstat
-    def test_fstat(handle):
-        st=real_fstat(handle)
-        try:
-            name=os.readlink("/proc/self/fd/"+str(handle))
-        except OSError:
-            name=""
-        owner=0 if name==str(shadow) else 1000
-        return SimpleNamespace(st_uid=owner,st_mode=st.st_mode)
-    monkeypatch.setattr(m.os,"fstat",test_fstat)
+    monkeypatch.setattr(m,"trusted_release_lock",lambda handle,path,expected_uid:True)
     class TrustedWorker:
         def _trusted_catalog_scoped_promotion_module(self,source):
             return SimpleNamespace(execute_native_catalog_scoped_request=lambda *a:None)

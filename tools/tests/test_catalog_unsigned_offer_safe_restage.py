@@ -184,7 +184,13 @@ def test_root_stage_routes_existing_stale_offer_only_to_controlled_restage(monke
     monkeypatch.setattr(root,"_root_offer_path",lambda _:state/"offers"/(new["release_id"]+".json"))
     monkeypatch.setattr(root,"_trusted_public_offer",lambda _:pytest.fail("unsafe ordinary root offer overwrite"))
     monkeypatch.setattr(root,"_restage_unchanged_catalog_scope",lambda host,payload:calls.append(payload) or {"status":"controlled_restage"})
-    monkeypatch.setattr(root,"secure_read",lambda path,**kw:Path(path).read_bytes())
+    historical=(Path(__file__).resolve().parents[2]/
+                root.ADMISSION_EVIDENCE_PATH).read_bytes()
+    def read_in_ci(path,**kw):
+        if str(path).endswith(root.ADMISSION_EVIDENCE_PATH):
+            return historical
+        return Path(path).read_bytes()
+    monkeypatch.setattr(root,"secure_read",read_in_ci)
     request={
         "schema_version":"1.0","action":"catalog_scope_stage",
         "request_id":"1"*32,"source_revision":new["protected_main_sha"],

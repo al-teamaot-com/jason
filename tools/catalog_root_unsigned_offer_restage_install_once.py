@@ -220,6 +220,12 @@ def record(name:str,obj):
     with os.fdopen(handle,"wb") as out:
         out.write(b);out.flush();os.fsync(out.fileno())
 
+def trusted_release_lock(handle,path,expected_uid):
+    meta=os.fstat(handle)
+    return (not path.is_symlink() and stat.S_ISREG(meta.st_mode)
+            and meta.st_uid==expected_uid and not (meta.st_mode&0o002))
+
+
 def execute():
     source,new,before,marker=preflight()
     owner=auth_owner(source,digest(new))
@@ -230,9 +236,7 @@ def execute():
     shadow=os.open(SHADOW_LOCK,os.O_RDWR|getattr(os,"O_NOFOLLOW",0))
     try:
         for handle,path,expected_uid in ((fd,NATIVE_LOCK,1000),(shadow,SHADOW_LOCK,0)):
-            meta=os.fstat(handle)
-            if (path.is_symlink() or not stat.S_ISREG(meta.st_mode)
-                    or meta.st_uid!=expected_uid or (meta.st_mode&0o002)):
+            if not trusted_release_lock(handle,path,expected_uid):
                 fail("NATIVE_RELEASE_LOCK_UNTRUSTED")
             try:fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
             except BlockingIOError:fail("OTHER_GOVERNED_RELEASE_IN_PROGRESS")
