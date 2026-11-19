@@ -158,3 +158,50 @@ def test_source_has_no_unreviewed_shell_provider_or_host_reboot():
     for forbidden in ("shell=True","os.system(","docker restart","systemctl reboot",
                       "subprocess.Popen(","requests.post(","/bin/sh","sudo "):
         assert forbidden not in c
+
+
+def test_exact_stage_reads_from_verified_sealed_root_not_parent(tmp_path):
+    """Exercise real Stage E root staging and real generator, not a stub."""
+    from tools import pmv4_e_exact_release_packet as packet
+    from tools import pmv4_e_root_trust_stage as trust
+
+    trust_root = tmp_path / "pmv4-e-trusted"
+    stager = trust.RootTrustStager(
+        source=packet.ROOT,
+        target=trust_root,
+        native_signed_started=lambda: True,
+        native_host_locked=lambda: True,
+        native_freeze_locked=lambda: True,
+        native_marker_absent=lambda: True,
+        native_replacements_inert=lambda: True,
+        production=False,
+    )
+    staged_hashes = {
+        path: sha256((packet.ROOT / path).read_bytes()).hexdigest()
+        for path in packet.REVIEWED_PATHS
+    }
+    result = stager.stage(source_sha="b" * 40, exact_hashes=staged_hashes)
+    assert result["installed_file_count"] == len(staged_hashes)
+
+    trusted_units = trust_root / "infrastructure/pmv4-e-scheduler/systemd"
+    expected = bundle.generate(base=trust_root)
+    hashes = {path: sha256(body).hexdigest() for path, body in expected.items()}
+    user_dir = tmp_path / "user"
+    system_dir = tmp_path / "system"
+    user_dir.mkdir()
+    system_dir.mkdir()
+    surface = ops.ExactSystemdSurface(
+        production=False,
+        runner=FakeSystemctl(),
+        user_dir=user_dir,
+        system_dir=system_dir,
+        trusted_dir=trusted_units,
+    )
+    installed = surface.stage(hashes)
+    assert len(installed) == 12
+    for relative, body in expected.items():
+        side = Path(relative).parts[-2]
+        target = (user_dir if side == "user" else system_dir) / Path(relative).name
+        assert target.read_bytes() == body
+    surface.unstage_exact(hashes)
+    assert all(not Path(path).exists() for path in installed)
