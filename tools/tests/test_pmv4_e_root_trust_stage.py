@@ -144,10 +144,13 @@ def test_sealed_root_imports_exact_packet_with_no_developer_checkout(tmp_path):
         "assert Path(packet.__file__).resolve()==root/'tools/pmv4_e_exact_release_packet.py'\n"
         "assert len(packet.REVIEWED_PATHS)==47\n"
     )
-    result=subprocess.run([sys.executable,"-I","-c",script,str(b.target)],
+    # Root can bypass 0555 permissions: -B is essential to prevent __pycache__
+    # creation inside the reviewed sealed tree during native execution.
+    result=subprocess.run([sys.executable,"-I","-B","-c",script,str(b.target)],
                           cwd=tmp_path,capture_output=True,text=True,check=False,
                           timeout=15)
     assert result.returncode==0, result.stderr
+    assert not any(x.name=="__pycache__" for x in b.target.rglob("*"))
     b.recover_inert_stage(hashes)
     assert not b.target.exists()
 
