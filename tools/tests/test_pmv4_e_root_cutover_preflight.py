@@ -184,3 +184,50 @@ def test_root_collect_rejects_unverified_live_kernel_owner(monkeypatch):
     with pytest.raises(gate.RootPreflightDenied,match="CURRENT_TICKET_DISPATCH_OWNER_UNVERIFIED"):
         gate.collect(runner=lambda *a,**kw:SimpleNamespace(
             returncode=0,stdout="inactive\\n"))
+
+
+@pytest.mark.parametrize("user,units",[
+    (True,gate.NEW_USER),(False,gate.NEW_ROOT),
+])
+def test_actual_systemd_notfound_is_inert_for_only_reviewed_new_units(user,units):
+    """Observed live Jason 2026-11-19: is-active exit=4 text='inactive'."""
+    seen=[]
+    def runner(argv,**kwargs):
+        seen.append(argv)
+        return SimpleNamespace(returncode=4,stdout="inactive\n",stderr="")
+    for unit in units:
+        assert gate._active(unit,user=user,runner=runner) is False
+    assert len(seen)==len(units)
+
+
+@pytest.mark.parametrize("user,units",[
+    (True,gate.OLD_USER),(False,gate.OLD_ROOT),
+    (True,gate.PRESERVE_USER),(False,gate.PRESERVE_ROOT),
+])
+def test_no_notfound_exception_for_required_legacy_or_monitoring(user,units):
+    def runner(argv,**kwargs):
+        return SimpleNamespace(returncode=4,stdout="inactive\n",stderr="")
+    for unit in units:
+        with pytest.raises(gate.RootPreflightDenied,
+                           match="SYSTEMD_READBACK_UNAVAILABLE"):
+            gate._active(unit,user=user,runner=runner)
+
+
+def test_unknown_or_active_status_for_notfound_new_unit_is_denied():
+    unit=next(iter(gate.NEW_ROOT))
+    for out in ("unknown\n","active\n","failed\n","not-found\n",""):
+        def runner(argv,**kwargs):
+            return SimpleNamespace(returncode=4,stdout=out,stderr="")
+        with pytest.raises(gate.RootPreflightDenied,
+                           match="NEW_TRIGGER_ABSENCE_AMBIGUOUS"):
+            gate._active(unit,user=False,runner=runner)
+
+
+def test_notfound_new_unit_nonfour_failure_code_denied():
+    unit=next(iter(gate.NEW_USER))
+    for code in (1,2,5,127):
+        def runner(argv,**kwargs):
+            return SimpleNamespace(returncode=code,stdout="inactive\n",stderr="")
+        with pytest.raises(gate.RootPreflightDenied,
+                           match="SYSTEMD_READBACK_UNAVAILABLE"):
+            gate._active(unit,user=True,runner=runner)
