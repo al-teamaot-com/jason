@@ -174,3 +174,22 @@ def test_complete_signed_native_failure_restores_controlplane_code_systemd_and_m
     assert not list(p["root_units"].iterdir())
     for rel,path in p["code"].targets.items():
         assert code.digest(path.read_bytes())==p["code"].prior_sha256[rel]
+
+
+def test_signed_native_acceptance_root_marker_works_with_umask_077(tmp_path):
+    """No false rollback when a root administrator has secure umask 077."""
+    import os
+    import stat
+    p=integration(tmp_path)
+    p["marker"].parent.rmdir()
+    original=os.umask(0o077)
+    try:
+        result=p["ledger"].promote(p["manifest"],p["proof"])
+    finally:
+        os.umask(original)
+    assert result["status"]=="native_stage_e_six_unit_accepted"
+    assert stat.S_IMODE(p["marker"].lstat().st_mode)==0o444
+    assert stat.S_IMODE(p["marker"].parent.lstat().st_mode)==0o755
+    assert p["surface"].verify_final(replacement=True)
+    assert records(p["root"])[0]["state"]=="accepted"
+
