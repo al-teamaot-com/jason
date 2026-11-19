@@ -38,9 +38,10 @@ def test_each_unit_preserves_existing_backend_while_refusing_unauthorized_start(
     trigger=generated[str(target/pair.new_trigger)].decode()
     old_service=unit.safe_source(ROOT,pair.side,pair.old_service).decode()
     old_trigger=unit.safe_source(ROOT,pair.side,pair.old_trigger).decode()
-    guard_line=("ExecCondition=/usr/bin/python3 "+unit.ADMISSION+
+    guard_line=("ExecCondition=/usr/bin/python3 -I -B "+unit.ADMISSION+
                 " --mode "+pair.mode+"\n")
     assert service.count(guard_line)==1
+    assert "ExecCondition=/usr/bin/python3 -I -B " in service
     assert service.count("[Service]")==1
     assert service.count("Type=oneshot")==1
     stripped=service.replace(guard_line,"")
