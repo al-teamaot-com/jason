@@ -1,0 +1,48 @@
+{
+  "candidate_mcp_image_id": "sha256:2e5c9597aaf3ac7f1f4af3e4c923c1d410de62e65bf0e8e21097a75bef8153b3",
+  "candidate_server_sha256": "f3ff7cbe6789126fe066da2914c0bb94757baf3604450b2100bbeaea3dae5c86",
+  "candidate_sha": "ec891ae49428357ccae8fa3b990c021a124b41d9",
+  "freeze_sha256": "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f",
+  "isolated_rollback_receipt_sha256": "561824f4d5ec0384433b52917f6bb46bfd3bf6f1a308b4397b9c716a98d95e3b",
+  "mcp_container_only": true,
+  "microsoft_admin_object_id": "c848022d-e13b-4457-84b0-e2f5c00dcaf6",
+  "native_production_release_authorized": false,
+  "new_mcp_env": {
+    "JASON_AOT_ADMIN_APPROVER_PROFILE": "jason-owner-v1"
+  },
+  "one_use_signed_owner_approval_required": true,
+  "owner_object_id": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+  "owner_tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+  "pmv4_core_replacement_authorized": false,
+  "profile": "jason-owner-only-scoped-mcp-v1",
+  "provider_writes_authorized": false,
+  "reviewed_owner_source_sha": "61b9ce79316f6bf2eb9da9835ccf3f9015a6c71d",
+  "rollback_mcp_env": {
+    "JASON_AOT_ADMIN_APPROVER_PROFILE": ""
+  },
+  "rollback_mcp_image_id": "sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477",
+  "rollback_sha": "d1b8c196dadd4b672ec8ba47075f27bb61c98d63",
+  "runtime_replacement_authorized": false,
+  "schema_version": "1.0",
+  "source_file_sha256": {
+    "config/jason-owner-authorization-profile.json": "02a2a762e725714ddb7589dec7d5ff04725f3f3751b4c91aa8fd5cd39456ab13",
+    "implementation/mcp_service/src/jason_mcp/server.py": "f3ff7cbe6789126fe066da2914c0bb94757baf3604450b2100bbeaea3dae5c86",
+    "implementation/mcp_service/tests/test_jason_licensed_owner_profile.py": "b3bb90c8e83c97934a8e573ff2f3da3103b1aed8f1155a5a42c1249e23a1bb31",
+    "infrastructure/jason-mcp/production-deploy.sh": "ae22bc7777d3c073dac34e7706ff83e89d2b4104d9f4aa947ae5552a74a0c63f",
+    "tools/jason_owner_auth_profile.py": "96623c201396a7d53931a747064e6e726c1f3586cc4289a86caed7a52bd3a334",
+    "tools/release_manager_host_runner.py": "bd75a17bc23f98b00c531c83793c30549bfb7f65ae85e81102af53826ac1cd06",
+    "tools/tests/test_admin_separated_deploy_contract.py": "a8bb3ec7405d8110cfb7225bf919dbc3c22524a411cd4717a2a3fb26a1140bd8",
+    "tools/tests/test_jason_owner_auth_profile.py": "8c0c82218409c5605ce5b6f281432fa56f2ba4931f33f98ea8842932bcffd311"
+  },
+  "source_scope_files": [
+    "config/jason-owner-authorization-profile.json",
+    "implementation/mcp_service/src/jason_mcp/server.py",
+    "implementation/mcp_service/tests/test_jason_licensed_owner_profile.py",
+    "infrastructure/jason-mcp/production-deploy.sh",
+    "tools/jason_owner_auth_profile.py",
+    "tools/release_manager_host_runner.py",
+    "tools/tests/test_admin_separated_deploy_contract.py",
+    "tools/tests/test_jason_owner_auth_profile.py"
+  ],
+  "unchanged_runtime_image_id": "sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132"
+}
