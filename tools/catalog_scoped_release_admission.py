@@ -47,6 +47,41 @@ EXACT_BLOBS = frozenset({
     "implementation/runtime_service/src/jason_runtime/autotask_procurement.py",
     "implementation/runtime_service/tests/test_autotask_catalog_service_identity.py",
 })
+# The protected 2026-11-19 licensed-Owner read-only canary authorization
+# changed ONE test assertion after the sealed catalog image snapshot. All
+# executable catalog modules must remain byte-identical to that snapshot.
+# Admit exactly this reviewed test revision, not arbitrary new test edits.
+OWNER_CANARY_TEST_PATH = "implementation/mcp_service/tests/test_autotask_catalog_grant_admin.py"
+OWNER_CANARY_REVIEWED_COMMIT = "4aa7b5fe5afb3c0948e7e18d9ca98e14a7cb891f"
+OWNER_CANARY_REVIEWED_SHA256 = "47b3419267a81928ca86a0aaa1ce655170a319acd2e3b98d5a2614f5af3a36ae"
+
+
+def verified_owner_canary_test_only(repo: Path, *, original: bytes,
+                                     protected: bytes, current: bytes,
+                                     main_sha: str) -> None:
+    """Accept only a byte-pinned later test assertion, not catalog code drift.
+
+    Snapshot and catalog-feature test bytes must still match. The one permitted
+    later test file must be identical to the reviewed change at the approved
+    merge, and that commit must precede the live protected-main revision.
+    No provider ACL, image, grant-admin runtime, or catalog function is added.
+    """
+    if original != protected:
+        fail("CATALOG_SOURCE_BLOB_CHANGED")
+    if current == original:
+        return
+    if sha256(current).hexdigest() != OWNER_CANARY_REVIEWED_SHA256:
+        fail("CATALOG_SOURCE_BLOB_CHANGED")
+    if (git(repo, "show", OWNER_CANARY_REVIEWED_COMMIT + ":" + OWNER_CANARY_TEST_PATH)
+            != current):
+        fail("CATALOG_SOURCE_BLOB_CHANGED")
+    result = subprocess.run([
+        "git", "-c", f"safe.directory={repo}", "-C", str(repo),
+        "merge-base", "--is-ancestor", OWNER_CANARY_REVIEWED_COMMIT, main_sha],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+    if result.returncode:
+        fail("CATALOG_SOURCE_BLOB_CHANGED")
+
 SERVER_PATH = "implementation/mcp_service/src/jason_mcp/server.py"
 SERVER_FUNCTIONS = frozenset({
     "_authority_admin_or_catalog_self", "_authority_grant_audit",
@@ -196,8 +231,13 @@ def verified_source_scope(
         fail("SNAPSHOT_SCOPE_DIGEST_CHANGED")
     for path in EXACT_BLOBS:
         original = git(repo, "show", f"{snapshot}:{path}")
-        if (original != git(repo, "show", f"{feature}:{path}")
-                or original != git(repo, "show", f"{main_sha}:{path}")):
+        protected_blob = git(repo, "show", f"{feature}:{path}")
+        current_blob = git(repo, "show", f"{main_sha}:{path}")
+        if path == OWNER_CANARY_TEST_PATH:
+            verified_owner_canary_test_only(
+                repo, original=original, protected=protected_blob,
+                current=current_blob, main_sha=main_sha)
+        elif original != protected_blob or original != current_blob:
             fail("CATALOG_SOURCE_BLOB_CHANGED")
     try:
         original = git(repo, "show", f"{snapshot}:{SERVER_PATH}").decode("utf-8")
