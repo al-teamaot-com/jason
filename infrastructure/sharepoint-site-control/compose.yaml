@@ -17,8 +17,8 @@ services:
       JASON_SHAREPOINT_BOUNDARY_DB: /run/jason-boundaries/clients.sqlite3
       JASON_SHAREPOINT_SITE_ACCESS_DB: /var/lib/jason/sharepoint/sites.sqlite3
       JASON_OPENBAO_URL: http://openbao:8200
-      JASON_SHAREPOINT_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/sharepoint/role_id
-      JASON_SHAREPOINT_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/sharepoint/secret_id
+      JASON_SHAREPOINT_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/sharepoint/role-id
+      JASON_SHAREPOINT_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/sharepoint/secret-id
       JASON_SHAREPOINT_GRAFANA_TOKEN_FILE: /run/jason-secrets/sharepoint-control/token
       JASON_SHAREPOINT_GRAFANA_OWNER_USERS: ${JASON_SHAREPOINT_GRAFANA_OWNER_USERS:?required}
       JASON_SHAREPOINT_CONTROL_BIND: 0.0.0.0
@@ -49,3 +49,5 @@ networks:
 
 volumes:
   sharepoint-site-state:
+    external: true
+    name: jason-sharepoint-site-state

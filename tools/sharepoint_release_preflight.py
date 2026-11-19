@@ -14,8 +14,16 @@ from pathlib import Path
 def collect(*, boundary_db: Path, role_id: Path, secret_id: Path,
             grafana_user_header: bool, runtime_read_registered: bool) -> dict:
     checks = {}
-    checks["sharepoint_approle_role_id_present"] = role_id.is_file()
-    checks["sharepoint_approle_secret_id_present"] = secret_id.is_file()
+    for key, path in (
+        ("sharepoint_approle_role_id_present", role_id),
+        ("sharepoint_approle_secret_id_present", secret_id),
+    ):
+        try:
+            checks[key] = path.is_file()
+        except OSError:
+            # Root-protected credentials may exist but are unreadable to this
+            # unprivileged preflight; never report unverified presence as PASS.
+            checks[key] = False
     checks["validated_sharepoint_client_boundary"] = False
     checks["boundary_db_readable"] = False
     if boundary_db.is_file():
@@ -50,9 +58,9 @@ def main():
     parser.add_argument("--boundary-db", type=Path,
                         default=Path("/var/lib/jason/authority/client-boundaries.sqlite3"))
     parser.add_argument("--role-id", type=Path,
-                        default=Path("/run/jason-secrets/openbao/sharepoint/role_id"))
+                        default=Path("/opt/jason/bootstrap/secrets/openbao/microsoft-graph-sharepoint-read-approle/role-id"))
     parser.add_argument("--secret-id", type=Path,
-                        default=Path("/run/jason-secrets/openbao/sharepoint/secret_id"))
+                        default=Path("/opt/jason/bootstrap/secrets/openbao/microsoft-graph-sharepoint-read-approle/secret-id"))
     parser.add_argument("--grafana-user-header-enabled", action="store_true")
     parser.add_argument("--runtime-read-registered", action="store_true")
     a=parser.parse_args()

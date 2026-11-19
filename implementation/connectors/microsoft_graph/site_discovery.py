@@ -45,7 +45,9 @@ class SharePointSiteDiscovery:
         parsed = urlsplit(url)
         if (parsed.scheme != "https" or parsed.netloc != "graph.microsoft.com"
                 or parsed.username is not None or parsed.password is not None
-                or parsed.fragment or parsed.path != "/v1.0/sites/getAllSites"):
+                or parsed.fragment or parsed.path not in {
+                    "/v1.0/sites/getAllSites", "/v1.0/sites/oneDrive.getAllSites"
+                }):
             raise ConnectorTransportError("Untrusted Graph site pagination URL")
         return url
 

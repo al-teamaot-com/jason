@@ -1612,10 +1612,10 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         "/var/lib/jason/sharepoint/sites.sqlite3"))
     sharepoint_role_id = Path(os.getenv(
         "JASON_SHAREPOINT_OPENBAO_ROLE_ID_PATH",
-        "/run/jason-secrets/openbao/sharepoint/role_id"))
+        "/run/jason-secrets/openbao/sharepoint/role-id"))
     sharepoint_secret_id = Path(os.getenv(
         "JASON_SHAREPOINT_OPENBAO_SECRET_ID_PATH",
-        "/run/jason-secrets/openbao/sharepoint/secret_id"))
+        "/run/jason-secrets/openbao/sharepoint/secret-id"))
     sharepoint_tenant = os.getenv("JASON_SHAREPOINT_AOT_TENANT_ID", "").strip()
     sharepoint_boundary_approved = False
     if sharepoint_profile and sharepoint_boundary_db.is_file() and sharepoint_tenant:

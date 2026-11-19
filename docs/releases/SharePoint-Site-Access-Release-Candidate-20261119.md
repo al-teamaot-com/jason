@@ -48,3 +48,66 @@ Reviewed the exact changed-file patches in independent IT Glue write PR #2455:
 Our integration's changes in those same three files add the dedicated `microsoft_graph.sharepoint_read` secret contract/provider and dormant AOT SharePoint reader registration, while preserving previously merged SharePoint writer, Microsoft group and Constant Contact code. **No IT Glue write changes are merged, authorized or activated by this integration.** The overlapping IT Glue PR must be independently re-reviewed for concurrent source changes at its merge/release time; this records coordination, not a waiver.
 
 Integration coordination: #2455
+
+## Updated isolated preproduction evidence and prerequisites (2026-11-19)
+
+- Built standalone source image from the **unchanged running runtime image**
+  `sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132`
+  using a locally tagged reference that resolved to that exact immutable ID. Preprod image
+  ID: `sha256:d6fd9d5d0ab14bdadc4c57b0cddb4a0b4c3bd38f1e1376b7794cb5b58830fbaa`.
+  This is local build evidence, **not a release-signable production artifact**.
+- Offline image imports and AOT SharePoint site-state test PASS. Separate ephemeral
+  containers shared the same synthetic policy SQLite file and demonstrated
+  discovered=disabled, explicitly enabled and immediate runtime readback.
+- Canonical root-protected AppRole provisioner requires `microsoft_graph_sharepoint`
+  and its `role-id` / `secret-id` files in
+  `/opt/jason/bootstrap/secrets/openbao/microsoft-graph-sharepoint-read-approle`.
+  The unprivileged operator session **cannot inspect** that protected directory;
+  unverified access is FAIL-CLOSED, not proof of file absence. Production client-boundary
+  database query returned zero SharePoint profile rows; no independently verified
+  consent or real app-only Graph read exists.
+- Microsoft Graph `sites/getAllSites` requires **application** `Sites.Read.All`,
+  with tenant admin consent. The documented nextLink can use
+  `/v1.0/sites/oneDrive.getAllSites?$skiptoken=...`; the bounded pagination validator
+  now accepts both documented Graph paths and rejects foreign hosts.
+- Grafana has the Infinity datasource and Volkov Labs Forms panel installed, but
+  current `GF_DATAPROXY_SEND_USER_HEADER` is not configured. Enabling the setting
+  requires separate exact-change approval and may restart Grafana. Do not substitute
+  delegated Owner SharePoint connector for Jason's app-only workload identity.
+- Shared persistent state is explicitly named `jason-sharepoint-site-state` and the
+  standalone runtime overlay is **off by default**. Controlled release activation
+  must mount this volume and dedicated AppRole into the governed runtime; no
+  deployment or restarts are effected by adding the overlay source.
+- Standalone preproduction cannot certify actual app consent, Graph site list,
+  accounting bank-statement read, configured Grafana Owner session or daily timer
+  until those real credentials and the deployment controls are authorized.
+
+### Exact remaining authorized sequence
+
+1. Independently inspect dedicated app registration, thumbprint, service principal,
+   tenant-wide **read-only** application `Sites.Read.All` consent, and signed Owner
+   evidence. Never create a validation row from claimed IDs or from delegated-user
+   access alone.
+2. Run existing canonical root-protected `provider_secret` lifecycle for
+   `microsoft_graph_sharepoint`, with the matching certificate material; verify
+   AppRole readback and restricted runtime group permissions without exposing secret
+   values or reusing directory/mail/SharePoint writer credentials.
+3. Perform a real app-only Graph token and complete all-sites enumeration, verify
+   tenant and expected host, then persist a single validated AOT reader boundary via
+   canonical Kernel repository under exact governed approval. Revalidate on readback.
+4. In isolated preprod, enable only two approved test sites, exercise search,
+   metadata, forbidden cross-tenant/content reads, refresh and revoke, and confirm
+   all newly discovered other sites remain disabled. Use the same reader for the
+   Accounting bank-statement location, with separate document release classification.
+5. Provision persistent shared site registry, Owner-authenticated Grafana site
+   controls and the daily timer with exact file scopes. Run full Grafana
+   authentication/authorization and controlled change-readback tests.
+6. Independent PR review, merge reviewed source to protected main only when approved,
+   run native Release Manager `prepare`, `preprod`, `review-impact --record`, exact
+   signed scope + rollback verification, obtain authenticated Owner exact-release
+   approval and one-transaction freeze exception; only then promote and verify
+   PMv4, service catalog, JSON playbook, Grafana and scheduled discovery canaries.
+
+**Do not request `approve_release_candidate` with a source-branch SHA**: the
+native tool only authorizes an actual production-eligible Release Manager ID
+whose candidate SHA and scope already passed independent review.

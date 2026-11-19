@@ -1,6 +1,6 @@
 # Independent SharePoint site-control image. Supply a reviewed immutable
 # Jason runtime base digest at build time; never pull floating production tags.
-ARG JASON_RUNTIME_BASE_IMAGE
+ARG JASON_RUNTIME_BASE_IMAGE=python:3.12-slim
 FROM ${JASON_RUNTIME_BASE_IMAGE}
 USER root
 COPY implementation/connectors/microsoft_graph /app/implementation/connectors/microsoft_graph

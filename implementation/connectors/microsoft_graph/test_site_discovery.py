@@ -7,7 +7,7 @@ TENANT="f7054323-d52b-4863-8c2f-1898f0b6077c"
 SITE={"id":"absolnet.sharepoint.com,aaa,bbb","name":"AOT Accounting",
       "webUrl":"https://absolnet.sharepoint.com/sites/AOTAccountingDocuments",
       "siteCollection":{"hostName":"absolnet.sharepoint.com"}}
-NEXT="https://graph.microsoft.com/v1.0/sites/getAllSites?$skiptoken=ABC"
+NEXT="https://graph.microsoft.com/v1.0/sites/oneDrive.getAllSites?$skiptoken=ABC"
 
 class Tokens:
     def access_token_for_tenant(self, *, microsoft_tenant_id):
