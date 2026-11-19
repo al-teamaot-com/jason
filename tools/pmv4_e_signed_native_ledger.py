@@ -44,7 +44,8 @@ def deny(ok: bool, code: str) -> None:
 class StageESignedNativeLedger(ComponentReleaseController):
     """Typed six-unit transaction sharing original native release primitives."""
 
-    def __init__(self, *, source_root: Path, **kwargs):
+    def __init__(self, *, source_root: Path, verify_stage_e_preflight=None,
+                 **kwargs):
         production = kwargs.get("production", True)
         if production:
             here = Path(__file__)
@@ -61,6 +62,18 @@ class StageESignedNativeLedger(ComponentReleaseController):
                  "IMMUTABLE_SOURCE_ROOT_REQUIRED")
         super().__init__(**kwargs)
         self.source_root = Path(source_root)
+        if not production:
+            deny(callable(verify_stage_e_preflight),
+                 "ISOLATED_PREFLIGHT_CALLBACK_REQUIRED")
+        self._test_stage_e_preflight = verify_stage_e_preflight
+
+    def _root_stage_e_preflight(self):
+        # The production native root explicitly measures its own health;
+        # a caller cannot inject a PASS through a callback.
+        if self.production:
+            from tools import pmv4_e_root_cutover_preflight as guard
+            return guard.evaluate(guard.collect())
+        return self._test_stage_e_preflight()
 
     def _bundle(self, manifest: Mapping[str, Any]) -> Path:
         releases, _, _, _ = self._paths()
@@ -106,6 +119,16 @@ class StageESignedNativeLedger(ComponentReleaseController):
         deny(self.observe_component(RESOURCE) == previous,
              "PHYSICAL_ROLLBACK_CHANGED")
         verified_bundle = self._bundle(manifest)
+        gate = self._root_stage_e_preflight()
+        deny(type(gate) is dict
+             and gate.get("status") ==
+                 "read_only_root_preflight_source_conditions_passed"
+             and gate.get("production_mutations") is False
+             and gate.get("owner_release_authorized") is False
+             and gate.get("pmv3_retirement_authorized") is False
+             and gate.get("legacy_triggers_verified") == 6
+             and gate.get("replacement_triggers_verified_inert") == 6,
+             "CURRENT_ROOT_PRECUTOVER_GATE_DENIED")
         deny(self.verify_source_and_ci(candidate) is True,
              "SOURCE_OR_PROTECTED_CI_UNVERIFIED")
         baseline = self._verify_protected_snapshot()
