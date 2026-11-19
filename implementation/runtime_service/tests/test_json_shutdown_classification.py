@@ -11,7 +11,7 @@ from jason_runtime.unexpected_shutdown_analysis import (
 EVENT = 1795070000000
 ENDPOINT = {
     "resource_id": "endpoint-1", "companyID": "777",
-    "site_uid": "site-1", "online": True,
+    "site_uid": "site-1", "online": True, "is_virtual": False,
     "device_type": {"category": "Desktop"},
 }
 HEALTHY_DISK = {"HealthStatus": "Healthy", "OperationalStatus": "OK"}
@@ -148,3 +148,10 @@ def test_canonical_json_shutdown_actions_are_separately_approval_bound():
     assert action.capability == "service.ticket.note.create"
     assert runner.instruction(step_id="note_gate", facts={}).step_id == "human_review"
     assert runner.instruction(step_id="ticket_gate", facts={}).step_id == "human_review"
+
+
+@pytest.mark.parametrize("is_virtual", [True, None])
+def test_virtual_or_unverified_target_cannot_inflate_site_threshold(is_virtual):
+    with pytest.raises(ShutdownJsonBoundaryError,
+                       match="TARGET_PHYSICAL_SCOPE_UNVERIFIED"):
+        assess(endpoint={**ENDPOINT, "is_virtual": is_virtual})

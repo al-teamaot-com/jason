@@ -41,6 +41,12 @@ def _notes(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
         raise JsonActivityProjectionBoundaryError("ACTIVITY_NOTE_RESULT_INVALID")
     if any(data.get(k) for k in ("has_more", "next_cursor", "nextCursor")):
         raise JsonActivityProjectionBoundaryError("ACTIVITY_NOTE_LIST_TRUNCATED")
+    try:
+        if (data.get("total_count") is not None and
+            int(data["total_count"]) > len(data["items"])):
+            raise JsonActivityProjectionBoundaryError("ACTIVITY_NOTE_LIST_TRUNCATED")
+    except (ValueError, TypeError) as exc:
+        raise JsonActivityProjectionBoundaryError("ACTIVITY_NOTE_COUNT_INVALID") from exc
     return data["items"]
 
 

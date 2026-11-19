@@ -5,7 +5,8 @@
     "implementation/runtime_service/src/jason_runtime/autonomy_worker_composition.py",
     "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
     "implementation/runtime_service/src/jason_runtime/autotask_client_notification.py",
-    "implementation/runtime_service/src/jason_runtime/client_information_requests.py"
+    "implementation/runtime_service/src/jason_runtime/client_information_requests.py",
+    "implementation/runtime_service/src/jason_runtime/json_client_question_plan.py"
   ],
   "json_source_conversion_accepted": false,
   "legacy_enabled": true,

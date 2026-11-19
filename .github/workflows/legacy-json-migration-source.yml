@@ -20,6 +20,8 @@ on:
       - "implementation/runtime_service/tests/test_json_gpt_insights_projection.py"
       - "implementation/runtime_service/src/jason_runtime/json_shutdown_classification.py"
       - "implementation/runtime_service/tests/test_json_shutdown_classification.py"
+      - "implementation/runtime_service/src/jason_runtime/json_client_question_plan.py"
+      - "implementation/runtime_service/tests/test_json_client_question_plan.py"
       - "implementation/runtime_service/tests/test_json_playbook_readonly_preprod.py"
       - "implementation/runtime_service/tests/test_json_readonly_shadow_pilot_legacy_parity.py"
       - "implementation/autonomous_remediation/playbook_registry.json"
@@ -85,6 +87,7 @@ jobs:
             implementation/runtime_service/tests/test_json_activity_projection.py \
             implementation/runtime_service/tests/test_json_gpt_insights_projection.py \
             implementation/runtime_service/tests/test_json_shutdown_classification.py \
+            implementation/runtime_service/tests/test_json_client_question_plan.py \
             tests/test_playbook_ticket_evidence.py \
             implementation/autonomous_remediation/test_json_playbook_document.py \
             implementation/autonomous_remediation/test_json_playbook_store.py

@@ -12,8 +12,8 @@ def test_all_19_have_exact_source_and_valid_json_but_zero_accepted():
     assert report["verified_inventory"] == 19
     assert report["source_mapped"] == 19
     assert report["canonical_json_source_artifacts"] == 19
-    assert report["detailed_candidates"] == 8
-    assert report["structural_unaccepted_drafts"] == 11
+    assert report["detailed_candidates"] == 9
+    assert report["structural_unaccepted_drafts"] == 10
     time_source = next(
         e for e in report["entries"] if e["id"] == "windows_time_source"
     )

@@ -30,6 +30,7 @@ ALREADY_DETAILED = frozenset({
     "jason_activity_log",
     "gpt_insights_tech_assist",
     "unexpected_shutdown",
+    "client_information_request",
 })
 
 
@@ -116,15 +117,6 @@ WORKFLOWS = {
         "repair": "all_nodes_same_company_resolved_and_split_approved",
         "wait": "waiting_source_split_reconciliation",
         "missing": ["bounded Affected Nodes parser and exact CI/DRMM lookup", "multi-child fanout and idempotent create receipts", "one-device child lineage and source completion", "source work ownership and post-write readback"],
-    },
-    "client_information_request": {
-        "entry": "service.ticket.read", "diagnose": "service.contact.read",
-        "verify": "service.notification.history.search",
-        "action": "service.ticket.client.notification.create",
-        "clean": "approved_question_already_sent_and_verified",
-        "repair": "one_approved_missing_information_question_ready",
-        "wait": "waiting_verified_client_reply",
-        "missing": ["all 120 source-approved question template/gap mappings", "same-company contact identity and approved profile", "one-use external notification with provider receipt", "verified newer matching client reply and originating playbook resume"],
     },
 }
 

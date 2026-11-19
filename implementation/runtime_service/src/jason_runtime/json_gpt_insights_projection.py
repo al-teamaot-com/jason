@@ -49,11 +49,12 @@ def plan_gpt_insights(
     if (not isinstance(ticket_id, int) or ticket_id < 1 or
         str(ticket.get("id")) != str(ticket_id) or
         str(ticket.get("companyID")) != str(client_id) or
-        not client_id):
+        not client_id or not isinstance(jason_creator_id, int) or
+        jason_creator_id <= 0):
         raise JsonGptInsightsBoundaryError("GPT_INSIGHTS_TICKET_SCOPE_UNVERIFIED")
     if (source_queue.strip().casefold() != "help desk i" or
         source_status.strip().casefold() != "new" or
-        source_label.strip().casefold() == "recurring"):
+        not source_label.strip() or source_label.strip().casefold() == "recurring"):
         return GptInsightProjection("ineligible", "none", "", "", None, None, None, None)
     category = classify_ticket(
         str(ticket.get("title") or ""),
@@ -74,6 +75,12 @@ def plan_gpt_insights(
         raise JsonGptInsightsBoundaryError("GPT_INSIGHTS_AUTHORITATIVE_NOTES_MISSING")
     if data.get("has_more") or data.get("next_cursor") or data.get("nextCursor"):
         raise JsonGptInsightsBoundaryError("GPT_INSIGHTS_NOTES_PAGINATED")
+    try:
+        if (data.get("total_count") is not None and
+            int(data["total_count"]) > len(data["items"])):
+            raise JsonGptInsightsBoundaryError("GPT_INSIGHTS_NOTES_PAGINATED")
+    except (TypeError, ValueError) as exc:
+        raise JsonGptInsightsBoundaryError("GPT_INSIGHTS_NOTES_COUNT_INVALID") from exc
     notes = data["items"]
     if any(not isinstance(note, Mapping) for note in notes):
         raise JsonGptInsightsBoundaryError("GPT_INSIGHTS_NOTE_ITEM_INVALID")

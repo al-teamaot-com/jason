@@ -206,3 +206,22 @@ Cross-endpoint source fanout, five independent Windows telemetry reads,
 durable recurrence, governed approval, exact note and ticket post-write
 readback and isolated live preproduction acceptance remain incomplete.
 See `UNEXPECTED-SHUTDOWN-JSON-CLASSIFICATION.md`.
+
+## Round 1 client-information source catalog conversion
+
+A detailed `client_information_request@1.0.0-migration.2` JSON candidate
+now preserves deterministic source-controlled selection of all 120 approved
+Round 1 questions through the existing legacy catalog and selector.
+The pure intent planner validates company, ticket, contact, notifications,
+evidence SHA, exact note/history pages and routine-only source class.
+Per-question synthetic tests verify the original rendered footer hash,
+negative cross-company/profile, duplicate and freeform boundaries, and
+the JSON interpreter's exact action authority and post-send readback gates.
+
+The existing `SQLiteClientQuestionLedger` send_uncertain no-replay,
+delivery/reply state and diagnostic resumption have **not** yet been
+composed and accepted end to end with the JSON interpreter, and no client
+notification has been sent. See `CLIENT-QUESTION-JSON-INTENT.md`.
+
+Ledger: **9 detailed partial candidates, 10 structural partial drafts,
+0 fully accepted legacy migrations**. Source-only, production inert.

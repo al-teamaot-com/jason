@@ -63,6 +63,8 @@ def classify_shutdown_json_readonly(
         raise ShutdownJsonBoundaryError("SHUTDOWN_HEALTH_EVIDENCE_INCOMPLETE")
     if not isinstance(peer_shutdowns, Sequence) or len(peer_shutdowns) > 100:
         raise ShutdownJsonBoundaryError("SHUTDOWN_PEERS_UNBOUNDED")
+    if endpoint.get("is_virtual") is not False:
+        raise ShutdownJsonBoundaryError("SHUTDOWN_TARGET_PHYSICAL_SCOPE_UNVERIFIED")
     affected = {target_uid}
     excluded_vm = 0
     ambiguous = 0

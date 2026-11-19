@@ -1,7 +1,7 @@
 {
   "accepted_only_when_all_independent_gates_pass": true,
   "canonical_json_source_artifacts": 19,
-  "detailed_candidates": 8,
+  "detailed_candidates": 9,
   "entries": [
     {
       "accepted_source_migration": false,
@@ -635,7 +635,7 @@
     },
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "client_information_request",
@@ -643,18 +643,18 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "6c83950bd16d25a8b8557ae0222e9263ddfd055f80ce90ede95302da30175e3c",
+      "json_fingerprint": "a1848fe643728391707e1dc35096811cffcc7749d49738835ca0ae4d193430f5",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/client_information_request.v1.json",
-      "json_version": "1.0.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/client_information_request.v1.json",
+      "json_version": "1.0.0-migration.2",
       "legacy_registry_version": "1.0.0",
       "legacy_retired": false,
       "legacy_source": "docs/playbooks/Jason-Client-Information-Requests-Round1.md",
       "legacy_source_blob_sha": "d073ca8a92f661f0a546e2ca6cc5c9433ea03b82",
       "legacy_source_sha256": "aa35e282a30f58cc6c8aa956ef80a8c5f0c32e1961e7d8b92ad5737947fad412",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "no_legacy_registry_mutation_authority_expansion": true,
       "production_json_activated": false,
       "source_declared_write_capabilities": [
@@ -665,10 +665,11 @@
       ],
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "all 120 source-approved question template/gap mappings",
-        "same-company contact identity and approved profile",
-        "one-use external notification with provider receipt",
-        "verified newer matching client reply and originating playbook resume"
+        "Exact resumed originating playbook authority from persisted worker state not fully composed with JSON runtime",
+        "Existing SQLiteClientQuestionLedger reservation, uncertain-send reconciliation, reply verifier and 10-day expiration not wired to JSON interpreter",
+        "External notification provider write, independent new same-contact recipient history and note readback not accepted in isolated live preproduction",
+        "Server-side immutable catalog body reconstruction and client profile/Owner promotion must be independently verified for source version and exact action",
+        "One send per ticket/question/evidence fingerprint across crashes and duplicates needs full end-to-end acceptance"
       ]
     },
     {
@@ -762,6 +763,6 @@
     "live_preproduction_provider_acceptance": false,
     "version": "0.1.0"
   },
-  "structural_unaccepted_drafts": 11,
+  "structural_unaccepted_drafts": 10,
   "verified_inventory": 19
 }
