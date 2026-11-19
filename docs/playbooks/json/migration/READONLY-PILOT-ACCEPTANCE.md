@@ -115,3 +115,14 @@ Core, a real client endpoint, or a live provider API.
 **This establishes test-backed source-level integration readiness for an
 isolated preproduction environment, not live provider acceptance.** No
 production JSON stage, activation, release, or legacy retirement is implied.
+
+
+## Repository integration coordination
+
+This component-scoped source PR is independently reviewable from the
+19-playbook migration workstream in PR #2611. Both PRs intentionally reference
+the same read-only adapter sources while the larger migration remains
+unaccepted. Merge the isolated read-only component only after its own
+required checks pass and its base is current; reconcile PR #2611 against
+the resulting protected `main` revision to remove overlap. A source merge
+does not deploy the component or activate JSON playbooks.
