@@ -1,7 +1,8 @@
 {
   "id": "post_error_investigation",
   "implementation_mentions_unreviewed": [
-    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py"
+    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
+    "implementation/runtime_service/src/jason_runtime/json_hardware_triage.py"
   ],
   "json_source_conversion_accepted": false,
   "legacy_enabled": true,

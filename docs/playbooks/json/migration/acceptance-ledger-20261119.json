@@ -1,7 +1,7 @@
 {
   "accepted_only_when_all_independent_gates_pass": true,
   "canonical_json_source_artifacts": 19,
-  "detailed_candidates": 9,
+  "detailed_candidates": 13,
   "entries": [
     {
       "accepted_source_migration": false,
@@ -85,7 +85,7 @@
     },
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "disk_bad_block_event_7",
@@ -93,32 +93,35 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "95aaf8bcd259b153cb4fac990576e5bf1cea9b931dd57f72cedc94c11035c75f",
+      "json_fingerprint": "6bde35361a6732af1dd75e6ffe4ceef86f8a96ca91079a577a1edebb414ac427",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/disk_bad_block_event_7.v1.json",
-      "json_version": "1.0.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/disk_bad_block_event_7.v1.json",
+      "json_version": "1.0.0-migration.2",
       "legacy_registry_version": "1.0.0",
       "legacy_retired": false,
       "legacy_source": "docs/playbooks/Jason-Windows-Disk-Bad-Block-Event-ID-7.md",
       "legacy_source_blob_sha": "01c64d2118e39f8372808d9f6a83953cdbf8e147",
       "legacy_source_sha256": "94acef692a9e2b29c29d348e7d261e68215b33a664196ded97838f6efb168892",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "no_legacy_registry_mutation_authority_expansion": true,
       "production_json_activated": false,
-      "source_declared_write_capabilities": [],
+      "source_declared_write_capabilities": [
+        "service.ticket.note.create",
+        "service.ticket.update"
+      ],
       "source_legacy_allowed_write_capabilities": [
         "service.ticket.note.create",
         "service.ticket.update"
       ],
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "authoritative HarddiskX physical-model bus map and SMART evidence",
-        "read-only component-control diagnostics and job persistence",
-        "internal-disk note/escalation and approved client notification",
-        "exact Autotask notes/ticket closing and post-write readback",
-        "Legacy registry does not authorize the requested mutation; this action is blocked pending separately governed source correction and authority."
+        "Full original authored playbook includes alert resolution but original registry does NOT authorize endpoint.alert.resolve; exact-scope governed approval and source change needed",
+        "Exact physical disk model/serial/HarddiskX mapping (Event 7) or POST firmware/WHEA/boot evidence requires independent controlled diagnostic job and source-scoped normalization",
+        "Bounded provider component job status and useful StdOut readback, no duplicate execution, and available safe diagnostic capability must be independently validated",
+        "Owner-promoted note/handoff and provider readback plus full outcome/restart tests pending",
+        "Isolated provider-connected live preproduction acceptance pending"
       ]
     },
     {
@@ -327,7 +330,7 @@
     },
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "low_disk_space",
@@ -335,18 +338,18 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "9db846bd28b35e114ecc1b607309813c49dd2986e06b441e25b12ecc736f6508",
+      "json_fingerprint": "8ddfe6f27137480d72b22e750ad9b1b8953e1cd73309b73a46ab12b632622959",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/low_disk_space.v1.json",
-      "json_version": "1.1.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/low_disk_space.v1.json",
+      "json_version": "1.1.0-migration.2",
       "legacy_registry_version": "1.1.0",
       "legacy_retired": false,
       "legacy_source": "docs/playbooks/Jason-Windows-Low-Disk-Space.md",
       "legacy_source_blob_sha": "4702c9a6895ca552a2e70ee2a9bc1eeb5685daf4",
       "legacy_source_sha256": "a89f2a6d9607134c1219565299722ce717826202e73955dcd61a4af391ac2f37",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "no_legacy_registry_mutation_authority_expansion": true,
       "production_json_activated": false,
       "source_declared_write_capabilities": [
@@ -359,10 +362,11 @@
       ],
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "protected server/workstation role and volume eligibility",
-        "safe file/object allowlist and dry-run candidate collection",
-        "bounded cleanup component arguments and job state",
-        "independent post-cleanup disk/monitor and ticket readback"
+        "Trusted read-only multi-command volume/large-file/VSS/physical disk evidence collection and parser fanout incomplete",
+        "Exact 15-minute existing Autotask cleanup grace and DRMM alert scoping plus current volume policy threshold",
+        "Only approved versioned Sysmon component after individual job plan and durable one-attempt lock",
+        "Complete job status and output read, per-device monitor/current free-space evidence, ticket note and terminal readback",
+        "Full restart/recheck, provider failure, protected role and live isolated preproduction acceptance"
       ]
     },
     {
@@ -404,7 +408,7 @@
     },
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "post_error_investigation",
@@ -412,32 +416,35 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "23e1bffe42a7bd1f3e0002cc680e666382093634b55d5f5d9c4f61e3bcb0821e",
+      "json_fingerprint": "6d93920c32e13583c40a74fee13d31d72dc7d2c7f3744a645836d390a0b2f9cc",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/post_error_investigation.v1.json",
-      "json_version": "1.0.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/post_error_investigation.v1.json",
+      "json_version": "1.0.0-migration.2",
       "legacy_registry_version": "1.0.0",
       "legacy_retired": false,
       "legacy_source": "docs/playbooks/Jason-Windows-POST-Error-Investigation.md",
       "legacy_source_blob_sha": "5596e879ceefb139cfc74e100a795b00683cbe4b",
       "legacy_source_sha256": "27322f5504c07fad3b7cbf420bcae5170151635e17aa09267f76326240a559b0",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "no_legacy_registry_mutation_authority_expansion": true,
       "production_json_activated": false,
-      "source_declared_write_capabilities": [],
+      "source_declared_write_capabilities": [
+        "service.ticket.note.create",
+        "service.ticket.update"
+      ],
       "source_legacy_allowed_write_capabilities": [
         "service.ticket.note.create",
         "service.ticket.update"
       ],
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "WHEA/storage/BSOD recurrence and protected hypervisor detection",
-        "exact alert resolution evidence and negative hardware-risk classification",
-        "follow-up Autotask internal-note and ticket closure",
-        "role-specific protected human-review escalation",
-        "Legacy registry does not authorize the requested mutation; this action is blocked pending separately governed source correction and authority."
+        "Full original authored playbook includes alert resolution but original registry does NOT authorize endpoint.alert.resolve; exact-scope governed approval and source change needed",
+        "Exact physical disk model/serial/HarddiskX mapping (Event 7) or POST firmware/WHEA/boot evidence requires independent controlled diagnostic job and source-scoped normalization",
+        "Bounded provider component job status and useful StdOut readback, no duplicate execution, and available safe diagnostic capability must be independently validated",
+        "Owner-promoted note/handoff and provider readback plus full outcome/restart tests pending",
+        "Isolated provider-connected live preproduction acceptance pending"
       ]
     },
     {
@@ -562,7 +569,7 @@
     },
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "vulscan_multi_device_split",
@@ -570,22 +577,24 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "6ed9681fc305f47e0032beb81e409edd57b5c3ecb0146b4ae0dc1452415ec59e",
+      "json_fingerprint": "c3b693dd1d5ee17309a8281ef21d3cee5ccad4893e5c0f9f6fa7062a3c6ab318",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/vulscan_multi_device_split.v1.json",
-      "json_version": "1.0.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/vulscan_multi_device_split.v1.json",
+      "json_version": "1.0.0-migration.2",
       "legacy_registry_version": "1.0.0",
       "legacy_retired": false,
       "legacy_source": "docs/playbooks/Jason-VulScan-Multi-Device-Split.md",
       "legacy_source_blob_sha": "72048d28a449e253715f46a69ddc35d65d196113",
       "legacy_source_sha256": "c33a9274887dd3ef622ef95b66b3cbd8caa072747e957b08a63b7707f18e5e34",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "no_legacy_registry_mutation_authority_expansion": true,
       "production_json_activated": false,
       "source_declared_write_capabilities": [
-        "service.ticket.create"
+        "service.ticket.create",
+        "service.ticket.note.create",
+        "service.ticket.update"
       ],
       "source_legacy_allowed_write_capabilities": [
         "service.ticket.create",
@@ -594,10 +603,11 @@
       ],
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "bounded Affected Nodes parser and exact CI/DRMM lookup",
-        "multi-child fanout and idempotent create receipts",
-        "one-device child lineage and source completion",
-        "source work ownership and post-write readback"
+        "JSON v1 interpreter lacks persisted foreach-target orchestration and source-version-aware resume; must REUSE existing TicketSplitExecutor, never implement duplicate engine",
+        "No independently verified Owner-promoted real provider child creation/readback for all nodes in isolated preproduction",
+        "Source ticket claim -> child creates -> note -> completion entire transactional/saga boundary not yet wired end-to-end",
+        "Interrupted or uncertain child create reconciliation must confirm exact marker/provider child before any retry",
+        "Full source lineage and source-completion rollback/partial failure tests not yet accepted"
       ]
     },
     {
@@ -763,6 +773,6 @@
     "live_preproduction_provider_acceptance": false,
     "version": "0.1.0"
   },
-  "structural_unaccepted_drafts": 10,
+  "structural_unaccepted_drafts": 6,
   "verified_inventory": 19
 }

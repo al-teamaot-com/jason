@@ -31,6 +31,10 @@ ALREADY_DETAILED = frozenset({
     "gpt_insights_tech_assist",
     "unexpected_shutdown",
     "client_information_request",
+    "low_disk_space",
+    "disk_bad_block_event_7",
+    "post_error_investigation",
+    "vulscan_multi_device_split",
 })
 
 
@@ -56,14 +60,6 @@ WORKFLOWS = {
         "wait": "reboot_approval_or_device_wait",
         "missing": ["Python security classifier and cross-provider threat posture", "bounded job continuation and exact approved component arguments", "per-run reboot authorization and 03:30 recheck", "security-incident independent verification and closure"],
     },
-    "disk_bad_block_event_7": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.alert.history.search",
-        "verify": "endpoint.alert.history.search", "action": None,
-        "clean": "removable_classification_verified_no_open_alert",
-        "repair": "exact_removable_media_alert_resolution_approved",
-        "wait": "waiting_approved_storage_diagnostic",
-        "missing": ["authoritative HarddiskX physical-model bus map and SMART evidence", "read-only component-control diagnostics and job persistence", "internal-disk note/escalation and approved client notification", "exact Autotask notes/ticket closing and post-write readback"],
-    },
     "dns_agent_diagnostic": {
         "entry": "service.ticket.search", "diagnose": "endpoint.software.search",
         "verify": "endpoint.alert.search", "action": "automation.component.execute",
@@ -77,22 +73,6 @@ WORKFLOWS = {
         "clean": "policy_compliance_proven", "repair": "approved_setter_component_required",
         "wait": "waiting_idletime_monitor_recheck",
         "missing": ["workstation/site policy scope and approved setter fingerprint", "component terminal job/StdErr bound verification", "post-job monitor propagation and stable observation", "exact alert/ticket completion and output provenance"],
-    },
-    "low_disk_space": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.audit.read",
-        "verify": "endpoint.audit.read", "action": "automation.component.execute",
-        "clean": "free_space_and_alert_recovered",
-        "repair": "approved_bounded_cleanup_warranted",
-        "wait": "waiting_monitor_propagation_or_device",
-        "missing": ["protected server/workstation role and volume eligibility", "safe file/object allowlist and dry-run candidate collection", "bounded cleanup component arguments and job state", "independent post-cleanup disk/monitor and ticket readback"],
-    },
-    "post_error_investigation": {
-        "entry": "service.ticket.search", "diagnose": "endpoint.alert.history.search",
-        "verify": "endpoint.alert.history.search", "action": None,
-        "clean": "isolated_healthy_post_alert_already_resolved",
-        "repair": "isolated_workstation_exact_post_alert_resolution",
-        "wait": "waiting_current_health_evidence",
-        "missing": ["WHEA/storage/BSOD recurrence and protected hypervisor detection", "exact alert resolution evidence and negative hardware-risk classification", "follow-up Autotask internal-note and ticket closure", "role-specific protected human-review escalation"],
     },
     "security_log_self_heal": {
         "entry": "service.ticket.search", "diagnose": "endpoint.alert.search",
@@ -109,14 +89,6 @@ WORKFLOWS = {
         "repair": "approved_patch_stack_repair_warranted",
         "wait": "waiting_normal_patch_window_or_approval",
         "missing": ["exact KB approval/window and device-patch identity", "multi-device ticket split prerequisite", "user impact/reboot approval and bounded WU repair flags", "exact KB/build/supersedence and ticket verification"],
-    },
-    "vulscan_multi_device_split": {
-        "entry": "service.ticket.search", "diagnose": "service.configuration.search",
-        "verify": "service.ticket.search", "action": "service.ticket.create",
-        "clean": "all_exact_child_tickets_already_exist",
-        "repair": "all_nodes_same_company_resolved_and_split_approved",
-        "wait": "waiting_source_split_reconciliation",
-        "missing": ["bounded Affected Nodes parser and exact CI/DRMM lookup", "multi-child fanout and idempotent create receipts", "one-device child lineage and source completion", "source work ownership and post-write readback"],
     },
 }
 

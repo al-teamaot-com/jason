@@ -225,3 +225,26 @@ notification has been sent. See `CLIENT-QUESTION-JSON-INTENT.md`.
 
 Ledger: **9 detailed partial candidates, 10 structural partial drafts,
 0 fully accepted legacy migrations**. Source-only, production inert.
+
+## Storage, hardware and multi-device source-specific candidates
+
+Four more legacy structural drafts are now detailed and independently
+source-tested without activating execution:
+`low_disk_space` (storage health, safe cleanup eligibility and Autotask
+grace), `disk_bad_block_event_7` and
+`post_error_investigation` (the deployed conservative diagnostics and
+approved internal-note/Human Review actions), and
+`vulscan_multi_device_split` (same-company CI/DRMM identity and existing
+ticket split request/lineage model).
+
+The authored Event ID 7 and POST documents include possible autonomous
+alert resolution, but original registry does not authorize
+`endpoint.alert.resolve`; that scope remains explicitly blocked.
+The multi-device JSON interpreter still needs the existing provider-neutral
+split primitive integrated with safe persisted per-child iteration and
+readback. Low disk remains blocked from actual cleanup until governed job,
+monitor and free-space verification passes. See
+`HARDWARE-STORAGE-SPLIT-SOURCE-BATCH.md`.
+
+Ledger: **13 detailed partial candidates, 6 structural drafts,
+0 of 19 fully accepted.** No production JSON activation or legacy retirement.
