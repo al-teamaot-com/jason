@@ -97,3 +97,23 @@ def test_unconsented_wrong_or_incomplete_sharepoint_boundary_fails_closed(change
 def test_missing_sharepoint_binding_denies_even_if_directory_profile_exists():
     with pytest.raises(PermissionError, match="Dedicated validated"):
         require_aot_boundary(None)
+
+
+def test_sharepoint_site_management_uses_isolated_app_token_source(tmp_path: Path):
+    from jason_runtime.microsoft_sharepoint import build_sharepoint_site_management
+    runtime = build_microsoft_sharepoint_runtime(
+        boundary_db=tmp_path / "boundaries.db",
+        openbao_url="https://openbao.invalid",
+        role_id_path=tmp_path / "role-id",
+        secret_id_path=tmp_path / "secret-id",
+        transport=object(),
+    )
+    manager = build_sharepoint_site_management(
+        runtime=runtime, tenant_id=AOT_TENANT,
+        state_db=tmp_path / "sharepoint-sites.db", transport=object(),
+    )
+    assert manager.daily_discovery.tokens is runtime.reader.tokens
+    assert manager.site_access.sites() == []
+    with pytest.raises(PermissionError):
+        manager.site_access.require_site_access(
+            tenant_id=AOT_TENANT, site_id="unknown-site")
