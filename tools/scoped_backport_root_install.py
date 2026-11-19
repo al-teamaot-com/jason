@@ -117,6 +117,15 @@ def source_tree(sha: str, reviewed_ci_sha: str) -> dict[str, bytes]:
         if (REPO / name).read_bytes() != blob:
             deny("INSTALL_SOURCE_BLOB_DIFFERENT")
         result[name] = blob
+    # The operator executes this bootstrap directly from the clean main
+    # worktree. Bind its own executable bytes to the exact CI-reviewed SHA
+    # too, without installing an additional privileged bootstrap copy.
+    installer_path = "tools/scoped_backport_root_install.py"
+    main_installer = git("show", sha + ":" + installer_path)
+    reviewed_installer = git("show", reviewed_ci_sha + ":" + installer_path)
+    if (main_installer != reviewed_installer
+            or (REPO / installer_path).read_bytes() != main_installer):
+        deny("INSTALLER_REVIEWED_CI_SOURCE_MISMATCH")
     # Audit-only: the imported package has now been byte-verified against
     # the immutable protected-main Git object before executing module code.
     from tools.scoped_backport_release import source_admission
