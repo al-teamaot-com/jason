@@ -93,3 +93,15 @@ def test_replay_and_expiry_denied_on_one_exact_owner_proof():
     with pytest.raises(v.OwnerReleaseProofDenied,match="EXPIRED_OR_FUTURE"):
         v.verify_exact_owner_release(
             proof,at=datetime.now(timezone.utc)+timedelta(minutes=20),**kw)
+
+
+def test_owner_source_review_never_fetches_installed_production_repo():
+    from pathlib import Path
+    source=Path(offer.__file__).read_text()
+    assert str(offer.REPO)==(
+        "/srv/jason/archive/engineering-artifacts/pmv4-e-owner-source-repo")
+    assert "engineering-source-repo" not in source
+    assert "engineering-worker-source" in source  # explicit prohibition only
+    assert "merge-base" in source and "--is-ancestor" in source
+    assert "origin/main" in source
+    assert "git fetch" not in source
