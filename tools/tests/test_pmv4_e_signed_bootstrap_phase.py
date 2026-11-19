@@ -173,3 +173,80 @@ def test_source_only_cannot_claim_production_root_install(tmp_path):
             marker_absent=lambda:True,source_ci_verified=lambda _:True,
             production=True,
         )
+
+
+def test_inert_stage_and_immutable_root_manifest_verify_same_owner_proof(
+        tmp_path):
+    from hashlib import sha256
+    from tools import pmv4_e_root_trust_stage as trust
+    from tools import pmv4_e_native_root_manifest_attestation as attestor
+    b,request,state,root,receipts=fixtures(tmp_path)
+    b.begin(request)
+    owner_id=request["signed_owner_proof"]["payload"]["approval_id"]
+    sealed=tmp_path/"sealed-root"
+    stager=trust.RootTrustStager(
+        source=packet.ROOT,target=sealed,
+        native_signed_started=lambda:b.signed_started(
+            candidate_sha=CANDIDATE,
+            scope_sha256=request["scope_sha256"],
+            approval_id=owner_id),
+        native_host_locked=lambda:state["host"],
+        native_freeze_locked=lambda:state["freeze"],
+        native_marker_absent=lambda:state["marker_absent"],
+        native_replacements_inert=lambda:state["inert"],
+        production=False,
+    )
+    hashes={
+        name:sha256((packet.ROOT/name).read_bytes()).hexdigest()
+        for name in packet.REVIEWED_PATHS
+    }
+    result=stager.stage(source_sha=CANDIDATE,exact_hashes=hashes)
+    assert result["installed_file_count"]==len(packet.REVIEWED_PATHS)
+    release=tmp_path/"root-release"
+    release.mkdir(mode=0o700)
+    manifest=contract.draft(candidate_sha=CANDIDATE,
+                            rollback_sha=ROLLBACK)
+    for name,content in (
+        ("manifest.json",manifest["manifest"]),
+        ("source-scope.json",manifest["source_scope"]),
+    ):
+        p=release/name
+        p.write_bytes(packet.canonical(content))
+        p.chmod(0o444)
+    release.chmod(0o555)
+    witness=attestor.inspect(
+        source_root=sealed,release_dir=release,production=False)
+    assert witness["status"]=="root_source_attested_no_release_authority"
+    assert witness["manifest_sha256"]==request["manifest_sha256"]
+    assert not witness["release_authorized"]
+    stager.recover_inert_stage(hashes)
+    assert not sealed.exists()
+
+
+def test_signed_started_rejects_corrupted_proof_even_from_root_receipt(tmp_path):
+    b,request,state,root,_=fixtures(tmp_path)
+    b.begin(request)
+    owner_id=request["signed_owner_proof"]["payload"]["approval_id"]
+    path=root/("owner-"+owner_id+".json")
+    original=path.read_bytes()
+    row=json.loads(original)
+    row["signed_owner_proof"]["signature_base64url"]="A"*86
+    path.write_text(json.dumps(row))
+    path.chmod(0o600)
+    assert b.signed_started(
+        candidate_sha=CANDIDATE,scope_sha256=request["scope_sha256"],
+        approval_id=owner_id) is False
+
+
+def test_signed_started_rejects_mismatched_proof_digest_even_if_signature_valid(tmp_path):
+    b,request,state,root,_=fixtures(tmp_path)
+    b.begin(request)
+    owner_id=request["signed_owner_proof"]["payload"]["approval_id"]
+    path=root/("owner-"+owner_id+".json")
+    record=json.loads(path.read_text())
+    record["signed_owner_proof_sha256"]="f"*64
+    path.write_text(json.dumps(record))
+    path.chmod(0o600)
+    assert b.signed_started(
+        candidate_sha=CANDIDATE,scope_sha256=request["scope_sha256"],
+        approval_id=owner_id) is False
