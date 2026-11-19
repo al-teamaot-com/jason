@@ -6,26 +6,71 @@ actual 12 reviewed unit file writes in disposable directories, full rollback
 through the same signed receipt, no provider or host-root changes.
 """
 from contextlib import contextmanager
+from hashlib import sha256
 import json
 
 import pytest
 
 from tools import pmv4_e_native_systemd_adapter as adapter
+from tools import pmv4_e_systemd_root_ops as ops
+from tools import pmv4_e_root_trust_stage as trust
+from tools import pmv4_e_exact_release_packet as packet
+from tools import pmv4_e_replacement_unit_bundle as bundle
+from tools import pmv4_e_native_backend_bridge as bridge
 from tools import pmv4_e_native_release_contract as contract
 from tools.tests.test_pmv4_e_signed_native_ledger import (
     Host, fixture, approval, ctl, CANDIDATE, ROLLBACK, records,
 )
-from tools.tests.test_pmv4_e_native_backend_bridge import make_bridge
+from tools.tests.test_pmv4_e_native_backend_bridge import Native
+from tools.tests.test_pmv4_e_systemd_root_ops import FakeSystemctl
 
 
 class CoupledHost(Host):
     def __init__(self, tmp_path, monkeypatch, ledger_root, *, fail_at=None):
         super().__init__()
+        # Copy the ACTUAL signed source manifest into an isolated sealed
+        # root. The real unit generator reads reviewed bytes from this root.
+        # There is deliberately no monkeypatch of bundle.generate; the
+        # signed ledger performs its real exact-byte source verification.
         work = tmp_path / "systemd"
         work.mkdir()
-        (self.callback, self.native, self.systemd,
-         self.user_dir, self.system_dir) = make_bridge(
-             work, monkeypatch, fail_at=fail_at)
+        sealed = work / "sealed"
+        staged_hashes = {
+            relative: sha256((packet.ROOT / relative).read_bytes()).hexdigest()
+            for relative in packet.REVIEWED_PATHS
+        }
+        stager = trust.RootTrustStager(
+            source=packet.ROOT, target=sealed,
+            native_signed_started=lambda: True,
+            native_host_locked=lambda: True,
+            native_freeze_locked=lambda: True,
+            native_marker_absent=lambda: True,
+            native_replacements_inert=lambda: True,
+            production=False,
+        )
+        stage_result = stager.stage(source_sha=CANDIDATE,
+                                    exact_hashes=staged_hashes)
+        assert stage_result["installed_file_count"] == len(packet.REVIEWED_PATHS)
+        self.user_dir = work / "user"
+        self.system_dir = work / "system"
+        self.user_dir.mkdir()
+        self.system_dir.mkdir()
+        self.systemd = FakeSystemctl()
+        self.unit_surface = ops.ExactSystemdSurface(
+            production=False, runner=self.systemd,
+            user_dir=self.user_dir, system_dir=self.system_dir,
+            trusted_dir=sealed / "infrastructure/pmv4-e-scheduler/systemd",
+        )
+        unit_hashes = {
+            relative: sha256(content).hexdigest()
+            for relative, content in bundle.generate(base=sealed).items()
+        }
+        assert len(unit_hashes) == 12
+        self.native = Native(self.systemd,unit_hashes,fail_at=fail_at)
+        wrapped = bridge.StageERootBridge(
+            native_root=self.native,systemd=self.unit_surface)
+        self.callback = adapter.StageEUnitAdapter(
+            wrapped,native_invocation=lambda: True)
         self.ledger_root = ledger_root
         self.host_lock_held = False
         # The systemd fixture intentionally substitutes disposable unit
@@ -109,7 +154,6 @@ def check_old_restored(host):
     assert host.systemd.enabled == set(adapter.OLD_USER + adapter.OLD_ROOT)
     assert host.native.marker is False
     assert host.native.policy == "legacy"
-    assert host.systemd.calls
     assert list(host.user_dir.iterdir()) == []
     assert list(host.system_dir.iterdir()) == []
 
@@ -174,4 +218,5 @@ def test_no_lock_cannot_touch_twelve_unit_surface(tmp_path, monkeypatch):
             action=adapter.PINNED_ACTION,
         )
     check_old_restored(host)
+    assert host.systemd.calls == []
     assert list((root/"receipts").iterdir()) == []
