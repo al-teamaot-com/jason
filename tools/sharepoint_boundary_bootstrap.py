@@ -45,7 +45,7 @@ PROVIDER = "microsoft_graph_sharepoint"
 PROFILE = "sharepoint-read"
 APPROVAL_SCOPE = "aot-sharepoint-client-boundary-create-only"
 DEFAULT_DB = Path("/var/lib/jason/authority/client-boundaries.sqlite3")
-AUDIT_DIR = Path("/var/lib/jason/authority")
+AUDIT_DIR = Path("/var/lib/jason/independent-component-release")
 AUDIT_FILE = AUDIT_DIR / "sharepoint-client-boundary-bootstrap.jsonl"
 
 
