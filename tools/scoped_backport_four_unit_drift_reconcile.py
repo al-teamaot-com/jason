@@ -183,7 +183,9 @@ def candidate_policy(baseline: bytes) -> tuple[dict, bytes]:
          and all(isinstance(k, str) for k in allowed + required)
          and all(k not in allowed + required for k in UNIT_NAMES),
          "POLICY_EXACT_FOUR_UNIT_GAP_NOT_PRESENT")
-    need(doc.get("max_stopped_rollback_containers") == 20,
+    # The governed PMv4-D root overlay approved 21 retained rollback images.
+    # Preserve this exact baseline and reject obsolete or relaxed values.
+    need(doc.get("max_stopped_rollback_containers") == 21,
          "POLICY_ROLLBACK_CAPACITY_CHANGED")
     doc["allowed_system_units"] = sorted(allowed + list(UNIT_NAMES))
     return doc, (json.dumps(doc, sort_keys=True, indent=2) + "\n").encode()

@@ -14,6 +14,8 @@ from tools import scoped_backport_four_unit_drift_reconcile as fix
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = json.loads((ROOT / "config/production-desired-state.json").read_text())
+# Current approved PMv4-D protected root overlay (public release config is older).
+BASE["max_stopped_rollback_containers"] = 21
 
 
 def candidate(original=None):
@@ -352,3 +354,22 @@ def test_scoped_workers_only_need_to_be_quiescent_during_root_code_upgrade(monke
         "jason-scoped-backport-requests.service",
         "jason-scoped-backport-recovery.service",
     }
+
+
+def test_root_candidate_preserves_approved_pmv4_d_rollback_limit():
+    approved, _ = fix.candidate_policy(json.dumps(BASE).encode())
+    assert approved["max_stopped_rollback_containers"] == 21
+    for forbidden in (20, 22, 200):
+        stale_or_relaxed = deepcopy(BASE)
+        stale_or_relaxed["max_stopped_rollback_containers"] = forbidden
+        with pytest.raises(fix.DriftCorrectionDenied,
+                           match="POLICY_ROLLBACK_CAPACITY_CHANGED"):
+            candidate(stale_or_relaxed)
+
+
+def test_host_verified_scoped_installed_unit_mode_matches_reviewed_root():
+    import inspect
+    source = inspect.getsource(fix.inspect)
+    assert "read_root(p, mode=0o444)" in source
+    assert "read_root(p, mode=0o644)" not in source
+    assert "INSTALLED_UNIT_BYTES_CHANGED" in source
