@@ -37,6 +37,7 @@ def build():
     expect=root.expected_policy(base)
     target=(json.dumps(expect,indent=2,sort_keys=True)+"\n").encode()
     unit_files={name:root.digest((Path("/etc/systemd/system")/name).read_bytes()) for name in root.CANDIDATE_NAMES}
+    need(unit_files==root.PINNED_UNIT_SHA256,"PROTECTED_SCOPED_BACKPORT_UNIT_BLOBS_CHANGED")
     rollback=Path("/opt/jason/current").resolve(strict=True).name
     need(len(rollback)==40,"LKG_SHA_INVALID")
     freeze=root.digest(root.FREEZE.read_bytes())

@@ -123,3 +123,12 @@ def test_native_revalidation_uses_operator_identity_and_hash_pinned_immutable_ru
     assert '"NATIVE_OPERATOR_REVALIDATOR_CHANGED"' in code
     assert '"root_verified_revalidate"' in code
     assert 'plan["rollback_sha"]' in code
+
+
+def test_all_four_installed_units_have_exact_git_pins():
+    assert set(root.PINNED_UNIT_SHA256)==set(root.CANDIDATE_NAMES)
+    assert all(len(v)==64 for v in root.PINNED_UNIT_SHA256.values())
+    code=Path(root.__file__).read_text()
+    assert 'and plan["unit_file_sha256"][name]==PINNED_UNIT_SHA256[name]' in code
+    assert 'mode=0o444' in code
+    assert '"PROTECTED_SCOPED_BACKPORT_UNIT_BLOBS_CHANGED"' in Path(builder.__file__).read_text()

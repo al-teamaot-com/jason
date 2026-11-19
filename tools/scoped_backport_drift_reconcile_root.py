@@ -26,6 +26,14 @@ CANDIDATE_NAMES=(
  "jason-scoped-backport-requests.path",
  "jason-scoped-backport-requests.service",
 )
+# SHA256s independently matched installed root-owned units to protected Git
+# at source 6adc19744fc7464ef3ba34d1ce0b3b20e9e69684.
+PINNED_UNIT_SHA256={
+    'jason-scoped-backport-recovery.service': 'd91a129e3783554ecb87b72e076353c7c90cd64856a4b0187ee8c5a5ad9b1cde',
+    'jason-scoped-backport-recovery.timer': 'e15b3973791625a5d817a1892eaf11a6b1ac60cffe86f419cea33a930d56c4fd',
+    'jason-scoped-backport-requests.path': '5ed31ef5b204a436a07ed9dfd268f82484242ae4656c813bc287bce0b9a8aa34',
+    'jason-scoped-backport-requests.service': 'f9cbc38b2612466dee9a603197ee9484d11f2468f744c31140f1ba5683c2a40d',
+}
 ROOT_POLICY=Path("/etc/jason/release-readback-recovery/production-desired-state.json")
 FREEZE=Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
 HOLD=Path("/var/lib/jason/openclaw/release-manager/auto-promotion-incident-hold")
@@ -119,8 +127,10 @@ def inspect(plan_path):
          "PRODUCTION_BASELINE_CHANGED")
     for name in CANDIDATE_NAMES:
         unit=Path("/etc/systemd/system")/name
-        need(digest(file_bytes(unit,mode=0o644))==
-             plan["unit_file_sha256"][name], "REVIEWED_CATALOG_UNIT_CHANGED:"+name)
+        observed=digest(file_bytes(unit,mode=0o444))
+        need(observed==PINNED_UNIT_SHA256[name]
+             and plan["unit_file_sha256"][name]==PINNED_UNIT_SHA256[name],
+             "REVIEWED_SCOPED_BACKPORT_UNIT_CHANGED:"+name)
     need(not AUDIT.joinpath(plan["source_sha"]+"-accepted.json").exists()
          and not AUDIT.joinpath(plan["source_sha"]+"-attempt.json").exists(),
          "SIGNED_POLICY_ACTION_ALREADY_CONSUMED")
