@@ -120,6 +120,56 @@ class StageESignedNativeLedger(ComponentReleaseController):
             "INSTALLED_ROOT_ATTESTATION_NOT_EXACT",
         )
 
+    @staticmethod
+    def _bootstrap_record_matches(record, *, manifest, proof, approval_id) -> bool:
+        """One Owner signature is bound to BOTH inert bootstrap and release.
+
+        The installed bootstrap journal is never itself a systemd permission.
+        The native ledger independently verifies the exact Owner signature
+        and requires this separate signed STARTED root receipt as evidence
+        that immutable source staging was properly authorized.
+        """
+        from hashlib import sha256
+        from tools import pmv4_e_signed_bootstrap_phase as bootstrap
+        return (
+            type(record) is dict
+            and set(record) == {
+                "schema_version", "status", "action", "approval_id",
+                "candidate_sha", "rollback_sha", "scope_sha256",
+                "manifest_sha256", "freeze_sha256", "source_file_count",
+                "signed_owner_proof_sha256", "signed_owner_proof",
+                "no_unit_mutations", "native_systemd_release_authorized",
+                "started_at", "recovery_required",
+            }
+            and record["schema_version"] == "1.0"
+            and record["status"] == "bootstrap_started"
+            and record["action"] == bootstrap.BOOTSTRAP_ACTION
+            and record["approval_id"] == approval_id
+            and record["candidate_sha"] == manifest["candidate_sha"]
+            and record["rollback_sha"] == manifest["rollback_sha"]
+            and record["scope_sha256"] == manifest["source_scope_sha256"]
+            and record["manifest_sha256"] == digest(canonical(manifest))
+            and record["freeze_sha256"] == manifest["freeze_sha256"]
+            and record["source_file_count"] == len(packet.REVIEWED_PATHS)
+            and record["signed_owner_proof"] == proof
+            and record["signed_owner_proof_sha256"] ==
+                sha256(canonical(proof)).hexdigest()
+            and record["no_unit_mutations"] is True
+            and record["native_systemd_release_authorized"] is False
+            and record["recovery_required"] is True
+        )
+
+    def _attest_bootstrap(self, *, manifest, proof, approval_id) -> None:
+        from tools import pmv4_e_signed_bootstrap_phase as bootstrap
+        filename="owner-"+approval_id+".json"
+        # Never allow the caller or a mutable developer checkout to select
+        # a different bootstrap journal directory.
+        record=bootstrap.root_record(
+            bootstrap.ROOT/filename,production=True)
+        deny(self._bootstrap_record_matches(
+            record,manifest=manifest,proof=proof,approval_id=approval_id),
+            "INERT_ROOT_BOOTSTRAP_OWNER_PROOF_NOT_BOUND")
+
     def preflight(self, manifest: Mapping[str, Any],
                   signed_approval: Mapping[str, Any], *,
                   at: datetime | None = None):
@@ -181,6 +231,10 @@ class StageESignedNativeLedger(ComponentReleaseController):
             consumed_ids=consumed,
             at=at or datetime.now(timezone.utc),
         )
+        if self.production:
+            self._attest_bootstrap(
+                manifest=manifest,proof=signed_approval,approval_id=grant["approval_id"],
+            )
         return (VerifiedRelease(
             RESOURCE, candidate, previous, grant["approval_id"],
             digest(canonical(manifest)), manifest["source_scope_sha256"],
