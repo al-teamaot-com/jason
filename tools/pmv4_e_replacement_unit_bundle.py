@@ -132,9 +132,9 @@ def generate(*,base:Path=ROOT)->dict[str,bytes]:
         need(service.count("[Service]")==1
              and service.count("ExecStart=")==1
              and service.count("Type=oneshot")==1
-             and "ExecCondition=/usr/bin/python3 "+ADMISSION not in service,
+             and "ExecCondition=/usr/bin/python3 -I -B "+ADMISSION not in service,
              "LEGACY_SERVICE_FORMAT_CHANGED")
-        guard=("ExecCondition=/usr/bin/python3 "+ADMISSION+
+        guard=("ExecCondition=/usr/bin/python3 -I -B "+ADMISSION+
                " --mode "+pair.mode+"\n")
         service=service.replace("[Service]\n","[Service]\n"+guard,1)
         if pair.mode=="engineering":

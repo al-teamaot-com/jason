@@ -4,7 +4,7 @@ After=docker.service
 ConditionPathExists=/usr/local/lib/jason/release_host_reconcile_worker.py
 
 [Service]
-ExecCondition=/usr/bin/python3 /opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py --mode component-reconcile
+ExecCondition=/usr/bin/python3 -I -B /opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py --mode component-reconcile
 Type=oneshot
 User=root
 Group=root

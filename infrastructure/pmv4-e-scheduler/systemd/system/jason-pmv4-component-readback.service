@@ -3,7 +3,7 @@ Description=Jason protected release-control readback (root-only)
 After=jason-production-drift-watchdog.service
 
 [Service]
-ExecCondition=/usr/bin/python3 /opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py --mode component-readback
+ExecCondition=/usr/bin/python3 -I -B /opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py --mode component-readback
 Type=oneshot
 User=root
 Group=root
