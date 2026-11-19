@@ -63,3 +63,41 @@ def test_inert_recovery_reuses_root_signed_started_and_never_issues_new_grant():
     assert "phase.begin(request)" in source
     assert source.index("phase.begin(request)") < source.index(
         "source.stage(candidate=candidate,exact_hashes=hashes)")
+
+
+def test_exact_native_release_records_match_root_attestor_reader_modes(tmp_path, monkeypatch):
+    """The writer must produce downstream 0444 records, not 0400 artifacts."""
+    import json
+    import os
+    import stat
+    from tools import pmv4_e_native_root_entry as entry
+    from tools import pmv4_e_native_root_manifest_attestation as rootproof
+
+    root = tmp_path / "native"
+    root.mkdir(mode=0o700)
+    monkeypatch.setattr(once, "NATIVE_RECORDS", root)
+    # The isolated fixture substitutes ONLY the production directory UID
+    # check; no production code has a non-root entrypoint or a bypass flag.
+    monkeypatch.setattr(once, "checked_root_dir", lambda path, **kw:
+                        None if path == root else
+                        (_ for _ in ()).throw(AssertionError(path)))
+    sample = {
+        "manifest": {"candidate_sha": "a"*40,
+                     "rollback_sha": "b"*40},
+        "source_scope": {"candidate_sha": "a"*40,
+                         "rollback_sha": "b"*40},
+    }
+    class Packet:
+        @staticmethod
+        def canonical(obj):
+            return json.dumps(obj, sort_keys=True,
+                              separators=(",", ":")).encode()
+
+    once.safe_release_records("a"*40, sample, Packet)
+    target = root / ("a"*40)
+    assert stat.S_IMODE(target.lstat().st_mode) == 0o555
+    for filename in ("manifest.json", "source-scope.json"):
+        path = target / filename
+        assert stat.S_IMODE(path.lstat().st_mode) == 0o444
+        assert json.loads(rootproof._regular(path, production=False)) in sample.values()
+        assert json.loads(entry.trust_file(path, uid=os.getuid())) in sample.values()
