@@ -1,7 +1,8 @@
 {
   "id": "security_log_self_heal",
   "implementation_mentions_unreviewed": [
-    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py"
+    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
+    "implementation/runtime_service/src/jason_runtime/json_security_log_classifier.py"
   ],
   "json_source_conversion_accepted": false,
   "legacy_enabled": true,

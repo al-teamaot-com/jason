@@ -4,7 +4,8 @@
     "implementation/autonomous_remediation/datto_edr_av_api_contract.py",
     "implementation/autonomous_remediation/datto_edr_av_runtime_contract.py",
     "implementation/mcp_service/src/jason_mcp/server.py",
-    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py"
+    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
+    "implementation/runtime_service/src/jason_runtime/json_edr_av_planner.py"
   ],
   "json_source_conversion_accepted": false,
   "legacy_enabled": true,

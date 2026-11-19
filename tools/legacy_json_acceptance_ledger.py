@@ -24,6 +24,36 @@ BASE = ROOT / "docs/playbooks/json/migration"
 LEDGER = BASE / "acceptance-ledger-20261119.json"
 
 
+def verify_no_source_mutation_expansion(
+    *, identifier: str, declared_capabilities: set[str],
+    legacy_allowed_capabilities: set[str],
+    live_catalog: dict[str, dict],
+) -> tuple[list[str], list[str]]:
+    """No source artifact can introduce capabilities outside legacy write authority."""
+    unknown = sorted(
+        capability for capability in declared_capabilities
+        if live_catalog.get(capability, {}).get("write_capability") is None
+    )
+    if unknown:
+        raise ValueError(
+            f"{identifier}:CAPABILITY_RISK_METADATA_MISSING:{unknown}"
+        )
+    declared_writes = sorted(
+        capability for capability in declared_capabilities
+        if live_catalog[capability]["write_capability"] is True
+    )
+    source_allowed_writes = sorted(
+        capability for capability in legacy_allowed_capabilities
+        if live_catalog.get(capability, {}).get("write_capability") is True
+    )
+    extras = sorted(set(declared_writes) - set(source_allowed_writes))
+    if extras:
+        raise ValueError(
+            f"{identifier}:MUTATION_NOT_AUTHORIZED_IN_LEGACY_REGISTRY:{extras}"
+        )
+    return declared_writes, source_allowed_writes
+
+
 def build() -> dict:
     schema = json.loads(SCHEMA.read_text())
     validator = Draft202012Validator(schema)
@@ -52,6 +82,15 @@ def build() -> dict:
         validated = validate_playbook_document(doc, known_capabilities=active_caps)
         if validated.playbook_id != identifier:
             raise ValueError(f"{identifier}:CANDIDATE_ID_MISMATCH")
+        metadata = {item["name"]: item for item in live["items"]}
+        declared_writes, allowed_writes = verify_no_source_mutation_expansion(
+            identifier=identifier,
+            declared_capabilities=set(validated.capabilities),
+            legacy_allowed_capabilities=set(
+                row.get("autonomy", {}).get("allowed_capabilities", [])
+            ),
+            live_catalog=metadata,
+        )
         if doc["autonomy"]["activation"] != "shadow":
             raise ValueError(f"{identifier}:MIGRATION_ACTIVATION_NOT_SHADOW")
         if doc["scope"]["direct_provider_access"] is not False:
@@ -90,6 +129,9 @@ def build() -> dict:
             "json_fingerprint": validated.fingerprint,
             "artifact_kind": kind,
             "json_schema_pass": True,
+            "no_legacy_registry_mutation_authority_expansion": True,
+            "source_declared_write_capabilities": declared_writes,
+            "source_legacy_allowed_write_capabilities": allowed_writes,
             "json_semantic_known_capabilities_pass": True,
             "json_activation": "shadow",
             "synthetic_dry_run_smoke_available": True,

@@ -153,3 +153,131 @@ See `OFFLINE-CONTEXT-READONLY-PARITY.md`. It is not an accepted replacement.
 
 The 19-source reconciliation now contains **five detailed candidates,
 14 structural partial drafts, 0 fully accepted legacy replacements**.
+
+## November 19 follow-on engineering — source authority gate and advisory note projections
+
+Revalidated the 19 enabled legacy sources and the governing source registry.
+The live `discover_capabilities` data for all 32 migration-used capabilities
+now records the provider read-only/write classification, not just names.
+`legacy_json_acceptance_ledger.py` rejects every JSON declared mutation that
+is not authorized in the corresponding original legacy registry entry, and
+fails closed if the capability's live risk metadata is unknown.
+
+Three unsafe generic drafts previously named an unauthorized mutation:
+`disk_bad_block_event_7` and `post_error_investigation` proposed
+`endpoint.alert.resolve`; `vulscan_missing_patch` proposed
+`automation.component.execute`. All three now route the attempted
+remediation to `human_review` and list the missing exact authority
+as an unresolved blocker. Tests cover the negative grant and source
+mutation expansion; these are NOT accepted replacements.
+
+Two advisory note workflows now have source-specific JSON definitions:
+`jason_activity_log@1.0.0-migration.2` and
+`gpt_insights_tech_assist@0.2.1-migration.2`.
+They reuse original deployed deterministic pure rendering/classification
+logic and authoritatively scoped, source-only note mutation *plans*.
+No proposed note write is executed. Test suites include deduplication,
+rollover, append-only updates, creation and update branches, source
+identity, creator/internal-visibility, stale/ambiguous note rejection,
+and missing-promotion/approval guards. See
+`JASON-ACTIVITY-JSON-PROJECTION.md` and
+`GPT-INSIGHTS-JSON-PROJECTION.md`. Both still need full governed
+provider write/readback, durable scheduling and independent preproduction
+acceptance before they can replace legacy.
+
+**Ledger:** 19 source-mapped JSON artifacts, 7 detailed partial candidates,
+12 structural partial drafts, **0/19 fully accepted**. No production JSON
+activation, no legacy retirement, no protected Core/Stage E change.
+
+## Unexpected Shutdown read-only deterministic classification
+
+The source-bound `unexpected_shutdown@1.1.0-migration.2` JSON
+candidate preserves current source classifiers for Windows Event 41/6008,
+physical-only site correlation, +/-15-minute incident grouping, the
+three-physical-device threshold, deterministic site event ID, protected
+server guard, WHEA/storage risk and 30-day independent recurrence gate.
+`json_shutdown_classification.py` uses the original
+`unexpected_shutdown_analysis.py` pure helpers, never a second provider
+execution engine. Tests prove synthetic same-source site/risk parity,
+virtual-device exclusion, wrong client/site/timestamp, offline devices
+and separate note/ticket approval gates.
+
+Cross-endpoint source fanout, five independent Windows telemetry reads,
+durable recurrence, governed approval, exact note and ticket post-write
+readback and isolated live preproduction acceptance remain incomplete.
+See `UNEXPECTED-SHUTDOWN-JSON-CLASSIFICATION.md`.
+
+## Round 1 client-information source catalog conversion
+
+A detailed `client_information_request@1.0.0-migration.2` JSON candidate
+now preserves deterministic source-controlled selection of all 120 approved
+Round 1 questions through the existing legacy catalog and selector.
+The pure intent planner validates company, ticket, contact, notifications,
+evidence SHA, exact note/history pages and routine-only source class.
+Per-question synthetic tests verify the original rendered footer hash,
+negative cross-company/profile, duplicate and freeform boundaries, and
+the JSON interpreter's exact action authority and post-send readback gates.
+
+The existing `SQLiteClientQuestionLedger` send_uncertain no-replay,
+delivery/reply state and diagnostic resumption have **not** yet been
+composed and accepted end to end with the JSON interpreter, and no client
+notification has been sent. See `CLIENT-QUESTION-JSON-INTENT.md`.
+
+Ledger: **9 detailed partial candidates, 10 structural partial drafts,
+0 fully accepted legacy migrations**. Source-only, production inert.
+
+## Storage, hardware and multi-device source-specific candidates
+
+Four more legacy structural drafts are now detailed and independently
+source-tested without activating execution:
+`low_disk_space` (storage health, safe cleanup eligibility and Autotask
+grace), `disk_bad_block_event_7` and
+`post_error_investigation` (the deployed conservative diagnostics and
+approved internal-note/Human Review actions), and
+`vulscan_multi_device_split` (same-company CI/DRMM identity and existing
+ticket split request/lineage model).
+
+The authored Event ID 7 and POST documents include possible autonomous
+alert resolution, but original registry does not authorize
+`endpoint.alert.resolve`; that scope remains explicitly blocked.
+The multi-device JSON interpreter still needs the existing provider-neutral
+split primitive integrated with safe persisted per-child iteration and
+readback. Low disk remains blocked from actual cleanup until governed job,
+monitor and free-space verification passes. See
+`HARDWARE-STORAGE-SPLIT-SOURCE-BATCH.md`.
+
+Ledger: **13 detailed partial candidates, 6 structural drafts,
+0 of 19 fully accepted.** No production JSON activation or legacy retirement.
+
+## Full 19-source detailed candidate reconciliation — source-only (November 19)
+
+All fourteen originally structural partial JSON drafts now have
+source-specific canonical JSON candidate definitions in
+`docs/playbooks/json/migration/candidates/`. The original five detailed
+candidates remain separate. This moves the **structural conversion**
+inventory to **19 detailed candidates and 0 generic structural drafts**.
+
+Every candidate is schema-valid and bound to a verified legacy SHA,
+immutable JSON fingerprint and actual live named read/write capability.
+A new source reconciliation test stages ALL 19 only in a separate
+temporary immutable JSON registry, verifies exactly nineteen draft
+receipts and no active versions on restart, tests fail-closed branches,
+denies unbound mutation steps and confirms no legacy write expansion.
+The private isolated test registry is not the production registry.
+
+The source-specific pure classifiers and planners for EDR/AV, BackupIQ,
+VulScan patch, DNS Agent, Windows Idle Log Off, and Security Log Self-Heal
+now have synthetic positive/negative tests using the original existing
+legacy helpers where applicable. Security Log event clearing requires
+exact signed Owner approval and must not be inferred from a standing-safe
+classification. Original registry does not authorize `endpoint.alert.resolve`
+for DNS Agent or Windows Idle Log Off; their JSON candidates route unresolved
+provider alerts to Human Review, never silently assuming completion.
+Original registry likewise does not authorize VulScan patch install.
+
+**None of these read-only classifiers is a complete executable replacement.**
+Each current candidate still has unresolved full legacy behavior parity,
+independent full provider readback/retry/interrupt acceptance and real
+preproduction service-identity client-bound execution gates. The
+`ALL-19-ACCEPTANCE-MATRIX.md` lists exact source versions and remaining
+gaps; production activation and legacy retirement remain **0**.
