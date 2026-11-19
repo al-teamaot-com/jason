@@ -1,5 +1,6 @@
 """Low-privilege scoped-backport release request is never release authority."""
 from __future__ import annotations
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,8 @@ import pytest
 
 from tools import scoped_backport_release as core
 from tools import scoped_backport_release_request as req
+from tools import scoped_backport_root_install as installer
+from tools import scoped_backport_native_root as native
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = json.loads((ROOT / core.RELEASE_MANIFEST).read_text())
@@ -72,7 +75,7 @@ def test_unprivileged_forged_policy_is_denied(tmp_path):
         "automatic_rollback_recovery_installed": True,
         "exact_signed_owner_approval_required": True,
     }))
-    with pytest.raises(core.ScopedBackportDenied, match="ROOT_HANDLER_OR_POLICY_UNTRUSTED"):
+    with pytest.raises(core.ScopedBackportDenied, match="ROOT_ATTESTATION_PARENT_UNTRUSTED"):
         req.installed_attestation(handler=script, policy=policy)
 
 
@@ -118,3 +121,102 @@ def test_forged_request_fields_rejected_before_worker(field, monkeypatch, tmp_pa
     with pytest.raises(core.ScopedBackportDenied, match="ROOT_REQUEST_SCHEMA_OR_BINDING_INVALID"):
         req.submit(x, spool=spool)
     assert list(spool.iterdir()) == []
+
+
+
+def test_installer_public_attestation_native_request_end_to_end_no_release(monkeypatch, tmp_path):
+    """Published installer receipt must match operator client and root worker.
+
+    This deliberately tests the real three-module contract, with only
+    root-owned filesystem reads simulated. No production mutation occurs.
+    """
+    worker_bytes = b"immutable root worker test fixture\n"
+    private_policy = {
+        "schema_version": "1.0", "profile": "governed-scoped-backport-v1",
+        "trusted_source_sha": MAIN, "reviewed_ci_sha": "3" * 40,
+        "root_handler_sha256": sha256(worker_bytes).hexdigest(),
+        "native_root_control_supported": True,
+        "automatic_rollback_recovery_installed": True,
+        "exact_signed_owner_approval_required": True,
+        "no_global_owner_elevation": True,
+    }
+    public = installer.build_public_attestation(private_policy)
+    assert set(public) == {
+        "schema_version", "profile", "trusted_source_sha", "reviewed_ci_sha",
+        "root_handler_sha256", "native_root_control_supported",
+        "automatic_rollback_recovery_installed",
+        "exact_signed_owner_approval_required",
+    }
+    assert "no_global_owner_elevation" not in public
+    assert req.ROOT_HANDLER == installer.INSTALL_ROOT / "tools/scoped_backport_native_root.py"
+    assert req.ROOT_POLICY == installer.ROOT_PUBLIC_ATTEST
+
+    def read_root(path, **kwargs):
+        if path == req.ROOT_POLICY:
+            return json.dumps(public).encode()
+        if path == req.ROOT_HANDLER:
+            return worker_bytes
+        pytest.fail("unreviewed root path in request verifier")
+    monkeypatch.setattr(req, "_root_file", read_root)
+    assert req.installed_attestation() == public
+    spool = tmp_path / "requests"
+    spool.mkdir(mode=0o700)
+    payload = req.request("scoped_backport_stage", o())
+    assert native._verify_typed_request(payload, o()) == "scoped_backport_stage"
+    queued = req.submit(payload, spool=spool)
+    assert queued["status"] == "queued_for_independent_root_validation_not_approved"
+    assert queued["native_release_record_created"] is False
+    assert queued["owner_approval_recorded"] is False
+    assert queued["production_mutations"] is False
+    assert json.loads((spool / (payload["request_id"] + ".json")).read_text()) == payload
+
+
+def test_root_public_attestation_must_match_exact_installed_worker(monkeypatch):
+    worker_bytes = b"scoped worker fixture\n"
+    private_policy = {
+        "profile": "governed-scoped-backport-v1",
+        "trusted_source_sha": MAIN, "reviewed_ci_sha": "3" * 40,
+        "root_handler_sha256": sha256(worker_bytes).hexdigest(),
+        "native_root_control_supported": True,
+        "automatic_rollback_recovery_installed": True,
+        "exact_signed_owner_approval_required": True,
+    }
+    public = installer.build_public_attestation(private_policy)
+    def read_root(path, **kwargs):
+        if path == req.ROOT_POLICY:
+            return json.dumps(public).encode()
+        if path == req.ROOT_HANDLER:
+            return worker_bytes + b"tampered"
+        pytest.fail("unreviewed root path")
+    monkeypatch.setattr(req, "_root_file", read_root)
+    with pytest.raises(core.ScopedBackportDenied, match="ROOT_HANDLER_SHA256_DRIFT"):
+        req.installed_attestation()
+
+
+def test_root_private_policy_not_exposed_by_public_attestation():
+    policy = {
+        "profile": "governed-scoped-backport-v1",
+        "trusted_source_sha": MAIN, "reviewed_ci_sha": "3" * 40,
+        "root_handler_sha256": "4" * 64,
+        "native_root_control_supported": True,
+        "automatic_rollback_recovery_installed": True,
+        "exact_signed_owner_approval_required": True,
+        "native_deploy_sha256": "5" * 64,
+        "core_sha256": "6" * 64,
+    }
+    public = installer.build_public_attestation(policy)
+    assert "native_deploy_sha256" not in public
+    assert "core_sha256" not in public
+    assert public["reviewed_ci_sha"] == "3" * 40
+
+
+def test_source_install_directories_world_readable_not_writable():
+    import inspect
+    src = inspect.getsource(installer.install)
+    for leaf in ("INSTALL_ROOT", 'INSTALL_ROOT / "tools"',
+                 'INSTALL_ROOT / "implementation"',
+                 'INSTALL_ROOT / "implementation/kernel"'):
+        assert f"_root_dir({leaf}, mode=0o755)" in src
+    assert "_root_dir(ROOT_STATE)" in src
+    assert "_write_exclusive(ROOT_PUBLIC_ATTEST" in src
+    assert "mode=0o644" in src
