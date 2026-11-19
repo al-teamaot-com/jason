@@ -54,6 +54,9 @@ jobs:
             tools/tests/test_catalog_scoped_root_install_transaction.py \
             tools/tests/test_catalog_scoped_root_bootstrap_packet.py \
             tools/tests/test_catalog_scoped_root_install_native.py
+      - name: Catalog root fresh-process trust verification and exact rollback
+        run: |
+          python -m pytest -q tools/tests/test_catalog_root_consumption_ledger_repair_v2_once.py
       - name: Catalog root-bootstrap and MCP release consumption-ledger namespace safety
         run: |
           python -m pytest -q \
