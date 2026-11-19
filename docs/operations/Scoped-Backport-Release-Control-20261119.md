@@ -233,3 +233,24 @@ merged to protected main, a fresh, exact installation scope has passed
 `--check`, and an authenticated local `al` sudo plus fresh signed Entra
 Owner decision has been independently verified. The installation itself
 never approves or promotes a candidate Entra release.
+
+## Root-private / operator-readable installation attestation
+
+The exact native release installer creates a root-private mode-0600 full policy
+(`/etc/jason-owner-release/scoped-backport-installed.json`) and a separate,
+root-owned mode-0644 **non-secret** attestation
+(`/etc/jason-owner-release/scoped-backport-public-attestation.json`).
+The four installed source directories are root-owned mode-0755 and installed
+source files are root-owned, non-writable. The operator can hash the exact
+installed worker without reading the full root policy or gaining root access.
+
+The low-privilege request client checks the exact installed handler path
+`/usr/local/lib/jason/scoped-backport/tools/scoped_backport_native_root.py`,
+the root-owned, non-writable policy directory, the reviewed/main source
+identities, and the worker digest before writing a typed request into its
+preprovisioned private queue. The root worker then **independently** rechecks
+the complete private installation policy, the published digest receipt,
+protected main, candidate/rollback source, Owner signature, the freeze,
+release lock, breaker, image IDs, four credential mount boundaries and
+protected service state. Neither the public attestation nor a queued request
+is a release approval or an authorization to modify Microsoft Graph.
