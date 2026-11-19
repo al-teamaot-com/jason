@@ -686,8 +686,13 @@ class NativeStageEHost:
         self._step_record("rollback_verified",recovery=True)
 
     def observe_component(self,component_id:str)->str:
-        """Physical native component identity; no fictitious Compose pointer."""
-        self._verify_boundary()
+        """Physical native component identity; no fictitious Compose pointer.
+
+        The original signed ledger observes its rollback source during the
+        host-locked PREFLIGHT, before it takes the freeze lock. Observation is
+        read-only; do not incorrectly require the later activation lock.
+        """
+        need(self.host_locked,"SIGNED_NATIVE_HOST_LOCK_REQUIRED")
         need(component_id==contract.COMPONENT,
              "OBSERVE_COMPONENT_SCOPE_UNREVIEWED")
         need(self._source_revision()==self.manifest["rollback_sha"],
