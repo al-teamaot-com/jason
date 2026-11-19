@@ -12,10 +12,24 @@ import pytest
 from tools import pmv4_e_exact_code_transaction as code
 from tools import pmv4_e_native_release_contract as contract
 from tools import pmv4_e_exact_release_packet as packet
+from tools import pmv4_e_root_trust_stage as trust
 
 
 def sample(tmp_path):
-    source=packet.ROOT
+    sealed=tmp_path/"sealed-root"
+    hashes={
+        rel:sha256((packet.ROOT/rel).read_bytes()).hexdigest()
+        for rel in packet.REVIEWED_PATHS
+    }
+    trust.RootTrustStager(
+        source=packet.ROOT,target=sealed,production=False,
+        native_signed_started=lambda:True,
+        native_host_locked=lambda:True,
+        native_freeze_locked=lambda:True,
+        native_marker_absent=lambda:True,
+        native_replacements_inert=lambda:True,
+    ).stage(source_sha="b"*40,exact_hashes=hashes)
+    source=sealed
     oldroot=tmp_path/"current"
     oldroot.mkdir()
     snapshot=tmp_path/"before";snapshot.mkdir(mode=0o700)
@@ -27,8 +41,7 @@ def sample(tmp_path):
         # A production file has verified old SHA, but test needs a synthetic
         # independently sealed old baseline. Caller cannot substitute hashes
         # in production mode.
-        target.write_bytes((source/name).read_bytes() if name!=code.POLICY
-                           else (source/code.POLICY).read_bytes())
+        target.write_bytes(("legacy-exact-before:"+name).encode("utf-8"))
         target.chmod(0o600)
         targets[name]=target
         oldhashes[name]=sha256(target.read_bytes()).hexdigest()
