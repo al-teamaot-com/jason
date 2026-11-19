@@ -35,7 +35,7 @@ OAUTH_SHA="24d3632a4b0aa60851a1c82ccb15539eb823dd26afa5a1a2cc8c7afc54d72153"
 PRIVATE=Path("/var/lib/jason/runtime-secrets/owner-release/private_key")
 PUBLIC=Path("/etc/jason-owner-release/verified-owner-public-key.json")
 FREEZE=Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
-REPO=Path("/home/al/.local/lib/jason/engineering-source-repo")
+REPO=Path("/srv/jason/archive/engineering-artifacts/pmv4-e-owner-source-repo")
 ARTIFACTS=Path("/srv/jason/archive/engineering-artifacts")
 ROLLBACK="d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 CONFIRM="APPROVE-ONE-EXACT-PMV4-E-SIX-UNIT-CUTOVER-AND-ROLLBACK"
@@ -96,6 +96,25 @@ def stage_packet(*,candidate:str,artifact:Path)->dict:
          and a.st_uid==a.st_gid==1000
          and stat.S_IMODE(a.st_mode)==0o700,
          "STAGED_ARTIFACT_NOT_PRIVATE")
+    # Verify an inert, unprivileged review-only Git clone. Never fetch or
+    # change the installed engineering-worker/source repositories while the
+    # production freeze is active.
+    meta=REPO.lstat()
+    need(REPO.parent==ARTIFACTS and not REPO.is_symlink()
+         and stat.S_ISDIR(meta.st_mode)
+         and meta.st_uid==meta.st_gid==1000
+         and stat.S_IMODE(meta.st_mode)==0o700,
+         "ISOLATED_REVIEW_REPOSITORY_UNTRUSTED")
+    present=subprocess.run(
+        ["/usr/bin/git","-C",str(REPO),
+         "cat-file","-e",candidate+"^{commit}"],
+        capture_output=True,check=False,timeout=20)
+    protected=subprocess.run(
+        ["/usr/bin/git","-C",str(REPO),
+         "merge-base","--is-ancestor",candidate,"origin/main"],
+        capture_output=True,check=False,timeout=20)
+    need(present.returncode==0 and protected.returncode==0,
+         "CANDIDATE_NOT_ON_REVIEWED_PROTECTED_MAIN")
     need(Path(__file__).read_bytes()==git_blob(
          candidate,"tools/pmv4_e_exact_owner_offer.py"),
          "EXECUTING_NONREVIEWED_OWNER_SOURCE")
