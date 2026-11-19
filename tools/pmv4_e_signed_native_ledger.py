@@ -24,15 +24,14 @@ from implementation.kernel.signed_owner_release import (
 )
 from tools.independent_component_release import (
     ComponentReleaseController, ComponentReleaseDenied, VerifiedRelease,
-    PRODUCTION_ROOT, OWNER_TRUST, trusted_file, _load_json, _atomic_json,
+    PRODUCTION_ROOT, OWNER_TRUST, trusted_file, trusted_dir, _load_json, _atomic_json,
     _replace_json, digest, release_id, PROTECTED,
 )
 from tools import pmv4_e_native_release_contract as contract
 from tools import pmv4_e_exact_release_packet as packet
 
 ENTRY = Path(
-    "/opt/jason/independent-component-release/trusted/tools/"
-    "pmv4_e_signed_native_ledger.py"
+    "/opt/jason/pmv4-e-trusted/tools/pmv4_e_signed_native_ledger.py"
 )
 RESOURCE = contract.COMPONENT
 
@@ -66,6 +65,7 @@ class StageESignedNativeLedger(ComponentReleaseController):
     def _bundle(self, manifest: Mapping[str, Any]) -> Path:
         releases, _, _, _ = self._paths()
         bundle = releases / manifest["candidate_sha"]
+        trusted_dir(bundle, production=self.production)
         raw = _load_json(trusted_file(
             bundle / "manifest.json", production=self.production))
         deny(raw == manifest, "MANIFEST_DRIFT")
@@ -88,6 +88,16 @@ class StageESignedNativeLedger(ComponentReleaseController):
         releases, receipts, _, _ = self._paths()
         candidate = manifest["candidate_sha"]
         previous = manifest["rollback_sha"]
+        if self.production:
+            deny(self.source_root.name == candidate
+                 and self.source_root.parent == Path("/opt/jason/releases")
+                 and not self.source_root.is_symlink(),
+                 "SOURCE_REVISION_PATH_UNTRUSTED")
+            source_info = self.source_root.lstat()
+            deny(stat.S_ISDIR(source_info.st_mode)
+                 and source_info.st_uid == 0 and source_info.st_gid == 0
+                 and source_info.st_mode & 0o022 == 0,
+                 "SOURCE_REVISION_NOT_IMMUTABLE")
         deny(manifest["component_id"] == RESOURCE, "COMPONENT_CHANGED")
         # Stage E is an initial adoption of a non-Compose native component:
         # the live PMv3 source is the physical rollback, NOT a fictitious
