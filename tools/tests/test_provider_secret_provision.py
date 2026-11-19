@@ -394,3 +394,61 @@ def test_datto_edr_contract_uses_dedicated_readonly_identity() -> None:
     assert Path(spec["credential_dir"]) == Path(
         "/opt/jason/bootstrap/secrets/openbao/datto-edr-read-approle"
     )
+
+
+
+def test_microsoft_group_admin_policies_use_two_distinct_secrets_and_approles() -> None:
+    read = PROVIDERS["microsoft_graph_group_read"]
+    write = PROVIDERS["microsoft_graph_group_write"]
+    existing = PROVIDERS["microsoft_graph"]
+    fields = ("private_key_pem", "certificate_pem", "certificate_thumbprint", "generation")
+    for profile in (read, write):
+        assert profile["fields"] == fields
+        assert set(profile["fields"]) == set(existing["fields"])
+        assert profile["logical_name"].startswith("microsoft_graph.group_")
+        assert profile["secret_path"] not in {existing["secret_path"]}
+        assert profile["role_name"] != existing["role_name"]
+        assert provider_policy_text("microsoft_graph_group_read").count('capabilities = ["read"]') == 1
+    assert read["logical_name"] != write["logical_name"]
+    assert read["secret_path"] != write["secret_path"]
+    assert read["role_name"] != write["role_name"]
+    assert read["credential_dir"] != write["credential_dir"]
+
+
+
+def test_group_admin_secrets_use_create_only_cas_and_no_overwrite(monkeypatch):
+    import tools.provider_secret_provision as module
+
+    calls = []
+
+    def fake_api_request(address, api_path, *, method, payload=None, token=None, allow_empty=False):
+        calls.append((api_path, method, payload, allow_empty))
+        return {}
+
+    monkeypatch.setattr(module, "api_request", fake_api_request)
+    values = {
+        "private_key_pem": "fake-private-test-only",
+        "certificate_pem": "fake-public-test-only",
+        "certificate_thumbprint": "A" * 40,
+        "generation": "test-only",
+    }
+    for provider in ("microsoft_graph_group_read", "microsoft_graph_group_write"):
+        calls.clear()
+        module.write_provider_secret(
+            address="http://unused.invalid", admin_token="test",
+            provider=provider, values=values,
+        )
+        assert len(calls) == 1
+        assert calls[0][0] == PROVIDERS[provider]["secret_path"]
+        assert calls[0][1] == "POST"
+        assert calls[0][2] == {"data": values, "options": {"cas": 0}}
+        assert calls[0][3] is True
+
+
+def test_group_admin_read_write_provisioning_no_cross_provider_paths():
+    read = PROVIDERS["microsoft_graph_group_read"]
+    write = PROVIDERS["microsoft_graph_group_write"]
+    for spec in (read, write):
+        assert spec["create_only_secret"] is True
+        assert spec["secret_path"].startswith("secret/data/connectors/microsoft-graph/production/group-")
+    assert read["secret_path"] != write["secret_path"]
