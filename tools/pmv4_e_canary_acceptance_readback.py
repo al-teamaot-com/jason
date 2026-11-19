@@ -75,9 +75,11 @@ def root_data(path:Path,*,mode:int=0o600,maximum:int=100000)->bytes:
 
 
 def validate_service_file_meta(meta:Any,*,path_name:str,
-                               expected_uid:int=FREEZE_UID,
-                               expected_gid:int=FREEZE_GID,mode:int=0o600,
+                               expected_uid:int|None=None,
+                               expected_gid:int|None=None,mode:int=0o600,
                                maximum:int=100000)->None:
+    expected_uid=FREEZE_UID if expected_uid is None else expected_uid
+    expected_gid=FREEZE_GID if expected_gid is None else expected_gid
     need(stat.S_ISREG(meta.st_mode) and meta.st_uid==expected_uid
          and meta.st_gid==expected_gid and meta.st_nlink==1
          and stat.S_IMODE(meta.st_mode)==mode
@@ -85,9 +87,11 @@ def validate_service_file_meta(meta:Any,*,path_name:str,
          "SERVICE_FILE_UNTRUSTED:"+path_name)
 
 
-def service_owned_data(path:Path,*,expected_uid:int=FREEZE_UID,
-                       expected_gid:int=FREEZE_GID,mode:int=0o600,
+def service_owned_data(path:Path,*,expected_uid:int|None=None,
+                       expected_gid:int|None=None,mode:int=0o600,
                        maximum:int=100000)->bytes:
+    expected_uid=FREEZE_UID if expected_uid is None else expected_uid
+    expected_gid=FREEZE_GID if expected_gid is None else expected_gid
     """Read the service-user-owned freeze without treating it as root data."""
     try:
         meta=path.lstat()
