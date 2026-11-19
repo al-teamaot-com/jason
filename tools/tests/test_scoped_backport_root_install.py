@@ -10,9 +10,13 @@ def test_scope_and_installer_paths_are_only_new_components():
     assert ins.INSTALL_ROOT.as_posix().startswith("/usr/local/lib/jason/")
     assert ins.ROOT_POLICY.as_posix().startswith("/etc/jason-owner-release/")
     assert all(x.startswith("tools/scoped_backport_")
-               or x == "tools/deploy_live_container.py"
+               or x in ("tools/deploy_live_container.py",
+                        "tools/pmv4_mcp_projection.py")
                or x.startswith("implementation/kernel/")
                for x in ins.FILES)
+    # A standalone root installer must bundle the exact module imported
+    # at load time by deploy_live_container.py.
+    assert "tools/pmv4_mcp_projection.py" in ins.FILES
     assert len(ins.UNITS) == 4
     assert all(x.startswith("jason-scoped-backport-") for x in ins.UNITS)
     assert "jason-runtime" not in ins.UNITS
