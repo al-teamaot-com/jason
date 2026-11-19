@@ -98,3 +98,39 @@ interpreter and the actual existing governed Observe Port *with mocked
 authority/orchestrator*, but no real preproduction provider session or
 production Core integration was exercised. Full migration readiness and source
 merge as a completed migration remain prohibited until independently proven.
+
+
+## Windows Time Source — detailed read-only shadow conversion (additional verified work)
+
+The enabled legacy `windows_time_source@0.1.0` uses `autonomy.activation=shadow`
+with no allowed provider mutation capabilities. Source-bound candidate
+`candidates/windows_time_source.v1.json` at `0.1.0-migration.1` now contains
+a deterministic read-only classification flow using the existing interpreter,
+governed ObservePort, source signature/parser, exact device and site identity,
+30-day recurring mismatch threshold and persisted 15-minute recheck.
+
+`json_windows_time_facts.py` reuses the actual legacy pure signature/history
+classifier. `json_windows_time_projection.py` projects **only verified**
+results into the existing legacy-compatible SQLite shadow-state/audit contract.
+`json_windows_time_preprod.py` uses the generalized version/fingerprint-bound
+read-only preproduction builder. `json_windows_time_sweep.py` is a **disconnected
+isolated candidate harness**, not installed as a production worker or second
+registry; it reuses the current 15-minute cadence storage and ensures a new
+observation in each cycle while deduplicating unchanged evidence.
+
+Isolated acceptance tests compare exact legacy-versus-JSON classifications,
+provider-read intents, recurrence counts, fingerprints, audit events, row
+contents and full sweep summary across current/recurring/offline/old/unrelated/
+multi-alert cases, plus source-change rechecks, duplicate alerts, missing
+identity, wrong client/site binding, wrong immutable version, interrupted
+recovery, and zero provider mutations. See
+`WINDOWS-TIME-SOURCE-SHADOW-PARITY.md` and the three
+`implementation/runtime_service/tests/test_json_windows_time_*.py` modules.
+
+**This is proven parity for the currently installed READ-ONLY shadow
+implementation, NOT the full authored Windows Time Self-Heal playbook.**
+Remediation components, domain-member safety/authority, capped retries, exact
+alert auto-resolution and ticket handling are in its Markdown but remain
+unimplemented and unaccepted in JSON. The full acceptance ledger therefore
+remains **0/19**. The inventory now has **4 detailed candidates and
+15 structural partial drafts**, not four fully migrated playbooks.

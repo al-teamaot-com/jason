@@ -63,11 +63,22 @@ def build() -> dict:
         if digest != source_map["source_sha256"]:
             raise ValueError(f"{identifier}:SOURCE_CHANGED")
         accepted = False
+        # Windows Time is proven against the installed *shadow classifier*
+        # only. The authoritative Markdown also specifies future self-heal,
+        # approved component remediation and provider alert verification.
+        # Those branches have NOT migrated; never count this as full parity.
+        installed_shadow_classifier_parity = identifier == "windows_time_source"
         gaps = (
             doc["migration"].get("missing_or_unimplemented_parity")
             or doc["migration"].get("known_gaps")
             or []
         )
+        if installed_shadow_classifier_parity:
+            gaps = list(gaps) + [
+                "Full Windows Time Self-Heal definition includes governed diagnostic component, domain-member remediation, per-action Owner approvals, bounded jobs/retries, exact alert and ticket readback, and protected DC/security branches; these are not represented in read-only shadow JSON.",
+                "The current isolated preproduction composition is synthetic and has not been deployed or tested with a real client-bound provider session.",
+                "No source-to-runtime activation/cutover or coexistence acceptance is authorized.",
+            ]
         outcomes.append({
             "id": identifier,
             "legacy_source": row["source"],
@@ -84,6 +95,9 @@ def build() -> dict:
             "synthetic_dry_run_smoke_available": True,
             "narrow_same_fixture_legacy_intent_parity": (
                 identifier in ALREADY_DETAILED
+            ),
+            "installed_readonly_shadow_behavior_parity": (
+                installed_shadow_classifier_parity
             ),
             "full_legacy_parity_pass": False,
             "exact_authority_boundary_end_to_end_pass": False,

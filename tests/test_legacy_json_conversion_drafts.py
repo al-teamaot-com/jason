@@ -23,7 +23,7 @@ def test_unconverted_population_is_complete_and_unique(docs):
         (ROOT / "implementation/autonomous_remediation/playbook_registry.json").read_text())
     enabled = {item["id"] for item in registry["playbooks"] if item["enabled"]}
     assert enabled == ALREADY_DETAILED | set(docs)
-    assert len(docs) == 16
+    assert len(docs) == 15
     assert not (ALREADY_DETAILED & set(docs))
 
 
@@ -131,12 +131,12 @@ def test_all_drafts_stage_as_immutable_inactive_versions_in_existing_registry(tm
         staged = store.stage(item, actor="source-only-inventory-test")
         assert staged.state == "draft"
         assert store.active(identifier) is None
-    assert store.generation() == 16
-    assert len(store.lifecycle_events()) == 16
+    assert store.generation() == 15
+    assert len(store.lifecycle_events()) == 15
     store.close()
     reopened = SQLitePlaybookRegistry(tmp_path / "all-16-draft-registry.sqlite3")
-    assert reopened.generation() == 16
-    assert len(reopened.list_all()) == 16
+    assert reopened.generation() == 15
+    assert len(reopened.list_all()) == 15
     assert reopened.active_snapshot()[1] == ()
     reopened.close()
 
@@ -152,4 +152,4 @@ def test_source_draft_generation_deterministic(docs):
         for filename in OUTPUT.glob("*.json")
     }
     assert before == after
-    assert len(after) == len(docs) == 16
+    assert len(after) == len(docs) == 15

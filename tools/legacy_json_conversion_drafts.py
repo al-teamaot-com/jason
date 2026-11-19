@@ -25,6 +25,7 @@ ALREADY_DETAILED = frozenset({
     "unsupported_readonly_triage_note",
     "unsupported_triage_human_review",
     "drmm_recent_alert_reconciliation",
+    "windows_time_source",
 })
 
 
@@ -142,14 +143,6 @@ WORKFLOWS = {
         "repair": "all_nodes_same_company_resolved_and_split_approved",
         "wait": "waiting_source_split_reconciliation",
         "missing": ["bounded Affected Nodes parser and exact CI/DRMM lookup", "multi-child fanout and idempotent create receipts", "one-device child lineage and source completion", "source work ownership and post-write readback"],
-    },
-    "windows_time_source": {
-        "entry": "management.alert.search", "diagnose": "endpoint.device.read",
-        "verify": "endpoint.alert.history.search", "action": "automation.component.execute",
-        "clean": "approved_time_source_currently_healthy",
-        "repair": "approved_resync_or_domain_hierarchy_repair_warranted",
-        "wait": "waiting_time_source_recheck",
-        "missing": ["fresh Windows Time component output and approved NTP set", "domain member vs DC/role-specific safe repair classification", "approved component UID and job-output verification", "exact DRMM alert auto-resolve/recheck with no reboot"],
     },
     "client_information_request": {
         "entry": "service.ticket.read", "diagnose": "service.contact.read",
