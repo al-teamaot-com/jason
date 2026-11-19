@@ -46,6 +46,7 @@ ROOT_TO_INSTALL=(
     "tools/pmv4_e_signed_native_ledger.py",
     "tools/pmv4_e_root_import_binding.py",
     "tools/pmv4_e_signed_bootstrap_phase.py",
+    "tools/pmv4_e_exact_owner_offer.py",
 )
 ROOT_COMPONENTS_PREINSTALLED=(
     "tools/independent_component_release.py",
