@@ -54,6 +54,12 @@ jobs:
             tools/tests/test_catalog_scoped_root_install_transaction.py \
             tools/tests/test_catalog_scoped_root_bootstrap_packet.py \
             tools/tests/test_catalog_scoped_root_install_native.py
+      - name: Catalog unsigned-offer source-only restage, PMv4 rollback and Owner-root install safety
+        run: |
+          python -m pytest -q \
+            tools/tests/test_catalog_unsigned_offer_safe_restage.py \
+            tools/tests/test_catalog_pmv4_transaction_rollback_gate.py \
+            tools/tests/test_catalog_root_unsigned_offer_restage_install_once.py
       - name: Catalog historical pinned runner trust and one-use root repair rollback
         run: |
           python -m pytest -q tools/tests/test_catalog_scoped_trusted_original_runner.py tools/tests/test_catalog_root_trusted_runner_repair_once.py
