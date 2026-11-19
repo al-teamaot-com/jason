@@ -14,7 +14,7 @@ SOURCE=Path(__file__).resolve().parents[1]
 ARTIFACTS=Path("/srv/jason/archive/engineering-artifacts")
 APPROVED_BASELINE=Path(
  "/srv/jason/archive/engineering-artifacts/"
- "pmv4-catalog-drift-769d8cad698d092779def1dcfb8ba5e1fc896a9d/candidate.json"
+ "pmv4-d-runbook-read-0467f3b29d2f6cbc0415ef9017627eb3c4a02915/policy-target.json"
 )
 ROOT_SCRIPT=SOURCE/"tools/scoped_backport_drift_reconcile_root.py"
 OWNER_SCRIPT=SOURCE/"tools/scoped_backport_drift_reconcile_owner.py"

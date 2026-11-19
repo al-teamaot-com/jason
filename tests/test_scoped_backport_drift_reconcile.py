@@ -14,7 +14,7 @@ def existing():
         "allowed_system_units": ["jason-release-control-readback.service"],
         "required_system_units": ["jason-runtime.service"],
         "allowed_running_containers": ["jason-runtime", "jason-mcp-pilot"],
-        "max_stopped_rollback_containers": 20,
+        "max_stopped_rollback_containers": 21,
         "forbidden_execution_prefixes": ["/unsafe"],
     }
 
@@ -37,8 +37,8 @@ def test_exact_four_unit_policy_only():
 
 @pytest.mark.parametrize("mutation",[
     lambda p: p["allowed_system_units"].append(root.CANDIDATE_NAMES[0]),
-    lambda p: p.update({"max_stopped_rollback_containers":21}),
-    lambda p: p.update({"max_stopped_rollback_containers":200}),
+    lambda p: p.update({"max_stopped_rollback_containers":20}),
+    lambda p: p.update({"max_stopped_rollback_containers":210}),
     lambda p: p["allowed_system_units"].append("jason-release-control-readback.service"),
 ])
 def test_bad_or_already_migrated_policy_denied(mutation):
@@ -80,7 +80,7 @@ def test_root_policy_target_does_not_relax_drift_guards():
     base.update({
         "allowed_user_units":["jason-release-manager.service"],
         "required_user_units":["jason-release-manager.timer"],
-        "max_stopped_rollback_containers":20,
+        "max_stopped_rollback_containers":21,
         "required_containers":["jason-runtime","jason-mcp-pilot"],
     })
     new=root.expected_policy(json.dumps(base).encode())

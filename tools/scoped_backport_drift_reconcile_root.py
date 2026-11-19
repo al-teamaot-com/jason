@@ -67,7 +67,7 @@ def expected_policy(raw):
     need(isinstance(allowed,list) and len(allowed)==len(set(allowed))
          and not any(item in allowed for item in CANDIDATE_NAMES),
          "BASE_SCOPED_BACKPORT_UNITS_NOT_MISSING")
-    need(p.get("max_stopped_rollback_containers")==20,
+    need(p.get("max_stopped_rollback_containers")==21,
          "UNEXPECTED_ROLLBACK_CAPACITY")
     p["allowed_system_units"]=sorted(allowed+list(CANDIDATE_NAMES))
     return p
