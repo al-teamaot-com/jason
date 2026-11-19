@@ -178,3 +178,56 @@ def test_source_preserves_existing_release_mutex_and_no_disruptive_change():
     assert "jason-pmv4-engineering.service" in content
     assert "PMV4_E_ROOT_RECONCILE_PATH" in content
     assert "os.chown(" not in content.split("def pmv4_e_controlplane_mode",1)[1].split("def atomic_json",1)[0]
+
+
+def test_root_accepted_controlplane_can_run_new_source_with_pinned_old_images():
+    baseline="a"*40
+    new_control="b"*40
+    assert m.choose_pmv4_e_convergence_source(
+        mode="replacement",runtime_revision=baseline,mcp_revision=baseline,
+        accepted={"candidate_sha":new_control,"rollback_sha":baseline},
+    )==new_control
+
+
+@pytest.mark.parametrize("case",[
+    ("legacy","a"*40,"a"*40,None,"a"*40),
+    ("legacy","a"*40,"b"*40,None,None),
+    ("replacement","a"*40,"a"*40,None,None),
+    ("replacement","a"*40,"b"*40,
+     {"candidate_sha":"b"*40,"rollback_sha":"a"*40},None),
+    ("replacement","a"*40,"a"*40,
+     {"candidate_sha":"a"*40,"rollback_sha":"a"*40},None),
+    ("replacement","a"*40,"a"*40,
+     {"candidate_sha":"b"*40,"rollback_sha":"c"*40},None),
+    ("replacement","a"*40,"a"*40,
+     {"candidate_sha":"invalid","rollback_sha":"a"*40},None),
+    ("denied","a"*40,"a"*40,
+     {"candidate_sha":"b"*40,"rollback_sha":"a"*40},None),
+])
+def test_dual_source_never_weakens_legacy_or_accepts_bad_root_marker(
+        case):
+    mode,runtime,mcp,accepted,result=case
+    assert m.choose_pmv4_e_convergence_source(
+        mode=mode,runtime_revision=runtime,mcp_revision=mcp,
+        accepted=accepted)==result
+
+
+def test_marker_identity_requires_actual_pinned_root_accepted_schema(
+        probe,monkeypatch):
+    marker,guard,lock=probe
+    receipt={
+        "action":"pmv4-e-oneowner-six-unit-replacement-and-retirement-v1",
+        "state":"accepted","source_sha":"b"*40,
+        "source_rollback_sha":"a"*40,
+    }
+    marker.chmod(0o600)
+    marker.write_text(json.dumps(receipt))
+    marker.chmod(0o444)
+    assert m.pmv4_e_accepted_source_identity()=={
+        "candidate_sha":"b"*40,"rollback_sha":"a"*40,
+    }
+    receipt["source_rollback_sha"]="b"*40
+    marker.chmod(0o600)
+    marker.write_text(json.dumps(receipt))
+    marker.chmod(0o444)
+    assert m.pmv4_e_accepted_source_identity() is None

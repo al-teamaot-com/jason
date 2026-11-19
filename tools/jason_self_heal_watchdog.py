@@ -147,6 +147,66 @@ def pmv4_e_controlplane_mode() -> str:
     return "denied"
 
 
+def pmv4_e_accepted_source_identity() -> dict[str, str] | None:
+    """Read only the root-owned source/rollback from a *validated* acceptance.
+
+    The caller must first have obtained replacement mode from the installed,
+    pinned root admission guard. This reader never converts an untrusted or
+    absent marker into either a release or a legacy fallback.
+    """
+    try:
+        info=PMV4_E_MARKER.lstat()
+        if (not stat.S_ISREG(info.st_mode) or PMV4_E_MARKER.is_symlink()
+            or info.st_uid!=0 or info.st_gid!=0 or info.st_nlink!=1
+            or stat.S_IMODE(info.st_mode)!=0o444
+            or not 0<info.st_size<=12000):
+            return None
+        raw=PMV4_E_MARKER.read_bytes()
+        if len(raw)!=info.st_size:
+            return None
+        item=json.loads(raw)
+        if not isinstance(item,dict):
+            return None
+        candidate=item.get("source_sha")
+        rollback=item.get("source_rollback_sha")
+        if not (isinstance(candidate,str) and SHA_RE.fullmatch(candidate)
+                and isinstance(rollback,str) and SHA_RE.fullmatch(rollback)
+                and candidate!=rollback
+                and item.get("action")==
+                "pmv4-e-oneowner-six-unit-replacement-and-retirement-v1"
+                and item.get("state")=="accepted"):
+            return None
+        return {"candidate_sha":candidate,"rollback_sha":rollback}
+    except (OSError,ValueError,TypeError):
+        return None
+
+
+def choose_pmv4_e_convergence_source(
+    *, mode: str, runtime_revision: str,
+    mcp_revision: str, accepted: Mapping[str, str] | None,
+) -> str | None:
+    """Runtime/MCP remain pinned to prior LKG after separate PMv4 E cutover.
+
+    The NEW controlplane SHA is never inferred from current main. It must
+    come solely from the accepted root-owned marker independently validated
+    by the admission guard. Legacy source alignment remains unchanged.
+    """
+    if (not isinstance(runtime_revision,str)
+        or not SHA_RE.fullmatch(runtime_revision)
+        or mcp_revision!=runtime_revision):
+        return None
+    if mode=="legacy":
+        return runtime_revision
+    if mode!="replacement" or not isinstance(accepted,Mapping):
+        return None
+    candidate=accepted.get("candidate_sha")
+    rollback=accepted.get("rollback_sha")
+    if (not isinstance(candidate,str) or not SHA_RE.fullmatch(candidate)
+        or rollback!=runtime_revision or candidate==runtime_revision):
+        return None
+    return candidate
+
+
 def atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temp = path.with_suffix(path.suffix + ".tmp")
@@ -242,7 +302,18 @@ def production_convergence_failures(
         failures.append("production_convergence_revision_mismatch:runtime_mcp")
         return failures, evidence
 
-    desired_revision = runtime_revision
+    accepted = (pmv4_e_accepted_source_identity()
+                if control_mode=="replacement" else None)
+    desired_revision = choose_pmv4_e_convergence_source(
+        mode=control_mode, runtime_revision=runtime_revision,
+        mcp_revision=mcp_revision, accepted=accepted,
+    )
+    if desired_revision is None:
+        failures.append("production_convergence_pmv4_e_exact_source_or_rollback_drift")
+        return failures,evidence
+    if accepted is not None:
+        evidence["pmv4_e_source_sha"]=accepted["candidate_sha"]
+        evidence["pmv4_e_rollback_sha"]=accepted["rollback_sha"]
     if verify_scheduled_surfaces is None:
         verify_scheduled_surfaces = releases_root is None
     release_root = releases_root or Path("/opt/jason/releases")
