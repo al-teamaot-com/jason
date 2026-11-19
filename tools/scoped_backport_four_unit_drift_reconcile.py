@@ -72,6 +72,9 @@ PROTECTED = (
     "jason-pmv4-shadow-gateway", "jason-teams-gateway", "openbao",
 )
 SHA = re.compile(r"^[0-9a-f]{40}$")
+# The approved root installer deliberately installs these four systemd files
+# root-owned read-only (0444), not writable mode 0644.
+INSTALLED_SYSTEMD_UNIT_MODE = 0o444
 
 
 class DriftCorrectionDenied(PermissionError):
@@ -183,7 +186,10 @@ def candidate_policy(baseline: bytes) -> tuple[dict, bytes]:
          and all(isinstance(k, str) for k in allowed + required)
          and all(k not in allowed + required for k in UNIT_NAMES),
          "POLICY_EXACT_FOUR_UNIT_GAP_NOT_PRESENT")
-    need(doc.get("max_stopped_rollback_containers") == 20,
+    # PMv4-D approved a 21-container rollback-retention limit. Reject a
+    # return to the obsolete pre-PMv4-D 20-container baseline rather than
+    # silently rewriting any other installed root-owned policy field.
+    need(doc.get("max_stopped_rollback_containers") == 21,
          "POLICY_ROLLBACK_CAPACITY_CHANGED")
     doc["allowed_system_units"] = sorted(allowed + list(UNIT_NAMES))
     return doc, (json.dumps(doc, sort_keys=True, indent=2) + "\n").encode()
@@ -306,8 +312,8 @@ def inspect(*, source_sha: str, reviewed_sha: str) -> dict:
     for unit in UNIT_NAMES:
         p = Path("/etc/systemd/system") / unit
         expected = installed[ROOT_UNIT_DIGESTS[unit]]
-        need(sha256(read_root(p, mode=0o644)).hexdigest() == expected,
-             "INSTALLED_UNIT_BYTES_CHANGED")
+        need(sha256(read_root(p, mode=INSTALLED_SYSTEMD_UNIT_MODE)).hexdigest()
+             == expected, "INSTALLED_UNIT_BYTES_CHANGED")
     upgrade = root_control_upgrade(
         installed, source_sha=source_sha, reviewed_sha=reviewed_sha)
     for folder in (SCOPED_REQUESTS, SCOPED_TRANSACTIONS, SCOPED_OFFERS):

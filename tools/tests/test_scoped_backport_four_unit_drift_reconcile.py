@@ -14,6 +14,9 @@ from tools import scoped_backport_four_unit_drift_reconcile as fix
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = json.loads((ROOT / "config/production-desired-state.json").read_text())
+# Production uses the PMv4-D signed root overlay, not the older public
+# release-config baseline that still has a 20-container retention limit.
+BASE["max_stopped_rollback_containers"] = 21
 
 
 def candidate(original=None):
@@ -265,3 +268,22 @@ def test_scoped_listeners_only_paused_not_existing_production_services():
     assert fix.SCOPED_PATH not in fix.PROTECTED
     assert fix.SCOPED_TIMER not in fix.PROTECTED
     assert "jason-production-drift-watchdog.timer" not in (fix.SCOPED_PATH, fix.SCOPED_TIMER)
+
+
+def test_reconcile_requires_approved_pmv4_d_rollback_capacity():
+    assert fix.candidate_policy(json.dumps(BASE).encode())[0][
+        "max_stopped_rollback_containers"] == 21
+    for unsupported in (20, 22, 999):
+        policy = deepcopy(BASE)
+        policy["max_stopped_rollback_containers"] = unsupported
+        with pytest.raises(fix.DriftCorrectionDenied,
+                           match="POLICY_ROLLBACK_CAPACITY_CHANGED"):
+            candidate(policy)
+
+
+def test_verified_scoped_backport_installer_root_unit_mode_is_readonly():
+    assert fix.INSTALLED_SYSTEMD_UNIT_MODE == 0o444
+    source = Path(fix.__file__).read_text()
+    assert "read_root(p, mode=INSTALLED_SYSTEMD_UNIT_MODE)" in source
+    assert "INSTALLED_UNIT_BYTES_CHANGED" in source
+    assert "read_root(p, mode=0o644)" not in source
