@@ -36,3 +36,10 @@ def test_invalid_baseline_or_rollback_cap_fail_closed():
              {'schema_version':'1.0','allowed_system_units':[],'max_stopped_rollback_containers':100},
              {'schema_version':'1.0','allowed_system_units':['a','a'],'max_stopped_rollback_containers':20}):
   with pytest.raises(root.ScopedBackportDriftDenied):root.expected_policy(json.dumps(obj).encode())
+
+
+def test_signed_owner_proof_is_restricted_to_the_licensed_jason_owner():
+ source=__import__('inspect').getsource(root.verified_owner)
+ assert 'bee80bdc-ffb0-4c50-b453-c09d4d411f5f' in source
+ assert 'person-entra-bee80bdcffb04c50b453c09d4d411f5f' in source
+ assert 'EXACT_LICENSED_JASON_OWNER_SIGNATURE_REQUIRED' in source

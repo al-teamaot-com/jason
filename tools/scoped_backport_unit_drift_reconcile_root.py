@@ -189,8 +189,10 @@ def verified_owner(packet,plan):
         expected_scope_sha256=plan["scope_sha256"],
         expected_manifest_sha256=digest(canon(plan)),
         expected_freeze_sha256=plan["freeze_sha256"])
-    need(bound["approval_id"]==proof["approval_id"],
-         "OWNER_SIGNATURE_INVALID")
+    need(bound["approval_id"]==proof["approval_id"]
+         and bound.get("owner_oid")=="bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+         and bound.get("owner_principal")=="person-entra-bee80bdcffb04c50b453c09d4d411f5f",
+         "EXACT_LICENSED_JASON_OWNER_SIGNATURE_REQUIRED")
     return proof["approval_id"]
 
 @contextmanager
