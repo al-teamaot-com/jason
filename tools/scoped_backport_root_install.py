@@ -41,6 +41,7 @@ def deny(code: str) -> None:
 
 INSTALL_ROOT = Path("/usr/local/lib/jason/scoped-backport")
 ROOT_POLICY = Path("/etc/jason-owner-release/scoped-backport-installed.json")
+ROOT_PUBLIC_ATTEST = Path("/etc/jason-owner-release/scoped-backport-public-attestation.json")
 ROOT_STATE = Path("/var/lib/jason-scoped-backport")
 PUBLIC = Path("/var/lib/jason/authority/scoped-backport-release")
 LEDGER = Path("/etc/jason-owner-release/scoped-backport-install-ledger")
@@ -186,6 +187,37 @@ def required_github_checks(sha: str) -> None:
         deny("INSTALL_REQUIRED_CI_NOT_GREEN")
 
 
+def build_public_attestation(private_policy: dict) -> dict:
+    """Only non-secret install evidence is readable by the 'al' request client.
+
+    Root's full policy remains private 0600 and is independently attested
+    by the installed host worker before any privileged operation.
+    """
+    allowed = ("trusted_source_sha", "reviewed_ci_sha",
+               "root_handler_sha256")
+    if (private_policy.get("profile") != "governed-scoped-backport-v1"
+            or not all(isinstance(private_policy.get(k), str)
+                       for k in allowed)
+            or not REGEX_SHA.fullmatch(private_policy["trusted_source_sha"])
+            or not REGEX_SHA.fullmatch(private_policy["reviewed_ci_sha"])
+            or not REGEX_HASH.fullmatch(private_policy["root_handler_sha256"])
+            or any(private_policy.get(k) is not True for k in (
+                "native_root_control_supported",
+                "automatic_rollback_recovery_installed",
+                "exact_signed_owner_approval_required"))):
+        deny("INSTALL_PUBLIC_ATTESTATION_POLICY_INVALID")
+    return {
+        "schema_version": "1.0",
+        "profile": "governed-scoped-backport-v1",
+        "trusted_source_sha": private_policy["trusted_source_sha"],
+        "reviewed_ci_sha": private_policy["reviewed_ci_sha"],
+        "root_handler_sha256": private_policy["root_handler_sha256"],
+        "native_root_control_supported": True,
+        "automatic_rollback_recovery_installed": True,
+        "exact_signed_owner_approval_required": True,
+    }
+
+
 def exact_live() -> dict:
     p = subprocess.run(["docker", "inspect", *ORIGINAL_PROTECTED],
                        capture_output=True, check=False, timeout=20)
@@ -208,7 +240,7 @@ def exact_live() -> dict:
 def preflight(sha: str, reviewed_ci_sha: str) -> dict:
     blobs = source_tree(sha, reviewed_ci_sha)
     expected_absent = (
-        INSTALL_ROOT, ROOT_POLICY, ROOT_STATE,
+        INSTALL_ROOT, ROOT_POLICY, ROOT_PUBLIC_ATTEST, ROOT_STATE,
         *(SERVICES / name for name in UNITS),
     )
     if any(p.exists() or p.is_symlink() for p in expected_absent):
@@ -385,12 +417,15 @@ def _write_exclusive(path: Path, raw: bytes, *, owner: int = 0,
         pass
 
 
-def _root_dir(path: Path, *, uid: int = 0, gid: int = 0) -> None:
+def _root_dir(path: Path, *, uid: int = 0, gid: int = 0,
+              mode: int = 0o700) -> None:
+    if mode not in (0o700, 0o755):
+        deny("INSTALL_DIRECTORY_MODE_UNAPPROVED")
     if path.exists() or path.is_symlink():
         deny("INSTALL_ROOT_DIRECTORY_REPLAY")
-    path.mkdir(mode=0o700)
+    path.mkdir(mode=mode)
     os.chown(path, uid, gid)
-    os.chmod(path, 0o700)
+    os.chmod(path, mode)
 
 
 def _audit(path: Path, data: dict) -> None:
@@ -435,6 +470,15 @@ def rollback_partial_install(blobs: dict[str, bytes],
                     "jason-scoped-backport-recovery.service",
                     "jason-scoped-backport-requests.service"],
                    capture_output=True, timeout=30, check=False)
+    if ROOT_PUBLIC_ATTEST.exists() or ROOT_PUBLIC_ATTEST.is_symlink():
+        if ROOT_PUBLIC_ATTEST.is_symlink():
+            deny("INSTALL_ROLLBACK_PUBLIC_ATTESTATION_LINK")
+        pub = json.loads(ROOT_PUBLIC_ATTEST.read_text())
+        if (pub.get("trusted_source_sha") != evidence["source_sha"]
+                or ROOT_PUBLIC_ATTEST.stat().st_uid != 0
+                or pub.get("reviewed_ci_sha") != evidence["reviewed_ci_sha"]):
+            deny("INSTALL_ROLLBACK_FOREIGN_PUBLIC_ATTESTATION")
+        ROOT_PUBLIC_ATTEST.unlink()
     if ROOT_POLICY.exists() or ROOT_POLICY.is_symlink():
         if ROOT_POLICY.is_symlink():
             deny("INSTALL_ROLLBACK_ROOT_POLICY_LINK")
@@ -543,10 +587,10 @@ def install(sha: str, reviewed_ci_sha: str, evidence: dict,
     })
     blobs = source_tree(sha, reviewed_ci_sha)
     try:
-        _root_dir(INSTALL_ROOT)
-        _root_dir(INSTALL_ROOT / "tools")
-        _root_dir(INSTALL_ROOT / "implementation")
-        _root_dir(INSTALL_ROOT / "implementation/kernel")
+        _root_dir(INSTALL_ROOT, mode=0o755)
+        _root_dir(INSTALL_ROOT / "tools", mode=0o755)
+        _root_dir(INSTALL_ROOT / "implementation", mode=0o755)
+        _root_dir(INSTALL_ROOT / "implementation/kernel", mode=0o755)
         for name in FILES:
             dest = INSTALL_ROOT / name
             _write_exclusive(dest, blobs[name])
@@ -587,6 +631,10 @@ def install(sha: str, reviewed_ci_sha: str, evidence: dict,
         _write_exclusive(ROOT_POLICY,
                          json.dumps(policy, sort_keys=True, indent=2).encode()+b"\n",
                          mode=0o600)
+        public_attestation = build_public_attestation(policy)
+        _write_exclusive(ROOT_PUBLIC_ATTEST,
+                         json.dumps(public_attestation, sort_keys=True, indent=2).encode()+b"\n",
+                         mode=0o644)
         subprocess.run(["systemctl", "daemon-reload"], check=True, timeout=30)
         subprocess.run(["systemctl", "enable", "--now",
                         "jason-scoped-backport-recovery.timer",

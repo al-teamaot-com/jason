@@ -19,8 +19,10 @@ from uuid import uuid4
 
 from tools.scoped_backport_release import validate_offer, ScopedBackportDenied, deny
 
-ROOT_HANDLER = Path("/usr/local/lib/jason/scoped-backport/host_request_worker.py")
-ROOT_POLICY = Path("/etc/jason-owner-release/scoped-backport-installed.json")
+ROOT_HANDLER = Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_native_root.py")
+# A minimal root-owned, non-secret read-only public receipt allows the local
+# operator to queue typed requests. The complete policy stays root-private.
+ROOT_POLICY = Path("/etc/jason-owner-release/scoped-backport-public-attestation.json")
 SPOOL = Path("/var/lib/jason/authority/scoped-backport-release/requests")
 ACTIONS = frozenset({"scoped_backport_stage", "scoped_backport_promote",
                      "scoped_backport_recover"})
@@ -35,6 +37,10 @@ def _root_file(path: Path, *, max_bytes=200000) -> bytes:
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         info = os.fstat(fd)
+        parent = path.parent.lstat()
+        if (path.parent.is_symlink() or not stat.S_ISDIR(parent.st_mode)
+                or parent.st_uid != 0 or parent.st_mode & 0o022):
+            deny("ROOT_ATTESTATION_PARENT_UNTRUSTED")
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
                 or info.st_mode & 0o022 or info.st_nlink != 1
                 or not 1 <= info.st_size <= max_bytes):
@@ -57,7 +63,8 @@ def installed_attestation(*, handler: Path = ROOT_HANDLER,
     except (ValueError, OSError) as exc:
         raise ScopedBackportDenied("SCOPED_BACKPORT_ROOT_POLICY_UNREADABLE") from exc
     expected = {"schema_version", "profile", "trusted_source_sha",
-                "root_handler_sha256", "native_root_control_supported",
+                "reviewed_ci_sha", "root_handler_sha256",
+                "native_root_control_supported",
                 "automatic_rollback_recovery_installed",
                 "exact_signed_owner_approval_required"}
     if (not isinstance(doc, dict) or set(doc) != expected
@@ -65,6 +72,8 @@ def installed_attestation(*, handler: Path = ROOT_HANDLER,
             or doc["profile"] != "governed-scoped-backport-v1"
             or not isinstance(doc["trusted_source_sha"], str)
             or not SHA.fullmatch(doc["trusted_source_sha"])
+            or not isinstance(doc["reviewed_ci_sha"], str)
+            or not SHA.fullmatch(doc["reviewed_ci_sha"])
             or not isinstance(doc["root_handler_sha256"], str)
             or not HEX.fullmatch(doc["root_handler_sha256"])
             or doc["native_root_control_supported"] is not True

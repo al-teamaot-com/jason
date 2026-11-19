@@ -224,6 +224,17 @@ class NativeScopedBackportHost:
         for p in (INSTALL_ROOT, INSTALL_ROOT / "tools"):
             if p.is_symlink() or not p.is_dir() or p.stat().st_uid != 0 or p.stat().st_mode & 0o022:
                 deny("ROOT_EXECUTABLE_DIRECTORY_UNTRUSTED")
+        # Public receipt can be read by the operator but cannot be
+        # independently rewritten by that operator. Root verifies it against
+        # the full private source/role policy before consuming queued work.
+        from tools.scoped_backport_release_request import installed_attestation
+        public = installed_attestation()
+        for field in ("profile", "trusted_source_sha", "reviewed_ci_sha",
+                      "root_handler_sha256", "native_root_control_supported",
+                      "automatic_rollback_recovery_installed",
+                      "exact_signed_owner_approval_required"):
+            if public[field] != policy[field]:
+                deny("PUBLIC_AND_PRIVATE_INSTALL_TRUST_DIVERGED")
         for argv in (("systemctl", "is-enabled", TIMER),
                      ("systemctl", "is-active", TIMER),
                      ("systemctl", "is-enabled", REQUEST_PATH),
