@@ -60,6 +60,9 @@ jobs:
       - name: Catalog root fresh-process trust verification and exact rollback
         run: |
           python -m pytest -q tools/tests/test_catalog_root_consumption_ledger_repair_v2_once.py
+      - name: Catalog exact approved licensed-Owner test lineage and root admission trust repair
+        run: |
+          python -m pytest -q tools/tests/test_catalog_owner_canary_pinned_admission.py tools/tests/test_catalog_admission_owner_canary_root_repair_once.py
       - name: Catalog Owner operator root-private transaction boundary and native one-use enforcement
         run: |
           python -m pytest -q tools/tests/test_catalog_owner_renewal_operator_v3.py
@@ -133,7 +136,8 @@ jobs:
             tools/tests/test_scoped_backport_native_worker.py \
             tools/tests/test_scoped_backport_root_install.py \
             tools/tests/test_scoped_backport_owner_local_approval.py \
-            tools/tests/test_scoped_backport_four_unit_drift_reconcile.py
+            tools/tests/test_scoped_backport_four_unit_drift_reconcile.py \
+            tools/tests/test_scoped_backport_projection_helper_repair.py
       - name: Microsoft group dormant and exact AOT activation composition
         run: |
           python -m pytest -q implementation/runtime_service/tests/test_composition.py -k group_admin
