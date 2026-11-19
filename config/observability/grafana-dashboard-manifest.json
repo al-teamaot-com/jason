@@ -103,6 +103,12 @@
       "uid": "jason-security-learning"
     },
     {
+      "path": "infrastructure/showcase/grafana/dashboards/jason-sharepoint-site-access.json",
+      "sha256": "51e90a3315c2e608f47423eada2e56a02ccc54e9b89fbfc41f22883ee3f696bb",
+      "title": "Jason SharePoint Site Access",
+      "uid": "jason-sharepoint-site-access"
+    },
+    {
       "path": "infrastructure/showcase/grafana/dashboards/jason-support-todo.json",
       "sha256": "75cfce54e4faae07c969fa8f8a199434765fff32e0d25947675c78090f43a752",
       "title": "Jason Support & To Do",

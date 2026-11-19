@@ -22,6 +22,7 @@ from connectors.core.contracts import (
 )
 
 from .sharepoint_reader import MicrosoftGraphSharePointReader
+from .site_access_registry import SharePointSiteAccess
 
 
 class TrustedIdentityBindings(Protocol):
@@ -59,6 +60,7 @@ class GovernedSharePointConnector:
     audit: AuditSink
     # An optional trusted AOT-only service identity; absent by default.
     organization_bindings: TrustedOrganizationServiceBindings | None = None
+    site_access: SharePointSiteAccess | None = None
 
     provider_name = "microsoft_graph"
     capabilities = frozenset({
@@ -100,9 +102,10 @@ class GovernedSharePointConnector:
             raise ConnectorAuthorizationError(
                 "Organization-scoped SharePoint reads require an approved AOT service binding"
             )
-        if context.capability not in {
-            "knowledge.document.metadata.read", "knowledge.document.content.read"
-        }:
+        needs_site_search = context.capability in {
+            "knowledge.library.search", "knowledge.document.search",
+        }
+        if needs_site_search and self.site_access is None:
             raise ConnectorAuthorizationError(
                 "Organization-scoped reader may not enumerate document libraries"
             )
@@ -115,12 +118,18 @@ class GovernedSharePointConnector:
             or getattr(binding, "status", None) != "active"
             or getattr(binding, "organization_id", None) != "aot"
             or getattr(binding, "jason_identity_id", None) != context.principal_id
-            or getattr(binding, "profile", None) != "aot-approved-document-read"
+            or getattr(binding, "profile", None) not in {
+                "aot-approved-document-read", "aot-approved-site-read"
+            }
         ):
             raise ConnectorAuthorizationError("AOT document service identity is not validated")
         tenant_id = str(getattr(binding, "microsoft_tenant_id", "") or "").strip()
         if not tenant_id:
             raise ConnectorAuthorizationError("AOT document tenant binding is missing")
+        if needs_site_search and getattr(binding, "profile", None) != "aot-approved-site-read":
+            raise ConnectorAuthorizationError(
+                "Organization-scoped reader may not enumerate document libraries"
+            )
         return tenant_id
 
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
@@ -139,6 +148,10 @@ class GovernedSharePointConnector:
         site_id = args["site_id"]
         drive_id = args.get("drive_id")
         item_id = args.get("item_id")
+        if self.site_access is not None:
+            # Mandatory runtime site switch. This is a second independent
+            # authorization boundary, not a substitute for document policy.
+            self.site_access.require_site_access(tenant_id=tenant_id, site_id=site_id)
         allowed_result = self.authorizer.authorized(
             principal_id=request.context.principal_id,
             organization_id=request.context.organization_id,

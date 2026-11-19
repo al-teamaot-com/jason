@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Jason SharePoint site registration (new sites disabled)
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 America/New_York
+Persistent=true
+RandomizedDelaySec=0
+Unit=jason-sharepoint-discovery.service
+
+[Install]
+WantedBy=timers.target

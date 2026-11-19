@@ -247,3 +247,36 @@ def test_aot_service_role_cannot_override_client_bound_principal():
             arguments={"site_id": "site", "drive_id": "drive", "item_id": "document"},
         ))
     assert reader.calls == [] and authorizer.calls == [] and audit.calls == []
+
+
+def test_site_scoped_aot_workload_can_enumerate_only_enabled_site(tmp_path):
+    from connectors.microsoft_graph.site_access_registry import SharePointSiteAccess
+    import dataclasses
+    registry = SharePointSiteAccess(str(tmp_path / "site-access.db"), tenant_id=TENANT)
+    registry.discover([{"tenant_id": TENANT, "site_id": "aot-site",
+                        "name": "AOT Accounting",
+                        "web_url": "https://absolnet.sharepoint.com/sites/AOTAccountingDocuments"}])
+    binding = dataclasses.replace(AotServiceBinding(), profile="aot-approved-site-read")
+    connector, reader, authorizer, audit, bindings = make_service_connector(
+        org_binding=binding)
+    connector = dataclasses.replace(connector, site_access=registry)
+    with pytest.raises(PermissionError):
+        connector.execute(ConnectorRequest(
+            context=org_context("knowledge.document.metadata.read"),
+            arguments={"site_id": "aot-site", "drive_id": "drive", "item_id": "file"}))
+    assert reader.calls == []
+    registry.set_enabled(site_id="aot-site", enabled=True,
+                         actor="verified-owner", approval_reference="exact-site-toggle",
+                         expected_revision=1)
+    result = connector.execute(ConnectorRequest(
+        context=org_context("knowledge.document.metadata.read"),
+        arguments={"site_id": "aot-site", "drive_id": "drive", "item_id": "file"}))
+    assert result.data["item"]["id"] == "file"
+    registry.set_enabled(site_id="aot-site", enabled=False,
+                         actor="verified-owner", approval_reference="exact-revoke",
+                         expected_revision=2)
+    with pytest.raises(PermissionError):
+        connector.execute(ConnectorRequest(
+            context=org_context("knowledge.document.metadata.read"),
+            arguments={"site_id": "aot-site", "drive_id": "drive", "item_id": "file"}))
+    assert len(reader.calls) == 1
