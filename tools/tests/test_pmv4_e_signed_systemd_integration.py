@@ -145,8 +145,8 @@ class CoupledHost(Host):
     def verify(self, bundle, manifest):
         if bundle.name == CANDIDATE:
             return (not self.fail_acceptance
-                    and self.systemd.verify_final(replacement=True))
-        return self.systemd.verify_final(replacement=False)
+                    and self.unit_surface.verify_final(replacement=True))
+        return self.unit_surface.verify_final(replacement=False)
 
 
 def check_old_restored(host):
