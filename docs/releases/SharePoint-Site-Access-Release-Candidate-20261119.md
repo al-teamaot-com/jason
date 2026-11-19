@@ -37,3 +37,14 @@ One reusable Jason workload identity for every AOT-owned SharePoint site; site-l
 **Release mechanism constraint:** The current protected-main Release Manager deploys an exact full main SHA, including unrelated already-merged changes. This branch is not a production-eligible release candidate until protected-main integration, complete scope inventory/overlap review, isolated preproduction and exact-SHA Owner freeze exception. Avoid deploying from feature worktree or using a sidecar as an unauthorized alternate production lane.
 
 **No production authorization is implied by the owner's instruction to finish engineering.** If any gate cannot be proven, remain in source-review state rather than claim operational readiness.
+
+## Concurrent PR #2455 overlap review (2026-11-19)
+
+Reviewed the exact changed-file patches in independent IT Glue write PR #2455:
+- `implementation/connectors/core/openbao_secrets.py`: additive `it_glue.readwrite` secret contract.
+- `tools/provider_secret_provision.py`: additive `it_glue_write` AppRole provider profile.
+- `implementation/runtime_service/src/jason_runtime/composition.py`: separate disabled-by-default IT Glue write registration and invoker.
+
+Our integration's changes in those same three files add the dedicated `microsoft_graph.sharepoint_read` secret contract/provider and dormant AOT SharePoint reader registration, while preserving previously merged SharePoint writer, Microsoft group and Constant Contact code. **No IT Glue write changes are merged, authorized or activated by this integration.** The overlapping IT Glue PR must be independently re-reviewed for concurrent source changes at its merge/release time; this records coordination, not a waiver.
+
+Integration coordination: #2455
