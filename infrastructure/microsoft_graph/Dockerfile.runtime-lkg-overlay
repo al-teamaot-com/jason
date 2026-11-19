@@ -1,0 +1,9 @@
+# Source-isolated AOT Entra group management preproduction candidate.
+# Reuses EXACT running LKG runtime image, not moving registry tags.
+FROM sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132
+USER root
+COPY --chown=0:1000 implementation/ /app/implementation/
+COPY --chown=0:1000 config/ /app/config/
+RUN chmod -R go-w,g+rX /app/implementation /app/config
+LABEL org.opencontainers.image.revision="688a90654313405cdc7a8be7fdf3e8595ca4cdf2"
+USER 1000:1000

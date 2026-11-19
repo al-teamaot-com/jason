@@ -1,0 +1,5 @@
+# M365 group management source-isolated overlay (STAGING ONLY)
+
+These offline Dockerfiles are for isolated engineering tests, NOT a production deployment mechanism. They are anchored to the exact already-running LKG image IDs and reproduce the baseline application source plus the narrowly reviewed PR #2454 group functionality. They do not install third-party packages, grant permissions, read protected secrets, change production containers, or constitute an approved release.
+
+Build each with Docker build context set to the exact approved LKG-backport Git worktree. Verify immutable labels, requirements and behavior in separate ephemeral, network-disabled containers. Actual production promotion must still pass the native Release Manager owner-signed exact-SHA transaction, including correct source labels, live LKG images, OpenBao AppRole mounts, release-control readback, test-ticket continuity, rollback and freeze preservation. Never promote from a moving branch or claim this overlay alone provides an independently hosted service; its source is isolated but execution remains linked to the central runtime/MCP processes.
