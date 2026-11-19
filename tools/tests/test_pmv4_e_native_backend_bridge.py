@@ -89,3 +89,17 @@ def test_replay_or_wrong_scope_cannot_touch_systemd(tmp_path,monkeypatch):
         promote(callback)
     assert sys.active==set(adapter.OLD_USER+adapter.OLD_ROOT)
     assert not list(u.iterdir())
+
+
+def test_backend_bridge_rechecks_live_code_before_marker(tmp_path,monkeypatch):
+    callback,native,sys,u,s=make_bridge(tmp_path,monkeypatch)
+    native.verify_live_controlplane_alignment=lambda *args:False
+    with pytest.raises(adapter.StageEAdapterDenied,
+                       match="INSTALLED_CONTROLPLANE_NOT_EXACT"):
+        promote(callback)
+    assert native.marker is False
+    assert native.policy=="replacement"
+    result=recover(callback)
+    assert result["status"]=="native_stage_e_six_unit_rollback_verified"
+    assert sys.active==set(adapter.OLD_USER+adapter.OLD_ROOT)
+    assert native.policy=="legacy"

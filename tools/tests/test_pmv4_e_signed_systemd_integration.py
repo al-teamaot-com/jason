@@ -87,6 +87,11 @@ class CoupledHost(Host):
             lambda candidate, rollback, scope, before: (
                 (candidate, rollback, scope) ==
                 (CANDIDATE, ROLLBACK, self.scope)))
+        self.native.verify_live_controlplane_alignment = (
+            lambda candidate, rollback, scope: (
+                self.native.controlplane_aligned
+                and (candidate,rollback,scope) ==
+                (CANDIDATE,ROLLBACK,self.scope)))
         self.native.native_started_receipt_verified = self.signed_started
         self.native.original_signed_started_receipt_verified = (
             lambda rollback, scope: self.signed_started(

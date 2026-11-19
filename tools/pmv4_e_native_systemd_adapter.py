@@ -135,6 +135,16 @@ class StageEUnitAdapter:
                 elif step=="commit_exact_policy_and_convergence":
                     self.backend.commit_reviewed_policy_and_code(
                         candidate_sha,rollback_sha,scope_sha256)
+                    # Source-only controls cannot prove installed state.
+                    # The real root host MUST read back the exact installed
+                    # Stage E-aware watchdog, Release Manager and reconciler
+                    # before publishing an accepted marker or starting new
+                    # dispatch. A declared plan is not live acceptance.
+                    require(
+                        self.backend.verify_live_controlplane_alignment(
+                            candidate_sha,rollback_sha,scope_sha256) is True,
+                        "INSTALLED_CONTROLPLANE_NOT_EXACT",
+                    )
                 elif step=="commit_root_accepted_marker":
                     self.backend.commit_reviewed_root_marker(
                         candidate_sha,rollback_sha,scope_sha256)
