@@ -43,6 +43,7 @@ ROOT_TO_INSTALL=(
     "tools/pmv4_e_native_backend_bridge.py",
     "tools/pmv4_e_native_release_contract.py",
     "tools/pmv4_e_native_root_manifest_attestation.py",
+    "tools/pmv4_e_signed_native_ledger.py",
 )
 ROOT_COMPONENTS_PREINSTALLED=(
     "tools/independent_component_release.py",
