@@ -28,6 +28,7 @@ from typing import Any
 from uuid import uuid4
 
 REPO = Path(__file__).resolve().parents[1]
+SOURCE_CACHE = Path("/home/al/.local/lib/jason/engineering-source-repo")
 sys.path.insert(0, str(REPO))
 
 
@@ -82,7 +83,8 @@ ACTION = "INSTALL-EXACT-SCOPED-BACKPORT-ROOT-V1"
 
 
 def git(*args: str) -> bytes:
-    p = subprocess.run(["git", "-C", str(REPO), *args],
+    p = subprocess.run(["git", "-c", f"safe.directory={REPO}",
+                        "-C", str(REPO), *args],
                        capture_output=True, check=False, timeout=30)
     if p.returncode:
         deny("INSTALL_PROTECTED_GIT_UNAVAILABLE")
@@ -116,6 +118,15 @@ def source_tree(sha: str, reviewed_ci_sha: str) -> dict[str, bytes]:
         if (REPO / name).read_bytes() != blob:
             deny("INSTALL_SOURCE_BLOB_DIFFERENT")
         result[name] = blob
+    # The operator executes this bootstrap directly from the clean main
+    # worktree. Bind its own executable bytes to the exact CI-reviewed SHA
+    # too, without installing an additional privileged bootstrap copy.
+    installer_path = "tools/scoped_backport_root_install.py"
+    main_installer = git("show", sha + ":" + installer_path)
+    reviewed_installer = git("show", reviewed_ci_sha + ":" + installer_path)
+    if (main_installer != reviewed_installer
+            or (REPO / installer_path).read_bytes() != main_installer):
+        deny("INSTALLER_REVIEWED_CI_SOURCE_MISMATCH")
     # Audit-only: the imported package has now been byte-verified against
     # the immutable protected-main Git object before executing module code.
     from tools.scoped_backport_release import source_admission
@@ -127,13 +138,14 @@ def source_tree(sha: str, reviewed_ci_sha: str) -> dict[str, bytes]:
 
 def verified_release_objects_available(sha: str, reviewed_ci_sha: str) -> None:
     """Source evidence must already be prefetched by unprivileged engineering."""
-    cache = Path("/home/al/.local/lib/jason/engineering-source-repo")
+    cache = SOURCE_CACHE
     if cache.is_symlink() or not (cache / ".git").exists():
         deny("INSTALL_REVIEWED_SOURCE_CACHE_UNAVAILABLE")
     manifest = json.loads((REPO / "config/scoped-backport-m365-release.json").read_text())
     for revision in (sha, reviewed_ci_sha, manifest["candidate_sha"],
                      manifest["rollback_sha"], manifest["reviewed_feature_sha"]):
-        p = subprocess.run(["git", "-C", str(cache), "cat-file", "-e",
+        p = subprocess.run(["git", "-c", f"safe.directory={cache}",
+                            "-C", str(cache), "cat-file", "-e",
                             revision + "^{commit}"], capture_output=True,
                            check=False, timeout=20)
         if p.returncode:

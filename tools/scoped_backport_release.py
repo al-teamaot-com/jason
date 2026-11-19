@@ -205,7 +205,8 @@ def _git(repo: Path, *args: str) -> bytes:
 
 
 def _ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
-    p = subprocess.run(["git", "-C", str(repo), "merge-base",
+    p = subprocess.run(["git", "-c", f"safe.directory={repo}",
+                        "-C", str(repo), "merge-base",
                         "--is-ancestor", ancestor, descendant],
                        capture_output=True, timeout=20, check=False)
     return p.returncode == 0

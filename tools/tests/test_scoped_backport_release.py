@@ -364,3 +364,15 @@ def test_main_mismatch_is_denied(monkeypatch):
     _source_git_with_pinned_main(monkeypatch, MANIFEST)
     with pytest.raises(sb.ScopedBackportDenied, match="PROTECTED_MAIN_MOVED"):
         sb.source_admission(ROOT, trusted_main_sha="f" * 40)
+
+
+def test_root_source_ancestry_uses_exact_repository_scope(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(sb.subprocess, "run", fake_run)
+    assert sb._ancestor(ROOT, "1" * 40, "2" * 40) is True
+    assert calls[0][:5] == ["git", "-c", f"safe.directory={ROOT}",
+                            "-C", str(ROOT)]
