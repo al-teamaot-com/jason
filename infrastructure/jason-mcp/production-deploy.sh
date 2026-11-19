@@ -125,7 +125,12 @@ policy = _validated_mobile_release_policy(
     repo / "config" / "mobile-release-approval-policy.json",
     source_v2_required=True,
 )
-print("admin-separated-v1" if policy["mode"] == "admin_approver_separated" else "")
+from jason_owner_auth_profile import declared_jason_owner_profile
+historical = "admin-separated-v1" if policy["mode"] == "admin_approver_separated" else ""
+licensed = declared_jason_owner_profile(repo)
+if licensed and historical:
+    raise SystemExit("JASON_OWNER_SOURCE_PROFILE_CONFLICT")
+print(licensed or historical)
 PY_ADMIN_ROLE
 )" || exit 2
 if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then

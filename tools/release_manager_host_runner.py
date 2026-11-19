@@ -3333,10 +3333,15 @@ def native_deploy_environment(
     if os.environ.get("JASON_RELEASE_MOBILE_APPROVAL_MODE") not in (None, mobile_policy["mode"]):
         raise ReleaseManagerError("invoking release approval mode conflicts with immutable candidate")
     env["JASON_RELEASE_MOBILE_APPROVAL_MODE"] = str(mobile_policy["mode"])
-    expected_admin = (
+    from jason_owner_auth_profile import declared_jason_owner_profile
+    historical_admin = (
         "admin-separated-v1"
         if mobile_policy["mode"] == "admin_approver_separated" else ""
     )
+    licensed_owner = declared_jason_owner_profile(candidate_tree)
+    if historical_admin and licensed_owner:
+        raise ReleaseManagerError("Jason Owner source policy conflicts with legacy admin profile")
+    expected_admin = licensed_owner or historical_admin
     if os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE") not in (None, expected_admin):
         raise ReleaseManagerError(
             "admin approver profile cannot override exact source policy"

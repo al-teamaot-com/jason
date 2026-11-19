@@ -4289,8 +4289,35 @@ _UNSUPERVISED_COMPONENT_BLOCK_PATTERNS = (
 )
 
 
+def _licensed_jason_owner() -> tuple[str, str]:
+    """Authenticate Jason's exact licensed Owner, not the Entra admin login.
+
+    The upstream signed OAuth middleware independently validates the bearer,
+    tenant, active Entra-to-Jason binding and active human identity. This check
+    must still bind the exact licensed-owner object, its unscoped Jason
+    principal and organization; an email string alone conveys no authority.
+    """
+    from jason_mcp.release_owner_identity import (
+        LICENSED_OWNER_OID, LICENSED_OWNER_PRINCIPAL, OWNER_TENANT_ID,
+    )
+
+    principal, organization, assurance, client_id = _authenticated_write_identity()
+    token = get_access_token()
+    claims = (getattr(token, "claims", None) or {}) if token is not None else {}
+    if (organization != "aot" or assurance != "entra-oauth-bearer"
+            or client_id is not None or principal != LICENSED_OWNER_PRINCIPAL
+            or claims.get("tid") != OWNER_TENANT_ID
+            or claims.get("oid") != LICENSED_OWNER_OID):
+        raise PermissionError("JASON_LICENSED_OWNER_REQUIRED")
+    return principal, organization
+
+
 def _authority_admin_owner() -> tuple[str, str]:
-    """Administer exact grants with the authenticated privileged account only.
+    """Authorize exact Jason Owner controls with an explicit policy profile.
+
+    `jason-owner-v1` binds only the licensed Jason Owner. Historical profiles
+    stay available for reviewed rollback until separately retired; they are
+    not silently promoted or used as evidence for a new production grant.
 
     V4/V4.1 is a distinct *opt-in* release policy. It does not remap the admin
     Entra identity into the routine technician account or write identity
@@ -4299,8 +4326,10 @@ def _authority_admin_owner() -> tuple[str, str]:
     """
     principal, organization, assurance, client_id = _authenticated_write_identity()
     mode = os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE", "").strip()
-    if mode not in {"", "admin-separated-v1"}:
+    if mode not in {"", "admin-separated-v1", "jason-owner-v1"}:
         raise PermissionError("AUTHORITY_GRANT_ADMIN_POLICY_INVALID")
+    if mode == "jason-owner-v1":
+        return _licensed_jason_owner()
     if mode == "admin-separated-v1":
         from uuid import UUID
         from jason_runtime.mobile_release_approval import read_mobile_release_policy
@@ -5215,6 +5244,8 @@ def run_autonomy_execution_acceptance() -> dict[str, Any]:
 
 
 def _component_approval_owner() -> tuple[str, str]:
+    if os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE", "").strip() == "jason-owner-v1":
+        return _licensed_jason_owner()
     principal, organization, _, _ = _authenticated_write_identity()
     owners = approval_owner_identities()
     if not owners or principal not in owners:
@@ -5223,6 +5254,9 @@ def _component_approval_owner() -> tuple[str, str]:
 
 
 def _release_approval_owner() -> tuple[str, str]:
+    if os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE", "").strip() == "jason-owner-v1":
+        return _licensed_jason_owner()
+    # Historical profiles remain rollback-compatible until independently retired.
     # Unlike global authority-grant administration, release approval may be
     # performed by the exact licensed Owner's active Entra OAuth subject. The
     # Entra/Jason identity middleware above independently verifies bearer
