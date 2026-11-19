@@ -211,7 +211,9 @@ def test_controlplane_install_readback_denied_before_accepted_marker():
                        match="INSTALLED_CONTROLPLANE_NOT_EXACT"):
         promote(backend)
     assert backend.marker is False
-    assert backend.active==set(adapter.OLD)
+    # The normal native signed rollback, not this callback, restores PMv3.
+    # All legacy triggers are stopped at this phase; new dispatch is inert.
+    assert backend.active==set()
     assert "commit_exact_policy_and_convergence" not in backend.steps
     # The signed native transaction will invoke exact inverse; no marker
     # or unreviewed replacement trigger was ever accepted.
