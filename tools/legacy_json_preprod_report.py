@@ -45,13 +45,13 @@ def generate() -> dict:
         "- Total real executed pytest cases: **"+str(tests["junit_test_totals"]["passed"])+" passed**, "+str(tests["junit_test_totals"]["failed"])+" failed, "+str(tests["junit_test_totals"]["errors"])+" errors, "+str(tests["junit_test_totals"]["skipped"])+" skipped.",
         "- Shared isolated checkpoint/identity/recovery suites: **"+str(tests["shared_recovery_test_totals"]["passed"])+" passed**; these are cross-cutting, not 19 individual live crash-recovery certifications.",
         "- Governance-boundary negative tests: **"+str(tests["governance_boundary_test_totals"]["passed"])+" passed**.",
-        "- Per-playbook synthetic source test files exercised: **19/19**. Real provider full behavioral parity: **0/19 accepted**.",
+        "- Per-playbook synthetic source test files exercised: **19/19**. Exact isolated immutable draft re-open/idempotency probes **19/19 PASS**. Real provider full behavioral parity: **0/19 accepted**.",
         "",
-        "| Candidate | Executed associated synthetic tests | Isolated source tests | End-to-end restart / recovery | Provider-backed preproduction |",
-        "|---|---:|---|---|---|",
+        "| Candidate | Associated synthetic tests | Source tests | Isolated draft restart | Provider job restart / recovery | Provider preproduction |",
+        "|---|---:|---|---|---|---|",
     ]
     for k,v in sorted(tests["cases"].items()):
-        lines.append("| `"+k+"` | "+str(v["executed_test_cases"]["passed"])+" | "+v["isolated_source_tests"]+" | Not fully verified | Blocked by Owner/target boundary |")
+        lines.append("| `"+k+"` | "+str(v["executed_test_cases"]["passed"])+" | "+v["isolated_source_tests"]+" | "+v["isolated_draft_interruption_reopen"]+" | Not end-to-end verified | Blocked by Owner/target boundary |")
     lines.extend([
         "",
         "## Readiness and real blockers",

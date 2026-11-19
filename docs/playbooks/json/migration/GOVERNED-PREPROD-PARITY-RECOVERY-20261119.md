@@ -10,32 +10,32 @@
 
 ## Executed non-provider parity/recovery matrix
 - Source-only / synthetic matrix: **isolated_synthetic_matrix_pass**.
-- Total real executed pytest cases: **527 passed**, 0 failed, 0 errors, 0 skipped.
-- Shared isolated checkpoint/identity/recovery suites: **96 passed**; these are cross-cutting, not 19 individual live crash-recovery certifications.
+- Total real executed pytest cases: **546 passed**, 0 failed, 0 errors, 0 skipped.
+- Shared isolated checkpoint/identity/recovery suites: **115 passed**; these are cross-cutting, not 19 individual live crash-recovery certifications.
 - Governance-boundary negative tests: **16 passed**.
-- Per-playbook synthetic source test files exercised: **19/19**. Real provider full behavioral parity: **0/19 accepted**.
+- Per-playbook synthetic source test files exercised: **19/19**. Exact isolated immutable draft re-open/idempotency probes **19/19 PASS**. Real provider full behavioral parity: **0/19 accepted**.
 
-| Candidate | Executed associated synthetic tests | Isolated source tests | End-to-end restart / recovery | Provider-backed preproduction |
-|---|---:|---|---|---|
-| `backupiq_endpoint_backup` | 18 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `client_information_request` | 135 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `datto_edr_av` | 12 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `disk_bad_block_event_7` | 15 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `dns_agent_diagnostic` | 15 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `drmm_recent_alert_reconciliation` | 19 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `gpt_insights_tech_assist` | 25 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `idle_log_off` | 15 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `jason_activity_log` | 16 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `low_disk_space` | 16 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `offline_ticket_context_augmentation` | 17 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `post_error_investigation` | 15 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `security_log_self_heal` | 20 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `unexpected_shutdown` | 21 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `unsupported_readonly_triage_note` | 10 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `unsupported_triage_human_review` | 10 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `vulscan_missing_patch` | 19 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `vulscan_multi_device_split` | 14 | pass | Not fully verified | Blocked by Owner/target boundary |
-| `windows_time_source` | 38 | pass | Not fully verified | Blocked by Owner/target boundary |
+| Candidate | Associated synthetic tests | Source tests | Isolated draft restart | Provider job restart / recovery | Provider preproduction |
+|---|---:|---|---|---|---|
+| `backupiq_endpoint_backup` | 18 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `client_information_request` | 135 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `datto_edr_av` | 12 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `disk_bad_block_event_7` | 15 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `dns_agent_diagnostic` | 15 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `drmm_recent_alert_reconciliation` | 19 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `gpt_insights_tech_assist` | 25 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `idle_log_off` | 15 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `jason_activity_log` | 16 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `low_disk_space` | 16 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `offline_ticket_context_augmentation` | 17 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `post_error_investigation` | 15 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `security_log_self_heal` | 20 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `unexpected_shutdown` | 21 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `unsupported_readonly_triage_note` | 10 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `unsupported_triage_human_review` | 10 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `vulscan_missing_patch` | 19 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `vulscan_multi_device_split` | 14 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
+| `windows_time_source` | 38 | pass | pass | Not end-to-end verified | Blocked by Owner/target boundary |
 
 ## Readiness and real blockers
 The live Owner admin status returned `AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED`. No exact provider-bound isolated test target was independently verified. These two facts prevent running real modifying preproduction tests. A named client or device inferred from production search results is **not** equivalent to an authorized test target; no such production target was used.

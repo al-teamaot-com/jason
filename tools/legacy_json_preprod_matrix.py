@@ -43,6 +43,7 @@ CASE_TESTS = {
 
 SHARED_RECOVERY = (
     "tests/test_legacy_json_isolated_preprod_acceptance.py",
+    "tests/test_legacy_json_preprod_recovery_all19.py",
     "tests/test_all_legacy_json_candidates_isolated_registry.py",
     "tests/test_json_governed_shadow_integration.py",
     "tests/test_json_playbook_isolated_trace.py",
@@ -70,6 +71,23 @@ def _counts(junit: Path) -> tuple[dict[str, dict[str, int]], dict[str,int]]:
         totals[kind] += 1
         totals["executed"] += 1
     return per_file,totals
+
+
+def _exact_draft_reopen_results(junit: Path) -> dict[str, str]:
+    """Evidence of each source draft's immutable restart, NOT job recovery."""
+    output = {}
+    prefix = "test_exact_candidate_draft_reopen_no_replay_or_mutation["
+    for tc in ET.parse(junit).getroot().iter("testcase"):
+        name = tc.attrib.get("name", "")
+        if not name.startswith(prefix) or not name.endswith("]"):
+            continue
+        ident = name[len(prefix):-1]
+        if ident in output:
+            raise ValueError("PREPROD_DUPLICATE_DRAFT_REOPEN_PROBE")
+        failed = any(tc.find(tag) is not None
+                     for tag in ("error", "failure", "skipped"))
+        output[ident] = "failed_or_skipped" if failed else "pass"
+    return output
 
 
 def run(*, root: Path = ROOT) -> dict:
@@ -105,6 +123,7 @@ def run(*, root: Path = ROOT) -> dict:
     if not junit.is_file():
         raise ValueError("PREPROD_MATRIX_JUNIT_MISSING")
     file_counts, totals=_counts(junit)
+    per_source_reopen=_exact_draft_reopen_results(junit)
     outcomes={}
     for entry in ledger["entries"]:
         names=CASE_TESTS[entry["id"]]
@@ -117,6 +136,7 @@ def run(*, root: Path = ROOT) -> dict:
             "executed_test_cases":numbers,
             "isolated_source_tests": "pass" if local_ok else "fail_or_unverified",
             "full_behavior_parity": "NOT_ACCEPTED",
+            "isolated_draft_interruption_reopen": per_source_reopen.get(entry["id"], "missing"),
             "per_playbook_crash_recovery": "NOT_END_TO_END_VERIFIED",
             "live_provider_connected_preproduction": "NOT_RUN_UNAPPROVED",
             "owner_action_approval": "NOT_GRANTED",
@@ -130,6 +150,8 @@ def run(*, root: Path = ROOT) -> dict:
     result={
         "status": ("isolated_synthetic_matrix_pass" if completed.returncode==0
                    and all(x["isolated_source_tests"]=="pass" for x in outcomes.values())
+                   and all(v=="pass" for v in per_source_reopen.values())
+                   and set(per_source_reopen)==ids
                    and shared["passed"]>0 and boundary["passed"]>0
                    else "isolated_synthetic_matrix_failed"),
         "junit_test_totals":totals,
@@ -159,5 +181,6 @@ if __name__ == "__main__":
     print("shared_recovery="+str(report["shared_recovery_test_totals"]))
     print("governance_boundary="+str(report["governance_boundary_test_totals"]))
     print("candidate_source_pass="+str(sum(x["isolated_source_tests"]=="pass" for x in report["cases"].values()))+"/19")
+    print("isolated_draft_reopen="+str(sum(x["isolated_draft_interruption_reopen"]=="pass" for x in report["cases"].values()))+"/19")
     if report["status"]!="isolated_synthetic_matrix_pass":
         raise SystemExit(1)

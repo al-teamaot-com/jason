@@ -7,6 +7,7 @@ on:
       - "tools/legacy_json_preprod_report.py"
       - "tests/test_legacy_json_preprod_boundary.py"
       - "tests/test_legacy_json_preprod_matrix.py"
+      - "tests/test_legacy_json_preprod_recovery_all19.py"
       - "docs/playbooks/json/migration/governed-preprod-boundary-v1.json"
       - ".github/workflows/legacy-json-preprod-boundary.yml"
   workflow_dispatch:
@@ -45,6 +46,8 @@ jobs:
           assert r['live_preproduction_provider_writes']==0
           assert r['production_json_registry_modified'] is False
           assert r['legacy_retirement_actions']==0
+          assert all(row['isolated_draft_interruption_reopen']=='pass'
+                     for row in r['cases'].values())
           assert r['governance_boundary_test_totals']['passed']>0
           assert r['shared_recovery_test_totals']['passed']>0
           PY
