@@ -289,10 +289,11 @@ def test_v1_rolled_back_journal_accepted_read_only(tmp_path,monkeypatch):
 
 
 def test_isolated_root_guard_is_preserved_in_native_worker_source():
-    import inspect
-    import tools.catalog_scoped_promotion_root as original
-    loader=Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
+    # CI does not mount Jason's privileged /usr/local/lib installation.
+    # The original root worker guard is source-controlled and hash-pinned.
+    loader=Path(__file__).resolve().parents[2]/"tools/release_host_reconcile_worker.py"
     source=loader.read_text()
+    assert str(m.ROOT_WORKER)=="/usr/local/lib/jason/release_host_reconcile_worker.py"
     assert 'CATALOG_SCOPED_ROOT_IMPORT_NAMESPACE_UNTRUSTED' in source
     assert 'any(name in sys.modules' in source
     assert "worker._trusted_catalog_scoped_promotion_module(source)" in m.ISOLATED_ROOT_CHECK
