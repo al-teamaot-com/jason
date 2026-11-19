@@ -247,14 +247,25 @@ class ImmutableRootSourceStage:
              if self.production else True,
              "RELEASE_IS_CURRENT_SOURCE")
         self._verify_tree(target,exact_hashes)
+        # All verified source directories are intentionally sealed 0555.
+        # Only after exact inventory/hash attestation and an accepted root
+        # recovery gate may we make those specific directories writable,
+        # strictly to unlink the reviewed files. Never widen file access.
+        directories=sorted(
+            (p for p in target.rglob("*") if p.is_dir()),
+            key=lambda p:len(p.parts),reverse=True)
+        for directory in directories+[target]:
+            meta=directory.lstat()
+            need(not directory.is_symlink()
+                 and stat.S_ISDIR(meta.st_mode)
+                 and (not self.production or meta.st_uid==meta.st_gid==0),
+                 "RECOVERY_DIRECTORY_IDENTITY_CHANGED")
+            directory.chmod(0o700)
         for relative in sorted(exact_hashes,key=lambda x:(x.count("/"),x),
                                reverse=True):
             (target/relative).unlink()
-        for item in sorted(target.rglob("*"),
-                           key=lambda p:len(p.parts),reverse=True):
-            need(item.is_dir() and not item.is_symlink(),
-                 "RECOVERY_FOREIGN_OBJECT")
-            item.rmdir()
+        for directory in directories:
+            directory.rmdir()
         target.rmdir()
         return {
             "status":"exact_unused_immutable_source_removed",
