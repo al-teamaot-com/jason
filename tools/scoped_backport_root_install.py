@@ -82,7 +82,8 @@ ACTION = "INSTALL-EXACT-SCOPED-BACKPORT-ROOT-V1"
 
 
 def git(*args: str) -> bytes:
-    p = subprocess.run(["git", "-C", str(REPO), *args],
+    p = subprocess.run(["git", "-c", f"safe.directory={REPO}",
+                        "-C", str(REPO), *args],
                        capture_output=True, check=False, timeout=30)
     if p.returncode:
         deny("INSTALL_PROTECTED_GIT_UNAVAILABLE")
@@ -133,7 +134,8 @@ def verified_release_objects_available(sha: str, reviewed_ci_sha: str) -> None:
     manifest = json.loads((REPO / "config/scoped-backport-m365-release.json").read_text())
     for revision in (sha, reviewed_ci_sha, manifest["candidate_sha"],
                      manifest["rollback_sha"], manifest["reviewed_feature_sha"]):
-        p = subprocess.run(["git", "-C", str(cache), "cat-file", "-e",
+        p = subprocess.run(["git", "-c", f"safe.directory={cache}",
+                            "-C", str(cache), "cat-file", "-e",
                             revision + "^{commit}"], capture_output=True,
                            check=False, timeout=20)
         if p.returncode:

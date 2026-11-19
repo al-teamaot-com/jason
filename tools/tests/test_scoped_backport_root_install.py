@@ -136,3 +136,32 @@ def test_root_policy_exactly_matches_native_host_schema():
         "trusted_source_sha", "reviewed_ci_sha", "root_handler_sha256",
         "root_recovery_sha256", "automatic_rollback_recovery_installed",
         "exact_signed_owner_approval_required"}
+
+
+def test_root_git_read_uses_only_exact_aot_worktree_safe_directory(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout=b"verified")
+    monkeypatch.setattr(ins.subprocess, "run", fake_run)
+    assert ins.git("rev-parse", "HEAD") == b"verified"
+    assert calls[0] == ["git", "-c", f"safe.directory={ins.REPO}",
+                        "-C", str(ins.REPO), "rev-parse", "HEAD"]
+
+
+def test_source_object_cache_read_is_exact_safe_directory(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    manifest = json.loads((ins.REPO / "config/scoped-backport-m365-release.json").read_text())
+    calls = []
+    monkeypatch.setattr(ins, "git", lambda *args: pytest.fail("must not fetch in this readback"))
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(ins.subprocess, "run", fake_run)
+    ins.verified_release_objects_available("1" * 40, "2" * 40)
+    cache = Path("/home/al/.local/lib/jason/engineering-source-repo")
+    assert len(calls) == 5
+    assert all(argv[:5] == ["git", "-c", f"safe.directory={cache}",
+                            "-C", str(cache)] for argv in calls)
