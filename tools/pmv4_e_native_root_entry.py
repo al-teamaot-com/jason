@@ -211,6 +211,7 @@ def owner_proof_for_promote(manifest:dict[str,Any])->dict[str,Any]:
 def started_proof_for_recovery(candidate:str)->dict[str,Any]|None:
     """No new permission: original native STARTED journal is recovery proof."""
     from tools import pmv4_e_signed_bootstrap_phase as bootstrap
+    from tools import pmv4_e_native_release_contract as contract
     root=NATIVE_ROOT/"receipts"
     trust_root_directory(root)
     pending=[]
@@ -219,7 +220,7 @@ def started_proof_for_recovery(candidate:str)->dict[str,Any]|None:
              "UNKNOWN_NATIVE_RECEIPT_STORE_OBJECT")
         record=bootstrap.root_record(item,production=True)
         if (record.get("state")=="started"
-            and record.get("component_id")=="pmv4-e-six-unit-controlplane"):
+            and record.get("component_id")==contract.COMPONENT):
             pending.append(record)
     need(len(pending)<=1,"MULTIPLE_NATIVE_STARTED_RELEASES")
     if not pending:
