@@ -48,6 +48,7 @@ ROOT_TO_INSTALL=(
     "tools/pmv4_e_signed_bootstrap_phase.py",
     "tools/pmv4_e_exact_owner_offer.py",
     "tools/pmv4_e_exact_code_transaction.py",
+    "tools/pmv4_e_native_root_host.py",
 )
 ROOT_COMPONENTS_PREINSTALLED=(
     "tools/independent_component_release.py",
