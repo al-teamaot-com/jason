@@ -134,3 +134,22 @@ alert auto-resolution and ticket handling are in its Markdown but remain
 unimplemented and unaccepted in JSON. The full acceptance ledger therefore
 remains **0/19**. The inventory now has **4 detailed candidates and
 15 structural partial drafts**, not four fully migrated playbooks.
+
+## Offline ticket augmentation — additional partial read-only classifier
+
+The enabled `offline_ticket_context_augmentation@0.1.0` has a
+source-bound `0.1.0-migration.2` JSON read-only classification candidate.
+It reuses the existing site-context role/classifier/note-preview functions,
+DEB asset selector and exact read-only JSON interpreter/ObservePort with a
+client-bound preproduction draft loader. Synthetic tests cover fixed and mobile
+peer classifications, expected text/fingerprint, missing CI/company/DRMM
+identity, site UID conflict, unsupported trigger and oversized peer inventory.
+No actual note, ticket lifecycle or endpoint actions are performed.
+
+This is **partial**. Active fixed-server witness proof, the 10-minute
+source-version recheck, optional DEB fallback, managed internal note dedup,
+exact owner promotion and provider note readback remain outstanding.
+See `OFFLINE-CONTEXT-READONLY-PARITY.md`. It is not an accepted replacement.
+
+The 19-source reconciliation now contains **five detailed candidates,
+14 structural partial drafts, 0 fully accepted legacy replacements**.

@@ -1,7 +1,8 @@
 {
   "id": "unsupported_triage_human_review",
   "implementation_mentions_unreviewed": [
-    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py"
+    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
+    "implementation/runtime_service/src/jason_runtime/json_governed_mutation_bridge.py"
   ],
   "json_source_conversion_accepted": false,
   "legacy_enabled": true,

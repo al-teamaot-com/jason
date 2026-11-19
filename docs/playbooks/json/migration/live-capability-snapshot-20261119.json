@@ -1,7 +1,7 @@
 {
   "snapshot_date": "2026-11-19",
   "source": "Jason MCP live capability discovery; limited to migration-referenced names",
-  "count": 31,
+  "count": 32,
   "items": [
     {
       "name": "automation.component.execute",
@@ -12,11 +12,11 @@
       "lifecycle": "active"
     },
     {
-      "name": "automation.job.read",
+      "name": "automation.job.output.read",
       "lifecycle": "active"
     },
     {
-      "name": "automation.job.output.read",
+      "name": "automation.job.read",
       "lifecycle": "active"
     },
     {
@@ -53,6 +53,10 @@
     },
     {
       "name": "endpoint.device.read",
+      "lifecycle": "active"
+    },
+    {
+      "name": "endpoint.device.search",
       "lifecycle": "active"
     },
     {

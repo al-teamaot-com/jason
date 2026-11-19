@@ -1,7 +1,7 @@
 {
   "accepted_only_when_all_independent_gates_pass": true,
   "canonical_json_source_artifacts": 19,
-  "detailed_candidates": 4,
+  "detailed_candidates": 5,
   "entries": [
     {
       "accepted_source_migration": false,
@@ -285,7 +285,7 @@
     },
     {
       "accepted_source_migration": false,
-      "artifact_kind": "structural_draft",
+      "artifact_kind": "candidate",
       "exact_authority_boundary_end_to_end_pass": false,
       "full_legacy_parity_pass": false,
       "id": "offline_ticket_context_augmentation",
@@ -293,25 +293,26 @@
       "interruption_recovery_end_to_end_pass": false,
       "isolated_live_provider_shadow_pass": false,
       "json_activation": "shadow",
-      "json_fingerprint": "792f93634900aaa9a3ffab9359f303ee507152746eb1ad5d164e4b9191e9f8e1",
+      "json_fingerprint": "feeb7e6e0379487f65906a712d1955d1e7da97769ce6a57aaaa17a91f82dd698",
       "json_schema_pass": true,
       "json_semantic_known_capabilities_pass": true,
-      "json_source_path": "docs/playbooks/json/migration/drafts/offline_ticket_context_augmentation.v1.json",
-      "json_version": "0.1.0-migration.1",
+      "json_source_path": "docs/playbooks/json/migration/candidates/offline_ticket_context_augmentation.v1.json",
+      "json_version": "0.1.0-migration.2",
       "legacy_registry_version": "0.1.0",
       "legacy_retired": false,
       "legacy_source": "docs/playbooks/Jason-Offline-Ticket-Context-Augmentation.md",
       "legacy_source_blob_sha": "1af96e8b0cdd22fd24a60bf3841711cf1ab8b8c9",
       "legacy_source_sha256": "c9ed3f8c2059f2dca28c3f62462c1b4c0e5b7e9d21f215dd9d6398ebeacefc51",
       "merged_to_protected_main": false,
-      "narrow_same_fixture_legacy_intent_parity": false,
+      "narrow_same_fixture_legacy_intent_parity": true,
       "production_json_activated": false,
       "synthetic_dry_run_smoke_available": true,
       "unresolved_gaps": [
-        "exact offline CI/device identity and optional backup presence",
-        "reusable deterministic context renderer and note ownership",
-        "source-version/idempotency and note provider readback",
-        "no unwanted ticket status/contact assignment changes"
+        "10-minute source-version conditional recheck and durable augmentation state",
+        "same-site role refresh, active fixed-server read-only Get-NetIPConfiguration witness and complete evidence correlation",
+        "per-company exact DEB asset selection identity and all uncertainty branches",
+        "approved internal note creation, deterministic technical note renderer and no-duplicate provider note readback",
+        "full worker source-to-JSON isolation and live preproduction provider acceptance"
       ]
     },
     {
@@ -605,6 +606,6 @@
     "live_preproduction_provider_acceptance": false,
     "version": "0.1.0"
   },
-  "structural_unaccepted_drafts": 15,
+  "structural_unaccepted_drafts": 14,
   "verified_inventory": 19
 }

@@ -1,7 +1,8 @@
 {
   "id": "offline_ticket_context_augmentation",
   "implementation_mentions_unreviewed": [
-    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py"
+    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
+    "implementation/runtime_service/src/jason_runtime/json_offline_context_preprod.py"
   ],
   "json_source_conversion_accepted": false,
   "legacy_enabled": true,

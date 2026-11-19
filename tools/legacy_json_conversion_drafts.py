@@ -26,6 +26,7 @@ ALREADY_DETAILED = frozenset({
     "unsupported_triage_human_review",
     "drmm_recent_alert_reconciliation",
     "windows_time_source",
+    "offline_ticket_context_augmentation",
 })
 
 
@@ -95,14 +96,6 @@ WORKFLOWS = {
         "repair": "approved_bounded_cleanup_warranted",
         "wait": "waiting_monitor_propagation_or_device",
         "missing": ["protected server/workstation role and volume eligibility", "safe file/object allowlist and dry-run candidate collection", "bounded cleanup component arguments and job state", "independent post-cleanup disk/monitor and ticket readback"],
-    },
-    "offline_ticket_context_augmentation": {
-        "entry": "service.ticket.search", "diagnose": "service.configuration.read",
-        "verify": "service.ticket.notes.search", "action": "service.ticket.note.create",
-        "clean": "offline_context_note_current",
-        "repair": "approved_exact_offline_context_note_required",
-        "wait": "waiting_endpoint_available",
-        "missing": ["exact offline CI/device identity and optional backup presence", "reusable deterministic context renderer and note ownership", "source-version/idempotency and note provider readback", "no unwanted ticket status/contact assignment changes"],
     },
     "post_error_investigation": {
         "entry": "service.ticket.search", "diagnose": "endpoint.alert.history.search",
