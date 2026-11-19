@@ -306,7 +306,9 @@ def inspect(*, source_sha: str, reviewed_sha: str) -> dict:
     for unit in UNIT_NAMES:
         p = Path("/etc/systemd/system") / unit
         expected = installed[ROOT_UNIT_DIGESTS[unit]]
-        need(sha256(read_root(p, mode=0o644)).hexdigest() == expected,
+        # The approved root installer deliberately materialized read-only
+        # systemd units as root:root 0444. Enforce the ACTUAL reviewed mode.
+        need(sha256(read_root(p, mode=0o444)).hexdigest() == expected,
              "INSTALLED_UNIT_BYTES_CHANGED")
     upgrade = root_control_upgrade(
         installed, source_sha=source_sha, reviewed_sha=reviewed_sha)

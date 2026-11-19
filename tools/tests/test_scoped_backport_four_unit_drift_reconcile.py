@@ -318,3 +318,10 @@ def test_stage_probe_rejects_forged_success_and_bearer_payload(monkeypatch):
     monkeypatch.setattr(fix.subprocess, "run", fake_run)
     assert fix.read_only_stage_probe() == (
         "SCOPED_BACKPORT_UNCLASSIFIED_STAGE_PROBE_DENIAL")
+
+
+def test_installed_systemd_unit_expected_mode_matches_actual_root_installer():
+    import inspect
+    source = inspect.getsource(fix.inspect)
+    assert 'read_root(p, mode=0o444)' in source
+    assert 'read_root(p, mode=0o644)' not in source
