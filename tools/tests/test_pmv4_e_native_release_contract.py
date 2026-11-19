@@ -128,3 +128,54 @@ def test_invalid_candidate_and_rollback_fail_closed_before_returning_draft():
     ):
         with pytest.raises(packet.StageEReleasePacketDenied):
             contract.draft(candidate_sha=candidate, rollback_sha=rollback)
+
+
+def test_native_contract_draft_from_sealed_root_only(tmp_path):
+    """No mutable checkout can satisfy typed policy/manifest runtime imports."""
+    from hashlib import sha256
+    import subprocess
+    import sys
+
+    from tools import pmv4_e_root_trust_stage as trust
+
+    target = tmp_path / "sealed"
+    staged = trust.RootTrustStager(
+        source=packet.ROOT,
+        target=target,
+        native_signed_started=lambda: True,
+        native_host_locked=lambda: True,
+        native_freeze_locked=lambda: True,
+        native_marker_absent=lambda: True,
+        native_replacements_inert=lambda: True,
+        production=False,
+    )
+    hashes = {
+        rel: sha256((packet.ROOT / rel).read_bytes()).hexdigest()
+        for rel in packet.REVIEWED_PATHS
+    }
+    assert "config/production-desired-state.json" in hashes
+    assert "tools/pmv4_e_native_release_contract.py" in hashes
+    staged.stage(source_sha=CANDIDATE, exact_hashes=hashes)
+    script = (
+        "from pathlib import Path\n"
+        "import sys\n"
+        "sys.path.insert(0,sys.argv[1])\n"
+        "from tools import pmv4_e_native_release_contract as c\n"
+        "from tools import pmv4_e_exact_release_packet as p\n"
+        "x=c.draft(candidate_sha='b'*40,rollback_sha='a'*40)\n"
+        "assert x['source_files_verified']==len(p.REVIEWED_PATHS)\n"
+        "assert x['manifest']['provider_scope']['provider']=='none'\n"
+        "assert x['signed_owner_proof'] is None\n"
+        "assert not x['production_release_ready']\n"
+        "assert Path(c.__file__).resolve().is_relative_to(sys.argv[1])\n"
+        "assert Path(p.__file__).resolve().is_relative_to(sys.argv[1])\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(target)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not any(p.name == "__pycache__" for p in target.rglob("*"))
+    staged.recover_inert_stage(hashes)
+    assert not target.exists()
