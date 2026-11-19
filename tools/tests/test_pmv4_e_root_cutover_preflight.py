@@ -241,8 +241,8 @@ def test_canary_freeze_readback_accepts_exact_service_user_owned_file(tmp_path,m
     freeze.write_bytes(raw)
     freeze.chmod(0o600)
     monkeypatch.setattr(canary,"FREEZE_PATH",freeze)
-    monkeypatch.setattr(canary,"FREEZE_UID",os.geteuid())
-    monkeypatch.setattr(canary,"FREEZE_GID",os.getegid())
+    monkeypatch.setattr(canary,"FREEZE_UID",freeze.stat().st_uid)
+    monkeypatch.setattr(canary,"FREEZE_GID",freeze.stat().st_gid)
     monkeypatch.setattr(canary,"root_data",lambda path,**kwargs:b"protected-policy")
     monkeypatch.setattr(canary,"ACTIVE",tmp_path/"absent-active-pointer")
     def runner(*args,**kwargs):
