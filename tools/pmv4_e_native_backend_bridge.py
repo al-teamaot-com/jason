@@ -84,6 +84,9 @@ class StageERootBridge:
     def commit_reviewed_policy_and_code(self,*args):
         self.native.commit_reviewed_policy_and_code(*args)
 
+    def verify_live_controlplane_alignment(self,*args)->bool:
+        return self.native.verify_live_controlplane_alignment(*args)
+
     def commit_reviewed_root_marker(self,*args):
         self.native.commit_reviewed_root_marker(*args)
 

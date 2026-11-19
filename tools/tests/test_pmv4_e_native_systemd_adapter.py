@@ -34,6 +34,7 @@ class FakeRootBackend:
         self.changed_protected=False
         self.changed_freeze=False
         self.policy="legacy"
+        self.controlplane_aligned=False
         self.staged=False
         self.claims_quiesced=False
         self.recovered=False
@@ -55,7 +56,12 @@ class FakeRootBackend:
     def stop_disable_exact(self,u,r):
         self.active.difference_update(u+r)
         self.enabled.difference_update(u+r)
-    def commit_reviewed_policy_and_code(self,*args):self.policy="replacement"
+    def commit_reviewed_policy_and_code(self,*args):
+        self.policy="replacement"
+        self.controlplane_aligned=True
+    def verify_live_controlplane_alignment(self,candidate,rollback,scope):
+        return (self.controlplane_aligned
+                and (candidate,rollback,scope)==(CANDIDATE,ROLLBACK,SCOPE))
     def commit_reviewed_root_marker(self,*args):self.marker=True
     def enable_start_exact(self,u,r):
         assert self.staged
@@ -74,7 +80,9 @@ class FakeRootBackend:
     def revoke_exact_marker_before_legacy(self):
         assert not (self.active&adapter.NEW)
         self.marker=False
-    def restore_reviewed_policy_code_and_watchdog(self,b):self.policy="legacy"
+    def restore_reviewed_policy_code_and_watchdog(self,b):
+        self.policy="legacy"
+        self.controlplane_aligned=False
     def restore_six_original_units_and_states(self,b):
         assert not self.marker
         self.active=set(b.active)
@@ -194,3 +202,20 @@ def test_exact_legacy_restoration_precedes_unblocking():
     assert root.steps==["block_new_dispatch"]
     assert root.active==set(adapter.OLD)
     assert root.marker is False
+
+
+def test_controlplane_install_readback_denied_before_accepted_marker():
+    backend=FakeRootBackend()
+    backend.verify_live_controlplane_alignment=lambda *args:False
+    with pytest.raises(adapter.StageEAdapterDenied,
+                       match="INSTALLED_CONTROLPLANE_NOT_EXACT"):
+        promote(backend)
+    assert backend.marker is False
+    assert backend.active==set(adapter.OLD)
+    assert "commit_exact_policy_and_convergence" not in backend.steps
+    # The signed native transaction will invoke exact inverse; no marker
+    # or unreviewed replacement trigger was ever accepted.
+    recovery=recover(backend)
+    assert recovery["status"]=="native_stage_e_six_unit_rollback_verified"
+    assert backend.policy=="legacy"
+    assert backend.active==set(adapter.OLD)
