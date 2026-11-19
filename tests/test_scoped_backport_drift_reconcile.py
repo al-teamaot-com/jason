@@ -132,3 +132,11 @@ def test_all_four_installed_units_have_exact_git_pins():
     assert 'and plan["unit_file_sha256"][name]==PINNED_UNIT_SHA256[name]' in code
     assert 'mode=0o444' in code
     assert '"PROTECTED_SCOPED_BACKPORT_UNIT_BLOBS_CHANGED"' in Path(builder.__file__).read_text()
+
+
+def test_owner_exact_scope_includes_native_breaker_revalidation():
+    for module in (root,owner,builder):
+        code=Path(module.__file__).read_text()
+        assert '"native_root_breaker_revalidation"' in code
+    launcher=Path(builder.__file__).read_text()
+    assert "BREAKER=NATIVE ROOT REVALIDATION" in launcher

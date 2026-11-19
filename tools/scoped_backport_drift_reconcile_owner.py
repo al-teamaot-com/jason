@@ -76,7 +76,7 @@ def exact_plan(path:Path)->dict[str,Any]:
          and plan.get("owner_consents")==1
          and plan.get("standing_authority") is False
          and plan.get("later_stages_authorized") is False
-         and plan.get("production_mutations")==["root_scoped_backport_four_unit_allowlist","watchdog_oneshot","restore_exact_baseline_on_failure","one_use_audit_receipts"]
+         and plan.get("production_mutations")==["root_scoped_backport_four_unit_allowlist","watchdog_oneshot","native_root_breaker_revalidation","restore_exact_baseline_on_failure","one_use_audit_receipts"]
          and plan.get("scoped_backport_unit_names")==list((
              "jason-scoped-backport-recovery.service",
              "jason-scoped-backport-recovery.timer",

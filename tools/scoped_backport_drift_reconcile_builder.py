@@ -57,7 +57,7 @@ def build():
         "owner_consents":1,"standing_authority":False,
         "later_stages_authorized":False,
         "restart_containers":[],
-        "production_mutations":["root_scoped_backport_four_unit_allowlist","watchdog_oneshot","restore_exact_baseline_on_failure","one_use_audit_receipts"],
+        "production_mutations":["root_scoped_backport_four_unit_allowlist","watchdog_oneshot","native_root_breaker_revalidation","restore_exact_baseline_on_failure","one_use_audit_receipts"],
     }
     plan["scope_sha256"]=root.digest(root.canon(plan))
     destination=ARTIFACTS/("scoped-backport-drift-"+candidate)
@@ -93,7 +93,7 @@ if [[ "$MODE" == "--check-only" ]]; then exit 0; fi
 [[ -t 0 && -t 1 ]] || { echo "REAL_INTERACTIVE_OWNER_TTY_REQUIRED" >&2; exit 2; }
 [[ ! -L "$STAGE" ]] || { echo "ROOT_STAGE_SYMLINK_DENIED" >&2; exit 2; }
 echo 'SCOPE: four approved scoped-backport service/timer/path declarations; native watchdog oneshot ONLY'
-echo 'TICKET CORE, MCP, FREEZE, BREAKER=UNMODIFIED'
+echo 'TICKET CORE, MCP, FREEZE=UNMODIFIED; BREAKER=NATIVE ROOT REVALIDATION'
 if [[ ! -e "$STAGE" ]]; then
   sudo /usr/bin/install -d -m 0700 -o root -g root "$STAGE"
   sudo /usr/bin/install -m 0400 -o root -g root "$R" "$STAGE/root.py"

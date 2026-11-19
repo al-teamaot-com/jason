@@ -89,7 +89,7 @@ def plan_from(packet):
          and data.get("owner_consents")==1
          and data.get("standing_authority") is False
          and data.get("later_stages_authorized") is False
-         and data.get("production_mutations")==["root_scoped_backport_four_unit_allowlist","watchdog_oneshot","restore_exact_baseline_on_failure","one_use_audit_receipts"]
+         and data.get("production_mutations")==["root_scoped_backport_four_unit_allowlist","watchdog_oneshot","native_root_breaker_revalidation","restore_exact_baseline_on_failure","one_use_audit_receipts"]
          and data.get("scoped_backport_unit_names")==list(CANDIDATE_NAMES)
          and data.get("restart_containers")==[]
          and data.get("source_sha") and len(data["source_sha"])==40
