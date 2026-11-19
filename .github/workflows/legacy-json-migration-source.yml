@@ -1,0 +1,91 @@
+name: Legacy JSON migration source gate
+
+on:
+  pull_request:
+    paths:
+      - "docs/playbooks/json/migration/**"
+      - "implementation/autonomous_remediation/playbook_runtime.py"
+      - "implementation/autonomous_remediation/playbook_document.py"
+      - "implementation/autonomous_remediation/playbook_ticket_evidence.py"
+      - "implementation/autonomous_remediation/json_shadow_integration.py"
+      - "implementation/autonomous_remediation/json_shadow_facts.py"
+      - "implementation/runtime_service/src/jason_runtime/json_playbook_readonly_preprod.py"
+      - "implementation/runtime_service/src/jason_runtime/json_windows_time_*.py"
+      - "implementation/runtime_service/tests/test_json_windows_time_*.py"
+      - "implementation/runtime_service/src/jason_runtime/json_offline_context_*.py"
+      - "implementation/runtime_service/tests/test_json_offline_context_*.py"
+      - "implementation/runtime_service/tests/test_json_playbook_readonly_preprod.py"
+      - "implementation/runtime_service/tests/test_json_readonly_shadow_pilot_legacy_parity.py"
+      - "implementation/autonomous_remediation/playbook_registry.json"
+      - "tests/test_legacy_json_*.py"
+      - "tools/legacy_json_migration_source_maps.py"
+      - "tools/legacy_json_conversion_drafts.py"
+      - "tools/legacy_json_acceptance_ledger.py"
+      - "tests/test_json_playbook_isolated_trace.py"
+      - "tests/test_json_governed_shadow_integration.py"
+      - "tests/test_json_readonly_shadow_pilot_acceptance.py"
+      - "tests/test_playbook_ticket_evidence.py"
+      - "tools/json_playbook_isolated_trace.py"
+      - "tools/legacy_json_migration_inventory.py"
+      - ".github/workflows/legacy-json-migration-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-source-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install isolated validation dependencies
+        run: python -m pip install --disable-pip-version-check pytest jsonschema
+      - name: Regenerate inventory and verify deterministic source binding
+        env:
+          PYTHONPATH: .
+        run: |
+          python tools/legacy_json_migration_inventory.py
+          python tools/legacy_json_migration_source_maps.py
+          python tools/legacy_json_conversion_drafts.py
+          python tools/legacy_json_acceptance_ledger.py
+          git diff --exit-code -- docs/playbooks/json/migration/source-audit-20261119.json docs/playbooks/json/migration/source_maps/ docs/playbooks/json/migration/drafts/ docs/playbooks/json/migration/acceptance-ledger-20261119.json
+      - name: Validate migration, exact worker-intent parity and interpreter regression
+        env:
+          PYTHONPATH: .:implementation:implementation/runtime_service/src
+        run: |
+          python -m pytest -q \
+            tests/test_legacy_json_inventory.py \
+            tests/test_legacy_json_source_maps.py \
+            tests/test_legacy_json_conversion_drafts.py \
+            tests/test_legacy_json_acceptance_ledger.py \
+            tests/test_legacy_json_migration_candidate.py \
+            tests/test_legacy_json_behavioral_parity.py \
+            tests/test_json_playbook_isolated_trace.py \
+            tests/test_json_governed_shadow_integration.py \
+            tests/test_json_readonly_shadow_pilot_acceptance.py \
+            implementation/runtime_service/tests/test_json_playbook_readonly_preprod.py \
+            implementation/runtime_service/tests/test_json_readonly_shadow_pilot_legacy_parity.py \
+            implementation/runtime_service/tests/test_json_windows_time_source_migration.py \
+            implementation/runtime_service/tests/test_json_windows_time_preprod.py \
+            implementation/runtime_service/tests/test_json_windows_time_sweep.py \
+            implementation/runtime_service/tests/test_json_offline_context_shadow.py \
+            implementation/runtime_service/tests/test_json_offline_context_preprod.py \
+            tests/test_playbook_ticket_evidence.py \
+            implementation/autonomous_remediation/test_json_playbook_document.py \
+            implementation/autonomous_remediation/test_json_playbook_store.py
+      - name: Verify immutable synthetic shadow-trace evidence
+        env:
+          PYTHONPATH: .
+        run: |
+          for fixture in docs/playbooks/json/migration/fixtures/*.json; do
+            stem=$(basename "$fixture" .json)
+            name="${stem%-*}"
+            python -m tools.json_playbook_isolated_trace "docs/playbooks/json/migration/candidates/${name}.v1.json" "$fixture" --output "docs/playbooks/json/migration/evidence/${stem}.trace.json"
+          done
+          git diff --exit-code -- docs/playbooks/json/migration/evidence/

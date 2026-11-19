@@ -252,6 +252,8 @@ def validate_playbook_document(
                             "eq", "ne", "in", "not_in", "exists", "truthy", "falsy"
                         }:
                             errors.append(f"{step_id}:BRANCH_CONDITION_INVALID:{branch_index}")
+                        if operator in {"in", "not_in"} and not isinstance(condition.get("value"), list):
+                            errors.append(f"{step_id}:BRANCH_MEMBERSHIP_ARRAY_REQUIRED:{branch_index}")
                     if not target:
                         errors.append(f"{step_id}:BRANCH_TARGET_REQUIRED:{branch_index}")
                     else:

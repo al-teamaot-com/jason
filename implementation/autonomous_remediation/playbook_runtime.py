@@ -117,6 +117,11 @@ class JsonPlaybookInterpreter:
             present = fact_name in facts
             actual = facts.get(fact_name)
             expected = condition.get("value")
+            # Missing facts are unknown, never evidence of a negative result.
+            # Without this guard, ne/not_in/falsy could route absent identity,
+            # approval, or health evidence into a privileged branch.
+            if not present and operator != "exists":
+                continue
             matched = False
             if operator == "eq":
                 matched = actual == expected

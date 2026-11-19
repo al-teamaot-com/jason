@@ -1,0 +1,253 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "service.configuration.search",
+      "service.ticket.create",
+      "service.ticket.search"
+    ],
+    "approval_bound_branches": [
+      "propose_approved_action"
+    ],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "source-only candidate; unsupported or unverified branches remain human review, not ticket closure"
+  },
+  "expected_state": {
+    "actual_health_requires_authoritative_provider_readback": true,
+    "documented_section": "legacy source section 5"
+  },
+  "migration": {
+    "accepted_for_execution": false,
+    "additional_required_compatibility": [
+      "trusted provider result-to-fact normalizer for each step",
+      "exact capability argument schema and approved source identity",
+      "all original documented state transitions, dedup/retries, job polls and provider readbacks",
+      "per-playbook legacy-vs-JSON positive/negative/approval/recovery parity",
+      "isolated shadow acceptance with actual governed read-port binding"
+    ],
+    "behavior_branches_mapped": {
+      "all_else": "human_review",
+      "healthy": "all_exact_child_tickets_already_exist",
+      "one_approved_action": "all_nodes_same_company_resolved_and_split_approved",
+      "waiting": "waiting_source_split_reconciliation"
+    },
+    "legacy_registry_version": "1.0.0",
+    "legacy_source_blob_sha": "72048d28a449e253715f46a69ddc35d65d196113",
+    "legacy_source_sha256": "c33a9274887dd3ef622ef95b66b3cbd8caa072747e957b08a63b7707f18e5e34",
+    "missing_or_unimplemented_parity": [
+      "bounded Affected Nodes parser and exact CI/DRMM lookup",
+      "multi-child fanout and idempotent create receipts",
+      "one-device child lineage and source completion",
+      "source work ownership and post-write readback"
+    ],
+    "production_activation_authorized": false,
+    "source_conversion": "structural_partial_not_accepted",
+    "source_map": "docs/playbooks/json/migration/source_maps/vulscan_multi_device_split.source-map.json"
+  },
+  "playbook": {
+    "id": "vulscan_multi_device_split",
+    "lifecycle": "pilot",
+    "name": "Jason - VulScan Multi-Device Ticket Split",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-VulScan-Multi-Device-Split.md",
+    "target_type": "ticket",
+    "version": "1.0.0-migration.1"
+  },
+  "schema_version": 1,
+  "scope": {
+    "any_unsupported_branch": "human_review",
+    "direct_provider_access": false,
+    "no_production_activation": true,
+    "source_only": true
+  },
+  "state_model": {
+    "entry_step": "read_target",
+    "legacy_wait_retry_semantics": "UNMAPPED_BLOCKING",
+    "must_resume_without_mutation_replay": true
+  },
+  "steps": [
+    {
+      "arguments": {
+        "page_size": 2,
+        "resource_id": {
+          "$fact": "ticket_id"
+        }
+      },
+      "capability": "service.ticket.search",
+      "id": "read_target",
+      "next": "scope_gate",
+      "type": "diagnostic"
+    },
+    {
+      "branches": [
+        {
+          "next": "read_diagnostic",
+          "when": {
+            "fact": "authoritative_same_client_scope_proven",
+            "operator": "eq",
+            "value": true
+          }
+        }
+      ],
+      "default": "human_review",
+      "id": "scope_gate",
+      "type": "decision"
+    },
+    {
+      "arguments": {
+        "$fact": "server_verified_diagnostic_read_arguments"
+      },
+      "capability": "service.configuration.search",
+      "id": "read_diagnostic",
+      "next": "classification_gate",
+      "type": "diagnostic"
+    },
+    {
+      "branches": [
+        {
+          "next": "verified_no_action_gate",
+          "when": {
+            "fact": "verified_legacy_disposition",
+            "operator": "eq",
+            "value": "all_exact_child_tickets_already_exist"
+          }
+        },
+        {
+          "next": "exact_authority_gate",
+          "when": {
+            "fact": "verified_legacy_disposition",
+            "operator": "eq",
+            "value": "all_nodes_same_company_resolved_and_split_approved"
+          }
+        },
+        {
+          "next": "wait_for_source",
+          "when": {
+            "fact": "verified_legacy_disposition",
+            "operator": "eq",
+            "value": "waiting_source_split_reconciliation"
+          }
+        }
+      ],
+      "default": "human_review",
+      "id": "classification_gate",
+      "type": "decision"
+    },
+    {
+      "branches": [
+        {
+          "next": "read_only_complete",
+          "when": {
+            "fact": "authoritative_healthy_state_proven",
+            "operator": "eq",
+            "value": true
+          }
+        }
+      ],
+      "default": "human_review",
+      "id": "verified_no_action_gate",
+      "type": "decision"
+    },
+    {
+      "branches": [
+        {
+          "next": "approved_action_args_gate",
+          "when": {
+            "fact": "exact_owner_promotion_verified",
+            "operator": "eq",
+            "value": true
+          }
+        }
+      ],
+      "default": "human_review",
+      "id": "exact_authority_gate",
+      "type": "decision"
+    },
+    {
+      "branches": [
+        {
+          "next": "propose_approved_action",
+          "when": {
+            "fact": "server_action_arguments_exact_and_authorized",
+            "operator": "eq",
+            "value": true
+          }
+        }
+      ],
+      "default": "human_review",
+      "id": "approved_action_args_gate",
+      "type": "decision"
+    },
+    {
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "arguments": {
+        "$fact": "server_verified_exact_action_arguments"
+      },
+      "capability": "service.ticket.create",
+      "id": "propose_approved_action",
+      "retry": {
+        "max_attempts": 1
+      },
+      "type": "remediation",
+      "verification_step": "read_independent_verification"
+    },
+    {
+      "arguments": {
+        "$fact": "server_verified_post_action_read_arguments"
+      },
+      "capability": "service.ticket.search",
+      "id": "read_independent_verification",
+      "next": "independent_verification_gate",
+      "type": "verification"
+    },
+    {
+      "branches": [
+        {
+          "next": "remediation_verified",
+          "when": {
+            "fact": "authoritative_post_action_health_and_readback_proven",
+            "operator": "eq",
+            "value": true
+          }
+        }
+      ],
+      "default": "human_review",
+      "id": "independent_verification_gate",
+      "type": "decision"
+    },
+    {
+      "id": "read_only_complete",
+      "type": "complete"
+    },
+    {
+      "id": "remediation_verified",
+      "type": "complete"
+    },
+    {
+      "id": "wait_for_source",
+      "resume": "bounded_wait_terminal",
+      "seconds": 3600,
+      "type": "wait"
+    },
+    {
+      "id": "bounded_wait_terminal",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "legacy_registry_entry": "vulscan_multi_device_split",
+    "runtime_filter_integration": "NOT_COMPLETE",
+    "source_version": "1.0.0"
+  },
+  "verification": {
+    "authoritative_source": "service.ticket.search",
+    "success_condition": "exact same-client healthy state independently proven; all writes separately authorized and read back"
+  }
+}
