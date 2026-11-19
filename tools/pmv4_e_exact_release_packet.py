@@ -47,6 +47,7 @@ ROOT_TO_INSTALL=(
     "tools/pmv4_e_root_import_binding.py",
     "tools/pmv4_e_signed_bootstrap_phase.py",
     "tools/pmv4_e_exact_owner_offer.py",
+    "tools/pmv4_e_exact_code_transaction.py",
 )
 ROOT_COMPONENTS_PREINSTALLED=(
     "tools/independent_component_release.py",
@@ -58,6 +59,7 @@ LEGACY_CONTROL_SURFACES=(
     "tools/jason_self_heal_watchdog.py",
     "tools/release_manager_host_runner.py",
     "tools/reconcile_production_host_services.sh",
+    "tools/release_host_reconcile_worker.py",
 )
 NEW_UNITS=tuple(sorted(
     "infrastructure/pmv4-e-scheduler/systemd/"
