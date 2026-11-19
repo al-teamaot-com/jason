@@ -7,6 +7,7 @@ under an exact authorized release before any request can execute it.
 """
 from __future__ import annotations
 from hashlib import sha256
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -153,8 +154,22 @@ def _restage_unchanged_catalog_scope(host:NativeCatalogHost, offer:Mapping[str,A
     uid=pwd.getpwnam('al').pw_uid
     gid=pwd.getpwnam('al').pw_gid
     def no_prior_authority():
-        if any(p.exists() or p.is_symlink() for p in (approval,transaction,active)):
+        if any(p.exists() or p.is_symlink() for p in (transaction,active)):
             fail('OFFER_RESTAGE_EXISTING_APPROVAL_OR_TRANSACTION')
+        if approval.exists() or approval.is_symlink():
+            # The original signed decision cannot be deleted, rewritten,
+            # silently extended or used on the new manifest. A new source-only
+            # offer is admissible only after the historical terminal approval
+            # expires, with its complete root-key-verified lineage intact and
+            # NOT consumed by any earlier production attempt.
+            old_offer,_=existing()
+            try:
+                previous=_signed_approval(old_offer['release_id'],old_offer,host)
+                expiry=datetime.fromisoformat(previous['payload']['expires_at'])
+            except (KeyError,ValueError,TypeError,PermissionError):
+                fail('OFFER_RESTAGE_EXISTING_APPROVAL_OR_TRANSACTION')
+            if expiry.tzinfo is None or datetime.now(timezone.utc)<expiry:
+                fail('OFFER_RESTAGE_SIGNED_OWNER_PROOF_NOT_EXPIRED')
     def encoded(item):
         return json.dumps(dict(item),sort_keys=True,separators=(',',':')).encode()+b'\n'
     def existing():
@@ -200,6 +215,23 @@ def _restage_unchanged_catalog_scope(host:NativeCatalogHost, offer:Mapping[str,A
     no_prior_authority()
     old,oldbytes=existing()
     validate_scope(old)
+    old_approval_bytes=(secure_read(approval,uid=uid,max_bytes=16384)
+                        if approval.exists() else None)
+    renewals=AUTH_ROOT/'owner-approval-renewals'/offer['release_id']
+    old_renewal_names=(frozenset(p.name for p in renewals.iterdir())
+                       if renewals.exists() else frozenset())
+    def approval_evidence_unchanged_after_write():
+        if any(p.exists() or p.is_symlink() for p in (transaction,active)):
+            fail('OFFER_RESTAGE_TRANSACTION_APPEARED')
+        if old_approval_bytes is None:
+            if approval.exists() or approval.is_symlink():
+                fail('OFFER_RESTAGE_UNEXPECTED_OWNER_PROOF')
+        elif secure_read(approval,uid=uid,max_bytes=16384)!=old_approval_bytes:
+            fail('OFFER_RESTAGE_SIGNED_OWNER_PROOF_CHANGED')
+        current_names=(frozenset(p.name for p in renewals.iterdir())
+                       if renewals.exists() else frozenset())
+        if current_names!=old_renewal_names:
+            fail('OFFER_RESTAGE_RENEWAL_LINEAGE_CHANGED')
     with host.transaction_lock(offer):
         no_prior_authority()
         same,raw=existing()
@@ -241,7 +273,7 @@ def _restage_unchanged_catalog_scope(host:NativeCatalogHost, offer:Mapping[str,A
             if (secure_read(path,max_bytes=16384)!=updated
                     or secure_read(public,uid=uid,max_bytes=16384)!=updated):
                 fail('OFFER_RESTAGE_READBACK_FAILED')
-            no_prior_authority()
+            approval_evidence_unchanged_after_write()
         except BaseException:
             # Atomic rename may succeed before a subsequent fsync fails.
             # Compare both files independently rather than trusting flags.
@@ -272,26 +304,124 @@ def _restage_unchanged_catalog_scope(host:NativeCatalogHost, offer:Mapping[str,A
             'owner_approval_required':True,'production_mutations':False}
 
 
-def _signed_approval(release_id:str,offer:Mapping[str,Any])->Mapping[str,Any]:
+def _signed_approval(release_id:str,offer:Mapping[str,Any],host:NativeCatalogHost)->Mapping[str,Any]:
+    """Current exact Owner proof, with append-only expired-proof lineage.
+
+    An expired ancestor has no authority. Its root-key-verified signature and
+    hash establish audit lineage only. Only the final fresh signed proof can
+    authorize the existing one-use production transaction.
+    """
+    from implementation.kernel.signed_owner_release import (
+        canonical,verify_exact_owner_release,OwnerReleaseProofDenied,
+    )
+    from datetime import timedelta
     uid=pwd.getpwnam('al').pw_uid
-    path=AUTH_ROOT/'owner-approvals'/(release_id+'.json')
-    request=json.loads(secure_read(path,max_bytes=16384,uid=uid))
-    if (set(request)!={'schema_version','authorization','release_id',
-            'candidate_sha','manifest_sha256','approved_by','organization_id',
-            'signed_owner_proof','standing_authority','production_mutation'}
-            or request['schema_version']!='1.0'
-            or request['authorization']!='fresh_entra_catalog_scoped_owner'
-            or request['release_id']!=release_id
-            or request['candidate_sha']!=offer['candidate_sha']
-            or request['manifest_sha256']!=offer['manifest_sha256']
-            or request['organization_id']!='aot'
-            or request['standing_authority'] is not False
-            or request['production_mutation'] is not False
-            or not isinstance(request['signed_owner_proof'],Mapping)):
-        fail('SIGNED_OWNER_APPROVAL_REQUEST_MISMATCH')
-    if request['approved_by']!=request['signed_owner_proof'].get('payload',{}).get('owner_principal'):
-        fail('SIGNED_OWNER_REQUEST_IDENTITY_MISMATCH')
-    return request['signed_owner_proof']
+    original_path=AUTH_ROOT/'owner-approvals'/(release_id+'.json')
+    original=json.loads(secure_read(original_path,max_bytes=16384,uid=uid))
+    expected={'schema_version','authorization','release_id',
+              'candidate_sha','manifest_sha256','approved_by','organization_id',
+              'signed_owner_proof','standing_authority','production_mutation'}
+    def validated_envelope(row,*,renewal:bool):
+        fields=(expected|{'predecessor_approval_id',
+                         'predecessor_signed_owner_proof_sha256'} if renewal else expected)
+        auth=('fresh_entra_catalog_scoped_owner_renewal' if renewal
+              else 'fresh_entra_catalog_scoped_owner')
+        if (not isinstance(row,dict) or set(row)!=fields
+                or row.get('schema_version')!='1.0'
+                or row.get('authorization')!=auth
+                or row.get('release_id')!=release_id
+                or row.get('candidate_sha')!=offer['candidate_sha']
+                or row.get('organization_id')!='aot'
+                or row.get('standing_authority') is not False
+                or row.get('production_mutation') is not False
+                or not isinstance(row.get('signed_owner_proof'),dict)):
+            fail('SIGNED_OWNER_RENEWAL_ENVELOPE_INVALID')
+        signed=row['signed_owner_proof']
+        payload=signed.get('payload')
+        if (not isinstance(payload,dict)
+                or row['approved_by']!=payload.get('owner_principal')
+                or row['manifest_sha256']!=payload.get('manifest_sha256')
+                or payload.get('release_id')!=release_id
+                or payload.get('candidate_sha')!=offer['candidate_sha']
+                or payload.get('rollback_sha')!=offer['rollback_sha']
+                or payload.get('scope_sha256')!=offer['scope_sha256']
+                or payload.get('freeze_sha256')!=offer['freeze_sha256']):
+            fail('SIGNED_OWNER_RENEWAL_SCOPE_INVALID')
+        try:
+            issued=datetime.fromisoformat(payload['issued_at'])
+            expires=datetime.fromisoformat(payload['expires_at'])
+            if issued.tzinfo is None or expires.tzinfo is None:
+                fail('SIGNED_OWNER_RENEWAL_TIME_INVALID')
+            # Historical validation proves signature and exact scope at its
+            # actual issuance only; it never grants an expired proof authority.
+            verify_exact_owner_release(
+                signed,public_key=host.pinned_owner_public_key(),
+                expected_candidate_sha=offer['candidate_sha'],
+                expected_rollback_sha=offer['rollback_sha'],
+                expected_release_id=release_id,
+                expected_scope_sha256=offer['scope_sha256'],
+                expected_manifest_sha256=row['manifest_sha256'],
+                expected_freeze_sha256=offer['freeze_sha256'],
+                at=issued+timedelta(seconds=1))
+        except (ValueError,TypeError,KeyError,OwnerReleaseProofDenied) as exc:
+            raise PermissionError('CATALOG_SCOPED_OWNER_RENEWAL_SIGNED_PROOF_INVALID') from exc
+        return signed,issued,expires
+    signed,issued,expires=validated_envelope(original,renewal=False)
+    original_owner=signed['payload']['owner_oid']
+    ancestor=signed
+    previous_expires=expires
+    previous_id=signed['payload']['approval_id']
+    try: consumed=host.consumed_approval_ids()
+    except BaseException:raise
+    if previous_id in consumed:fail('SIGNED_OWNER_RENEWAL_PREDECESSOR_CONSUMED')
+    parent=AUTH_ROOT/'owner-approval-renewals'
+    directory=parent/release_id
+    receipts={}
+    if parent.exists() or parent.is_symlink():
+        if (parent.is_symlink() or not parent.is_dir()
+                or parent.stat().st_uid!=uid
+                or stat.S_IMODE(parent.stat().st_mode)!=0o700):
+            fail('SIGNED_OWNER_RENEWAL_PARENT_DIRECTORY_UNTRUSTED')
+    if directory.exists() or directory.is_symlink():
+        if (directory.is_symlink() or not directory.is_dir()
+                or directory.stat().st_uid!=uid
+                or stat.S_IMODE(directory.stat().st_mode)!=0o700):
+            fail('SIGNED_OWNER_RENEWAL_DIRECTORY_UNTRUSTED')
+        for item in directory.iterdir():
+            if (item.suffix!='.json' or
+                    re.fullmatch(r'owner-mcp-[0-9a-f]{32}',item.stem) is None):
+                fail('SIGNED_OWNER_RENEWAL_UNEXPECTED_RECORD')
+            row=json.loads(secure_read(item,max_bytes=16384,uid=uid))
+            child=row.get('signed_owner_proof')
+            if not isinstance(child,dict) or not isinstance(child.get('payload'),dict):
+                fail('SIGNED_OWNER_RENEWAL_RECORD_INVALID')
+            if child['payload'].get('approval_id')!=item.stem:
+                fail('SIGNED_OWNER_RENEWAL_RECORD_ID_MISMATCH')
+            if item.stem in receipts:fail('SIGNED_OWNER_RENEWAL_DUPLICATE')
+            receipts[item.stem]=row
+    if len(receipts)>8:fail('SIGNED_OWNER_RENEWAL_CHAIN_TOO_LONG')
+    visited=set()
+    while receipts:
+        children=[(key,row) for key,row in receipts.items()
+                  if row.get('predecessor_approval_id')==previous_id]
+        if len(children)!=1:fail('SIGNED_OWNER_RENEWAL_CHAIN_AMBIGUOUS')
+        key,row=children[0]
+        if key in visited:fail('SIGNED_OWNER_RENEWAL_CYCLE')
+        if row.get('predecessor_signed_owner_proof_sha256')!=sha256(canonical(ancestor)).hexdigest():
+            fail('SIGNED_OWNER_RENEWAL_PREDECESSOR_HASH_CHANGED')
+        current,current_issued,current_expires=validated_envelope(row,renewal=True)
+        if (current_issued<previous_expires
+                or current['payload']['owner_oid']!=original_owner
+                or key in consumed):
+            fail('SIGNED_OWNER_RENEWAL_PREDECESSOR_NOT_EXPIRED_OR_CONSUMED')
+        visited.add(key)
+        del receipts[key]
+        ancestor=current
+        previous_id=key
+        previous_expires=current_expires
+    if (ancestor['payload']['manifest_sha256']!=offer['manifest_sha256']):
+        fail('SIGNED_OWNER_RENEWAL_NOT_BOUND_TO_CURRENT_OFFER')
+    return ancestor
 
 
 def execute_native_catalog_scoped_request(
@@ -353,5 +483,5 @@ def execute_native_catalog_scoped_request(
         fail('ROOT_REQUEST_OFFER_MISMATCH')
     if action=='catalog_scope_recover':
         return host.recover_interrupted(offer)
-    signed=_signed_approval(offer['release_id'],offer)
+    signed=_signed_approval(offer['release_id'],offer,host)
     return promote_scoped_catalog_pair(offer,signed,host=host)
