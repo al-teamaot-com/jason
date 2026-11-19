@@ -33,6 +33,14 @@ def inspect_one(root: Path, row: dict) -> dict:
     headings = {int(m.group(1)): m.group(2).strip() for m in SECTION.finditer(content)}
     discovered = sorted(set(CAP.findall(content)))
     registry_capabilities = sorted(set(row.get("autonomy", {}).get("allowed_capabilities", [])))
+    # Only extract explicit source manifest/version labels, not every incidental
+    # version in prose. A difference is review evidence, not authority to pick
+    # a newer version or silently change runtime selection.
+    declared = re.search(
+        r"(?im)^\s*(?:\*\*Version:\*\*|Version:|\s+version:)\s*(\d+\.\d+\.\d+)",
+        content[:1200],
+    )
+    declared_version = declared.group(1) if declared else None
     functions = []
     classes = []
     if not markdown:
@@ -52,6 +60,8 @@ def inspect_one(root: Path, row: dict) -> dict:
         "id": row["id"],
         "name": row["name"],
         "version": row["version"],
+        "source_declared_version": declared_version,
+        "registry_source_version_conflict": declared_version is not None and declared_version != row["version"],
         "lifecycle": row["lifecycle"],
         "enabled": row["enabled"],
         "source": row["source"],

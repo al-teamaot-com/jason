@@ -121,3 +121,78 @@ def test_legacy_internal_note_and_json_same_fixture_write_payload(tmp_path):
             "Jason - Governed Read-Only Investigation")
     finally:
         store.close()
+
+def run_json_intent_chain(engine, facts):
+    """Walk the existing interpreter only; never call a capability/provider."""
+    seen = []
+    current = engine.document.entry_step
+    for _ in range(50):
+        inst = engine.instruction(step_id=current, facts=facts)
+        seen.append(inst)
+        if inst.terminal:
+            return seen
+        current = engine.next_step(inst.step_id, facts=facts)
+    raise AssertionError("bounded shadow trace did not terminate")
+
+
+@pytest.mark.parametrize("case,expected", [
+    ("healthy", ["endpoint.alert.resolve", "service.ticket.note.create", "service.ticket.update"]),
+    ("old", []),
+    ("unsupported", []),
+    ("offline", []),
+    ("active_detection", []),
+])
+def test_drmm_alert_reconciliation_legacy_vs_json_intents(tmp_path, case, expected):
+    from implementation.runtime_service.tests.test_daily_drmm_alert_reconciliation import (
+        Reads, build, security_alert, NOW,
+    )
+    alert = security_alert(age_hours=25 if case == "old" else 1)
+    if case == "unsupported":
+        alert["alertContext"] = {"@class": "eventlog_ctx", "code": "1129"}
+    reads = Reads([alert], online=case != "offline",
+                  active=[{"alert_id": "active"}] if case == "active_detection" else [],
+                  ticket={"id": 101, "status": 1})
+    service = build(tmp_path, reads)
+    service.run_once(now=NOW)
+    legacy = [(cap, args) for _, cap, args in service.actions.calls]
+    assert [cap for cap, _ in legacy] == expected
+    original = json.loads(
+        (CANDIDATES / "drmm_recent_alert_reconciliation.v1.json").read_text())
+    engine = JsonPlaybookInterpreter(validate_playbook_document(original))
+    resolution_note = (
+        legacy[1][1]["payload"]["description"] if len(legacy) > 1
+        else "synthetic recovery note not used by unapproved branches"
+    )
+    facts = {
+        "alert_in_24_hour_window": case != "old",
+        "exact_alert_device_identity": True,
+        "registered_alert_class": ("eventlog_ctx" if case == "unsupported"
+                                   else "endpoint_security_threat_ctx"),
+        "exact_endpoint_online": case != "offline",
+        "exact_agent_and_av_engine_healthy": True,
+        "current_nonarchived_detection_count": 1 if case == "active_detection" else 0,
+        "exact_reconciliation_owner_promotion_verified": True,
+        "exact_alert_resolution_readback_verified": True,
+        "exact_alert_ticket_number_present": True,
+        "unique_exact_linked_ticket_open": True,
+        "exact_ticket_complete_readback_verified": True,
+        "alert_uid": "alert-1", "device_uid": "dev-1",
+        "ticket_number": "T1", "ticket_id": 101, "agent_id": "agent-1",
+        "resolution_note": resolution_note,
+    }
+    trace = run_json_intent_chain(engine, facts)
+    json_actions = [(inst.capability, dict(inst.arguments)) for inst in trace
+                    if inst.step_type == "remediation"]
+    assert [cap for cap, _ in json_actions] == expected
+    assert json_actions == legacy
+
+
+def test_drmm_json_unverified_alert_history_blocks_ticket_mutation():
+    document = json.loads(
+        (CANDIDATES / "drmm_recent_alert_reconciliation.v1.json").read_text())
+    runtime = JsonPlaybookInterpreter(validate_playbook_document(document))
+    missing_readback = runtime.instruction(
+        step_id="resolved_gate", facts={"exact_alert_resolution_readback_verified": False},
+    )
+    assert missing_readback.step_type == "human_review"
+    assert missing_readback.terminal

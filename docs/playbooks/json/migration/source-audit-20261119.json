@@ -25,6 +25,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": true,
       "section_numbers_found": [
         1,
         2,
@@ -60,6 +61,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "source_declared_version": "1.3.0",
       "source_format": "markdown",
       "source_git_blob_sha": "9dde241866ddca31f9640d3deb1e0b3ed5a19228",
       "source_sha256": "6af554f37ea21ba753d6a17f727c7c239563348ab7096aab7c591087e9921931",
@@ -153,6 +155,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [],
       "size_bytes": 30625,
       "source": "implementation/autonomous_remediation/datto_edr_av_playbook.py",
@@ -161,6 +164,7 @@
         "security.disposition.value",
         "security.source_set"
       ],
+      "source_declared_version": null,
       "source_format": "python",
       "source_git_blob_sha": "c3645b2c003e6f4079b62d32572e27b00cdd57b9",
       "source_sha256": "84858da6eeb8569923a0ab9d3d758741cb2899d143b754318fd6f51a2751c99e",
@@ -190,6 +194,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -218,6 +223,7 @@
       "size_bytes": 13584,
       "source": "docs/playbooks/Jason-Windows-Disk-Bad-Block-Event-ID-7.md",
       "source_capability_references_unreviewed": [],
+      "source_declared_version": null,
       "source_format": "markdown",
       "source_git_blob_sha": "01c64d2118e39f8372808d9f6a83953cdbf8e147",
       "source_sha256": "94acef692a9e2b29c29d348e7d261e68215b33a664196ded97838f6efb168892",
@@ -248,6 +254,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -287,6 +294,7 @@
         "service.ticket.search",
         "site.search"
       ],
+      "source_declared_version": null,
       "source_format": "markdown",
       "source_git_blob_sha": "fa1dbb6375a0cb58a01c7948edc168bf55131e14",
       "source_sha256": "1067c93ce79f235d77a42ad2aa5eaa1c0e744e6ff60f9766b6ee5c6ae1da0194",
@@ -321,6 +329,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -355,6 +364,7 @@
         "service.ticket.search",
         "service.ticket.update"
       ],
+      "source_declared_version": "1.0.0",
       "source_format": "markdown",
       "source_git_blob_sha": "076872fae94f49d3daa3dc1b8740bd99fee75ee2",
       "source_sha256": "0149505ad708e1497407ab8da51d2b1fa6a44bd9f5f5c4725e7df990482d69de",
@@ -384,6 +394,7 @@
         "service.ticket.note.create",
         "service.ticket.note.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -419,6 +430,7 @@
         "service.ticket.notes.search",
         "service.ticket.search"
       ],
+      "source_declared_version": "0.2.1",
       "source_format": "markdown",
       "source_git_blob_sha": "12b770b6dc74546215c5196c1d72fb533e0dd243",
       "source_sha256": "846072c29f3f06a21350756126a35e27ff99883879444d0f4c1ee24b17a116ea",
@@ -449,6 +461,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -488,6 +501,7 @@
         "service.ticket.read",
         "service.ticket.update"
       ],
+      "source_declared_version": "1.1.0",
       "source_format": "markdown",
       "source_git_blob_sha": "ef5b3e7b437a268a351370398f6417ff607d1c0b",
       "source_sha256": "4b2a91976a5eee04ed32fdfe502059e9fb9c57934e3aa4563854764308a7bb63",
@@ -517,6 +531,7 @@
         "service.ticket.note.create",
         "service.ticket.note.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -549,6 +564,7 @@
         "service.ticket.note.update",
         "service.ticket.notes.search"
       ],
+      "source_declared_version": "1.0.0",
       "source_format": "markdown",
       "source_git_blob_sha": "727db8ae9808c3464e1f4eb348944ee4542c64c5",
       "source_sha256": "9c4c56e9c89dc7503c46aec7fdf17c7085ec821ffa3b291cf062c0414a087f8b",
@@ -579,6 +595,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -618,6 +635,7 @@
         "service.ticket.read",
         "service.ticket.search"
       ],
+      "source_declared_version": "1.1.0",
       "source_format": "markdown",
       "source_git_blob_sha": "4702c9a6895ca552a2e70ee2a9bc1eeb5685daf4",
       "source_sha256": "a89f2a6d9607134c1219565299722ce717826202e73955dcd61a4af391ac2f37",
@@ -646,6 +664,7 @@
       "registry_capabilities": [
         "service.ticket.note.create"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -683,6 +702,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "source_declared_version": "0.1.0",
       "source_format": "markdown",
       "source_git_blob_sha": "1af96e8b0cdd22fd24a60bf3841711cf1ab8b8c9",
       "source_sha256": "c9ed3f8c2059f2dca28c3f62462c1b4c0e5b7e9d21f215dd9d6398ebeacefc51",
@@ -712,6 +732,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -744,6 +765,7 @@
         "service.ticket.note.create",
         "service.ticket.read"
       ],
+      "source_declared_version": null,
       "source_format": "markdown",
       "source_git_blob_sha": "5596e879ceefb139cfc74e100a795b00683cbe4b",
       "source_sha256": "27322f5504c07fad3b7cbf420bcae5170151635e17aa09267f76326240a559b0",
@@ -774,6 +796,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -816,6 +839,7 @@
         "service.ticket.search",
         "service.ticket.update"
       ],
+      "source_declared_version": null,
       "source_format": "markdown",
       "source_git_blob_sha": "60fbcc32388d59f0dab029ca440d905a87a51c44",
       "source_sha256": "46c1f9fee5698d92832a9b12676720503902c02be6176fb6e4622ebdb4bd0569",
@@ -845,6 +869,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -877,6 +902,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "source_declared_version": "1.1.0",
       "source_format": "markdown",
       "source_git_blob_sha": "238c644b741ef82a104318e92b99f42dd10dbea1",
       "source_sha256": "a8965f286af821ee948fb25a2b5cd3629da225cc169a729594d0446448acc24f",
@@ -907,6 +933,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -940,6 +967,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "source_declared_version": null,
       "source_format": "markdown",
       "source_git_blob_sha": "c44b06dabd07b5c6755c16fe8ebd91974cc8f5d6",
       "source_sha256": "807ed1eeed83ae046b734d2a9568fe533fa512d72959f2fd30580d9f20ca8e23",
@@ -970,6 +998,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -1003,6 +1032,7 @@
         "service.ticket.note.create",
         "service.ticket.update"
       ],
+      "source_declared_version": "1.0.0",
       "source_format": "markdown",
       "source_git_blob_sha": "72048d28a449e253715f46a69ddc35d65d196113",
       "source_sha256": "c33a9274887dd3ef622ef95b66b3cbd8caa072747e957b08a63b7707f18e5e34",
@@ -1029,6 +1059,7 @@
       "python_classes": [],
       "python_functions": [],
       "registry_capabilities": [],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -1069,6 +1100,7 @@
         "service.ticket.search",
         "service.ticket.update"
       ],
+      "source_declared_version": "0.1.0",
       "source_format": "markdown",
       "source_git_blob_sha": "5a6dd8624c30a5f90f3bc776141d1d2226a77e3b",
       "source_sha256": "5032731f3baef32c48956d2eefd55d1eec7cf28e2acd9b76d47f9e815be753be",
@@ -1097,6 +1129,7 @@
       "registry_capabilities": [
         "service.ticket.client.notification.create"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -1131,6 +1164,7 @@
         "service.ticket.notes.search",
         "service.ticket.read"
       ],
+      "source_declared_version": null,
       "source_format": "markdown",
       "source_git_blob_sha": "d073ca8a92f661f0a546e2ca6cc5c9433ea03b82",
       "source_sha256": "aa35e282a30f58cc6c8aa956ef80a8c5f0c32e1961e7d8b92ad5737947fad412",
@@ -1160,6 +1194,7 @@
         "service.ticket.note.create",
         "service.ticket.note.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -1191,6 +1226,7 @@
         "service.ticket.note.update",
         "service.ticket.notes.search"
       ],
+      "source_declared_version": "1.0.0",
       "source_format": "markdown",
       "source_git_blob_sha": "edce573413941881154dd13cbc1b1e08a7c70727",
       "source_sha256": "9d5513b8a6f10a215960d448dca54414c00420f0042fb8af3a094a817835c2e7",
@@ -1219,6 +1255,7 @@
       "registry_capabilities": [
         "service.ticket.update"
       ],
+      "registry_source_version_conflict": false,
       "section_numbers_found": [
         1,
         2,
@@ -1249,6 +1286,7 @@
         "service.ticket.search",
         "service.ticket.update"
       ],
+      "source_declared_version": "1.0.0",
       "source_format": "markdown",
       "source_git_blob_sha": "5f28c92f9d44e7f2a58cec30258b7d8f4c08ab27",
       "source_sha256": "1e54b4982c76ba30e4b7b9ef3b2f0bd49ee226998c987864fc630ec085d6dddc",

@@ -221,3 +221,35 @@ def test_readonly_note_readback_requires_exact_body_evidence():
         "exact_note_body_readback_verified": True}).step_id == "documented"
     assert engine.instruction(step_id="note_readback_gate", facts={
         "exact_note_body_readback_verified": False}).step_id == "blocked"
+
+
+@pytest.mark.parametrize("op", ["in", "not_in"])
+def test_membership_predicates_reject_non_array_to_prevent_string_substring_match(op):
+    doc = payload()
+    gate = next(step for step in doc["steps"] if step["id"] == "pilot_gate")
+    gate["branches"][0]["when"] = {"fact": "ticket_id", "operator": op,
+                                      "value": "143305"}
+    with pytest.raises(PlaybookValidationError, match="BRANCH_MEMBERSHIP_ARRAY_REQUIRED"):
+        validate_playbook_document(doc)
+
+
+def test_both_candidates_stage_into_isolated_registry_without_activation(tmp_path):
+    store_path = tmp_path / "migration-isolated-registry.sqlite3"
+    store = SQLitePlaybookRegistry(store_path)
+    try:
+        docs = [payload(), json.loads(READONLY_NOTE.read_text())]
+        for entry in docs:
+            staged = store.stage(entry, actor="migration-isolated-test")
+            assert staged.state == "draft"
+        assert store.generation() == 2
+        assert store.active_snapshot()[1] == ()
+        assert len(store.lifecycle_events()) == 2
+    finally:
+        store.close()
+    reopened = SQLitePlaybookRegistry(store_path)
+    try:
+        assert reopened.generation() == 2
+        assert reopened.active_snapshot()[1] == ()
+        assert len(reopened.list_all()) == 2
+    finally:
+        reopened.close()

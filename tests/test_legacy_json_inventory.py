@@ -25,3 +25,12 @@ def test_python_workflow_has_real_functions_not_just_documentation():
     assert len(python_sources) == 1
     assert python_sources[0]["python_functions"]
     assert python_sources[0]["migration_status"] == "requires_semantic_mapping_and_independent_acceptance"
+
+
+def test_documented_backupiq_registry_version_mismatch_is_not_silently_resolved():
+    entries = {r["id"]: r for r in module.build(ROOT)["entries"]}
+    backupiq = entries["backupiq_endpoint_backup"]
+    assert backupiq["version"] == "1.2.0"
+    assert backupiq["source_declared_version"] == "1.3.0"
+    assert backupiq["registry_source_version_conflict"] is True
+    assert sum(x["registry_source_version_conflict"] for x in entries.values()) == 1
