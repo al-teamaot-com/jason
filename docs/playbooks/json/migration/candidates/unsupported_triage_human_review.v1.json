@@ -49,9 +49,10 @@
       "type": "diagnostic",
       "capability": "service.ticket.search",
       "arguments": {
-        "ticket_id": {
+        "resource_id": {
           "$fact": "ticket_id"
-        }
+        },
+        "page_size": 2
       },
       "next": "read_notes"
     },
@@ -235,11 +236,13 @@
       "type": "remediation",
       "capability": "service.ticket.update",
       "arguments": {
-        "ticket_id": {
-          "$fact": "ticket_id"
-        },
-        "queue_id": 29682833,
-        "status_id": 37
+        "payload": {
+          "id": {
+            "$fact": "ticket_id"
+          },
+          "queueID": "Help Desk I",
+          "status": "Human Review"
+        }
       },
       "approval_classification": "modifying",
       "approval_required": true,
@@ -253,9 +256,10 @@
       "type": "verification",
       "capability": "service.ticket.search",
       "arguments": {
-        "ticket_id": {
+        "resource_id": {
           "$fact": "ticket_id"
-        }
+        },
+        "page_size": 2
       },
       "next": "readback_gate"
     },
@@ -308,7 +312,8 @@
     "known_gaps": [
       "Current interpreter does not persist or enforce the declared workflow state, retries, queue/status field allowlist or live readback.",
       "A trusted orchestrator must supply fresh facts after each capability call; synthetic facts alone do not prove provider integration.",
-      "No live acceptance or behavioral parity against production ticket write has been performed."
+      "No live acceptance or behavioral parity against production ticket write has been performed.",
+      "Source action arguments now match the legacy worker: payload.id/queueID/status; pre-read uses resource_id and page_size=2. Actual returned jasonVerification.verifiedFields remains an external trusted fact and has not been mapped from adapter output."
     ],
     "production_activation_authorized": false
   }

@@ -59,7 +59,7 @@ def test_proven_gate_chain_proposes_only_exact_approved_update():
     assert step.approval_required is True
     assert step.approval_classification == "modifying"
     assert step.capability == "service.ticket.update"
-    assert step.arguments == {"ticket_id": 143305, "queue_id": 29682833, "status_id": 37}
+    assert step.arguments == {"payload": {"id": 143305, "queueID": "Help Desk I", "status": "Human Review"}}
 
 
 @pytest.mark.parametrize("fact,bad", [
@@ -146,3 +146,78 @@ def test_absent_fact_never_satisfies_negative_decision(operator, value):
                 "default": "blocked"}
     assert JsonPlaybookInterpreter._decision_target(decision, {}) == "blocked"
     assert JsonPlaybookInterpreter._decision_target(decision, {"approval": False}) == "handoff_update"
+
+READONLY_NOTE = ROOT / "docs/playbooks/json/migration/candidates/unsupported_readonly_triage_note.v1.json"
+NOTE_GOOD = {
+    "ticket_id": 143305,
+    "source_version_current": True,
+    "company_identity_verified": True,
+    "assigned_elsewhere": False,
+    "valid_nontransient_note_draft": True,
+    "exact_note_promotion_verified": True,
+    "note_fingerprint_already_verified": False,
+    "existing_managed_note": False,
+    "note_body": "JASON READ-ONLY INVESTIGATION - exact verified finding",
+}
+
+
+def note_engine():
+    return JsonPlaybookInterpreter(validate_playbook_document(json.loads(READONLY_NOTE.read_text())))
+
+
+def test_readonly_first_candidate_schema_and_no_provider_execution():
+    doc = json.loads(READONLY_NOTE.read_text())
+    jsonschema.Draft202012Validator(json.loads(SCHEMA.read_text())).validate(doc)
+    assert doc["autonomy"]["activation"] == "shadow"
+    assert doc["scope"]["direct_provider_access"] is False
+    assert doc["migration"]["production_activation_authorized"] is False
+
+
+def test_readonly_note_create_is_exact_approval_bound_proposal_only():
+    instruction = note_engine().instruction(step_id="pilot_gate", facts=NOTE_GOOD)
+    assert instruction.step_id == "note_create"
+    assert instruction.capability == "service.ticket.note.create"
+    assert instruction.approval_required is True
+    assert instruction.arguments["payload"] == {
+        "ticketID": 143305,
+        "title": "Jason - Governed Read-Only Investigation",
+        "description": NOTE_GOOD["note_body"], "noteType": 3, "publish": 2,
+    }
+
+
+@pytest.mark.parametrize("change", [
+    {"ticket_id": 143073},
+    {"source_version_current": False},
+    {"company_identity_verified": False},
+    {"assigned_elsewhere": True},
+    {"valid_nontransient_note_draft": False},
+    {"exact_note_promotion_verified": False},
+    {"existing_managed_note": True,
+     "existing_note_content_matches_last_owned_fingerprint": False},
+])
+def test_readonly_note_rejects_unapproved_or_unowned_writes(change):
+    facts = dict(NOTE_GOOD)
+    facts.update(change)
+    step = note_engine().instruction(step_id="pilot_gate", facts=facts)
+    assert step.step_id == "blocked"
+
+
+def test_readonly_note_suppresses_duplicate_and_proposes_safe_update():
+    once = note_engine().instruction(
+        step_id="pilot_gate", facts=dict(NOTE_GOOD, note_fingerprint_already_verified=True))
+    assert once.step_id == "documented"
+    update = note_engine().instruction(step_id="pilot_gate", facts=dict(
+        NOTE_GOOD, existing_managed_note=True,
+        existing_note_content_matches_last_owned_fingerprint=True,
+        managed_note_id=9001))
+    assert update.step_id == "note_update"
+    assert update.approval_required is True
+    assert update.arguments["payload"]["id"] == 9001
+
+
+def test_readonly_note_readback_requires_exact_body_evidence():
+    engine = note_engine()
+    assert engine.instruction(step_id="note_readback_gate", facts={
+        "exact_note_body_readback_verified": True}).step_id == "documented"
+    assert engine.instruction(step_id="note_readback_gate", facts={
+        "exact_note_body_readback_verified": False}).step_id == "blocked"
