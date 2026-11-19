@@ -101,7 +101,7 @@ def test_owner_source_review_never_fetches_installed_production_repo():
     assert str(offer.REPO)==(
         "/srv/jason/archive/engineering-artifacts/pmv4-e-owner-source-repo")
     assert "engineering-source-repo" not in source
-    assert "engineering-worker-source" in source  # explicit prohibition only
+    assert "engineering-worker-source" not in source
     assert "merge-base" in source and "--is-ancestor" in source
     assert "origin/main" in source
     assert "git fetch" not in source
