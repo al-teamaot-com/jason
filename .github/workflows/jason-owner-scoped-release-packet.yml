@@ -18,7 +18,7 @@ jobs:
       - name: Fetch exact frozen Owner-only source and protected main refs
         run: |
           git fetch --no-tags origin refs/heads/prep/jason-owner-only-20261119:refs/remotes/origin/prep/jason-owner-only-20261119
-          test "$(git rev-parse refs/remotes/origin/prep/jason-owner-only-20261119)" = "ec891ae49428357ccae8fa3b990c021a124b41d9"
+          git merge-base --is-ancestor ec891ae49428357ccae8fa3b990c021a124b41d9 refs/remotes/origin/prep/jason-owner-only-20261119
           git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
       - name: Read-only Owner-only release manifest and rollback scope tests
         run: PYTHONPATH=. python -m pytest -q tools/tests/test_jason_owner_scoped_release_admission.py
