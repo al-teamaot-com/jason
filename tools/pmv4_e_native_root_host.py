@@ -684,3 +684,66 @@ class NativeStageEHost:
         need(before==self._physical_before(),
              "RECOVERY_RECEIPT_BEFORE_CHANGED")
         self._step_record("rollback_verified",recovery=True)
+
+    def observe_component(self,component_id:str)->str:
+        """Physical native component identity; no fictitious Compose pointer."""
+        self._verify_boundary()
+        need(component_id==contract.COMPONENT,
+             "OBSERVE_COMPONENT_SCOPE_UNREVIEWED")
+        need(self._source_revision()==self.manifest["rollback_sha"],
+             "PRESERVED_RUNTIME_BASELINE_CHANGED")
+        if not self._marker_present():
+            return self.manifest["rollback_sha"]
+        marker=(admission.read_root_marker(self.marker)
+                if self.production else read_json(self.marker))
+        need(marker is not None
+             and marker.get("source_sha")==self.manifest["candidate_sha"]
+             and marker.get("source_rollback_sha")==self.manifest["rollback_sha"]
+             and marker.get("source_scope_sha256")==
+                 self.manifest["source_scope_sha256"]
+             and marker.get("owner_approval_id")==self.approval_id
+             and marker.get("state")=="accepted",
+             "PHYSICAL_COMPONENT_MARKER_NOT_EXACT")
+        return self.manifest["candidate_sha"]
+
+    def verify_component(self,bundle:Path,
+                         manifest:Mapping[str,Any])->bool:
+        """Read back final installed state inside the original native ledger.
+
+        After accepted-marker publication the signed code-switch guard
+        intentionally cannot run again (it requires marker ABSENT). Verify
+        exact candidate-vs-original file SHA from the earlier sealed root
+        before-image directly, plus installed six trigger states, unique
+        Ticket Core owner, untouched protected services and original freeze.
+        """
+        self._verify_boundary()
+        need(type(manifest) is dict and manifest==self.manifest,
+             "VERIFY_MANIFEST_NOT_SAME_SIGNED_RELEASE")
+        need(isinstance(bundle,Path) and
+             bundle.name in (self.manifest["candidate_sha"],
+                             self.manifest["rollback_sha"]),
+             "VERIFY_BUNDLE_ID_UNREVIEWED")
+        before=self._physical_before()
+        status=self.observe_component(contract.COMPONENT)
+        candidate=bundle.name==self.manifest["candidate_sha"]
+        need(status==bundle.name,"LIVE_COMPONENT_SOURCE_NOT_EXACT")
+        need(self.systemd.verify_final(replacement=candidate),
+             "LIVE_SYSTEMD_PARITY_MISMATCH")
+        record,_=self.code._read_before(
+            self.manifest["candidate_sha"],self.scope)
+        expected=(record["candidate_sha256"]
+                  if candidate else record["prior_sha256"])
+        for name in code.OBJECTS:
+            raw=code.read_exact(self.code.targets[name])
+            identity=self.code.targets[name].lstat()
+            need(digest(raw)==expected[name]
+                 and (identity.st_uid,identity.st_gid,
+                      stat.S_IMODE(identity.st_mode))==
+                     self.code.identities[name],
+                 "LIVE_CODE_OR_PROTECTED_POLICY_DRIFT")
+        need(self.freeze_and_protected_unchanged(before),
+             "PROTECTED_RUNTIME_OR_FREEZE_CHANGED")
+        self._ticket_owner()
+        self._scan()
+        return True
+

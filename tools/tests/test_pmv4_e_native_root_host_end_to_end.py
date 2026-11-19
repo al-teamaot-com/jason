@@ -116,9 +116,10 @@ def integration(tmp_path):
             scope_sha256=manifest["source_scope_sha256"])
         installed["sha"]=ROLLBACK
     def verify(bundle,manifest):
+        attested=host.verify_component(bundle,manifest)
         if bundle.name==CANDIDATE and fail["after_activate"]:
             return False
-        return surface.verify_final(replacement=(bundle.name==CANDIDATE))
+        return attested
     ledger=signed.StageESignedNativeLedger(
         root=ledger_root,source_root=sealed,
         verify_stage_e_preflight=core.root_gate,
@@ -127,7 +128,7 @@ def integration(tmp_path):
         verify_protected=core.protected,
         verify_source_and_ci=core.source,
         verify_image=lambda *_:False,
-        observe_component=lambda _:installed["sha"],
+        observe_component=host.observe_component,
         activate_component=activate,
         restore_component=restore,
         verify_component=verify,
