@@ -289,6 +289,36 @@ def bounded_stage_denial_code(exc: BaseException) -> str:
     return "SCOPED_BACKPORT_UNCLASSIFIED_DENIAL"
 
 
+def probe_stage_read_only() -> dict:
+    """Prove native admission and Docker preflight with zero release mutation.
+
+    A root provenance attestation and existing production transaction lock
+    are required, but the breaker is deliberately NOT revalidated/closed by
+    this diagnostic. Normal stage still requires a closed breaker and fresh
+    independently clean drift.
+    """
+    if os.geteuid() != 0 or Path(__file__).resolve(strict=True) != INSTALLED_ENTRY:
+        deny("INSTALLED_NATIVE_ROOT_WORKER_REQUIRED")
+    host = NativeScopedBackportHost()
+    host.enforce_installed_root_trust()
+    offer = _offer_from_protected_source(
+        host, host.policy["trusted_source_sha"])
+    with host.release_lock(offer):
+        host.freshly_validate_live_scope(offer)
+        _native_preflight(offer, host)
+    return {
+        "schema_version": "1.0",
+        "status": "scoped_native_readonly_stage_preflight_pass",
+        "release_id": offer["release_id"],
+        "candidate_sha": offer["candidate_sha"],
+        "protected_main_sha": offer["protected_main_sha"],
+        "production_mutations": False,
+        "provider_writes": False,
+        "release_eligibility_created": False,
+        "owner_approval_recorded": False,
+    }
+
+
 def drain() -> dict:
     """Consume bounded one-use request files; no blind side-effect retry."""
     if os.geteuid() != 0 or Path(__file__).resolve(strict=True) != INSTALLED_ENTRY:
@@ -337,10 +367,24 @@ def main() -> int:
     group = args.add_mutually_exclusive_group(required=True)
     group.add_argument("--request-id")
     group.add_argument("--drain", action="store_true")
+    group.add_argument("--probe-stage", action="store_true")
     o = args.parse_args()
     if not sys.flags.isolated:
         deny("ROOT_WORKER_ISOLATED_PYTHON_REQUIRED")
-    if o.drain:
+    if o.probe_stage:
+        try:
+            result = probe_stage_read_only()
+        except (ScopedBackportDenied, PermissionError, ValueError,
+                OSError, subprocess.SubprocessError) as exc:
+            result = {
+                "status": "scoped_native_readonly_stage_preflight_denied",
+                "denial_code": bounded_stage_denial_code(exc),
+                "production_mutations": False,
+                "provider_writes": False,
+            }
+            print(json.dumps(result, sort_keys=True))
+            return 2
+    elif o.drain:
         result = drain()
     else:
         result = dispatch_one(o.request_id)

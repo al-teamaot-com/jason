@@ -265,3 +265,56 @@ def test_scoped_listeners_only_paused_not_existing_production_services():
     assert fix.SCOPED_PATH not in fix.PROTECTED
     assert fix.SCOPED_TIMER not in fix.PROTECTED
     assert "jason-production-drift-watchdog.timer" not in (fix.SCOPED_PATH, fix.SCOPED_TIMER)
+
+
+def test_stage_probe_invokes_pinned_installed_root_worker_only(monkeypatch):
+    import json
+    captured = []
+    def fake_run(args, **kw):
+        captured.append(args)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({
+                "status": "scoped_native_readonly_stage_preflight_pass",
+                "production_mutations": False, "provider_writes": False,
+                "release_eligibility_created": False,
+                "owner_approval_recorded": False,
+            }).encode())
+    monkeypatch.setattr(fix.subprocess, "run", fake_run)
+    assert fix.read_only_stage_probe() == (
+        "pass_nonmutating_scoped_source_and_docker_preflights")
+    assert captured == [[
+        "/usr/bin/python3", "-I",
+        str(fix.ROOT_INSTALL_DIR / "tools/scoped_backport_native_root.py"),
+        "--probe-stage",
+    ]]
+
+
+def test_stage_probe_returns_only_bounded_failure_code(monkeypatch):
+    def fake_run(args, **kw):
+        return SimpleNamespace(
+            returncode=2,
+            stdout=json.dumps({
+                "status": "scoped_native_readonly_stage_preflight_denied",
+                "denial_code": "SCOPED_BACKPORT_GROUP_APPROLE_FILE_SCOPE_DRIFT",
+                "production_mutations": False, "provider_writes": False,
+            }).encode(),
+            stderr=b"secret private endpoint refused credential",
+        )
+    monkeypatch.setattr(fix.subprocess, "run", fake_run)
+    assert fix.read_only_stage_probe() == (
+        "SCOPED_BACKPORT_GROUP_APPROLE_FILE_SCOPE_DRIFT")
+
+
+def test_stage_probe_rejects_forged_success_and_bearer_payload(monkeypatch):
+    def fake_run(args, **kw):
+        return SimpleNamespace(
+            returncode=2,
+            stdout=json.dumps({
+                "status": "scoped_native_readonly_stage_preflight_denied",
+                "denial_code": "Bearer secret-123",
+                "production_mutations": False, "provider_writes": False,
+            }).encode())
+    monkeypatch.setattr(fix.subprocess, "run", fake_run)
+    assert fix.read_only_stage_probe() == (
+        "SCOPED_BACKPORT_UNCLASSIFIED_STAGE_PROBE_DENIAL")
