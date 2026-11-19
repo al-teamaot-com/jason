@@ -64,6 +64,13 @@ def scenario(tmp_path,monkeypatch):
         def pinned_owner_public_key(self):
             return key.public_key()
     monkeypatch.setattr(root,"AUTH_ROOT",state)
+    # CI runners do not provision the production-only 'al' account.
+    # Keep the production lookup unchanged and model its exact UID in tests.
+    from types import SimpleNamespace
+    monkeypatch.setattr(root.pwd,"getpwnam",
+                        lambda name:SimpleNamespace(
+                            pw_uid=os.getuid(),pw_gid=os.getgid())
+                        if name=="al" else (_ for _ in ()).throw(KeyError(name)))
     return key,old,latest,state,lock,signed,old_path,FakeRootHost()
 
 
