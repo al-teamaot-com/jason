@@ -32,6 +32,7 @@ ROOT_TO_INSTALL=(
     "tools/pmv4_e_retirement_readiness.py",
     "tools/pmv4_e_controlplane_dependencies.py",
     "tools/pmv4_e_root_trust_stage.py",
+    "tools/pmv4_e_exact_release_packet.py",
     "tools/pmv4_e_root_receipt_readback.py",
     "tools/pmv4_e_canary_acceptance_readback.py",
     "tools/pmv4_e_ticket_owner_readback.py",
