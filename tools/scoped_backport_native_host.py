@@ -58,7 +58,7 @@ ROOT_POLICY_FIELDS = {
     "root_handler_sha256", "native_host_sha256",
     "core_sha256", "request_module_sha256", "owner_local_sha256",
     "kernel_owner_proof_sha256", "native_deploy_sha256",
-    "root_recovery_sha256", "recovery_unit_sha256", "recovery_timer_sha256",
+    "native_mcp_projection_sha256", "root_recovery_sha256", "recovery_unit_sha256", "recovery_timer_sha256",
     "request_unit_sha256", "request_path_sha256",
     "native_root_control_supported", "automatic_rollback_recovery_installed",
     "exact_signed_owner_approval_required", "no_global_owner_elevation",
@@ -73,6 +73,9 @@ INSTALL_FILES = {
     "owner_local_sha256": INSTALL_ROOT / "tools/scoped_backport_owner_local_approval.py",
     "kernel_owner_proof_sha256": INSTALL_ROOT / "implementation/kernel/signed_owner_release.py",
     "native_deploy_sha256": NATIVE,
+    # Required sibling import of deploy_live_container.py. This digest is
+    # enforced under root before every stage/recovery transaction.
+    "native_mcp_projection_sha256": INSTALL_ROOT / "tools/pmv4_mcp_projection.py",
     "root_recovery_sha256": INSTALL_ROOT / "tools/scoped_backport_native_recovery.py",
     "recovery_unit_sha256": Path("/etc/systemd/system/jason-scoped-backport-recovery.service"),
     "recovery_timer_sha256": Path("/etc/systemd/system/jason-scoped-backport-recovery.timer"),

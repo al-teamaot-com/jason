@@ -60,6 +60,8 @@ FILES = (
     "tools/scoped_backport_native_recovery.py",
     "tools/scoped_backport_owner_local_approval.py",
     "tools/deploy_live_container.py",
+    # deploy_live_container.py imports this root-owned sibling at module load.
+    "tools/pmv4_mcp_projection.py",
     "implementation/kernel/signed_owner_release.py",
     "implementation/kernel/__init__.py",
 )
@@ -621,6 +623,7 @@ def install(sha: str, reviewed_ci_sha: str, evidence: dict,
             "owner_local_sha256": "tools/scoped_backport_owner_local_approval.py",
             "kernel_owner_proof_sha256": "implementation/kernel/signed_owner_release.py",
             "native_deploy_sha256": "tools/deploy_live_container.py",
+            "native_mcp_projection_sha256": "tools/pmv4_mcp_projection.py",
             "root_recovery_sha256": "tools/scoped_backport_native_recovery.py",
             "recovery_unit_sha256": (UNIT_DIR / "jason-scoped-backport-recovery.service").as_posix(),
             "recovery_timer_sha256": (UNIT_DIR / "jason-scoped-backport-recovery.timer").as_posix(),
