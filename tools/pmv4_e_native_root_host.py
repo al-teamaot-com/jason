@@ -112,6 +112,8 @@ class NativeStageEHost:
         source_root:Path=TRUST,
         owner_evidence:Callable[[],dict]|None=None,
         scan_evidence:Callable[[],dict]|None=None,
+        test_owner_public_key:Any=None,
+        test_before_evidence:Callable[[],adapter.Before]|None=None,
     ):
         if production:
             here=Path(__file__)
@@ -124,6 +126,8 @@ class NativeStageEHost:
             need(core_host is None and code_switch is None
                  and systemd is None and owner_evidence is None
                  and scan_evidence is None
+                 and test_owner_public_key is None
+                 and test_before_evidence is None
                  and receipt_dir==RECEIPTS and before_dir==BEFORE
                  and step_dir==STEPS and marker==MARKER
                  and current==CURRENT and freeze==FREEZE
@@ -160,6 +164,10 @@ class NativeStageEHost:
         self.current=Path(current)
         self.freeze=Path(freeze)
         self.production=production
+        self.code_test_public_key=test_owner_public_key
+        self.test_before_evidence=test_before_evidence
+        need(production or test_owner_public_key is not None,
+             "ISOLATED_OWNER_KEY_REQUIRED")
         self.core_host=(IndependentComponentHost(production=True)
                         if production else core_host)
         need(self.core_host is not None,
@@ -283,6 +291,16 @@ class NativeStageEHost:
 
     def read_protected_before(self)->adapter.Before:
         self._verify_boundary()
+        if self.test_before_evidence is not None:
+            before=self.test_before_evidence()
+            need(isinstance(before,adapter.Before),
+                 "ISOLATED_BEFORE_NOT_TYPED")
+            adapter.assert_exact_before(before)
+            need(before.source_sha==self.manifest["rollback_sha"],
+                 "ROLLBACK_BASELINE_CHANGED")
+            self.before=before
+            self._first_scan=self._scan()["observed_at"]
+            return before
         active=set()
         enabled=set()
         for user,names in (
@@ -499,7 +517,8 @@ class NativeStageEHost:
         root_policy=code.read_exact(self.code.targets[code.POLICY])
         candidate_policy_sha=digest(root_policy)
         need(candidate_policy_sha!=before.policy_sha256
-             and before.policy_sha256==packet.EXPECTED_PRIOR_ROOT_POLICY,
+             and (not self.production or
+                  before.policy_sha256==packet.EXPECTED_PRIOR_ROOT_POLICY),
              "POLICY_DELTA_NOT_EXACT")
         before_raw=code.read_exact(
             self.before_dir/candidate/"before.json")
@@ -541,20 +560,25 @@ class NativeStageEHost:
         parent=self.marker.parent
         ancestor=parent.parent.lstat()
         need(not parent.parent.is_symlink()
-             and ancestor.st_uid==0 and ancestor.st_gid==0
-             and ancestor.st_mode&0o022==0,
+             and ancestor.st_mode&0o022==0
+             and (not self.production or
+                  (ancestor.st_uid==0 and ancestor.st_gid==0)),
              "ROOT_OWNER_MARKER_ANCESTOR_UNTRUSTED")
         if not parent.exists():
             parent.mkdir(mode=0o755)
         info=parent.lstat()
-        need(not parent.is_symlink() and info.st_uid==0 and info.st_gid==0
+        need(not parent.is_symlink()
+             and (not self.production or
+                  (info.st_uid==0 and info.st_gid==0))
              and stat.S_IMODE(info.st_mode)==0o755,
              "OWNER_MARKER_PARENT_MODE_CHANGED")
         fd=os.open(self.marker,os.O_WRONLY|os.O_CREAT|os.O_EXCL|
                    getattr(os,"O_NOFOLLOW",0),0o444)
         with os.fdopen(fd,"wb") as stream:
             stream.write(packet.canonical(row));stream.flush();os.fsync(stream.fileno())
-        need(admission.read_root_marker(self.marker)==row,
+        verified=(admission.read_root_marker(self.marker)
+                  if self.production else read_json(self.marker))
+        need(verified==row,
              "ROOT_ACCEPTED_MARKER_READBACK_MISMATCH")
 
     def freeze_and_protected_unchanged(self,before:adapter.Before)->bool:
@@ -620,7 +644,8 @@ class NativeStageEHost:
         self._verify_boundary()
         if not self._marker_present():
             return
-        record=admission.read_root_marker(self.marker)
+        record=(admission.read_root_marker(self.marker)
+                if self.production else read_json(self.marker))
         need(record is not None
              and record["owner_approval_id"]==self.approval_id
              and record["source_sha"]==self.manifest["candidate_sha"]
