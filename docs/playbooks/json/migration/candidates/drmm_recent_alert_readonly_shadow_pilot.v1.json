@@ -1,0 +1,229 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "drmm_recent_alert_readonly_shadow_pilot",
+    "name": "DRMM Recent Alert Read-Only Shadow Pilot",
+    "version": "0.1.0",
+    "lifecycle": "pilot",
+    "target_type": "provider_object",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-DRMM-Recent-Alert-Reconciliation.md"
+  },
+  "trigger": {
+    "provider": "Datto RMM",
+    "scope": "single exact currently-open alert UID",
+    "lookback_hours": 24
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "read_only": true,
+    "no_ticket_changes": true,
+    "no_provider_mutations": true,
+    "pilot_is_not_legacy_replacement": true
+  },
+  "expected_state": {
+    "only_authoritative_health_classification": true,
+    "no_alert_resolution": true,
+    "no_autotask_actions": true
+  },
+  "state_model": {
+    "entry_step": "read_open_alerts",
+    "persist": [
+      "run_id",
+      "client_id",
+      "target_alert_uid",
+      "candidate_fingerprint",
+      "governed_read_hashes"
+    ],
+    "read_only_recovery": "SQLiteJsonShadowState isolated"
+  },
+  "steps": [
+    {
+      "id": "read_open_alerts",
+      "type": "diagnostic",
+      "capability": "management.alert.search",
+      "arguments": {
+        "status": "open"
+      },
+      "next": "recent_gate"
+    },
+    {
+      "id": "recent_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "alert_in_24_hour_window",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "exact_uid_gate"
+        }
+      ],
+      "default": "outside_window"
+    },
+    {
+      "id": "exact_uid_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_alert_device_identity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "verifier_gate"
+        }
+      ],
+      "default": "identity_inconclusive"
+    },
+    {
+      "id": "verifier_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "registered_alert_class",
+            "operator": "eq",
+            "value": "endpoint_security_threat_ctx"
+          },
+          "next": "read_device"
+        }
+      ],
+      "default": "unsupported_class"
+    },
+    {
+      "id": "read_device",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "online_gate"
+    },
+    {
+      "id": "online_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_endpoint_online",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_security_status"
+        }
+      ],
+      "default": "waiting_offline"
+    },
+    {
+      "id": "read_security_status",
+      "type": "diagnostic",
+      "capability": "endpoint.security.status.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "engine_gate"
+    },
+    {
+      "id": "engine_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_agent_and_av_engine_healthy",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_active_detections"
+        }
+      ],
+      "default": "unhealthy_engine"
+    },
+    {
+      "id": "read_active_detections",
+      "type": "diagnostic",
+      "capability": "endpoint.security.detection.search",
+      "arguments": {
+        "agent_id": {
+          "$fact": "agent_id"
+        },
+        "archived": false,
+        "limit": 50
+      },
+      "next": "detections_gate"
+    },
+    {
+      "id": "detections_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "current_nonarchived_detection_count",
+            "operator": "eq",
+            "value": 0
+          },
+          "next": "healthy_observed"
+        }
+      ],
+      "default": "active_detections"
+    },
+    {
+      "id": "outside_window",
+      "type": "complete"
+    },
+    {
+      "id": "identity_inconclusive",
+      "type": "complete"
+    },
+    {
+      "id": "unsupported_class",
+      "type": "complete"
+    },
+    {
+      "id": "waiting_offline",
+      "type": "complete"
+    },
+    {
+      "id": "unhealthy_engine",
+      "type": "complete"
+    },
+    {
+      "id": "active_detections",
+      "type": "complete"
+    },
+    {
+      "id": "healthy_observed",
+      "type": "complete"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "governed management.alert.search, endpoint.device.read, endpoint.security.status.read and endpoint.security.detection.search",
+    "success_condition": "one exact alert classified using current-state evidence; no remediation or provider write"
+  },
+  "completion": {
+    "terminal_disposition": "read-only observation classified only; ticket and alert unchanged"
+  },
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "endpoint.device.read",
+      "endpoint.security.detection.search",
+      "endpoint.security.status.read",
+      "management.alert.search"
+    ]
+  },
+  "migration": {
+    "status": "isolated_shadow_pilot_only",
+    "accepted_as_legacy_replacement": false,
+    "related_legacy_id": "drmm_recent_alert_reconciliation",
+    "legacy_source_blob_sha": "076872fae94f49d3daa3dc1b8740bd99fee75ee2",
+    "source_only": true,
+    "production_activation_authorized": false,
+    "acceptance_boundary": "single-alert read-only classification; does not resolve alerts or tickets"
+  }
+}
