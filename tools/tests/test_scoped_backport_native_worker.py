@@ -222,3 +222,41 @@ def test_stage_reuses_one_exact_root_and_public_eligibility_receipt(monkeypatch)
     public_eligibility = root_public[2][1]
     assert root_eligibility == receipt == public_eligibility
     assert receipt["status"] == "native_scoped_preproduction_eligible_not_approved"
+
+
+def test_root_stage_preflight_probe_refuses_mutable_worktree(monkeypatch):
+    monkeypatch.setattr(worker.os, "geteuid", lambda: 0)
+    with pytest.raises(core.ScopedBackportDenied,
+                       match="INSTALLED_NATIVE_ROOT_WORKER_REQUIRED"):
+        worker.probe_stage_read_only()
+
+
+def test_root_stage_probe_uses_trusted_host_and_does_not_record_eligibility(monkeypatch):
+    from contextlib import nullcontext
+    class Host:
+        def __init__(self):
+            self.policy = {"trusted_source_sha": OFFER["protected_main_sha"]}
+            self.steps = []
+        def enforce_installed_root_trust(self):
+            self.steps.append("attest")
+        def release_lock(self, offer):
+            self.steps.append("lock")
+            return nullcontext()
+        def freshly_validate_live_scope(self, offer):
+            self.steps.append("validate_exact_source_and_images")
+    h=Host()
+    monkeypatch.setattr(worker.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(worker, "INSTALLED_ENTRY", worker.Path(worker.__file__).resolve())
+    monkeypatch.setattr(worker, "NativeScopedBackportHost", lambda: h)
+    monkeypatch.setattr(worker, "_offer_from_protected_source", lambda host, main:
+                        OFFER)
+    monkeypatch.setattr(worker, "_native_preflight",
+                        lambda offer, host: h.steps.append("native_docker_preflight"))
+    result = worker.probe_stage_read_only()
+    assert h.steps == ["attest", "lock", "validate_exact_source_and_images",
+                       "native_docker_preflight"]
+    assert result["status"] == "scoped_native_readonly_stage_preflight_pass"
+    assert result["production_mutations"] is False
+    assert result["provider_writes"] is False
+    assert result["release_eligibility_created"] is False
+    assert result["owner_approval_recorded"] is False

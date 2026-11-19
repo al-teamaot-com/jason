@@ -477,34 +477,38 @@ def listener_action(action: str) -> None:
 
 
 def read_only_stage_probe() -> str:
-    """No release record, no Owner proof, no container swap, no breaker bypass.
+    """Run ONLY the independently installed root worker's read-only probe.
 
-    Assess source, native root attestation, four credential-file ACLs, image
-    provenance and candidate Docker preflights. A closed breaker is still
-    mandatory during the subsequent actual native stage.
+    Never import caller-worktree code in the root process or treat a
+    developer-owned PYTHONPATH as trusted code. The root-installed handler
+    independently re-verifies pinned SHA policy and all source/images.
     """
+    path = ROOT_INSTALL_DIR / "tools/scoped_backport_native_root.py"
     try:
-        if ROOT_INSTALL_DIR.is_symlink() or ROOT_INSTALL_DIR.stat().st_uid != 0:
-            return "SCOPED_BACKPORT_ROOT_INSTALL_UNTRUSTED"
-        sys.path.insert(0, str(ROOT_INSTALL_DIR))
-        from tools.scoped_backport_native_host import NativeScopedBackportHost
-        from tools.scoped_backport_native_root import (
-            _offer_from_protected_source, _native_preflight,
-            bounded_stage_denial_code,
-        )
-        host = NativeScopedBackportHost()
-        host.enforce_installed_root_trust()
-        offer = _offer_from_protected_source(
-            host, host.policy["trusted_source_sha"])
-        with host.release_lock(offer):
-            host.freshly_validate_live_scope(offer)
-            _native_preflight(offer, host)
-        return "pass_nonmutating_scoped_source_and_docker_preflights"
-    except Exception as exc:
-        try:
-            return bounded_stage_denial_code(exc)
-        except (NameError, ImportError):
-            return "SCOPED_BACKPORT_UNCLASSIFIED_DENIAL"
+        result = subprocess.run(
+            ["/usr/bin/python3", "-I", str(path), "--probe-stage"],
+            capture_output=True, timeout=130, check=False)
+        if len(result.stdout) > 4096:
+            return "SCOPED_BACKPORT_STAGE_PROBE_RESULT_TOO_LARGE"
+        doc = json.loads(result.stdout)
+        if (not isinstance(doc, dict)
+                or doc.get("production_mutations") is not False
+                or doc.get("provider_writes") is not False):
+            return "SCOPED_BACKPORT_STAGE_PROBE_OUTPUT_UNTRUSTED"
+        if (result.returncode == 0 and
+                doc.get("status") == "scoped_native_readonly_stage_preflight_pass"
+                and doc.get("release_eligibility_created") is False
+                and doc.get("owner_approval_recorded") is False):
+            return "pass_nonmutating_scoped_source_and_docker_preflights"
+        if (result.returncode == 2 and
+                doc.get("status") == "scoped_native_readonly_stage_preflight_denied"):
+            reason = doc.get("denial_code")
+            if isinstance(reason, str) and re.fullmatch(
+                    r"SCOPED_BACKPORT_[A-Z0-9_]{2,96}", reason):
+                return reason
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return "SCOPED_BACKPORT_UNCLASSIFIED_STAGE_PROBE_DENIAL"
 
 
 def audit_once(path: Path, doc: dict) -> None:
