@@ -1,0 +1,50 @@
+# Completely separate opt-in SharePoint sidecar. No changes to the existing
+# runtime, MCP, Grafana, ticket, catalog, or playbook containers.
+services:
+  sharepoint-site-control:
+    build:
+      context: ../..
+      dockerfile: infrastructure/sharepoint-site-control/Dockerfile
+      args:
+        JASON_RUNTIME_BASE_IMAGE: ${JASON_SHAREPOINT_RUNTIME_BASE_DIGEST:?immutable approved runtime image digest required}
+    image: ${JASON_SHAREPOINT_CONTROL_IMAGE:?exact approved image tag required}
+    container_name: jason-sharepoint-site-control
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      JASON_SHAREPOINT_AOT_TENANT_ID: ${JASON_SHAREPOINT_AOT_TENANT_ID:?required}
+      JASON_SHAREPOINT_BOUNDARY_DB: /run/jason-boundaries/clients.sqlite3
+      JASON_SHAREPOINT_SITE_ACCESS_DB: /var/lib/jason/sharepoint/sites.sqlite3
+      JASON_OPENBAO_URL: http://openbao:8200
+      JASON_SHAREPOINT_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/sharepoint/role_id
+      JASON_SHAREPOINT_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/sharepoint/secret_id
+      JASON_SHAREPOINT_GRAFANA_TOKEN_FILE: /run/jason-secrets/sharepoint-control/token
+      JASON_SHAREPOINT_GRAFANA_OWNER_USERS: ${JASON_SHAREPOINT_GRAFANA_OWNER_USERS:?required}
+      JASON_SHAREPOINT_CONTROL_BIND: 0.0.0.0
+      JASON_SHAREPOINT_CONTROL_PORT: "9582"
+    volumes:
+      - ${JASON_SHAREPOINT_BOUNDARY_HOST_DB:?required}:/run/jason-boundaries/clients.sqlite3:ro
+      - ${JASON_SHAREPOINT_APPROLE_HOST_DIR:?required}:/run/jason-secrets/openbao/sharepoint:ro
+      - ${JASON_SHAREPOINT_CONTROL_TOKEN_HOST_DIR:?required}:/run/jason-secrets/sharepoint-control:ro
+      - sharepoint-site-state:/var/lib/jason/sharepoint
+    networks:
+      - observability
+      - jason-core
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+
+networks:
+  observability:
+    external: true
+    name: jason-observability
+  jason-core:
+    external: true
+    name: jason-core
+
+volumes:
+  sharepoint-site-state:
