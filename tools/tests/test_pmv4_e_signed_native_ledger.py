@@ -320,3 +320,53 @@ def test_root_attestor_validates_exact_bytes_before_accepting_scope(
     assert observed[0]["source_root"] == root_attestor.TRUST_ROOT
     assert observed[0]["release_dir"] == root/"releases"/CANDIDATE
     assert list((root/"receipts").iterdir()) == []
+
+
+def test_native_ledger_requires_exact_same_signed_bootstrap_before_promotion(
+        tmp_path):
+    from hashlib import sha256
+    from tools import pmv4_e_signed_bootstrap_phase as bootstrap
+    root,manifest=fixture(tmp_path)
+    signed=approval(manifest)
+    approval_id=signed["payload"]["approval_id"]
+    valid={
+        "schema_version":"1.0",
+        "status":"bootstrap_started",
+        "action":bootstrap.BOOTSTRAP_ACTION,
+        "approval_id":approval_id,
+        "candidate_sha":CANDIDATE,
+        "rollback_sha":ROLLBACK,
+        "scope_sha256":manifest["source_scope_sha256"],
+        "manifest_sha256":sha256(canonical(manifest)).hexdigest(),
+        "freeze_sha256":manifest["freeze_sha256"],
+        "source_file_count":len(packet.REVIEWED_PATHS),
+        "signed_owner_proof_sha256":sha256(canonical(signed)).hexdigest(),
+        "signed_owner_proof":signed,
+        "no_unit_mutations":True,
+        "native_systemd_release_authorized":False,
+        "started_at":datetime.now(timezone.utc).isoformat(),
+        "recovery_required":True,
+    }
+    assert native.StageESignedNativeLedger._bootstrap_record_matches(
+        valid,manifest=manifest,proof=signed,approval_id=approval_id)
+    for name,bad in (
+        ("status","accepted"),
+        ("action","host_reconcile"),
+        ("approval_id","owner-mcp-"+"a"*32),
+        ("candidate_sha","c"*40),
+        ("rollback_sha","c"*40),
+        ("scope_sha256","0"*64),
+        ("manifest_sha256","0"*64),
+        ("freeze_sha256","0"*64),
+        ("source_file_count",1),
+        ("signed_owner_proof_sha256","f"*64),
+        ("native_systemd_release_authorized",True),
+        ("no_unit_mutations",False),
+        ("recovery_required",False),
+    ):
+        changed=dict(valid);changed[name]=bad
+        assert not native.StageESignedNativeLedger._bootstrap_record_matches(
+            changed,manifest=manifest,proof=signed,approval_id=approval_id)
+    extra=dict(valid);extra["bypass"]="yes"
+    assert not native.StageESignedNativeLedger._bootstrap_record_matches(
+        extra,manifest=manifest,proof=signed,approval_id=approval_id)
