@@ -166,18 +166,55 @@ def candidate_packet()->tuple[dict,dict,dict[str,bytes]]:
 
 
 def gh_api(endpoint:str,query:str)->dict:
-    if os.geteuid()==0:
-        cmd=["/usr/sbin/runuser","-u","al","--","/usr/bin/env",
-             "HOME=/home/al","XDG_CONFIG_HOME=/home/al/.config",
-             "/usr/bin/gh","api","--method","GET",endpoint,
-             "--jq",query]
-    else:
+    def command_for(api_endpoint:str)->list[str]:
+        if os.geteuid()==0:
+            return ["/usr/sbin/runuser","-u","al","--","/usr/bin/env",
+                    "HOME=/home/al","XDG_CONFIG_HOME=/home/al/.config",
+                    "/usr/bin/gh","api","--method","GET",api_endpoint,
+                    "--jq",query]
         need(os.geteuid()==1000,"GITHUB_IDENTITY_MUST_BE_LOCAL_OWNER")
-        cmd=["/usr/bin/gh","api","--method","GET",endpoint,"--jq",query]
-    p=subprocess.run(cmd,capture_output=True,text=True,timeout=70)
-    need(p.returncode==0 and len(p.stdout)<750_000,"GITHUB_ATTESTATION_UNAVAILABLE")
-    return json.loads(p.stdout)
+        return ["/usr/bin/gh","api","--method","GET",api_endpoint,
+                "--jq",query]
 
+    if "/check-runs?per_page=100" in endpoint and "page=" not in endpoint:
+        base=endpoint.split("?",1)[0]
+        all_rows=[]
+        expected_total=None
+        for page in range(1,11):
+            page_endpoint=base+"?per_page=100&page="+str(page)
+            result=subprocess.run(command_for(page_endpoint),capture_output=True,
+                                  text=True,timeout=70)
+            need(result.returncode==0 and len(result.stdout)<750_000,
+                 "GITHUB_ATTESTATION_UNAVAILABLE")
+            try:
+                response=json.loads(result.stdout)
+            except (ValueError,TypeError) as exc:
+                raise Denied("PMV4_E_GITHUB_CHECK_PAGE_INVALID") from exc
+            count=response.get("count")
+            rows=response.get("rows")
+            need(type(count) is int and isinstance(rows,list)
+                 and len(rows)<=100,
+                 "GITHUB_CHECK_PAGE_SCHEMA_INVALID")
+            if expected_total is None:
+                expected_total=count
+            need(count==expected_total,
+                 "GITHUB_CHECK_TOTAL_CHANGED_DURING_PAGINATION")
+            all_rows.extend(rows)
+            need(len(all_rows)<=1000 and len(all_rows)<=expected_total,
+                 "GITHUB_CHECK_PAGE_LIMIT_INVALID")
+            if len(rows)<100:
+                need(len(all_rows)==expected_total,
+                     "GITHUB_CHECK_RUN_COUNT_MISMATCH")
+                break
+        else:
+            raise Denied("PMV4_E_GITHUB_CHECK_PAGINATION_LIMIT")
+        return {"count":expected_total,"rows":all_rows}
+
+    result=subprocess.run(command_for(endpoint),capture_output=True,
+                          text=True,timeout=70)
+    need(result.returncode==0 and len(result.stdout)<750_000,
+         "GITHUB_ATTESTATION_UNAVAILABLE")
+    return json.loads(result.stdout)
 
 def verify_ci(sha:str)->dict:
     """Live GitHub protected main + native REQUIRED checks, not noisy totals.
@@ -233,7 +270,7 @@ def verify_ci(sha:str)->dict:
         "{name:.name,sha:.head_sha,status:.status,"
         "conclusion:.conclusion,app:.app.id,at:.completed_at}]}")
     rows=checked.get("rows")
-    need(isinstance(rows,list) and 8<=len(rows)<=100
+    need(isinstance(rows,list) and 8<=len(rows)<=1000
          and checked.get("count")==len(rows),
          "REQUIRED_CHECK_SUITE_UNAVAILABLE")
     for name,app_id in sorted(expected.items()):
