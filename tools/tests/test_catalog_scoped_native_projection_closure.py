@@ -53,7 +53,8 @@ def test_pinned_native_deployer_requires_exact_sibling_projection(tmp_path):
 def test_no_preflight_import_ever_references_mutable_source_repository():
     root = inspect.getsource(worker._trusted_catalog_scoped_promotion_module)
     assert 'sys.modules' in root
-    assert 'source_revision + ":" + relative' in root
+    assert '_catalog_scoped_trusted_source_ref(relative, source_revision)' in root
+    assert worker._catalog_scoped_trusted_source_ref(PROJECTION, "a"*40) == "a"*40 + ":" + PROJECTION
     assert '/opt/jason/current/tools/pmv4_mcp_projection.py' not in root
     helper = (ROOT/'tools/deploy_live_container.py').read_text()
     assert 'from pmv4_mcp_projection import (' in helper
