@@ -236,4 +236,4 @@ def test_root_admission_baseline_only_emits_only_verified_lkg_sha(
         "runtime_mcp_source_revision":"b"*40})
     assert rootguard.main(["--source-revision","a"*40,
                            "--runtime-baseline-only"])==0
-    assert capsys.readouterr().out=="b"*40+"\\n"
+    assert capsys.readouterr().out=="b"*40+"\n"
