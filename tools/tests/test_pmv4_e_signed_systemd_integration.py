@@ -225,3 +225,15 @@ def test_no_lock_cannot_touch_twelve_unit_surface(tmp_path, monkeypatch):
     check_old_restored(host)
     assert host.systemd.calls == []
     assert list((root/"receipts").iterdir()) == []
+
+
+def test_signed_native_receipt_never_marks_parity_failure_accepted(
+        tmp_path, monkeypatch):
+    root, manifest=fixture(tmp_path)
+    host=CoupledHost(tmp_path,monkeypatch,root,
+                     fail_at="verify_complete_parity")
+    with pytest.raises(RuntimeError,match="INJECTED_verify_complete_parity"):
+        ctl(root,host).promote(manifest,approval(manifest))
+    assert records(root)[0]["state"]=="rolled_back"
+    assert host.native.marker is False
+    check_old_restored(host)

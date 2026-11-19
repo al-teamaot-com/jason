@@ -36,7 +36,8 @@ class FakeVerifiedUnitGuard:
         if self.bad:
             raise PermissionError("verified root marker denied")
         return {"schema_version":"1.0","state":"accepted",
-                "source_sha":self.sha}
+                "source_sha":self.sha,
+                "source_rollback_sha":"b"*40 if self.sha!="b"*40 else "a"*40}
 
 
 def test_absent_marker_preserves_legacy_host_reconcile_without_invoking_guard(
@@ -62,6 +63,7 @@ def test_root_accepted_marker_promotes_only_one_matching_exact_revision(marker):
         marker=marker,guard=guard,require_installed=False)
     assert result["mode"]=="replacement"
     assert result["source_revision"]==source
+    assert result["runtime_mcp_source_revision"]=="b"*40
     assert result["cutover_accepted"] is True
     assert result["production_mutations"] is False
     assert guard.calls==[marker]
@@ -187,3 +189,51 @@ def test_shell_mode_output_contract_is_not_json(tmp_path,monkeypatch,capsys):
 def test_host_script_requests_scalar_mode_only():
     source=(SOURCE/"tools/reconcile_production_host_services.sh").read_text()
     assert '--source-revision "$SOURCE_REVISION" --mode-only)' in source
+
+
+def test_bad_root_accepted_rollback_denied_before_new_source_convergence(
+    marker,monkeypatch):
+    class BadMarker:
+        def read_root_marker(self,path):
+            return {
+                "schema_version":"1.0","state":"accepted",
+                "source_sha":"a"*40,
+                "source_rollback_sha":"a"*40,
+            }
+    with pytest.raises(rootguard.RootReconcileAdmissionDenied,
+                       match="ROOT_RELEASE_SOURCE_OR_RECEIPT_NOT_EXACT"):
+        rootguard.decide(source_revision="a"*40,marker=marker,
+            guard=BadMarker(),require_installed=False)
+
+
+def test_verified_root_marker_baseline_is_exclusive_dual_sha_source():
+    source=(SOURCE/"tools/reconcile_production_host_services.sh").read_text()
+    assert 'PMV4_E_EXPECTED_MCP_REVISION="$SOURCE_REVISION"' in source
+    assert '--runtime-baseline-only)' in source
+    assert 'if [ "$LIVE_MCP_REVISION" != "$PMV4_E_EXPECTED_MCP_REVISION" ]; then' in source
+    assert "JASON_EXPECTED_MCP_SOURCE_REVISION" in source
+    assert "Stage E controlplane-only release cannot restart protected runtime/MCP" in source
+    assert "docker restart jason-runtime jason-mcp-pilot" in source
+    # Existing generic behavior is retained for old-mode releases.
+    assert 'PMV4_E_HOST_MODE=legacy' in source
+
+
+def test_root_admission_baseline_only_fails_closed_without_marker(
+        tmp_path,monkeypatch,capsys):
+    monkeypatch.setattr(rootguard.os,"geteuid",lambda:0)
+    monkeypatch.setattr(rootguard,"TRUST_ENTRY",Path(rootguard.__file__).resolve())
+    monkeypatch.setattr(rootguard,"decide",lambda **_:{"mode":"legacy","cutover_accepted":False})
+    assert rootguard.main(["--source-revision","a"*40,
+                           "--runtime-baseline-only"])==2
+
+
+def test_root_admission_baseline_only_emits_only_verified_lkg_sha(
+        tmp_path,monkeypatch,capsys):
+    monkeypatch.setattr(rootguard.os,"geteuid",lambda:0)
+    monkeypatch.setattr(rootguard,"TRUST_ENTRY",Path(rootguard.__file__).resolve())
+    monkeypatch.setattr(rootguard,"decide",lambda **_:{
+        "mode":"replacement","cutover_accepted":True,
+        "runtime_mcp_source_revision":"b"*40})
+    assert rootguard.main(["--source-revision","a"*40,
+                           "--runtime-baseline-only"])==0
+    assert capsys.readouterr().out=="b"*40+"\n"

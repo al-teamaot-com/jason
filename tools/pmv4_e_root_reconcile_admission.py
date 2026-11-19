@@ -78,29 +78,44 @@ def decide(*,source_revision:str,
     except (PermissionError,OSError,ValueError,TypeError) as exc:
         raise RootReconcileAdmissionDenied(
             "PMV4_E_RECONCILE_ROOT_ACCEPTED_PROOF_INVALID") from exc
+    rollback=receipt.get("source_rollback_sha") if isinstance(receipt,dict) else None
     need(isinstance(receipt,dict)
          and receipt.get("state")=="accepted"
-         and receipt.get("source_sha")==source_revision,
+         and receipt.get("source_sha")==source_revision
+         and isinstance(rollback,str)
+         and SHA.fullmatch(rollback) is not None
+         and rollback!=source_revision,
          "ROOT_RELEASE_SOURCE_OR_RECEIPT_NOT_EXACT")
     return {"status":"replacement_root_acceptance_verified",
             "mode":"replacement",
             "cutover_accepted":True,
             "source_revision":source_revision,
+            "runtime_mcp_source_revision":rollback,
             "production_mutations":False}
 
 
 def main(argv=None)->int:
     parser=argparse.ArgumentParser()
     parser.add_argument("--source-revision",required=True)
-    parser.add_argument("--mode-only",action="store_true",
-                        help="Emit only the validated mode for shell admission")
+    choices=parser.add_mutually_exclusive_group()
+    choices.add_argument("--mode-only",action="store_true",
+                         help="Emit only the validated mode for shell admission")
+    choices.add_argument("--runtime-baseline-only",action="store_true",
+                         help="Emit exact root-accepted original runtime/MCP SHA")
     args=parser.parse_args(argv)
     try:
         # Only the installed root-owned file is the deployable entrypoint.
         need(Path(__file__).resolve()==TRUST_ENTRY,
              "REVIEWED_ROOT_ENTRYPOINT_NOT_INSTALLED")
         result=decide(source_revision=args.source_revision)
-        print(result["mode"] if args.mode_only else json.dumps(result,sort_keys=True))
+        if args.runtime_baseline_only:
+            need(result["mode"]=="replacement"
+                 and isinstance(result.get("runtime_mcp_source_revision"),str)
+                 and SHA.fullmatch(result["runtime_mcp_source_revision"]) is not None,
+                 "UNACCEPTED_RUNTIME_MCP_BASELINE")
+            print(result["runtime_mcp_source_revision"])
+        else:
+            print(result["mode"] if args.mode_only else json.dumps(result,sort_keys=True))
         return 0
     except RootReconcileAdmissionDenied as exc:
         print(str(exc)[:180],file=sys.stderr)
