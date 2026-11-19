@@ -17,9 +17,9 @@ DESTINATIONS = tuple(
 )
 
 
-def test_default_source_profile_is_explicitly_off_for_independent_release():
-    assert json.loads(PROFILE.read_text()) == ALLOWED_OFF
-    assert read_profile(PROFILE) == ""
+def test_release_source_profile_is_exact_aot_pilot_activation():
+    assert json.loads(PROFILE.read_text()) == ALLOWED
+    assert read_profile(PROFILE) == ALLOWED["profile"]
     assert ALLOWED["client_id"] == "client-aot-internal"
     assert ALLOWED["tenant_id"] == "f7054323-d52b-4863-8c2f-1898f0b6077c"
 
