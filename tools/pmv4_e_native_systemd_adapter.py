@@ -31,9 +31,9 @@ STEPS=(
     "stage_reviewed_units_inert",
     "stop_six_legacy",
     "commit_exact_policy_and_convergence",
-    "commit_root_accepted_marker",
     "activate_six_replacements",
     "verify_complete_parity",
+    "commit_root_accepted_marker",
 )
 
 
@@ -145,9 +145,6 @@ class StageEUnitAdapter:
                             candidate_sha,rollback_sha,scope_sha256) is True,
                         "INSTALLED_CONTROLPLANE_NOT_EXACT",
                     )
-                elif step=="commit_root_accepted_marker":
-                    self.backend.commit_reviewed_root_marker(
-                        candidate_sha,rollback_sha,scope_sha256)
                 elif step=="activate_six_replacements":
                     self.backend.enable_start_exact(NEW_USER,NEW_ROOT)
                 elif step=="verify_complete_parity":
@@ -157,6 +154,12 @@ class StageEUnitAdapter:
                             "POSTFLIGHT_NOT_SIX_REPLACEMENTS")
                     require(self.backend.freeze_and_protected_unchanged(before),
                             "PROTECTED_POSTFLIGHT_CHANGED")
+                elif step=="commit_root_accepted_marker":
+                    # Root acceptance must be the LAST mutation only AFTER
+                    # six new triggers have live parity. Until then the
+                    # replacement services' ExecCondition fails closed.
+                    self.backend.commit_reviewed_root_marker(
+                        candidate_sha,rollback_sha,scope_sha256)
                 self.backend.append_native_step_receipt(step,before)
                 completed.append(step)
             return {"status":"native_stage_e_six_unit_candidate_verified",

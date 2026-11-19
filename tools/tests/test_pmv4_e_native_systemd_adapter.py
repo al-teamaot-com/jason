@@ -62,7 +62,10 @@ class FakeRootBackend:
     def verify_live_controlplane_alignment(self,candidate,rollback,scope):
         return (self.controlplane_aligned
                 and (candidate,rollback,scope)==(CANDIDATE,ROLLBACK,SCOPE))
-    def commit_reviewed_root_marker(self,*args):self.marker=True
+    def commit_reviewed_root_marker(self,*args):
+        assert self.active==set(adapter.NEW)
+        assert self.enabled==set(adapter.NEW)
+        self.marker=True
     def enable_start_exact(self,u,r):
         assert self.staged
         self.active.update(u+r)
@@ -221,3 +224,22 @@ def test_controlplane_install_readback_denied_before_accepted_marker():
     assert recovery["status"]=="native_stage_e_six_unit_rollback_verified"
     assert backend.policy=="legacy"
     assert backend.active==set(adapter.OLD)
+
+
+def test_root_acceptance_marker_fails_closed_until_postflight_parity():
+    backend=FakeRootBackend(fail_at="verify_complete_parity")
+    with pytest.raises(RuntimeError,match="INJECTED_verify_complete_parity"):
+        promote(backend)
+    assert backend.marker is False
+    assert backend.active==set(adapter.NEW)
+    # The native signed controller then reverts the reviewable step ledger.
+    assert recover(backend)["status"]=="native_stage_e_six_unit_rollback_verified"
+    assert backend.active==set(adapter.OLD)
+
+
+def test_native_last_phase_is_accepted_marker_not_live_unit_start():
+    assert adapter.STEPS[-1]=="commit_root_accepted_marker"
+    assert adapter.STEPS.index("activate_six_replacements") < (
+        adapter.STEPS.index("verify_complete_parity"))
+    assert adapter.STEPS.index("verify_complete_parity") < (
+        adapter.STEPS.index("commit_root_accepted_marker"))
