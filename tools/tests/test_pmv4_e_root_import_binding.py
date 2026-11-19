@@ -24,6 +24,11 @@ def test_package_order_and_original_generic_root_module_from_disposable_bundle(
         target.write_bytes((packet.ROOT / relative).read_bytes())
     for path in ("tools", "implementation", "implementation/kernel"):
         (original / path).mkdir(exist_ok=True, parents=True)
+    for name in binding.NATIVE_FILES:
+        (original / name).chmod(0o444)
+    for path in ("tools", "implementation", "implementation/kernel"):
+        (original / path).chmod(0o555)
+    original.chmod(0o555)
     staged_root = trust.RootTrustStager(
         source=packet.ROOT, target=staged, production=False,
         native_signed_started=lambda:True,
@@ -89,6 +94,14 @@ def test_invalid_original_root_file_is_denied_before_module_binding(tmp_path):
         hashes[name]=sha256(p.read_bytes()).hexdigest()
     altered=original/binding.NATIVE_FILES[0]
     altered.write_bytes(b"untrusted original")
+    for name in binding.NATIVE_FILES:
+        (original/name).chmod(0o444)
+    for name in binding.STAGE_FILES:
+        (stage/name).chmod(0o444)
+    for base in (original, stage):
+        for part in ("tools", "implementation", "implementation/kernel"):
+            (base/part).chmod(0o555)
+        base.chmod(0o555)
     with pytest.raises(binding.StageERootImportDenied,
                        match="NATIVE_FILE_BYTES_CHANGED"):
         binding.prepare(
