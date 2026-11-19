@@ -64,7 +64,7 @@ def test_mcp_native_shell_validator_does_not_activate_v4_admin_profile():
         MCP, 'SOURCE_ADMIN_APPROVER_PROFILE="$(python3', 'PY_ADMIN_ROLE', ROOT,
     )
     assert run.returncode == 0, run.stderr
-    assert run.stdout.strip() == ""
+    assert run.stdout.strip() == "jason-owner-v1"
 
 
 @pytest.mark.parametrize("bad", [

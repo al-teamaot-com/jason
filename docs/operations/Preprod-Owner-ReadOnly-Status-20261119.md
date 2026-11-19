@@ -52,3 +52,15 @@ native MCP release. No on-host activation is part of source merge.
 security review and protected CI before source merge. Native MCP release
 requires exact SHA, scope, rollback and separate production authorization.
 Production freeze, PMv4 Ticket Core and Stage E remain unchanged.
+
+## Owner-role correction supersedes narrow status-only proposal
+
+The original narrow status-read prototype was superseded by the Owner's
+explicit instruction that `al_admin@teamaot.com` is a **Microsoft 365/Entra
+admin account, not a Jason administrative sign-in**. The authoritative revised
+source and release plan is
+`docs/operations/Jason-Licensed-Owner-Authorization-Correction-20261119.md`.
+The original source-only status path remains an observation check; when
+`jason-owner-v1` is enabled, the licensed Jason Owner is permitted to make
+strictly governed Jason approval decisions as well. No change is active until
+separate exact-SHA native release approval and live readback.
