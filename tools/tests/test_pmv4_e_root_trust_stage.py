@@ -132,7 +132,7 @@ def test_sealed_root_imports_exact_packet_with_no_developer_checkout(tmp_path):
     hashes=bundle_hashes()
     assert "tools/pmv4_e_exact_release_packet.py" in hashes
     b.stage(source_sha="b"*40,exact_hashes=hashes)
-    assert len(hashes)==47
+    assert len(hashes)==len(packet.REVIEWED_PATHS)
     script=(
         "from pathlib import Path\n"
         "import sys\n"
