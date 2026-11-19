@@ -88,3 +88,30 @@ CI source gate reports success at the exact branch SHA.**
 
 **Legacy migration reconciled: 0/19 fully accepted.** Retain the existing
 legacy implementation and protected PMv4 boundaries unchanged.
+
+
+## Runtime-service preproduction composition proof (source-only)
+
+The independent opt-in builder at
+`implementation/runtime_service/src/jason_runtime/json_playbook_readonly_preprod.py`
+now uses the **existing** `SQLitePlaybookRegistry(..., read_only=True)`
+to inspect an exact isolated **draft** `drmm_recent_alert_readonly_shadow_pilot@0.1.0`.
+It enforces its immutable fingerprint, exact read-only capability set, and
+nonactive state. The existing
+`jason_runtime.autonomy_shadow_runtime.GovernedAutonomyReadPort` composes
+the service principal's authorized Observe request and the Central
+Orchestrator; the builder does not create new provider transport, an
+alternative runbook registry, a competing Ticket Core scheduler or any
+mutation capability.
+
+`implementation/runtime_service/tests/test_json_playbook_readonly_preprod.py`
+tests this composition using fake in-memory authority and provider
+responses with **ten isolated scenarios**. Client scope, explicit Observe
+policy, exact registry fingerprint, refusal to load active versions,
+restart/idempotency, and the five supported read-only classifications are
+covered. Neither these tests nor the builder connect to the production
+Core, a real client endpoint, or a live provider API.
+
+**This establishes test-backed source-level integration readiness for an
+isolated preproduction environment, not live provider acceptance.** No
+production JSON stage, activation, release, or legacy retirement is implied.

@@ -9,6 +9,8 @@ on:
       - "implementation/autonomous_remediation/playbook_ticket_evidence.py"
       - "implementation/autonomous_remediation/json_shadow_integration.py"
       - "implementation/autonomous_remediation/json_shadow_facts.py"
+      - "implementation/runtime_service/src/jason_runtime/json_playbook_readonly_preprod.py"
+      - "implementation/runtime_service/tests/test_json_playbook_readonly_preprod.py"
       - "implementation/autonomous_remediation/playbook_registry.json"
       - "tests/test_legacy_json_*.py"
       - "tools/legacy_json_migration_source_maps.py"
@@ -62,6 +64,7 @@ jobs:
             tests/test_json_playbook_isolated_trace.py \
             tests/test_json_governed_shadow_integration.py \
             tests/test_json_readonly_shadow_pilot_acceptance.py \
+            implementation/runtime_service/tests/test_json_playbook_readonly_preprod.py \
             tests/test_playbook_ticket_evidence.py \
             implementation/autonomous_remediation/test_json_playbook_document.py \
             implementation/autonomous_remediation/test_json_playbook_store.py
