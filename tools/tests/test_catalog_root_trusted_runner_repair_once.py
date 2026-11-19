@@ -113,3 +113,12 @@ def test_owner_scope_is_not_provider_or_image_release():
     for forbidden in ("docker run","docker stop","systemctl restart",
                       "systemctl stop","production-deployment-freeze.unlink"):
         assert forbidden not in source
+
+
+def test_prior_root_owner_receipts_read_from_ledger_directory_not_worker_bytes():
+    source=SOURCE.read_text()
+    assert 'previously=Path("/var/lib/jason-catalog-scoped-promotion/rebind-ledger")' in source
+    assert 'read(previously/"verified.json"' in source
+    assert 'read(previously/"owner-intent.json"' in source
+    assert 'read(previous/"verified.json"' not in source
+    assert 'read(previous/"owner-intent.json"' not in source

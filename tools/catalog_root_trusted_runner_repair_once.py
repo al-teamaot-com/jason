@@ -128,8 +128,8 @@ def preflight():
     if old.get("source_sha")!=OLD_SOURCE_SHA or old.get("root_worker_sha256")!=OLD_WORKER_SHA256:
         fail("EXACT_ROOT_POLICY_MISMATCH")
     previously=Path("/var/lib/jason-catalog-scoped-promotion/rebind-ledger")
-    original_receipt=json.loads(read(previous/"verified.json",uid=0,mode=0o600,limit=8192))
-    consumed=json.loads(read(previous/"owner-intent.json",uid=0,mode=0o600,limit=8192))
+    original_receipt=json.loads(read(previously/"verified.json",uid=0,mode=0o600,limit=8192))
+    consumed=json.loads(read(previously/"owner-intent.json",uid=0,mode=0o600,limit=8192))
     if (original_receipt.get("status")!="exact_catalog_root_rebind_verified"
             or original_receipt.get("source_sha")!=OLD_SOURCE_SHA
             or consumed.get("status")!="consumed_before_mutation"
