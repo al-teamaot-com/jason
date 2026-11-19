@@ -100,3 +100,17 @@ any prior successful sign-in or Owner confirmation as standing approval.
 
 The engineering repair must not be described as a production deployment until
 the specific root-owned receipt and release-manager results exist.
+
+## Parallel integration and CI coordination
+
+PR #2654 performs a separate catalog Owner-canary admission repair. Its only
+file-level overlap with this isolated scoped release-control fix is the
+additive test-step registration in
+`.github/workflows/security-regressions.yml`. Review confirmed the
+new catalog tests and the new standalone native-helper packaging test use
+distinct test files and exercise separate governed components. Both steps
+must remain in the protected workflow after integration, and neither PR
+may be treated as an approval for the other's production root writes.
+The PR bodies explicitly record `Integration coordination: #2654` and
+`Integration coordination: #2655`, respectively, so the repository's
+change-integration gate can preserve both independent validations.
