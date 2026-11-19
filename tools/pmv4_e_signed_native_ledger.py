@@ -91,6 +91,35 @@ class StageESignedNativeLedger(ComponentReleaseController):
             raise ComponentReleaseDenied("PMV4_E_NATIVE_SOURCE_SCOPE_DRIFT") from exc
         return bundle
 
+    def _attest_installed_root(self, *, manifest, candidate, previous, verified_bundle):
+        # The independent attestor must rehash the exact canonical,
+        # ROOT-owned sealed 51-file tree and the root release manifest.
+        # No signed Owner grant is accepted on mere source CI or a
+        # user-supplied JSON claim of installed root acceptance.
+        from tools import pmv4_e_native_root_manifest_attestation as root_attestor
+        root_record = root_attestor.inspect(
+            source_root=root_attestor.TRUST_ROOT,
+            release_dir=verified_bundle,
+            production=True,
+        )
+        deny(
+            type(root_record) is dict
+            and root_record.get("status") ==
+                "root_source_attested_no_release_authority"
+            and root_record.get("candidate_sha") == candidate
+            and root_record.get("rollback_sha") == previous
+            and root_record.get("scope_sha256") ==
+                manifest["source_scope_sha256"]
+            and root_record.get("manifest_sha256") ==
+                digest(canonical(manifest))
+            and root_record.get("file_count") ==
+                len(packet.REVIEWED_PATHS)
+            and root_record.get("production_mutations") is False
+            and root_record.get("release_authorized") is False
+            and root_record.get("owner_proof_issued") is False,
+            "INSTALLED_ROOT_ATTESTATION_NOT_EXACT",
+        )
+
     def preflight(self, manifest: Mapping[str, Any],
                   signed_approval: Mapping[str, Any], *,
                   at: datetime | None = None):
@@ -119,6 +148,11 @@ class StageESignedNativeLedger(ComponentReleaseController):
         deny(self.observe_component(RESOURCE) == previous,
              "PHYSICAL_ROLLBACK_CHANGED")
         verified_bundle = self._bundle(manifest)
+        if self.production:
+            self._attest_installed_root(
+                manifest=manifest, candidate=candidate, previous=previous,
+                verified_bundle=verified_bundle,
+            )
         gate = self._root_stage_e_preflight()
         deny(type(gate) is dict
              and gate.get("status") ==
