@@ -28,9 +28,12 @@ class CoupledHost(Host):
              work, monkeypatch, fail_at=fail_at)
         self.ledger_root = ledger_root
         self.host_lock_held = False
-        self.scope = contract.draft(
-            candidate_sha=CANDIDATE, rollback_sha=ROLLBACK
-        )["manifest"]["source_scope_sha256"]
+        # The systemd fixture intentionally substitutes disposable unit
+        # bytes after the signed source manifest was prepared. Reusing the
+        # immutable on-disk manifest avoids re-drafting against fake bytes.
+        self.scope = json.loads(
+            (ledger_root/"releases"/CANDIDATE/"manifest.json").read_text()
+        )["source_scope_sha256"]
         self.callback.native_invocation = (
             lambda: self.host_lock_held and self.freeze_active)
         self.native.exclusive_host_lock_held = lambda: self.host_lock_held
