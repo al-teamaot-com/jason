@@ -54,6 +54,9 @@ jobs:
             tools/tests/test_catalog_scoped_root_install_transaction.py \
             tools/tests/test_catalog_scoped_root_bootstrap_packet.py \
             tools/tests/test_catalog_scoped_root_install_native.py
+      - name: Scoped Backport exact four-unit desired-state reconciliation security
+        run: |
+          python -m pytest -q tests/test_scoped_backport_drift_reconcile.py
       - name: Catalog root fresh-process trust verification and exact rollback
         run: |
           python -m pytest -q tools/tests/test_catalog_root_consumption_ledger_repair_v2_once.py
@@ -126,7 +129,8 @@ jobs:
             tools/tests/test_scoped_backport_native_host.py \
             tools/tests/test_scoped_backport_native_worker.py \
             tools/tests/test_scoped_backport_root_install.py \
-            tools/tests/test_scoped_backport_owner_local_approval.py
+            tools/tests/test_scoped_backport_owner_local_approval.py \
+            tools/tests/test_scoped_backport_four_unit_drift_reconcile.py
       - name: Microsoft group dormant and exact AOT activation composition
         run: |
           python -m pytest -q implementation/runtime_service/tests/test_composition.py -k group_admin

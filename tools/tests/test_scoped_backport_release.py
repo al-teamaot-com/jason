@@ -376,3 +376,60 @@ def test_root_source_ancestry_uses_exact_repository_scope(monkeypatch):
     assert sb._ancestor(ROOT, "1" * 40, "2" * 40) is True
     assert calls[0][:5] == ["git", "-c", f"safe.directory={ROOT}",
                             "-C", str(ROOT)]
+
+
+
+def test_scoped_pinned_main_may_advance_with_only_unrelated_changes(monkeypatch):
+    pinned = MAIN
+    current = "e" * 40
+    observed = []
+    monkeypatch.setattr(sb, "_ancestor", lambda repo, left, right:
+                        left == pinned and right == current)
+    def git(repo, *args):
+        observed.append(args)
+        if args[0] == "show" and ":" in args[1]:
+            revision, name = args[1].split(":", 1)
+            assert revision in (pinned, current)
+            return ("immutable:" + name).encode()
+        raise AssertionError(args)
+    monkeypatch.setattr(sb, "_git", git)
+    sb.confirm_protected_main_lineage(ROOT, pinned=pinned, current=current)
+    expected = len(sb.SCOPED_MAIN_IMMUTABLE_PATHS)
+    assert len(observed) == expected * 2
+
+
+def test_scoped_main_change_to_one_critical_module_denied(monkeypatch):
+    pinned, current = MAIN, "e" * 40
+    monkeypatch.setattr(sb, "_ancestor", lambda *a: True)
+    def git(repo, *args):
+        revision, name = args[1].split(":", 1)
+        return (("modified" if name == sb.RELEASE_MANIFEST and revision == current
+                 else "reviewed") + name).encode()
+    monkeypatch.setattr(sb, "_git", git)
+    with pytest.raises(sb.ScopedBackportDenied,
+                       match="PINNED_SCOPED_SOURCE_CHANGED_ON_MAIN"):
+        sb.confirm_protected_main_lineage(ROOT, pinned=pinned, current=current)
+
+
+def test_non_descendant_latest_main_denied(monkeypatch):
+    monkeypatch.setattr(sb, "_ancestor", lambda *a: False)
+    monkeypatch.setattr(sb, "_git", lambda *a:
+                        pytest.fail("no source read for non-descendant main"))
+    with pytest.raises(sb.ScopedBackportDenied, match="PROTECTED_MAIN_MOVED"):
+        sb.confirm_protected_main_lineage(
+            ROOT, pinned=MAIN, current="e"*40)
+
+
+def test_scoped_main_source_set_covers_all_production_root_and_credential_code():
+    paths = sb.SCOPED_MAIN_IMMUTABLE_PATHS
+    assert sb.RELEASE_MANIFEST in paths
+    assert sb.GROUP_SOURCE_MODULES.issubset(paths)
+    assert {
+        "tools/scoped_backport_release.py",
+        "tools/scoped_backport_native_root.py",
+        "tools/scoped_backport_native_host.py",
+        "tools/scoped_backport_native_recovery.py",
+        "tools/scoped_backport_release_request.py",
+        "implementation/kernel/signed_owner_release.py",
+        "tools/deploy_live_container.py",
+    }.issubset(paths)

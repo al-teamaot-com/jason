@@ -193,3 +193,32 @@ def test_foreign_recovery_journal_denied_before_root_state(monkeypatch):
     with pytest.raises(core.ScopedBackportDenied, match="RECOVERY_JOURNAL_OFFER_MISMATCH"):
         recovery.reconcile_one(host, OFFER, doc)
     assert host.actions == []
+
+
+
+def test_root_denial_code_is_bounded_and_never_leaks_provider_payload():
+    assert worker.bounded_stage_denial_code(
+        core.ScopedBackportDenied("SCOPED_BACKPORT_ROOT_SCOPE_CHANGED")
+    ) == "SCOPED_BACKPORT_ROOT_SCOPE_CHANGED"
+    for exc in (
+        ValueError("Authorization Bearer secret-123"),
+        core.ScopedBackportDenied("SCOPED_BACKPORT_TOKEN=" + "x"*90),
+        PermissionError("/run/jason-secrets/private/credentials"),
+    ):
+        assert worker.bounded_stage_denial_code(
+            exc) == "SCOPED_BACKPORT_UNCLASSIFIED_DENIAL"
+
+
+def test_stage_reuses_one_exact_root_and_public_eligibility_receipt(monkeypatch):
+    host = StageHost()
+    root_public = []
+    monkeypatch.setattr(worker, "_native_preflight", lambda *a: None)
+    monkeypatch.setattr(worker, "atomic_root_json",
+                        lambda path, doc: root_public.append(("root", doc)))
+    monkeypatch.setattr(worker, "_publish_public",
+                        lambda name, key, doc: root_public.append((name, doc)))
+    receipt = worker.stage(host, OFFER)
+    root_eligibility = root_public[0][1]["eligible"]
+    public_eligibility = root_public[2][1]
+    assert root_eligibility == receipt == public_eligibility
+    assert receipt["status"] == "native_scoped_preproduction_eligible_not_approved"
