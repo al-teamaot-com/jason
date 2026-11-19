@@ -129,7 +129,8 @@ jobs:
             tools/tests/test_scoped_backport_native_host.py \
             tools/tests/test_scoped_backport_native_worker.py \
             tools/tests/test_scoped_backport_root_install.py \
-            tools/tests/test_scoped_backport_owner_local_approval.py
+            tools/tests/test_scoped_backport_owner_local_approval.py \
+            tools/tests/test_scoped_backport_four_unit_drift_reconcile.py
       - name: Microsoft group dormant and exact AOT activation composition
         run: |
           python -m pytest -q implementation/runtime_service/tests/test_composition.py -k group_admin

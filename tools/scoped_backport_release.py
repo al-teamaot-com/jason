@@ -212,6 +212,41 @@ def _ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
     return p.returncode == 0
 
 
+# A scoped release is pinned to immutable *reviewed* source, not the
+# repository's unrelated daily engineering merges. When protected main has
+# advanced, its exact reviewed root code, manifest, Graph implementation
+# and systemd units must remain byte-identical to the pinned source commit.
+# No branch-force, source substitution, tag drift or relaxed production gate.
+SCOPED_MAIN_IMMUTABLE_PATHS = frozenset((
+    RELEASE_MANIFEST,
+    "tools/scoped_backport_release.py",
+    "tools/scoped_backport_release_request.py",
+    "tools/scoped_backport_native_root.py",
+    "tools/scoped_backport_native_host.py",
+    "tools/scoped_backport_native_recovery.py",
+    "tools/scoped_backport_owner_local_approval.py",
+    "tools/deploy_live_container.py",
+    "implementation/kernel/signed_owner_release.py",
+    "infrastructure/scoped-backport-release/jason-scoped-backport-recovery.service",
+    "infrastructure/scoped-backport-release/jason-scoped-backport-recovery.timer",
+    "infrastructure/scoped-backport-release/jason-scoped-backport-requests.path",
+    "infrastructure/scoped-backport-release/jason-scoped-backport-requests.service",
+)) | GROUP_SOURCE_MODULES
+
+
+def confirm_protected_main_lineage(repo: Path, *, pinned: str,
+                                   current: str) -> None:
+    if current == pinned:
+        return
+    if (not _SHA.fullmatch(current) or
+            not _ancestor(repo, pinned, current)):
+        deny("PROTECTED_MAIN_MOVED")
+    for path in sorted(SCOPED_MAIN_IMMUTABLE_PATHS):
+        if _git(repo, "show", pinned + ":" + path) != _git(
+                repo, "show", current + ":" + path):
+            deny("PINNED_SCOPED_SOURCE_CHANGED_ON_MAIN")
+
+
 def source_admission(repo: Path, *, trusted_main_sha: str,
                      manifest_path: str = RELEASE_MANIFEST) -> dict[str, Any]:
     """Read-only, exact protected-main + frozen snapshot proof.
@@ -224,8 +259,10 @@ def source_admission(repo: Path, *, trusted_main_sha: str,
     if origin not in _ORIGIN:
         deny("ORIGIN_NOT_AOT")
     remote = _git(repo, "ls-remote", "origin", "refs/heads/main").decode().strip().split()
-    if remote != [main, "refs/heads/main"]:
-        deny("PROTECTED_MAIN_MOVED")
+    if (len(remote) != 2 or remote[1] != "refs/heads/main"
+            or not _SHA.fullmatch(remote[0])):
+        deny("PROTECTED_MAIN_REMOTE_INVALID")
+    confirm_protected_main_lineage(repo, pinned=main, current=remote[0])
     try:
         m = validate_manifest(json.loads(_git(repo, "show", main + ":" + manifest_path)))
     except (ValueError, UnicodeError) as exc:
