@@ -199,3 +199,38 @@ def test_root_stage_routes_existing_stale_offer_only_to_controlled_restage(monke
     }
     assert root.execute_native_catalog_scoped_request(request,repo=state,native_ci_checks=lambda *_:{})=={"status":"controlled_restage"}
     assert calls==[new]
+
+
+def test_expired_signed_but_unconsumed_offer_may_restage_without_changing_proof(host,monkeypatch):
+    from datetime import datetime,timezone,timedelta
+    fake,old,new,state,auth=host
+    prior=auth/"owner-approvals"/(new["release_id"]+".json")
+    prior.write_text("immutable existing cryptographically signed proof\n")
+    original=prior.read_bytes()
+    def verified_prior(release_id,offer,host):
+        assert release_id==old["release_id"] and offer["manifest_sha256"]==old["manifest_sha256"]
+        return {"payload":{"expires_at":(
+            datetime.now(timezone.utc)-timedelta(seconds=10)).isoformat()}}
+    monkeypatch.setattr(root,"_signed_approval",verified_prior)
+    result=root._restage_unchanged_catalog_scope(fake,new)
+    assert result["status"]=="catalog_unsigned_offer_restaged_without_production_mutation"
+    assert prior.read_bytes()==original
+    assert fake.opened==1 and fake.breaker==[]
+    assert (state/"offers"/(new["release_id"]+".json")).read_bytes()==encoded(new)
+    assert (auth/"offers"/(new["release_id"]+".json")).read_bytes()==encoded(new)
+
+
+def test_still_live_signed_proof_cannot_restage_across_moving_main(host,monkeypatch):
+    from datetime import datetime,timezone,timedelta
+    fake,old,new,state,auth=host
+    prior=auth/"owner-approvals"/(new["release_id"]+".json")
+    prior.write_text("immutable signed decision still within 15 minute window\n")
+    original=prior.read_bytes()
+    monkeypatch.setattr(root,"_signed_approval",
+                        lambda *a:{"payload":{"expires_at":(
+                            datetime.now(timezone.utc)+timedelta(minutes=5)).isoformat()}})
+    with pytest.raises(PermissionError,match="OFFER_RESTAGE_SIGNED_OWNER_PROOF_NOT_EXPIRED"):
+        root._restage_unchanged_catalog_scope(fake,new)
+    assert fake.opened==0
+    assert prior.read_bytes()==original
+    assert (state/"offers"/(new["release_id"]+".json")).read_bytes()==encoded(old)
