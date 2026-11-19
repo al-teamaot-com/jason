@@ -199,8 +199,8 @@ def test_invalid_approval_source_or_scope_does_not_activate(tmp_path, scenario):
     elif scenario == "source":
         host.fail_source=True
     elif scenario == "replay":
-        (root/"receipts"/("owner-"+"4"*32+".json")).write_text(
-            json.dumps({"approval_id":"4"*32,"state":"accepted"}))
+        (root/"receipts"/("owner-"+"owner-mcp-"+"4"*32+".json")).write_text(
+            json.dumps({"approval_id":"owner-mcp-"+"4"*32,"state":"accepted"}))
     with pytest.raises((PermissionError, original.ComponentReleaseDenied)):
         ctl(root,host).promote(manifest,signer)
     assert "activate" not in host.calls
