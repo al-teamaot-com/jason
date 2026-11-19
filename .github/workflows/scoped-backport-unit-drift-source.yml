@@ -1,0 +1,16 @@
+name: Scoped-backport inventory checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  inventory-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - run: PYTHONPATH=. python -m pytest -q tools/tests/test_scoped_backport_unit_drift_evidence.py tools/tests/test_scoped_backport_unit_drift_reconcile_root.py

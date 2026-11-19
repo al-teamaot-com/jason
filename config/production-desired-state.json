@@ -64,7 +64,11 @@
     "jason-release-control-readback.service",
     "jason-release-control-transition.service",
     "jason-release-host-reconcile.service",
-    "jason-runtime.service"
+    "jason-runtime.service",
+    "jason-scoped-backport-recovery.service",
+    "jason-scoped-backport-recovery.timer",
+    "jason-scoped-backport-requests.path",
+    "jason-scoped-backport-requests.service"
   ],
   "required_user_units": [
     "jason-release-manager.timer",
