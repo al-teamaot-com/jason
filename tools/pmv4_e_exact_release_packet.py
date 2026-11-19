@@ -51,6 +51,7 @@ ROOT_TO_INSTALL=(
     "tools/pmv4_e_native_root_host.py",
     "tools/pmv4_e_native_root_entry.py",
     "tools/pmv4_e_immutable_source_stage.py",
+    "tools/pmv4_e_inert_bootstrap_sequence.py",
 )
 ROOT_COMPONENTS_PREINSTALLED=(
     "tools/independent_component_release.py",
