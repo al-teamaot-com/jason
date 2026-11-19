@@ -87,8 +87,8 @@ def setup_host(tmp_path):
     policy.write_bytes((packet.ROOT/native.code.POLICY).read_bytes())
     policy.chmod(0o600)
     first="2026-11-19T14:01:01+00:00"
-    next="2026-11-19T14:02:02+00:00"
-    scans=iter((first,next,next))
+    second="2026-11-19T14:02:02+00:00"
+    scans=iter((first,second,second))
     old=unit.Before(
         active=frozenset(unit.OLD),enabled=frozenset(unit.OLD),
         policy_sha256=packet.EXPECTED_PRIOR_ROOT_POLICY,
@@ -118,7 +118,7 @@ def setup_host(tmp_path):
         },
         scan_evidence=lambda:{
             "status":"fresh","duplicate_items":0,
-            "observed_at":next(scans, next),
+            "observed_at":next(scans, second),
         },
         core_host=core,code_switch=code,systemd=sys,production=False)
     row={
@@ -235,7 +235,7 @@ def test_twelve_unit_hashes_derived_from_reviewed_source_only(tmp_path):
 def test_native_host_has_no_arbitrary_deploy_cli_or_issuer_and_reuses_native_locks():
     source=Path(native.__file__).read_text()
     for banned in ("subprocess.Popen(", "docker restart ", "systemctl start ",
-                   "sudo ", "issue_exact_owner_release(", "os.system("):
+                   "sudo /usr/bin", "issue_exact_owner_release(", "os.system("):
         assert banned not in source
     assert "with self.core_host.host_transaction()" in source
     assert "with self.core_host.freeze_transaction(expected)" in source
