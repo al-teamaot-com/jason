@@ -60,6 +60,9 @@ jobs:
       - name: Catalog root fresh-process trust verification and exact rollback
         run: |
           python -m pytest -q tools/tests/test_catalog_root_consumption_ledger_repair_v2_once.py
+      - name: Catalog Owner operator root-private transaction boundary and native one-use enforcement
+        run: |
+          python -m pytest -q tools/tests/test_catalog_owner_renewal_operator_v3.py
       - name: Catalog root-bootstrap and MCP release consumption-ledger namespace safety
         run: |
           python -m pytest -q \
