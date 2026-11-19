@@ -162,9 +162,18 @@ def safe_release_records(candidate:str,reviewed:dict,packet)->None:
         p=temp/filename
         data=packet.canonical(reviewed[key])
         fd=os.open(p,os.O_CREAT|os.O_EXCL|os.O_WRONLY|
-                   getattr(os,"O_NOFOLLOW",0),0o400)
+                   getattr(os,"O_NOFOLLOW",0),0o444)
         with os.fdopen(fd,"wb") as f:
             f.write(data);f.flush();os.fsync(f.fileno())
+        # The independently installed Stage E attestor and final native
+        # entry both require root-owned 0444 release records; a 0400
+        # bootstrap artifact would pass the writer but fail preflight.
+        p.chmod(0o444)
+        identity=p.lstat()
+        need(not p.is_symlink() and stat.S_ISREG(identity.st_mode)
+             and identity.st_nlink==1
+             and stat.S_IMODE(identity.st_mode)==0o444,
+             "NATIVE_MANIFEST_IDENTITY_OR_MODE_CHANGED")
         need(p.read_bytes()==data,
              "NATIVE_MANIFEST_DURABLE_READBACK_CHANGED")
     temp.chmod(0o555)

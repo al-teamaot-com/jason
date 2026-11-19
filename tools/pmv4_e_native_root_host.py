@@ -566,6 +566,10 @@ class NativeStageEHost:
              "ROOT_OWNER_MARKER_ANCESTOR_UNTRUSTED")
         if not parent.exists():
             parent.mkdir(mode=0o755)
+            # Secure root installers may set umask 077. Only this reviewed
+            # non-secret acceptance folder needs 0755 so al-owned
+            # ExecConditions can read the exact accepted marker.
+            parent.chmod(0o755)
         info=parent.lstat()
         need(not parent.is_symlink()
              and (not self.production or
@@ -576,6 +580,9 @@ class NativeStageEHost:
                    getattr(os,"O_NOFOLLOW",0),0o444)
         with os.fdopen(fd,"wb") as stream:
             stream.write(packet.canonical(row));stream.flush();os.fsync(stream.fileno())
+        # The root admission parser requires 0444, irrespective of the
+        # operator's restrictive umask. Never weaken the parser.
+        self.marker.chmod(0o444)
         verified=(admission.read_root_marker(self.marker)
                   if self.production else read_json(self.marker))
         need(verified==row,
