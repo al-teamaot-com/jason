@@ -2611,7 +2611,10 @@ def require_host_reconciler_ready(state_root: Path) -> None:
         raise ReleaseManagerError(
             "root host reconciliation spool permissions are unavailable"
         )
-    worker = Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
+    replacement = pmv4_e_scheduling_mode()=="replacement"
+    worker = (Path("/opt/jason/pmv4-e-trusted/tools/release_host_reconcile_worker.py")
+              if replacement else
+              Path("/usr/local/lib/jason/release_host_reconcile_worker.py"))
     if not worker.is_file():
         raise ReleaseManagerError("root host reconciliation worker is not installed")
     meta = worker.stat()
@@ -2620,7 +2623,8 @@ def require_host_reconciler_ready(state_root: Path) -> None:
             "root host reconciliation worker ownership/mode is unsafe"
         )
     completed = subprocess.run(
-        ["systemctl", "is-active", "jason-release-host-reconcile.path"],
+        ["systemctl", "is-active", "jason-pmv4-component-reconcile.path"
+         if replacement else "jason-release-host-reconcile.path"],
         env=user_systemd_env(),
         text=True,
         stdout=subprocess.PIPE,
@@ -2817,7 +2821,11 @@ def install_release_manager_from_current(expected_sha: str) -> dict[str, Any]:
         # must already have staged an immutable replacement controller.
         source_link = Path.home() / ".local" / "lib" / "jason" / "release-manager-source"
         installed_runner = Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
-        expected_runner = current / "tools" / "release_manager_host_runner.py"
+        marker=json.loads(PMV4_E_ACCEPTED_MARKER.read_bytes())
+        control_sha=exact_sha(str(marker.get("source_sha") or ""), "PMv4 E source SHA")
+        if marker.get("source_rollback_sha") != expected_sha:
+            raise ReleaseManagerError("PMv4 E source rollback does not match production")
+        expected_runner = Path("/opt/jason/releases") / control_sha / "tools/release_manager_host_runner.py"
         if (source_link.resolve().name.casefold() != expected_sha
                 or not installed_runner.is_file() or not expected_runner.is_file()
                 or hashlib.sha256(installed_runner.read_bytes()).digest()

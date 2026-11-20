@@ -49,6 +49,13 @@ def test_each_unit_preserves_existing_backend_while_refusing_unauthorized_start(
                       unit.RELEASE_HOLD_CONDITION,
                       unit.DRIFT_PREFLIGHT_CONDITION):
         stripped=stripped.replace(condition,"",1)
+    if pair.mode=="component-reconcile":
+        stripped=stripped.replace(
+            "ExecStart=/usr/bin/python3 -I -B "+unit.ISOLATED_RECONCILER,
+            "ExecStart=/usr/bin/python3 "+unit.LEGACY_RECONCILER)
+        stripped=stripped.replace(
+            "ConditionPathExists="+unit.ISOLATED_RECONCILER,
+            "ConditionPathExists="+unit.LEGACY_RECONCILER)
     assert stripped==old_service
     if pair.mode=="engineering":
         assert service.count(unit.OWNER_PAUSE_CONDITION)==1

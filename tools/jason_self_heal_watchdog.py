@@ -61,6 +61,7 @@ PMV4_E_ROOT_RECONCILE_PATH = "jason-pmv4-component-reconcile.path"
 ENGINEERING_SOURCE_LINK = Path.home() / ".local/lib/jason/engineering-worker-source"
 CURRENT_RELEASE_LINK = Path("/opt/jason/current")
 ROOT_HOST_RECONCILER = Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
+PMV4_E_ROOT_HOST_RECONCILER = Path("/opt/jason/pmv4-e-trusted/tools/release_host_reconcile_worker.py")
 SCHEDULED_ARTIFACTS = (
     ("support_repair_worker", "tools/support_repair_host_worker.py", Path.home() / ".local/lib/jason/support_repair_host_worker.py"),
     ("owner_approved_development_worker", "tools/owner_approved_development_worker.py", Path.home() / ".local/lib/jason/owner_approved_development_worker.py"),
@@ -320,7 +321,8 @@ def production_convergence_failures(
     release_dir = release_root / desired_revision
     evidence["desired_revision"] = desired_revision
     evidence["release_dir"] = str(release_dir)
-    if not release_dir.is_dir():
+    baseline_dir = release_root / runtime_revision
+    if not release_dir.is_dir() or not baseline_dir.is_dir():
         failures.append("production_convergence_release_source_missing")
         return failures, evidence
 
@@ -329,7 +331,7 @@ def production_convergence_failures(
     except (FileNotFoundError, OSError):
         installed_source = None
     evidence["release_manager_source"] = str(installed_source) if installed_source else None
-    if installed_source != release_dir.resolve():
+    if installed_source != baseline_dir.resolve():
         failures.append("production_convergence_release_manager_source_drift")
 
     timer_relative=(
@@ -365,7 +367,7 @@ def production_convergence_failures(
         except (FileNotFoundError, OSError):
             current_release = None
         evidence["current_release"] = str(current_release) if current_release else None
-        if current_release != release_dir.resolve():
+        if current_release != baseline_dir.resolve():
             failures.append("production_convergence_current_release_drift")
 
         try:
@@ -379,12 +381,27 @@ def production_convergence_failures(
             candidate = result.stdout.strip().casefold() if result.returncode == 0 else ""
             engineering_revision = candidate if SHA_RE.fullmatch(candidate) else None
         evidence["engineering_source_revision"] = engineering_revision
-        if engineering_revision != desired_revision:
+        if control_mode=="replacement" and engineering_revision is not None:
+            ancestry=run([
+                "git","-C",str(engineering_source),"merge-base",
+                "--is-ancestor",desired_revision,engineering_revision,
+            ],timeout=10)
+            clean=run(["git","-C",str(engineering_source),"status","--porcelain"],timeout=10)
+            engineering_matches=(ancestry.returncode==0 and clean.returncode==0
+                                 and not clean.stdout.strip())
+        else:
+            engineering_matches=engineering_revision==desired_revision
+        if not engineering_matches:
             failures.append("production_convergence_engineering_source_drift")
 
         scheduled_artifacts: dict[str, Any] = {}
         for name, relative, installed in SCHEDULED_ARTIFACTS:
-            desired = release_dir / relative
+            candidate_artifact = control_mode=="replacement" and name in {
+                "self_heal_watchdog", "root_host_reconciler",
+            }
+            desired = (release_dir if candidate_artifact else baseline_dir) / relative
+            if control_mode=="replacement" and name=="root_host_reconciler":
+                installed = PMV4_E_ROOT_HOST_RECONCILER
             desired_hash = _sha256(desired)
             installed_hash = _sha256(installed)
             scheduled_artifacts[name] = {
@@ -405,9 +422,9 @@ def production_convergence_failures(
     if EXPECTED_RELEASE_TIMER not in timer_text:
         failures.append("production_convergence_intent_contradiction:release_manager_timer_not_24x7")
 
-    policy = read_json(release_dir / "config/release-manager-policy.json")
+    policy = read_json(baseline_dir / "config/release-manager-policy.json")
     schedule = policy.get("schedule") if isinstance(policy.get("schedule"), Mapping) else {}
-    coordinator = read_json(release_dir / "config/development-release-coordinator.json")
+    coordinator = read_json(baseline_dir / "config/development-release-coordinator.json")
     production = coordinator.get("production") if isinstance(coordinator.get("production"), Mapping) else {}
     automatic_window = production.get("automatic_window") if isinstance(production.get("automatic_window"), Mapping) else {}
     evidence["release_manager_policy_schedule"] = dict(schedule)

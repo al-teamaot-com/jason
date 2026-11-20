@@ -244,3 +244,136 @@ def test_combined_decision_requires_readonly_privileged_preflight(monkeypatch, f
             install.cutover_preflight()
     else:
         install.cutover_preflight()
+
+
+@pytest.fixture
+def isolated_cutover(repair, monkeypatch, tmp_path):
+    files, policy, receipt, before, base = repair
+    install.WORKER.chmod(0o755)
+    install.WORKER.write_bytes(b"old worker")
+    catalog = tmp_path / "catalog.json"
+    catalog.write_bytes(install.canonical({"root_worker_sha256": install.WORKER_BEFORE}))
+    catalog.chmod(0o600)
+    monkeypatch.setattr(install, "CATALOG_POLICY", catalog)
+    return files, policy, receipt, before, base, catalog
+
+
+def test_isolated_install_preserves_shared_worker_and_catalog(isolated_cutover):
+    files, policy, receipt, before, base, catalog = isolated_cutover
+    worker_before = install.WORKER.read_bytes()
+    catalog_before = catalog.read_bytes()
+    state = install.install_isolated_source(files, policy, receipt["scope"], "fixture-owner")
+    assert install.WORKER.read_bytes() == worker_before
+    assert catalog.read_bytes() == catalog_before
+    assert json.loads(install.POLICY.read_bytes()) == policy
+    assert install.tree(state / "trust-before") == before
+    assert install.tree(install.TRUST) != before
+    assert json.loads((state / "approval.json").read_bytes())["owner_object_id"] == "fixture-owner"
+
+
+def test_isolated_install_rolls_back_preparation_on_postcheck_failure(isolated_cutover, monkeypatch):
+    files, policy, receipt, before, base, catalog = isolated_cutover
+    old_policy = install.POLICY.read_bytes()
+    catalog_before = catalog.read_bytes()
+
+    def failed():
+        raise install.Denied("SIMULATED_ISOLATED_POSTCHECK")
+
+    monkeypatch.setattr(install, "protected", failed)
+    with pytest.raises(install.Denied, match="POSTCHECK"):
+        install.install_isolated_source(files, policy, receipt["scope"], "fixture-owner")
+    assert install.POLICY.read_bytes() == old_policy
+    assert install.tree(install.TRUST) == before
+    assert install.WORKER.read_bytes() == b"old worker"
+    assert catalog.read_bytes() == catalog_before
+
+
+def test_isolated_install_rejects_catalog_drift_before_mutation(isolated_cutover):
+    files, policy, receipt, before, base, catalog = isolated_cutover
+    catalog.chmod(0o600)
+    catalog.write_text('{"root_worker_sha256":"changed"}')
+    with pytest.raises(install.Denied, match="CATALOG_SHARED_WORKER_PIN_CHANGED"):
+        install.install_isolated_source(files, policy, receipt["scope"], "fixture-owner")
+    assert install.tree(install.TRUST) == before
+    assert not (base / ("isolated-cutover-" + policy["candidate_sha"])).exists()
+
+
+@pytest.mark.parametrize("native_status", [
+    "native_stage_e_six_unit_accepted", "native_stage_e_six_unit_rollback_verified",
+])
+def test_isolated_native_distinguishes_acceptance_from_rollback(tmp_path, monkeypatch, native_status):
+    from types import SimpleNamespace
+    candidate = "a" * 40
+    request = {"signed_owner_proof": {"payload": {"approval_id": "fixture"}}}
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        assert kwargs["input"] == install.canonical(request)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            "candidate_sha": candidate, "status": native_status,
+        }).encode())
+
+    monkeypatch.setattr(install.subprocess, "run", run)
+    if native_status.endswith("_accepted"):
+        assert install.run_isolated_native(candidate, request, tmp_path)["status"] == native_status
+    else:
+        with pytest.raises(install.Denied, match="NOT_ACCEPTED"):
+            install.run_isolated_native(candidate, request, tmp_path)
+    assert len(calls) == 1
+    assert json.loads((tmp_path / "native-result.json").read_bytes())["status"] == native_status
+
+
+def test_isolated_native_failure_uses_original_signed_inert_recovery(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    request = {"signed_owner_proof": {"payload": {"approval_id": "fixture"}}}
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=2 if len(calls) == 1 else 0, stdout=b"{}")
+
+    monkeypatch.setattr(install.subprocess, "run", run)
+    with pytest.raises(install.Denied, match="CUTOVER_FAILED"):
+        install.run_isolated_native("a" * 40, request, tmp_path)
+    assert calls[0][0][-2:] == ["--stage-and-promote", "--owner-request-stdin"]
+    assert calls[1][0][-2:] == ["--recover-inert", "--owner-request-stdin"]
+    assert calls[0][1]["input"] == calls[1][1]["input"] == install.canonical(request)
+    assert json.loads((tmp_path / "failed-native-attempt.json").read_bytes())[
+        "owner_approval_reusable"] is False
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_isolated_signer_keeps_exact_scope(monkeypatch, changed):
+    from types import SimpleNamespace
+    policy = {key: str(index) * size for index, (key, size) in enumerate([
+        ("candidate_sha", 40), ("rollback_sha", 40), ("scope_sha256", 64),
+        ("manifest_sha256", 64), ("freeze_sha256", 64),
+    ], 1)}
+
+    def run(command, **kwargs):
+        assert command[:4] == ["/usr/sbin/runuser", "-u", "al", "--"]
+        assert "offer.checked_identity()" in command[8]
+        supplied_policy, actor = json.loads(kwargs["input"])
+        assert supplied_policy == policy and actor == "fixture-owner"
+        result = dict(policy)
+        if changed:
+            result["scope_sha256"] = "changed"
+        return SimpleNamespace(stdout=json.dumps(result).encode())
+
+    monkeypatch.setattr(install.subprocess, "run", run)
+    if changed:
+        with pytest.raises(install.Denied, match="SIGNER_SCOPE_CHANGED"):
+            install.signed_cutover_request(policy, "fixture-owner")
+    else:
+        assert install.signed_cutover_request(policy, "fixture-owner") == policy
+
+
+def test_isolated_unit_scope_contains_all_twelve_installed_files():
+    from tools import pmv4_e_replacement_unit_bundle as bundle
+    targets = install.replacement_unit_targets(bundle.generate())
+    assert len(targets) == len(set(targets)) == 12
+    assert "/etc/systemd/system/jason-pmv4-component-reconcile.service" in targets
+    assert "/home/al/.config/systemd/user/jason-pmv4-engineering.timer" in targets
+    with pytest.raises(install.Denied, match="SCOPE_INCOMPLETE"):
+        install.replacement_unit_targets({})

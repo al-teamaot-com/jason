@@ -162,6 +162,7 @@ def test_replacement_production_convergence_expects_only_new_timer(probe,monkeyp
     candidate="b"*40
     release=releases/candidate
     release.mkdir(parents=True)
+    (releases/revision).mkdir()
     monkeypatch.setattr(m,"pmv4_e_controlplane_mode",lambda:"replacement")
     monkeypatch.setattr(m,"pmv4_e_accepted_source_identity",
                         lambda:{"candidate_sha":candidate,"rollback_sha":revision})
@@ -235,3 +236,64 @@ def test_marker_identity_requires_actual_pinned_root_accepted_schema(
     marker.write_text(json.dumps(receipt))
     marker.chmod(0o444)
     assert m.pmv4_e_accepted_source_identity() is None
+
+def test_accepted_controlplane_checks_runtime_baseline_and_isolated_worker(tmp_path, monkeypatch):
+    runtime="a"*40
+    control="b"*40
+    root=tmp_path/"releases"
+    base=root/runtime
+    candidate=root/control
+    base.mkdir(parents=True)
+    candidate.mkdir()
+    source_link=tmp_path/"source"
+    source_link.symlink_to(base)
+    engineering=tmp_path/"engineering"
+    engineering.mkdir()
+    installed_runner=tmp_path/"runner.py"
+    installed_timer=tmp_path/"release.timer"
+    isolated_worker=tmp_path/"isolated.py"
+    def artifact(folder, relative, data):
+        path=folder/relative
+        path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_bytes(data)
+        return path
+    artifact(candidate,"tools/release_manager_host_runner.py",b"new runner")
+    installed_runner.write_bytes(b"new runner")
+    timer="infrastructure/pmv4-e-scheduler/systemd/user/jason-pmv4-component-release.timer"
+    payload=(m.EXPECTED_RELEASE_TIMER+"\n").encode()
+    artifact(candidate,timer,payload)
+    installed_timer.write_bytes(payload)
+    shared=artifact(base,"tools/release_host_reconcile_worker.py",b"catalog pinned worker")
+    artifact(candidate,"tools/release_host_reconcile_worker.py",b"isolated worker")
+    isolated_worker.write_bytes(b"isolated worker")
+    artifact(base,"config/release-manager-policy.json",
+             json.dumps({"schedule":{"mode":"continuous_24x7"}}).encode())
+    artifact(base,"config/development-release-coordinator.json",
+             json.dumps({"production":{"automatic_window":{"mode":"continuous_24x7"}}}).encode())
+    monkeypatch.setattr(m,"pmv4_e_controlplane_mode",lambda:"replacement")
+    monkeypatch.setattr(m,"pmv4_e_accepted_source_identity",
+                        lambda:{"candidate_sha":control,"rollback_sha":runtime})
+    monkeypatch.setattr(m,"_container_source_revision",lambda name:runtime)
+    monkeypatch.setattr(m,"CURRENT_RELEASE_LINK",source_link)
+    monkeypatch.setattr(m,"ENGINEERING_SOURCE_LINK",engineering)
+    monkeypatch.setattr(m,"PMV4_E_ROOT_HOST_RECONCILER",isolated_worker)
+    monkeypatch.setattr(m,"SCHEDULED_ARTIFACTS",(
+        ("root_host_reconciler","tools/release_host_reconcile_worker.py",shared),
+    ))
+    def run(command,**kwargs):
+        output=control if "rev-parse" in command else "" if "git"==command[0] else "active"
+        return SimpleNamespace(returncode=0,stdout=output,stderr="")
+    monkeypatch.setattr(m,"run",run)
+    failures,evidence=m.production_convergence_failures(
+        releases_root=root,release_manager_source_link=source_link,
+        installed_runner=installed_runner,installed_timer=installed_timer,
+        verify_scheduled_surfaces=True)
+    assert failures==[]
+    assert shared.read_bytes()==b"catalog pinned worker"
+    assert evidence["scheduled_artifacts"]["root_host_reconciler"]["installed"]==str(isolated_worker)
+    isolated_worker.write_bytes(b"tampered")
+    failures,_=m.production_convergence_failures(
+        releases_root=root,release_manager_source_link=source_link,
+        installed_runner=installed_runner,installed_timer=installed_timer,
+        verify_scheduled_surfaces=True)
+    assert "production_convergence_scheduled_artifact_drift:root_host_reconciler" in failures

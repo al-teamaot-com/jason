@@ -205,3 +205,9 @@ def test_root_only_legacy_unit_mismatch_rejected_before_writing_snapshot(
                         code.parity.PMv4SchedulingDenied)):
         c.prepare(candidate="b"*40,scope=scope)
     assert list(c.before_root.iterdir())==[]
+
+
+def test_catalog_shared_worker_is_outside_native_mutation_targets():
+    assert code.RECONCILER not in code.OBJECTS
+    assert Path("/usr/local/lib/jason/release_host_reconcile_worker.py") not in code.DEFAULT_TARGETS.values()
+    assert code.FILES == (code.WATCHDOG, code.MANAGER)
