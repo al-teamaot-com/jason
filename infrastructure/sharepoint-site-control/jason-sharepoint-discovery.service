@@ -1,0 +1,13 @@
+[Unit]
+Description=Jason SharePoint site discovery (AOT app-only, disabled by default)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/jason/sharepoint-site-control
+EnvironmentFile=/etc/jason/sharepoint-site-control.env
+ExecStart=/usr/bin/docker compose -f compose.yaml run --rm --no-deps sharepoint-site-control python /app/tools/sharepoint_site_access_service.py discover
+TimeoutStartSec=900
+NoNewPrivileges=yes

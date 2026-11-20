@@ -1,0 +1,13 @@
+apiVersion: 1
+datasources:
+  - name: Jason SharePoint Site Control
+    uid: jason-sharepoint-control
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    url: http://jason-sharepoint-site-control:9582
+    editable: false
+    jsonData:
+      httpHeaderName1: Authorization
+      global_queries: []
+    secureJsonData:
+      httpHeaderValue1: ${JASON_SHAREPOINT_CONTROL_AUTH_HEADER}
