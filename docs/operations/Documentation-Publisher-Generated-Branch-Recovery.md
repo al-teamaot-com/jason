@@ -15,3 +15,11 @@ The regression suite belongs to the documentation CI job. Separate proposed addi
 The exact deployment helper reuses the reviewed Owner verifier, protected-source CI attestor and production host locks. Its full root preflight runs before the Owner decision. It installs only immutable copies of the existing publisher scripts and a service override, then starts the existing documentation service. Actual generated-source readback, live drift and unchanged protected services are required before acceptance. Partial installation restores only its own exact override and retains private approval evidence; a consumed attempt is not silently replayed.
 
 The publisher supplies GitHub authentication through the coordinator's existing environment input, avoiding credentials in process arguments. An already-open generated PR must be reconciled before the one-use service installation starts, so waiting on an older PR is not mistaken for acceptance of the new source.
+
+## Failed installation readback continuation
+
+A failed verification may leave the approved publisher code installed while restoring the original service configuration. Preserve its private approval and failed-attempt records. Repair Git data only after verifying its owning repository; preserve a foreign worktree through that repository rather than deleting its files or forcing removal.
+
+The separate readback continuation does not replay the installer. It requires the original root-owned approval, exact scope digest, unchanged approved publisher bytes and override, a trusted original Owner, a decision within two hours, the recorded restored failure phase, and no prior recovery attempt or acceptance. It rechecks protected source CI, production gates, protected service identities and repaired worktree ownership under the existing locks before writing one exclusive recovery record.
+
+Only the original override is restored and the existing documentation job started. Successful generated-source readback, clean production drift and unchanged protections are required for acceptance. A failed job restores that exact override and retains both original evidence and the consumed recovery record. No signing operation, new provider authority, nonce reset or code replacement is available through this continuation. Root execution remains required.
