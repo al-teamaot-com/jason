@@ -219,3 +219,28 @@ def test_combined_cutover_uses_original_signer_and_publisher(monkeypatch, valid)
         with pytest.raises(install.Denied, match="READBACK_INVALID"):
             install.queue_cutover(policy, oid)
     assert calls[0][0][:4] == ["/usr/sbin/runuser", "-u", "al", "--"]
+
+
+@pytest.mark.parametrize("failure", ["native_denial", "wrong_status", None])
+def test_combined_decision_requires_readonly_privileged_preflight(monkeypatch, failure):
+    from types import SimpleNamespace
+
+    def run(command, **kwargs):
+        assert command[:3] == ["/usr/bin/python3", "-I", "-B"]
+        assert "gate.evaluate(gate.collect())" in command[4]
+        return SimpleNamespace(
+            returncode=1 if failure == "native_denial" else 0,
+            stderr=b"GateDenied: live prerequisite unavailable",
+            stdout=json.dumps({
+                "status": "wrong" if failure == "wrong_status" else
+                          "read_only_root_preflight_source_conditions_passed",
+                "production_mutations": False,
+            }).encode(),
+        )
+
+    monkeypatch.setattr(install.subprocess, "run", run)
+    if failure:
+        with pytest.raises(install.Denied, match="PREFLIGHT"):
+            install.cutover_preflight()
+    else:
+        install.cutover_preflight()

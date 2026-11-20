@@ -496,6 +496,27 @@ def rollback(files, policy, expected_scope):
 
 
 
+
+def cutover_preflight():
+    """Read privileged acceptance before asking for the combined decision."""
+    script = (
+        "import json,sys; sys.path.insert(0,sys.argv[1]); "
+        "from tools import pmv4_e_root_cutover_preflight as gate; "
+        "print(json.dumps(gate.evaluate(gate.collect()),sort_keys=True))"
+    )
+    result = subprocess.run(
+        ["/usr/bin/python3", "-I", "-B", "-c", script, str(TRUST)],
+        capture_output=True, check=False, timeout=180,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors="replace").strip().splitlines()
+        raise Denied("CUTOVER_PREFLIGHT:" + (detail[-1] if detail else "unavailable"))
+    evidence = json.loads(result.stdout)
+    need(evidence.get("status") == "read_only_root_preflight_source_conditions_passed"
+         and evidence.get("production_mutations") is False,
+         "CUTOVER_PREFLIGHT_UNVERIFIED")
+
+
 def queue_cutover(policy, owner_oid):
     """The existing service signer publishes only the just-approved exact cutover."""
     publisher = ARTIFACTS / (
@@ -599,6 +620,7 @@ def main():
                 "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
                 "person-entra-bee80bdcffb04c50b453c09d4d411f5f"),
                 "CANONICAL_OWNER_IDENTITY_NOT_ACTIVE")
+            cutover_preflight()
     if not args.apply:
         print(json.dumps({"status": "read_only_preflight_passed", "scope": proposed}, sort_keys=True))
         return
