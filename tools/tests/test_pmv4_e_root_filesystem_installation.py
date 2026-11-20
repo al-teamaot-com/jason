@@ -180,6 +180,9 @@ from pathlib import Path
 entry=Path("/usr/local/lib/jason/pmv4-e-bootstrap/trusted/tools/pmv4_e_root_bootstrap_once.py")
 spec=importlib.util.spec_from_file_location("canonical_bootstrap",entry)
 b=importlib.util.module_from_spec(spec);spec.loader.exec_module(b)
+for directory in (b.TRUST,b.NATIVE):
+    meta=directory.lstat()
+    assert (meta.st_uid,meta.st_gid,meta.st_mode&0o022)==(0,0,0),str(directory)+str((meta.st_uid,meta.st_gid,oct(meta.st_mode)))
 b.bind_original_native()
 from tools import pmv4_e_installation_preflight as preflight
 from tools import pmv4_e_signed_bootstrap_phase as signed
