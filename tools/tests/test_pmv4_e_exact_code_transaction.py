@@ -211,3 +211,38 @@ def test_catalog_shared_worker_is_outside_native_mutation_targets():
     assert code.RECONCILER not in code.OBJECTS
     assert Path("/usr/local/lib/jason/release_host_reconcile_worker.py") not in code.DEFAULT_TARGETS.values()
     assert code.FILES == (code.WATCHDOG, code.MANAGER)
+
+
+def test_exact_live_policy_baseline_preserves_scoped_backport_controls(tmp_path):
+    from tools import pmv4_e_root_receipt_readback as rootproof
+    from tools import pmv4_e_unit_admission as admission
+    from tools import pmv4_e_canary_acceptance_readback as canary
+
+    raw=(Path(__file__).parent/"fixtures/pmv4_e_root_policy_after_scoped_backport.json").read_bytes()
+    expected="a4358f564c7b5c6ede6ccfa32d884760a247a2d5672440dbc80d771893868608"
+    historical="4c9db0f4bbd12e1892b480a759d2d89b9749b84187eb2a753a260ecf326b7953"
+    assert code.digest(raw)==packet.EXPECTED_PRIOR_ROOT_POLICY==expected
+    assert rootproof.ACTIVE_POLICY_SHA==admission.PRIOR_POLICY==canary.LIVE_POLICY==expected
+    assert canary.POLICY==historical
+    original=json.loads(raw)
+    preserved={
+        "jason-scoped-backport-recovery.service",
+        "jason-scoped-backport-recovery.timer",
+        "jason-scoped-backport-requests.path",
+        "jason-scoped-backport-requests.service",
+    }
+    old=json.loads(raw)
+    old["allowed_system_units"]=[u for u in old["allowed_system_units"] if u not in preserved]
+    assert code.digest((json.dumps(old,indent=2,sort_keys=True)+"\n").encode())==historical
+
+    c,state,targets,scope=sample(tmp_path)
+    p=targets[code.POLICY]
+    p.write_bytes(raw)
+    c.prior_sha256[code.POLICY]=expected
+    c.prepare(candidate="b"*40,scope=scope)
+    c.apply(candidate="b"*40,scope=scope)
+    accepted=json.loads(p.read_bytes())
+    assert preserved.issubset(accepted["allowed_system_units"])
+    assert accepted==code.parity.plan_exact_unit_delta(original)["candidate_policy"]
+    c.restore(candidate="b"*40,scope=scope)
+    assert p.read_bytes()==raw

@@ -377,3 +377,42 @@ def test_isolated_unit_scope_contains_all_twelve_installed_files():
     assert "/home/al/.config/systemd/user/jason-pmv4-engineering.timer" in targets
     with pytest.raises(install.Denied, match="SCOPE_INCOMPLETE"):
         install.replacement_unit_targets({})
+
+
+@pytest.mark.parametrize("denied",[False,True])
+def test_new_reviewed_preflight_is_volatile_and_preserves_installed_trust(isolated,monkeypatch,tmp_path,denied):
+    from pathlib import Path
+    from types import SimpleNamespace
+    files,policy,receipt,before,base=isolated
+    temporary=tmp_path/"volatile"
+    temporary.mkdir(mode=0o700)
+    monkeypatch.setattr(install,"PREFLIGHT_TMP",temporary)
+    called=[]
+
+    def run(command,**kwargs):
+        source=Path(command[-1])
+        called.append(source)
+        assert source != install.TRUST
+        assert source.parent.parent==temporary
+        assert (source/"tools/pmv4_e_root_bootstrap_once.py").read_bytes()==files[
+            "tools/pmv4_e_root_bootstrap_once.py"]
+        assert source.stat().st_uid==0 and source.stat().st_mode & 0o777==0o555
+        assert source.parent.stat().st_mode & 0o777==0o700
+        assert install.tree(install.TRUST)==before
+        return SimpleNamespace(
+            returncode=2 if denied else 0,stderr=b"RootPreflightDenied: exact denial",
+            stdout=json.dumps({"status":"read_only_root_preflight_source_conditions_passed",
+                               "production_mutations":False}).encode())
+
+    monkeypatch.setattr(install.subprocess,"run",run)
+    if denied:
+        with pytest.raises(install.Denied,match="CUTOVER_PREFLIGHT"):
+            install.cutover_preflight(files)
+    else:
+        install.cutover_preflight(files)
+    assert len(called)==1
+    assert not called[0].exists()
+    assert not list(temporary.iterdir())
+    assert install.tree(install.TRUST)==before
+    assert not install.POLICY.exists()
+    assert install.WORKER.read_bytes()==b"old worker"

@@ -30,6 +30,7 @@ WORKER = BASE.parent / "release_host_reconcile_worker.py"
 POLICY = Path("/etc/jason/independent-component-release/pmv4-e-dispatch.json")
 RECORDS = Path("/var/lib/jason-owner-release/pmv4-e-dispatch")
 CATALOG_POLICY = Path("/etc/jason-owner-release/catalog-scoped-promotion-installed.json")
+PREFLIGHT_TMP = Path("/run")
 ARTIFACTS = Path("/srv/jason/archive/engineering-artifacts")
 MANAGER = Path("/var/lib/jason/openclaw/release-manager")
 REQUESTS = MANAGER / "host-reconcile/requests"
@@ -499,17 +500,39 @@ def rollback(files, policy, expected_scope):
 
 
 
-def cutover_preflight():
+@contextmanager
+def reviewed_preflight_source(files):
+    """Read-only probe from exact CI/Git-verified bytes, before installation.
+
+    The isolated caller verifies every archive byte via current_ci first.
+    Root-private volatile staging permits testing a newly reviewed baseline
+    without changing the installed bootstrap trust or any production policy.
+    """
+    if files is None:
+        yield TRUST
+        return
+    with tempfile.TemporaryDirectory(prefix="jason-pmv4-e-preflight-", dir=PREFLIGHT_TMP) as name:
+        base = Path(name)
+        directory(base, 0o700)
+        staged = base / "reviewed"
+        stage_tree(staged, files)
+        need(tree(staged) == digest(canonical({key: digest(raw) for key, raw in files.items()})),
+             "PREFLIGHT_REVIEWED_SOURCE_CHANGED")
+        yield staged
+
+
+def cutover_preflight(files=None):
     """Read privileged acceptance before asking for the combined decision."""
     script = (
         "import json,sys; sys.path.insert(0,sys.argv[1]); "
         "from tools import pmv4_e_root_cutover_preflight as gate; "
         "print(json.dumps(gate.evaluate(gate.collect()),sort_keys=True))"
     )
-    result = subprocess.run(
-        ["/usr/bin/python3", "-I", "-B", "-c", script, str(TRUST)],
-        capture_output=True, check=False, timeout=180,
-    )
+    with reviewed_preflight_source(files) as source:
+        result = subprocess.run(
+            ["/usr/bin/python3", "-I", "-B", "-c", script, str(source)],
+            capture_output=True, check=False, timeout=180,
+        )
     if result.returncode != 0:
         detail = result.stderr.decode(errors="replace").strip().splitlines()
         raise Denied("CUTOVER_PREFLIGHT:" + (detail[-1] if detail else "unavailable"))
@@ -739,7 +762,7 @@ def complete_isolated(args, files, policy):
         _, catalog_hash = isolated_baseline()
         scope["protected_catalog_policy_sha256"] = catalog_hash
         current_ci(files, args.candidate_sha)
-        cutover_preflight()
+        cutover_preflight(files)
     if not args.apply:
         print(json.dumps({"status": "isolated_read_only_preflight_passed", "scope": scope}))
         return
