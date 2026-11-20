@@ -1597,12 +1597,21 @@ def _process_stage_e_request(request: dict[str, object]) -> dict[str, object]:
         raise HostReconcileError("PMV4_E_OWNER_IDENTITY_NOT_ACTIVE")
     _stage_e_record_verified_request(owner, proof["approval_id"])
     _verify_main(str(policy["candidate_sha"]))
-    ci = subprocess.run(
-        ["/usr/bin/python3", "-I", "-B", str(ci_entry),
-         "--candidate-sha", str(policy["candidate_sha"])],
-        cwd="/", env={"PATH": "/usr/bin:/bin"}, text=True,
-        capture_output=True, timeout=480, check=False,
-    )
+    ci_command = ["/usr/bin/python3", "-I", "-B", str(ci_entry),
+                  "--candidate-sha", str(policy["candidate_sha"])]
+    for timeout in (480, 240):
+        try:
+            ci = subprocess.run(
+                ci_command, cwd="/", env={"PATH": "/usr/bin:/bin"}, text=True,
+                capture_output=True, timeout=timeout, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            continue
+        if (ci.returncode == 0
+                or "GITHUB_ATTESTATION_UNAVAILABLE" not in (ci.stderr or "")):
+            break
+    else:
+        raise HostReconcileError("PMV4_E_CI_REFRESH_UNAVAILABLE")
     try:
         evidence = json.loads(ci.stdout)
     except (ValueError, TypeError) as exc:

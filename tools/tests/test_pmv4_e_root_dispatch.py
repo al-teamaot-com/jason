@@ -3,6 +3,7 @@ import copy
 from hashlib import sha256
 import json
 import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -222,7 +223,7 @@ def test_verified_root_record_is_idempotent_and_never_overwritten(tmp_path, monk
 def test_failed_ci_refresh_keeps_record_but_never_starts_bootstrap(dispatch, monkeypatch):
     request, _, calls = dispatch
     monkeypatch.setattr(worker.subprocess, "run", lambda *a, **k:
-                        SimpleNamespace(returncode=1, stdout="DENIED"))
+                        SimpleNamespace(returncode=1, stdout="DENIED", stderr=""))
     with pytest.raises(worker.HostReconcileError, match="CI_REFRESH_FAILED"):
         worker._process_stage_e_request(request)
     assert [c[0] for c in calls] == ["record", "main"]
@@ -305,3 +306,28 @@ def test_verified_native_rollback_cannot_be_reported_as_cutover(dispatch, monkey
     with pytest.raises(worker.HostReconcileError, match="CUTOVER_ROLLBACK_VERIFIED"):
         worker._process_stage_e_request(request)
     assert [c[0] for c in calls] == ["record", "main"]
+
+@pytest.mark.parametrize("failure", ["timeout", "transport"])
+def test_transient_ci_failure_retries_once_with_same_owner_proof(dispatch, monkeypatch, failure):
+    request, _, calls = dispatch
+    owner = request["owner_request"]
+    successful_run = worker.subprocess.run
+    attempts = []
+
+    def run(command, **kwargs):
+        if command[3].endswith("/pmv4_e_ci_refresh.py"):
+            attempts.append((command, kwargs["timeout"]))
+            if len(attempts) == 1:
+                if failure == "timeout":
+                    raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+                return SimpleNamespace(returncode=1, stdout="",
+                                       stderr="GITHUB_ATTESTATION_UNAVAILABLE")
+        return successful_run(command, **kwargs)
+
+    monkeypatch.setattr(worker.subprocess, "run", run)
+    result = worker._process_stage_e_request(request)
+    assert result["status"] == "native_stage_e_six_unit_accepted"
+    assert attempts[0][0] == attempts[1][0]
+    assert [timeout for _, timeout in attempts] == [480, 240]
+    assert [item[0] for item in calls] == ["record", "main", "ci", "run"]
+    assert json.loads(calls[-1][2]["input"]) == owner
