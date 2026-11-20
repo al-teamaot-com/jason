@@ -39,6 +39,8 @@ jobs:
             tools/tests/test_pmv4_e_exact_owner_offer.py \
             tools/tests/test_pmv4_e_forwarded_owner_request.py \
             tools/tests/test_pmv4_e_root_dispatch.py \
+            tools/tests/test_pmv4_e_dispatch_install.py \
+            tools/tests/test_release_root_signed_mcp_owner.py \
             tools/tests/test_pmv4_e_ci_refresh.py \
             tools/tests/test_pmv4_e_source_scope_guard.py \
             tools/tests/test_manual_release_scope.py \
