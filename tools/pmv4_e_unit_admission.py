@@ -19,7 +19,7 @@ from typing import Any
 
 # The later root installer must deploy BOTH the guard and its existing
 # source-only scheduling contract under one immutable root-owned tree.
-TRUST_ROOT=Path("/opt/jason/pmv4-e-trusted")
+TRUST_ROOT=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native")
 TRUST_ENTRY=TRUST_ROOT/"tools/pmv4_e_unit_admission.py"
 if Path(__file__).resolve()==TRUST_ENTRY:
     sys.path.insert(0,str(TRUST_ROOT))
@@ -28,7 +28,7 @@ from tools import pmv4_e_scheduler_parity as parity
 ACCEPTED=Path("/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json")
 ACTION="pmv4-e-oneowner-six-unit-replacement-and-retirement-v1"
 FREEZE="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
-PRIOR_POLICY="4c9db0f4bbd12e1892b480a759d2d89b9749b84187eb2a753a260ecf326b7953"
+PRIOR_POLICY="a4358f564c7b5c6ede6ccfa32d884760a247a2d5672440dbc80d771893868608"
 OWNER_RE=re.compile(r"^owner-mcp-[0-9a-f]{32}$")
 SOURCE_RE=re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE=re.compile(r"^[0-9a-f]{64}$")

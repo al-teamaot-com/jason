@@ -5617,6 +5617,53 @@ def authorize_pmv4_stage_a0_install(
         return {"status": "rejected", "error_code": str(exc)}
 
 
+@mcp.tool()
+def authorize_pmv4_stage_e_cutover(
+    candidate_sha: str,
+    rollback_sha: str,
+    scope_sha256: str,
+    manifest_sha256: str,
+    freeze_sha256: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Queue one authenticated, exact Stage E Owner decision.
+
+    If installed and enabled, the independent root worker may consume this
+    request to perform the six-unit cutover after its own production gates.
+    No standing authority is granted. Disabled by default.
+    """
+    try:
+        if os.environ.get("JASON_PMV4_STAGE_E_ISSUER_ENABLED") != "true":
+            raise PermissionError("PMV4_STAGE_E_OWNER_ISSUER_NOT_INSTALLED")
+        principal, organization = _release_approval_owner()
+        access_token = get_access_token()
+        if access_token is None or not isinstance(access_token.token, str):
+            raise PermissionError("PMV4_STAGE_E_ENTRA_BEARER_REQUIRED")
+        from jason_mcp.pmv4_e_owner_bridge import issue_stage_e_request
+        from jason_mcp.pmv4_owner_bridge import public_protected_main_head
+        exact_binding = {
+            "service": "pmv4-stage-e-six-unit-cutover",
+            "candidate_sha": candidate_sha, "rollback_sha": rollback_sha,
+            "scope_sha256": scope_sha256, "manifest_sha256": manifest_sha256,
+            "freeze_sha256": freeze_sha256, "owner_principal": principal,
+        }
+        def consent(binding: Mapping[str, Any]) -> bool:
+            return isinstance(binding, Mapping) and dict(binding) == exact_binding
+        return issue_stage_e_request(
+            bearer_token=access_token.token,
+            verified_principal=principal, verified_organization=organization,
+            verify_entra_bearer=_entra_token_verifier.verify_signed_claims,
+            exact_owner_consent=consent,
+            protected_main_check=public_protected_main_head,
+            candidate_sha=candidate_sha, rollback_sha=rollback_sha,
+            scope_sha256=scope_sha256, manifest_sha256=manifest_sha256,
+            freeze_sha256=freeze_sha256,
+            affirmative_decision=affirmative_decision,
+        )
+    except (PermissionError, ValueError, RuntimeError, OSError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+
 def _component_unsupervised_block_reason(
     record: Mapping[str, Any],
 ) -> str | None:

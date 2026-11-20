@@ -15,6 +15,10 @@ import stat
 from pathlib import Path
 import subprocess
 from typing import Any, Callable, Mapping
+from types import SimpleNamespace
+from tools.independent_component_release import (
+    ComponentReleaseController, ComponentReleaseDenied, PROTECTED as NATIVE_PROTECTED,
+)
 
 from tools import pmv4_e_scheduler_parity as parity
 
@@ -43,9 +47,43 @@ def require(ok:bool,why:str)->None:
         raise RootPreflightDenied("PMV4_E_ROOT_PREFLIGHT_"+why)
 
 
+def verify_native_protected(snapshot):
+    """Use the original controller's exact protected-container health rule."""
+    require(isinstance(snapshot,Mapping) and set(snapshot)==set(NATIVE_PROTECTED),
+            "NATIVE_PROTECTED_SNAPSHOT_INCOMPLETE")
+    for name,row in snapshot.items():
+        require(isinstance(row,Mapping),"NATIVE_PROTECTED_RECORD_INVALID")
+        require(row.get("running") is True and row.get("health") in ("healthy","none",None),
+                "NATIVE_PROTECTED_UNHEALTHY:"+name)
+    try:
+        return ComponentReleaseController._verify_protected_snapshot(
+            SimpleNamespace(verify_protected=lambda:snapshot))
+    except ComponentReleaseDenied as exc:
+        raise RootPreflightDenied("PMV4_E_ROOT_PREFLIGHT_NATIVE_PROTECTED_RECORD_INVALID") from exc
+
+
+def live_native_protected(*,runner=subprocess.run):
+    observed={}
+    for name in NATIVE_PROTECTED:
+        result=runner(["/usr/bin/docker","inspect","--type","container",name],
+                      capture_output=True,text=True,timeout=15,check=False)
+        require(result.returncode==0,"NATIVE_PROTECTED_READ_UNAVAILABLE:"+name)
+        try:
+            data=json.loads(result.stdout)
+            require(isinstance(data,list) and len(data)==1,"NATIVE_PROTECTED_READ_AMBIGUOUS")
+            row=data[0];state=row["State"]
+            observed[name]={"id":row["Id"],"image":row["Image"],
+                "started_at":state["StartedAt"],"running":state["Running"],
+                "health":(state.get("Health") or {}).get("Status","none")}
+        except (ValueError,KeyError,TypeError) as exc:
+            raise RootPreflightDenied("PMV4_E_ROOT_PREFLIGHT_NATIVE_PROTECTED_RECORD_INVALID") from exc
+    return verify_native_protected(observed)
+
+
 def evaluate(evidence:Mapping[str,Any])->dict[str,Any]:
     """Pure fail-closed decision; passed only independently measured evidence."""
     require(evidence.get("uid")==0,"ROOT_ONLY")
+    verify_native_protected(evidence.get("native_protected"))
     require(evidence.get("root_cda1")=="verified","C_D_A1_ROOT_RECEIPT_UNVERIFIED")
     require(evidence.get("root_canary")=="verified","NATIVE_CANARY_UNVERIFIED")
     require(evidence.get("source_policy_valid") is True,
@@ -79,6 +117,7 @@ def evaluate(evidence:Mapping[str,Any])->dict[str,Any]:
         "production_mutations":False,
         "owner_release_authorized":False,
         "pmv3_retirement_authorized":False,
+        "native_protected_components_verified":len(NATIVE_PROTECTED),
         "legacy_triggers_verified":6,
         "replacement_triggers_verified_inert":6,
     }
@@ -185,6 +224,7 @@ def _root_evidence(*, historical:Mapping[str,Any], canary:Mapping[str,Any])->dic
 def collect(*,runner:Callable[...,Any]=subprocess.run)->dict[str,Any]:
     """Live root observation, never grant production release authority."""
     require(os.geteuid()==0,"ROOT_ONLY")
+    native_protected=live_native_protected(runner=runner)
     from tools import pmv4_e_root_receipt_readback as rootproof
     from tools import pmv4_e_canary_acceptance_readback as canaryproof
     from tools import pmv4_e_retirement_readiness as retirement
@@ -210,7 +250,7 @@ def collect(*,runner:Callable[...,Any]=subprocess.run)->dict[str,Any]:
             and owner.get("exclusive_owner_count")==1,
             "CURRENT_TICKET_DISPATCH_OWNER_UNVERIFIED")
     return {
-        "uid":0,**details,
+        "uid":0,**details,"native_protected":native_protected,
         "marker_absent":marker_absent,
         "user_active_old":{u:_active(u,user=True,runner=runner) for u in OLD_USER},
         "root_active_old":{u:_active(u,user=False,runner=runner) for u in OLD_ROOT},

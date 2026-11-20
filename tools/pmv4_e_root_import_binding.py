@@ -21,7 +21,7 @@ import types
 from typing import Any, Mapping
 
 NATIVE = Path("/opt/jason/independent-component-release/trusted")
-STAGE_E = Path("/opt/jason/pmv4-e-trusted")
+STAGE_E = Path("/usr/local/lib/jason/pmv4-e-bootstrap/native")
 ENTRY = STAGE_E / "tools/pmv4_e_root_import_binding.py"
 NATIVE_FILES = (
     "tools/independent_component_release.py",

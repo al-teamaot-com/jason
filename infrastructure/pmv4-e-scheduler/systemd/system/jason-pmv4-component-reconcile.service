@@ -1,14 +1,14 @@
 [Unit]
 Description=Jason root-owned host release reconciliation worker
 After=docker.service
-ConditionPathExists=/usr/local/lib/jason/release_host_reconcile_worker.py
+ConditionPathExists=/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/release_host_reconcile_worker.py
 
 [Service]
-ExecCondition=/usr/bin/python3 -I -B /opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py --mode component-reconcile
+ExecCondition=/usr/bin/python3 -I -B /usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py --mode component-reconcile
 Type=oneshot
 User=root
 Group=root
-ExecStart=/usr/bin/python3 /usr/local/lib/jason/release_host_reconcile_worker.py
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/jason/pmv4-e-bootstrap/native/tools/release_host_reconcile_worker.py
 NoNewPrivileges=true
 PrivateTmp=true
 UMask=0027

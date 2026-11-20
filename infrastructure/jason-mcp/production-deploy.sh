@@ -330,6 +330,38 @@ else
   PMV4_STAGE_A0_ARGS=(--set-env "JASON_PMV4_STAGE_A0_ISSUER_ENABLED=false")
 fi
 
+# Stage E is independently gated and remains disabled in this source profile.
+PMV4_STAGE_E_MODE="$(python3 - "$REPO_ROOT/config/pmv4-stage-e-issuer-activation.json" <<'PY_PMV4_E'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("DENIED: PMv4 Stage E issuer profile missing")
+try:
+    doc=json.loads(p.read_text())
+except (OSError,ValueError):
+    raise SystemExit("DENIED: PMv4 Stage E issuer profile invalid")
+if (not isinstance(doc,dict)
+        or set(doc)!={"schema_version","service","mode"}
+        or doc["schema_version"]!="1.0"
+        or doc["service"]!="pmv4-stage-e-six-unit-cutover"
+        or doc["mode"] not in ("off","on")):
+    raise SystemExit("DENIED: PMv4 Stage E issuer profile not exact")
+print(doc["mode"])
+PY_PMV4_E
+)" || exit 2
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  PMV4_STAGE_E_ARGS=(--set-env "JASON_PMV4_STAGE_E_ISSUER_ENABLED=false")
+elif [ "$PMV4_STAGE_E_MODE" = "on" ]; then
+  if [ "${#OWNER_SIGNER_ARGS[@]}" -eq 0 ]; then
+    echo "DENIED: Stage E has no trusted Owner signing mount" >&2
+    exit 2
+  fi
+  PMV4_STAGE_E_ARGS=(--set-env "JASON_PMV4_STAGE_E_ISSUER_ENABLED=true")
+else
+  PMV4_STAGE_E_ARGS=(--set-env "JASON_PMV4_STAGE_E_ISSUER_ENABLED=false")
+fi
+
 PREFLIGHT=false
 for arg in "$@"; do
   if [ "$arg" = "--preflight" ]; then
@@ -357,6 +389,7 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   "${OWNER_SIGNER_ARGS[@]}" \
   "${PMV4_OWNER_ARGS[@]}" \
   "${PMV4_STAGE_A0_ARGS[@]}" \
+  "${PMV4_STAGE_E_ARGS[@]}" \
   --promote-image-tag jason-mcp:production \
   --rollback-image-tag jason-mcp:rollback-current \
   --health-url http://127.0.0.1:8000/healthz   "$@"

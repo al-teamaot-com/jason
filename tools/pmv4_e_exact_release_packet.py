@@ -21,7 +21,7 @@ ROOT=Path(__file__).resolve().parents[1]
 SHA40=re.compile(r"^[0-9a-f]{40}$")
 SHA64=re.compile(r"^[0-9a-f]{64}$")
 ACTION="pmv4-e-oneowner-six-unit-replacement-and-retirement-v1"
-EXPECTED_PRIOR_ROOT_POLICY="4c9db0f4bbd12e1892b480a759d2d89b9749b84187eb2a753a260ecf326b7953"
+EXPECTED_PRIOR_ROOT_POLICY="a4358f564c7b5c6ede6ccfa32d884760a247a2d5672440dbc80d771893868608"
 EXPECTED_FREEZE="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 ROOT_TO_INSTALL=(
     "config/production-desired-state.json",
@@ -30,6 +30,10 @@ ROOT_TO_INSTALL=(
     "tools/pmv3_work_engine.py",
     "tools/pmv4_e_root_reconcile_admission.py",
     "tools/pmv4_e_root_cutover_preflight.py",
+    "tools/pmv4_e_installation_preflight.py",
+    "tools/pmv4_e_source_scope_guard.py",
+    "tools/pmv4_e_ci_refresh.py",
+    "tools/manual_release_scope.py",
     "tools/pmv4_e_retirement_readiness.py",
     "tools/pmv4_e_controlplane_dependencies.py",
     "tools/pmv4_e_root_trust_stage.py",
@@ -100,6 +104,47 @@ def canonical(obj:dict[str,Any])->bytes:
                       ensure_ascii=False,allow_nan=False).encode()
 
 
+def read_owner_request_stream(stream)->dict[str,Any]:
+    """Decode one bounded Stage E request; signature checks remain root-owned."""
+    try:
+        raw=stream.read(32769)
+        require(isinstance(raw,bytes) and 0<len(raw)<=32768,
+                "OWNER_REQUEST_STREAM_SIZE_INVALID")
+        def no_duplicate_keys(pairs):
+            out={}
+            for key,value in pairs:
+                if key in out:
+                    raise ValueError("duplicate owner request field")
+                out[key]=value
+            return out
+        request=json.loads(raw,object_pairs_hook=no_duplicate_keys)
+    except StageEReleasePacketDenied:
+        raise
+    except (AttributeError,OSError,ValueError,TypeError,UnicodeDecodeError) as exc:
+        raise StageEReleasePacketDenied(
+            "PMV4_E_PACKET_OWNER_REQUEST_STREAM_INVALID") from exc
+    fields={
+        "schema_version","request_id","action","candidate_sha",
+        "rollback_sha","scope_sha256","manifest_sha256","freeze_sha256",
+        "signed_owner_proof",
+    }
+    require(type(request) is dict and set(request)==fields
+            and request.get("schema_version")=="1.0"
+            and request.get("action")=="pmv4_e_stage_exact_signed_inert_root_v1"
+            and type(request.get("candidate_sha")) is str
+            and SHA40.fullmatch(request["candidate_sha"]) is not None
+            and type(request.get("rollback_sha")) is str
+            and SHA40.fullmatch(request["rollback_sha"]) is not None
+            and request["candidate_sha"]!=request["rollback_sha"]
+            and request.get("request_id")=="release-"+request["candidate_sha"][:16]
+            and all(type(request.get(key)) is str and
+                    SHA64.fullmatch(request[key]) is not None
+                    for key in ("scope_sha256","manifest_sha256","freeze_sha256"))
+            and type(request.get("signed_owner_proof")) is dict,
+            "OWNER_REQUEST_STREAM_SCHEMA_INVALID")
+    return request
+
+
 def read_reviewed(root:Path,relative:str)->bytes:
     p=root/relative
     require(not p.is_symlink() and p.is_file(),"REVIEWED_SOURCE_MISSING")
@@ -144,7 +189,7 @@ def prepare(*,root:Path=ROOT,candidate_sha:str,rollback_sha:str,
             "root_triggers":exact["retire_system_units"]+exact["add_system_units"],
             "reconcile_watchdog_code":list(LEGACY_CONTROL_SURFACES),
             "desired_state":"exact_six_control_delta",
-            "trusted_root":"/opt/jason/pmv4-e-trusted",
+            "trusted_root":"/usr/local/lib/jason/pmv4-e-bootstrap/native",
             "owner_acceptance":"/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json",
         },
         "protected_runtime_mcp_restart_allowed":False,

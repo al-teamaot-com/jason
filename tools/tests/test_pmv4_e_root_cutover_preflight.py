@@ -9,9 +9,14 @@ import pytest
 from tools import pmv4_e_root_cutover_preflight as gate
 
 
+def healthy_native():
+    return {name:{"id":name,"image":"sha256:"+"a"*64,"started_at":"2026-11-20T00:00:00Z",
+                  "running":True,"health":"healthy"} for name in gate.NATIVE_PROTECTED}
+
+
 def good():
     return {
-        "uid":0,"root_cda1":"verified","root_canary":"verified",
+        "uid":0,"native_protected":healthy_native(),"root_cda1":"verified","root_canary":"verified",
         "source_policy_valid":True,"root_policy_valid":True,
         "marker_absent":True,"breaker":"closed","freeze":"unchanged",
         "ticket_unique_owner":True,"scan_fresh":True,"duplicate_items":0,
@@ -98,6 +103,7 @@ def test_root_collect_never_forges_ticket_ownership(tmp_path,monkeypatch):
         "exclusive_owner_count":1,"lock_inode":123,"lock_owner_pid":550,
         "container_init_pid":501})
     monkeypatch.setattr(gate,"MARKER",tmp_path/"absent-marker")
+    monkeypatch.setattr(gate,"live_native_protected",lambda **kwargs:healthy_native())
     calls=[]
     def run(cmd,**kwargs):
         calls.append(tuple(cmd))
@@ -181,6 +187,7 @@ def test_root_collect_rejects_unverified_live_kernel_owner(monkeypatch):
         "source_policy_valid":True,"breaker":"closed","freeze":"unchanged"})
     monkeypatch.setattr(retirement,"scan_summary",lambda:{"status":"fresh","duplicate_items":0})
     monkeypatch.setattr(ownerproof,"inspect",lambda **kw:{"status":"unverified","unique_owner":False})
+    monkeypatch.setattr(gate,"live_native_protected",lambda **kwargs:healthy_native())
     with pytest.raises(gate.RootPreflightDenied,match="CURRENT_TICKET_DISPATCH_OWNER_UNVERIFIED"):
         gate.collect(runner=lambda *a,**kw:SimpleNamespace(
             returncode=0,stdout="inactive\\n"))
@@ -267,3 +274,36 @@ def test_canary_freeze_metadata_rejects_wrong_identity_or_mode(field,value):
                        match="SERVICE_FILE_UNTRUSTED"):
         canary.validate_service_file_meta(
             SimpleNamespace(**metadata),path_name="production-deployment-freeze")
+
+
+@pytest.mark.parametrize("health",["unhealthy","starting"])
+def test_shadow_unhealthy_denies_even_with_verified_historical_receipts(health):
+    evidence=good()
+    evidence["native_protected"]["jason-pmv4-shadow-gateway"]["health"]=health
+    with pytest.raises(gate.RootPreflightDenied,match="NATIVE_PROTECTED_UNHEALTHY:jason-pmv4-shadow-gateway"):
+        gate.evaluate(evidence)
+
+
+def test_missing_native_live_snapshot_cannot_pass_historical_preflight():
+    evidence=good();evidence.pop("native_protected")
+    with pytest.raises(gate.RootPreflightDenied,match="SNAPSHOT_INCOMPLETE"):
+        gate.evaluate(evidence)
+
+
+def test_live_native_health_reads_only_exact_original_protected_containers():
+    import json
+    calls=[]
+    def run(cmd,**kwargs):
+        calls.append(cmd);name=cmd[-1]
+        assert cmd==["/usr/bin/docker","inspect","--type","container",name]
+        return SimpleNamespace(returncode=0,stdout=json.dumps([{
+            "Id":name,"Image":"sha256:"+"a"*64,
+            "State":{"Running":True,"StartedAt":"2026-11-20T00:00:00Z"}}]))
+    result=gate.live_native_protected(runner=run)
+    assert set(result)==set(gate.NATIVE_PROTECTED)
+    assert len(calls)==5 and all(row["health"]=="none" for row in result.values())
+
+
+def test_live_native_health_rejects_non_container_or_malformed_docker_response():
+    with pytest.raises(gate.RootPreflightDenied):
+        gate.live_native_protected(runner=lambda *a,**k:SimpleNamespace(returncode=0,stdout="{}"))

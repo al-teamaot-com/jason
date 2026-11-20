@@ -2,7 +2,7 @@
 """Root-owned, read-only attestation of one exact typed Stage E manifest.
 
 Source-only until an independently authorized installer seals this file at
-/opt/jason/pmv4-e-trusted/tools/. No Owner proof, release authority or
+/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/. No Owner proof, release authority or
 systemd action is created here. Never trust a caller's JSON as signed scope.
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any
 from tools import pmv4_e_native_release_contract as contract
 from tools import pmv4_e_exact_release_packet as packet
 
-TRUST_ROOT = Path("/opt/jason/pmv4-e-trusted")
+TRUST_ROOT = Path("/usr/local/lib/jason/pmv4-e-bootstrap/native")
 INSTALLED = TRUST_ROOT / "tools/pmv4_e_native_root_manifest_attestation.py"
 RELEASE_ROOT = Path("/var/lib/jason/independent-component-release/releases")
 

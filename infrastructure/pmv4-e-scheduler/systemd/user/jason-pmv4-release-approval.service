@@ -5,7 +5,7 @@ ConditionPathExists=/var/lib/jason/openclaw/release-manager/auto-promotion-incid
 ConditionPathExists=/home/al/.local/lib/jason/release_manager_host_runner.py
 
 [Service]
-ExecCondition=/usr/bin/python3 -I -B /opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py --mode release-approval
+ExecCondition=/usr/bin/python3 -I -B /usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py --mode release-approval
 Type=oneshot
 # Separate read/approval-only command; never initiate deployment.
 ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/release_manager_host_runner.py --repo /home/al/.local/lib/jason/release-approval-source --state-root /var/lib/jason/openclaw/release-manager approval-only-held

@@ -3,6 +3,14 @@ on:
   pull_request:
     paths:
       - "tools/pmv4_e_root_cutover_preflight.py"
+      - "tools/pmv4_e_dispatch_install.py"
+      - "tools/pmv4_e_operational_closure.py"
+      - "tools/tests/test_pmv4_e_operational_closure.py"
+      - "tools/pmv4_e_installation_preflight.py"
+      - "tools/tests/test_pmv4_e_root_filesystem_installation.py"
+      - "tools/pmv4_e_restore_approved_worker.py"
+      - "tools/tests/test_pmv4_e_restore_approved_worker.py"
+      - "tools/tests/test_pmv4_e_dispatch_install.py"
       - "tools/pmv4_e_ticket_owner_readback.py"
       - "tools/tests/test_pmv4_e_ticket_owner_readback.py"
       - "tools/tests/test_pmv4_e_root_cutover_preflight.py"
@@ -17,6 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -31,7 +40,11 @@ jobs:
           # credentials, production host calls or provider connectivity.
           sudo -n env PYTHONPATH=tools:.:implementation:implementation/mcp_service/src \
             "$python_exe" -B -m pytest -q \
+              tools/tests/test_pmv4_e_root_filesystem_installation.py \
+              tools/tests/test_pmv4_e_operational_closure.py \
               tools/tests/test_pmv4_e_root_cutover_preflight.py \
-              tools/tests/test_pmv4_e_ticket_owner_readback.py
+              tools/tests/test_pmv4_e_ticket_owner_readback.py \
+              tools/tests/test_pmv4_e_dispatch_install.py \
+              tools/tests/test_pmv4_e_restore_approved_worker.py
           test ! -e /var/lib/jason/independent-component-release
           test ! -e /etc/jason/release-readback-recovery/production-desired-state.json
