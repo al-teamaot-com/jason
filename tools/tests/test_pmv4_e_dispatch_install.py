@@ -79,7 +79,8 @@ def isolated(tmp_path, monkeypatch, files):
     monkeypatch.setattr(install, "protected", lambda: None)
     previous = install.tree(trust)
     data = {"candidate_sha": "7" * 40}
-    receipt = {"scope": {"trust_before_sha256": previous}, "owner_object_id": "fixture-owner"}
+    receipt = {"scope": {"trust_before_sha256": previous, "policy": data},
+               "owner_object_id": "fixture-owner"}
     return files, data, receipt, previous, base
 
 
@@ -122,3 +123,99 @@ def test_rollback_denies_a_dispatched_approval(isolated):
         install.rollback(files, policy, receipt["scope"])
     assert install.WORKER.read_bytes() == files[install.WORKER_SOURCE]
     assert install.POLICY.exists()
+
+
+@pytest.fixture
+def repair(isolated, monkeypatch):
+    files, policy, receipt, previous, base = isolated
+    install.install(files, policy, receipt, previous)
+    installed_tree = install.tree(install.TRUST)
+    monkeypatch.setattr(install, "REPAIR_FROM", policy["candidate_sha"])
+    monkeypatch.setattr(install, "REPAIR_WORKER", install.digest(install.WORKER.read_bytes()))
+    monkeypatch.setattr(install, "REPAIR_POLICY", install.digest(install.POLICY.read_bytes()))
+    monkeypatch.setattr(install, "REPAIR_TREE", installed_tree)
+    updated = {name: data + b" updated" for name, data in files.items()}
+    policy = {"candidate_sha": "8" * 40}
+    receipt = {
+        "scope": {"trust_before_sha256": installed_tree, "queue_cutover": True,
+                  "policy": policy},
+        "owner_object_id": "fixture-owner",
+    }
+    return updated, policy, receipt, installed_tree, base
+
+
+def test_repair_preserves_original_policy_and_approval_state_on_rollback(repair):
+    files, policy, receipt, before, _ = repair
+    previous_policy = install.POLICY.read_bytes()
+    previous_worker = install.WORKER.read_bytes()
+    install.install(files, policy, receipt, before)
+    assert install.WORKER.read_bytes() == files[install.WORKER_SOURCE]
+    assert json.loads(install.POLICY.read_bytes()) == policy
+    install.rollback(files, policy, receipt["scope"])
+    assert install.POLICY.read_bytes() == previous_policy
+    assert install.WORKER.read_bytes() == previous_worker
+    assert install.tree(install.TRUST) == before
+    assert install.RECORDS.is_dir()
+
+
+def test_failed_repair_restores_exact_prior_dispatcher(repair, monkeypatch):
+    files, policy, receipt, before, _ = repair
+    previous_policy = install.POLICY.read_bytes()
+    previous_worker = install.WORKER.read_bytes()
+
+    def postcheck():
+        if install.POLICY.read_bytes() != previous_policy:
+            raise install.Denied("REPAIR_POSTCHECK_FAILED")
+
+    monkeypatch.setattr(install, "protected", postcheck)
+    with pytest.raises(install.Denied, match="POSTCHECK"):
+        install.install(files, policy, receipt, before)
+    assert install.POLICY.read_bytes() == previous_policy
+    assert install.WORKER.read_bytes() == previous_worker
+    assert install.tree(install.TRUST) == before
+    assert install.RECORDS.is_dir()
+
+
+def test_repair_rejects_changed_prior_policy_before_mutation(repair):
+    files, policy, receipt, before, _ = repair
+    install.POLICY.chmod(0o600)
+    install.POLICY.write_text('{"candidate_sha":"tampered"}')
+    install.POLICY.chmod(0o400)
+    worker_before = install.WORKER.read_bytes()
+    with pytest.raises(install.Denied, match="BASELINE_CHANGED"):
+        install.install(files, policy, receipt, before)
+    assert install.WORKER.read_bytes() == worker_before
+    assert install.tree(install.TRUST) == before
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_combined_cutover_uses_original_signer_and_publisher(monkeypatch, valid):
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    policy = {"candidate_sha": "a" * 40}
+    oid = "fixture-owner"
+    publisher = (Path(__file__).resolve().parents[2] /
+                 "implementation/mcp_service/src/jason_mcp/pmv4_stage_a0_owner_issuer.py").read_bytes()
+    monkeypatch.setattr(install, "read", lambda *args: publisher)
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        supplied_policy, actor, source = json.loads(kwargs["input"])
+        assert supplied_policy == policy and actor == oid
+        assert source.encode() == publisher
+        assert "offer.signed_request(" in command[8]
+        assert 'publisher["_publish_exact_request"]' in command[8]
+        return SimpleNamespace(stdout=json.dumps({
+            "request_id": "pmv4-e-" + "a" * 16 + "-" + "b" * 32 if valid else "invalid",
+            "candidate_sha": policy["candidate_sha"],
+        }).encode())
+
+    monkeypatch.setattr(install.subprocess, "run", run)
+    if valid:
+        assert install.queue_cutover(policy, oid)["candidate_sha"] == policy["candidate_sha"]
+    else:
+        with pytest.raises(install.Denied, match="READBACK_INVALID"):
+            install.queue_cutover(policy, oid)
+    assert calls[0][0][:4] == ["/usr/sbin/runuser", "-u", "al", "--"]

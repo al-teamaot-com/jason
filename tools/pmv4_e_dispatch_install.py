@@ -19,6 +19,11 @@ import tempfile
 import time
 
 ACTION = "INSTALL-EXACT-PMV4-E-DISPATCHER"
+REPAIR_ACTION = "REPAIR-AND-COMPLETE-EXACT-PMV4-E"
+REPAIR_FROM = "f792abc67cfa38c85a44f33a54cef576f862b9fe"
+REPAIR_WORKER = "60b0166a328fe32d1e8246b9279bfd22fcc083e3734b4f81315ab953ed83727a"
+REPAIR_POLICY = "caa84bec47d99ccf3b463ca082d035e108cd14993102b32e363d6677a40b5a34"
+REPAIR_TREE = "2389c735751c0dd8bdcc9eae3d23d83b42df162d06623ad1f08a9a31db0b5739"
 BASE = Path("/usr/local/lib/jason/pmv4-e-bootstrap")
 TRUST = BASE / "trusted"
 WORKER = BASE.parent / "release_host_reconcile_worker.py"
@@ -234,12 +239,13 @@ def owner(scope):
     challenge = auth["_form"](endpoint + "devicecode", {"client_id": client, "scope": auth["SCOPE"]})
     need(all(isinstance(challenge.get(key), str) for key in ("user_code", "device_code", "verification_uri")),
          "ENTRA_DEVICE_CODE_UNAVAILABLE")
-    print("EXACT_ACTION=" + ACTION, flush=True)
+    action = scope["action"]
+    print("EXACT_ACTION=" + action, flush=True)
     print("CANDIDATE_SHA=" + scope["policy"]["candidate_sha"], flush=True)
     print("ROLLBACK_SHA=" + scope["policy"]["rollback_sha"], flush=True)
     print("INSTALL_SCOPE_SHA256=" + digest(canonical(scope)), flush=True)
     print("INSTALL_TARGETS=" + ",".join(map(str, (TRUST, WORKER, POLICY, RECORDS))), flush=True)
-    print("CUTOVER=false; MCP_ACTIVATION=false; SERVICES_RESTARTED=false", flush=True)
+    print("CUTOVER=" + str(scope.get("queue_cutover", False)).lower(), flush=True)
     print("BROWSER_VERIFICATION_URL=" + challenge["verification_uri"], flush=True)
     print("SIGN_IN_CODE=" + challenge["user_code"], flush=True)
     interval = max(5, min(20, int(challenge.get("interval", 5))))
@@ -252,8 +258,8 @@ def owner(scope):
         })
         if isinstance(result.get("access_token"), str):
             actor = auth["jwt_owner"](result["access_token"])
-            need(input("Type " + ACTION + " to approve installation and exact rollback: ").strip()
-                 == ACTION, "OWNER_CONFIRMATION_MISSING")
+            need(input("Type " + action + " to approve this exact scope and rollback: ").strip()
+                 == action, "OWNER_CONFIRMATION_MISSING")
             return actor
         if result.get("error") == "slow_down":
             interval = min(20, interval + 5)
@@ -328,22 +334,47 @@ def stage_tree(root, files):
     sync_dir(root)
 
 
+def repair_baseline():
+    old = read(POLICY, 0, 0o400)
+    need(digest(old) == REPAIR_POLICY
+         and json.loads(old).get("candidate_sha") == REPAIR_FROM
+         and digest(read(WORKER, 0, 0o755)) == REPAIR_WORKER
+         and tree(TRUST) == REPAIR_TREE, "REPAIR_BASELINE_CHANGED")
+    accepted = json.loads(read(
+        BASE / ("dispatch-install-" + REPAIR_FROM) / "accepted.json", 0, 0o400))
+    need(accepted.get("status") == "installed"
+         and accepted.get("scope", {}).get("policy") == json.loads(old),
+         "PRIOR_DISPATCH_INSTALL_NOT_ACCEPTED")
+    directory(RECORDS, 0o700)
+    need(not any(RECORDS.iterdir()), "PRIOR_OWNER_REQUEST_ALREADY_DISPATCHED")
+    return old
+
+
 def install(files, policy, receipt, before_tree):
     candidate = policy["candidate_sha"]
     state = BASE / ("dispatch-install-" + candidate)
     directory(BASE)
     directory(WORKER.parent)
     directory(POLICY.parent)
-    need(not any(os.path.lexists(p) for p in (state, POLICY, RECORDS)),
+    repair = receipt["scope"].get("queue_cutover", False)
+    previous_policy = repair_baseline() if repair else None
+    need(not os.path.lexists(state)
+         and (repair or not any(os.path.lexists(p) for p in (POLICY, RECORDS))),
          "INSTALL_TARGET_EXISTS_OR_PARTIAL")
     old_worker = read(WORKER, 0, 0o755)
-    need(digest(old_worker) == WORKER_BEFORE and tree(TRUST) == before_tree,
+    expected_worker = REPAIR_WORKER if repair else WORKER_BEFORE
+    need(digest(old_worker) == expected_worker and tree(TRUST) == before_tree,
          "INSTALL_BASELINE_CHANGED")
-    receipt = {**receipt, "records_parent_preexisting": os.path.lexists(RECORDS.parent)}
+    receipt = {
+        **receipt, "records_parent_preexisting": os.path.lexists(RECORDS.parent),
+        "records_preexisting": os.path.lexists(RECORDS),
+    }
     with tempfile.TemporaryDirectory(prefix=".dispatch-install-", dir=BASE) as staging:
         prepared = Path(staging)
         write(prepared / "worker-before.py", old_worker, 0o755)
         write(prepared / "approval.json", canonical(receipt), 0o400)
+        if previous_policy is not None:
+            write(prepared / "policy-before.json", previous_policy, 0o400)
         stage_tree(prepared / "trust-new", files)
         write(prepared / "worker-new.py", files[WORKER_SOURCE], 0o755)
         os.rename(prepared, state)
@@ -353,8 +384,9 @@ def install(files, policy, receipt, before_tree):
         write(policy_pending, canonical(policy), 0o400)
         RECORDS.parent.mkdir(mode=0o700, exist_ok=True)
         directory(RECORDS.parent)
-        RECORDS.mkdir(mode=0o700)
-        sync_dir(RECORDS.parent)
+        if not receipt["records_preexisting"]:
+            RECORDS.mkdir(mode=0o700)
+            sync_dir(RECORDS.parent)
         protected()
         os.rename(TRUST, state / "trust-before")
         sync_dir(state)
@@ -362,8 +394,12 @@ def install(files, policy, receipt, before_tree):
         os.rename(state / "trust-new", TRUST)
         sync_dir(state)
         sync_dir(BASE)
-        os.link(policy_pending, POLICY)
-        policy_pending.unlink()
+        if repair:
+            need(read(POLICY, 0, 0o400) == previous_policy, "REPAIR_POLICY_CHANGED")
+            os.replace(policy_pending, POLICY)
+        else:
+            os.link(policy_pending, POLICY)
+            policy_pending.unlink()
         sync_dir(POLICY.parent)
         os.replace(state / "worker-new.py", WORKER)
         sync_dir(state)
@@ -394,7 +430,11 @@ def rollback(files, policy, expected_scope):
     old_tree = state / "trust-before"
     have_backup = os.path.lexists(old_tree)
     have_trust = os.path.lexists(TRUST)
-    need(digest(before) == WORKER_BEFORE and installed in (before, files[WORKER_SOURCE])
+    repair = expected_scope.get("queue_cutover", False)
+    previous_policy = read(state / "policy-before.json", 0, 0o400) if repair else None
+    expected_worker = REPAIR_WORKER if repair else WORKER_BEFORE
+    need(not repair or digest(previous_policy) == REPAIR_POLICY, "REPAIR_BEFORE_POLICY_CHANGED")
+    need(digest(before) == expected_worker and installed in (before, files[WORKER_SOURCE])
          and (tree(old_tree) == expected_tree if have_backup else
               have_trust and tree(TRUST) == expected_tree)
          and (not have_backup or not have_trust or tree(TRUST) == after_tree),
@@ -410,7 +450,8 @@ def rollback(files, policy, expected_scope):
         sync_dir(POLICY.parent)
     for target in (POLICY, pending):
         if os.path.lexists(target):
-            need(read(target, 0, 0o400) == canonical(policy), "ROLLBACK_POLICY_CHANGED")
+            need(read(target, 0, 0o400) in (canonical(policy), previous_policy),
+                 "ROLLBACK_POLICY_CHANGED")
     if os.path.lexists(RECORDS):
         directory(RECORDS, 0o700)
         need(not any(RECORDS.iterdir()), "STAGE_E_APPROVAL_ALREADY_DISPATCHED")
@@ -422,17 +463,26 @@ def rollback(files, policy, expected_scope):
         os.replace(restore, WORKER)
         sync_dir(WORKER.parent)
         sync_dir(state)
-    for target in (POLICY, pending):
-        if os.path.lexists(target):
-            target.unlink()
-            sync_dir(target.parent)
+    if previous_policy is not None:
+        restore_policy = state / "policy-restore.json"
+        if not os.path.lexists(restore_policy):
+            write(restore_policy, previous_policy, 0o400)
+        need(read(restore_policy, 0, 0o400) == previous_policy, "POLICY_RESTORE_CHANGED")
+        os.replace(restore_policy, POLICY)
+        sync_dir(POLICY.parent)
+    elif os.path.lexists(POLICY):
+        POLICY.unlink()
+        sync_dir(POLICY.parent)
+    if os.path.lexists(pending):
+        pending.unlink()
+        sync_dir(pending.parent)
     if have_backup:
         if have_trust:
             os.rename(TRUST, state / "trust-failed")
         os.rename(old_tree, TRUST)
         sync_dir(BASE)
         sync_dir(state)
-    if os.path.lexists(RECORDS):
+    if os.path.lexists(RECORDS) and not receipt["records_preexisting"]:
         RECORDS.rmdir()
         sync_dir(RECORDS.parent)
     if (not receipt["records_parent_preexisting"] and os.path.lexists(RECORDS.parent)
@@ -440,8 +490,60 @@ def rollback(files, policy, expected_scope):
         RECORDS.parent.rmdir()
         sync_dir(RECORDS.parent.parent)
     need(read(WORKER, 0, 0o755) == before and tree(TRUST) == expected_tree
-         and not os.path.lexists(POLICY), "ROLLBACK_READBACK_MISMATCH")
+         and (read(POLICY, 0, 0o400) == previous_policy if repair else
+              not os.path.lexists(POLICY)), "ROLLBACK_READBACK_MISMATCH")
     write(state / "rolled-back.json", canonical({"status": "rolled_back", **receipt}), 0o400)
+
+
+
+def queue_cutover(policy, owner_oid):
+    """The existing service signer publishes only the just-approved exact cutover."""
+    publisher = ARTIFACTS / (
+        "pmv4-e-owner-source-repo/implementation/mcp_service/src/"
+        "jason_mcp/pmv4_stage_a0_owner_issuer.py")
+    source = read(publisher, 1000, 0o444, 30_000)
+    need(digest(source) ==
+         "096b3ca7cb8510dff3b695a25f82fc96029ac8ad348e69a9beafa7b44ed7e7e4",
+         "ORIGINAL_REQUEST_PUBLISHER_CHANGED")
+    script = """
+import json
+from pathlib import Path
+import sys
+sys.path[:0] = [sys.argv[1], str(Path(sys.argv[1]) / "implementation")]
+from tools import pmv4_e_exact_owner_offer as offer
+policy, owner_oid, publisher_source = json.load(sys.stdin)
+signer, _, private = offer.checked_identity()
+plan = {
+    "candidate": policy["candidate_sha"], "rollback": policy["rollback_sha"],
+    "scope_sha256": policy["scope_sha256"],
+    "manifest_sha256": policy["manifest_sha256"],
+    "freeze_sha256": policy["freeze_sha256"],
+}
+owner = offer.signed_request(plan, signer=signer, private=private, owner_oid=owner_oid)
+approval = owner["signed_owner_proof"]["payload"]["approval_id"]
+request_id = "pmv4-e-" + policy["candidate_sha"][:16] + "-" + approval[10:]
+publisher = {"__name__": "original_request_publisher"}
+exec(compile(publisher_source, "<pinned-publisher>", "exec"), publisher)
+target = publisher["REQUESTS"] / (request_id + ".json")
+publisher["_trusted_requests"](target.parent, production=True)
+publisher["_publish_exact_request"](target, {
+    "request_id": request_id, "source_revision": policy["candidate_sha"],
+    "action": "pmv4_e_cutover", "owner_request": owner,
+})
+print(json.dumps({"request_id": request_id, "candidate_sha": policy["candidate_sha"]}))
+"""
+    result = subprocess.run(
+        ["/usr/sbin/runuser", "-u", "al", "--", "/usr/bin/python3", "-I", "-B",
+         "-c", script, str(TRUST)],
+        input=canonical([policy, owner_oid, source.decode()]), cwd="/",
+        capture_output=True, check=True, timeout=45,
+    )
+    payload = json.loads(result.stdout)
+    need(type(payload) is dict and payload.get("candidate_sha") == policy["candidate_sha"]
+         and re.fullmatch("pmv4-e-" + policy["candidate_sha"][:16] +
+                          "-[0-9a-f]{32}", payload.get("request_id", "")),
+         "QUEUED_CUTOVER_READBACK_INVALID")
+    return payload
 
 
 def main():
@@ -450,6 +552,7 @@ def main():
     parser.add_argument("--archive-sha256", required=True)
     parser.add_argument("--manifest-sha256", required=True)
     parser.add_argument("--before-tree-sha256", required=True)
+    parser.add_argument("--repair-and-cutover", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true")
     mode.add_argument("--rollback", action="store_true")
@@ -461,12 +564,16 @@ def main():
          "EXACT_DIGESTS_REQUIRED")
     files, policy = plan(args.candidate_sha, args.archive_sha256, args.manifest_sha256)
     proposed = {
-        "action": ACTION, "policy": policy, "archive_sha256": args.archive_sha256,
-        "worker_before_sha256": WORKER_BEFORE,
+        "action": REPAIR_ACTION if args.repair_and_cutover else ACTION,
+        "policy": policy, "archive_sha256": args.archive_sha256,
+        "worker_before_sha256": REPAIR_WORKER if args.repair_and_cutover else WORKER_BEFORE,
         "worker_after_sha256": digest(files[WORKER_SOURCE]),
         "trust_before_sha256": args.before_tree_sha256,
         "installer_sha256": digest(Path(__file__).read_bytes()),
     }
+    if args.repair_and_cutover:
+        need(args.before_tree_sha256 == REPAIR_TREE, "REPAIR_EXACT_TREE_REQUIRED")
+        proposed["queue_cutover"] = True
     if args.rollback:
         with locks():
             protected()
@@ -475,13 +582,23 @@ def main():
         return
     with locks():
         protected()
-        need(not any(os.path.lexists(p) for p in (
-            BASE / ("dispatch-install-" + args.candidate_sha), POLICY, RECORDS,
-        )), "INSTALL_TARGET_EXISTS_OR_PARTIAL")
+        if args.repair_and_cutover:
+            repair_baseline()
+        else:
+            need(not any(os.path.lexists(p) for p in (POLICY, RECORDS)),
+                 "INSTALL_TARGET_EXISTS_OR_PARTIAL")
+        need(not os.path.lexists(BASE / ("dispatch-install-" + args.candidate_sha)),
+             "INSTALL_TARGET_EXISTS_OR_PARTIAL")
         need(tree(TRUST) == args.before_tree_sha256
-             and digest(read(WORKER, 0, 0o755)) == WORKER_BEFORE,
+             and digest(read(WORKER, 0, 0o755)) == proposed["worker_before_sha256"],
              "INSTALL_BASELINE_CHANGED")
         current_ci(files, args.candidate_sha)
+        if args.repair_and_cutover:
+            worker = load_code(files[WORKER_SOURCE], "stage_e_repaired_worker", WORKER)
+            need(worker["_root_owner_identity_is_active"](
+                "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+                "person-entra-bee80bdcffb04c50b453c09d4d411f5f"),
+                "CANONICAL_OWNER_IDENTITY_NOT_ACTIVE")
     if not args.apply:
         print(json.dumps({"status": "read_only_preflight_passed", "scope": proposed}, sort_keys=True))
         return
@@ -494,7 +611,10 @@ def main():
             "approved_at": datetime.now(timezone.utc).isoformat(),
         }
         install(files, policy, receipt, args.before_tree_sha256)
-    print("PMV4_E_DISPATCHER_INSTALL=VERIFIED")
+    print("PMV4_E_DISPATCHER_INSTALL=VERIFIED", flush=True)
+    if args.repair_and_cutover:
+        result = queue_cutover(policy, actor)
+        print("PMV4_E_CUTOVER=QUEUED REQUEST_ID=" + result["request_id"], flush=True)
 
 
 if __name__ == "__main__":
