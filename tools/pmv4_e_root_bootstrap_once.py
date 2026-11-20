@@ -234,6 +234,17 @@ def native_promotion(candidate:str,*,packet,request:dict,
     return payload
 
 
+def require_matching_recovery_request(request:dict,record:dict)->None:
+    """Only the previously journaled exact proof can select inert recovery."""
+    need(type(request) is dict and type(record) is dict
+         and type(request.get("signed_owner_proof")) is dict
+         and request["signed_owner_proof"]==record.get("signed_owner_proof")
+         and all(request.get(key)==record.get(key) for key in (
+             "candidate_sha","rollback_sha","scope_sha256",
+             "manifest_sha256","freeze_sha256")),
+         "RECOVERY_REQUEST_DOES_NOT_MATCH_STARTED_PROOF")
+
+
 def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False,
              owner_request_stream=None)->dict:
     bind_original_native()
@@ -243,6 +254,7 @@ def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False,
     from tools import pmv4_e_native_release_contract as contract
     from tools import pmv4_e_exact_release_packet as packet
     from tools import pmv4_e_root_cutover_preflight as rootflight
+    from tools import pmv4_e_source_scope_guard as scope_guard
     from tools.independent_component_host_adapter import IndependentComponentHost
 
     need(packet.ROOT==TRUST and
@@ -253,8 +265,6 @@ def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False,
         checked_root_dir(directory)
     # A forwarded request is untrusted until the original root signed phase
     # verifies it under the host and freeze locks, exactly as for the file.
-    need(not (recover_inert and owner_request_stream is not None),
-         "FORWARDED_REQUEST_NOT_VALID_FOR_INERT_RECOVERY")
     forwarded=(packet.read_owner_request_stream(owner_request_stream)
                if owner_request_stream is not None else None)
     # The original root verifier, not a user/GitHub branch or this helper,
@@ -283,6 +293,16 @@ def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False,
                        for n in rootflight.NEW_USER) and not any(
                        rootflight._active(n,user=False)
                        for n in rootflight.NEW_ROOT)
+    def source_and_ci(sha):
+        if core.source_and_ci(sha) is not True:
+            return False
+        witness=scope_guard.verify_under_lock(
+            candidate=sha,rollback=reviewed["manifest"]["rollback_sha"],
+            manual_sha256=reviewed["source_scope"]["exact_replacement_files_sha256"][
+                "tools/manual_release_scope.py"],
+            host_lock_held=state["host"],freeze_lock_held=state["freeze"],
+            production=True)
+        return witness.get("status")=="protected_stage_e_source_scope_verified_under_lock"
     phase=signed.SignedInertBootstrap(
         source_root=TRUST,
         host_lock_held=lambda:state["host"],
@@ -290,7 +310,7 @@ def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False,
         legacy_active=all_legacy,
         replacements_inert=replacements_inert,
         marker_absent=marker_absent,
-        source_ci_verified=core.source_and_ci,
+        source_ci_verified=source_and_ci,
         production=True)
     hashes=reviewed["source_scope"]["exact_replacement_files_sha256"]
     source=immutable.ImmutableRootSourceStage(
@@ -337,6 +357,10 @@ def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False,
                             scope_sha256=reviewed["manifest"]["source_scope_sha256"],
                             approval_id=approval_id),
                              "RECOVERY_ORIGINAL_SIGNED_BOOTSTRAP_MISSING")
+                        recovery_record=signed.root_record(
+                            BOOTSTRAP_JOURNAL/("owner-"+approval_id+".json"),
+                            production=True)
+                        require_matching_recovery_request(request,recovery_record)
                         for item in NATIVE_RECEIPTS.iterdir():
                             row=signed.root_record(item,production=True)
                             need(row.get("candidate_sha")!=candidate,

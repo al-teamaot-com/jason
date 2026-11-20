@@ -370,3 +370,28 @@ def test_native_ledger_requires_exact_same_signed_bootstrap_before_promotion(
     extra=dict(valid);extra["bypass"]="yes"
     assert not native.StageESignedNativeLedger._bootstrap_record_matches(
         extra,manifest=manifest,proof=signed,approval_id=approval_id)
+
+
+def test_source_guard_runs_after_both_locks_and_before_activation(tmp_path):
+    root, manifest = fixture(tmp_path)
+    host = Host()
+    original_source = host.source
+    def source_under_freeze(sha):
+        assert host.freeze_active is True
+        return original_source(sha)
+    host.source = source_under_freeze
+    ctl(root, host).promote(manifest, approval(manifest))
+    assert host.calls.index("host_lock") < host.calls.index("freeze_lock")
+    assert host.calls.index("freeze_lock") < host.calls.index("source")
+    assert host.calls.index("source") < host.calls.index("activate")
+
+
+def test_failed_under_lock_source_check_does_not_write_receipt(tmp_path):
+    root, manifest = fixture(tmp_path)
+    host = Host()
+    host.fail_source = True
+    with pytest.raises(original.ComponentReleaseDenied):
+        ctl(root, host).promote(manifest, approval(manifest))
+    assert host.freeze_active is False
+    assert records(root) == []
+    assert "activate" not in host.calls

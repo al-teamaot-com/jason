@@ -266,68 +266,69 @@ class StageESignedNativeLedger(ComponentReleaseController):
 
     def promote(self, manifest: Mapping[str, Any],
                 signed_approval: Mapping[str, Any]) -> dict[str, Any]:
-        """Use identical signed native locks and receipts, but typed systemd."""
+        """Use the original host, component and freeze boundaries."""
+        deny(type(manifest) is dict and set(manifest) == contract.MANIFEST_FIELDS,
+             "TYPED_SYSTEMD_MANIFEST_REQUIRED")
         with self.host_transaction():
             with self._native_lock().open("rb") as lock:
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError as exc:
                     raise ComponentReleaseDenied("COMPONENT_TRANSACTION_BUSY") from exc
-                verified, bundle, before = self.preflight(
-                    manifest, signed_approval)
-                *_, active = self._paths()
-                _, receipts, _, _ = self._paths()
-                receipt = receipts / ("owner-" + verified.approval_id + ".json")
-                journal = self._journal(
-                    verified, manifest, before, signed_approval)
-                _atomic_json(receipt, journal)  # Crash recovery begins HERE.
-                prior = self.source_root.parent / verified.rollback_sha
-                try:
-                    with self.freeze_transaction(manifest["freeze_sha256"]):
+                # Source/CI and Owner preflight must see the same freeze
+                # boundary as activation, not a pre-lock approximation.
+                with self.freeze_transaction(manifest["freeze_sha256"]):
+                    verified, bundle, before = self.preflight(
+                        manifest, signed_approval)
+                    *_, active = self._paths()
+                    _, receipts, _, _ = self._paths()
+                    receipt = receipts / ("owner-" + verified.approval_id + ".json")
+                    journal = self._journal(
+                        verified, manifest, before, signed_approval)
+                    _atomic_json(receipt, journal)  # Crash recovery begins HERE.
+                    prior = self.source_root.parent / verified.rollback_sha
+                    try:
+                        self.activate_component(bundle, manifest)
+                        deny(self.observe_component(RESOURCE) ==
+                             verified.candidate_sha,
+                             "ACTIVATION_READBACK_FAILED")
+                        deny(self.verify_component(bundle, manifest) is True,
+                             "LIVE_SIX_UNIT_ACCEPTANCE_FAILED")
+                        deny(self._same_protected(
+                            before, self._verify_protected_snapshot()),
+                            "PROTECTED_CONTAINERS_CHANGED")
+                    except BaseException:
                         try:
-                            self.activate_component(bundle, manifest)
+                            self.restore_component(prior, manifest)
                             deny(self.observe_component(RESOURCE) ==
-                                 verified.candidate_sha,
-                                 "ACTIVATION_READBACK_FAILED")
-                            deny(self.verify_component(bundle, manifest) is True,
-                                 "LIVE_SIX_UNIT_ACCEPTANCE_FAILED")
+                                 verified.rollback_sha,
+                                 "ROLLBACK_READBACK_FAILED")
+                            deny(self.verify_component(prior, manifest) is True,
+                                 "ROLLBACK_ACCEPTANCE_FAILED")
                             deny(self._same_protected(
                                 before, self._verify_protected_snapshot()),
-                                "PROTECTED_CONTAINERS_CHANGED")
+                                "PROTECTED_ROLLBACK_DRIFT")
+                            journal["state"] = "rolled_back"
+                            journal["finished_at"] = datetime.now(
+                                timezone.utc).isoformat()
+                            _replace_json(receipt, journal)
                         except BaseException:
-                            try:
-                                self.restore_component(prior, manifest)
-                                deny(self.observe_component(RESOURCE) ==
-                                     verified.rollback_sha,
-                                     "ROLLBACK_READBACK_FAILED")
-                                deny(self.verify_component(prior, manifest) is True,
-                                     "ROLLBACK_ACCEPTANCE_FAILED")
-                                deny(self._same_protected(
-                                    before, self._verify_protected_snapshot()),
-                                    "PROTECTED_ROLLBACK_DRIFT")
-                                journal["state"] = "rolled_back"
-                                journal["finished_at"] = datetime.now(
-                                    timezone.utc).isoformat()
-                                _replace_json(receipt, journal)
-                            except BaseException:
-                                # Unresolved STARTED receipt blocks other releases.
-                                pass
-                            raise
-                    self._freeze_bytes(manifest)
-                    pointer = active / (RESOURCE + ".json")
-                    deny(not pointer.exists() and not pointer.is_symlink(),
-                         "ACTIVE_POINTER_CONFLICT")
-                    _atomic_json(pointer, {
-                        "component_id": RESOURCE,
-                        "candidate_sha": verified.candidate_sha,
-                        "manifest_sha256": verified.manifest_sha256,
-                    })
-                    journal["state"] = "accepted"
-                    journal["finished_at"] = datetime.now(
-                        timezone.utc).isoformat()
-                    _replace_json(receipt, journal)
-                except BaseException:
-                    raise
+                            # Unresolved STARTED receipt blocks other releases.
+                            pass
+                        raise
+                self._freeze_bytes(manifest)
+                pointer = active / (RESOURCE + ".json")
+                deny(not pointer.exists() and not pointer.is_symlink(),
+                     "ACTIVE_POINTER_CONFLICT")
+                _atomic_json(pointer, {
+                    "component_id": RESOURCE,
+                    "candidate_sha": verified.candidate_sha,
+                    "manifest_sha256": verified.manifest_sha256,
+                })
+                journal["state"] = "accepted"
+                journal["finished_at"] = datetime.now(
+                    timezone.utc).isoformat()
+                _replace_json(receipt, journal)
                 return {
                     "status": "native_stage_e_six_unit_accepted",
                     "candidate_sha": verified.candidate_sha,

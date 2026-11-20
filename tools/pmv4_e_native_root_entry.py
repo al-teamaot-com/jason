@@ -239,6 +239,7 @@ def controller_from_root(*,manifest:dict[str,Any],
     from tools import pmv4_e_native_backend_bridge as bridge
     from tools import pmv4_e_native_systemd_adapter as adapter
     from tools import pmv4_e_signed_native_ledger as native
+    from tools import pmv4_e_source_scope_guard as scope_guard
     from tools.independent_component_release import PRODUCTION_ROOT
 
     source_root=PRODUCTION_RELEASE_ROOT/manifest["candidate_sha"]
@@ -270,13 +271,23 @@ def controller_from_root(*,manifest:dict[str,Any],
         component.restore(
             rollback_sha=m["rollback_sha"],
             scope_sha256=m["source_scope_sha256"])
+    def source_and_ci(sha):
+        if core.core_host.source_and_ci(sha) is not True:
+            return False
+        witness=scope_guard.verify_under_lock(
+            candidate=sha,rollback=manifest["rollback_sha"],
+            manual_sha256=scope["exact_replacement_files_sha256"][
+                "tools/manual_release_scope.py"],
+            host_lock_held=core.exclusive_host_lock_held(),
+            freeze_lock_held=core.freeze_lock_held(),production=True)
+        return witness.get("status")=="protected_stage_e_source_scope_verified_under_lock"
 
     return native.StageESignedNativeLedger(
         source_root=source_root,root=PRODUCTION_ROOT,
         host_transaction=core.host_transaction,
         freeze_transaction=core.freeze_transaction,
         verify_protected=core.core_host.protected,
-        verify_source_and_ci=core.core_host.source_and_ci,
+        verify_source_and_ci=source_and_ci,
         verify_image=core.core_host.image,
         observe_component=core.observe_component,
         activate_component=activate,
