@@ -18,10 +18,10 @@ from typing import Any, Callable, Mapping
 from tools import pmv4_e_replacement_unit_bundle as bundle
 from tools import pmv4_e_scheduler_parity as parity
 
-INSTALLED=Path("/opt/jason/pmv4-e-trusted/tools/pmv4_e_systemd_root_ops.py")
+INSTALLED=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_systemd_root_ops.py")
 USER_UNIT_ROOT=Path("/home/al/.config/systemd/user")
 SYSTEM_UNIT_ROOT=Path("/etc/systemd/system")
-TRUSTED_UNITS=Path("/opt/jason/pmv4-e-trusted/infrastructure/pmv4-e-scheduler/systemd")
+TRUSTED_UNITS=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native/infrastructure/pmv4-e-scheduler/systemd")
 NEW_USER=frozenset(parity.USER_REPLACEMENT)
 NEW_ROOT=frozenset(parity.ROOT_REPLACEMENT)
 OLD_USER=frozenset(parity.USER_LEGACY)

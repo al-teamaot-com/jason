@@ -95,7 +95,7 @@ def main():
          "CATALOG_PIN_DOES_NOT_MATCH_APPROVED_BEFORE_IMAGE")
     need(digest(read(MANAGER / "production-deployment-freeze", 1000, 0o600)) == FREEZE_HASH,
          "FREEZE_CHANGED")
-    need(not os.path.lexists("/opt/jason/pmv4-e-trusted"),
+    need(not os.path.lexists("/usr/local/lib/jason/pmv4-e-bootstrap/native"),
          "NATIVE_STAGE_E_ALREADY_STARTED")
     records = Path("/var/lib/jason-owner-release/pmv4-e-dispatch")
     need(not any(records.iterdir()), "OWNER_REQUEST_ALREADY_DISPATCHED")

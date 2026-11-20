@@ -242,9 +242,10 @@ def test_accepted_controlplane_checks_runtime_baseline_and_isolated_worker(tmp_p
     control="b"*40
     root=tmp_path/"releases"
     base=root/runtime
-    candidate=root/control
+    controls=tmp_path/"controls"
+    candidate=controls/control
     base.mkdir(parents=True)
-    candidate.mkdir()
+    candidate.mkdir(parents=True)
     source_link=tmp_path/"source"
     source_link.symlink_to(base)
     engineering=tmp_path/"engineering"
@@ -285,7 +286,7 @@ def test_accepted_controlplane_checks_runtime_baseline_and_isolated_worker(tmp_p
         return SimpleNamespace(returncode=0,stdout=output,stderr="")
     monkeypatch.setattr(m,"run",run)
     failures,evidence=m.production_convergence_failures(
-        releases_root=root,release_manager_source_link=source_link,
+        releases_root=root,control_releases_root=controls,release_manager_source_link=source_link,
         installed_runner=installed_runner,installed_timer=installed_timer,
         verify_scheduled_surfaces=True)
     assert failures==[]
@@ -293,7 +294,7 @@ def test_accepted_controlplane_checks_runtime_baseline_and_isolated_worker(tmp_p
     assert evidence["scheduled_artifacts"]["root_host_reconciler"]["installed"]==str(isolated_worker)
     isolated_worker.write_bytes(b"tampered")
     failures,_=m.production_convergence_failures(
-        releases_root=root,release_manager_source_link=source_link,
+        releases_root=root,control_releases_root=controls,release_manager_source_link=source_link,
         installed_runner=installed_runner,installed_timer=installed_timer,
         verify_scheduled_surfaces=True)
     assert "production_convergence_scheduled_artifact_drift:root_host_reconciler" in failures

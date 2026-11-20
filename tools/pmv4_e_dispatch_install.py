@@ -24,6 +24,10 @@ REPAIR_FROM = "f792abc67cfa38c85a44f33a54cef576f862b9fe"
 REPAIR_WORKER = "60b0166a328fe32d1e8246b9279bfd22fcc083e3734b4f81315ab953ed83727a"
 REPAIR_POLICY = "caa84bec47d99ccf3b463ca082d035e108cd14993102b32e363d6677a40b5a34"
 REPAIR_TREE = "2389c735751c0dd8bdcc9eae3d23d83b42df162d06623ad1f08a9a31db0b5739"
+INSTALLED_ISOLATED_CANDIDATE = "296be96964bdf27a238ed252742e117e07d7da76"
+INSTALLED_ISOLATED_TREE = "03d1bf39661e6c85cb81e0d10e1bd2db667c3eb8f1a3988ec5878fbef40f7b50"
+INSTALLED_ISOLATED_POLICY = "8b963ea8a2e33560e7d83ddd540611e0482cd3fcac88f85b27699e9a001a49e9"
+INSTALLED_ISOLATED_SCOPE = "1a2c32102076e3957f6f147fe1be39f374c7e6206295cbbdf57cf1e8e9789d87"
 BASE = Path("/usr/local/lib/jason/pmv4-e-bootstrap")
 TRUST = BASE / "trusted"
 WORKER = BASE.parent / "release_host_reconcile_worker.py"
@@ -31,6 +35,7 @@ POLICY = Path("/etc/jason/independent-component-release/pmv4-e-dispatch.json")
 RECORDS = Path("/var/lib/jason-owner-release/pmv4-e-dispatch")
 CATALOG_POLICY = Path("/etc/jason-owner-release/catalog-scoped-promotion-installed.json")
 PREFLIGHT_TMP = Path("/run")
+NATIVE_STATE = Path("/var/lib/jason/independent-component-release")
 ARTIFACTS = Path("/srv/jason/archive/engineering-artifacts")
 MANAGER = Path("/var/lib/jason/openclaw/release-manager")
 REQUESTS = MANAGER / "host-reconcile/requests"
@@ -302,7 +307,7 @@ def protected():
          "--property=ActiveState", "--value"], check=True, capture_output=True, text=True, timeout=10)
     need(installed_unit.stdout.strip() == "inactive" and not any(REQUESTS.iterdir()),
          "HOST_RECONCILE_WORK_IN_PROGRESS")
-    need(not os.path.lexists("/opt/jason/pmv4-e-trusted"), "STAGE_E_ALREADY_STAGED")
+    need(not os.path.lexists("/usr/local/lib/jason/pmv4-e-bootstrap/native"), "STAGE_E_ALREADY_STAGED")
 
 
 def sync_dir(path):
@@ -521,16 +526,23 @@ def reviewed_preflight_source(files):
         yield staged
 
 
-def cutover_preflight(files=None):
+def cutover_preflight(files=None, candidate=None):
     """Read privileged acceptance before asking for the combined decision."""
     script = (
         "import json,sys; sys.path.insert(0,sys.argv[1]); "
         "from tools import pmv4_e_root_cutover_preflight as gate; "
         "print(json.dumps(gate.evaluate(gate.collect()),sort_keys=True))"
     )
+    if candidate is not None:
+        script = script.replace(
+            "from tools import pmv4_e_root_cutover_preflight as gate; ",
+            "from tools import pmv4_e_installation_preflight as install; "
+            "install.collect(sys.argv[2]); "
+            "from tools import pmv4_e_root_cutover_preflight as gate; ")
     with reviewed_preflight_source(files) as source:
         result = subprocess.run(
-            ["/usr/bin/python3", "-I", "-B", "-c", script, str(source)],
+            ["/usr/bin/python3", "-I", "-B", "-c", script, str(source)]
+            + ([candidate] if candidate is not None else []),
             capture_output=True, check=False, timeout=180,
         )
     if result.returncode != 0:
@@ -593,20 +605,67 @@ print(json.dumps({"request_id": request_id, "candidate_sha": policy["candidate_s
 
 
 
+def verified_previous_isolated_install(old_policy):
+    """Historical installation evidence never supplies a new release approval."""
+    prior = BASE / ("isolated-cutover-" + INSTALLED_ISOLATED_CANDIDATE)
+    approval = json.loads(read(prior / "approval.json", 0, 0o400))
+    need(digest(canonical(approval.get("scope"))) == INSTALLED_ISOLATED_SCOPE
+         and approval["scope"].get("policy") == json.loads(old_policy)
+         and approval.get("owner_object_id") == "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+         "PREVIOUS_ISOLATED_INSTALL_SCOPE_CHANGED")
+    request = json.loads(read(prior / "owner-proof.json", 0, 0o400))
+    proof = request["signed_owner_proof"]
+    payload = proof["payload"]
+    journal = json.loads(read(Path("/var/lib/jason/independent-component-release/stage-e-bootstrap") /
+        ("owner-" + payload["approval_id"] + ".json"), 0, 0o600))
+    need(journal.get("signed_owner_proof") == proof
+         and journal.get("candidate_sha") == INSTALLED_ISOLATED_CANDIDATE
+         and journal.get("no_unit_mutations") is True,
+         "PREVIOUS_ISOLATED_SIGNED_JOURNAL_CHANGED")
+    signer_path = Path("/usr/local/lib/jason/owner_signed_release.py")
+    signer_source = read(signer_path, 0, 0o644)
+    need(digest(signer_source) == "f50eea90102d9a1de82b3753ec8d0cd225280d385ac7a658ae2c2a303934a0e3",
+         "PREVIOUS_INSTALL_VERIFIER_CHANGED")
+    signer = load_code(signer_source, "historical_install_verifier", signer_path)
+    at = datetime.fromisoformat(journal["started_at"])
+    need(at <= datetime.now(timezone.utc), "PREVIOUS_INSTALL_TIME_UNTRUSTED")
+    policy = json.loads(old_policy)
+    verified = signer["verify_exact_owner_release"](
+        proof, public_key=signer["read_pinned_root_owner_public_key"](
+            Path("/etc/jason-owner-release/verified-owner-public-key.json")),
+        expected_release_id="release-" + INSTALLED_ISOLATED_CANDIDATE[:16],
+        expected_candidate_sha=INSTALLED_ISOLATED_CANDIDATE,
+        expected_rollback_sha=ROLLBACK, expected_scope_sha256=policy["scope_sha256"],
+        expected_manifest_sha256=policy["manifest_sha256"],
+        expected_freeze_sha256=policy["freeze_sha256"], at=at)
+    need(verified["owner_oid"] == approval["owner_object_id"],
+         "PREVIOUS_INSTALL_OWNER_CHANGED")
+    receipts = Path("/var/lib/jason/independent-component-release/receipts")
+    for item in receipts.iterdir():
+        native = json.loads(read(item, 0, 0o600, 100000))
+        need(native.get("candidate_sha") != INSTALLED_ISOLATED_CANDIDATE,
+             "PREVIOUS_NATIVE_TRANSACTION_REQUIRES_LEDGER_RECOVERY")
+
+
 def isolated_baseline():
     directory(BASE)
-    need(tree(TRUST) == REPAIR_TREE
+    before = tree(TRUST)
+    need(before in {REPAIR_TREE, INSTALLED_ISOLATED_TREE}
          and digest(read(WORKER, 0, 0o755)) == WORKER_BEFORE,
          "ISOLATED_APPROVED_BASELINE_CHANGED")
     old_policy = read(POLICY, 0, 0o400)
-    need(digest(old_policy) == REPAIR_POLICY, "ISOLATED_PREVIOUS_DISPATCH_POLICY_CHANGED")
-    accepted = json.loads(read(
-        BASE / ("dispatch-install-" + REPAIR_FROM) / "accepted.json", 0, 0o400))
-    need(accepted.get("status") == "installed"
-         and accepted.get("scope", {}).get("policy") == json.loads(old_policy),
-         "ORIGINAL_DISPATCH_INSTALL_RECEIPT_CHANGED")
-    catalog = read(CATALOG_POLICY,
-                   0, 0o600, 8192)
+    if before == INSTALLED_ISOLATED_TREE:
+        need(digest(old_policy) == INSTALLED_ISOLATED_POLICY,
+             "ISOLATED_PREVIOUS_DISPATCH_POLICY_CHANGED")
+        verified_previous_isolated_install(old_policy)
+    else:
+        need(digest(old_policy) == REPAIR_POLICY, "ISOLATED_PREVIOUS_DISPATCH_POLICY_CHANGED")
+        accepted = json.loads(read(
+            BASE / ("dispatch-install-" + REPAIR_FROM) / "accepted.json", 0, 0o400))
+        need(accepted.get("status") == "installed"
+             and accepted.get("scope", {}).get("policy") == json.loads(old_policy),
+             "ORIGINAL_DISPATCH_INSTALL_RECEIPT_CHANGED")
+    catalog = read(CATALOG_POLICY, 0, 0o600, 8192)
     need(json.loads(catalog).get("root_worker_sha256") == WORKER_BEFORE,
          "CATALOG_SHARED_WORKER_PIN_CHANGED")
     return old_policy, digest(catalog)
@@ -627,7 +686,19 @@ def install_isolated_source(files, policy, scope, actor):
     stage_tree(state / "trust-new", files)
     pending = POLICY.with_name("." + POLICY.name + ".isolated")
     moved = installed = policy_installed = False
+    layout=[(BASE / "releases",0o755),*[(NATIVE_STATE/name,0o700)
+        for name in ("stage-e-code-before","stage-e-physical-before","stage-e-step-audit")]]
+    created=[]
     try:
+        for index,(target,mode) in enumerate(layout):
+            if not os.path.lexists(target):
+                directory(target.parent)
+                write(state / ("directory-intent-"+str(index)+".json"),canonical({
+                    "path":str(target),"uid":0,"gid":0,"mode":oct(mode)}),0o400)
+                target.mkdir(mode=mode)
+                os.chmod(target,mode)
+                created.append((target,mode))
+            directory(target,mode)
         write(pending, canonical(policy), 0o400)
         need(read(POLICY, 0, 0o400) == previous_policy, "DISPATCH_POLICY_CHANGED")
         os.rename(TRUST, state / "trust-before")
@@ -655,6 +726,10 @@ def install_isolated_source(files, policy, scope, actor):
         if moved:
             os.rename(state / "trust-before", TRUST)
         pending.unlink(missing_ok=True)
+        for target,mode in reversed(created):
+            directory(target,mode)
+            need(not any(target.iterdir()), "INSTALL_DIRECTORY_HAS_FOREIGN_CONTENT")
+            target.rmdir()
         sync_dir(BASE)
         sync_dir(POLICY.parent)
         raise
@@ -719,6 +794,8 @@ def run_isolated_native(candidate, request, state):
     except subprocess.TimeoutExpired:
         result = subprocess.CompletedProcess(command, 124, b"", b"")
     if result.returncode:
+        write(state / "native-failure.stderr", getattr(result, "stderr", b"") or b"native bootstrap returned no stderr", 0o400)
+        write(state / "native-failure.stdout", result.stdout or b"native bootstrap returned no stdout", 0o400)
         # The original recovery rejects cleanup after native STARTED and
         # preserves its independently signed rollback/recovery receipts.
         recovery = subprocess.run(
@@ -730,7 +807,9 @@ def run_isolated_native(candidate, request, state):
             "signed_inert_recovery_returncode": recovery.returncode,
             "owner_approval_reusable": False,
         }), 0o400)
-        raise Denied("ISOLATED_NATIVE_CUTOVER_FAILED_SEE_ROOT_RECEIPTS")
+        details = (getattr(result, "stderr", b"") or b"").decode(errors="replace").strip().splitlines()
+        reason = details[-1] if details and re.fullmatch(r"[A-Za-z0-9_:/.-]{1,250}", details[-1]) else "SEE_ROOT_RECEIPTS"
+        raise Denied("ISOLATED_NATIVE_CUTOVER_FAILED:" + reason)
     payload = json.loads(result.stdout)
     write(state / "native-result.json", canonical(payload), 0o400)
     need(payload.get("candidate_sha") == candidate
@@ -740,17 +819,20 @@ def run_isolated_native(candidate, request, state):
 
 
 def complete_isolated(args, files, policy):
-    need(args.before_tree_sha256 == REPAIR_TREE and not args.rollback
+    need(args.before_tree_sha256 == INSTALLED_ISOLATED_TREE and not args.rollback
          and not args.repair_and_cutover, "ISOLATED_MODE_ARGUMENTS_INVALID")
     scope = {
         "action": "COMPLETE-EXACT-ISOLATED-PMV4-E", "policy": policy,
         "queue_cutover": True,
-        "archive_sha256": args.archive_sha256, "trust_before_sha256": REPAIR_TREE,
+        "archive_sha256": args.archive_sha256, "trust_before_sha256": args.before_tree_sha256,
         "protected_shared_worker_sha256": WORKER_BEFORE,
         "installer_sha256": digest(Path(__file__).read_bytes()),
         "installation_targets": [str(TRUST), str(POLICY),
-            "/opt/jason/pmv4-e-trusted", "/opt/jason/releases/" + args.candidate_sha,
+            "/usr/local/lib/jason/pmv4-e-bootstrap/native",
+            str(BASE / "releases"), str(BASE / "releases" / args.candidate_sha),
             "/var/lib/jason/independent-component-release",
+            *["/var/lib/jason/independent-component-release/"+name for name in (
+                "stage-e-code-before","stage-e-physical-before","stage-e-step-audit")],
             "/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json",
             "/etc/jason/release-readback-recovery/production-desired-state.json",
             "/home/al/.local/lib/jason/jason_self_heal_watchdog.py",
@@ -761,8 +843,9 @@ def complete_isolated(args, files, policy):
         protected()
         _, catalog_hash = isolated_baseline()
         scope["protected_catalog_policy_sha256"] = catalog_hash
+        need(tree(TRUST) == args.before_tree_sha256, "ISOLATED_EXACT_BEFORE_TREE_CHANGED")
         current_ci(files, args.candidate_sha)
-        cutover_preflight(files)
+        cutover_preflight(files, args.candidate_sha)
     if not args.apply:
         print(json.dumps({"status": "isolated_read_only_preflight_passed", "scope": scope}))
         return

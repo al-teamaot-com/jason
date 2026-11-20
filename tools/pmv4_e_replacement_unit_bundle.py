@@ -20,9 +20,9 @@ from tools import pmv4_e_scheduler_parity as parity
 ROOT=Path(__file__).resolve().parents[1]
 SOURCE=Path("infrastructure/openclaw-operations/systemd")
 TARGET=Path("infrastructure/pmv4-e-scheduler/systemd")
-ADMISSION="/opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py"
+ADMISSION="/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py"
 LEGACY_RECONCILER="/usr/local/lib/jason/release_host_reconcile_worker.py"
-ISOLATED_RECONCILER="/opt/jason/pmv4-e-trusted/tools/release_host_reconcile_worker.py"
+ISOLATED_RECONCILER="/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/release_host_reconcile_worker.py"
 # Mirror mandatory live production drop-ins when replacing service identities.
 # New names do not inherit the legacy .service.d/ controls.
 OWNER_PAUSE_CONDITION=(

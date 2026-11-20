@@ -70,6 +70,9 @@ def isolated(tmp_path, monkeypatch, files):
     worker.chmod(0o755)
     policy = tmp_path / "policy.json"
     records = tmp_path / "authority" / "records"
+    native=base/"native-journals"
+    native.mkdir(mode=0o700)
+    monkeypatch.setattr(install, "NATIVE_STATE", native)
     monkeypatch.setattr(install, "BASE", base)
     monkeypatch.setattr(install, "TRUST", trust)
     monkeypatch.setattr(install, "WORKER", worker)

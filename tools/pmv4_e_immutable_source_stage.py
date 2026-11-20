@@ -4,7 +4,7 @@
 This is NOT an installer/authority issuer, root CLI or second release manager.
 A separately authenticated signed-native bootstrap must FIRST verify the exact
 Owner proof, protected Git/CI and hold original host+freeze locks. This helper
-then seals only reviewed bytes at /opt/jason/releases/<candidate>. Future
+then seals only reviewed bytes at /usr/local/lib/jason/pmv4-e-bootstrap/releases/<candidate>. Future
 Stage E root trust stager independently rehashes this root-owned source.
 
 Production requires an independently installed root-owned pinned executable,
@@ -23,7 +23,7 @@ from tools import pmv4_e_exact_release_packet as packet
 
 ENTRY=Path("/usr/local/lib/jason/pmv4-e-bootstrap/trusted/tools/pmv4_e_immutable_source_stage.py")
 SOURCE=Path("/srv/jason/archive/engineering-artifacts/pmv4-e-owner-source-repo")
-TARGET_PARENT=Path("/opt/jason/releases")
+TARGET_PARENT=Path("/usr/local/lib/jason/pmv4-e-bootstrap/releases")
 SHA40=re.compile(r"^[0-9a-f]{40}$")
 DIGEST=re.compile(r"^[0-9a-f]{64}$")
 
