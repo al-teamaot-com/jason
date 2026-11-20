@@ -9,3 +9,5 @@ Existing worktrees must be clean before reuse. Dirty or unregistered worktrees s
 Disposable Git tests cover rewritten tracking refs, later main changes, an already-merged generated branch, rejection of foreign changes, and preservation of local work. They exercise the normal publisher through a synthetic remote and command adapter; they do not contact GitHub or change production.
 
 Deployment remains separate from source acceptance. The scheduled service must execute the reviewed publisher before the operational repair is complete. Generated source validation state must remain distinct from actual production deployment state.
+
+The regression suite belongs to the documentation CI job. Separate proposed additions for Owner-plan and sparse-source tests belong to the runtime job and must be reconciled independently; this repair does not replace those tests or authorize their release.
