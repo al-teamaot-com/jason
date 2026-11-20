@@ -77,6 +77,7 @@ def identity_alias():
 @pytest.fixture
 def filesystem(tmp_path,identity_alias):
     assert all(not p.exists() for p in ROOTS),"Refusing existing Jason filesystem"
+    previous_umask=os.umask(0o022)
     try:
         for root in ROOTS:
             root.mkdir(parents=True,exist_ok=True)
@@ -171,6 +172,7 @@ def filesystem(tmp_path,identity_alias):
                     target.unlink()
         for root in reversed(ROOTS):
             if root.exists():shutil.rmtree(root)
+        os.umask(previous_umask)
 
 STAGE=r"""
 import importlib.util,json,sys
