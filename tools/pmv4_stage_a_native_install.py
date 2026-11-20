@@ -375,8 +375,18 @@ class NativeStageAInstaller:
         freeze_path: Path, ci_check: Callable[[str], bool],
         approval_public_key: Any = None,
         after_step: Callable[[str], None] | None = None,
+        bounded_plan_evidence: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """One bounded exact transaction, never public ungoverned apply."""
+        """One bounded exact transaction, never public ungoverned apply.
+
+        The separately tested schema-v2 plan bridge may exercise this SAME
+        actual create/journal/recovery engine only inside disposable sandbox.
+        Production must still use the installed legacy v1 exact Owner proof
+        until an independently reviewed root-owned plan consumer is released.
+        No caller can toggle this flag to gain production authority.
+        """
+        if bounded_plan_evidence is not None and self.production:
+            raise StageANativeDenied("STAGE_A_PLAN_ROOT_POLICY_NOT_DEPLOYED")
         if self.production and approval_public_key is not None:
             raise StageANativeDenied("STAGE_A_UNPINNED_PUBLIC_KEY_DENIED")
         if self.production and (self.root_health is None
@@ -388,15 +398,64 @@ class NativeStageAInstaller:
         with self._legacy_lock():
             self._assert_parents()
             observed_health = dict(self.root_health())
-            proof = admission.verify_admission(
-                repo=repo, candidate_sha=candidate_sha,
-                reviewed_scope=scope, exact_manifest=manifest,
-                signed_owner_proof=signed_proof, frozen_marker=freeze_path,
-                confirmed_root_health=observed_health,
-                protected_main_ci_check=ci_check,
-                at=self.at or datetime.now(timezone.utc),
-                production=self.production, test_public_key=approval_public_key,
-            )
+            if bounded_plan_evidence is None:
+                proof = admission.verify_admission(
+                    repo=repo, candidate_sha=candidate_sha,
+                    reviewed_scope=scope, exact_manifest=manifest,
+                    signed_owner_proof=signed_proof, frozen_marker=freeze_path,
+                    confirmed_root_health=observed_health,
+                    protected_main_ci_check=ci_check,
+                    at=self.at or datetime.now(timezone.utc),
+                    production=self.production, test_public_key=approval_public_key,
+                )
+            else:
+                # Test only: no alternate root/trust signer, no alternate
+                # release mutation method. Reuse the actual native journal,
+                # full exact-scope checks, root lock and rollback acceptance.
+                from tools.pmv4_one_owner_native_root_admission import (
+                    verify_sandbox_native_root_action,
+                )
+                fields = {
+                    "objective", "action_index", "signed_parent", "ledger",
+                    "pinned_public_key", "hold_path", "plan_journal",
+                    "current_grant_attestation",
+                }
+                if (set(bounded_plan_evidence) != fields
+                        or not isinstance(signed_proof, Mapping)
+                        or approval_public_key is not None):
+                    raise StageANativeDenied("STAGE_A_PLAN_EVIDENCE_NOT_EXACT")
+                from tools.pmv4_bounded_plan_journal import BoundedPlanJournal
+                trusted_plan_journal = bounded_plan_evidence["plan_journal"]
+                if (not isinstance(trusted_plan_journal, BoundedPlanJournal)
+                        or trusted_plan_journal.objective != bounded_plan_evidence["objective"]
+                        or trusted_plan_journal.signed_parent != bounded_plan_evidence["signed_parent"]
+                        or trusted_plan_journal.owner_ledger is not bounded_plan_evidence["ledger"]):
+                    raise StageANativeDenied("STAGE_A_PLAN_JOURNAL_NOT_EXACT")
+                # Root acceptance independently verifies source/manifest,
+                # original parent + derived step signatures, a fresh current
+                # grant assertion and the ROOT journal chain. It does NOT
+                # consult the mutable operator-owned approval SQLite directly.
+                verified = verify_sandbox_native_root_action(
+                    repo=repo, candidate_sha=candidate_sha,
+                    reviewed_scope=scope, exact_manifest=manifest,
+                    freeze_path=freeze_path,
+                    hold_path=bounded_plan_evidence["hold_path"],
+                    native_root_health=observed_health,
+                    objective=bounded_plan_evidence["objective"],
+                    signed_parent=bounded_plan_evidence["signed_parent"],
+                    signed_step=signed_proof,
+                    current_signed_grant=bounded_plan_evidence["current_grant_attestation"],
+                    root_readonly_journal=trusted_plan_journal,
+                    pinned_public_key=bounded_plan_evidence["pinned_public_key"],
+                    action_index=bounded_plan_evidence["action_index"],
+                    protected_main_ci_check=ci_check,
+                    at=self.at or datetime.now(timezone.utc),
+                    production=False,
+                )
+                proof = {
+                    "owner_approval_id": verified["parent_approval_id"],
+                    "exact_manifest_sha256": _hash(_canonical(manifest)),
+                }
             if scope["candidate_sha"] != candidate_sha:
                 raise StageANativeDenied("STAGE_A_SOURCE_NOT_PINNED")
             journal = self._journal(candidate_sha)
@@ -413,6 +472,26 @@ class NativeStageAInstaller:
                 "freeze_sha256": manifest["freeze_sha256"],
                 "signed_proof_sha256": _hash(_canonical(signed_proof)),
             }
+            # Claim the reviewed machine step only after native source,
+            # exact manifest and immutable empty-baseline checks pass. Never
+            # accept prior completion claims from the caller. A crash after
+            # this claim is preserved and must be reconciled against native
+            # readback before any replay; no new human consent is minted.
+            plan_claim = None
+            if bounded_plan_evidence is not None:
+                plan_claim = trusted_plan_journal.claim(
+                    action_index=bounded_plan_evidence["action_index"],
+                    signed_step=signed_proof,
+                    observed={
+                        "candidate_sha": candidate_sha,
+                        "rollback_sha": scope["rollback_sha"],
+                        "freeze_sha256": _hash(freeze_path.read_bytes()),
+                        "hold_sha256": _hash(bounded_plan_evidence["hold_path"].read_bytes()),
+                        "scope_sha256": scope["scope_sha256"],
+                        "artifact_sha256": _hash(_canonical(manifest)),
+                    },
+                    at=self.at or datetime.now(timezone.utc),
+                )
             self._append(journal, "prepared", binding)
             # All create steps have a durable preceding intent. A torn
             # file/foreign entry is quarantined, never recursively erased.
@@ -439,7 +518,7 @@ class NativeStageAInstaller:
                 ):
                     raise StageANativeDenied("STAGE_A_PROMOTION_HOLD_CHANGED")
             self._append(journal, "verified_installed", binding)
-            return {
+            outcome = {
                 "status": "installed",
                 "source_sha": candidate_sha,
                 "scope_sha256": scope["scope_sha256"],
@@ -448,6 +527,68 @@ class NativeStageAInstaller:
                 "audit_chain_sha256": self._events(journal)[-1]["hash"],
                 "production_mutation": self.production,
             }
+            if plan_claim is not None:
+                trusted_plan_journal.complete(
+                    action_index=bounded_plan_evidence["action_index"],
+                    claim_id=plan_claim["step_claim_id"],
+                    native_result=outcome,
+                    at=self.at or datetime.now(timezone.utc),
+                )
+            return outcome
+
+    def reconcile_bounded_plan_completion(
+        self, *, plan_journal: Any, action_index: int,
+        scope: Mapping[str, Any], signed_step: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Sandbox-only crash recovery without another human approval.
+
+        A torn final plan-journal write is recoverable only if the ORIGINAL
+        exact native installation journal is already in verified_installed,
+        all scoped native bytes match, all recorded signed Step hashes match
+        and the original signed Owner plan is still valid/not revoked.
+        Never reinterpret a prepared/failed/rolled-back journal as success.
+        """
+        if self.production:
+            raise StageANativeDenied("STAGE_A_PLAN_ROOT_POLICY_NOT_DEPLOYED")
+        from tools.pmv4_bounded_plan_journal import BoundedPlanJournal
+        if (not isinstance(plan_journal, BoundedPlanJournal)
+                or type(action_index) is not int
+                or not 0 <= action_index < len(plan_journal.objective.actions)
+                or not isinstance(signed_step, Mapping)
+                or plan_journal.objective.actions[action_index].scope_sha256
+                   != scope.get("scope_sha256")):
+            raise StageANativeDenied("STAGE_A_PLAN_RECOVERY_SCOPE_UNTRUSTED")
+        proof_hash = _hash(_canonical(signed_step))
+        claim_id = (signed_step.get("payload") or {}).get("step_claim_id")
+        if not isinstance(claim_id, str):
+            raise StageANativeDenied("STAGE_A_PLAN_RECOVERY_CLAIM_MISSING")
+        with self._legacy_lock():
+            self._trusted_journal_parent()
+            journal = self._journal(scope["candidate_sha"])
+            rows = self._events(journal)
+            if (not rows or rows[0]["event"] != "prepared"
+                    or rows[-1]["event"] != "verified_installed"
+                    or any(row["source_sha"] != scope["candidate_sha"]
+                           or row["scope_sha256"] != scope["scope_sha256"]
+                           or row["owner_approval_id"]
+                              != plan_journal.parent["parent_approval_id"]
+                           or row["signed_proof_sha256"] != proof_hash
+                           for row in rows)):
+                raise StageANativeDenied("STAGE_A_PLAN_NATIVE_RECEIPT_UNVERIFIED")
+            self._verify_objects(scope, partial=False)
+            outcome = {
+                "status": "installed", "source_sha": scope["candidate_sha"],
+                "scope_sha256": scope["scope_sha256"],
+                "rollback_sha": packet.EMPTY_BASELINE,
+                "owner_approval_id": plan_journal.parent["parent_approval_id"],
+                "audit_chain_sha256": rows[-1]["hash"],
+                "production_mutation": False,
+            }
+            plan_journal.complete(
+                action_index=action_index, claim_id=claim_id,
+                native_result=outcome, at=self.at or datetime.now(timezone.utc),
+            )
+            return outcome
 
     def recover_empty(self, *, scope: Mapping[str, Any],
                       confirmed_approval_id: str,

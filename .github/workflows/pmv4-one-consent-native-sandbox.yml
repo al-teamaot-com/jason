@@ -1,0 +1,81 @@
+name: PMv4 One Consent Native Transaction (sandbox only)
+on:
+  pull_request:
+    paths:
+      - tools/pmv4_stage_a_native_install.py
+      - tools/pmv4_bounded_plan_journal.py
+      - tools/pmv4_current_grant_attestation.py
+      - tools/pmv4_one_owner_native_root_admission.py
+      - tests/test_pmv4_native_root_no_operator_sqlite.py
+      - tools/pmv4_stage_a_bounded_plan_preflight.py
+      - implementation/kernel/pmv4_plan_child_proof.py
+      - implementation/orchestrator/pmv4_objective_scope.py
+      - tests/test_pmv4_one_consent_native_sandbox_transaction.py
+      - tests/test_pmv4_bounded_plan_native_journal_recovery.py
+      - tests/test_pmv4_current_grant_attestation.py
+      - tests/test_pmv4_mixed_step_rollback_scope.py
+      - tests/test_pmv4_bounded_owner_mcp_bridge.py
+      - implementation/mcp_service/src/jason_mcp/pmv4_bounded_owner_bridge.py
+      - config/pmv4-stage-a0/one-owner-recovery-review-20261115.json
+      - tools/pmv4_stage_a0_one_owner_review.py
+      - tests/test_pmv4_stage_a0_one_owner_review.py
+      - tests/test_pmv4_stage_a0_owner_governance_decision.py
+      - docs/operations/PMv4-Stage-A0-One-Release-Approval-Decision-20261115.md
+      - docs/operations/PMv4-Single-Owner-Approval-Per-Objective-20261114.md
+      - .github/workflows/pmv4-one-consent-native-sandbox.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  one-consent-native-transaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated cryptographic test dependencies
+        run: python -m pip install pytest cryptography PyJWT requests
+      - name: One signed Owner decision into actual native sandbox create and rollback
+        run: |
+          PYTHONPATH=implementation:. python -m pytest -q \
+            tests/test_pmv4_one_consent_native_sandbox_transaction.py \
+            tests/test_pmv4_bounded_plan_native_journal_recovery.py \
+            tests/test_pmv4_current_grant_attestation.py \
+            tests/test_pmv4_mixed_step_rollback_scope.py \
+            tests/test_pmv4_bounded_owner_mcp_bridge.py \
+            tests/test_pmv4_stage_a0_one_owner_review.py \
+            tests/test_pmv4_stage_a0_owner_governance_decision.py \
+            tests/test_pmv4_native_root_no_operator_sqlite.py \
+            tests/test_pmv4_stage_a_native_install.py \
+            tests/test_pmv4_stage_a_bounded_plan_preflight.py \
+            tests/test_pmv4_owner_objective_end_to_end.py
+      - name: Verify exact three-stage source and no apply capability
+        run: PYTHONPATH=implementation:. python tools/pmv4_stage_a0_one_owner_review.py --check-only
+      - name: Real disposable UID0 native test paths, never production release
+        run: |
+          sudo env PYTHONPATH=implementation:. "$(which python)" -m pytest -q \
+            tests/test_pmv4_one_consent_native_sandbox_transaction.py \
+            tests/test_pmv4_bounded_plan_native_journal_recovery.py \
+            tests/test_pmv4_current_grant_attestation.py \
+            tests/test_pmv4_mixed_step_rollback_scope.py \
+            tests/test_pmv4_bounded_owner_mcp_bridge.py \
+            tests/test_pmv4_stage_a0_one_owner_review.py \
+            tests/test_pmv4_stage_a0_owner_governance_decision.py \
+            tests/test_pmv4_native_root_no_operator_sqlite.py \
+            tests/test_pmv4_stage_a_native_install.py
+      - name: Verify immutable source-only production denial
+        run: |
+          PYTHONPATH=implementation:. python -m pytest -q \
+            tests/test_pmv4_one_consent_native_sandbox_transaction.py \
+            tests/test_pmv4_bounded_plan_native_journal_recovery.py \
+            tests/test_pmv4_current_grant_attestation.py \
+            tests/test_pmv4_mixed_step_rollback_scope.py \
+            tests/test_pmv4_bounded_owner_mcp_bridge.py \
+            tests/test_pmv4_stage_a0_one_owner_review.py \
+            tests/test_pmv4_stage_a0_owner_governance_decision.py \
+            tests/test_pmv4_native_root_no_operator_sqlite.py \
+            -k production_plan_path_denied
