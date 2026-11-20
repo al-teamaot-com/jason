@@ -132,7 +132,13 @@ def read_offer(candidate:str,packet):
     out={}
     for name in ("manifest.json","source-scope.json","owner-proof.json"):
         p=folder/name
-        x=p.lstat()
+        try:
+            x=p.lstat()
+        except FileNotFoundError as exc:
+            reason=("OWNER_PROOF_MISSING" if name=="owner-proof.json"
+                    else "OWNER_REVIEW_FILE_MISSING:"+name)
+            raise StageERootBootstrapDenied(
+                "PMV4_E_ROOT_BOOTSTRAP_"+reason) from exc
         need(not p.is_symlink() and stat.S_ISREG(x.st_mode)
              and x.st_uid==x.st_gid==1000
              and x.st_nlink==1 and stat.S_IMODE(x.st_mode)==0o400
