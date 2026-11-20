@@ -36,8 +36,12 @@ schema in an isolated test. It does not record a live decision or publish a
 request. Production is denied by default and explicitly denied when requested.
 
 The root bootstrap reports which reviewed artifact is missing rather than
-returning an unclassified `FileNotFoundError`. It still rejects missing or
-untrusted artifacts.
+returning an unclassified `FileNotFoundError`. It can also receive the same
+bounded signed request through stdin and pass it to the native entry. Both
+original root gates still verify the signature and exact scope independently;
+missing or untrusted artifacts are still rejected. Native success must match
+the original candidate, rollback and approval ID and confirm protected
+services were unchanged. The legacy proof-file path remains available.
 
 ## Remaining work before any release
 

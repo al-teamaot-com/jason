@@ -122,7 +122,7 @@ def candidate_arg(value:str)->str:
     return value
 
 
-def read_offer(candidate:str,packet):
+def read_offer(candidate:str,packet,*,owner_request=None):
     folder=ARTIFACTS/("pmv4-e-source-only-"+candidate)
     m=folder.lstat()
     need(not folder.is_symlink() and stat.S_ISDIR(m.st_mode)
@@ -130,7 +130,10 @@ def read_offer(candidate:str,packet):
          and stat.S_IMODE(m.st_mode)==0o700,
          "OWNER_REVIEWED_ARTIFACT_NOT_PRIVATE")
     out={}
-    for name in ("manifest.json","source-scope.json","owner-proof.json"):
+    files=("manifest.json","source-scope.json")
+    if owner_request is None:
+        files+=("owner-proof.json",)
+    for name in files:
         p=folder/name
         try:
             x=p.lstat()
@@ -149,6 +152,11 @@ def read_offer(candidate:str,packet):
             raise StageERootBootstrapDenied(
                 "PMV4_E_ROOT_BOOTSTRAP_OWNER_RECORD_INVALID") from exc
         need(type(out[name]) is dict,"OWNER_RECORD_NOT_OBJECT")
+    if owner_request is not None:
+        need(type(owner_request) is dict
+             and owner_request.get("candidate_sha")==candidate,
+             "FORWARDED_OWNER_REQUEST_CANDIDATE_MISMATCH")
+        out["owner-proof.json"]=owner_request
     need(out["manifest.json"].get("candidate_sha")==candidate,
          "OWNER_RELEASE_MANIFEST_CHANGED")
     return out
@@ -192,7 +200,42 @@ def safe_release_records(candidate:str,reviewed:dict,packet)->None:
          "NATIVE_RELEASE_RECORD_INVENTORY_DRIFT")
 
 
-def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False)->dict:
+def native_promotion(candidate:str,*,packet,request:dict,
+                     forwarded:bool,runner=None)->dict:
+    """Pass the same proof to the independently verifying native ledger."""
+    command=[
+        "/usr/bin/python3","-I","-B",str(FINAL_ENTRY),
+        "--candidate-sha",candidate,"--promote",
+    ]
+    native_input=None
+    if forwarded:
+        command.append("--owner-request-stdin")
+        native_input=packet.canonical(request).decode("utf-8")
+    runner=runner or subprocess.run
+    result=runner(
+        command,cwd="/",env={"PATH":"/usr/bin:/bin"},check=False,
+        input=native_input,capture_output=True,text=True,timeout=480)
+    need(result.returncode==0,
+         "ORIGINAL_SIGNED_NATIVE_PROMOTION_FAILED_SEE_ROOT_JOURNAL")
+    try:
+        payload=json.loads(result.stdout)
+        expected_approval=request["signed_owner_proof"]["payload"]["approval_id"]
+        expected_rollback=request["rollback_sha"]
+    except (KeyError,ValueError,TypeError) as exc:
+        raise StageERootBootstrapDenied(
+            "PMV4_E_ROOT_BOOTSTRAP_NATIVE_RESULT_NOT_JSON_OR_BOUND") from exc
+    need(type(payload) is dict
+         and payload.get("status")=="native_stage_e_six_unit_accepted"
+         and payload.get("candidate_sha")==candidate
+         and payload.get("rollback_sha")==expected_rollback
+         and payload.get("approval_id")==expected_approval
+         and payload.get("protected_services_changed") is False,
+         "ORIGINAL_NATIVE_ACCEPTANCE_NOT_VERIFIED")
+    return payload
+
+
+def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False,
+             owner_request_stream=None)->dict:
     bind_original_native()
     from tools import pmv4_e_signed_bootstrap_phase as signed
     from tools import pmv4_e_immutable_source_stage as immutable
@@ -208,9 +251,15 @@ def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False)->dict:
     for directory in (NATIVE_RECORDS,NATIVE_RECEIPTS,
                       BOOTSTRAP_JOURNAL,RELEASES):
         checked_root_dir(directory)
+    # A forwarded request is untrusted until the original root signed phase
+    # verifies it under the host and freeze locks, exactly as for the file.
+    need(not (recover_inert and owner_request_stream is not None),
+         "FORWARDED_REQUEST_NOT_VALID_FOR_INERT_RECOVERY")
+    forwarded=(packet.read_owner_request_stream(owner_request_stream)
+               if owner_request_stream is not None else None)
     # The original root verifier, not a user/GitHub branch or this helper,
     # authoritatively chooses the source, Owner and live CI evidence.
-    offer=read_offer(candidate,packet)
+    offer=read_offer(candidate,packet,owner_request=forwarded)
     reviewed=contract.draft(
         candidate_sha=candidate,
         rollback_sha=offer["manifest.json"]["rollback_sha"],
@@ -343,19 +392,8 @@ def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False)->dict:
     # The original native signed ledger reacquires original host+freeze locks,
     # verifies independently installed root/Owner/CI/preflight, then executes
     # its own bounded six-unit transaction and rollback. No other executor.
-    result=subprocess.run([
-        "/usr/bin/python3","-I","-B",str(FINAL_ENTRY),
-        "--candidate-sha",candidate,"--promote",
-    ],cwd="/",env={"PATH":"/usr/bin:/bin"},check=False,
-      capture_output=True,text=True,timeout=480)
-    need(result.returncode==0,
-         "ORIGINAL_SIGNED_NATIVE_PROMOTION_FAILED_SEE_ROOT_JOURNAL")
-    try:payload=json.loads(result.stdout)
-    except (ValueError,TypeError) as exc:
-        raise StageERootBootstrapDenied(
-            "PMV4_E_ROOT_BOOTSTRAP_NATIVE_RESULT_NOT_JSON") from exc
-    need(payload.get("status")=="native_stage_e_six_unit_accepted",
-         "ORIGINAL_NATIVE_ACCEPTANCE_NOT_VERIFIED")
+    payload=native_promotion(
+        candidate,packet=packet,request=request,forwarded=forwarded is not None)
     return {
         **output,"status":"native_stage_e_six_unit_accepted",
         "original_native_receipt":payload,
@@ -370,11 +408,13 @@ def main(argv=None)->int:
     mode.add_argument("--stage-only",action="store_true")
     mode.add_argument("--stage-and-promote",action="store_true")
     mode.add_argument("--recover-inert",action="store_true")
+    parser.add_argument("--owner-request-stdin",action="store_true")
     args=parser.parse_args(argv)
     candidate=candidate_arg(args.candidate_sha)
     result=run_once(
         candidate,stage_only=args.stage_only,
-        recover_inert=args.recover_inert)
+        recover_inert=args.recover_inert,
+        owner_request_stream=sys.stdin.buffer if args.owner_request_stdin else None)
     print(json.dumps(result,sort_keys=True))
     return 0
 

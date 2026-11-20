@@ -100,6 +100,47 @@ def canonical(obj:dict[str,Any])->bytes:
                       ensure_ascii=False,allow_nan=False).encode()
 
 
+def read_owner_request_stream(stream)->dict[str,Any]:
+    """Decode one bounded Stage E request; signature checks remain root-owned."""
+    try:
+        raw=stream.read(32769)
+        require(isinstance(raw,bytes) and 0<len(raw)<=32768,
+                "OWNER_REQUEST_STREAM_SIZE_INVALID")
+        def no_duplicate_keys(pairs):
+            out={}
+            for key,value in pairs:
+                if key in out:
+                    raise ValueError("duplicate owner request field")
+                out[key]=value
+            return out
+        request=json.loads(raw,object_pairs_hook=no_duplicate_keys)
+    except StageEReleasePacketDenied:
+        raise
+    except (AttributeError,OSError,ValueError,TypeError,UnicodeDecodeError) as exc:
+        raise StageEReleasePacketDenied(
+            "PMV4_E_PACKET_OWNER_REQUEST_STREAM_INVALID") from exc
+    fields={
+        "schema_version","request_id","action","candidate_sha",
+        "rollback_sha","scope_sha256","manifest_sha256","freeze_sha256",
+        "signed_owner_proof",
+    }
+    require(type(request) is dict and set(request)==fields
+            and request.get("schema_version")=="1.0"
+            and request.get("action")=="pmv4_e_stage_exact_signed_inert_root_v1"
+            and type(request.get("candidate_sha")) is str
+            and SHA40.fullmatch(request["candidate_sha"]) is not None
+            and type(request.get("rollback_sha")) is str
+            and SHA40.fullmatch(request["rollback_sha"]) is not None
+            and request["candidate_sha"]!=request["rollback_sha"]
+            and request.get("request_id")=="release-"+request["candidate_sha"][:16]
+            and all(type(request.get(key)) is str and
+                    SHA64.fullmatch(request[key]) is not None
+                    for key in ("scope_sha256","manifest_sha256","freeze_sha256"))
+            and type(request.get("signed_owner_proof")) is dict,
+            "OWNER_REQUEST_STREAM_SCHEMA_INVALID")
+    return request
+
+
 def read_reviewed(root:Path,relative:str)->bytes:
     p=root/relative
     require(not p.is_symlink() and p.is_file(),"REVIEWED_SOURCE_MISSING")

@@ -36,6 +36,7 @@ jobs:
             tests/test_pmv4_e_mcp_owner_bridge.py \
             tests/test_pmv4_stage_a0_owner_issuer.py \
             tools/tests/test_pmv4_e_exact_owner_offer.py \
+            tools/tests/test_pmv4_e_forwarded_owner_request.py \
             tools/tests/test_pmv4_e_root_bootstrap_once.py \
             tools/tests/test_pmv4_e_signed_bootstrap_phase.py \
             tools/tests/test_pmv4_e_signed_native_ledger.py \

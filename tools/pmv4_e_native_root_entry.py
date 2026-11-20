@@ -292,7 +292,10 @@ def main(argv=None)->int:
     modes.add_argument("--preflight",action="store_true")
     modes.add_argument("--promote",action="store_true")
     modes.add_argument("--recover-interrupted",action="store_true")
+    parser.add_argument("--owner-request-stdin",action="store_true")
     args=parser.parse_args(argv)
+    need(not args.owner_request_stdin or args.promote,
+         "FORWARDED_REQUEST_ONLY_VALID_FOR_PROMOTION")
     need(os.geteuid()==0 and Path(__file__)==ROOT_ENTRY
          and Path(__file__).resolve()==ROOT_ENTRY
          and not Path(__file__).is_symlink(),
@@ -314,7 +317,12 @@ def main(argv=None)->int:
                           "production_mutations":False},sort_keys=True))
         return 0
     if args.promote:
-        signed=owner_proof_for_promote(manifest)
+        if args.owner_request_stdin:
+            from tools import pmv4_e_exact_release_packet as packet
+            request=packet.read_owner_request_stream(sys.stdin.buffer)
+            signed=require_exact_owner_request(request,manifest)
+        else:
+            signed=owner_proof_for_promote(manifest)
     else:
         signed=started_proof_for_recovery(candidate)
         if signed is None:
