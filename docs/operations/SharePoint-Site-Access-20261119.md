@@ -40,3 +40,7 @@ AOT SharePoint Sites table: display name, site URL, site identifier, enabled/dis
 ## Current engineering evidence
 
 Source branch `feature/sharepoint-site-access-config-20261119` now contains durable site access state management, a bounded app-only Microsoft Graph `getAllSites` enumerator with full pagination and atomic daily-scan semantics, the site-gated connector wrapper, a governed admin service with exact revision and approval validation injection, unit tests, and focused CI. These components are **source-only**: the existing Jason scheduler has not yet been wired to invoke the scanner, the Grafana page and authenticated API have not been deployed, the wrapper has not yet been registered as the live connector, and the site/certificate/provider acceptance has not run. `Sites.Read.All` alone does not establish app-only runtime access. Do not claim functionality based solely on these code files.
+
+## Container dependency closure
+
+The isolated service image must package the dedicated SharePoint-read OpenBao contract alongside its Graph connector and runtime adapter. The immutable runtime base may predate that logical secret. Image acceptance must import the built artifact and verify that contract directly; source imports from the development checkout alone do not establish image readiness.
