@@ -177,3 +177,10 @@ def test_failed_native_promotion_uses_only_journaled_rollback(timed_out, valid_r
             once.native_promotion(candidate, packet=packet, request=request,
                                   forwarded=True, runner=run)
     assert len(commands) == 2
+
+
+def test_native_failure_retains_original_safe_denial_without_replaying_proof():
+    result=SimpleNamespace(returncode=2,stderr="DENIED:ComponentReleaseDenied:COMPONENT_PROTECTED_HEALTH_UNVERIFIED\n")
+    assert once.native_failure_code(result)==result.stderr.strip()
+    assert once.native_failure_code(None)=="NATIVE_TIMEOUT"
+    assert once.native_failure_code(SimpleNamespace(returncode=2,stderr="arbitrary secret text"))=="NATIVE_EXIT_2"
