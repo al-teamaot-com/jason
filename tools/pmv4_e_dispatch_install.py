@@ -15,6 +15,7 @@ import re
 import stat
 import subprocess
 import tarfile
+import tempfile
 import time
 
 ACTION = "INSTALL-EXACT-PMV4-E-DISPATCHER"
@@ -171,33 +172,57 @@ def load_code(raw, name, path):
 
 
 def current_ci(files, candidate):
+    # Verify every archive file before loading any of its code as root.
+    run_as_owner = [
+        "/usr/sbin/runuser", "-u", "al", "--", "/usr/bin/env", "-i",
+        "PATH=/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
+        "GIT_OPTIONAL_LOCKS=0", "GIT_NO_REPLACE_OBJECTS=1",
+        "GIT_GRAFT_FILE=/dev/null", "GIT_CONFIG_COUNT=2",
+        "GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=false",
+        "GIT_CONFIG_KEY_1=core.hooksPath", "GIT_CONFIG_VALUE_1=/dev/null",
+    ]
+    upstream = subprocess.run(
+        run_as_owner + ["/usr/bin/git", "ls-remote",
+                        "https://github.com/al-teamaot-com/jason.git", "refs/heads/main"],
+        text=True, capture_output=True, check=True, timeout=45,
+    ).stdout.split()
+    need(len(upstream) == 2 and upstream[1] == "refs/heads/main"
+         and re.fullmatch("[0-9a-f]{40}", upstream[0]), "PROTECTED_MAIN_UNAVAILABLE")
+    script = """
+from hashlib import sha256
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+repo, rollback, candidate, protected_main = sys.argv[1:]
+source, hashes = json.load(sys.stdin)
+for name, expected in hashes.items():
+    raw = subprocess.check_output(["/usr/bin/git", "-C", repo, "show",
+                                   candidate + ":" + name], timeout=8)
+    if sha256(raw).hexdigest() != expected:
+        raise SystemExit("REVIEWED_ARCHIVE_FILE_DIFFERS_FROM_GIT")
+namespace = {"__name__": "stage_e_scope"}
+exec(compile(source, "<reviewed-scope>", "exec"), namespace)
+namespace["verify_pinned_candidate_against_main"](Path(repo), rollback, candidate, protected_main)
+"""
+    subprocess.run(
+        run_as_owner + ["/usr/bin/python3", "-I", "-B", "-c", script,
+                        str(ARTIFACTS / "pmv4-e-owner-source-repo"), ROLLBACK,
+                        candidate, upstream[0]],
+        input=canonical([
+            files["tools/manual_release_scope.py"].decode(),
+            {name: digest(raw) for name, raw in files.items()},
+        ]),
+        capture_output=True, check=True, timeout=150,
+    )
     module = load_code(files[CONTROLS["ci_refresh_sha256"]], "stage_e_ci", POLICY)
     pinned = module["load_pinned_attestor"](module["SOURCE"], production=True)
     module["paginate_required_checks"](pinned)
     evidence = pinned["verify_ci"](candidate)
     need(evidence["candidate_sha"] == candidate and evidence["required_ci_passed"] is True
-         and evidence["protected_main_ancestor"] is True, "CURRENT_PROTECTED_CI_UNVERIFIED")
-    # Runtime release scope still uses the original pinned JES-005 verifier.
-    script = (
-        "from pathlib import Path; import sys; "
-        "ns={'__name__':'stage_e_scope'}; "
-        "exec(compile(sys.stdin.buffer.read(), '<reviewed-scope>', 'exec'), ns); "
-        "ns['verify_pinned_candidate_against_main'](Path(sys.argv[1]), "
-        "sys.argv[2], sys.argv[3], sys.argv[4])"
-    )
-    subprocess.run(
-        ["/usr/sbin/runuser", "-u", "al", "--", "/usr/bin/env", "-i",
-         "PATH=/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
-         "GIT_OPTIONAL_LOCKS=0", "GIT_NO_REPLACE_OBJECTS=1",
-         "GIT_GRAFT_FILE=/dev/null", "GIT_CONFIG_COUNT=2",
-         "GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=false",
-         "GIT_CONFIG_KEY_1=core.hooksPath", "GIT_CONFIG_VALUE_1=/dev/null",
-         "/usr/bin/python3", "-I", "-B", "-c", script,
-         str(ARTIFACTS / "pmv4-e-owner-source-repo"), ROLLBACK, candidate,
-         evidence["protected_main"]],
-        input=files["tools/manual_release_scope.py"], capture_output=True,
-        check=True, timeout=120,
-    )
+         and evidence["protected_main_ancestor"] is True
+         and evidence["protected_main"] == upstream[0], "CURRENT_PROTECTED_CI_UNVERIFIED")
 
 
 def owner(scope):
@@ -314,12 +339,15 @@ def install(files, policy, receipt, before_tree):
     old_worker = read(WORKER, 0, 0o755)
     need(digest(old_worker) == WORKER_BEFORE and tree(TRUST) == before_tree,
          "INSTALL_BASELINE_CHANGED")
-    state.mkdir(mode=0o700)
-    write(state / "worker-before.py", old_worker, 0o755)
     receipt = {**receipt, "records_parent_preexisting": os.path.lexists(RECORDS.parent)}
-    write(state / "approval.json", canonical(receipt), 0o400)
-    stage_tree(state / "trust-new", files)
-    write(state / "worker-new.py", files[WORKER_SOURCE], 0o755)
+    with tempfile.TemporaryDirectory(prefix=".dispatch-install-", dir=BASE) as staging:
+        prepared = Path(staging)
+        write(prepared / "worker-before.py", old_worker, 0o755)
+        write(prepared / "approval.json", canonical(receipt), 0o400)
+        stage_tree(prepared / "trust-new", files)
+        write(prepared / "worker-new.py", files[WORKER_SOURCE], 0o755)
+        os.rename(prepared, state)
+        sync_dir(BASE)
     policy_pending = POLICY.with_name("." + POLICY.name + "." + candidate)
     try:
         write(policy_pending, canonical(policy), 0o400)
