@@ -40,7 +40,12 @@ ROOTS=tuple(map(Path,["/opt/jason","/usr/local/lib/jason","/var/lib/jason",
 
 def put(path,raw,mode=0o444,uid=0):
     path=Path(path)
+    missing=[];parent=path.parent
+    while not parent.exists():
+        missing.append(parent);parent=parent.parent
     path.parent.mkdir(parents=True,exist_ok=True)
+    for directory in missing:
+        os.chown(directory,0,0);directory.chmod(0o755)
     path.write_bytes(raw)
     path.chmod(mode)
     os.chown(path,uid,uid)
@@ -81,7 +86,7 @@ def filesystem(tmp_path,identity_alias):
     try:
         for root in ROOTS:
             root.mkdir(parents=True,exist_ok=True)
-            root.chmod(0o755)
+            os.chown(root,0,0);root.chmod(0o755)
         os.chown("/var/lib/jason",1000,1000)
         Path("/var/lib/jason").chmod(0o750)
         os.chown("/opt/jason",997,984)
@@ -111,6 +116,8 @@ def filesystem(tmp_path,identity_alias):
         original=Path("/opt/jason/independent-component-release/trusted")
         for name in packet.ROOT_COMPONENTS_PREINSTALLED:
             put(original/name,(REPO/name).read_bytes())
+        for directory in (original,original/"tools",original/"implementation",original/"implementation/kernel"):
+            directory.chmod(0o555)
         for folder in [ROOT,ROOT/"receipts",ROOT/"stage-e-bootstrap",ROOT/"releases"]:
             folder.mkdir(parents=True,exist_ok=True);folder.chmod(0o700)
         (BASE/"releases").mkdir(mode=0o755)
