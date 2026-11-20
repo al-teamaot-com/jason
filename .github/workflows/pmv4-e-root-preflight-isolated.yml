@@ -5,6 +5,8 @@ on:
       - "tools/pmv4_e_root_cutover_preflight.py"
       - "tools/pmv4_e_dispatch_install.py"
       - "tools/pmv4_e_operational_closure.py"
+      - "tools/documentation_publisher_install.py"
+      - "tools/tests/test_documentation_publisher_install.py"
       - "tools/tests/test_pmv4_e_operational_closure.py"
       - "tools/pmv4_e_installation_preflight.py"
       - "tools/tests/test_pmv4_e_root_filesystem_installation.py"
@@ -42,6 +44,7 @@ jobs:
             "$python_exe" -B -m pytest -q \
               tools/tests/test_pmv4_e_root_filesystem_installation.py \
               tools/tests/test_pmv4_e_operational_closure.py \
+              tools/tests/test_documentation_publisher_install.py \
               tools/tests/test_pmv4_e_root_cutover_preflight.py \
               tools/tests/test_pmv4_e_ticket_owner_readback.py \
               tools/tests/test_pmv4_e_dispatch_install.py \

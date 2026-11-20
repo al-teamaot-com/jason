@@ -136,9 +136,8 @@ CONTROL_BOARD_FILE="$(mktemp)"
 cleanup_control_board() { rm -f "$CONTROL_BOARD_FILE"; }
 trap cleanup_control_board EXIT
 GITHUB_TOKEN="$(gh auth token)"
-python3 tools/development_release_coordinator.py \
+GITHUB_TOKEN="$GITHUB_TOKEN" python3 tools/development_release_coordinator.py \
   --repository al-teamaot-com/jason \
-  --token "$GITHUB_TOKEN" \
   --output "$CONTROL_BOARD_FILE"
 unset GITHUB_TOKEN
 # The board is advisory. Tag this specific production observation so that the

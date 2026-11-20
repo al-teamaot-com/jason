@@ -191,7 +191,7 @@ jobs:
       - name: Test documentation evidence replay idempotency
         run: python3 -B -m unittest discover -s tests -p test_documentation_reconciler_replay.py
       - name: Test generated-branch recovery and bounded publisher diagnostics
-        run: python3 -B -m pytest -q tools/tests/test_documentation_source_reconciler.py tools/tests/test_documentation_success_reconciler.py tools/tests/test_documentation_publisher_git_recovery.py
+        run: python3 -B -m pytest -q tools/tests/test_documentation_source_reconciler.py tools/tests/test_documentation_success_reconciler.py tools/tests/test_documentation_publisher_git_recovery.py tools/tests/test_documentation_publisher_install.py
       - name: Validate documentation control plane
         run: python3 tools/validate_documentation_control.py
       - name: Build documentation directly from canonical docs tree

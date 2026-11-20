@@ -52,8 +52,11 @@ def source(tmp_path):
     """))
     (repo / "tools/validate_documentation_control.py").write_text("pass\n")
     (repo / "tools/development_release_coordinator.py").write_text(textwrap.dedent("""
-        import sys
+        import json,os,sys
         from pathlib import Path
+        Path(os.environ['COORDINATOR_CALL']).write_text(json.dumps({
+            'argv':sys.argv[1:],
+            'token_present':os.environ.get('GITHUB_TOKEN')=='disposable-test-token'}))
         Path(sys.argv[sys.argv.index('--output')+1]).write_text('disposable board')
     """))
     seed = commit(repo, "fixture baseline")
@@ -92,7 +95,8 @@ else: raise SystemExit(90)
     env = {**os.environ, "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
            "JASON_DOCUMENTATION_REPO_ROOT": str(repo),
            "JASON_DOCUMENTATION_WORKTREE_ROOT": str(tmp_path / "worktrees"),
-           "PUBLISHED": str(tmp_path / "published")}
+           "PUBLISHED": str(tmp_path / "published"),
+           "COORDINATOR_CALL": str(tmp_path / "coordinator-call.json")}
     return {"repo": repo, "other": other, "remote": remote, "env": env,
             "seed": seed, "stale": stale, "fresh": fresh, "root": tmp_path}
 
@@ -123,6 +127,9 @@ def test_rewritten_tracking_ref_and_later_main_recover_through_normal_publicatio
     assert result.returncode == 0, result.stdout + result.stderr
     assert "DOCUMENTATION_PUBLICATION=PR_OPEN" in result.stdout
     assert Path(s["env"]["PUBLISHED"]).is_file()
+    call = json.loads(Path(s["env"]["COORDINATOR_CALL"]).read_text())
+    assert call['token_present'] is True
+    assert '--token' not in call['argv'] and 'disposable-test-token' not in call['argv']
     tip = git(s["repo"], "rev-parse", BRANCH).stdout.strip()
     assert git(s["repo"], "merge-base", "--is-ancestor", current, tip).returncode == 0
     assert set(git(s["repo"], "diff", "--name-only", current, tip).stdout.splitlines()) == GENERATED
