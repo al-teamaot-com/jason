@@ -200,6 +200,15 @@ def safe_release_records(candidate:str,reviewed:dict,packet)->None:
          "NATIVE_RELEASE_RECORD_INVENTORY_DRIFT")
 
 
+def native_failure_code(result)->str:
+    if result is None:
+        return "NATIVE_TIMEOUT"
+    for line in reversed((getattr(result,"stderr","") or "").splitlines()):
+        if re.fullmatch(r"DENIED:[A-Za-z0-9_:./-]{1,180}",line):
+            return line
+    return "NATIVE_EXIT_"+str(result.returncode)
+
+
 def native_promotion(candidate:str,*,packet,request:dict,
                      forwarded:bool,runner=None)->dict:
     """Pass the same proof to the independently verifying native ledger."""
@@ -236,7 +245,8 @@ def native_promotion(candidate:str,*,packet,request:dict,
              and payload.get("approval_id")==
                  request["signed_owner_proof"]["payload"]["approval_id"]
              and payload.get("protected_services_changed") is False,
-             "ORIGINAL_SIGNED_NATIVE_PROMOTION_FAILED_SEE_ROOT_JOURNAL")
+             "ORIGINAL_SIGNED_NATIVE_PROMOTION_FAILED_SEE_ROOT_JOURNAL:"
+             +native_failure_code(result))
         return payload
     try:
         payload=json.loads(result.stdout)

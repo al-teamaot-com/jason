@@ -116,6 +116,13 @@ def filesystem(tmp_path,identity_alias):
         original=Path("/opt/jason/independent-component-release/trusted")
         for name in packet.ROOT_COMPONENTS_PREINSTALLED:
             put(original/name,(REPO/name).read_bytes())
+        put(original/"tools/pmv4_host_release_guard.py",(REPO/"tools/pmv4_host_release_guard.py").read_bytes())
+        put("/etc/jason/independent-component-release/host-profiles.json",json.dumps({
+            "schema_version":"1.0","components":{"synthetic-lab":{
+                "project":"jason-synthetic-lab","state_dir":"/var/lib/jason/synthetic-lab",
+                "role_id_path":"/synthetic/role-id","secret_id_path":"/synthetic/secret-id"}}}).encode())
+        put("/var/lib/jason/ticket-core/autonomy-operational-work.sqlite3",b"synthetic metadata fixture",0o600,1000)
+        ticket_dir=Path("/var/lib/jason/ticket-core");ticket_dir.chmod(0o700);os.chown(ticket_dir,1000,1000)
         for directory in (original,original/"tools",original/"implementation",original/"implementation/kernel"):
             directory.chmod(0o555)
         for folder in [ROOT,ROOT/"receipts",ROOT/"stage-e-bootstrap",ROOT/"releases"]:
@@ -229,6 +236,12 @@ spec=importlib.util.spec_from_file_location("canonical_native_entry",entry)
 e=importlib.util.module_from_spec(spec);spec.loader.exec_module(e)
 manifest,scope=e.installed_release(sys.argv[1])
 e.bind_original_native_packages(scope)
+request=json.loads(Path(sys.argv[2]).read_bytes())
+proof=e.require_exact_owner_request(request,manifest)
+controller=e.controller_from_root(manifest=manifest,scope=scope,owner_proof=proof)
+assert controller.production is True
+assert controller.__class__.__name__=="StageESignedNativeLedger"
+print("production_native_controller_and_host_constructed")
 from tools import pmv4_e_native_root_manifest_attestation as attestor
 result=attestor.inspect(release_dir=e.NATIVE_ROOT/"releases"/sys.argv[1],production=True)
 assert result["status"]=="root_source_attested_no_release_authority"
@@ -296,7 +309,7 @@ def test_real_canonical_staging_attestation_and_cleanup_with_service_owned_opt(f
     assert (original.st_uid,original.st_gid,original.st_mode&0o777)==(997,984,0o750)
     assert "production_mode_source_and_trust_staged" in child(STAGE,candidate,request)
     assert (BASE/"native").is_dir() and (BASE/"releases"/candidate).is_dir()
-    assert "root_source_attested_no_release_authority" in child(ATTEST,candidate)
+    assert "root_source_attested_no_release_authority" in child(ATTEST,candidate,request)
     assert "cleanup_and_replay_denial_verified" in child(CLEAN,candidate,request)
     assert not (BASE/"native").exists() and not (BASE/"releases"/candidate).exists()
     current=Path("/opt/jason").stat()
