@@ -76,6 +76,11 @@ def test_non_root_or_unisolated_cli_denies_before_loading_private_evidence(monke
 
 def test_original_installer_and_payload_remain_byte_identical():
     assert r.digest(Path(original.__file__).read_bytes()) == r.ORIGINAL_EXECUTOR
+    pins = {
+        "tools/documentation_source_reconciler.py": "7eacdf6e368c13da13807ebba513acc6481f97f2bce852bff09423960b56f5fc",
+        "tools/publish_documentation_reconciliation.sh": "1c5ff7a73835cd55710cf01c16f2efc39e44986618ed88d44d6f66e35b9a46dd",
+    }
+    assert {name: r.digest((r.from_source / name).read_bytes()) for name in pins} == pins
 
 
 
@@ -164,3 +169,13 @@ def test_failed_job_restores_override_and_preserves_original_approval_and_attemp
     assert not (tmp_path / "accepted.json").exists()
     for name in ("approval.json", "verification-failed.json"):
         assert (tmp_path / name).read_bytes() == b"original-root-sealed-evidence"
+
+
+def test_symlink_override_parent_never_creates_target_file(override, tmp_path):
+    target = tmp_path / "foreign-directory"
+    target.mkdir()
+    override.path.parent.symlink_to(target, target_is_directory=True)
+    with pytest.raises(PermissionError, match="DIRECTORY_IDENTITY"):
+        override.apply(original.dropin_bytes(r.ORIGINAL_SOURCE))
+    assert list(target.iterdir()) == []
+    assert override.path.parent.is_symlink()
