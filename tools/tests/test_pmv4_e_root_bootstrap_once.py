@@ -1,5 +1,8 @@
 """No uninstalled root source can initiate Stage E; exact entry only."""
 from pathlib import Path
+import json
+import subprocess
+from types import SimpleNamespace
 import pytest
 from tools import pmv4_e_root_bootstrap_once as once
 
@@ -101,3 +104,76 @@ def test_exact_native_release_records_match_root_attestor_reader_modes(tmp_path,
         assert stat.S_IMODE(path.lstat().st_mode) == 0o444
         assert json.loads(rootproof._regular(path, production=False)) in sample.values()
         assert json.loads(entry.trust_file(path, uid=os.getuid())) in sample.values()
+
+
+@pytest.mark.parametrize("missing,reason", [
+    ("manifest.json", "OWNER_REVIEW_FILE_MISSING:manifest.json"),
+    ("source-scope.json", "OWNER_REVIEW_FILE_MISSING:source-scope.json"),
+    ("owner-proof.json", "OWNER_PROOF_MISSING"),
+])
+def test_missing_review_artifact_is_reported_explicitly(
+        tmp_path, monkeypatch, missing, reason):
+    import json
+    from types import SimpleNamespace
+
+    candidate = "a" * 40
+    folder = tmp_path / ("pmv4-e-source-only-" + candidate)
+    folder.mkdir(mode=0o700)
+    folder.chmod(0o700)
+    for name in ("manifest.json", "source-scope.json", "owner-proof.json"):
+        if name == missing:
+            continue
+        path = folder / name
+        path.write_text(json.dumps({"candidate_sha": candidate}))
+        path.chmod(0o400)
+
+    monkeypatch.setattr(once, "ARTIFACTS", tmp_path)
+    real_lstat = Path.lstat
+    def fixture_lstat(path):
+        meta = real_lstat(path)
+        if path == folder or path.parent == folder:
+            return SimpleNamespace(
+                st_mode=meta.st_mode, st_uid=1000, st_gid=1000,
+                st_nlink=meta.st_nlink, st_size=meta.st_size,
+            )
+        return meta
+    monkeypatch.setattr(Path, "lstat", fixture_lstat)
+
+    with pytest.raises(once.StageERootBootstrapDenied, match=reason):
+        once.read_offer(candidate, packet=None)
+
+@pytest.mark.parametrize("timed_out", [True, False])
+@pytest.mark.parametrize("valid_receipt", [True, False])
+def test_failed_native_promotion_uses_only_journaled_rollback(timed_out, valid_receipt):
+    candidate, rollback = "a" * 40, "b" * 40
+    approval_id = "owner-mcp-" + "c" * 32
+    request = {"rollback_sha": rollback,
+               "signed_owner_proof": {"payload": {"approval_id": approval_id}}}
+    packet = SimpleNamespace(canonical=lambda value: json.dumps(value).encode())
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        if "--promote" in command:
+            assert json.loads(kwargs["input"]) == request
+            if timed_out:
+                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+            return SimpleNamespace(returncode=2, stdout="")
+        assert "--recover-interrupted" in command
+        assert "--owner-request-stdin" not in command and "input" not in kwargs
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            "status": "native_stage_e_six_unit_rollback_verified",
+            "candidate_sha": candidate, "rollback_sha": rollback,
+            "approval_id": approval_id if valid_receipt else "owner-mcp-" + "d" * 32,
+            "protected_services_changed": False,
+        }))
+
+    if valid_receipt:
+        result = once.native_promotion(candidate, packet=packet, request=request,
+                                       forwarded=True, runner=run)
+        assert result["status"] == "native_stage_e_six_unit_rollback_verified"
+    else:
+        with pytest.raises(once.StageERootBootstrapDenied, match="SEE_ROOT_JOURNAL"):
+            once.native_promotion(candidate, packet=packet, request=request,
+                                  forwarded=True, runner=run)
+    assert len(commands) == 2
