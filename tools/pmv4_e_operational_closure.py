@@ -194,9 +194,16 @@ def inspect(source_sha,ns):
     need(read(Path('/home/al/.local/lib/jason/jason_self_heal_watchdog.py'),1000,0o700)==read(NATIVE/'tools/jason_self_heal_watchdog.py',0,0o444),'INSTALLED_WATCHDOG_NOT_ACCEPTED_SOURCE')
     pause_sha=digest(read(PAUSE,1000,0o600))
     # The accepted native tree and this executor must match protected source.
-    handoff=json.loads(ns['read'](ART/('pmv4-e-root-admin-bundle-'+CONTROL_SHA)/'handoff-manifest.json',1000,0o400))
-    files={name:read(NATIVE/name,0,0o444) for name in handoff['reviewed_hashes']}
-    need(all(digest(raw)==handoff['reviewed_hashes'][name] for name,raw in files.items()),'ACCEPTED_NATIVE_TREE_CHANGED')
+    records=Path('/var/lib/jason/independent-component-release/releases')/CONTROL_SHA
+    accepted_scope=json.loads(read(records/'source-scope.json',0,0o444))
+    accepted_manifest=json.loads(read(records/'manifest.json',0,0o444))
+    need(digest(canon(accepted_scope))==ACCEPTED_SCOPE and digest(canon(accepted_manifest))==ACCEPTED_MANIFEST,'NATIVE_RECORD_BINDING_CHANGED')
+    hashes=accepted_scope['exact_replacement_files_sha256']
+    need(isinstance(hashes,dict) and len(hashes)==64 and all(
+        re.fullmatch(r'[A-Za-z0-9_./-]+',name) and '..' not in Path(name).parts and not Path(name).is_absolute()
+        and re.fullmatch('[0-9a-f]{64}',value) for name,value in hashes.items()),'NATIVE_INVENTORY_NOT_EXACT')
+    files={name:read(NATIVE/name,0,0o444) for name in hashes}
+    need(all(digest(raw)==hashes[name] for name,raw in files.items()),'ACCEPTED_NATIVE_TREE_CHANGED')
     files['tools/pmv4_e_operational_closure.py']=Path(__file__).read_bytes()
     ns['current_ci'](files,source_sha)
     state=BASE/('operational-closure-'+source_sha);need(not os.path.lexists(state),'ONE_USE_CLOSURE_ALREADY_ATTEMPTED')
