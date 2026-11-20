@@ -21,7 +21,7 @@ ROOT=Path(__file__).resolve().parents[1]
 SHA40=re.compile(r"^[0-9a-f]{40}$")
 SHA64=re.compile(r"^[0-9a-f]{64}$")
 ACTION="pmv4-e-oneowner-six-unit-replacement-and-retirement-v1"
-EXPECTED_PRIOR_ROOT_POLICY="4c9db0f4bbd12e1892b480a759d2d89b9749b84187eb2a753a260ecf326b7953"
+EXPECTED_PRIOR_ROOT_POLICY="a4358f564c7b5c6ede6ccfa32d884760a247a2d5672440dbc80d771893868608"
 EXPECTED_FREEZE="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 ROOT_TO_INSTALL=(
     "config/production-desired-state.json",

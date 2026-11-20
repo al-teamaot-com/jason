@@ -25,6 +25,9 @@ SCOPE="b9107ef85af95fe20ecd40523006e561c90d06585835d63a9970719bbd03f4c6"
 MANIFEST="92472001a64ecdd3d9c53d321b544aa7d10bdcf27f5dd2ad8b72b97bca6d2924"
 FREEZE="bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 POLICY="4c9db0f4bbd12e1892b480a759d2d89b9749b84187eb2a753a260ecf326b7953"
+# The canary receipt retains its original policy pin. Current preflight
+# separately checks the reviewed post-maintenance production baseline.
+LIVE_POLICY=historical.ACTIVE_POLICY_SHA
 APPROVAL_ID="owner-mcp-215fd672872d4f84a99ee17a25cf6fd5"
 ACTION="pmv4-e-oneowner-providerfree-native-canary-and-cleanup-v1"
 ROOT=Path("/var/lib/jason/independent-component-release")
@@ -239,7 +242,7 @@ def exact_receipts()->dict[str,Any]:
 
 def probe_clean_host(*,runner=subprocess.run,
                      expected_freeze_sha:str=FREEZE,
-                     expected_policy_sha:str=POLICY)->dict[str,Any]:
+                     expected_policy_sha:str=LIVE_POLICY)->dict[str,Any]:
     # The defaults are immutable production acceptance pins. Overriding them
     # is only for synthetic fixtures that cannot reproduce a SHA preimage.
     for expected in (expected_freeze_sha,expected_policy_sha):

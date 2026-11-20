@@ -304,3 +304,29 @@ def test_manifest_contract_is_byte_exact_sha_against_original_canary():
     assert sha256(core.canonical(manifest)).hexdigest()==a.MANIFEST
     assert manifest["provider_scope"]["provider"]=="none"
     assert manifest["rollback_sha"]=="0"*40
+
+
+def test_historical_canary_receipt_does_not_adopt_current_policy(evidence):
+    paths,_,_=evidence
+    assert a.POLICY != a.LIVE_POLICY
+    assert a.exact_receipts()["root_terminal_state"]=="accepted_and_removed"
+    record=json.loads(paths["terminal"].read_bytes())
+    record["protected_policy_sha256"]=a.LIVE_POLICY
+    paths["terminal"].write_text(json.dumps(record))
+    with pytest.raises(a.CanaryAcceptanceDenied,match="FINAL_CANARY_ACCEPTANCE_RECEIPT_NOT_EXACT"):
+        a.exact_receipts()
+
+
+def test_live_cleanup_probe_uses_exact_post_maintenance_policy(evidence,monkeypatch):
+    paths,_,_=evidence
+    fixture=Path(__file__).resolve().parents[1]/"tools/tests/fixtures/pmv4_e_root_policy_after_scoped_backport.json"
+    paths["policy"].write_bytes(fixture.read_bytes())
+    seen=[]
+    def run(argv,**kwargs):
+        seen.append(argv)
+        return SimpleNamespace(returncode=0,stdout="")
+    result=a.probe_clean_host(
+        runner=run,expected_freeze_sha=sha256(paths["freeze"].read_bytes()).hexdigest())
+    assert result["policy_sha256"]==a.LIVE_POLICY
+    assert result["policy_sha256"]!=a.POLICY
+    assert len(seen)==2
