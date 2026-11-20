@@ -181,3 +181,22 @@ def test_native_receipt_must_match_forwarded_approval(field, bad):
             runner=lambda *args, **kw: SimpleNamespace(
                 returncode=0, stdout=json.dumps(receipt)),
         )
+
+
+def test_forwarded_inert_recovery_must_match_original_started_proof(tmp_path):
+    import copy
+    _, request = signed_request()
+    gate, _, _, journal, _ = fixtures(tmp_path)
+    gate.begin(request, at=datetime.now(timezone.utc))
+    record = json.loads(next(journal.iterdir()).read_text())
+    bootstrap_entry.require_matching_recovery_request(request, record)
+    for field in ("candidate_sha", "rollback_sha", "scope_sha256",
+                  "manifest_sha256", "freeze_sha256"):
+        changed = copy.deepcopy(request)
+        changed[field] = "f" * len(changed[field])
+        with pytest.raises(PermissionError, match="RECOVERY_REQUEST_DOES_NOT_MATCH"):
+            bootstrap_entry.require_matching_recovery_request(changed, record)
+    changed = copy.deepcopy(request)
+    changed["signed_owner_proof"]["signature_base64url"] = "A" * 86
+    with pytest.raises(PermissionError, match="RECOVERY_REQUEST_DOES_NOT_MATCH"):
+        bootstrap_entry.require_matching_recovery_request(changed, record)

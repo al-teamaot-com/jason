@@ -1,61 +1,71 @@
-# PMv4 Stage E approval bridge — source-only integration
+# PMv4 Stage E approval bridge — draft source review
 
 ## Observed problem
 
-The installed Stage E bootstrap reads an exact, short-lived signed Owner
-request from `owner-proof.json`. The previously approved candidate is
+The installed Stage E bootstrap reads a short-lived signed Owner request from
+`owner-proof.json`. The previously approved candidate is
 `510243494efcd592a1585c681a3fa28a29296e17`, with rollback
-`d1b8c196dadd4b672ec8ba47075f27bb61c98d63`. The last observed candidate
-directory contains expired proof files and no current `owner-proof.json`.
-The root bootstrap and its original native verifier remain the authority for
-production admission.
+`d1b8c196dadd4b672ec8ba47075f27bb61c98d63`. The observed candidate
+directory contained expired proofs and no current `owner-proof.json`. The
+installed root host reconciler does not admit a Stage E action. The connected
+operator session is UID 1000 and does not provide the governed root execution
+path needed to replace the reconciler or install a new trust bundle.
 
-The live host reconciler does not admit a Stage E action, and the connected
-remote session runs as UID 1000. The available remote tool blocks sudo. Do not
-repurpose another root action or weaken that boundary.
+The approved candidate is an ancestor of protected main observed at
+`fb1d5f57c57c3675896eb06ca88b236c7718d6e8`, but the existing
+`verify_pinned_candidate_against_main` denies it because later protected
+commits touch release controls and scope. Of the 60 files in that historical
+Stage E review, `tools/release_manager_host_runner.py` changed. A newer
+candidate requires a new exact review. The old approval must not be silently
+transferred to a different SHA.
 
-The existing exact candidate is an ancestor of protected main observed at
-`fb1d5f57c57c3675896eb06ca88b236c7718d6e8`, but
-`verify_pinned_candidate_against_main` denies it because newer protected
-commits touch release controls and scope. Of the 60 Stage E reviewed
-files, `tools/release_manager_host_runner.py` changed; its newer changes
-include licensed Owner profile handling and scoped-backport commands. A
-source-only draft for `fb1d5f57c57c3675896eb06ca88b236c7718d6e8` has scope
-SHA256 `096ee88a19cf5ce18b76b8ff3044902897f7539ab691c833b0d504c0c88118d7`
-and manifest SHA256
-`699b3e0370810624d07eed3c90ae9f74d5ba0077d20908cb6bf94a09d3af0321`.
-This is not an approved or deployment-ready candidate. The review must be
-repeated against the advertised main head at execution time.
+## Draft implementation
 
-## This source slice
+- The feature-gated MCP tool verifies the authenticated Entra Owner, exact
+  decision and protected main, checks the live freeze fingerprint, reuses the
+  existing Ed25519 signer, and queues the typed Stage E request. The source
+  activation profile defaults to **off** and rollback also forces it off.
+- The proposed root worker accepts only the typed Stage E action, independently
+  checks a root-owned exact candidate/rollback/scope/manifest/freeze policy,
+  verifies the original Owner signature and active identity, and preserves the
+  signed decision in a root-only journal before invoking the pinned bootstrap.
+- The same signed request passes through the bootstrap and native entry; both
+  original root gates independently verify it. The existing proof-file route
+  remains available.
+- Before bootstrap the proposed worker refreshes root-owned protected CI
+  evidence with the existing hash-pinned GitHub verifier. Required check runs
+  are paginated and validated completely; existing evidence is preserved.
+- Before staging and activation, the original JES-005 source check is rerun
+  against the freshly advertised protected main under the original host
+  transaction and freeze-verification boundary. The freeze boundary verifies
+  bytes; it is not a separate operating-system lock.
+- The native ledger checks source and CI within that boundary before writing
+  its STARTED receipt or activating units. The native ledger remains the sole
+  six-unit execution and rollback authority.
 
-The new MCP adapter accepts a synthetic verified Entra bearer, exact reviewed
-offer and one exact Owner decision, then reuses the existing Stage E
-`signed_request` and native signer. It emits the existing bootstrap request
-schema in an isolated test. It does not record a live decision or publish a
-request. Production is denied by default and explicitly denied when requested.
+The proposed implementation is source only. Synthetic tests do not verify a
+live Owner session, install the issuer or root worker, or authorize a release.
+A failed bootstrap attempts only signed inert cleanup using the same
+root-journaled proof; native receipts block that cleanup and remain subject to
+the native rollback ledger. A signed approval is preserved on dispatch failure,
+but automatic resumption or reissuance after a consumed or expired one-use
+proof is not implemented.
 
-The root bootstrap reports which reviewed artifact is missing rather than
-returning an unclassified `FileNotFoundError`. It can also receive the same
-bounded signed request through stdin and pass it to the native entry. Both
-original root gates still verify the signature and exact scope independently;
-missing or untrusted artifacts are still rejected. Native success must match
-the original candidate, rollback and approval ID and confirm protected
-services were unchanged. The legacy proof-file path remains available.
+## Remaining release gates
 
-## Remaining work before any release
+1. Independently review the complete diff and resolve interrupted transaction
+   recovery and single-decision retry semantics without weakening proof expiry
+   or replay controls.
+2. Merge and verify protected CI for an exact current candidate. Recompute
+   source scope, manifest and freeze digests from that candidate, and resolve
+   the exact SHA authorization under the governing rules.
+3. Prepare and review a byte-exact root bootstrap/dispatcher installation and
+   rollback, with a root-owned policy and journals. Install it through an
+   authorized root path. Install and enable the MCP issuer through its separately
+   governed release path and verify publication in the authenticated session.
+4. Verify current CI, preflight and live state, consume the Owner decision,
+   run the bounded six-unit transaction, then independently verify ticket
+   ownership, scheduling parity, rollback readiness and protected services.
 
-- Implement and independently review a Stage E-only root dispatcher with a
-  root-owned allowlist and the existing native one-use signature and locks.
-- Bind the MCP entry to the existing verified session, exact immutable offer,
-  protected source and root readiness. Record the already granted Owner
-  decision only when the approved scope is verified; do not represent a
-  synthetic decision as live evidence.
-- Reconcile newer protected source and dependencies, verify fresh CI and root
-  preflight, and prepare a byte-exact release and rollback. Resolve any actual
-  change in approved scope through the governing approval process.
-- Install and verify the matching MCP and root components through an available
-  governed root execution path; then perform Stage E and post-cutover checks.
-
-No production release, root execution, approval consumption, or cutover is
-claimed by this source slice.
+No production release, root execution, live approval consumption or cutover is
+claimed by this draft.
