@@ -14,13 +14,14 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import operational_acceptance_reader as acceptance_reader
+import jason_engineering_worktree_storage as worktree_storage
 
 DEFAULT_REPO = Path("/home/al/projects/jason")
 DEFAULT_SPOOL = Path("/var/lib/jason/openclaw/support-repair")
 DEFAULT_RELEASE_STATE = Path("/var/lib/jason/openclaw/release-manager")
 DEFAULT_RELEASE_RUNNER = Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
 DEFAULT_RELEASE_SOURCE = Path.home() / ".local" / "lib" / "jason" / "release-manager-source"
-WORKTREE_ROOT = Path("/home/al/jason-worktrees/todo-closure")
+WORKTREE_ROOT = worktree_storage.ARCHIVE_ROOT / 'todo-closure'
 TODO_PATH = Path("docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md")
 
 TODO_META = re.compile(r"(?im)^\s*-\s*TODO item\s*:\s*(TODO-[A-Z]+-[0-9]+)\s*$")
@@ -670,8 +671,8 @@ def create_closure_pr(
     sha = str(production.get("live_sha") or "")
     rid = str(release.get("release_id") or "")
     branch = f"close/todo-{todo_id.casefold()}-{sha[:12]}"
-    path = WORKTREE_ROOT / todo_id.casefold()
-    WORKTREE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = worktree_storage.archive_path('todo-closure', todo_id.casefold())
+    worktree_storage.prepare_parent(path)
 
     if path.exists():
         run(["git", "worktree", "remove", "--force", str(path)], cwd=repo, check=False)

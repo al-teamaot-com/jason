@@ -22,10 +22,25 @@ import support_repair_host_worker as support
 import todo_release_bridge as todo_bridge
 import change_integration_gate
 import documentation_impact_gate
+import jason_engineering_worktree_storage as worktree_storage
 
 DEFAULT_REPO = Path('/home/al/projects/jason')
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
-WORKTREE_ROOT = Path('/home/al/jason-worktrees/owner-approved-development')
+WORKTREE_ROOT = worktree_storage.ARCHIVE_ROOT / 'owner-approved-development'
+
+
+def owner_worktree_path(name: str) -> Path:
+    if WORKTREE_ROOT == worktree_storage.ARCHIVE_ROOT / 'owner-approved-development':
+        return worktree_storage.path_for('owner-approved-development', name)
+    # Existing isolated unit-test fixtures may replace WORKTREE_ROOT.
+    return WORKTREE_ROOT / name
+
+
+def prepare_owner_worktree(path: Path) -> None:
+    if WORKTREE_ROOT == worktree_storage.ARCHIVE_ROOT / 'owner-approved-development':
+        worktree_storage.prepare_parent(path)
+    else:
+        WORKTREE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
 APPROVAL = re.compile(
     r'(?im)^\s*-\s*\*\*Autonomous development:\*\*\s*owner-approved\s*$'
 )
@@ -248,8 +263,8 @@ def active_support_count(spool: Path) -> int:
 
 
 def ensure_worktree(repo: Path, issue_number: int, branch: str | None = None) -> Path:
-    WORKTREE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path = WORKTREE_ROOT / f'issue-{issue_number}'
+    path = owner_worktree_path(f'issue-{issue_number}')
+    prepare_owner_worktree(path)
     if path.exists():
         return path
     support.run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
@@ -269,7 +284,7 @@ def ensure_recovery_worktree(repo: Path, issue_number: int, revision: str) -> Pa
     """
     if not re.fullmatch(r'[0-9a-f]{40}', revision):
         raise support.WorkerError('invalid recovery production revision')
-    path = WORKTREE_ROOT / f'issue-{issue_number}-recovery-{revision[:12]}'
+    path = owner_worktree_path(f'issue-{issue_number}-recovery-{revision[:12]}')
     if path.exists():
         actual = support.run(['git', 'rev-parse', '--show-toplevel'], cwd=path)
         if Path(actual).resolve() != path.resolve():
@@ -277,7 +292,7 @@ def ensure_recovery_worktree(repo: Path, issue_number: int, revision: str) -> Pa
         if support.run(['git', 'status', '--porcelain'], cwd=path):
             raise support.WorkerError('recovery worktree has uncommitted changes')
         return path
-    WORKTREE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    prepare_owner_worktree(path)
     support.run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
     branch = f'develop/owner-approved-issue-{issue_number}-recovery-{revision[:12]}'
     support.run(['git', 'worktree', 'add', '-b', branch, str(path), 'origin/main'], cwd=repo)
@@ -295,9 +310,9 @@ def ensure_stale_source_clone(repo: Path, issue_number: int, revision: str) -> P
     """
     if not isinstance(issue_number, int) or issue_number <= 0 or not re.fullmatch(r'[0-9a-f]{40}', revision):
         raise support.WorkerError('invalid stale-source clone identity')
-    path = WORKTREE_ROOT / f'issue-{issue_number}-stale-{revision[:12]}'
+    path = owner_worktree_path(f'issue-{issue_number}-stale-{revision[:12]}')
     branch = f'develop/owner-approved-issue-{issue_number}-stale-{revision[:12]}'
-    WORKTREE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    prepare_owner_worktree(path)
     origin = support.run(['git', 'remote', 'get-url', 'origin'], cwd=repo)
     if (repo.resolve() == Path('/home/al/.local/lib/jason/engineering-source-repo')
             and origin != 'https://github.com/al-teamaot-com/jason.git'):
@@ -311,7 +326,7 @@ def ensure_stale_source_clone(repo: Path, issue_number: int, revision: str) -> P
         # Fetch the already verified origin/main ref using Git's file transport
         # from the trusted managed engineering source; this writes only the
         # new private checkout, not source/.git/worktrees.
-        support.run(['git', 'init', '-q', '-b', 'main', str(path)], cwd=WORKTREE_ROOT)
+        support.run(['git', 'init', '-q', '-b', 'main', str(path)], cwd=path.parent)
         support.run(['git', 'remote', 'add', 'origin', origin], cwd=path)
         source = 'file://' + str(repo.resolve())
         support.run(['git', 'fetch', '--no-tags', '--depth=1', source,
@@ -1333,7 +1348,7 @@ def readmit_stale_clean_development_source(
                 or rec.get('blocker_class') in {'external_authority', 'blocked_by_dependency', 'internal_retry_exhausted'}
                 or issue_has_closed_dependency_gate(item)):
             continue
-        old_path = WORKTREE_ROOT / f'issue-{issue}'
+        old_path = owner_worktree_path(f'issue-{issue}')
         old_branch = f'develop/owner-approved-issue-{issue}'
         rid = str(rec.get('reasoning_request_id') or '')
         if (rec.get('worktree') != str(old_path)
@@ -1427,7 +1442,7 @@ def readmit_verified_cached_stale_response_replay(
         if (not re.fullmatch(r'[0-9a-f]{40}',prior_sha)
                 or not re.fullmatch(r'[0-9a-f]{64}',rid)):
             continue
-        old_tree=WORKTREE_ROOT / f'issue-{issue}-stale-{prior_sha[:12]}'
+        old_tree=owner_worktree_path(f'issue-{issue}-stale-{prior_sha[:12]}')
         if (record.get('worktree')!=str(old_tree)
                 or record.get('branch')!=f'develop/owner-approved-issue-{issue}-stale-{prior_sha[:12]}'):
             continue
@@ -1567,7 +1582,7 @@ def readmit_verified_exhausted_evidence_synthesis(
             continue
         prior_sha = str(rec.get('stale_source_recovery_revision') or '')
         old_id = str(rec.get('reasoning_request_id') or '')
-        original = WORKTREE_ROOT / f'issue-{issue}-stale-{prior_sha[:12]}'
+        original = owner_worktree_path(f'issue-{issue}-stale-{prior_sha[:12]}')
         branch = f'develop/owner-approved-issue-{issue}-stale-{prior_sha[:12]}'
         if (not re.fullmatch(r'[0-9a-f]{40}', prior_sha) or live_sha == prior_sha
                 or not re.fullmatch(r'[0-9a-f]{64}', old_id)

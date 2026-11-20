@@ -23,6 +23,6 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/al/jason-worktrees/support-repair /home/al/jason-worktrees/owner-approved-development /home/al/jason-worktrees/todo-closure /var/lib/jason/openclaw/support-repair
+ReadWritePaths=/home/al/jason-worktrees/support-repair /home/al/jason-worktrees/owner-approved-development /home/al/jason-worktrees/todo-closure /var/lib/jason/openclaw/support-repair -/srv/jason/archive/engineering-worktrees/support-repair -/srv/jason/archive/engineering-worktrees/support-repair-closure -/srv/jason/archive/engineering-worktrees/owner-approved-development -/srv/jason/archive/engineering-worktrees/todo-closure
 
 # SOURCE ONLY: install/enable only through an exact-SHA governed PMV3 release.

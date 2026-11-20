@@ -22,6 +22,13 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# The standalone governance unittest loads this module directly by file path,
+# while production invokes the installed runner as a script. Bind its sibling
+# helper to the same immutable source directory in both execution modes.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import jason_engineering_worktree_storage as worktree_storage
 from typing import Any, Mapping
 
 
@@ -328,9 +335,8 @@ def _independent_classification(
 
 
 def _worktree(repo: Path, candidate: str) -> Path:
-    root = Path("/home/al/jason-worktrees/autonomous-repair")
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path = root / candidate
+    path = worktree_storage.archive_path('autonomous-repair', candidate)
+    worktree_storage.prepare_parent(path)
     if path.exists():
         shutil.rmtree(path)
     _run(["git", "worktree", "add", "--detach", str(path), candidate], cwd=repo)

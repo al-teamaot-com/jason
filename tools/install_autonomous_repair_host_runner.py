@@ -9,6 +9,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import jason_engineering_worktree_storage as worktree_storage
+
 
 def _copy(source: Path, destination: Path, mode: int) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -30,9 +32,12 @@ def main() -> int:
     home = Path.home()
 
     runner_source = repo / "tools" / "autonomous_repair_host_runner.py"
+    worktree_storage_source = repo / "tools" / "jason_engineering_worktree_storage.py"
     unit_source = repo / "infrastructure" / "openclaw-operations" / "systemd" / "user"
     if not runner_source.is_file():
         raise SystemExit("autonomous repair host runner source is missing")
+    if not worktree_storage_source.is_file():
+        raise SystemExit("engineering worktree storage source is missing")
     for name in (
         "jason-autonomous-repair-runner.service",
         "jason-autonomous-repair-runner.path",
@@ -40,6 +45,7 @@ def main() -> int:
         if not (unit_source / name).is_file():
             raise SystemExit(f"systemd source unit is missing: {name}")
 
+    worktree_storage.prepare_family('autonomous-repair')
     install_root = home / ".local" / "lib" / "jason"
     user_units = home / ".config" / "systemd" / "user"
     _copy(
@@ -47,6 +53,7 @@ def main() -> int:
         install_root / "autonomous_repair_host_runner.py",
         0o700,
     )
+    _copy(worktree_storage_source, install_root / "jason_engineering_worktree_storage.py", 0o600)
     for name in (
         "jason-autonomous-repair-runner.service",
         "jason-autonomous-repair-runner.path",
