@@ -333,7 +333,7 @@ def _verify_root_policy_covers_candidate(source_revision: str) -> None:
 
 def _trusted_root_policy_helper():
     """Load only the installed root-owned helper, never mutable source."""
-    helper = Path(__file__).with_name("protected_root_policy_migration.py")
+    helper = Path("/usr/local/lib/jason/protected_root_policy_migration.py")
     meta = helper.lstat()
     if (not stat.S_ISREG(meta.st_mode) or helper.is_symlink()
             or meta.st_uid != 0 or meta.st_mode & 0o022):

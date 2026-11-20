@@ -21,6 +21,8 @@ ROOT=Path(__file__).resolve().parents[1]
 SOURCE=Path("infrastructure/openclaw-operations/systemd")
 TARGET=Path("infrastructure/pmv4-e-scheduler/systemd")
 ADMISSION="/opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py"
+LEGACY_RECONCILER="/usr/local/lib/jason/release_host_reconcile_worker.py"
+ISOLATED_RECONCILER="/opt/jason/pmv4-e-trusted/tools/release_host_reconcile_worker.py"
 # Mirror mandatory live production drop-ins when replacing service identities.
 # New names do not inherit the legacy .service.d/ controls.
 OWNER_PAUSE_CONDITION=(
@@ -140,6 +142,13 @@ def generate(*,base:Path=ROOT)->dict[str,bytes]:
         if pair.mode=="engineering":
             service=service.replace("[Unit]\n",
                                     "[Unit]\n"+OWNER_PAUSE_CONDITION,1)
+        elif pair.mode=="component-reconcile":
+            original="ExecStart=/usr/bin/python3 "+LEGACY_RECONCILER+"\n"
+            need(service.count(original)==1, "ROOT_RECONCILER_EXECSTART_CHANGED")
+            service=service.replace(
+                original,"ExecStart=/usr/bin/python3 -I -B "+ISOLATED_RECONCILER+"\n",1)
+            service=service.replace("ConditionPathExists="+LEGACY_RECONCILER,
+                                    "ConditionPathExists="+ISOLATED_RECONCILER,1)
         elif pair.mode=="component-release":
             service=service.replace("[Unit]\n",
                                     "[Unit]\n"+RELEASE_HOLD_CONDITION,1)
@@ -170,7 +179,7 @@ def validate(*,base:Path=ROOT)->dict:
         "source_unit_count":12,
         "trigger_count":6,
         "service_count":6,
-        "legacy_backend_execstart_changed":False,
+        "isolated_root_reconciler":ISOLATED_RECONCILER,
         "guarded_by_future_exact_root_acceptance":True,
         "self_heal_and_reconcile_migration_accepted":False,
         "root_install_authorized":False,

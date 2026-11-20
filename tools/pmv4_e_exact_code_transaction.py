@@ -29,23 +29,20 @@ WATCHDOG="tools/jason_self_heal_watchdog.py"
 MANAGER="tools/release_manager_host_runner.py"
 RECONCILER="tools/release_host_reconcile_worker.py"
 POLICY="config/production-desired-state.json"
-FILES=(WATCHDOG,MANAGER,RECONCILER)
+FILES=(WATCHDOG,MANAGER)
 DEFAULT_TARGETS={
     WATCHDOG:Path("/home/al/.local/lib/jason/jason_self_heal_watchdog.py"),
     MANAGER:Path("/home/al/.local/lib/jason/release_manager_host_runner.py"),
-    RECONCILER:Path("/usr/local/lib/jason/release_host_reconcile_worker.py"),
     POLICY:Path("/etc/jason/release-readback-recovery/production-desired-state.json"),
 }
 DEFAULT_IDENTITIES={
     WATCHDOG:(1000,1000,0o700),
     MANAGER:(1000,1000,0o755),
-    RECONCILER:(0,0,0o755),
     POLICY:(0,0,0o600),
 }
 EXPECTED_BEFORE={
     WATCHDOG:"6e1619012e1cbc30de0819b3f07320e75e933ed4c2643acdabdb94fca6d33fcf",
     MANAGER:"7208832ecb575d549721788f196f85c7d6bd609794680fe099f6ff60401626a9",
-    RECONCILER:"55890d6725cc49c2e70743ced3632a79817267764a1dbaa876bdd9e77a5e8e18",
     POLICY:packet.EXPECTED_PRIOR_ROOT_POLICY,
 }
 OBJECTS=frozenset(DEFAULT_TARGETS)

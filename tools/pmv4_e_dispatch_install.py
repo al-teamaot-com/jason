@@ -29,6 +29,7 @@ TRUST = BASE / "trusted"
 WORKER = BASE.parent / "release_host_reconcile_worker.py"
 POLICY = Path("/etc/jason/independent-component-release/pmv4-e-dispatch.json")
 RECORDS = Path("/var/lib/jason-owner-release/pmv4-e-dispatch")
+CATALOG_POLICY = Path("/etc/jason-owner-release/catalog-scoped-promotion-installed.json")
 ARTIFACTS = Path("/srv/jason/archive/engineering-artifacts")
 MANAGER = Path("/var/lib/jason/openclaw/release-manager")
 REQUESTS = MANAGER / "host-reconcile/requests"
@@ -244,7 +245,8 @@ def owner(scope):
     print("CANDIDATE_SHA=" + scope["policy"]["candidate_sha"], flush=True)
     print("ROLLBACK_SHA=" + scope["policy"]["rollback_sha"], flush=True)
     print("INSTALL_SCOPE_SHA256=" + digest(canonical(scope)), flush=True)
-    print("INSTALL_TARGETS=" + ",".join(map(str, (TRUST, WORKER, POLICY, RECORDS))), flush=True)
+    targets = scope.get("installation_targets", (TRUST, WORKER, POLICY, RECORDS))
+    print("INSTALL_TARGETS=" + ",".join(map(str, targets)), flush=True)
     print("CUTOVER=" + str(scope.get("queue_cutover", False)).lower(), flush=True)
     print("BROWSER_VERIFICATION_URL=" + challenge["verification_uri"], flush=True)
     print("SIGN_IN_CODE=" + challenge["user_code"], flush=True)
@@ -567,6 +569,204 @@ print(json.dumps({"request_id": request_id, "candidate_sha": policy["candidate_s
     return payload
 
 
+
+def isolated_baseline():
+    directory(BASE)
+    need(tree(TRUST) == REPAIR_TREE
+         and digest(read(WORKER, 0, 0o755)) == WORKER_BEFORE,
+         "ISOLATED_APPROVED_BASELINE_CHANGED")
+    old_policy = read(POLICY, 0, 0o400)
+    need(digest(old_policy) == REPAIR_POLICY, "ISOLATED_PREVIOUS_DISPATCH_POLICY_CHANGED")
+    accepted = json.loads(read(
+        BASE / ("dispatch-install-" + REPAIR_FROM) / "accepted.json", 0, 0o400))
+    need(accepted.get("status") == "installed"
+         and accepted.get("scope", {}).get("policy") == json.loads(old_policy),
+         "ORIGINAL_DISPATCH_INSTALL_RECEIPT_CHANGED")
+    catalog = read(CATALOG_POLICY,
+                   0, 0o600, 8192)
+    need(json.loads(catalog).get("root_worker_sha256") == WORKER_BEFORE,
+         "CATALOG_SHARED_WORKER_PIN_CHANGED")
+    return old_policy, digest(catalog)
+
+
+def install_isolated_source(files, policy, scope, actor):
+    """Install only Stage E source and dispatch policy under the existing locks."""
+    previous_policy, catalog_digest = isolated_baseline()
+    state = BASE / ("isolated-cutover-" + policy["candidate_sha"])
+    need(not os.path.lexists(state), "ISOLATED_INSTALL_ALREADY_PRESENT")
+    state.mkdir(mode=0o700)
+    write(state / "policy-before.json", previous_policy, 0o400)
+    write(state / "approval.json", canonical({
+        "scope": scope, "owner_object_id": actor,
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "catalog_policy_sha256": catalog_digest,
+    }), 0o400)
+    stage_tree(state / "trust-new", files)
+    pending = POLICY.with_name("." + POLICY.name + ".isolated")
+    moved = installed = policy_installed = False
+    try:
+        write(pending, canonical(policy), 0o400)
+        need(read(POLICY, 0, 0o400) == previous_policy, "DISPATCH_POLICY_CHANGED")
+        os.rename(TRUST, state / "trust-before")
+        moved = True
+        os.rename(state / "trust-new", TRUST)
+        installed = True
+        os.replace(pending, POLICY)
+        policy_installed = True
+        sync_dir(BASE)
+        sync_dir(state)
+        sync_dir(POLICY.parent)
+        need(tree(TRUST) == digest(canonical({name: digest(raw) for name, raw in files.items()}))
+             and read(POLICY, 0, 0o400) == canonical(policy)
+             and digest(read(WORKER, 0, 0o755)) == WORKER_BEFORE,
+             "ISOLATED_SOURCE_INSTALL_READBACK_FAILED")
+        protected()
+        return state
+    except BaseException:
+        if policy_installed:
+            restore = state / "policy-restore.json"
+            write(restore, previous_policy, 0o400)
+            os.replace(restore, POLICY)
+        if installed:
+            os.rename(TRUST, state / "trust-failed")
+        if moved:
+            os.rename(state / "trust-before", TRUST)
+        pending.unlink(missing_ok=True)
+        sync_dir(BASE)
+        sync_dir(POLICY.parent)
+        raise
+
+
+def signed_cutover_request(policy, actor):
+    """Reuse the existing exact service signer after the one local Owner decision."""
+    script = """
+import json
+from pathlib import Path
+import sys
+sys.path[:0] = [sys.argv[1], str(Path(sys.argv[1]) / "implementation")]
+from tools import pmv4_e_exact_owner_offer as offer
+policy, actor = json.load(sys.stdin)
+signer, _, private = offer.checked_identity()
+plan = {
+    "candidate": policy["candidate_sha"], "rollback": policy["rollback_sha"],
+    "scope_sha256": policy["scope_sha256"], "manifest_sha256": policy["manifest_sha256"],
+    "freeze_sha256": policy["freeze_sha256"],
+}
+print(json.dumps(offer.signed_request(plan, signer=signer, private=private, owner_oid=actor)))
+"""
+    result = subprocess.run(
+        ["/usr/sbin/runuser", "-u", "al", "--", "/usr/bin/python3", "-I", "-B",
+         "-c", script, str(TRUST)], input=canonical([policy, actor]), cwd="/",
+        capture_output=True, check=True, timeout=30,
+    )
+    request = json.loads(result.stdout)
+    need(all(request.get(key) == policy[key] for key in (
+        "candidate_sha", "rollback_sha", "scope_sha256", "manifest_sha256", "freeze_sha256")),
+        "ISOLATED_SIGNER_SCOPE_CHANGED")
+    return request
+
+
+def replacement_unit_targets(files):
+    targets = []
+    prefix = "infrastructure/pmv4-e-scheduler/systemd/"
+    for name in sorted(files):
+        if not name.startswith(prefix):
+            continue
+        relative = PurePosixPath(name).relative_to(prefix)
+        if relative.parts[0] == "user":
+            root = "/home/al/.config/systemd/user/"
+        else:
+            need(relative.parts[0] == "system", "UNIT_SCOPE_INVALID")
+            root = "/etc/systemd/system/"
+        need(len(relative.parts) == 2, "UNIT_SCOPE_INVALID")
+        targets.append(root + relative.name)
+    need(len(targets) == 12, "SIX_UNIT_SCOPE_INCOMPLETE")
+    return targets
+
+
+def run_isolated_native(candidate, request, state):
+    command = ["/usr/bin/python3", "-I", "-B",
+               str(TRUST / CONTROLS["bootstrap_sha256"]),
+               "--candidate-sha", candidate]
+    try:
+        result = subprocess.run(
+            command + ["--stage-and-promote", "--owner-request-stdin"],
+            input=canonical(request), cwd="/", capture_output=True, timeout=1050, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        result = subprocess.CompletedProcess(command, 124, b"", b"")
+    if result.returncode:
+        # The original recovery rejects cleanup after native STARTED and
+        # preserves its independently signed rollback/recovery receipts.
+        recovery = subprocess.run(
+            command + ["--recover-inert", "--owner-request-stdin"],
+            input=canonical(request), cwd="/", capture_output=True, timeout=180, check=False,
+        )
+        write(state / "failed-native-attempt.json", canonical({
+            "candidate_sha": candidate, "native_returncode": result.returncode,
+            "signed_inert_recovery_returncode": recovery.returncode,
+            "owner_approval_reusable": False,
+        }), 0o400)
+        raise Denied("ISOLATED_NATIVE_CUTOVER_FAILED_SEE_ROOT_RECEIPTS")
+    payload = json.loads(result.stdout)
+    write(state / "native-result.json", canonical(payload), 0o400)
+    need(payload.get("candidate_sha") == candidate
+         and payload.get("status") == "native_stage_e_six_unit_accepted",
+         "ISOLATED_CUTOVER_NOT_ACCEPTED_SEE_NATIVE_RESULT")
+    return payload
+
+
+def complete_isolated(args, files, policy):
+    need(args.before_tree_sha256 == REPAIR_TREE and not args.rollback
+         and not args.repair_and_cutover, "ISOLATED_MODE_ARGUMENTS_INVALID")
+    scope = {
+        "action": "COMPLETE-EXACT-ISOLATED-PMV4-E", "policy": policy,
+        "queue_cutover": True,
+        "archive_sha256": args.archive_sha256, "trust_before_sha256": REPAIR_TREE,
+        "protected_shared_worker_sha256": WORKER_BEFORE,
+        "installer_sha256": digest(Path(__file__).read_bytes()),
+        "installation_targets": [str(TRUST), str(POLICY),
+            "/opt/jason/pmv4-e-trusted", "/opt/jason/releases/" + args.candidate_sha,
+            "/var/lib/jason/independent-component-release",
+            "/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json",
+            "/etc/jason/release-readback-recovery/production-desired-state.json",
+            "/home/al/.local/lib/jason/jason_self_heal_watchdog.py",
+            "/home/al/.local/lib/jason/release_manager_host_runner.py",
+            *replacement_unit_targets(files)],
+    }
+    with locks():
+        protected()
+        _, catalog_hash = isolated_baseline()
+        scope["protected_catalog_policy_sha256"] = catalog_hash
+        current_ci(files, args.candidate_sha)
+        cutover_preflight()
+    if not args.apply:
+        print(json.dumps({"status": "isolated_read_only_preflight_passed", "scope": scope}))
+        return
+    actor = owner(scope)
+    with locks():
+        protected()
+        current_ci(files, args.candidate_sha)
+        state = install_isolated_source(files, policy, scope, actor)
+    refresh = subprocess.run(
+        ["/usr/bin/python3", "-I", "-B", str(TRUST / CONTROLS["ci_refresh_sha256"]),
+         "--candidate-sha", args.candidate_sha],
+        cwd="/", capture_output=True, check=True, timeout=480,
+    )
+    need(json.loads(refresh.stdout).get("status") == "fresh_protected_ci_verified",
+         "ISOLATED_NATIVE_CI_UNVERIFIED")
+    request = signed_cutover_request(policy, actor)
+    write(state / "owner-proof.json", canonical(request), 0o400)
+    result = run_isolated_native(args.candidate_sha, request, state)
+    need(digest(read(WORKER, 0, 0o755)) == WORKER_BEFORE
+         and digest(read(CATALOG_POLICY,
+                         0, 0o600, 8192)) == catalog_hash,
+         "PROTECTED_SHARED_WORKER_OR_CATALOG_CHANGED")
+    write(state / "accepted.json", canonical(result), 0o400)
+    print("PMV4_E_ISOLATED_CUTOVER=VERIFIED")
+    print(json.dumps(result["original_native_receipt"], sort_keys=True))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate-sha", required=True)
@@ -574,6 +774,7 @@ def main():
     parser.add_argument("--manifest-sha256", required=True)
     parser.add_argument("--before-tree-sha256", required=True)
     parser.add_argument("--repair-and-cutover", action="store_true")
+    parser.add_argument("--isolated-cutover", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true")
     mode.add_argument("--rollback", action="store_true")
@@ -584,6 +785,10 @@ def main():
                  (args.archive_sha256, args.manifest_sha256, args.before_tree_sha256)),
          "EXACT_DIGESTS_REQUIRED")
     files, policy = plan(args.candidate_sha, args.archive_sha256, args.manifest_sha256)
+    if args.isolated_cutover:
+        complete_isolated(args, files, policy)
+        return
+    need(not args.apply, "SHARED_WORKER_INSTALL_REQUIRES_ISOLATED_CUTOVER")
     proposed = {
         "action": REPAIR_ACTION if args.repair_and_cutover else ACTION,
         "policy": policy, "archive_sha256": args.archive_sha256,
