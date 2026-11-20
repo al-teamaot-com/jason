@@ -15,7 +15,7 @@ import re
 import stat
 import sys
 
-TRUST_ROOT=Path("/opt/jason/pmv4-e-trusted")
+TRUST_ROOT=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native")
 TRUST_ENTRY=TRUST_ROOT/"tools/pmv4_e_root_reconcile_admission.py"
 MARKER=Path("/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json")
 UNIT_GUARD=TRUST_ROOT/"tools/pmv4_e_unit_admission.py"

@@ -50,7 +50,7 @@ RELEASE_MANAGER_RUNNER = Path.home() / ".local/lib/jason/release_manager_host_ru
 RELEASE_MANAGER_TIMER = Path.home() / ".config/systemd/user/jason-release-manager.timer"
 PMV4_E_RELEASE_MANAGER_TIMER = Path.home() / ".config/systemd/user/jason-pmv4-component-release.timer"
 PMV4_E_MARKER = Path("/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json")
-PMV4_E_GUARD = Path("/opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py")
+PMV4_E_GUARD = Path("/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py")
 PMV4_E_TIMERS = (
     "jason-pmv4-component-release.timer",
     "jason-pmv4-engineering.timer",
@@ -61,7 +61,8 @@ PMV4_E_ROOT_RECONCILE_PATH = "jason-pmv4-component-reconcile.path"
 ENGINEERING_SOURCE_LINK = Path.home() / ".local/lib/jason/engineering-worker-source"
 CURRENT_RELEASE_LINK = Path("/opt/jason/current")
 ROOT_HOST_RECONCILER = Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
-PMV4_E_ROOT_HOST_RECONCILER = Path("/opt/jason/pmv4-e-trusted/tools/release_host_reconcile_worker.py")
+PMV4_E_ROOT_HOST_RECONCILER = Path("/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/release_host_reconcile_worker.py")
+PMV4_E_RELEASES_ROOT = Path("/usr/local/lib/jason/pmv4-e-bootstrap/releases")
 SCHEDULED_ARTIFACTS = (
     ("support_repair_worker", "tools/support_repair_host_worker.py", Path.home() / ".local/lib/jason/support_repair_host_worker.py"),
     ("owner_approved_development_worker", "tools/owner_approved_development_worker.py", Path.home() / ".local/lib/jason/owner_approved_development_worker.py"),
@@ -274,6 +275,7 @@ def production_convergence_failures(
     installed_runner: Path = RELEASE_MANAGER_RUNNER,
     installed_timer: Path = RELEASE_MANAGER_TIMER,
     releases_root: Path | None = None,
+    control_releases_root: Path | None = None,
     verify_scheduled_surfaces: bool | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """Verify canonical production intent, installed host state, and live runtime agree.
@@ -317,11 +319,12 @@ def production_convergence_failures(
         evidence["pmv4_e_rollback_sha"]=accepted["rollback_sha"]
     if verify_scheduled_surfaces is None:
         verify_scheduled_surfaces = releases_root is None
-    release_root = releases_root or Path("/opt/jason/releases")
+    release_root = control_releases_root or releases_root or (PMV4_E_RELEASES_ROOT if control_mode=="replacement"
+                                     else Path("/opt/jason/releases"))
     release_dir = release_root / desired_revision
     evidence["desired_revision"] = desired_revision
     evidence["release_dir"] = str(release_dir)
-    baseline_dir = release_root / runtime_revision
+    baseline_dir = (releases_root or Path("/opt/jason/releases")) / runtime_revision
     if not release_dir.is_dir() or not baseline_dir.is_dir():
         failures.append("production_convergence_release_source_missing")
         return failures, evidence

@@ -19,7 +19,7 @@ from typing import Any
 
 # The later root installer must deploy BOTH the guard and its existing
 # source-only scheduling contract under one immutable root-owned tree.
-TRUST_ROOT=Path("/opt/jason/pmv4-e-trusted")
+TRUST_ROOT=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native")
 TRUST_ENTRY=TRUST_ROOT/"tools/pmv4_e_unit_admission.py"
 if Path(__file__).resolve()==TRUST_ENTRY:
     sys.path.insert(0,str(TRUST_ROOT))

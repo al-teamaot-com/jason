@@ -7,7 +7,7 @@ verified signed exact Owner proof, opened a STARTED receipt, and acquired its
 host/freeze locks. Trust installation is inert and must be recorded in its
 durable rollback journal before retiring any legacy triggers.
 
-Production location: /opt/jason/pmv4-e-trusted
+Production location: /usr/local/lib/jason/pmv4-e-bootstrap/native
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import stat
 from typing import Any, Callable, Mapping
 from tools import pmv4_e_exact_release_packet as packet
 
-TARGET=Path("/opt/jason/pmv4-e-trusted")
+TARGET=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native")
 SHA40=re.compile(r"^[0-9a-f]{40}$")
 
 

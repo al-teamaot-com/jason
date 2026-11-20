@@ -70,7 +70,7 @@ fi
 # Detect the final root-owned accepted PMv4 E marker before changing files.
 # An invalid or stale marker DENIES rather than returning to old PMv3 mode.
 PMV4_E_MARKER="/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json"
-PMV4_E_HOST_GUARD="/opt/jason/pmv4-e-trusted/tools/pmv4_e_root_reconcile_admission.py"
+PMV4_E_HOST_GUARD="/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_root_reconcile_admission.py"
 PMV4_E_HOST_MODE=legacy
 # The runtime/MCP images stay pinned at PMv3 LKG when only the Stage E
 # control-plane transitions. A root-owned accepted marker is the sole
@@ -240,7 +240,7 @@ fi
 # independent systemd activation checks pass near the end of this script.
 step_start protected_root_policy_stage
 if [ "$PMV4_E_HOST_MODE" = replacement ]; then
-  /usr/bin/python3 -I -B "/opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py" --mode component-reconcile >/dev/null
+  /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode component-reconcile >/dev/null
   echo "PMV4_E_LEGACY_ROOT_POLICY_STAGE=SKIPPED_ACCEPTED_REPLACEMENT"
 else
   /usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py" --stage-only
@@ -598,7 +598,7 @@ if [ "$PMV4_E_HOST_MODE" = replacement ]; then
     echo "ERROR: retired PMv3 engineering timer reactivated" >&2
     exit 14
   fi
-  run_as_al /usr/bin/python3 -I -B "/opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py" --mode engineering >/dev/null
+  run_as_al /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode engineering >/dev/null
   PMV4_E_ENGINEERING_TIMER=jason-pmv4-engineering.timer
 else
   run_as_al /usr/bin/python3 "$ENGINEERING_SOURCE_REPO/tools/install_support_repair_host_worker.py" \
@@ -717,7 +717,7 @@ echo "DOCUMENTATION_SOURCE_REPO=$DOCUMENTATION_SOURCE_REPO"
 # root transition install fails before the release can be certified.
 step_start root_reconciler_install
 if [ "$PMV4_E_HOST_MODE" = replacement ]; then
-  /usr/bin/python3 -I -B "/opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py" --mode component-reconcile >/dev/null
+  /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode component-reconcile >/dev/null
   if [ "$(systemctl is-active jason-pmv4-component-reconcile.path 2>/dev/null || true)" != active ]; then
     echo "ERROR: PMv4 root reconcile path inactive" >&2
     exit 14
@@ -747,7 +747,7 @@ echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
 # before the final drift guard. Do not replace the running release controller.
 step_start held_approval_user_unit_install
 if [ "$PMV4_E_HOST_MODE" = replacement ]; then
-  run_as_al /usr/bin/python3 -I -B "/opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py" --mode release-approval >/dev/null
+  run_as_al /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode release-approval >/dev/null
   for timer in jason-pmv4-release-approval.timer jason-pmv4-component-release.timer; do
     if [ "$(run_as_al systemctl --user is-active "$timer" 2>/dev/null || true)" != active ]; then
       echo "ERROR: accepted PMv4 user release timer inactive: $timer" >&2
@@ -840,7 +840,7 @@ echo "JASON_BOOT_RECOVERY_INSTALL=PASS"
 
 step_start root_release_transition_install
 if [ "$PMV4_E_HOST_MODE" = replacement ]; then
-  /usr/bin/python3 -I -B "/opt/jason/pmv4-e-trusted/tools/pmv4_e_unit_admission.py" --mode component-transition >/dev/null
+  /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode component-transition >/dev/null
   if [ "$(systemctl is-active jason-pmv4-component-transition.timer 2>/dev/null || true)" != active ]; then
     echo "ERROR: accepted PMv4 root transition timer inactive" >&2
     exit 14

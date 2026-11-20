@@ -20,7 +20,7 @@ from typing import Any, Callable, Mapping
 from tools.independent_component_release import trusted_file
 
 TRUST = Path("/usr/local/lib/jason/pmv4-e-bootstrap/trusted")
-NATIVE_TRUST = Path("/opt/jason/pmv4-e-trusted")
+NATIVE_TRUST = Path("/usr/local/lib/jason/pmv4-e-bootstrap/native")
 ENTRIES = frozenset(root / "tools/pmv4_e_source_scope_guard.py"
                     for root in (TRUST, NATIVE_TRUST))
 MANUAL = TRUST / "tools/manual_release_scope.py"

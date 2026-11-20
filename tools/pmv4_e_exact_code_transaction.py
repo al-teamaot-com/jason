@@ -20,9 +20,9 @@ from typing import Any,Callable,Mapping
 from tools import pmv4_e_scheduler_parity as parity
 from tools import pmv4_e_exact_release_packet as packet
 
-ENTRY=Path("/opt/jason/pmv4-e-trusted/tools/pmv4_e_exact_code_transaction.py")
+ENTRY=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_exact_code_transaction.py")
 SNAPSHOT_ROOT=Path("/var/lib/jason/independent-component-release/stage-e-code-before")
-SOURCE_ROOT=Path("/opt/jason/pmv4-e-trusted")
+SOURCE_ROOT=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native")
 SHA40=re.compile(r"^[0-9a-f]{40}$")
 HASH=re.compile(r"^[0-9a-f]{64}$")
 WATCHDOG="tools/jason_self_heal_watchdog.py"

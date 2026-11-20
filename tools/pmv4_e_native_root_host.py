@@ -7,7 +7,7 @@ host/freeze locks, immutable STARTED/ACCEPTED/ROLLED_BACK receipts and
 interrupted rollback. StageEUnitAdapter controls the exact six reviewed
 systemd controls through StageERootBridge and ExactSystemdSurface.
 
-Source only until pinned under /opt/jason/pmv4-e-trusted by the independently
+Source only until pinned under /usr/local/lib/jason/pmv4-e-bootstrap/native by the independently
 authorized root bootstrap. Does not implement a root CLI, sudo escalation,
 Docker/provider mutation, service restart, reboot, or network operation.
 """
@@ -44,8 +44,8 @@ from implementation.kernel.signed_owner_release import (
     canonical,read_pinned_root_owner_public_key,verify_exact_owner_release,
 )
 
-ENTRY=Path("/opt/jason/pmv4-e-trusted/tools/pmv4_e_native_root_host.py")
-TRUST=Path("/opt/jason/pmv4-e-trusted")
+ENTRY=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_native_root_host.py")
+TRUST=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native")
 NATIVE_ROOT=Path("/var/lib/jason/independent-component-release")
 RECEIPTS=NATIVE_ROOT/"receipts"
 BEFORE=NATIVE_ROOT/"stage-e-physical-before"

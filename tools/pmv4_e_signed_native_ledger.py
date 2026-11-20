@@ -31,7 +31,7 @@ from tools import pmv4_e_native_release_contract as contract
 from tools import pmv4_e_exact_release_packet as packet
 
 ENTRY = Path(
-    "/opt/jason/pmv4-e-trusted/tools/pmv4_e_signed_native_ledger.py"
+    "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_signed_native_ledger.py"
 )
 RESOURCE = contract.COMPONENT
 
@@ -58,7 +58,7 @@ class StageESignedNativeLedger(ComponentReleaseController):
             deny(kwargs.get("root") == PRODUCTION_ROOT
                  and Path(source_root).is_absolute()
                  and not Path(source_root).is_symlink()
-                 and Path(source_root).parent == Path("/opt/jason/releases"),
+                 and Path(source_root).parent == Path("/usr/local/lib/jason/pmv4-e-bootstrap/releases"),
                  "IMMUTABLE_SOURCE_ROOT_REQUIRED")
         super().__init__(**kwargs)
         self.source_root = Path(source_root)
@@ -182,7 +182,7 @@ class StageESignedNativeLedger(ComponentReleaseController):
         previous = manifest["rollback_sha"]
         if self.production:
             deny(self.source_root.name == candidate
-                 and self.source_root.parent == Path("/opt/jason/releases")
+                 and self.source_root.parent == Path("/usr/local/lib/jason/pmv4-e-bootstrap/releases")
                  and not self.source_root.is_symlink(),
                  "SOURCE_REVISION_PATH_UNTRUSTED")
             source_info = self.source_root.lstat()

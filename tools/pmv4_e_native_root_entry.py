@@ -24,11 +24,11 @@ import stat
 import sys
 from typing import Any
 
-ROOT_ENTRY=Path("/opt/jason/pmv4-e-trusted/tools/pmv4_e_native_root_entry.py")
+ROOT_ENTRY=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_native_root_entry.py")
 TRUST=ROOT_ENTRY.parent.parent
 GENERIC=Path("/opt/jason/independent-component-release/trusted")
 NATIVE_ROOT=Path("/var/lib/jason/independent-component-release")
-PRODUCTION_RELEASE_ROOT=Path("/opt/jason/releases")
+PRODUCTION_RELEASE_ROOT=Path("/usr/local/lib/jason/pmv4-e-bootstrap/releases")
 OWNER_ARTIFACTS=Path("/srv/jason/archive/engineering-artifacts")
 SHA40=re.compile(r"^[0-9a-f]{40}$")
 PINNED_NATIVE_SHA256={

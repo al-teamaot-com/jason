@@ -32,11 +32,11 @@ ENTRY=TRUST/"tools/pmv4_e_root_bootstrap_once.py"
 NATIVE=Path("/opt/jason/independent-component-release/trusted")
 SOURCE_REVIEW=Path("/srv/jason/archive/engineering-artifacts/pmv4-e-owner-source-repo")
 ARTIFACTS=Path("/srv/jason/archive/engineering-artifacts")
-RELEASES=Path("/opt/jason/releases")
+RELEASES=Path("/usr/local/lib/jason/pmv4-e-bootstrap/releases")
 NATIVE_RECORDS=Path("/var/lib/jason/independent-component-release/releases")
 NATIVE_RECEIPTS=Path("/var/lib/jason/independent-component-release/receipts")
 BOOTSTRAP_JOURNAL=Path("/var/lib/jason/independent-component-release/stage-e-bootstrap")
-FINAL_ENTRY=Path("/opt/jason/pmv4-e-trusted/tools/pmv4_e_native_root_entry.py")
+FINAL_ENTRY=Path("/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_native_root_entry.py")
 SHA40=re.compile(r"^[0-9a-f]{40}$")
 PINNED_NATIVE={
     "tools/independent_component_release.py":"1e6f981344f6bfb87977f2d3f4c5e76875447efd78aba03a8968ba94240bd4c7",
@@ -276,6 +276,7 @@ def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False,
     from tools import pmv4_e_exact_release_packet as packet
     from tools import pmv4_e_root_cutover_preflight as rootflight
     from tools import pmv4_e_source_scope_guard as scope_guard
+    from tools import pmv4_e_installation_preflight as installation
     from tools.independent_component_host_adapter import IndependentComponentHost
 
     need(packet.ROOT==TRUST and
@@ -414,6 +415,7 @@ def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False,
                             "legacy_six_unchanged":True,
                             "owner_approval_reusable":False,
                         }
+                    installation.collect(candidate,require_layout=True)
                     # The original signed phase binds exact current source,
                     # protected CI, signer, pre-cutover state and replay.
                     phase.begin(request)
