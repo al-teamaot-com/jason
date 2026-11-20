@@ -1617,7 +1617,8 @@ def _process_stage_e_request(request: dict[str, object]) -> dict[str, object]:
          "--stage-and-promote", "--owner-request-stdin"],
         input=json.dumps(owner, sort_keys=True, separators=(",", ":")),
         cwd="/", env={"PATH": "/usr/bin:/bin"},
-        text=True, capture_output=True, timeout=600, check=False,
+        # Allow the inner native promotion and journaled rollback to finish.
+        text=True, capture_output=True, timeout=1050, check=False,
     )
     if completed.returncode != 0:
         # Cleanup is limited to signed inert staging. The bootstrap refuses
@@ -1647,14 +1648,17 @@ def _process_stage_e_request(request: dict[str, object]) -> dict[str, object]:
     except (ValueError, TypeError, KeyError) as exc:
         raise HostReconcileError("PMV4_E_BOOTSTRAP_RESULT_INVALID") from exc
     if (type(result) is not dict
-            or result.get("status") != "native_stage_e_six_unit_accepted"
             or result.get("candidate_sha") != policy["candidate_sha"]
             or type(native) is not dict
-            or native.get("status") != "native_stage_e_six_unit_accepted"
+            or native.get("status") != result.get("status")
             or native.get("candidate_sha") != policy["candidate_sha"]
             or native.get("rollback_sha") != policy["rollback_sha"]
             or native.get("approval_id") != proof["approval_id"]
             or native.get("protected_services_changed") is not False):
+        raise HostReconcileError("PMV4_E_BOOTSTRAP_RECEIPT_MISMATCH")
+    if result.get("status") == "native_stage_e_six_unit_rollback_verified":
+        raise HostReconcileError("PMV4_E_INTERRUPTED_CUTOVER_ROLLBACK_VERIFIED")
+    if result.get("status") != "native_stage_e_six_unit_accepted":
         raise HostReconcileError("PMV4_E_BOOTSTRAP_RECEIPT_MISMATCH")
     return {
         "status": result["status"], "candidate_sha": policy["candidate_sha"],

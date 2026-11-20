@@ -276,3 +276,32 @@ def test_failed_bootstrap_attempts_only_original_signed_inert_recovery(
     assert len(commands) == 3
     assert "--recover-inert" in commands[-1][0]
     assert [c[0] for c in calls] == ["record", "main"]
+
+
+def test_verified_native_rollback_cannot_be_reported_as_cutover(dispatch, monkeypatch):
+    request, _, calls = dispatch
+    owner = request["owner_request"]
+    status = "native_stage_e_six_unit_rollback_verified"
+
+    def run(command, **kwargs):
+        if command[3].endswith("/pmv4_e_ci_refresh.py"):
+            return SimpleNamespace(returncode=0, stdout=json.dumps({
+                "status": "fresh_protected_ci_verified",
+                "candidate_sha": owner["candidate_sha"],
+            }))
+        assert "--stage-and-promote" in command
+        native = {
+            "status": status, "candidate_sha": owner["candidate_sha"],
+            "rollback_sha": owner["rollback_sha"],
+            "approval_id": owner["signed_owner_proof"]["payload"]["approval_id"],
+            "protected_services_changed": False,
+        }
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            "status": status, "candidate_sha": owner["candidate_sha"],
+            "original_native_receipt": native,
+        }))
+
+    monkeypatch.setattr(worker.subprocess, "run", run)
+    with pytest.raises(worker.HostReconcileError, match="CUTOVER_ROLLBACK_VERIFIED"):
+        worker._process_stage_e_request(request)
+    assert [c[0] for c in calls] == ["record", "main"]

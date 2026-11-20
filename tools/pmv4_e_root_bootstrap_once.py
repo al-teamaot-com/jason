@@ -212,11 +212,32 @@ def native_promotion(candidate:str,*,packet,request:dict,
         command.append("--owner-request-stdin")
         native_input=packet.canonical(request).decode("utf-8")
     runner=runner or subprocess.run
-    result=runner(
-        command,cwd="/",env={"PATH":"/usr/bin:/bin"},check=False,
-        input=native_input,capture_output=True,text=True,timeout=480)
-    need(result.returncode==0,
-         "ORIGINAL_SIGNED_NATIVE_PROMOTION_FAILED_SEE_ROOT_JOURNAL")
+    try:
+        result=runner(
+            command,cwd="/",env={"PATH":"/usr/bin:/bin"},check=False,
+            input=native_input,capture_output=True,text=True,timeout=480)
+    except subprocess.TimeoutExpired:
+        result=None
+    if result is None or result.returncode!=0:
+        # Only the native STARTED receipt can authorize rollback. The
+        # recovery entry rechecks that receipt at its original start time.
+        recovery=runner(
+            command[:6]+["--recover-interrupted"],
+            cwd="/",env={"PATH":"/usr/bin:/bin"},check=False,
+            capture_output=True,text=True,timeout=300)
+        try:
+            payload=json.loads(recovery.stdout)
+        except (ValueError,TypeError):
+            payload=None
+        need(recovery.returncode==0 and type(payload) is dict
+             and payload.get("status")=="native_stage_e_six_unit_rollback_verified"
+             and payload.get("candidate_sha")==candidate
+             and payload.get("rollback_sha")==request["rollback_sha"]
+             and payload.get("approval_id")==
+                 request["signed_owner_proof"]["payload"]["approval_id"]
+             and payload.get("protected_services_changed") is False,
+             "ORIGINAL_SIGNED_NATIVE_PROMOTION_FAILED_SEE_ROOT_JOURNAL")
+        return payload
     try:
         payload=json.loads(result.stdout)
         expected_approval=request["signed_owner_proof"]["payload"]["approval_id"]
@@ -419,7 +440,7 @@ def run_once(candidate:str,*,stage_only:bool,recover_inert:bool=False,
     payload=native_promotion(
         candidate,packet=packet,request=request,forwarded=forwarded is not None)
     return {
-        **output,"status":"native_stage_e_six_unit_accepted",
+        **output,"status":payload["status"],
         "original_native_receipt":payload,
         "root_bootstrap_source_pinned":True,
     }

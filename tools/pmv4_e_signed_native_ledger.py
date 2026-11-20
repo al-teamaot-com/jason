@@ -437,5 +437,6 @@ class StageESignedNativeLedger(ComponentReleaseController):
                 return {
                     "status": "native_stage_e_six_unit_rollback_verified",
                     "candidate_sha": candidate, "rollback_sha": rollback,
+                    "approval_id": grant["approval_id"],
                     "protected_services_changed": False,
                 }
