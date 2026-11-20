@@ -31,6 +31,9 @@ def args():
         "verified_organization": "aot",
         "verify_entra_bearer": lambda _: dict(claims),
         "exact_owner_consent": lambda _: True,
+        "source_review": lambda candidate, rollback: (
+            candidate == CANDIDATE and rollback == ROLLBACK
+        ),
         "reviewed_offer": {
             "candidate": CANDIDATE, "rollback": ROLLBACK,
             "scope_sha256": SCOPE, "manifest_sha256": MANIFEST,
@@ -140,6 +143,9 @@ def test_signed_mcp_request_passes_original_inert_root_gate(tmp_path, args):
         "freeze_sha256": reviewed["manifest"]["freeze_sha256"],
         "signing_key": KEY,
     })
+    args["source_review"] = lambda candidate, rollback: (
+        candidate == ROOT_CANDIDATE and rollback == ROOT_ROLLBACK
+    )
     args["reviewed_offer"] = {
         "candidate": ROOT_CANDIDATE, "rollback": ROOT_ROLLBACK,
         "scope_sha256": reviewed["scope_sha256"],
@@ -154,3 +160,12 @@ def test_signed_mcp_request_passes_original_inert_root_gate(tmp_path, args):
     with pytest.raises(PermissionError, match="PROTECTED_SOURCE_CI_NOT_VERIFIED"):
         root_gate.validate(request, at=NOW)
     assert list(journal.iterdir()) == []
+
+
+def test_failed_source_review_denies_before_owner_proof(args):
+    seen = []
+    args["source_review"] = lambda *_: False
+    args["exact_owner_consent"] = lambda binding: seen.append(binding) or True
+    with pytest.raises(PermissionError, match="SOURCE_REVIEW_DENIED"):
+        bridge.build_stage_e_request(**args)
+    assert seen == []

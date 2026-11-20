@@ -17,8 +17,15 @@ repurpose another root action or weaken that boundary.
 The existing exact candidate is an ancestor of protected main observed at
 `fb1d5f57c57c3675896eb06ca88b236c7718d6e8`, but
 `verify_pinned_candidate_against_main` denies it because newer protected
-commits touch release controls and scope. The review must be repeated against
-the advertised main head at execution time.
+commits touch release controls and scope. Of the 60 Stage E reviewed
+files, `tools/release_manager_host_runner.py` changed; its newer changes
+include licensed Owner profile handling and scoped-backport commands. A
+source-only draft for `fb1d5f57c57c3675896eb06ca88b236c7718d6e8` has scope
+SHA256 `096ee88a19cf5ce18b76b8ff3044902897f7539ab691c833b0d504c0c88118d7`
+and manifest SHA256
+`699b3e0370810624d07eed3c90ae9f74d5ba0077d20908cb6bf94a09d3af0321`.
+This is not an approved or deployment-ready candidate. The review must be
+repeated against the advertised main head at execution time.
 
 ## This source slice
 

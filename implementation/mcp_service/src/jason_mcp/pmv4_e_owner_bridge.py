@@ -22,6 +22,7 @@ def build_stage_e_request(
     verified_principal: str, verified_organization: str,
     verify_entra_bearer: Callable[[str], Mapping[str, Any] | None],
     exact_owner_consent: Callable[[Mapping[str, Any]], bool],
+    source_review: Callable[[str, str], bool],
     reviewed_offer: Mapping[str, Any],
     candidate_sha: str, rollback_sha: str,
     scope_sha256: str, manifest_sha256: str, freeze_sha256: str,
@@ -42,6 +43,7 @@ def build_stage_e_request(
             or affirmative_decision != "approve_exact_pmv4_stage_e_cutover"
             or not callable(verify_entra_bearer)
             or not callable(exact_owner_consent)
+            or not callable(source_review)
             or not isinstance(reviewed_offer, Mapping)):
         raise StageEMcpBridgeDenied("PMV4_E_MCP_AUTHENTICATED_OWNER_REQUIRED")
 
@@ -57,6 +59,8 @@ def build_stage_e_request(
             or candidate_sha == rollback_sha
             or any(reviewed_offer.get(k) != v for k, v in expected.items())):
         raise StageEMcpBridgeDenied("PMV4_E_MCP_REVIEWED_OFFER_MISMATCH")
+    if source_review(candidate_sha, rollback_sha) is not True:
+        raise StageEMcpBridgeDenied("PMV4_E_MCP_SOURCE_REVIEW_DENIED")
 
     now = at or datetime.now(timezone.utc)
     if now.tzinfo is None or now.utcoffset() is None:
