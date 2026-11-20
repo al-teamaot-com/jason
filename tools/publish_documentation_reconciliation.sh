@@ -47,7 +47,7 @@ git fetch origin main >/dev/null 2>&1
 # revision-specific PR branches if they race to publish the first candidate.
 REMOTE_EXISTS=0
 if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-  git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" >/dev/null 2>&1
+  git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" >/dev/null 2>&1
   REMOTE_EXISTS=1
 fi
 if [ "$PR_COUNT" -eq 1 ] && [ "$REMOTE_EXISTS" -ne 1 ]; then
@@ -60,7 +60,9 @@ if [ "$REMOTE_EXISTS" -eq 1 ]; then
   if [ "$PR_COUNT" -eq 0 ]; then
     # A leftover branch from a closed PR, or a cross-host race, must never
     # overwrite manually authored files even without an open PR.
-    REMOTE_PATHS="$(git diff --name-only origin/main "$STATE_REF")"
+    # Compare only the generated branch contribution. Main may have advanced
+    # since this branch was merged; a two-dot diff includes unrelated main work.
+    REMOTE_PATHS="$(git diff --name-only "origin/main...$STATE_REF")"
     while IFS= read -r changed; do
       case "$changed" in
         ""|docs/control/AUTOMATED-CHANGE-STATE.json|docs/control/AUTOMATED-CHANGE-STATE.md) ;;
@@ -89,9 +91,15 @@ for CHECK_REF in "${STATE_REFS[@]}"; do
 done
 
 if [ -d "$WORKTREE/.git" ] || [ -f "$WORKTREE/.git" ]; then
-  git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
+  if [ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=all)" ]; then
+    echo "DOCUMENTATION_PUBLICATION=BLOCKED_DIRTY_WORKTREE" >&2
+    exit 1
+  fi
+  git worktree remove "$WORKTREE" >/dev/null
+elif [ -e "$WORKTREE" ] || [ -L "$WORKTREE" ]; then
+  echo "DOCUMENTATION_PUBLICATION=BLOCKED_UNREGISTERED_WORKTREE" >&2
+  exit 1
 fi
-rm -rf "$WORKTREE"
 
 # Migrate the revision-specific worktree from pre-single-flight publishers.
 # Only a validated 12-character SHA suffix can be used as a legacy path.
@@ -128,9 +136,8 @@ CONTROL_BOARD_FILE="$(mktemp)"
 cleanup_control_board() { rm -f "$CONTROL_BOARD_FILE"; }
 trap cleanup_control_board EXIT
 GITHUB_TOKEN="$(gh auth token)"
-python3 tools/development_release_coordinator.py \
+GITHUB_TOKEN="$GITHUB_TOKEN" python3 tools/development_release_coordinator.py \
   --repository al-teamaot-com/jason \
-  --token "$GITHUB_TOKEN" \
   --output "$CONTROL_BOARD_FILE"
 unset GITHUB_TOKEN
 # The board is advisory. Tag this specific production observation so that the
