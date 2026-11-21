@@ -57,7 +57,7 @@ class NativeBoundary:
     def stage(self, *, proposal, requests, pending):
         material = {"requests": [request_material(r) for r in requests],
                     "scope": scope_material(proposal.scope)}
-        staged = self.store.stage(approval_id=proposal.approval_id, material=material, at=NOW,
+        staged = self.store.stage(approval_id=proposal.approval_id, material=material, at=self.now,
             policy_digest=self.ports["policy_digest"], allowed_components=frozenset({"documentation-publisher"}),
             allowed_requesters=frozenset({SERVICE}), native_preflight=lambda _: True)
         return staged
@@ -67,6 +67,8 @@ class NativeBoundary:
             policy_digest=self.ports["policy_digest"],
             allowed_components=frozenset({"documentation-publisher"}))
     def call(self, operation, *, approval_id, step_index=None, signed_envelope=None):
+        if operation == "status":
+            return self.store.status(approval_id=approval_id)
         if operation == "admit":
             return self.store.admit(approval_id=approval_id, signed_envelope=signed_envelope,
                                     at=self.now, verify_ports=self.ports)
@@ -77,7 +79,7 @@ class NativeBoundary:
             from jason_runtime.owner_objective_root_client import ObjectiveRootRequestDenied
             raise ObjectiveRootRequestDenied("NO_EXISTING_NATIVE_CLAIM", "not_started")
         if operation == "deliver":
-            message_id = self.store.deliver(approval_id=approval_id, at=NOW,
+            message_id = self.store.deliver(approval_id=approval_id, at=self.now,
                 policy_digest=self.ports["policy_digest"],
                 allowed_components=frozenset({"documentation-publisher"}),
                 native_delivery=lambda _: self.delivery.deliver(SimpleNamespace(
@@ -162,7 +164,7 @@ def env(tmp_path):
 
 
 def signed(env, case, decision):
-    approval_id = env.config["campaign"][case + "_approval_id"]
+    approval_id = env.config["campaign"].get(case + "_approval_id", case)
     pending = env.app.handler.service.teams_flow.approval_service.repository.get(approval_id)
     envelope = dict(kind="conversation.turn", request_id="transport-"+approval_id,
         correlation_id=approval_id, issued_at=NOW.isoformat(), expires_at=(NOW+timedelta(seconds=90)).isoformat(),
@@ -285,3 +287,100 @@ def test_transient_native_gate_keeps_original_decision_and_first_effect_after_tr
     assert len(env.native.effects)==2 and len(env.delivery.requests)==2
     decision=env.native.store._read(env.native.store._plan(approval)/"verified-decision.json")
     assert decision["verified_at"]==NOW.isoformat()
+
+def complete_acceptance(env):
+    deny_then_issue(env)
+    env.app.interaction(signed(env, "approve", "approve"))
+    env.app.maintenance()
+
+
+def test_later_registered_objective_uses_one_new_decision_without_root_reinstallation(env):
+    complete_acceptance(env)
+    request_id = "2" * 32
+    result = env.app.submit_registered(template_id="documentation-publisher", request_id=request_id)
+    approval = result["approval_id"]
+    assert approval == "planapproval-objective-" + request_id
+    assert len(env.delivery.requests) == 3 and len(env.native.effects) == 2
+    # A retried request and a component restart retain the same manifest/card.
+    again = env.app.submit_registered(template_id="documentation-publisher", request_id=request_id)
+    assert again == result
+    restarted = build(env.config, delivery=env.delivery, root_client=env.native, clock=lambda:NOW)
+    env.app = restarted
+    assert restarted.submit_registered(template_id="documentation-publisher", request_id=request_id) == result
+    assert len(env.delivery.requests) == 3 and len(env.native.effects) == 2
+    restarted.interaction(signed(env, approval, "approve"))
+    restarted.maintenance()
+    assert restarted.submission_status(request_id=request_id)["state"] == "completed"
+    assert env.native.store.status(approval_id=approval)["state"] == "verified_complete"
+    assert len(env.native.effects) == 4 and len(env.delivery.requests) == 3
+
+
+def test_submissions_require_real_initial_acceptance_and_bounded_active_work(env):
+    with pytest.raises(PermissionError, match="LIVE_OWNER_ACCEPTANCE_REQUIRED"):
+        env.app.submit_registered(template_id="documentation-publisher", request_id="2"*32)
+    complete_acceptance(env)
+    for number in ("2", "3"):
+        env.app.submit_registered(template_id="documentation-publisher", request_id=number*32)
+    with pytest.raises(PermissionError, match="ACTIVE_LIMIT"):
+        env.app.submit_registered(template_id="documentation-publisher", request_id="4"*32)
+    assert len(env.delivery.requests) == 4 and len(env.native.effects) == 2
+
+
+@pytest.mark.parametrize("template,identifier", [
+    ("shell", "2"*32), ("documentation-publisher", "../escape"),
+    ("documentation-publisher", "1"*32), ("documentation-publisher", 123)])
+def test_submission_cannot_change_template_or_reuse_reserved_id(env,template,identifier):
+    with pytest.raises(PermissionError):
+        env.app.submit_registered(template_id=template,request_id=identifier)
+    assert not env.native.effects and not env.delivery.requests
+
+
+def test_interrupted_submission_retains_initial_manifest_time_and_does_not_resend(env,monkeypatch):
+    complete_acceptance(env)
+    original=env.native.call
+    def crash(operation,**kwargs):
+        if operation=="deliver":raise SystemExit("stop before first later-objective delivery")
+        return original(operation,**kwargs)
+    monkeypatch.setattr(env.native,"call",crash)
+    with pytest.raises(SystemExit):
+        env.app.submit_registered(template_id="documentation-publisher",request_id="2"*32)
+    monkeypatch.setattr(env.native,"call",original)
+    later=NOW+timedelta(minutes=10)
+    env.native.now=later
+    env.app=build(env.config,delivery=env.delivery,root_client=env.native,clock=lambda:later)
+    result=env.app.submit_registered(template_id="documentation-publisher",request_id="2"*32)
+    assert result["expires_at"]==(NOW+timedelta(days=1)).isoformat()
+    assert len(env.delivery.requests)==3
+
+def test_restart_after_root_stage_before_canonical_storage_uses_same_submission_manifest(env,monkeypatch):
+    complete_acceptance(env)
+    original=env.native.stage
+    def crash(**kwargs):
+        original(**kwargs)
+        raise SystemExit("stop after Root stage before canonical storage")
+    monkeypatch.setattr(env.native,"stage",crash)
+    with pytest.raises(SystemExit):
+        env.app.submit_registered(template_id="documentation-publisher",request_id="2"*32)
+    assert len(env.delivery.requests)==2
+    monkeypatch.setattr(env.native,"stage",original)
+    later=NOW+timedelta(minutes=10);env.native.now=later
+    env.app=build(env.config,delivery=env.delivery,root_client=env.native,clock=lambda:later)
+    env.app.maintenance()
+    result=env.app.submission_status(request_id="2"*32)
+    assert result["expires_at"]==(NOW+timedelta(days=1)).isoformat()
+    assert len(env.delivery.requests)==3 and len(env.native.effects)==2
+
+
+def test_expired_undecided_requests_release_capacity_without_new_effect_or_old_card_resend(env):
+    complete_acceptance(env)
+    for number in ("2","3"):
+        env.app.submit_registered(template_id="documentation-publisher",request_id=number*32)
+    assert len(env.delivery.requests)==4 and len(env.native.effects)==2
+    later=NOW+timedelta(hours=25);env.native.now=later
+    env.app=build(env.config,delivery=env.delivery,root_client=env.native,clock=lambda:later)
+    env.app.maintenance()
+    result=env.app.submit_registered(template_id="documentation-publisher",request_id="4"*32)
+    assert result["state"]=="awaiting_approval"
+    assert len(env.delivery.requests)==5 and len(env.native.effects)==2
+    assert env.app.handler.requests.objective_submission_ids(
+        prefix="planapproval-objective-",now=later,ttl_seconds=86400)==(result["approval_id"],)

@@ -6,8 +6,8 @@ are read-only; subordinate execution contexts stay in this component's state.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -155,6 +155,7 @@ class ObjectiveApplication:
     root_client: object
     clock: object
     status_maintenance: object = None
+    issuance_lock: object = field(default_factory=threading.RLock)
 
     def interaction(self, envelope):
         token = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
@@ -162,7 +163,7 @@ class ObjectiveApplication:
         submit = parsed.approval_submit
         if submit is None or not submit.approval_id.startswith(PREFIX):
             raise PermissionError("approval is outside the isolated objective component")
-        if submit.approval_id == self.config["campaign"]["approve_approval_id"] and submit.decision == "approve":
+        if submit.approval_id != self.config["campaign"]["deny_approval_id"] and submit.decision == "approve":
             # Root independently retains the original decision before transient
             # CI/native gates can consume the transport freshness window.
             admitted = self.root_client.call("admit", approval_id=submit.approval_id,
@@ -176,6 +177,10 @@ class ObjectiveApplication:
             decided_at=parsed.issued_at, selections=submit.selections, signed_envelope=envelope)
 
     def issue(self, case):
+        with self.issuance_lock:
+            return self._issue(case)
+
+    def _issue(self, case):
         campaign = self.config["campaign"]
         approval_id = campaign[case + "_approval_id"]
         prior = self.handler.service.teams_flow.approval_service.repository.get(approval_id)
@@ -188,32 +193,86 @@ class ObjectiveApplication:
                 campaign["deny_approval_id"])
             if denied is None or denied.status != "denied":
                 return False
-        names = (TEST_CAPABILITY,) if case == "deny" else CAPABILITIES
+        return self._issue_plan(approval_id, datetime.fromisoformat(campaign["issued_at"]), test=case == "deny")
+
+    def _issue_plan(self, approval_id, issued_at, *, test=False):
+        campaign = self.config["campaign"]
+        names = (TEST_CAPABILITY,) if test else CAPABILITIES
         args = ({"test_only": True, "execution_permitted": False}
-                if case == "deny" else campaign["step_arguments"])
+                if test else campaign["step_arguments"])
         requests = tuple(OrchestrationRequest(
             execution_id=approval_id + "-" + str(index), correlation_id=approval_id,
             principal_id=self.config["requester_identity_id"], organization_id="aot",
             capability_name=name, capability_version="1.0.0",
             requested_mode="deterministic", orchestration_mode=OrchestrationMode.EXECUTE,
             authority_allowed=False, approval_present=False,
-            risk="low" if case == "deny" else "critical",
+            risk="low" if test else "critical",
             data_handling=DataHandlingPolicy("internal", False, retention_allowed=True),
             budget=ExecutionBudget(Decimal("0")), arguments=args,
             permission_mode="execute", requester_kind="service")
             for index, name in enumerate(names))
-        issued_at = datetime.fromisoformat(campaign["issued_at"])
         issuer = replace(self.handler.issuer, approval_id_factory=lambda: approval_id,
                          clock=lambda: issued_at)
         issuer.submit_service_plan(requests=requests,
             principal=AutonomousPrincipal(self.config["requester_identity_id"], "aot"),
-            title=("TEST ONLY: choose Deny" if case == "deny"
+            title=("TEST ONLY: choose Deny" if test
                    else "Complete documentation publisher restoration and scheduled verification"),
             summary=("This separate test cannot execute a production action, even if approved."
-                     if case == "deny" else
+                     if test else
                      "One decision covers the reviewed restore and its scheduled readback. Jason executes and verifies both steps."),
-            production=case != "deny", ttl_seconds=self.config["objective_ttl_seconds"])
+            production=not test, ttl_seconds=self.config["objective_ttl_seconds"])
         return True
+
+    def activated(self):
+        activation = self.config.get("activation_path")
+        if activation is None:
+            return True
+        ready = read_profile(Path(activation))
+        return ready.get("ready") is True and ready.get("source_sha") == self.config["source_sha"]
+
+    def submit_registered(self, *, template_id, request_id):
+        """Request one immutable registered plan; never grant human authority."""
+        import re
+        if template_id != "documentation-publisher" or not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f]{32}", request_id):
+            raise PermissionError("REGISTERED_OBJECTIVE_REQUEST_REQUIRED")
+        approval_id = PREFIX + request_id
+        campaign = self.config["campaign"]
+        if approval_id in (campaign["deny_approval_id"], campaign["approve_approval_id"]):
+            raise PermissionError("ACCEPTANCE_OBJECTIVE_ID_RESERVED")
+        with self.issuance_lock:
+            denied = self.handler.service.teams_flow.approval_service.repository.accepted_decision(campaign["deny_approval_id"])
+            progress = self.handler.requests.progress(campaign["approve_approval_id"])
+            if (not self.activated() or denied is None or denied.status != "denied"
+                    or progress is None or progress["state"] != "completed"
+                    or self.root_client.call("status", approval_id=campaign["approve_approval_id"]).get("state") != "verified_complete"):
+                raise PermissionError("LIVE_OWNER_ACCEPTANCE_REQUIRED")
+            now = self.clock()
+            issued_at = self.handler.requests.objective_submission(
+                approval_id=approval_id, template_id=template_id, now=now, prefix=PREFIX,
+                maximum_active=2, ttl_seconds=self.config["objective_ttl_seconds"])
+            pending = self.handler.service.teams_flow.approval_service.repository.get(approval_id)
+            if pending is None:
+                if now >= issued_at + timedelta(seconds=self.config["objective_ttl_seconds"]):
+                    raise PermissionError("OBJECTIVE_SUBMISSION_EXPIRED")
+                self._issue_plan(approval_id, issued_at)
+            elif pending.status.value == "pending":
+                self._recover_root_delivery(pending)
+            return self.submission_status(request_id=request_id)
+
+    def submission_status(self, *, request_id):
+        import re
+        if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f]{32}", request_id):
+            raise PermissionError("OBJECTIVE_REQUEST_ID_REQUIRED")
+        approval_id = PREFIX + request_id
+        if not self.handler.requests.contains(approval_id):
+            raise PermissionError("OBJECTIVE_NOT_FOUND")
+        proposal = self.handler.proposals.require(approval_id)
+        pending = self.handler.service.teams_flow.approval_service.repository.get(approval_id)
+        return {"approval_id": approval_id, "template_id": "documentation-publisher",
+                "state": (self.handler.requests.progress(approval_id) or {}).get("state", "staging"),
+                "decision": pending.status.value if pending else None,
+                "expires_at": proposal.scope.expires_at.isoformat(),
+                "plan_fingerprint": proposal.plan_fingerprint}
 
     def _recover_root_delivery(self, pending):
         from orchestrator.approval_audit import ApprovalAuditEventType
@@ -252,6 +311,14 @@ class ObjectiveApplication:
                 return
         self.issue("deny")
         self.issue("approve")
+        for approval_id in self.handler.requests.objective_submission_ids(
+                prefix=PREFIX, now=self.clock(), ttl_seconds=self.config["objective_ttl_seconds"]):
+            try:
+                self.submit_registered(template_id="documentation-publisher",
+                                       request_id=approval_id.removeprefix(PREFIX))
+            except Exception as exc:
+                print(json.dumps({"event": "owner_objective_submission_blocked",
+                                  "reason": type(exc).__name__}), flush=True)
         for approval_id in self.handler.requests.candidate_ids(limit=32, prefix=PREFIX, include_indeterminate=True):
             if approval_id.startswith(PREFIX):
                 self.handler.plan_runner.process(approval_id)
@@ -298,6 +365,8 @@ def main():
             self.wfile.write(json.dumps(result).encode())
     server = ThreadingHTTPServer(("0.0.0.0", 8097), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    from .owner_objective_submission import start_issuer
+    start_issuer(app, Path(config["state_dir"]) / "issuer.sock")
     while True:
         try:
             app.maintenance()

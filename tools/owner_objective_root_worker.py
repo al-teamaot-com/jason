@@ -178,8 +178,7 @@ def process(message: dict, config: dict, context) -> dict:
         def preflight(candidate):
             steps = candidate["material"]["requests"]
             if ([step.get("capability_name") for step in steps] != [
-                    "release.documentation.publisher.restore", "release.documentation.publisher.verify"]
-                    or candidate["approval_id"] != config["campaign_approval_id"]):
+                    "release.documentation.publisher.restore", "release.documentation.publisher.verify"]):
                 return False
             for step in steps:
                 if step["arguments"] != actions.manifest["step_arguments"]:
@@ -192,8 +191,7 @@ def process(message: dict, config: dict, context) -> dict:
         return {k: staged[k] for k in ("approval_id", "plan_fingerprint", "card_instance_challenge")}
     if op == "deliver" and set(message) == {"schema_version", "operation", "approval_id"}:
         from tools.owner_objective_teams_delivery import send
-        if (approval_id != config["campaign_approval_id"]
-                or active_owner(config, config["tenant_id"], config["owner_oid"]) != config["owner_identity_id"]
+        if (active_owner(config, config["tenant_id"], config["owner_oid"]) != config["owner_identity_id"]
                 or actions.preflight() is not True):
             raise PermissionError("OBJECTIVE_DELIVERY_LIVE_PREFLIGHT")
         provider_id = store.deliver(approval_id=approval_id, at=now,
@@ -206,8 +204,6 @@ def process(message: dict, config: dict, context) -> dict:
             raise PermissionError("OBJECTIVE_ROOT_DELIVERY_NOT_CONFIRMED")
         return {"approval_id": approval_id, "delivery_recorded": True}
     if op == "admit" and set(message) == {"schema_version", "operation", "approval_id", "signed_envelope"}:
-        if approval_id != config["campaign_approval_id"]:
-            raise PermissionError("OBJECTIVE_DECISION_OUTSIDE_REGISTERED_CAMPAIGN")
         return store.admit(approval_id=approval_id, signed_envelope=message["signed_envelope"],
                            at=now, verify_ports=ports)
     if op in ("execute", "readback") and set(message) == {

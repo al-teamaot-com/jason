@@ -37,7 +37,7 @@ covered recovery do not ask for another Owner response.
 Current v1 documentation registration permits exactly restore then scheduled
 verification, with a fixed artifact source and exact rollback. It allows only
 the two mechanically generated documentation state files to change as its own
-publication effect. It does not permit arbitrary source changes, provider
+publication effect, using the existing generated branch/PR and control-board\nissue #526. Later requests for this registered template use the same local\nworkload issuer and one new original decision per objective; no Root setup or\nper-step vote is required. Repeat jobs require fresh invocation evidence and\npreserve earlier acceptance records. It does not permit arbitrary source changes, business provider
 writes, a changed tenant/component, wider disruption or a general Root shell.
 
 A materially changed remaining objective, expired/revoked grant or genuinely
