@@ -46,6 +46,12 @@ from .provider_read_capability_catalog import (
 from .service import CapabilityInvoker, InvocationResult
 
 
+class AutotaskTimeEntryPermissionUnproven(PermissionError):
+    """Keep native permission proof fail-closed with a safe diagnostic code."""
+
+    error_code = "AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN"
+
+
 class TrustedPrincipalBindingResolver(Protocol):
     def find_active_by_jason_identity(self, *, jason_identity_id: str): ...
 
@@ -392,7 +398,9 @@ class AutotaskImpersonationInformationAuthorizer:
                 and resolution.capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH
                 and (mode != AUTOTASK_AUTH_MODE_IMPERSONATED
                      or os.getenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", "") != "verified")):
-            raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
+            raise AutotaskTimeEntryPermissionUnproven(
+                "Autotask time-entry requester permission has not been proven."
+            )
 
         invocation = self.delegate.invoke(request=request, resolution=resolution)
 
@@ -401,7 +409,9 @@ class AutotaskImpersonationInformationAuthorizer:
 
         if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
             if resolution.capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH:
-                raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
+                raise AutotaskTimeEntryPermissionUnproven(
+                    "Autotask time-entry requester permission has not been proven."
+                )
             if resolution.capability_name not in AUTOTASK_CAPABILITIES:
                 return invocation
             if resolution.capability_name in {SERVICE_ENTITY_SEARCH, SERVICE_ENTITY_READ}:

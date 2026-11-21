@@ -837,3 +837,45 @@ def test_vulscan_notification_empty_history_requires_exact_bounded_ticket_query(
             request=request, resolution=_resolution(SERVICE_NOTIFICATION_HISTORY_SEARCH),
         ).information_authorization.require_allowed(InformationAction.RELEASE)
         assert decision.allowed is False
+
+
+@pytest.mark.parametrize("mode,proof", [
+    (AUTOTASK_AUTH_MODE_JASON_MANAGED, None),
+    (AUTOTASK_AUTH_MODE_JASON_MANAGED, "verified"),
+    (AUTOTASK_AUTH_MODE_IMPERSONATED, None),
+    (AUTOTASK_AUTH_MODE_IMPERSONATED, "true"),
+])
+def test_time_entry_permission_stop_is_specific_and_never_fetches(monkeypatch, mode, proof):
+    from orchestrator.autotask_information_authorizer import AutotaskTimeEntryPermissionUnproven
+    from orchestrator.provider_read_capability_catalog import SERVICE_TICKET_TIME_ENTRY_SEARCH
+
+    class NeverFetch:
+        def invoke(self, **kwargs):
+            pytest.fail("unproven labor access must stop before provider fetch")
+
+    monkeypatch.setenv(AUTOTASK_REQUESTER_AUTH_MODE_ENV, mode)
+    monkeypatch.delenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", raising=False)
+    if proof is not None:
+        monkeypatch.setenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", proof)
+    with pytest.raises(AutotaskTimeEntryPermissionUnproven) as failure:
+        AutotaskImpersonationInformationAuthorizer(delegate=NeverFetch()).invoke(
+            request=_request(SERVICE_TICKET_TIME_ENTRY_SEARCH, principal_id="person-technician"),
+            resolution=_resolution(SERVICE_TICKET_TIME_ENTRY_SEARCH),
+        )
+    assert failure.value.error_code == "AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN"
+
+
+def test_proven_native_labor_path_still_requires_trusted_requester_binding(monkeypatch):
+    from orchestrator.provider_read_capability_catalog import SERVICE_TICKET_TIME_ENTRY_SEARCH
+
+    monkeypatch.setenv(AUTOTASK_REQUESTER_AUTH_MODE_ENV, AUTOTASK_AUTH_MODE_IMPERSONATED)
+    monkeypatch.setenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", "verified")
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(
+        request=_request(SERVICE_TICKET_TIME_ENTRY_SEARCH, principal_id="person-technician"),
+        resolution=_resolution(SERVICE_TICKET_TIME_ENTRY_SEARCH),
+    )
+    release = invocation.information_authorization.decisions[InformationAction.RELEASE]
+    assert release.allowed is False
