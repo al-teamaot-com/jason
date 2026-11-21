@@ -22,6 +22,26 @@ groups:
           summary: Jason security-control exporter is down
           description: Prometheus cannot scrape the secret-safe security-control exporter.
 
+      - alert: JasonSecurityControlAuditProjectionUnavailable
+        expr: jason_security_control_audit_available == 0
+        for: 15m
+        labels:
+          severity: warning
+          service: jason-security
+        annotations:
+          summary: Jason security-control audit projection is incomplete or stale
+          description: Counts are withheld until bounded audit backfill completes. Check cursor and checkpoint; a reachable exporter is not proof of complete metrics.
+
+      - alert: JasonSecurityControlCheckpointUnavailable
+        expr: jason_security_control_projection_persist_ok == 0
+        for: 15m
+        labels:
+          severity: warning
+          service: jason-security
+        annotations:
+          summary: Jason security-control projection cannot persist its checkpoint
+          description: Inspect the private exporter state directory. No audit database index or mutation is required.
+
       - alert: JasonAuthorityContextDenialObserved
         expr: delta(jason_security_control_events{control="authority_context_denied"}[15m]) >= 1
         for: 0m
