@@ -1239,6 +1239,22 @@ Copy this section when adding an idea:
 6. No item in this document overrides the Jason Constitution, policy engine, approval requirements, or human authority.
 ---
 
+### TODO-GOV-007 — One authenticated Teams approval per bounded work package with automatic continuation
+
+- **Priority:** P1 — Owner-requested approval-friction reduction
+- **Status:** Approved for source-only design and engineering — owner-requested 2026-11-05; production activation separately governed
+- **Autonomous engineering readiness:** Approved for bounded source-only engineering; release/deployment authorization not granted
+- **Risk level:** High — shared approval and release-governance surfaces
+- **Idea:** Replace repeated Teams, chat, and terminal approvals for the same approved task with one authenticated, comprehensible Teams decision for each exact bounded work package. Reuse the existing shared approval service rather than adding another approval engine.
+- **Workflow:** The owner's task assignment authorizes routine in-scope engineering/diagnosis. Automatically continue bounded retries, safe read checks, tests, CI, integration, and verification. At the true production authority boundary, one Teams card presents exact candidate SHA, full diff/scope digest, rollback SHA, risk, preproduction/CCC evidence, and one-transaction freeze exception. One click emits *independent*, exact-bound owner, CCC-review, and freeze-exception receipts, then automatically resumes to verified completion; never ask for separate chat/SSH approvals for those same compatible gates.
+- **Approval reuse:** Reuse an existing signed approval only while exact purpose, target, arguments, policy version, scope, SHA (where applicable), production/rollback identity, risk, and TTL remain valid. Deduplicate retries, worker changes and notification delivery; changed material scope, SHA or disruptive action requires a new narrowly targeted approval.
+- **Teams UX:** Group compatible pending approvals, show explicit included/excluded actions, human-readable reasoning and consequences, include Approve/Reject and status. Routine progress is informational only, not another approval request. Keep a durable receipt and outcome linked to the original objective.
+- **Authority boundary:** This TODO does not create standing production deployment authority, bypass exact-SHA approval, authorize unknown future commits, unfreeze globally, waive protected CI/CCC, broaden provider/tenant permissions, or preapprove disruptive endpoint actions, financial movements or sensitive security changes. Preserve signed Entra identity, TTL/nonce, replay protection, exact-argument approval, immutable evidence, rollback and fail-closed behavior.
+- **Acceptance:** One bounded repair end to end with at most one interactive Teams approval at its true production boundary, independently verified authority receipts, no extra chat/SSH command, automatic postapproval resume and verified closeout. Negative tests for SHA/diff/rollback/policy drift, wrong approver/tenant, changed scope, expiry/replay, denial, concurrent execution and disruptive branch. Measure duplicate approval prompts per objective and approval-to-resume success, demonstrating a material reduction.
+- **Existing architecture and dependencies:** GitHub issue #2337; shared governed approval service #1468, Universal Approver #1440, one-transaction release/freeze Teams flow #2316, production_repair Teams policy #2324, technician approval/auto-resume #2104, TODO-GOV-006 and throughput improvements #2292. Do not create competing engines.
+- **Decision owner:** AOT Owner / Jason Governance Authority
+- **Review trigger:** Before further approval-surface expansion and after existing shared approval integrations are ready for consolidated production acceptance.
+
 ## Completed / consolidated history
 
 Completed and superseded TODO records are preserved verbatim in docs/roadmaps/Project-Jason-TODO-Consolidation-History.md. The active roadmap intentionally contains only work with remaining independent scope.
