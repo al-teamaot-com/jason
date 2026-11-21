@@ -18,7 +18,7 @@ ExecStart=/usr/bin/python3 -I -B -c "import runpy,sys;sys.path.insert(0,'/usr/lo
 TimeoutStartSec=120
 NoNewPrivileges=true
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
-CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_AUDIT_WRITE
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_KILL CAP_AUDIT_WRITE
 UMask=0077
 # Host mount namespace is required: consumers must see the recorded file bind.
 # Do not add mount-namespace hardening that makes recovery private to this unit.

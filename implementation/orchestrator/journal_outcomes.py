@@ -61,7 +61,7 @@ class OutcomeReceipts:
      catalog=store.profile.catalog()
      with store._active(catalog,write=True) as db:
       db.execute("DELETE FROM audit_journal_pending_outcomes WHERE receipt_id=?",(row["receipt_id"],))
-      if event.event_type in TERMINAL:
+      if event.event_type in TERMINAL or event.stage.casefold()=="denied":
        db.execute("DELETE FROM audit_journal_inflight WHERE execution_id=?",(event.execution_id,))
    else:store.append_event(event)
    with store._mutex,store.profile.gate():

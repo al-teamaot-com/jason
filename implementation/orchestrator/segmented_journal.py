@@ -361,7 +361,8 @@ class SegmentedOrchestrationEventStore:
                 if catalog["mode"]!="legacy":
                     db.execute("DELETE FROM audit_journal_pending_outcomes WHERE receipt_id=?",(key,))
                     if (event.event_type in ("orchestration.capability.completed","orchestration.capability.failed",
-                            "orchestration.request.terminated","orchestration.check_only.validated")
+                            "orchestration.request.terminated","orchestration.check_only.validated",
+                            "orchestration.idempotency.deduplicated")
                             or (event.stage.casefold()=="denied" and event.event_type.startswith("orchestration."))):
                         db.execute("DELETE FROM audit_journal_inflight WHERE execution_id=?",(event.execution_id,))
 

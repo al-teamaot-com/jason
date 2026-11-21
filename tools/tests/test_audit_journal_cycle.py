@@ -49,3 +49,14 @@ def test_legacy_publication_stays_paused_until_consumers_are_restored(native):
   old.append_event(event("restored",kind="orchestration.request.received"))
   assert old.get("new").event_id=="new" and old.get("restored").event_id=="restored"
  finally:old.close()
+
+
+def test_cached_approval_replays_release_their_capacity_reservations(native):
+ from orchestrator import journal_sql
+ p,c,s=native;c.transition(initial=True)
+ for index in range(64):
+  execution="replay-"+str(index)
+  s.append_event(event("received-"+str(index),execution=execution,kind="orchestration.request.received"))
+  s.append_event(event("deduplicated-"+str(index),execution=execution,
+                       kind="orchestration.idempotency.deduplicated",stage="completed"))
+ assert journal_sql.active_state(p.active)["reservations"]==[]

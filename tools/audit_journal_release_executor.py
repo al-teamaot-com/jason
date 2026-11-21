@@ -10,7 +10,8 @@ from contextlib import contextmanager,ExitStack
 from datetime import datetime,timezone
 import fcntl,stat
 from hashlib import sha256
-import json,os,subprocess,sys,time
+from http.client import HTTPException
+import json,os,signal,subprocess,sys,time
 from pathlib import Path
 from tools.audit_journal_release_scope import ACTION,PRIVATE,POLICY,BASE,OWNER,ROLLBACK,PROTECTED,STATE,digest
 from tools.audit_journal_container_release import DockerEngine,ROLES,planned_configuration,exact_original_configuration,configuration_matches
@@ -31,13 +32,15 @@ class ExactRelease:
        and self.plan["scope_sha256"]==digest(self.plan["scope"])
        and self.plan["candidate_sha"]==self.policy["candidate_sha"],"JOURNAL_EXACT_RELEASE_PLAN_BINDING")
   self.before=read_control(PRIVATE/"producer-before.json",0,0o400)
-  need(digest(self.before)==self.plan["producer_before_sha256"],"JOURNAL_BEFORE_SPEC_BINDING")
+  need(set(self.before)==set(ROLES) and digest(self.before)==self.plan["producer_before_sha256"],
+       "JOURNAL_BEFORE_SPEC_BINDING")
   adoption=read_control(PRIVATE/"adoption.json",0,0o400)
   need(adoption["scope_sha256"]==self.plan["scope_sha256"]
        and self.plan["scope"]["source_sha256"]==self.policy["trusted_source_sha256"],
        "JOURNAL_ADOPTION_AND_EXECUTION_SCOPE_DIVERGED")
   for role,before in self.before.items():
-   need(role in ROLES and digest(exact_original_configuration(before))==
+   need(role in ROLES and before["Id"]==self.plan["scope"]["producer_before"][role]["id"]
+        and digest(exact_original_configuration(before))==
         self.plan["scope"]["producer_before"][role]["configuration_sha256"]
         and digest(planned_configuration(before,self.plan["candidate_sha"]))==
         self.plan["scope"]["producer_after_configuration_sha256"][role],
@@ -60,6 +63,11 @@ class ExactRelease:
    self.protected()
    yield
 
+ def arm_budget(self,seconds):
+  need(seconds>0,"JOURNAL_EXACT_EXECUTION_TIME_BUDGET")
+  def expired(_signum,_frame):raise TimeoutError("JOURNAL_EXACT_EXECUTION_TIME_BUDGET")
+  signal.signal(signal.SIGALRM,expired);signal.setitimer(signal.ITIMER_REAL,seconds)
+
  def save(self):self.c._json(self.path,self.journal,0o400)
  def status(self,phase,**extra):
   value={"schema_version":"1.0","candidate_sha":self.plan["candidate_sha"],"phase":phase,
@@ -81,6 +89,7 @@ class ExactRelease:
   need(0<=(datetime.now(timezone.utc)-datetime.fromisoformat(self.journal["started_at"])).total_seconds()<=28800,
        "JOURNAL_EXACT_RELEASE_EXECUTION_BUDGET")
   elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(self.journal["started_at"])).total_seconds()
+  self.arm_budget(28800-elapsed)
   self.c._objective_deadline=time.monotonic()+28800-elapsed
   self.c._exact_release_scope=self.plan["scope_sha256"]
   self.c._exact_source_dataset=self.plan["scope"]["source_dataset_identity"]
@@ -111,23 +120,26 @@ class ExactRelease:
    before=self.before[role]
    body=exact_original_configuration(before) if original else planned_configuration(before,candidate)
    current=self.engine.lookup(role)
-   if self.matches(current,body) and current["State"]["Running"]:continue
    key=("restore:" if original else "install:")+role
    step=self.journal["steps"].get(key)
-   if step is None:
-    if original and current is None:
+   if original and (current is None or step is not None and step.get("restore_missing")):
+    if step is None:
      installed=self.journal["steps"].get("install:"+role)
      need(installed is not None,"JOURNAL_MISSING_PRODUCER_HAS_NO_RECORDED_INSTALL")
-     saved=self.engine.lookup(installed["backup"],required=True)
-     need(saved["Id"]==before["Id"] and not saved["State"]["Running"],
-          "JOURNAL_EXACT_ORIGINAL_BEFORE_CONTAINER_REQUIRED")
-     result=self.engine.call("POST","/containers/create?name="+role,body)
-     need(len(result.get("Id",""))==64,"JOURNAL_ORIGINAL_RECREATION_ID")
-     self.engine.call("POST","/containers/"+result["Id"]+"/start")
-     restored=self.engine.inspect(role)
-     need(self.matches(restored,body) and restored["State"]["Running"],"JOURNAL_RECREATED_ORIGINAL_NOT_VERIFIED")
-     self.journal["steps"][key]={"after_id":restored["Id"],"verified":True};self.save()
-     continue
+     step={"restore_missing":True,"original_backup":installed["backup"],
+           "original_id":before["Id"],"configuration_sha256":digest(body)}
+     self.journal["steps"][key]=step;self.save()
+    kwargs={"original_id":step["original_id"],"original_backup":step["original_backup"]}
+    try:result=self.engine.restore_missing(role,body,**kwargs)
+    except (OSError,HTTPException):result=self.engine.restore_missing(role,body,**kwargs)
+    restored=self.engine.inspect(role)
+    need(self.matches(restored,body) and restored["State"]["Running"],"JOURNAL_RECREATED_ORIGINAL_NOT_VERIFIED")
+    step.update(result,verified=True);self.save();continue
+   if self.matches(current,body) and current["State"]["Running"]:
+    if step and step.get("after_id"):
+     need(current["Id"]==step["after_id"],"JOURNAL_RECORDED_REPLACEMENT_CHANGED")
+    continue
+   if step is None:
     need(current is not None,"JOURNAL_UNRECORDED_PRODUCER_ABSENT")
     if not original:need(current["Id"]==before["Id"],"JOURNAL_PRODUCER_CHANGED_BEFORE_REPLACEMENT")
     phase="failed" if original else "before"
@@ -135,7 +147,13 @@ class ExactRelease:
           "configuration_sha256":digest(body)}
     self.journal["steps"][key]=step;self.save()
    self.status("restoring_consumers" if original else "installing_dormant_consumers",role=role)
-   result=self.engine.replace(role,body,expected_id=step["before_id"],backup_name=step["backup"])
+   try:
+    result=self.engine.replace(role,body,expected_id=step["before_id"],backup_name=step["backup"])
+   except (OSError,HTTPException):
+    # Engine.replace begins with exact native readback, including any existing
+    # stopped before-image. This bounded retry reconciles a transport loss.
+    self.status("reconciling_container_transport_outcome",role=role)
+    result=self.engine.replace(role,body,expected_id=step["before_id"],backup_name=step["backup"])
    step.update(result,verified=False);self.save()
    deadline=time.monotonic()+120
    while time.monotonic()<deadline:
@@ -163,7 +181,7 @@ class ExactRelease:
   start=datetime.now(timezone.utc)
   subprocess.run(["/usr/bin/systemctl","enable","--now","jason-audit-journal-maintenance.timer"],
                  capture_output=True,timeout=30,check=True)
-  deadline=time.monotonic()+600
+  deadline=min(time.monotonic()+21600,getattr(self.c,"_objective_deadline",time.monotonic()+21600))
   while time.monotonic()<deadline:
    try:
     row=read_control(self.c.p.control/"maintenance-status.json",0)
@@ -266,12 +284,15 @@ class ExactRelease:
   stamp=self.journal.setdefault("recovery_started_at",datetime.now(timezone.utc).isoformat());self.save()
   elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(stamp)).total_seconds()
   need(0<=elapsed<=28800,"JOURNAL_EXACT_RECOVERY_EXECUTION_BUDGET")
+  self.arm_budget(28800-elapsed)
   self.c._objective_deadline=time.monotonic()+28800-elapsed
   self.c._exact_release_scope=self.plan["scope_sha256"]
 
  def rollback(self):
   subprocess.run(["/usr/bin/systemctl","disable","--now","jason-audit-journal-maintenance.timer"],
-                 capture_output=True,timeout=30,check=False)
+                 capture_output=True,timeout=30,check=True)
+  subprocess.run(["/usr/bin/systemctl","stop","jason-audit-journal-maintenance.service"],
+                 capture_output=True,timeout=150,check=True)
   self.c.recover()
   self.c.cleanup_abandoned_work()
   if self.c.p.catalog()["mode"]!="legacy":
@@ -288,7 +309,9 @@ class ExactRelease:
 
 def complete(controller):
  executor=ExactRelease(controller)
- with executor.release_locks():executor.complete()
+ try:
+  with executor.release_locks():executor.complete()
+ finally:signal.setitimer(signal.ITIMER_REAL,0)
 
 
 def rollback_release(controller):
@@ -296,7 +319,9 @@ def rollback_release(controller):
  if executor.journal.get("outcome")=="rolled_back":return
  # A rollback may start only within the exact original execution window.
  if "recovery_started_at" not in executor.journal:executor.claim()
- with executor.release_locks():
-  executor.begin_recovery();executor.protected();executor.rollback()
-  executor.journal["outcome"]="rolled_back";executor.save()
-  executor.status("rolled_back",all_history_retained=True)
+ try:
+  with executor.release_locks():
+   executor.begin_recovery();executor.protected();executor.rollback()
+   executor.journal["outcome"]="rolled_back";executor.save()
+   executor.status("rolled_back",all_history_retained=True)
+ finally:signal.setitimer(signal.ITIMER_REAL,0)

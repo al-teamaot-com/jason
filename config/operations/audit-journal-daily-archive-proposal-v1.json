@@ -13,10 +13,15 @@
     "approval_database_changed": false,
     "business_provider_writes": false,
     "new_approval_service": false,
-    "new_scheduler": false,
     "new_work_scheduler": false,
     "maintenance_integration_pending_review": true,
-    "new_database_or_approval_authority_for_outcome_receipts": false
+    "new_database_or_approval_authority_for_outcome_receipts": false,
+    "new_scheduler_platform": false,
+    "new_storage_maintenance_timer": true,
+    "consumer_image_ids_changed": false,
+    "same_image_consumer_replacements": 3,
+    "maximum_recovery_consumer_replacements": 3,
+    "docker_daemon_restart": false
   },
   "proposed_limits": {
     "timezone": "America/New_York",
@@ -36,7 +41,10 @@
     "historical_scrub_after_days": 28,
     "historical_scrub_maximum_age_days": 31,
     "archive_free_reserve_bytes": 4294967296,
-    "pending_outcome_reconciliation_grace_seconds": 60
+    "pending_outcome_reconciliation_grace_seconds": 60,
+    "maximum_initial_execution_seconds": 28800,
+    "maximum_covered_recovery_seconds": 28800,
+    "maximum_event_bytes": 262144
   },
   "retention": {
     "archive_delete_allowed": false,
@@ -52,7 +60,8 @@
     "archive_destination": "owner_selected_archive_drive",
     "off_host_backup_claimed": false,
     "rollback_reconstruction_storage": "archive_drive",
-    "canonical_legacy_rollback_data_binding": "descriptor_guarded_file_bind_with_boot_recovery"
+    "canonical_legacy_rollback_data_binding": "descriptor_guarded_file_bind_with_boot_recovery",
+    "rollback_retains_boot_recovery_and_archive_custody": true
   },
   "integrity": {
     "active": "bounded consistent snapshot plus full integrity and restore proof",
@@ -104,5 +113,5 @@
     "native_current_health_and_governed_revalidation"
   ],
   "production_ready": false,
-  "implementation_status": "dormant_native_modules_in_review_not_installed"
+  "implementation_status": "exact_bootstrap_and_native_transaction_under_review_not_installed"
 }

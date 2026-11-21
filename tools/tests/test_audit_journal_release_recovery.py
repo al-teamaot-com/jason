@@ -63,3 +63,17 @@ def test_configuration_readback_rejects_resource_or_mount_permission_change():
  assert not configuration_matches(current,body)
  current["HostConfig"]["ReadonlyRootfs"]=True;current["Mounts"][-1]["RW"]=True
  assert not configuration_matches(current,body)
+
+
+@pytest.mark.parametrize("crash",["create","start"])
+def test_original_recreation_lost_response_does_not_consume_an_extra_replacement(monkeypatch,crash):
+ from tools.audit_journal_container_release import exact_original_configuration
+ monkeypatch.setattr("tools.audit_journal_container_release.os.geteuid",lambda:0)
+ engine=EngineFixture(crash);engine.rows[BACKUP]=engine.rows.pop(ROLE)
+ engine.rows[BACKUP]["State"]["Running"]=False
+ body=exact_original_configuration(before())
+ with pytest.raises(RuntimeError,match="lost-response"):
+  engine.restore_missing(ROLE,body,original_id="b"*64,original_backup=BACKUP)
+ result=engine.restore_missing(ROLE,body,original_id="b"*64,original_backup=BACKUP)
+ assert result["after_id"]=="d"*64 and engine.created==1
+ assert engine.rows[ROLE]["State"]["Running"] and configuration_matches(engine.rows[ROLE],body)

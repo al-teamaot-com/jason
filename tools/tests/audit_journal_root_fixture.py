@@ -97,10 +97,16 @@ writer("legacy","before","after","late","after-rollback")
 try:controller.transition(initial=True)
 except FileExistsError:pass
 else:raise AssertionError("one-use cutover authority replayed")
+# A Root SQL-helper timeout must not leave its UID1000 descendant holding
+# the journal open. This read-only helper is deliberately interrupted at startup.
+try:controller._sql("state",{"path":str(p.active)},seconds=0.001)
+except subprocess.TimeoutExpired:pass
+else:raise AssertionError("startup timeout did not occur")
+controller.no_handles(p.active)
 bootstrap=runpy.run_path("/bootstrap_fixture.py")
 cases=bootstrap["exercise"](BASE,TRUST)
 composition=runpy.run_path("/installer_fixture.py")["exercise"](BASE,TRUST)
-print(json.dumps({"root_install_composition_cases":composition,"root_bootstrap_interruption_cases":cases,"test":"isolated-native-root-two-identity","result":"passed",
+print(json.dumps({"sql_helper_timeout_group_reaped":True,"root_install_composition_cases":composition,"root_bootstrap_interruption_cases":cases,"test":"isolated-native-root-two-identity","result":"passed",
  "root_custody":True,"writer_uid":1000,"distinct_filesystems":True,"production_mounts":False,
  "all_events_retained":True,"original_source_reclaimed":True,"reboot_mapping_restored":True,
  "recursive_container_bind_verified":True}))

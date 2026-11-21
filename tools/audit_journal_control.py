@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import sqlite3
 import stat
 import subprocess
@@ -174,10 +175,21 @@ class JournalController:
         need(os.geteuid()==0 and self.p.writer_uid==1000,"JOURNAL_WRITER_IDENTITY")
         # Only fixed installed code and a finite operation execute as UID1000.
         loader='import runpy,sys;sys.path.insert(0,sys.argv[1]);p=sys.argv[2];sys.argv=[p,*sys.argv[3:]];runpy.run_path(p,run_name="__main__")'
-        completed=subprocess.run(["/usr/sbin/runuser","-u","al","--","/usr/bin/python3","-I","-B",
+        argv=["/usr/sbin/runuser","-u","al","--","/usr/bin/python3","-I","-B",
             "-c",loader,str(ENTRY.parent.parent/"implementation"),str(ENTRY),"--sql-operation",
-            operation,"--sql-arguments",canonical(args).decode()],capture_output=True,text=True,
-            timeout=seconds,check=False)
+            operation,"--sql-arguments",canonical(args).decode()]
+        # This fresh process group contains only the fixed writer-UID SQL helper.
+        # Terminate the whole tracked group on interruption, so an orphan query
+        # cannot keep a handoff/file open after its Root coordinator has stopped.
+        with subprocess.Popen(argv,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
+                              start_new_session=True) as child:
+            try:stdout,stderr=child.communicate(timeout=seconds)
+            except BaseException:
+                try:os.killpg(child.pid,signal.SIGKILL)
+                except ProcessLookupError:pass
+                child.wait()
+                raise
+            completed=subprocess.CompletedProcess(argv,child.returncode,stdout,stderr)
         if self.fixture and completed.returncode!=0:
             raise RuntimeError("FIXTURE_SQL_"+operation+":"+completed.stderr)
         if completed.returncode!=0:

@@ -113,6 +113,7 @@ def reviewed_scope(candidate,code_hashes,native_hashes,unit_hashes,facts):
   "release_initiated_business_provider_writes":0,
   "docker_boot_waits_for_journal_data_recovery":True,"docker_daemon_restart_performed":False,
   "claimed_temporary_work_cleanup_allowed":True,"published_archive_cleanup_allowed":False,
+  "interrupted_sql_helper_cleanup":"exact_spawned_process_group_only",
   "archive_root_metadata_before":facts["archive_root_metadata"],
   "archive_root_metadata_after":{"uid":0,"gid":0,"mode":"0o755","recursive":False},
   "desired_state_before_sha256":DESIRED_BEFORE,"desired_state_after_sha256":facts["desired_after_sha256"],

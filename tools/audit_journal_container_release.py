@@ -137,6 +137,24 @@ class DockerEngine:
   return {"role":role,"before_id":expected_id,"after_id":current["Id"],"image_id":body["Image"]}
 
 
+ def restore_missing(self,role,body,*,original_id,original_backup):
+  need(os.geteuid()==0 and role in ROLES,"ROOT_ORIGINAL_RECREATION_REQUIRED")
+  need(re.fullmatch(role+r"-rollback-audit-before-[0-9a-f]{12}",original_backup),
+       "EXACT_ORIGINAL_BACKUP_NAME")
+  saved=self.lookup(original_backup,required=True)
+  need(saved["Id"]==original_id and saved["Image"]==body["Image"] and not saved["State"]["Running"],
+       "EXACT_STOPPED_ORIGINAL_REQUIRED")
+  current=self.lookup(role)
+  if current is None:
+   result=self.call("POST","/containers/create?name="+quote(role,safe=""),body)
+   need(re.fullmatch("[0-9a-f]{64}",result.get("Id","")),"RESTORED_CONTAINER_ID")
+   current=self.lookup(role,required=True)
+   need(current["Id"]==result["Id"],"RESTORED_CONTAINER_CHANGED")
+  need(configuration_matches(current,body),"UNKNOWN_ORIGINAL_RECREATION")
+  if not current["State"]["Running"]:self.call("POST","/containers/"+current["Id"]+"/start")
+  return {"role":role,"before_id":original_id,"after_id":current["Id"],"image_id":body["Image"]}
+
+
 def configuration_matches(current,body):
  if current["Image"]!=body["Image"]:return False
  if any(current["Config"].get(k)!=v for k,v in body.items()
