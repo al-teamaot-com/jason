@@ -1,6 +1,7 @@
 {
   "bundle_sha256": "f39065a9c98da1fd8900c93f41965b84125129507b527d1e3287ef68e3e5c6d0",
   "exact_action": "owner-full-integrity-v2-bounded-repair-20261113",
+  "existing_stage_a0_issuer_state": "true_with_exact_root_signed_activation_receipt",
   "fast_unit_sha256": "0df61693ecbd4cf50533e916b5c62c418da3bfa3fd581616090703257c0dfd71",
   "freeze_sha256": "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f",
   "full_scan_max_seconds": 5400,
@@ -18,7 +19,7 @@
   "runtime_image_id": "sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132",
   "schema_version": "1.0",
   "scope_sha256": "8267a53e7c532125a8cf8df316c1f71da6eecdb7c8e34536c298119816e483fe",
-  "script_sha256": "25460fa9b16374da19866413384decc1e23d93cb56c712fa0b8952c9ff92d27c",
+  "script_sha256": "a328adcf67fc258713bfaac8971490d2f3b5fdb5d409bf1b873813abd82711dc",
   "service_max_seconds": 5700,
   "source_sha": "95832507e6e5f804f092cb5d3ebdea90ba1a49bf"
 }
