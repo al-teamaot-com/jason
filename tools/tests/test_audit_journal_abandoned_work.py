@@ -81,3 +81,17 @@ def test_prepared_rollback_protected_until_receipt_and_recoverable_cleanup(nativ
     assert cleaned['prepared_temporary_copies_cleaned']==1
     assert not prepared[0].exists()
     assert controller.cleanup_abandoned_work()['prepared_temporary_copies_cleaned']==0
+
+
+def test_maintenance_can_finish_interrupted_verified_prepare(native):
+    p,controller,_=native
+    controller.transition(initial=True)
+    controller.seal_one()
+    controller.prepare_rollback()
+    controller.recovery().accept_recipe()
+    assert controller.rollback.exists()
+    result=controller.maintain()
+    assert result['status']=='prepared_recovery_copy_discarded_history_retained'
+    assert not controller.rollback.exists()
+    assert controller.recovery().cleanup_prepared()['prepared_temporary_copies_cleaned']==1
+    assert controller.maintain()['status'] in ('verified_redundant_local_source_reclaimed','scrub_not_due')

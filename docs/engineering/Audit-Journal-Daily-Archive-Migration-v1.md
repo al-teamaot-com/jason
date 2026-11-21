@@ -306,9 +306,9 @@ request to execute a production cutover or permission to modify production.
 The source-only candidate also tests Root-claimed disposable work recovery
 after interruption. Cleanup must honor creation claims, inode/device identity,
 link rejection and a strictly bounded work parent; it may not remove retained
-history or unclaimed directories. Six dedicated negative/positive tests pass, including
+history or unclaimed directories. Eleven dedicated negative/positive tests pass, including
 a readback requiring real events from both active and sealed history.
 The expanded local event-store, health, migration, legacy reconstruction and
-release regression suite passes 136 tests, and the isolated UID0/UID1000 native
+release regression suite passes 141 tests, and the isolated UID0/UID1000 native
 fixture also passes. These remain non-production proofs and grant no production
 authority.

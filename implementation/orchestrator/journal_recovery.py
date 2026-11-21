@@ -141,9 +141,11 @@ class ArchiveRecovery:
    recipe=read_control(c.private/"recovery-recipe.json",p.custody_uid,0o400)
    need(recipe["initial_full_reconstruction"]==plan["proof"],"JOURNAL_DISCARD_RECONSTRUCTION_PROOF")
    target=Path(plan["target"])
-   need(target.parent==self.storage and fingerprint(target.stat())==plan["target_fingerprint"],
+   need(not c.intent.exists() and target.parent==self.storage and target.name.endswith(".prepared.sqlite3"),
         "JOURNAL_DISCARD_TARGET_IDENTITY")
-   c.no_handles(target);target.unlink()
+   if target.exists():
+    need(fingerprint(target.stat())==plan["target_fingerprint"],"JOURNAL_DISCARD_TARGET_IDENTITY")
+    c.no_handles(target);target.unlink()
    c._json(c.private/"last-reconstruction.json",plan,0o400)
    c.rollback.unlink()
    return {"status":"prepared_recovery_copy_discarded_history_retained"}

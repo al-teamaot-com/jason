@@ -53,6 +53,7 @@ class ExactRelease:
        "JOURNAL_EXACT_RELEASE_EXECUTION_BUDGET")
   elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(self.journal["started_at"])).total_seconds()
   self.c._objective_deadline=time.monotonic()+28800-elapsed
+  self.c._exact_release_scope=self.plan["scope_sha256"]
   self.protected()
  def sql(self,operation,args,seconds=10800):return self.c._sql(operation,args,seconds=seconds)
  def barrier(self,enabled,legacy=False):
@@ -206,7 +207,11 @@ class ExactRelease:
     self.status("fully_verifying_and_archiving_closed_history");self.c.seal_one()
    self.status("verifying_legacy_reconstruction_and_cold_restore")
    if not (PRIVATE/"recovery-recipe.json").exists():
-    self.c.prepare_rollback();self.c.recovery().accept_recipe();self.c.recovery().discard_prepared()
+    self.c.prepare_rollback();self.c.recovery().accept_recipe()
+   if self.c.rollback.exists():
+    recipe=read_control(PRIVATE/"recovery-recipe.json",0,0o400)
+    prepared=read_control(self.c.rollback,0,0o400)
+    if prepared["proof"]==recipe["initial_full_reconstruction"]:self.c.recovery().discard_prepared()
    self.c.recovery().extend_recipe()
    for row in self.c.p.catalog()["segments"]:
     if (self.c.p.pending/row["proof"]["source_before_image"]).exists():
@@ -226,6 +231,7 @@ class ExactRelease:
   elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(stamp)).total_seconds()
   need(0<=elapsed<=28800,"JOURNAL_EXACT_RECOVERY_EXECUTION_BUDGET")
   self.c._objective_deadline=time.monotonic()+28800-elapsed
+  self.c._exact_release_scope=self.plan["scope_sha256"]
 
  def rollback(self):
   subprocess.run(["/usr/bin/systemctl","disable","--now","jason-audit-journal-maintenance.timer"],

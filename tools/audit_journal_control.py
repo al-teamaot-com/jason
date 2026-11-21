@@ -241,6 +241,10 @@ class JournalController:
 
     def claim_initial_cutover(self,intent):
         need(not self.fixture,"JOURNAL_INITIAL_CLAIM_PRODUCTION_ONLY")
+        if not self.p.fixture:
+            need(getattr(self,"_exact_release_scope",None) is not None
+                 and time.monotonic()<getattr(self,"_objective_deadline",0),
+                 "JOURNAL_FRESH_EXACT_RELEASE_REQUIRED_FOR_INITIAL_CUTOVER")
         fd=os.open(self.private/"initial-cutover-claimed.json",
                    os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o400)
         with os.fdopen(fd,"wb") as stream:
@@ -496,6 +500,10 @@ class JournalController:
 
     def finish_rollback(self):
         p=self.p
+        if not p.fixture:
+            need(getattr(self,"_exact_release_scope",None) is not None
+                 and time.monotonic()<getattr(self,"_objective_deadline",0),
+                 "JOURNAL_FRESH_EXACT_RELEASE_REQUIRED_FOR_NEW_ROLLBACK")
         with self.serialized(),self.handoff():
             before=p.catalog();plan=read_control(self.rollback,p.custody_uid,0o400)
             active=self._sql("state",{"path":str(p.active)},seconds=10)
@@ -600,6 +608,10 @@ class JournalController:
             self.recovery().discard_prepared()
             return {"status":"initial_full_legacy_reconstruction_and_restore_verified"}
         recipe=read_control(recipe_path,self.p.custody_uid,0o400)
+        if self.rollback.exists():
+            prepared=read_control(self.rollback,self.p.custody_uid,0o400)
+            if prepared["proof"]==recipe["initial_full_reconstruction"]:
+                return self.recovery().discard_prepared()
         if recipe["covered_segments"]!={r["id"]:r["fingerprint"] for r in catalog["segments"]}:
             return self.recovery().extend_recipe()
         for record in catalog["segments"]:
