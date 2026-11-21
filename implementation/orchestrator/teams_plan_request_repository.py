@@ -147,6 +147,11 @@ class PlanRequestRepository:
             raise PermissionError('no immutable server-owned request for this approval')
         return json.loads(row[0])
 
+    def contains(self, approval_id: str) -> bool:
+        with sqlite3.connect(self.path) as db:
+            return db.execute("SELECT 1 FROM universal_plan_requests WHERE approval_id=?",
+                              (approval_id,)).fetchone() is not None
+
     def require(self, approval_id: str) -> OrchestrationRequest:
         return self.steps(approval_id)[0]
 
@@ -164,7 +169,8 @@ class PlanRequestRepository:
             raise PermissionError('stored plan material changed after proposal')
 
 
-    def candidate_ids(self, *, limit: int = 32) -> tuple[str, ...]:
+    def candidate_ids(self, *, limit: int = 32, prefix: str = "",
+                      include_indeterminate: bool = False) -> tuple[str, ...]:
         # Receipt presence is scheduling evidence only. The worker independently
         # validates the receipt, plan fingerprint, identity, grants and policy.
         with sqlite3.connect(self.path) as db:
@@ -172,8 +178,9 @@ class PlanRequestRepository:
                 "SELECT r.approval_id FROM universal_plan_requests r "
                 "JOIN approval_decision_receipts d ON d.approval_id=r.approval_id "
                 "LEFT JOIN universal_plan_progress p ON p.approval_id=r.approval_id "
-                "WHERE p.state IS NULL OR p.state NOT IN ('completed','denied','blocked','indeterminate') "
-                "ORDER BY r.rowid LIMIT ?", (max(1,min(32,limit)),)).fetchall()
+                "WHERE (p.state IS NULL OR p.state NOT IN ('completed','denied','blocked','indeterminate') "
+                "OR (? AND p.state='indeterminate')) AND substr(r.approval_id,1,?)=? "
+                "ORDER BY r.rowid LIMIT ?", (include_indeterminate,len(prefix),prefix,max(1,min(32,limit)),)).fetchall()
         return tuple(row[0] for row in rows)
 
     def record_progress(self, approval_id: str, *, state: str, now: datetime,

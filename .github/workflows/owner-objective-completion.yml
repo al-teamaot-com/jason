@@ -1,0 +1,61 @@
+name: Owner Objective Completion
+on:
+  pull_request:
+    paths:
+      - 'tools/*objective*'
+      - 'tools/tests/test_*objective*'
+      - 'implementation/kernel/identity_authority/**'
+      - 'implementation/orchestrator/**'
+      - 'implementation/runtime_service/src/jason_runtime/**'
+      - 'implementation/runtime_service/tests/test_*objective*'
+      - 'implementation/runtime_service/tests/test_universal*'
+      - 'infrastructure/jason-teams-gateway/**'
+      - '.github/workflows/owner-objective-completion.yml'
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  signed-objective-and-root-recovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install disposable test dependencies
+        run: |
+          python -m pip install -q pytest PyYAML jsonschema
+          python -m pip install -q ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service
+      - name: Canonical framework and isolated component regression
+        env:
+          PYTHONPATH: .:tools:implementation:implementation/runtime_service/src:implementation/connectors/openclaw/src:implementation/cap-007/src
+        run: |
+          python -B -m pytest -q implementation/runtime_service/tests/test_universal*.py implementation/runtime_service/tests/test_owner_objective*.py
+          node --test infrastructure/jason-teams-gateway/test/objective-approval-route.test.mjs
+      - name: Disposable UID0 native receipts and path defenses
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_exe="$(command -v python)"
+          sudo -n env PYTHONPATH=.:tools:implementation:implementation/runtime_service/src:implementation/connectors/openclaw/src:implementation/cap-007/src \
+            "$python_exe" -B -m pytest -q \
+              tools/tests/test_pmv4_teams_objective_admission.py \
+              tools/tests/test_pmv4_teams_objective_store.py \
+              tools/tests/test_owner_objective_root_io.py \
+              tools/tests/test_pmv4_objective_documentation.py \
+              tools/tests/test_owner_objective_teams_delivery.py \
+              tools/tests/test_owner_objective_live_authority.py \
+              tools/tests/test_owner_objective_source_verifier.py \
+              tools/tests/test_owner_objective_install_scope.py \
+              tools/tests/test_owner_objective_ci.py \
+              tools/tests/test_owner_objective_install.py
+          test ! -e /var/lib/jason-owner-release/owner-objective-inbox
+          test ! -e /etc/jason-owner-release/owner-objective.json
