@@ -89,6 +89,55 @@ def test_process_procurement_invoice_routes_to_canonical_flow_and_teams(monkeypa
     assert flow.draft_call["microsoft_object_id"] == "object-a"
 
 
+def test_process_procurement_quote_uses_same_canonical_flow_without_invoice_number(monkeypatch):
+    flow = FakeFlow()
+    _wire(monkeypatch, flow)
+
+    result = server.process_procurement_invoice(
+        vendor_name="Ingram Micro",
+        source_reference="Ingram-QUOTE-1001.pdf",
+        lines=[
+            {
+                "name": "Laptop",
+                "quantity": 2,
+                "unit_cost": "900.00",
+                "billing_frequency": "one_time",
+            }
+        ],
+        document_kind="vendor_quote",
+        document_number="QUOTE-1001",
+        invoice_total="1800.00",
+        ship_to="XYZ Test Company",
+    )
+
+    assert result["status"] == "completed"
+    normalized = flow.draft_call["normalized"]
+    assert normalized["source_kind"] == "vendor_quote"
+    assert normalized["document_number"] == "QUOTE-1001"
+    assert normalized["vendor_order_reference"] == "QUOTE-1001"
+    assert "invoice_number" not in normalized
+    assert normalized["invoice_total"] == "1800.00"
+
+
+def test_process_procurement_document_rejects_unknown_kind(monkeypatch):
+    flow = FakeFlow()
+    _wire(monkeypatch, flow)
+
+    result = server.process_procurement_invoice(
+        vendor_name="Ingram Micro",
+        source_reference="bad.pdf",
+        lines=[{"name": "Laptop", "quantity": 1, "unit_cost": "1.00"}],
+        document_kind="purchase_receipt",
+        document_number="BAD-1",
+    )
+
+    assert result == {
+        "status": "rejected",
+        "error_code": "procurement_document_kind_invalid",
+    }
+    assert flow.draft_call is None
+
+
 def test_process_procurement_invoice_rejects_summary_without_lines(monkeypatch):
     flow = FakeFlow()
     _wire(monkeypatch, flow)
