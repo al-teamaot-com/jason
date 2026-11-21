@@ -245,6 +245,8 @@ class JournalController:
             need(getattr(self,"_exact_release_scope",None) is not None
                  and time.monotonic()<getattr(self,"_objective_deadline",0),
                  "JOURNAL_FRESH_EXACT_RELEASE_REQUIRED_FOR_INITIAL_CUTOVER")
+            need(intent["source_identity"]==getattr(self,"_exact_source_dataset",None),
+                 "JOURNAL_REVIEWED_SOURCE_DATASET_CHANGED")
         fd=os.open(self.private/"initial-cutover-claimed.json",
                    os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o400)
         with os.fdopen(fd,"wb") as stream:
@@ -287,6 +289,10 @@ class JournalController:
 
     def transition(self,*,initial=False):
         p=self.p
+        if initial and not p.fixture:
+            need(getattr(self,"_exact_release_scope",None) is not None
+                 and time.monotonic()<getattr(self,"_objective_deadline",0),
+                 "JOURNAL_FRESH_EXACT_RELEASE_REQUIRED_FOR_INITIAL_CUTOVER")
         with self.serialized(),self.handoff():
             before=p.catalog()
             need((before["mode"]=="legacy")==initial,"JOURNAL_TRANSITION_MODE")

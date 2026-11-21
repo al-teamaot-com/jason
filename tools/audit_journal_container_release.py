@@ -41,6 +41,8 @@ def planned_configuration(before,candidate):
  env={v.split("=",1)[0]:v.split("=",1)[1] for v in entries}
  selected=env.get("JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE","")
  need(selected in ("",PROFILE),"EXISTING_PROFILE_CONFLICT")
+ need(env.get("JASON_ORCHESTRATION_EVENTS_DB")=="/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3",
+      "CANONICAL_CONSUMER_PATH_REQUIRED")
  env["JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE"]=PROFILE
  config["Env"]=[key+"="+value for key,value in env.items()]
  labels=config.setdefault("Labels",{})
@@ -63,6 +65,7 @@ def planned_configuration(before,candidate):
   aliases=[v for v in endpoint.get("Aliases") or [] if v not in (before["Id"],before["Id"][:12])]
   networks[name]={"Aliases":aliases}
   if endpoint.get("DriverOpts"):networks[name]["DriverOpts"]=copy.deepcopy(endpoint["DriverOpts"])
+  if endpoint.get("GwPriority") is not None:networks[name]["GwPriority"]=endpoint["GwPriority"]
  return {**config,"HostConfig":host,"NetworkingConfig":{"EndpointsConfig":networks}}
 
 def exact_original_configuration(before):
@@ -73,6 +76,9 @@ def exact_original_configuration(before):
  networks={name:{"Aliases":[v for v in item.get("Aliases") or []
              if v not in (before["Id"],before["Id"][:12])]}
            for name,item in before["NetworkSettings"]["Networks"].items()}
+ for name,item in before["NetworkSettings"]["Networks"].items():
+  if item.get("DriverOpts"):networks[name]["DriverOpts"]=copy.deepcopy(item["DriverOpts"])
+  if item.get("GwPriority") is not None:networks[name]["GwPriority"]=item["GwPriority"]
  return {**config,"HostConfig":copy.deepcopy(before["HostConfig"]),
          "NetworkingConfig":{"EndpointsConfig":networks}}
 
@@ -138,6 +144,13 @@ def configuration_matches(current,body):
  # Docker normalizes mount syntax. Validate destinations and read/write modes
  # independently; every remaining HostConfig setting must be preserved.
  if any(current["HostConfig"].get(k)!=v for k,v in body["HostConfig"].items() if k!="Mounts"):return False
+ networks=current["NetworkSettings"]["Networks"]
+ expected=body.get("NetworkingConfig",{}).get("EndpointsConfig",{})
+ if set(networks)!=set(expected):return False
+ for name,wanted in expected.items():
+  observed=networks[name]
+  if not set(wanted.get("Aliases") or [])<=set(observed.get("Aliases") or []):return False
+  if any(observed.get(k)!=wanted[k] for k in ("DriverOpts","GwPriority") if k in wanted):return False
  actual={r["Destination"]:(r["Type"],r["Source"],r["RW"]) for r in current["Mounts"]}
  return all(actual.get(r["Target"])==(r["Type"],r["Source"],not r.get("ReadOnly",False))
             for r in body["HostConfig"].get("Mounts") or [])

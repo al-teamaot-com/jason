@@ -6,7 +6,9 @@ isolated Root interpreter, immutable verified bundle, independently verified
 Owner adoption, and Root-only exact release plan.
 """
 from __future__ import annotations
+from contextlib import contextmanager,ExitStack
 from datetime import datetime,timezone
+import fcntl,stat
 from hashlib import sha256
 import json,os,subprocess,sys,time
 from pathlib import Path
@@ -30,6 +32,33 @@ class ExactRelease:
        and self.plan["candidate_sha"]==self.policy["candidate_sha"],"JOURNAL_EXACT_RELEASE_PLAN_BINDING")
   self.before=read_control(PRIVATE/"producer-before.json",0,0o400)
   need(digest(self.before)==self.plan["producer_before_sha256"],"JOURNAL_BEFORE_SPEC_BINDING")
+  adoption=read_control(PRIVATE/"adoption.json",0,0o400)
+  need(adoption["scope_sha256"]==self.plan["scope_sha256"]
+       and self.plan["scope"]["source_sha256"]==self.policy["trusted_source_sha256"],
+       "JOURNAL_ADOPTION_AND_EXECUTION_SCOPE_DIVERGED")
+  for role,before in self.before.items():
+   need(role in ROLES and digest(exact_original_configuration(before))==
+        self.plan["scope"]["producer_before"][role]["configuration_sha256"]
+        and digest(planned_configuration(before,self.plan["candidate_sha"]))==
+        self.plan["scope"]["producer_after_configuration_sha256"][role],
+        "JOURNAL_REVIEWED_PRODUCER_CONFIGURATION_DIVERGED")
+
+ @contextmanager
+ def release_locks(self):
+  with ExitStack() as stack:
+   deadline=time.monotonic()+30
+   for path,uid,mode in ((STATE/"production-transaction.lock",1000,0o664),
+      (Path("/var/lib/jason/pmv4-shadow/control/host-mutation.lock"),0,0o600)):
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC);stack.callback(os.close,fd)
+    meta=os.fstat(fd)
+    need(stat.S_ISREG(meta.st_mode) and meta.st_uid==uid and meta.st_nlink==1
+         and stat.S_IMODE(meta.st_mode)==mode,"JOURNAL_NATIVE_RELEASE_LOCK_IDENTITY")
+    while True:
+     try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);break
+     except BlockingIOError:
+      need(time.monotonic()<deadline,"JOURNAL_OTHER_RELEASE_TRANSACTION_BUSY");time.sleep(0.1)
+   self.protected()
+   yield
 
  def save(self):self.c._json(self.path,self.journal,0o400)
  def status(self,phase,**extra):
@@ -54,6 +83,7 @@ class ExactRelease:
   elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(self.journal["started_at"])).total_seconds()
   self.c._objective_deadline=time.monotonic()+28800-elapsed
   self.c._exact_release_scope=self.plan["scope_sha256"]
+  self.c._exact_source_dataset=self.plan["scope"]["source_dataset_identity"]
   self.protected()
  def sql(self,operation,args,seconds=10800):return self.c._sql(operation,args,seconds=seconds)
  def barrier(self,enabled,legacy=False):
@@ -151,7 +181,13 @@ class ExactRelease:
   paths=[str(self.c.p.active)]
   with self.c.p.gate():
    paths.extend(str(self.c.p.artifact(r)) for r in self.c.p.catalog()["segments"][:1])
-  probes=self.sql("reader_probes",{"paths":paths},seconds=30)
+  deadline=time.monotonic()+300
+  while True:
+   probes=self.sql("reader_probes",{"paths":paths},seconds=30)
+   if probes["per_source_probe_counts"] and probes["per_source_probe_counts"][0]:break
+   self.status("awaiting_first_genuine_current_journal_event")
+   need(time.monotonic()<deadline,"JOURNAL_REAL_CURRENT_ACTIVITY_NOT_OBSERVED")
+   time.sleep(5)
   need(probes["event_ids"] and len(probes["per_source_probe_counts"])==2
        and all(probes["per_source_probe_counts"]),"JOURNAL_REAL_CURRENT_AND_HISTORICAL_EVENTS_REQUIRED")
   code=("import json,sys;from orchestrator.event_store import SQLiteOrchestrationEventStore;"
@@ -250,7 +286,9 @@ class ExactRelease:
   self.c._json(DESIRED,rollback,0o600)
   self.native();self.protected()
 
-def complete(controller):ExactRelease(controller).complete()
+def complete(controller):
+ executor=ExactRelease(controller)
+ with executor.release_locks():executor.complete()
 
 
 def rollback_release(controller):
@@ -258,6 +296,7 @@ def rollback_release(controller):
  if executor.journal.get("outcome")=="rolled_back":return
  # A rollback may start only within the exact original execution window.
  if "recovery_started_at" not in executor.journal:executor.claim()
- executor.begin_recovery();executor.protected();executor.rollback()
- executor.journal["outcome"]="rolled_back";executor.save()
- executor.status("rolled_back",all_history_retained=True)
+ with executor.release_locks():
+  executor.begin_recovery();executor.protected();executor.rollback()
+  executor.journal["outcome"]="rolled_back";executor.save()
+  executor.status("rolled_back",all_history_retained=True)

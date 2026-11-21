@@ -25,6 +25,7 @@ class EngineFixture(DockerEngine):
    config={k:copy.deepcopy(v) for k,v in body.items() if k not in ("HostConfig","NetworkingConfig")}
    self.rows[ROLE]={"Id":"d"*64,"Image":body["Image"],"Config":config,
     "HostConfig":copy.deepcopy(body["HostConfig"]),"State":{"Running":False},
+    "NetworkSettings":{"Networks":copy.deepcopy(body["NetworkingConfig"]["EndpointsConfig"])},
     "Mounts":[{"Destination":v["Target"],"Type":v["Type"],"Source":v["Source"],
                "RW":not v.get("ReadOnly",False)} for v in body["HostConfig"]["Mounts"]]}
    step="create";result={"Id":"d"*64}

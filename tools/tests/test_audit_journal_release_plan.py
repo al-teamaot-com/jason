@@ -7,7 +7,7 @@ CANDIDATE="a"*40
 
 def before(role="jason-runtime"):
  return {"Name":"/"+role,"Id":"b"*64,"Image":"sha256:"+"c"*64,
- "Config":{"User":"1000:1000","Env":["EXISTING=fixture-value"],"Labels":{"existing":"fixture"},
+ "Config":{"User":"1000:1000","Env":["EXISTING=fixture-value","JASON_ORCHESTRATION_EVENTS_DB=/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3"],"Labels":{"existing":"fixture"},
  "Cmd":["python","-m","fixture"],"Entrypoint":["fixture-entry"],"Healthcheck":{"Test":["CMD","fixture-health"]}},
  "HostConfig":{"Privileged":False,"AutoRemove":False,"ReadonlyRootfs":True,"CapDrop":["ALL"],
  "Mounts":[{"Type":"bind","Source":"/fixture/existing","Target":"/fixture/data","ReadOnly":True}],
