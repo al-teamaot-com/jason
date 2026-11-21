@@ -258,3 +258,130 @@ class FullRepositoryTodoIntakeInventoryTests(unittest.TestCase):
         with patch.object(module,'gh_json',return_value=[{} for _ in range(5000)]):
             with self.assertRaisesRegex(RuntimeError,'safe limit'):
                 module.open_todo_issue_map(Path('/tmp/repo'))
+
+
+
+class ConflictedIdentityIsolationTests(unittest.TestCase):
+    def _issue(self, number, item_id="TODO-OPS-013", title=None, extra=""):
+        return {
+            "number": number,
+            "title": title or f"Approved TODO {number}",
+            "body": f"- TODO item: {item_id}\n{extra}",
+            "url": f"https://github.com/al-teamaot-com/jason/issues/{number}",
+        }
+
+    def test_disjoint_approved_work_can_progress_while_identity_is_quarantined(self):
+        from unittest.mock import patch
+        issues = [self._issue(1500), self._issue(1459)]
+        conflicts = {}
+        with patch.object(module, "gh_json", return_value=issues):
+            inventory = module.open_todo_issue_map(
+                Path("/tmp/repo"), identity_conflicts=conflicts,
+            )
+        self.assertEqual(inventory["TODO-OPS-013"]["number"], 1459)
+        self.assertEqual(conflicts["TODO-OPS-013"]["issue_numbers"], [1459, 1500])
+        self.assertFalse(conflicts["TODO-OPS-013"]["new_work_authorized"])
+        self.assertEqual(module.additional_conflict_capacity(conflicts), 1)
+        candidate, reason = module.select_candidate(
+            todos=module.parse_todo_sections(TODO_TEXT),
+            support_text="", support_state={"items": {}},
+            max_support_repairs=2, existing_issues=inventory,
+        )
+        self.assertEqual(reason, "eligible")
+        self.assertEqual(candidate.item_id, "TODO-OPS-010")
+
+    def test_quarantine_preserves_all_conflicting_identities_in_any_order(self):
+        from unittest.mock import patch
+        issues = [self._issue(1500), self._issue(1459), self._issue(1510)]
+        with patch.object(module, "gh_json", return_value=issues):
+            conflicts = {}
+            result = module.open_todo_issue_map(
+                Path("/tmp/repo"), identity_conflicts=conflicts,
+            )
+        self.assertEqual(result["TODO-OPS-013"]["number"], 1459)
+        self.assertEqual(
+            conflicts["TODO-OPS-013"]["issue_numbers"], [1459, 1500, 1510],
+        )
+        self.assertEqual(module.additional_conflict_capacity(conflicts), 2)
+
+    def test_scheduled_dry_run_records_conflict_and_does_not_abort(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, spool = root / "repo", root / "spool"
+            (repo / "config").mkdir(parents=True)
+            (repo / "config/development-release-coordinator.json").write_text(
+                json.dumps({
+                    "todo_autonomy": {"enabled": True, "max_active_items": 3,
+                                     "max_open_todo_issues": 10},
+                    "support_autonomy": {"max_active_items": 2},
+                }), encoding="utf-8",
+            )
+            def git_read(args, *, cwd, check=True):
+                self.assertEqual(args[0], "git")
+                if args[1] == "fetch":
+                    return ""
+                if args[1] == "show" and "Project-Jason-TODO" in args[2]:
+                    return TODO_TEXT
+                if args[1] == "show" and args[2].endswith("SUPPORT.md"):
+                    return ""
+                raise AssertionError(f"unexpected command: {args!r}")
+            with patch.object(module, "run", side_effect=git_read), \
+                    patch.object(module, "gh_json", return_value=[
+                        self._issue(1500), self._issue(1459)
+                    ]), \
+                    patch.object(module.support_worker, "open_support_issue_ids", return_value=set()), \
+                    patch.object(module, "create_issue", side_effect=AssertionError("must not mutate")), \
+                    patch.object(sys, "argv", [
+                        "todo_engineering_intake.py", "--repo", str(repo),
+                        "--spool", str(spool), "--dry-run",
+                    ]):
+                self.assertEqual(module.main(), 0)
+            state = json.loads((spool / "todo-intake-state.json").read_text())
+            self.assertEqual(state["status"], "dry_run")
+            self.assertEqual(state["candidate"]["id"], "TODO-OPS-010")
+            self.assertEqual(state["identity_conflict_count"], 1)
+            self.assertEqual(
+                state["identity_conflicts"]["TODO-OPS-013"]["issue_numbers"],
+                [1459, 1500],
+            )
+
+    def test_new_conflict_at_creation_recheck_fails_closed_without_issue(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo, spool = root / "repo", root / "spool"
+            (repo / "config").mkdir(parents=True)
+            (repo / "config/development-release-coordinator.json").write_text(
+                json.dumps({
+                    "todo_autonomy": {"enabled": True, "max_active_items": 3,
+                                     "max_open_todo_issues": 10},
+                    "support_autonomy": {"max_active_items": 2},
+                }), encoding="utf-8",
+            )
+            def git_read(args, *, cwd, check=True):
+                if args[:2] == ["git", "fetch"]:
+                    return ""
+                if args[:2] == ["git", "show"]:
+                    return TODO_TEXT if "Project-Jason-TODO" in args[2] else ""
+                raise AssertionError(args)
+            with patch.object(module, "run", side_effect=git_read), \
+                    patch.object(module, "gh_json", side_effect=[
+                        [], [
+                            self._issue(1901, "TODO-OPS-010"),
+                            self._issue(1902, "TODO-OPS-010"),
+                        ],
+                    ]), \
+                    patch.object(module.support_worker, "open_support_issue_ids", return_value=set()), \
+                    patch.object(module, "create_issue", side_effect=AssertionError("must not create")), \
+                    patch.object(sys, "argv", [
+                        "todo_engineering_intake.py", "--repo", str(repo),
+                        "--spool", str(spool),
+                    ]):
+                self.assertEqual(module.main(), 0)
+            state = json.loads((spool / "todo-intake-state.json").read_text())
+            self.assertEqual(state["status"], "identity_conflict_quarantined")
+            self.assertEqual(
+                state["identity_conflicts"]["TODO-OPS-010"]["issue_numbers"],
+                [1901, 1902],
+            )
