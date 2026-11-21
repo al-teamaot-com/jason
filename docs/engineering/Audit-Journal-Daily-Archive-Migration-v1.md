@@ -26,12 +26,17 @@ objective, including its data-preserving rollback.
 | Archive destination | /srv/jason/archive/governed-audit/orchestration |
 | Proposed daily boundary | 00:15 America/New_York; handle 23/25-hour local days |
 | Early rollover target | 1 GiB, subject to measured write/verification workload |
-| Emergency admission ceiling | 2 GiB; fail closed with a capacity exception if maintenance cannot proceed |
+| Emergency admission ceiling | 2 GiB including the live WAL; reserve outcome-audit space before admitting new work |
 | Proposed final writer-pause budget | 30 seconds, including final delta merge; prove before authorization |
 | Proposed rollback tail limit | 128 MiB / 100,000 events; exceed either and rebuild while current writers continue |
 | Retention | Preserve all archive history; no age-based deletion in this migration |
 | Scope | Orchestration journal, its consumers, maintenance integration, archive custody and the corresponding health-proof format |
 | Excluded | Authority/grant/approval DB changes, provider configuration/business writes, arbitrary host cleanup and general Root execution |
+
+Size measurement includes the main database **and its WAL**, not just the
+main file. Reserve capacity for already-admitted work to record its outcome.
+A capacity stop prevents new admission; it must not turn a provider operation
+with an uncertain or unrecorded outcome into a blind retry.
 
 The 1/2 GiB thresholds and pause/tail budgets are proposed engineering targets,
 not measured production guarantees. The complete production impact must include

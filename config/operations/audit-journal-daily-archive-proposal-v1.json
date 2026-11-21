@@ -23,7 +23,9 @@
     "maximum_writer_pause_seconds": 30,
     "final_rollback_delta_maximum_bytes": 134217728,
     "final_rollback_delta_maximum_rows": 100000,
-    "performance_acceptance_required": true
+    "performance_acceptance_required": true,
+    "size_metric": "main_database_bytes_plus_wal_bytes",
+    "reserve_for_inflight_outcome_audit_required": true
   },
   "retention": {
     "archive_delete_allowed": false,
