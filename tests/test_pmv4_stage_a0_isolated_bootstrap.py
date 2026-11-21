@@ -43,7 +43,7 @@ def test_exact_source_only_allowlist_never_includes_runtime_or_mcp():
     names = sparse.required_paths()
     assert "tools/pmv4_stage_a_native_install.py" in names
     assert "implementation/kernel/signed_owner_release.py" in names
-    assert len(names) == 13
+    assert len(names) == 14
     assert all(not name.startswith((
         "infrastructure/jason-runtime/", "infrastructure/jason-mcp/",
         "implementation/mcp_service/", "implementation/runtime_service/",
