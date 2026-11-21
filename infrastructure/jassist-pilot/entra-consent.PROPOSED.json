@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "status": "unverified_do_not_grant_automatically",
+  "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+  "spa_pilot_client_id": "d1cc801b-13ba-4d44-bea6-e7f08186e4d5",
+  "spa_redirect": "https://pihjpgplfhmpenlghbcdbgdkadleflfi.chromiumapp.org/jassist",
+  "spa_client_secret_required": false,
+  "api_resource_client_id": "9b9996e9-5c34-48b7-948c-f44f89352f89",
+  "delegated_scope_required": "JAssist.Send",
+  "legacy_jason_read_scope_must_remain_unchanged": true,
+  "group_eligibility_id": "5273dd8a-1456-4985-b0a3-c00061267e26",
+  "server_graph_minimum_expected_application_permissions": [
+    "User.Read.All",
+    "GroupMember.Read.All"
+  ],
+  "independent_graph_admin_consent_readback_verified": false,
+  "independent_spa_scope_consent_verified": false,
+  "independent_current_group_membership_verified": false
+}
