@@ -300,3 +300,14 @@ this review branch is open.
 
 **Authorization state:** This checkpoint is engineering evidence only, not a
 request to execute a production cutover or permission to modify production.
+
+### Continued recovery-hardening regression (November 21, 2026)
+
+The source-only candidate also tests Root-claimed disposable work recovery
+after interruption. Cleanup must honor creation claims, inode/device identity,
+link rejection and a strictly bounded work parent; it may not remove retained
+history or unclaimed directories. Four dedicated negative/positive tests pass.
+The expanded local event-store, health, migration, legacy reconstruction and
+release regression suite passes 134 tests, and the isolated UID0/UID1000 native
+fixture also passes. These remain non-production proofs and grant no production
+authority.

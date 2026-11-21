@@ -151,7 +151,8 @@ class ExactRelease:
   with self.c.p.gate():
    paths.extend(str(self.c.p.artifact(r)) for r in self.c.p.catalog()["segments"][:1])
   probes=self.sql("reader_probes",{"paths":paths},seconds=30)
-  need(probes["event_ids"],"JOURNAL_HISTORICAL_READER_PROBES_REQUIRED")
+  need(probes["event_ids"] and len(probes["per_source_probe_counts"])==2
+       and all(probes["per_source_probe_counts"]),"JOURNAL_REAL_CURRENT_AND_HISTORICAL_EVENTS_REQUIRED")
   code=("import json,sys;from orchestrator.event_store import SQLiteOrchestrationEventStore;"
         "s=SQLiteOrchestrationEventStore(sys.argv[1]);ids=json.loads(sys.argv[2]);"
         "assert all(s.get(v).event_id==v for v in ids);s.close();print(len(ids))")
@@ -196,6 +197,7 @@ class ExactRelease:
   self.claim()
   try:
    self.c.recover()
+   self.c.cleanup_abandoned_work()
    if self.c.p.catalog()["mode"]=="legacy" and not (PRIVATE/"initial-cutover-complete.json").exists():
     self.barrier(True,legacy=True);self.drain(False);self.replace();self.verify_modules()
     self.status("publishing_small_active_journal");self.c.transition(initial=True)
@@ -229,6 +231,7 @@ class ExactRelease:
   subprocess.run(["/usr/bin/systemctl","disable","--now","jason-audit-journal-maintenance.timer"],
                  capture_output=True,timeout=30,check=False)
   self.c.recover()
+  self.c.cleanup_abandoned_work()
   if self.c.p.catalog()["mode"]!="legacy":
    self.barrier(True);self.drain(True)
    self.status("reconstructing_all_events_for_exact_legacy_rollback")

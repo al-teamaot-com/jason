@@ -147,8 +147,15 @@ class JournalController:
 
     def _job(self,*,local=False):
         base=self.local_work if local else self.work
-        path=base/uuid4().hex;path.mkdir(mode=0o700)
+        path=base/uuid4().hex
+        claim=self.private/("work-"+path.name+".json")
+        self._json(claim,{"path":str(path),"finished":False,
+            "created_at":datetime.now(timezone.utc).isoformat()},0o400)
+        path.mkdir(mode=0o700)
         os.chown(path,self.p.writer_uid,self.p.writer_uid);path.chmod(0o700)
+        meta=path.stat()
+        self._json(claim,{"path":str(path),"finished":False,"identity":[meta.st_dev,meta.st_ino],
+            "created_at":datetime.now(timezone.utc).isoformat()},0o400)
         return path
 
     def _sql(self,operation,args,*,seconds=10800):
@@ -185,14 +192,51 @@ class JournalController:
     def _cleanup_job(self,job):
         need(job.parent in (self.work,self.local_work) and not job.is_symlink(),
              "JOURNAL_WORK_CLEANUP_SCOPE")
+        claim=self.private/("work-"+job.name+".json")
+        record=read_control(claim,self.p.custody_uid,0o400)
+        need(record["path"]==str(job) and not record["finished"],"JOURNAL_WORK_CLAIM_REQUIRED")
+        meta=job.lstat()
+        need(stat.S_ISDIR(meta.st_mode) and meta.st_uid in (self.p.custody_uid,self.p.writer_uid)
+             and ("identity" not in record or [meta.st_dev,meta.st_ino]==record["identity"]),
+             "JOURNAL_WORK_DIRECTORY_CHANGED")
         # Unlink only immediate regular files or symlinks: never follow a link,
         # recurse, remove a directory owned by an unrelated task or touch history.
         for child in job.iterdir():
             meta=child.lstat()
             need(stat.S_ISREG(meta.st_mode) or stat.S_ISLNK(meta.st_mode),
                  "JOURNAL_WORK_CLEANUP_UNEXPECTED_DIRECTORY")
+            if stat.S_ISREG(meta.st_mode):require_no_handles(child)
             child.unlink()
         job.rmdir();sync(job.parent)
+        self._json(claim,{**record,"finished":True,"cleaned_at":datetime.now(timezone.utc).isoformat()},0o400)
+
+    def cleanup_abandoned_work(self):
+        # Root-only creation claims distinguish disposable work from retained
+        # history. Hold the same controller lock; never clean a live handoff.
+        with self.serialized():
+            protected=set()
+            for marker in (self.intent,self.private/"initial-cutover-claimed.json"):
+                if not marker.exists():continue
+                row=read_control(marker,self.p.custody_uid,0o400)
+                if marker.name=="initial-cutover-claimed.json":
+                    if (self.private/"initial-cutover-complete.json").exists():continue
+                    row=row["transaction"]
+                if row.get("target"):protected.add(str(Path(row["target"]).parent))
+                if row.get("plan",{}).get("target"):
+                    protected.add(str(Path(row["plan"]["target"]).parent))
+            cleaned=0
+            for claim in sorted(self.private.glob("work-*.json")):
+                row=read_control(claim,self.p.custody_uid,0o400)
+                if row["finished"] or row["path"] in protected:continue
+                job=Path(row["path"])
+                need(job.parent in (self.work,self.local_work) and len(job.name)==32
+                     and all(c in "0123456789abcdef" for c in job.name),"JOURNAL_WORK_CLAIM_SCOPE")
+                if job.exists():self._cleanup_job(job)
+                else:self._json(claim,{**row,"finished":True},0o400)
+                cleaned+=1
+                if cleaned>=32:break
+            return {"status":"abandoned_claimed_temporary_work_recovered" if cleaned else "no_abandoned_work",
+                    "jobs_cleaned":cleaned}
 
     def claim_initial_cutover(self,intent):
         need(not self.fixture,"JOURNAL_INITIAL_CLAIM_PRODUCTION_ONLY")
@@ -569,6 +613,7 @@ class JournalController:
         # One scheduled invocation must finish its dependent seal/recipe/reclaim
         # work, rather than leaving each phase until another day's timer.
         if self.intent.exists():self.recover()
+        self.cleanup_abandoned_work()
         request=self.private/"first-scheduled-rollover.json"
         steps=[]
         for _ in range(12):

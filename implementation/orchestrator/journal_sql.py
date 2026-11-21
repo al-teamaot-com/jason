@@ -208,6 +208,7 @@ def rebuild(paths,target,proofs=None):
 def legacy_restore_proof(source,target):
     need(not os.path.lexists(target),"JOURNAL_LEGACY_RESTORE_TARGET_PRESENT")
     shutil.copyfile(source,target);Path(target).chmod(0o600)
+    with Path(target).open("rb") as materialized:os.fsync(materialized.fileno())
     with connection(target) as db:
         ids=[r[0] for r in db.execute(
             "SELECT event_id FROM orchestration_events WHERE rowid IN "
@@ -327,12 +328,13 @@ def dispatch(operation,args):
     if operation=="tail_budget":return tail_budget(**args)
     if operation=="reader_probes":
         need(1<=len(args["paths"])<=2,"JOURNAL_PROBE_PATH_BOUND")
-        identifiers=[]
+        identifiers=[];sizes=[]
         for path in args["paths"]:
             with connection(path) as db:
-                identifiers.extend(r[0] for r in db.execute("SELECT event_id FROM orchestration_events WHERE rowid IN "
-                    "((SELECT min(rowid) FROM orchestration_events),(SELECT max(rowid) FROM orchestration_events))"))
-        return {"event_ids":list(dict.fromkeys(identifiers)),"provider_invocations":0}
+                rows=[r[0] for r in db.execute("SELECT event_id FROM orchestration_events WHERE rowid IN "
+                    "((SELECT min(rowid) FROM orchestration_events),(SELECT max(rowid) FROM orchestration_events))")]
+                identifiers.extend(rows);sizes.append(len(rows))
+        return {"event_ids":list(dict.fromkeys(identifiers)),"per_source_probe_counts":sizes,"provider_invocations":0}
     if operation=="live_claim_count":return live_claim_count(args["cutoff"])
     if operation=="barrier":
         admission_barrier(args["path"],args["enabled"],args.get("block_invoking",False));return {"enabled":args["enabled"]}
