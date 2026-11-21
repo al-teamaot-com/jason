@@ -183,6 +183,44 @@ class PlanRequestRepository:
                 "ORDER BY r.rowid LIMIT ?", (include_indeterminate,len(prefix),prefix,max(1,min(32,limit)),)).fetchall()
         return tuple(row[0] for row in rows)
 
+    def objective_submission(self, *, approval_id: str, template_id: str, now: datetime,
+                             prefix: str, maximum_active: int) -> datetime:
+        """Stable issuance metadata in the canonical DB; this grants no authority."""
+        with sqlite3.connect(self.path) as db:
+            db.execute("CREATE TABLE IF NOT EXISTS universal_objective_submissions ("
+                       "approval_id TEXT PRIMARY KEY, template_id TEXT NOT NULL, issued_at TEXT NOT NULL)")
+            db.execute("BEGIN IMMEDIATE")
+            prior = db.execute("SELECT template_id,issued_at FROM universal_objective_submissions WHERE approval_id=?",
+                               (approval_id,)).fetchone()
+            if prior is not None:
+                if prior[0] != template_id:
+                    raise PermissionError("OBJECTIVE_SUBMISSION_CHANGED")
+                return datetime.fromisoformat(prior[1])
+            # Uncertain/blocked tasks retain a slot. A different request ID cannot
+            # turn an unresolved effect into a new attempt.
+            count = db.execute("SELECT count(*) FROM ("
+                "SELECT approval_id FROM universal_objective_submissions UNION "
+                "SELECT approval_id FROM universal_plan_requests) r "
+                "LEFT JOIN universal_plan_progress p ON p.approval_id=r.approval_id "
+                "WHERE substr(r.approval_id,1,?)=? AND "
+                "(p.state IS NULL OR p.state NOT IN ('completed','denied'))",
+                (len(prefix), prefix)).fetchone()[0]
+            if count >= maximum_active:
+                raise PermissionError("OBJECTIVE_ACTIVE_LIMIT")
+            db.execute("INSERT INTO universal_objective_submissions VALUES (?,?,?)",
+                       (approval_id,template_id,now.isoformat()))
+        return now
+
+    def objective_submission_ids(self) -> tuple[str, ...]:
+        with sqlite3.connect(self.path) as db:
+            exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='universal_objective_submissions'").fetchone()
+            if not exists:
+                return ()
+            rows = db.execute("SELECT s.approval_id FROM universal_objective_submissions s "
+                "LEFT JOIN universal_plan_progress p ON p.approval_id=s.approval_id "
+                "WHERE p.state IS NULL OR p.state NOT IN ('completed','denied') ORDER BY s.rowid LIMIT 2").fetchall()
+        return tuple(row[0] for row in rows)
+
     def record_progress(self, approval_id: str, *, state: str, now: datetime,
                         completed_steps: int = 0, current_execution_id: str | None = None,
                         reason_code: str | None = None) -> None:

@@ -49,7 +49,7 @@ EXTRA_CODE=(
  "tools/owner_objective_root_worker.py","tools/owner_objective_source_verifier.py",
  "tools/owner_objective_ci.py","tools/owner_objective_teams_delivery.py",
  "tools/pmv4_teams_objective_admission.py","tools/pmv4_teams_objective_store.py",
- "tools/pmv4_objective_documentation.py","tools/documentation_publisher_install.py",
+ "tools/pmv4_objective_documentation.py","tools/submit_owner_objective.py","tools/documentation_publisher_install.py",
  "tools/pmv4_e_operational_closure.py","tools/deploy_live_container.py",
  "tools/pmv4_mcp_projection.py",
  "implementation/connectors/openclaw/src/jason_openclaw/signed_transport.py",
@@ -484,7 +484,8 @@ db.execute('COMMIT');db.close()
             "schema_version":"1.0","objective":"restore-and-verify-documentation-publisher",
             "native_manifest_sha256":manifest_hash,"candidate_sha":self.candidate,"rollback_sha":ROLLBACK,
             "ordered_capabilities":list(f["scope_module"].CAPABILITIES[:2]),
-            "business_provider_writes":False,"github_documentation_publication_allowed":True,"protected_runtime_changes":False,
+            "business_provider_writes":False,"github_documentation_publication_allowed":True,
+            "github_existing_generated_branch_pr_allowed":True,"github_control_board_issue":526,"protected_runtime_changes":False,
             "maximum_job_starts":1,"original_failed_approval_reused":False,
         }
         args=dict(component_id="documentation-publisher",candidate_sha=self.candidate,
@@ -533,6 +534,7 @@ db.execute('COMMIT');db.close()
         image=self.scope["artifacts"]["component_image"]
         args=["/usr/bin/docker","run","-d","--name","jason-owner-objective","--network","jason-core",
             "--restart","unless-stopped","--user","1000:1000","--read-only","--cap-drop","ALL",
+            "--env","JASON_SOURCE_REVISION="+self.candidate,
             "--security-opt","no-new-privileges","--pids-limit","128","--memory","512m",
             "--tmpfs","/tmp:rw,nosuid,nodev,noexec,size=32m"]
         for source,destination,readonly in (

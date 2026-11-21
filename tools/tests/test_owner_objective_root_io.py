@@ -99,3 +99,34 @@ def test_dirfd_writer_stays_with_original_directory_after_parent_rename(tmp_path
         assert not (parent/"results/receipt.json").exists()
     finally:
         os.close(fd)
+
+
+@pytest.mark.parametrize("altered", [False, True])
+def test_root_staging_accepts_later_parent_only_for_registered_exact_template(monkeypatch,altered):
+    from types import SimpleNamespace
+    approval="planapproval-objective-"+"2"*32
+    args={"component_id":"documentation-publisher","candidate_sha":"a"*40}
+    material={"requests":[{"capability_name":name,"arguments":dict(args)}
+        for name in ("release.documentation.publisher.restore","release.documentation.publisher.verify")]}
+    if altered:material["requests"][1]["arguments"]["candidate_sha"]="b"*40
+    preflights=[]
+    class Store:
+        def stage(self,**kwargs):
+            assert kwargs["approval_id"]==approval
+            candidate={"approval_id":approval,"material":kwargs["material"]}
+            if not kwargs["native_preflight"](candidate):raise PermissionError("REGISTERED_TEMPLATE_CHANGED")
+            return {"approval_id":approval,"plan_fingerprint":"c"*64,"card_instance_challenge":"d"*48}
+    actions=SimpleNamespace(manifest={"step_arguments":args},
+                            preflight=lambda:preflights.append(True) or True)
+    monkeypatch.setattr(worker,"root_read",lambda *a:b'{"ready":true,"source_sha":"source"}')
+    config={"activation_path":"/unused","source_sha":"source","requester_identity_id":"jason-service",
+            "campaign_approval_id":"planapproval-objective-"+"1"*32}
+    ports={"policy_digest":"e"*64,"allowed_components":frozenset({"documentation-publisher"})}
+    message={"schema_version":"1.0","operation":"stage","approval_id":approval,"material":material}
+    if altered:
+        with pytest.raises(PermissionError,match="TEMPLATE_CHANGED"):
+            worker.process(message,config,(Store(),actions,ports,None,None))
+        assert not preflights
+    else:
+        assert worker.process(message,config,(Store(),actions,ports,None,None))["approval_id"]==approval
+        assert preflights==[True]

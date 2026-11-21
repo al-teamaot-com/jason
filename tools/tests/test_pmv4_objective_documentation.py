@@ -34,8 +34,9 @@ def native_case(tmp_path,monkeypatch):
         calls.append(args)
         if args==["daemon-reload"]:
             state["ExecStart"]=str(base/docs.PUBLISHER_SOURCE) if dropin.exists() else "original"
+            state["DropInPaths"]=str(dropin) if dropin.exists() else ""
         if args==["start","--no-block",docs.UNIT]:
-            job.update(InvocationID="new",ExecMainStartTimestampMonotonic=str(time.monotonic_ns()//1000))
+            job.update(InvocationID="new-"+str(len(calls)),ExecMainStartTimestampMonotonic=str(time.monotonic_ns()//1000))
     native=dict(directory=lambda p,*a:p.mkdir(mode=0o700,exist_ok=True),
         read=lambda p,*a:p.read_bytes(),write=write,props=lambda *a:state.copy(),
         systemctl=systemctl,run=lambda *a:"\n".join(k+"="+v for k,v in job.items()))
@@ -48,7 +49,9 @@ def native_case(tmp_path,monkeypatch):
         if after_restore:
             assert dropin.read_bytes()==docs.override_bytes()
             assert str(base/docs.PUBLISHER_SOURCE) in state["ExecStart"]
-        else:assert not dropin.exists()
+        elif dropin.exists():
+            assert dropin.read_bytes()==docs.override_bytes()
+            assert state["DropInPaths"]==str(dropin)
         return True
     monkeypatch.setattr(actions,"preflight",preflight)
     def claim(index):
@@ -183,3 +186,48 @@ def test_full_native_preflight_denies_changed_independent_gate(preflight_case,ch
     if change=="drift":drift["status"]="drift_detected"
     if change=="stale":drift["observed_at"]="2020-01-01T00:00:00+00:00"
     with pytest.raises(TeamsObjectiveDenied):actions.preflight()
+
+def second_claim(claim,index):
+    value=claim(index)
+    value.update(approval_id="planapproval-objective-"+"2"*32,
+                 claim_id=("a","b")[index]*64,plan_fingerprint="e"*64)
+    return value
+
+
+def test_new_objective_preserves_first_acceptance_and_runs_one_fresh_job(native_case):
+    actions,claim,calls,base,dropin,job=native_case
+    actions.execute(claim(0));actions.execute(claim(1))
+    accepted=(base/"accepted.json").read_bytes()
+    reloads=calls.count(["daemon-reload"])
+    next_restore=second_claim(claim,0);next_verify=second_claim(claim,1)
+    actions.execute(next_restore)
+    assert calls.count(["daemon-reload"])==reloads
+    actions.execute(next_verify)
+    assert (base/"accepted.json").read_bytes()==accepted
+    assert calls.count(["start","--no-block",docs.UNIT])==2
+    assert actions.readback(next_verify)["approval_id"]==next_verify["approval_id"]
+
+
+def test_old_accepted_job_is_not_evidence_for_later_objective(native_case):
+    actions,claim,calls,base,dropin,job=native_case
+    actions.execute(claim(0));actions.execute(claim(1))
+    next_verify=second_claim(claim,1)
+    with pytest.raises(FileNotFoundError):
+        actions.readback(next_verify)
+    assert calls.count(["start","--no-block",docs.UNIT])==1
+
+
+def test_later_job_crash_recovers_own_invocation_and_preserves_older_acceptance(native_case,monkeypatch):
+    actions,claim,calls,base,dropin,job=native_case
+    actions.execute(claim(0));actions.execute(claim(1))
+    accepted=(base/"accepted.json").read_bytes()
+    next_restore=second_claim(claim,0);next_verify=second_claim(claim,1)
+    actions.execute(next_restore)
+    finish=actions._finish_verified_job
+    monkeypatch.setattr(actions,"_finish_verified_job",
+        lambda c:(_ for _ in ()).throw(SystemExit("stop after later job")))
+    with pytest.raises(SystemExit):actions.execute(next_verify)
+    monkeypatch.setattr(actions,"_finish_verified_job",finish)
+    assert actions.readback(next_verify)["status"]=="verified"
+    assert (base/"accepted.json").read_bytes()==accepted
+    assert calls.count(["start","--no-block",docs.UNIT])==2

@@ -97,11 +97,16 @@ class DocumentationObjectiveActions:
         need(state["ActiveState"] in ("inactive", "failed"), "DOCUMENTATION_SERVICE_BUSY")
         if after_restore:
             need(c["read"](DROPIN, 0, 0o644) == override_bytes()
-                 and str(PUBLISHER_BASE / PUBLISHER_SOURCE) in state["ExecStart"],
+                 and str(PUBLISHER_BASE / PUBLISHER_SOURCE) in state["ExecStart"]
+                 and state.get("DropInPaths", "").split() == [str(DROPIN)],
                  "REVIEWED_DOCUMENTATION_SOURCE_NOT_ACTIVE")
-        else:
-            need(not os.path.lexists(DROPIN) and state.get("DropInPaths", "") == "",
+        elif os.path.lexists(DROPIN):
+            need(c["read"](DROPIN, 0, 0o644) == override_bytes()
+                 and str(PUBLISHER_BASE / PUBLISHER_SOURCE) in state["ExecStart"]
+                 and state.get("DropInPaths", "").split() == [str(DROPIN)],
                  "FOREIGN_DOCUMENTATION_OVERRIDE")
+        else:
+            need(state.get("DropInPaths", "") == "", "FOREIGN_DOCUMENTATION_OVERRIDE")
         return True
 
     def _host(self):
@@ -132,9 +137,10 @@ class DocumentationObjectiveActions:
                 c["directory"](DROPIN.parent, 0)
                 created = False
                 try:
-                    c["write"](DROPIN, override_bytes(), 0o644)
-                    created = True
-                    c["systemctl"](["daemon-reload"])
+                    if not os.path.lexists(DROPIN):
+                        c["write"](DROPIN, override_bytes(), 0o644)
+                        created = True
+                        c["systemctl"](["daemon-reload"])
                     self.preflight(after_restore=True)
                     result = self._record(claim, status="verified")
                     c["write"](receipt, canonical(result), 0o400)
@@ -195,17 +201,27 @@ class DocumentationObjectiveActions:
             self.preflight(after_restore=True)
             result = self._record(claim, status="verified")
             accepted = PUBLISHER_BASE / "accepted.json"
-            need(not os.path.lexists(accepted), "DOCUMENTATION_ALREADY_ACCEPTED")
-            c["write"](accepted, canonical({
-                **result, "status": "documentation_publisher_operationally_verified",
-                "source_sha": PUBLISHER_SOURCE,
-                "authorization": "original_signed_teams_owner_objective",
-                "protected_services_changed": False, "provider_mutations": False,
-                "github_documentation_publication": True,
-                "accepted_at": datetime.now(timezone.utc).isoformat(),
-            }), 0o400)
+            if os.path.lexists(accepted):
+                self._prior_acceptance()
+            else:
+                c["write"](accepted, canonical({
+                    **result, "status": "documentation_publisher_operationally_verified",
+                    "source_sha": PUBLISHER_SOURCE,
+                    "authorization": "original_signed_teams_owner_objective",
+                    "protected_services_changed": False, "provider_mutations": False,
+                    "github_documentation_publication": True,
+                    "accepted_at": datetime.now(timezone.utc).isoformat(),
+                }), 0o400)
             c["write"](self.receipts / (claim["claim_id"] + ".json"), canonical(result), 0o400)
             return result
+
+    def _prior_acceptance(self):
+        accepted = json.loads(self.native["read"](PUBLISHER_BASE / "accepted.json", 0, 0o400))
+        need(accepted.get("status") == "documentation_publisher_operationally_verified"
+             and accepted.get("authorization") == "original_signed_teams_owner_objective"
+             and accepted.get("source_sha") == PUBLISHER_SOURCE,
+             "FOREIGN_DOCUMENTATION_ACCEPTANCE")
+        return accepted
 
     def readback(self, claim: dict) -> Mapping:
         """Recover verified native facts, never rerun an uncertain service job."""
@@ -223,12 +239,12 @@ class DocumentationObjectiveActions:
                 # This also covers a crash after the job finished but before
                 # the small acceptance receipt was committed.
                 return self._finish_verified_job(claim)
-            accepted = json.loads(self.native["read"](PUBLISHER_BASE / "accepted.json", 0, 0o400))
+            accepted = self._prior_acceptance()
             expected = self._record(claim, status="verified")
-            need(all(accepted.get(k) == v for k, v in expected.items() if k != "status")
-                 and accepted.get("status") == "documentation_publisher_operationally_verified"
-                 and accepted.get("authorization") == "original_signed_teams_owner_objective",
-                 "DOCUMENTATION_ACCEPTANCE_NOT_THIS_OBJECTIVE")
+            if not all(accepted.get(k) == v for k, v in expected.items() if k != "status"):
+                # An older objective's acceptance cannot prove this new job.
+                # Recover only this claim's independently sealed fresh invocation.
+                return self._finish_verified_job(claim)
             self.preflight(after_restore=True)
             self.native["write"](receipt, canonical(expected), 0o400)
             return expected

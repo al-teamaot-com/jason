@@ -70,3 +70,37 @@ receipts and final status. A unit-test signature cannot prove a real click.
 Production readiness also requires expiry/revocation, replay/concurrency,
 changed scope/source/policy, interrupted execution and rollback evidence.
 A missing real provider ID or SDK linkage remains a blocker; never invent it.
+
+## Reusable local submission
+
+After the separate Deny test and real initial objective complete, the same
+component accepts later requests over its UID1000-only Unix socket. No new Root
+command or installation is required for this registered template. The reviewed
+Root policy still limits every request to the same exact two documentation
+actions and artifacts. Other privileged handlers remain separately reviewable.
+
+Use the installed command as the registered local workload:
+
+    python3 -B /usr/local/lib/jason/owner-objective/trusted/tools/submit_owner_objective.py --template documentation-publisher
+
+Retain the printed request ID. Reusing it recovers the original plan/card,
+expiry, decision and results; it never silently creates a replacement vote.
+Add --request-id ID --status for canonical progress. The local request has no
+approval authority. The licensed Owner must approve its Root-rendered Teams
+card once before either native step executes.
+
+Issuance timestamps live in the existing canonical plan database as submission
+metadata, not another approval ledger. At most two unresolved objectives may
+be admitted. Existing maintenance retries interrupted staging/delivery using
+the same request, never resending an unknown provider send. Root still verifies
+all current gates, registered requester, immutable arguments and original click.
+
+Repeat restoration is an exact configuration readback when already installed.
+Each new verification claim starts at most one fresh scheduled job and requires
+its own native invocation evidence. Preserve the first immutable acceptance
+record and write new per-objective Root receipts. An old success cannot satisfy
+a later objective.
+
+The fixed publisher may update its existing generated branch/PR and existing
+control-board issue #526. Its file changes remain bounded to the two declared
+generated documentation-state files; no business provider writes are allowed.
