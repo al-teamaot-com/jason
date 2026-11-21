@@ -98,9 +98,9 @@ class ObjectiveRootInvoker:
         try:
             result = self.root_client.call("execute", approval_id=parent,
                                          step_index=index, signed_envelope=signed)
-        except (TimeoutError, ObjectiveRootRequestDenied) as exc:
+        except (TimeoutError, PermissionError, OSError, ValueError) as exc:
             if isinstance(exc, ObjectiveRootRequestDenied) and exc.execution_state == "not_started":
-                raise
+                raise ProviderOutcomeIndeterminate("independent Root proof confirms no native action started") from exc
             try:
                 result = self.root_client.call("readback", approval_id=parent,
                                              step_index=index, signed_envelope=signed)
@@ -110,13 +110,22 @@ class ObjectiveRootInvoker:
                 or result.get("step_index") != index
                 or result.get("candidate_sha") != request.arguments["candidate_sha"]
                 or result.get("scope_sha256") != request.arguments["scope_sha256"]):
-            raise PermissionError("native Root outcome is not verified for this exact step")
+            raise ProviderOutcomeIndeterminate("native Root outcome is not verified for this exact step")
         return InvocationResult(output=result, attempts=1)
 
     def readback(self, request):
         parent, index, signed = self._context(request)
-        result = self.root_client.call("readback", approval_id=parent,
-                                     step_index=index, signed_envelope=signed)
+        try:
+            result = self.root_client.call("readback", approval_id=parent,
+                                         step_index=index, signed_envelope=signed)
+        except ObjectiveRootRequestDenied as exc:
+            if exc.execution_state != "not_started":
+                raise ProviderOutcomeIndeterminate("native effect remains uncertain") from exc
+            # A fresh Root-owned denial proves there is no native claim and no
+            # effect was possible. Perform the first native execution under the
+            # SAME canonical consumed claim and original human decision.
+            result = self.root_client.call("execute", approval_id=parent,
+                                         step_index=index, signed_envelope=signed)
         proposal = self.handler().proposals.require(parent)
         args = request.arguments
         if (result.get("status") != "verified" or result.get("approval_id") != parent

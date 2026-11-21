@@ -197,9 +197,11 @@ class UniversalPlanContinuationMaintenance:
                         self._progress(approval_id, "indeterminate", completed=completed,
                             execution_id=current_execution_id, reason="native_readback_required")
                         return
-                    # This installed provider port can only observe native state.
-                    # All original decision, live role, scope and expiry gates
-                    # above still apply. Never invoke/reset a consumed action.
+                    # The installed port reads native state first. It may do a
+                    # FIRST native execution only after independent Root proof
+                    # that no native claim/effect ever existed. Unknown effects
+                    # are never repeated and the consumed claim is never reset.
+                    # All original decision/live role/scope/expiry gates apply.
                     stage = "native_readback"
                     output = self.indeterminate_readback(resumed)
                     self.execution_ledger.reconcile_consumed_success(resumed, output=output)

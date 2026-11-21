@@ -201,6 +201,7 @@ class DocumentationObjectiveActions:
                 "source_sha": PUBLISHER_SOURCE,
                 "authorization": "original_signed_teams_owner_objective",
                 "protected_services_changed": False, "provider_mutations": False,
+                "github_documentation_publication": True,
                 "accepted_at": datetime.now(timezone.utc).isoformat(),
             }), 0o400)
             c["write"](self.receipts / (claim["claim_id"] + ".json"), canonical(result), 0o400)

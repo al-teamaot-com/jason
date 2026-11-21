@@ -17,19 +17,19 @@ import secrets
 TRUSTED = Path("/usr/local/lib/jason/owner-objective/trusted")
 ENTRY = TRUSTED / "tools/owner_objective_root_worker.py"
 CONFIG = Path("/etc/jason-owner-release/owner-objective.json")
-SPOOL = Path("/var/lib/jason/owner-objective-inbox")
+SPOOL = Path("/var/lib/jason-owner-release/owner-objective-inbox")
 PRIVATE = Path("/var/lib/jason-owner-release/objectives")
 _ID = re.compile(r"[0-9a-f]{64}\Z")
 
 
-def root_read(path: Path, mode=0o444, maximum=2000000) -> bytes:
+def root_read(path: Path, mode=0o444, maximum=2000000, empty_ok=False) -> bytes:
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as stream:
         m, link = os.fstat(stream.fileno()), path.lstat()
         if (not stat.S_ISREG(m.st_mode) or stat.S_ISLNK(link.st_mode)
                 or (m.st_dev, m.st_ino) != (link.st_dev, link.st_ino)
                 or m.st_uid != 0 or m.st_gid != 0 or m.st_nlink != 1
-                or stat.S_IMODE(m.st_mode) != mode or not 0 < m.st_size <= maximum):
+                or stat.S_IMODE(m.st_mode) != mode or not (0 if empty_ok else 1) <= m.st_size <= maximum):
             raise PermissionError("OBJECTIVE_ROOT_FILE_IDENTITY")
         raw = stream.read(maximum + 1)
     if len(raw) != m.st_size:
@@ -114,7 +114,7 @@ def runtime(config):
     from tools import owner_objective_source_verifier
     files = config["files_sha256"]
     for name, expected in files.items():
-        if sha256(root_read(TRUSTED / name)).hexdigest() != expected:
+        if sha256(root_read(TRUSTED / name, empty_ok=True)).hexdigest() != expected:
             raise PermissionError("OBJECTIVE_INSTALLED_CODE_CLOSURE_CHANGED")
     original_path = TRUSTED / "tools/documentation_publisher_install.py"
     raw = root_read(original_path)
@@ -159,7 +159,11 @@ def runtime(config):
 def process(message: dict, config: dict, context) -> dict:
     store, actions, ports, native, canonical = context
     op = message.get("operation")
-    if op in ("readback", "status"):
+    activation = json.loads(root_read(Path(config["activation_path"])))
+    if (op != "status" and (activation.get("ready") is not True
+            or activation.get("source_sha") != config["source_sha"])):
+        raise PermissionError("OBJECTIVE_INSTALLATION_ACCEPTANCE_PENDING")
+    if op in ("readback", "status", "execute"):
         observation = message.get("observation_id")
         if not isinstance(observation, str) or not re.fullmatch(r"[0-9a-f]{32}", observation):
             raise PermissionError("OBJECTIVE_READBACK_OBSERVATION_ID")
@@ -201,6 +205,11 @@ def process(message: dict, config: dict, context) -> dict:
         if enrolled["provider_message_id"] != message["provider_message_id"]:
             raise PermissionError("OBJECTIVE_ROOT_DELIVERY_NOT_CONFIRMED")
         return {"approval_id": approval_id, "delivery_recorded": True}
+    if op == "admit" and set(message) == {"schema_version", "operation", "approval_id", "signed_envelope"}:
+        if approval_id != config["campaign_approval_id"]:
+            raise PermissionError("OBJECTIVE_DECISION_OUTSIDE_REGISTERED_CAMPAIGN")
+        return store.admit(approval_id=approval_id, signed_envelope=message["signed_envelope"],
+                           at=now, verify_ports=ports)
     if op in ("execute", "readback") and set(message) == {
             "schema_version", "operation", "approval_id", "step_index", "signed_envelope"}:
         index = message["step_index"]

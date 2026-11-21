@@ -54,6 +54,8 @@ jobs:
               tools/tests/test_owner_objective_teams_delivery.py \
               tools/tests/test_owner_objective_live_authority.py \
               tools/tests/test_owner_objective_source_verifier.py \
-              tools/tests/test_owner_objective_install_scope.py
-          test ! -e /var/lib/jason/owner-objective-inbox
+              tools/tests/test_owner_objective_install_scope.py \
+              tools/tests/test_owner_objective_ci.py \
+              tools/tests/test_owner_objective_install.py
+          test ! -e /var/lib/jason-owner-release/owner-objective-inbox
           test ! -e /etc/jason-owner-release/owner-objective.json

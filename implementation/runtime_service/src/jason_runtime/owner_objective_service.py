@@ -162,6 +162,13 @@ class ObjectiveApplication:
         submit = parsed.approval_submit
         if submit is None or not submit.approval_id.startswith(PREFIX):
             raise PermissionError("approval is outside the isolated objective component")
+        if submit.approval_id == self.config["campaign"]["approve_approval_id"] and submit.decision == "approve":
+            # Root independently retains the original decision before transient
+            # CI/native gates can consume the transport freshness window.
+            admitted = self.root_client.call("admit", approval_id=submit.approval_id,
+                                             signed_envelope=envelope)
+            if admitted.get("owner_decision_recorded") is not True:
+                raise PermissionError("Root did not retain the original Owner decision")
         return self.handler.handle(approval_id=submit.approval_id, decision=submit.decision,
             microsoft_tenant_id=parsed.microsoft_tenant_id,
             microsoft_object_id=parsed.microsoft_object_id,
@@ -238,6 +245,11 @@ class ObjectiveApplication:
                 now=self.clock(), reason_code="approval_delivery_root_readback_required")
 
     def maintenance(self):
+        activation = self.config.get("activation_path")
+        if activation is not None:
+            ready = read_profile(Path(activation))
+            if ready.get("ready") is not True or ready.get("source_sha") != self.config["source_sha"]:
+                return
         self.issue("deny")
         self.issue("approve")
         for approval_id in self.handler.requests.candidate_ids(limit=32, prefix=PREFIX, include_indeterminate=True):

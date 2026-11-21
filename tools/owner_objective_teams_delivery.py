@@ -17,7 +17,7 @@ def review(enrollment):
     steps = enrollment["material"]["requests"]
     facts = [
         {"title": "Plan fingerprint", "value": enrollment["plan_fingerprint"]},
-        {"title": "Production impact", "value": "Restore the reviewed documentation publisher override; run and verify its existing scheduled job."},
+        {"title": "Production impact", "value": "Restore the reviewed documentation publisher override; run and verify its existing scheduled job. Publish only the two generated documentation-state files through the existing GitHub publisher."},
         {"title": "Excluded", "value": "Runtime, MCP, Ticket Core, provider data, freeze and promotion hold changes."},
         {"title": "Expiry", "value": scope["expires_at"]},
     ]

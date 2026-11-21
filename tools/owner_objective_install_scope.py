@@ -11,7 +11,7 @@ ROOT_TARGETS = (
     "/usr/local/lib/jason/owner-objective",
     "/etc/jason-owner-release/owner-objective.json",
     "/var/lib/jason-owner-release/objectives",
-    "/var/lib/jason/owner-objective-inbox",
+    "/var/lib/jason-owner-release/owner-objective-inbox",
     "/var/lib/jason/openclaw/owner-objective",
     "/var/lib/jason/openclaw/universal-approvals.sqlite3",
     "/var/lib/jason/authority/authority.sqlite3",
@@ -19,6 +19,10 @@ ROOT_TARGETS = (
     "/etc/systemd/system/jason-owner-objective-executor.service",
     "/etc/systemd/system/jason-owner-objective-executor.path",
     "/etc/systemd/system/jason-documentation-reconciliation.service.d",
+    "/var/lib/jason/openclaw/release-manager/production-control-state.json",
+    "/var/lib/jason/openclaw/release-manager/production-drift.json",
+    "/var/lib/jason/openclaw/release-manager/protected-transitions",
+    "/var/lib/jason/openclaw/release-manager/protected-readback",
 )
 CAPABILITIES = ("release.documentation.publisher.restore",
                 "release.documentation.publisher.verify", "interaction.owner.acceptance.record")

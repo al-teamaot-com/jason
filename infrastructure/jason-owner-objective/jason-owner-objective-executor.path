@@ -1,7 +1,7 @@
 [Unit]
 Description=Jason typed Owner objective request queue
 [Path]
-DirectoryNotEmpty=/var/lib/jason/owner-objective-inbox/requests
+DirectoryNotEmpty=/var/lib/jason-owner-release/owner-objective-inbox/requests
 Unit=jason-owner-objective-executor.service
 [Install]
 WantedBy=multi-user.target

@@ -206,6 +206,19 @@ class RootObjectiveStore:
                  "RETAINED_DECISION_CHANGED")
         return verified
 
+    def admit(self, *, approval_id, signed_envelope, at, verify_ports):
+        """Retain the real human decision while its transport is fresh.
+
+        Native release gates remain independent. Their temporary failure must
+        not discard an already verified Owner decision or demand another vote.
+        """
+        path = self._plan(approval_id)
+        with self._locked(path):
+            verified = self._decision(path, signed_envelope=signed_envelope, at=at,
+                                      verify_ports=verify_ports)
+            return {"approval_id": approval_id, "plan_fingerprint": verified.plan_fingerprint,
+                    "owner_decision_recorded": True}
+
     def claim(self, *, approval_id: str, step_index: int, signed_envelope: Mapping[str, Any],
               at: datetime, verify_ports: dict, native_preflight: Callable[[dict, dict], bool],
               readback_only: bool = False) -> dict:

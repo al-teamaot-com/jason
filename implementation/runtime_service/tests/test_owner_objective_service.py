@@ -52,6 +52,8 @@ class NativeBoundary:
         self.timeout_after_effect = False
         self.readback_unavailable = False
         self.calls = []
+        self.preflight_unavailable = False
+        self.now = NOW
     def stage(self, *, proposal, requests, pending):
         material = {"requests": [request_material(r) for r in requests],
                     "scope": scope_material(proposal.scope)}
@@ -65,6 +67,15 @@ class NativeBoundary:
             policy_digest=self.ports["policy_digest"],
             allowed_components=frozenset({"documentation-publisher"}))
     def call(self, operation, *, approval_id, step_index=None, signed_envelope=None):
+        if operation == "admit":
+            return self.store.admit(approval_id=approval_id, signed_envelope=signed_envelope,
+                                    at=self.now, verify_ports=self.ports)
+        if operation == "execute" and self.preflight_unavailable:
+            from jason_runtime.owner_objective_root_client import ObjectiveRootRequestDenied
+            raise ObjectiveRootRequestDenied("NATIVE_PREFLIGHT", "not_started")
+        if operation == "readback" and not (self.store._plan(approval_id)/("claim-"+str(step_index)+".json")).exists():
+            from jason_runtime.owner_objective_root_client import ObjectiveRootRequestDenied
+            raise ObjectiveRootRequestDenied("NO_EXISTING_NATIVE_CLAIM", "not_started")
         if operation == "deliver":
             message_id = self.store.deliver(approval_id=approval_id, at=NOW,
                 policy_digest=self.ports["policy_digest"],
@@ -74,7 +85,7 @@ class NativeBoundary:
             return {"approval_id": approval_id, "provider_message_id": message_id}
         self.calls.append((operation, step_index))
         claim = self.store.claim(approval_id=approval_id, step_index=step_index,
-            signed_envelope=signed_envelope, at=NOW, verify_ports=self.ports,
+            signed_envelope=signed_envelope, at=self.now, verify_ports=self.ports,
             native_preflight=lambda *a: True, readback_only=operation == "readback")
         if operation == "execute" and not claim["already_verified"]:
             assert claim["claim_id"] not in self.effects
@@ -254,3 +265,23 @@ def test_current_service_grant_revocation_blocks_remaining_step_without_second_v
     approval=env.config["campaign"]["approve_approval_id"]
     assert env.app.handler.requests.progress(approval)["state"]=="blocked"
     assert len(env.native.effects)==1 and len(env.delivery.requests)==2
+
+
+def test_transient_native_gate_keeps_original_decision_and_first_effect_after_transport_expiry(env):
+    deny_then_issue(env)
+    env.app.interaction(signed(env,"approve","approve"))
+    env.native.preflight_unavailable=True
+    env.app.maintenance()
+    approval=env.config["campaign"]["approve_approval_id"]
+    assert env.app.handler.requests.progress(approval)["state"]=="indeterminate"
+    assert not env.native.effects
+    env.native.preflight_unavailable=False
+    later=NOW+timedelta(minutes=10)
+    env.native.now=later
+    restarted=build(env.config,delivery=env.delivery,root_client=env.native,clock=lambda:later)
+    restarted.maintenance()
+    progress=restarted.handler.requests.progress(approval)
+    assert progress["state"]=="completed",progress
+    assert len(env.native.effects)==2 and len(env.delivery.requests)==2
+    decision=env.native.store._read(env.native.store._plan(approval)/"verified-decision.json")
+    assert decision["verified_at"]==NOW.isoformat()

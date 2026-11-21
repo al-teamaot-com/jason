@@ -90,8 +90,11 @@ def verify(config, candidate):
         raise PermissionError("OBJECTIVE_SOURCE_VERIFIER_NOT_INSTALLED")
     from tools import pmv4_e_ci_refresh as ci
     namespace = ci.load_pinned_attestor(ci.SOURCE, production=True)
+    original_api = namespace["gh_api"]
     ci.paginate_required_checks(namespace)
     evidence = namespace["verify_ci"](candidate)
+    from tools.owner_objective_ci import require_acceptance
+    require_acceptance(original_api, candidate)
     if (evidence["required_ci_passed"] is not True
             or evidence["protected_main_ancestor"] is not True):
         raise PermissionError("OBJECTIVE_REQUIRED_CI_NOT_PASSED")

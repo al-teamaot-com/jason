@@ -11,7 +11,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/jason-owner-release/objectives /var/lib/jason/owner-objective-inbox /usr/local/lib/jason/documentation-reconciliation /etc/systemd/system/jason-documentation-reconciliation.service.d
+ReadWritePaths=/var/lib/jason-owner-release/objectives /var/lib/jason-owner-release/owner-objective-inbox /usr/local/lib/jason/documentation-reconciliation /etc/systemd/system/jason-documentation-reconciliation.service.d
 ReadWritePaths=/var/lib/jason/openclaw/release-manager
 # Existing fixed native service/CI ports run as their existing identities.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

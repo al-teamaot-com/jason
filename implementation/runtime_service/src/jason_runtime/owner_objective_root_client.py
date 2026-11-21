@@ -32,10 +32,10 @@ class ObjectiveRootClient:
     expected_root_uid: int = 0
 
     def call(self, operation: str, **payload) -> dict:
-        if operation not in {"stage", "deliver", "delivery", "execute", "readback", "status"}:
+        if operation not in {"stage", "deliver", "delivery", "admit", "execute", "readback", "status"}:
             raise PermissionError("unregistered objective Root operation")
         message = {"schema_version": "1.0", "operation": operation, **payload}
-        if operation in {"readback", "status"}:
+        if operation in {"readback", "status", "execute"}:
             message["observation_id"] = secrets.token_hex(16)
         raw = encoded(message)
         if len(raw) > 196608:
