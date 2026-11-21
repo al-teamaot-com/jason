@@ -1,0 +1,37 @@
+name: Validate AOT Standing-Safe Diagnostic Classifier
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'implementation/mcp_service/tests/test_aot_passive_diagnostic_promotion.py'
+      - '.github/workflows/drmm-standing-safe-diagnostics.yml'
+  push:
+    paths:
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'implementation/mcp_service/tests/test_aot_passive_diagnostic_promotion.py'
+      - '.github/workflows/drmm-standing-safe-diagnostics.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  reviewed-diagnostics:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-001/src:implementation/cap-003/src:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src:implementation/mcp_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install governed test dependencies
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service ./implementation/mcp_service
+      - name: Compile exact-identity classifier and regression tests
+        run: |
+          python -m py_compile implementation/mcp_service/src/jason_mcp/server.py implementation/mcp_service/tests/test_aot_passive_diagnostic_promotion.py
+      - name: Verify Owner authorization, three diagnostics and negative controls
+        run: |
+          python -m pytest -q implementation/mcp_service/tests/test_aot_passive_diagnostic_promotion.py implementation/mcp_service/tests/test_governed_read_failure_contract.py
