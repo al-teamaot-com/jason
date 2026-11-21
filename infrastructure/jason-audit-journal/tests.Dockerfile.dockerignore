@@ -1,0 +1,14 @@
+**
+!implementation
+!implementation/orchestrator
+!implementation/orchestrator/event_store.py
+!implementation/orchestrator/segmented_journal.py
+!implementation/orchestrator/journal_sql.py
+!implementation/orchestrator/journal_health.py
+!tools
+!tools/audit_journal_control.py
+!tools/tests
+!tools/tests/audit_journal_root_fixture.py
+!infrastructure
+!infrastructure/jason-audit-journal
+!infrastructure/jason-audit-journal/tests.Dockerfile

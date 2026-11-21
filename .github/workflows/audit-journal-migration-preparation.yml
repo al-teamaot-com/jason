@@ -4,6 +4,19 @@ on:
     paths:
       - 'tools/audit_journal_migration.py'
       - 'tools/tests/test_audit_journal_migration.py'
+      - 'tools/audit_journal_control.py'
+      - 'tools/audit_journal_root_inventory.py'
+      - 'tools/audit_journal_benchmark.py'
+      - 'tools/tests/test_audit_journal_native.py'
+      - 'tools/tests/test_audit_journal_health.py'
+      - 'tools/tests/audit_journal_root_fixture.py'
+      - 'implementation/orchestrator/event_store.py'
+      - 'implementation/orchestrator/segmented_journal.py'
+      - 'implementation/orchestrator/journal_sql.py'
+      - 'implementation/orchestrator/journal_health.py'
+      - 'tools/openclaw_authority_fast_health.py'
+      - 'tools/openclaw_authority_operational_health.py'
+      - 'infrastructure/jason-audit-journal/**'
       - 'config/operations/audit-journal-daily-archive-proposal-v1.json'
       - 'docs/engineering/Audit-Journal-Daily-Archive-Migration-v1.md'
       - '.github/workflows/audit-journal-migration-preparation.yml'
@@ -27,6 +40,11 @@ jobs:
           PYTHONPATH: .:tools:implementation
           PYTHONDONTWRITEBYTECODE: '1'
         run: |
-          python -B -m pytest -o addopts='' -q -p no:cacheprovider tools/tests/test_audit_journal_migration.py implementation/orchestrator/tests/test_event_store.py implementation/orchestrator/tests/test_reconstruction.py
+          python -B -m pytest -o addopts='' -q -p no:cacheprovider tools/tests/test_audit_journal_migration.py tools/tests/test_audit_journal_native.py tools/tests/test_audit_journal_health.py tools/tests/test_openclaw_authority_operational_health.py tools/tests/test_openclaw_authority_fast_health.py implementation/orchestrator/tests/test_event_store.py implementation/orchestrator/tests/test_reconstruction.py
           python -m json.tool config/operations/audit-journal-daily-archive-proposal-v1.json >/dev/null
           test ! -e /var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3
+
+      - name: Root custody, UID 1000 writer and one-use crash recovery
+        run: |
+          docker build --network=none -f infrastructure/jason-audit-journal/tests.Dockerfile -t audit-journal-native-fixture .
+          docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=8g audit-journal-native-fixture

@@ -31,6 +31,13 @@ def sqlite_integrity(path: Path) -> str:
         return str(connection.execute('PRAGMA integrity_check').fetchone()[0])
 
 
+def orchestration_integrity(path: Path, temp_root: Path | None):
+    if os.getenv("JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE", ""):
+        from orchestrator.journal_health import full_integrity
+        return full_integrity(path,temp_root=temp_root)
+    return {"integrity":sqlite_integrity(path)}
+
+
 def authority_counts(path: Path) -> dict[str, int]:
     with sqlite3.connect(path) as connection:
         tables = {
@@ -145,7 +152,7 @@ def run(args: argparse.Namespace) -> int:
         orchestration = files['orchestration_audit']
         orchestration_present = orchestration.exists()
         orchestration_started = monotonic()
-        audit_check = pool.submit(sqlite_integrity, orchestration) if orchestration_present else None
+        audit_check = pool.submit(orchestration_integrity, orchestration, args.backup_temp_root) if orchestration_present else None
 
         for name in ('authority', 'replay', 'security_audit'):
             path = files[name]
@@ -180,7 +187,8 @@ def run(args: argparse.Namespace) -> int:
         elif int(registry.get('active_records', 0) or 0) < 1:
             failures.append('key_registry_no_active_keys')
 
-        integrity = audit_check.result() if audit_check is not None else None
+        journal_evidence = audit_check.result() if audit_check is not None else {}
+        integrity = journal_evidence.get("integrity")
         if audit_check is not None:
             stage_seconds['orchestration_audit'] = _stage_complete('orchestration_audit', orchestration_started)
         current_mode = mode(orchestration)
@@ -216,6 +224,8 @@ def run(args: argparse.Namespace) -> int:
         'provider_contacted': False,
         'provider_credentials_used': False,
     }
+    if journal_evidence.get("catalog_sha256"):
+        report["orchestration_journal"]=journal_evidence
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if not failures else 2
 

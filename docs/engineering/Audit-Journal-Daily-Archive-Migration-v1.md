@@ -76,8 +76,8 @@ artifact, new tenant, new provider write, larger disruption or deletion of histo
 | 4. Cutover | Under the exclusive handoff gate, checkpoint WAL, preserve the closed source, create a small canonical journal and atomically publish the new generation. | Write intent before changes, fsync files/directories and retain before-images. An interrupted intent blocks new admission until independent recovery. |
 | 5. Resume | Open each operation against the published generation; do not keep stale SQLite handles across rotation. | Confirm actual appends and reads on every consumer, including cross-boundary executions. |
 | 6. Archive closed legacy data | Copy the now-closed history to the independently verified archive filesystem, outside the writer pause. Full-check it, compare event continuity and bind checksum/custody. | Initial legacy verification can be long. Its measured resource/deadline budget is separate from the short handoff. No readiness PASS until complete. |
-| 7. Verify recovery copies | Verify an approved independent backup, restore/read it and prove the archive catalog can reconstruct historical executions. | The archive disk alone is not a complete backup strategy. A second directory on the same disk is not independent backup evidence. |
-| 8. Reclaim exact local before-image | Only after archive, independent backup, reader routing and rollback reconstruction are verified, remove the exact obsolete local copy under the approved scope. | A missing proof retains the local copy. Never delete the active journal, WAL/SHM with live users, archives or unrelated audit/approval data. |
+| 7. Verify recovery copies | Verify a cold restore on the Owner-selected archive drive and prove the archive catalog can reconstruct historical executions. | This scope provides separate-disk archival. It does not claim off-host backup protection. |
+| 8. Reclaim exact local before-image | Only after archive-drive restore, reader routing and rollback reconstruction are verified, remove the exact obsolete local copy under the approved scope. | A missing proof retains the local copy. Never delete the active journal, WAL/SHM with live users, archives or unrelated audit/approval data. |
 | 9. Adopt recurring operation and health | Use the existing maintenance owner and Root executor, with an explicitly adopted fixed-path daily/size policy and segment-aware health. | No second approval database, bot or scheduler. Handler registration, policy adoption, revocation and custody enforcement require reviewed production implementation. |
 | 10. Accept | Complete a real scheduled rollover, cross-segment query, restart/recovery test and native health/revalidation. | A green rehearsal, card, copy or one clean service invocation is not operational acceptance. |
 
@@ -128,9 +128,11 @@ independently authorize cached integrity evidence.
   according to the formally adopted policy.
 - Initial legacy segment: one-time full verification and restore/read proof.
   No claim that the old large file becomes cheap to verify just by renaming it.
-- Backup: preserve event IDs and content. Verify another approved recovery copy
-  and its restore before reclaiming the local original. The rehearsal's second
-  synthetic copy explicitly reports independent_backup_verified=false.
+- Selected destination: the Owner chose the archive drive. Verify event/content
+  parity, a cold restore on that drive, reader routing and rollback reconstruction
+  before reclaiming an obsolete local copy. This is separate-disk archival;
+  off-host backup is outside this scope. A second copy on the same drive is
+  restore evidence and never independent/off-host backup evidence.
 - Health: current fast/full format stays effective until a separately accepted
   segment-aware format is deployed. Do not extend the existing freshness window,
   write a synthetic PASS, clear failures or force protected control JSON.
@@ -206,22 +208,57 @@ The synthetic final rollback proof scans its small target while holding the gate
 That is intentional for a correctness reference, and is prohibited for the real
 large-file implementation. No production pause/latency claim follows from this test.
 
+## Dormant native implementation under review
+
+The legacy store remains the default. An explicit Root-owned profile at
+/run/jason/audit-journal/profile.json selects the new adapter only for the
+canonical journal. This source does not install the profile or activate a service.
+
+| Source | Implemented behavior |
+| --- | --- |
+| implementation/orchestrator/segmented_journal.py | Same event-store API; per-operation active connections; shared handoff gate; protected catalog; immutable sealed reads; bounded lookup cache and Bloom filters; global event-ID checks; outcome capacity reservations. |
+| implementation/orchestrator/journal_sql.py | Finite writer-UID SQLite operations; standalone checkpointing, full integrity/content proof, online snapshots, filter validation, reconstruction and bounded idempotent tail merge. |
+| tools/audit_journal_control.py | Installed isolated Root guard; protected adoption/source checks; one-use initial claim with crash recovery; serialized rotation, seal, scrub, guarded reclamation and event-preserving rollback. |
+| implementation/orchestrator/journal_health.py | Consistent active snapshot and cold restore; Root-custodied historical proof/fingerprint coverage; overdue historical scrub rejection. |
+| Existing operational/fast health tools | Explicit-profile integration; legacy defaults and authority/replay/security/authority-backup checks remain in effect. |
+| tools/audit_journal_root_inventory.py | Read-only complete /proc handle inventory and protected baseline metadata; no privileged SQLite queries, credentials, audit payload export or deployment. |
+| Native fixture tests | Real SQLite WAL/processes, concurrency, interruption points, two actual UIDs, Root custody denial, post-snapshot event preservation and old-reader reconstruction. |
+
+Pending files use short-lived read connections so old handles cannot obstruct
+sealing/reclamation indefinitely. Slow full scans, copies, filter generation and
+cold-restore work run outside the exclusive writer handoff. Long hashing of the
+prepared rollback file also runs before the final pause; the final gate checks its
+Root-protected fingerprint, rechecks the tail budget and merges only the bounded
+tail. A verified redundant local legacy before-image may become the rollback seed
+after its archive is sealed and readers use that archive. This avoids allocating a
+second full legacy file on the small system disk. The seed is never the only copy.
+
+New admission pauses only orchestration.request.received. Already-admitted
+invocations and their outcome records may finish. Unknown/consumed provider claims
+must not be reset, expired or treated as safe-to-retry to force a drain.
+
+The Root controller has no Owner authentication mechanism of its own. Its fixed
+production entry requires an immutable installed source closure, a Root policy and
+an adoption receipt issued by the existing independent Owner verification path.
+Scheduled maintenance cannot claim initial cutover or replay a consumed initial
+claim after rollback. There is no deployed Root archive action yet.
+
 ## Work required before a production authorization request
 
-- Complete Root-authoritative consumer/open-handle inventory and exact image/
-  configuration/source scope.
-- Implement and review production writer/reader routing, protected catalog,
-  archive locator, Root maintenance handler and independent backup integration.
+- Bind the complete Root-authoritative inventory to the exact consumer image,
+  configuration, native health and release-control scope.
+- Review the dormant native implementation and complete the release bootstrap,
+  native health installation and existing maintenance integration.
 - Measure representative event volume, payloads, lookup fan-out, pause time,
   rollback tail, copy/check duration, storage/memory/I/O reserves and failure
   behavior; validate or amend the proposed numeric limits as one reviewed scope.
 - Test power-loss publication boundaries, ambiguous outcomes, missing mount,
-  bad backup, full disk, inode/link substitution, custody/revocation and safe
+  bad restore, full disk, inode/link substitution, custody/revocation and safe
   restart of the actual consumer artifacts.
 - Prepare immutable release artifacts, exact rollback references and a signed
   objective manifest using the existing release/approval boundary.
 - Complete controlled native acceptance and one scheduled cycle after approval.
 
-Preparation does not grant production authority. Keep the current a4194c9
+Preparation does not grant production authority. Keep the existing
 Owner-objective installation candidate and its protected source unchanged while
 this review branch is open.
