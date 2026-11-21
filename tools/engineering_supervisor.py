@@ -18,6 +18,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
+ACTIVE_STALL_CYCLES = 2
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -169,14 +172,16 @@ def build_snapshot(spool: Path, prior: Mapping[str, Any] | None = None) -> dict[
     active = int(intake.get("active_development_items") or 0) + int(intake.get("active_support_repairs") or 0)
     outstanding = int((intake.get("downstream_commitments") or {}).get("outstanding_count") or 0)
     capacity = int(intake.get("engineering_capacity") or 0)
-    stalled = outstanding > 0 and active == 0 and capacity > 0
+    idle_stall = outstanding > 0 and active == 0 and capacity > 0
+    active_stall = outstanding > 0 and active > 0 and no_progress >= ACTIVE_STALL_CYCLES
     internal = sum(counts.get(name, 0) for name in (
         "recoverable_source", "recoverable_transport", "recoverable_validation", "needs_triage"))
-    blocker = ("internal_recovery_needed" if stalled and internal
-               else "external_or_governed_gate" if stalled else None)
+    blocker = ("active_work_not_advancing" if active_stall
+               else "internal_recovery_needed" if idle_stall and internal
+               else "external_or_governed_gate" if idle_stall else None)
     return {
         "schema_version": "1.0", "observed_at": now(),
-        "status": "degraded" if stalled else "healthy",
+        "status": "degraded" if idle_stall or active_stall else "healthy",
         "reason": blocker,
         "active": active, "engineering_capacity": capacity, "approved_outstanding": outstanding,
         "unchanged_cycles": no_progress,
