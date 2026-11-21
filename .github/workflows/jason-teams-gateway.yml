@@ -18,9 +18,11 @@ jobs:
       - name: Check gateway syntax
         run: |
           node --check infrastructure/jason-teams-gateway/index.mjs
+          node --check infrastructure/jason-teams-gateway/teams-user-bootstrap.mjs
+          node --check infrastructure/jason-teams-gateway/test/teams-user-bootstrap.test.mjs
           node --check infrastructure/jason-teams-gateway/test/gateway-contract.test.mjs
-      - name: Test single-response and bounded failure observability
-        run: node --test infrastructure/jason-teams-gateway/test/gateway-contract.test.mjs
+      - name: Test Teams gateway, licensing preflight, and approval contracts
+        run: node --test infrastructure/jason-teams-gateway/test/*.test.mjs
       - name: Reject canned working acknowledgement
         shell: bash
         run: |
