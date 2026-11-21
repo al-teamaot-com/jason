@@ -658,6 +658,10 @@ def main(argv=None):
     with ns["locks"]():
         scope,facts=inspect(c,ns,args.source_sha,artifacts,campaign)
     print("FULL_ROOT_PREFLIGHT=PASS;PRODUCTION_MUTATIONS=false",flush=True)
+    print("PREPARED_COMPONENT_IMAGE="+artifacts["component_image"],flush=True)
+    print("PREPARED_GATEWAY_IMAGE="+artifacts["gateway_image"],flush=True)
+    print("GATEWAY_REPLACEMENTS=1;RUNTIME_RESTARTS=0;MCP_RESTARTS=0;TICKET_CORE_CHANGES=0",flush=True)
+    print("NARROW_GRANTS=6;INITIAL_NATIVE_OBJECTIVE=DOCUMENTATION_RESTORE_AND_VERIFY",flush=True)
     if not args.apply:
         print(json.dumps({"scope_sha256":digest(canonical(scope)),"scope":scope},sort_keys=True));return
     actor=ns["owner"](scope)
