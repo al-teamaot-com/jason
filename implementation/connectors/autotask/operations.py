@@ -128,6 +128,10 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
     # Governed, narrowly scoped Company outbound-consent update only.
     # The exact Company UDF payload is assembled and validated by the
     # independently activation-gated outbound-optin connector.
+    "autotask.company.classification.update": OperationDefinition(
+        method="PATCH", path_template="/V1.0/Companies",
+        json_argument="payload", require_positive_body_id=True,
+    ),
     "autotask.company.outbound.optin.update": OperationDefinition(
         method="PATCH",
         path_template="/V1.0/Companies",
