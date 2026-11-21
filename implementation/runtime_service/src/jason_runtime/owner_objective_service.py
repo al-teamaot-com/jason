@@ -249,7 +249,7 @@ class ObjectiveApplication:
             now = self.clock()
             issued_at = self.handler.requests.objective_submission(
                 approval_id=approval_id, template_id=template_id, now=now, prefix=PREFIX,
-                maximum_active=2)
+                maximum_active=2, ttl_seconds=self.config["objective_ttl_seconds"])
             pending = self.handler.service.teams_flow.approval_service.repository.get(approval_id)
             if pending is None:
                 if now >= issued_at + timedelta(seconds=self.config["objective_ttl_seconds"]):
@@ -311,7 +311,8 @@ class ObjectiveApplication:
                 return
         self.issue("deny")
         self.issue("approve")
-        for approval_id in self.handler.requests.objective_submission_ids():
+        for approval_id in self.handler.requests.objective_submission_ids(
+                prefix=PREFIX, now=self.clock(), ttl_seconds=self.config["objective_ttl_seconds"]):
             try:
                 self.submit_registered(template_id="documentation-publisher",
                                        request_id=approval_id.removeprefix(PREFIX))

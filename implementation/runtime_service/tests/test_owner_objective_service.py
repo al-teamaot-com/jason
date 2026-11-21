@@ -57,7 +57,7 @@ class NativeBoundary:
     def stage(self, *, proposal, requests, pending):
         material = {"requests": [request_material(r) for r in requests],
                     "scope": scope_material(proposal.scope)}
-        staged = self.store.stage(approval_id=proposal.approval_id, material=material, at=NOW,
+        staged = self.store.stage(approval_id=proposal.approval_id, material=material, at=self.now,
             policy_digest=self.ports["policy_digest"], allowed_components=frozenset({"documentation-publisher"}),
             allowed_requesters=frozenset({SERVICE}), native_preflight=lambda _: True)
         return staged
@@ -79,7 +79,7 @@ class NativeBoundary:
             from jason_runtime.owner_objective_root_client import ObjectiveRootRequestDenied
             raise ObjectiveRootRequestDenied("NO_EXISTING_NATIVE_CLAIM", "not_started")
         if operation == "deliver":
-            message_id = self.store.deliver(approval_id=approval_id, at=NOW,
+            message_id = self.store.deliver(approval_id=approval_id, at=self.now,
                 policy_digest=self.ports["policy_digest"],
                 allowed_components=frozenset({"documentation-publisher"}),
                 native_delivery=lambda _: self.delivery.deliver(SimpleNamespace(
@@ -369,3 +369,18 @@ def test_restart_after_root_stage_before_canonical_storage_uses_same_submission_
     result=env.app.submission_status(request_id="2"*32)
     assert result["expires_at"]==(NOW+timedelta(days=1)).isoformat()
     assert len(env.delivery.requests)==3 and len(env.native.effects)==2
+
+
+def test_expired_undecided_requests_release_capacity_without_new_effect_or_old_card_resend(env):
+    complete_acceptance(env)
+    for number in ("2","3"):
+        env.app.submit_registered(template_id="documentation-publisher",request_id=number*32)
+    assert len(env.delivery.requests)==4 and len(env.native.effects)==2
+    later=NOW+timedelta(hours=25);env.native.now=later
+    env.app=build(env.config,delivery=env.delivery,root_client=env.native,clock=lambda:later)
+    env.app.maintenance()
+    result=env.app.submit_registered(template_id="documentation-publisher",request_id="4"*32)
+    assert result["state"]=="awaiting_approval"
+    assert len(env.delivery.requests)==5 and len(env.native.effects)==2
+    assert env.app.handler.requests.objective_submission_ids(
+        prefix="planapproval-objective-",now=later,ttl_seconds=86400)==(result["approval_id"],)
