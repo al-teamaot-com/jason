@@ -51,7 +51,7 @@ A ticket must pass all deterministic admission gates before Jason can claim it:
 5. The CI `referenceNumber` exactly matches the governed Datto RMM device UID.
 6. The CI hostname exactly matches the governed Datto hostname, case-insensitively.
 7. The endpoint is online when admitted.
-8. The exact playbook version is durably promoted for autonomous execution.
+8. The exact playbook version has a durable promotion, created either by direct Owner approval or by inheritance from an active matching authority envelope.
 9. Every required capability is separately authorized for `jason-autonomy-worker`.
 10. Every executable Datto component used by the autonomous branch is approved as standing-safe.
 
@@ -120,7 +120,7 @@ Standing-safe Datto components used by autonomous resolvers remain independently
 
 `service.ticket.note.update` is not a generic Autotask note editor. The production provider boundary requires an exact existing internal note, exact Jason creator identity, an approved managed title (`GPT Insights` or `Jason Activity`), provider update permission, and post-write readback. `Jason Activity` updates are additionally append-only. Before/after bodies and SHA-256 values are retained in Jason's mutation audit.
 
-`gpt_insights_tech_assist@0.2.0` is limited to **Help Desk I / New / non-Recurring** tickets with no applicable promoted remediation playbook. `jason_activity_log@1.0.0` projects meaningful persisted operational state changes into one chronological internal note while suppressing unchanged consecutive polling. Both scopes require separate exact durable owner promotions before unattended use.
+`gpt_insights_tech_assist@0.2.0` is limited to **Help Desk I / New / non-Recurring** tickets with no applicable promoted remediation playbook. `jason_activity_log@1.0.0` projects meaningful persisted operational state changes into one chronological internal note while suppressing unchanged consecutive polling. Both scopes require an exact durable promotion before unattended use. The first approval of an authority envelope is Owner-controlled; later version-only revisions may inherit that same envelope while execution remains exact-version gated.
 
 ## Runtime and persistent state
 
@@ -176,7 +176,7 @@ When validating production behavior, confirm all of the following before conclud
 - the source revision is the intended production revision;
 - `JASON_AUTONOMY_WORKER_ENABLED=true`;
 - `JASON_DATTO_COMPONENT_EXECUTION_AUTONOMY_ENABLED=true`;
-- the durable playbook promotion is active and matches the exact playbook version/capability set;
+- the durable exact-version playbook promotion is active and matches the policy/capability set; inherited promotions must trace to an active matching Owner-approved authority envelope;
 - required Datto components are standing-safe;
 - generic PowerShell remains per-run;
 - the SQLite work ledger shows only expected active/waiting/terminal items;
@@ -195,13 +195,13 @@ A new playbook is not autonomous merely because source metadata says `autonomous
 7. authoritative success criteria and readback verification;
 8. tests for ambiguity, stale evidence, poisoned evidence, duplicate identity, offline targets, and failure/retry paths;
 9. controlled production acceptance;
-10. separate durable owner promotion for that exact playbook version and capability set.
+10. durable exact-version promotion; a new or changed authority envelope requires Owner approval, while a version-only revision may inherit an active identical envelope.
 
 Client-facing communications remain separately governed even when the technical remediation playbook is autonomous.
 
 ### Durable promotion administration
 
-Source metadata is nomination, not authority. Each autonomous playbook/version still requires a separate durable promotion in `playbook-autonomy.sqlite3` for its exact policy ID and allowed-capability set.
+Source metadata is nomination, not authority. Each autonomous playbook/version still requires an exact durable promotion in `playbook-autonomy.sqlite3`. The first promotion for an authority envelope is Owner-approved. The envelope fingerprint is the complete registry entry with only `version` removed; therefore any change to trigger, source, review status, gates, capabilities, remediation metadata, human-review boundary, branch policy, or other registry field changes the envelope and requires a new Owner decision. A version-only revision with the identical envelope may mechanically inherit the active Owner approval and materialize a new exact-version promotion.
 
 The preferred path is the authenticated owner-only MCP promotion control. If a newly deployed MCP admin control is not yet present in the current ChatGPT tool catalog, the repository also provides the bounded operator utility `python -m jason_mcp.autonomy_admin <playbook_id> --approved-by <owner-id>`. This utility is a control-plane fallback only: it performs no provider access, accepts only an owner identifier already present in `JASON_DATTO_COMPONENT_APPROVAL_OWNER_IDENTITIES`, reads the source-controlled production playbook registry, refuses any playbook not already marked `autonomy.activation=autonomous`, derives the exact version/policy/capability scope from that registry, writes the normal immutable promotion store, and appends a local JSONL audit event including the registry SHA-256 fingerprint.
 
@@ -235,7 +235,7 @@ The current operating principle is now: Jason may automatically start and carry 
 
 Technicians may create and improve playbooks without receiving authority to make them autonomous. For a production playbook whose source registry nominates an autonomous safe branch, the runtime can detect that the exact durable promotion is missing and submit a Teams owner-approval card.
 
-The owner card is bound to the exact playbook version, policy ID, allowed capability set, source path, review status, and canonical registry-entry fingerprint. An authenticated configured owner may Approve, Deny, or Request Changes. Approval mechanically creates the exact durable `PlaybookAutonomyApproval`; it does not broaden any capability, component, or remediation branch beyond the reviewed source scope.
+The owner card is bound to the exact playbook version, policy ID, allowed capability set, source path, review status, canonical registry-entry fingerprint, and authority-envelope fingerprint. An authenticated configured owner may Approve, Deny, or Request Changes. Approval creates the exact durable `PlaybookAutonomyApproval` and seeds that precise authority envelope. Future version-only revisions may inherit it; any other registry change fails envelope matching and requires new Owner review. Inheritance never broadens any capability, component, remediation branch, trigger, or human-review boundary.
 
 A changed fingerprint invalidates the old review scope. A non-owner response, copied card payload, typed approval text, or Teams membership cannot create autonomy authority.
 ## 2026-09-27 production acceptance — automatic device-access lifecycle
