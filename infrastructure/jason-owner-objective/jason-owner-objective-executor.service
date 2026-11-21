@@ -1,0 +1,18 @@
+[Unit]
+Description=Jason typed Owner objective Root executor
+After=local-fs.target docker.service
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/jason/owner-objective/trusted/tools/owner_objective_root_worker.py
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/jason-owner-release/objectives /var/lib/jason/owner-objective-inbox /usr/local/lib/jason/documentation-reconciliation /etc/systemd/system/jason-documentation-reconciliation.service.d
+ReadWritePaths=/var/lib/jason/openclaw/release-manager
+# Existing fixed native service/CI ports run as their existing identities.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+TimeoutStartSec=360
