@@ -1,0 +1,25 @@
+name: AOT DRMM Diagnostics Windows Runtime
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/drmm-diagnostics/**'
+      - '.github/workflows/drmm-diagnostic-windows-runtime.yml'
+  push:
+    paths:
+      - 'scripts/drmm-diagnostics/**'
+      - '.github/workflows/drmm-diagnostic-windows-runtime.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-ps51:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify all three diagnostics under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -File scripts/drmm-diagnostics/tests/validate-collector-runtime.ps1
