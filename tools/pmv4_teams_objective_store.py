@@ -16,13 +16,35 @@ from pathlib import Path
 import re
 import secrets
 import stat
+import tempfile
 from typing import Any, Callable, Mapping
 
-from tools.independent_component_release import _atomic_json
 from tools.pmv4_teams_objective_admission import (
     TeamsObjectiveDenied, canonical, need, plan_digest, timestamp, validate_enrollment,
     verify_original_teams_decision,
 )
+
+def _atomic_json(path, record):
+    """Publish a private immutable receipt under the Root plan lock.
+
+    Staging owns a newly created private directory. Every subsequent writer
+    holds its plan lock; operator-writable ancestors are never used here.
+    """
+    if os.path.lexists(path):
+        raise FileExistsError("immutable Root receipt already exists")
+    fd, temporary = tempfile.mkstemp(prefix=".objective-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(canonical(record)); stream.flush(); os.fsync(stream.fileno())
+        os.rename(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try: os.fsync(directory)
+        finally: os.close(directory)
+    finally:
+        if os.path.lexists(temporary):
+            os.unlink(temporary)
+
 
 ROOT = Path("/var/lib/jason-owner-release/objectives")
 ENTRY = Path("/usr/local/lib/jason/owner-objective/trusted/tools/pmv4_teams_objective_store.py")

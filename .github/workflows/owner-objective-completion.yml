@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install disposable test dependencies
-        run: python -m pip install -q pytest cryptography PyYAML
+        run: python -m pip install -q pytest cryptography PyYAML jsonschema
       - name: Canonical framework and isolated component regression
         env:
           PYTHONPATH: .:tools:implementation:implementation/runtime_service/src:implementation/connectors/openclaw/src:implementation/cap-007/src

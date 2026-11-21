@@ -12,6 +12,7 @@ import re
 import sqlite3
 import stat
 import sys
+import secrets
 
 TRUSTED = Path("/usr/local/lib/jason/owner-objective/trusted")
 ENTRY = TRUSTED / "tools/owner_objective_root_worker.py"
@@ -330,12 +331,26 @@ def drain_one(config, context, *, spool=SPOOL, private=PRIVATE,
 
 
 def put_at(directory_fd, name, raw, mode):
-    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+    try:
+        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    else:
+        raise FileExistsError("immutable Root result already exists")
+    temporary = ".objective-" + secrets.token_hex(16)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                  mode, dir_fd=directory_fd)
-    with os.fdopen(fd, "wb") as stream:
-        os.fchmod(stream.fileno(), mode)
-        stream.write(raw); stream.flush(); os.fsync(stream.fileno())
-    os.fsync(directory_fd)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            os.fchmod(stream.fileno(), mode)
+            stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+        # This Root-owned directory has exactly one writer under worker.lock.
+        # Publish completed bytes atomically; readers never see a partial result.
+        os.rename(temporary, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        os.fsync(directory_fd)
+    finally:
+        try: os.unlink(temporary, dir_fd=directory_fd)
+        except FileNotFoundError: pass
 
 
 if __name__ == "__main__":

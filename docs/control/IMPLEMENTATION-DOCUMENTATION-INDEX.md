@@ -61,6 +61,8 @@ If a package README contains a material architecture, authority, security, or op
 | `implementation/client_bootstrap/README.md` | Client bootstrap implementation mechanics | Canonical organizational/client models, identity/authority, and applicable operational runbooks |
 | `implementation/autonomous_remediation/README.md` | Governed autonomous-remediation implementation framework, execution stages, and promotion safeguards | `docs/governance/`; `docs/architecture/`; `docs/components/`; `docs/operations/`; identity-first authorization and Central Orchestrator governance |
 
+| `infrastructure/jason-owner-objective/README.md` | Isolated canonical approval hosting, Root enrollment and governed installation mechanics; activation pending | `docs/engineering/Teams-Objective-Completion-Restoration.md`; `docs/engineering/Owner-Objective-Approval-Policy-v1.md` (proposed adoption); existing identity/authority and release governance |
+
 ## Policy, intelligence, memory, and accounting documentation
 
 | Implementation-local record | Supporting purpose | Governed human-facing owner / related records |

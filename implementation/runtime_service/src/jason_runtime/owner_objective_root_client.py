@@ -42,23 +42,30 @@ class ObjectiveRootClient:
             raise ValueError("objective request exceeds size bound")
         identifier = sha256(raw).hexdigest()
         path = self.spool / "requests" / (identifier + ".json")
+        # Stage outside the watched queue, then publish complete immutable
+        # request bytes. DirectoryNotEmpty must never observe a partial write.
+        staging = self.spool / "staging" / (identifier + "." + secrets.token_hex(16))
+        fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        except FileExistsError:
-            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-            with os.fdopen(fd, "rb") as stream:
-                m = os.fstat(stream.fileno())
-                if (not stat.S_ISREG(m.st_mode) or m.st_uid != os.geteuid()
-                        or m.st_nlink != 1 or stat.S_IMODE(m.st_mode) != 0o600
-                        or stream.read(196609) != raw):
-                    raise PermissionError("existing objective request is not the same immutable request")
-        else:
             with os.fdopen(fd, "wb") as stream:
                 os.fchmod(stream.fileno(), 0o600)
                 stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+            if os.path.lexists(path):
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(fd, "rb") as stream:
+                    m = os.fstat(stream.fileno())
+                    if (not stat.S_ISREG(m.st_mode) or m.st_uid != os.geteuid()
+                            or m.st_nlink != 1 or stat.S_IMODE(m.st_mode) != 0o600
+                            or stream.read(196609) != raw):
+                        raise PermissionError("existing request changed")
+            else:
+                os.rename(staging, path)
             directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             try: os.fsync(directory)
             finally: os.close(directory)
+        finally:
+            try: staging.unlink()
+            except FileNotFoundError: pass
         result = self.spool / "results" / (identifier + ".json")
         deadline = time.monotonic() + self.timeout_seconds
         while time.monotonic() < deadline:
