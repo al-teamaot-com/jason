@@ -97,6 +97,11 @@ class DattoRmmConnector(ConnectorBase):
                     request=request,
                     prepared=prepared,
                 )
+                if request.context.capability == "datto_rmm.device.get":
+                    self._verify_numeric_device_read(
+                        arguments=request.arguments,
+                        payload=payload,
+                    )
                 data = self._normalize_result(
                     request.context.capability,
                     payload,
@@ -121,6 +126,43 @@ class DattoRmmConnector(ConnectorBase):
             provider=self.provider_name,
             data=data,
         )
+
+    @classmethod
+    def _verify_numeric_device_read(
+        cls, *, arguments: Mapping[str, Any], payload: Any
+    ) -> None:
+        """An exact Datto device-ID lookup must return same ID and a UID.
+
+        Never infer a mapping from hostname, device name, client-side URL,
+        or unverified search results. Provider outages and missing fields
+        must deny rather than grant a scoped screenshot capability.
+        """
+        requested = str(
+            arguments.get("device_uid")
+            or arguments.get("resource_id")
+            or ""
+        ).strip()
+        if not re.fullmatch(r"[1-9][0-9]{0,23}", requested):
+            return
+        if not isinstance(payload, Mapping):
+            raise ValueError("Datto device-ID lookup returned no device record")
+        record = payload
+        for candidate in ("device", "data"):
+            nested = payload.get(candidate)
+            if isinstance(nested, Mapping):
+                record = nested
+                break
+        returned_id = record.get("id")
+        if returned_id is None:
+            returned_id = record.get("deviceId")
+        if isinstance(returned_id, bool) or not isinstance(returned_id, (int, str)):
+            raise ValueError("Datto device-ID lookup returned no verified device ID")
+        returned = str(returned_id).strip()
+        if returned != requested:
+            raise ValueError("Datto device-ID lookup returned a mismatched device")
+        provider_uid = cls._first_scalar(record, "uid", "deviceUid", "device_uid")
+        if not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", provider_uid):
+            raise ValueError("Datto device-ID lookup returned no durable device UID")
 
     @staticmethod
     def _durable_device_identity_present(arguments: Mapping[str, Any]) -> bool:
@@ -1247,6 +1289,13 @@ class DattoRmmConnector(ConnectorBase):
             ).strip()
             if not device_uid:
                 raise ValueError("device_uid or resource_id is required")
+            # Datto's web-console /device/{id} selector is a numeric
+            # provider device *ID*, distinct from its durable v2 UID.
+            # The governed read resolves that ID through Datto's
+            # documented GET /v2/device/id/{deviceId} endpoint and
+            # independently verifies the returned ID + durable UID.
+            if re.fullmatch(r"[1-9][0-9]{0,23}", device_uid):
+                return f"/api/v2/device/id/{device_uid}", None
             return f"/api/v2/device/{device_uid}", None
         if capability == "datto_rmm.device.search":
             requested_max = int(arguments.get("max", cls.default_device_search_max))

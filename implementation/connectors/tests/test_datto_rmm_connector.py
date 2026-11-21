@@ -409,6 +409,85 @@ def test_device_read_uses_resource_id_as_durable_device_uid() -> None:
     assert params is None
 
 
+def test_numeric_datto_web_remote_device_id_uses_documented_read_by_id() -> None:
+    # Browser /device/1717088 and API /device/{uid} are distinct identities.
+    # Resolve through the existing governed read capability only.
+    path, params = DattoRmmConnector._resolve_operation(
+        "datto_rmm.device.get", {"resource_id": "1717088"}
+    )
+    assert path == "/api/v2/device/id/1717088"
+    assert params is None
+    path, params = DattoRmmConnector._resolve_operation(
+        "datto_rmm.device.get",
+        {"resource_id": "710e63d6-caca-d830-697a-81250b0a8321"},
+    )
+    assert path == "/api/v2/device/710e63d6-caca-d830-697a-81250b0a8321"
+    assert params is None
+
+
+def test_numeric_device_id_requires_provider_exact_id_and_uuid() -> None:
+    uid = "710e63d6-caca-d830-697a-81250b0a8321"
+    good = {"id": 1717088, "uid": uid, "hostname": "Al-Samsung",
+            "siteUid": "9bb56523-cade-4ffb-bc34-696e788f0f4c"}
+    DattoRmmConnector._verify_numeric_device_read(
+        arguments={"resource_id": "1717088"}, payload=good
+    )
+    DattoRmmConnector._verify_numeric_device_read(
+        arguments={"resource_id": "1717088"}, payload={"device": good}
+    )
+    for payload in (
+        None, {}, {"id": 12345, "uid": uid},
+        {"id": 1717088, "uid": ""},
+        {"id": 1717088, "uid": "NOT_A_UUID"},
+        {"id": True, "uid": uid},
+        {"id": 1717088, "uid": "000000"},
+    ):
+        with pytest.raises(ValueError):
+            DattoRmmConnector._verify_numeric_device_read(
+                arguments={"resource_id": "1717088"}, payload=payload
+            )
+    # Existing UUID-based reads retain their established provider behavior.
+    DattoRmmConnector._verify_numeric_device_read(
+        arguments={"resource_id": uid}, payload={"uid": uid}
+    )
+
+
+def test_governed_numeric_device_read_enforces_exact_provider_id(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+    uid = "710e63d6-caca-d830-697a-81250b0a8321"
+    exact = {
+        "id": 1717088,
+        "uid": uid,
+        "siteUid": "9bb56523-cade-4ffb-bc34-696e788f0f4c",
+        "hostname": "Al-Samsung",
+    }
+    transport=Transport([exact])
+    connector=DattoRmmConnector(secrets=Secrets(),transport=transport,audit=Audit())
+    result=connector.execute(
+        connector_request(
+            capability="datto_rmm.device.get",
+            arguments={"resource_id":"1717088"},
+        )
+    )
+    assert result.data == exact
+    assert len(transport.calls)==1
+    assert transport.calls[0]["method"]=="GET"
+    assert transport.calls[0]["url"].endswith("/api/v2/device/id/1717088")
+
+    mismatch=Transport([{**exact,"id":987654}])
+    connector=DattoRmmConnector(secrets=Secrets(),transport=mismatch,audit=Audit())
+    with pytest.raises(ValueError,match="mismatched device"):
+        connector.execute(
+            connector_request(
+                capability="datto_rmm.device.get",
+                arguments={"resource_id":"1717088"},
+            )
+        )
+
+
 def test_device_read_requires_durable_identifier() -> None:
     with pytest.raises(ValueError, match="device_uid or resource_id is required"):
         DattoRmmConnector._resolve_operation("datto_rmm.device.get", {})
