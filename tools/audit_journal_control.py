@@ -120,6 +120,26 @@ class JournalController:
                     "within_budget":elapsed<=30,"observed_at":datetime.now(timezone.utc).isoformat()},0o400)
                 need(elapsed<=30,"JOURNAL_HANDOFF_BUDGET_EXCEEDED")
 
+    def no_handles(self,path):return require_no_handles(path)
+
+    def recovery(self):
+        from orchestrator.journal_recovery import ArchiveRecovery
+        return ArchiveRecovery(self)
+
+    def profile_arguments(self):
+        p=self.p
+        return {"active":str(p.active),"control":str(p.control),"archives":str(p.archives),
+                "pending":str(p.pending),"custody_uid":p.custody_uid,"writer_uid":p.writer_uid,
+                "target_bytes":p.target_bytes,"ceiling_bytes":p.ceiling_bytes,
+                "maximum_event_bytes":p.maximum_event_bytes,"execution_reserve_bytes":p.execution_reserve_bytes,
+                "maximum_inflight":p.maximum_inflight,"fixture":p.fixture}
+
+    def verifier_digest(self):
+        from orchestrator import event_store,segmented_journal,journal_health,journal_recovery,journal_mount,journal_outcomes
+        files=[Path(__file__),*(Path(m.__file__) for m in
+            (event_store,segmented_journal,journal_sql,journal_health,journal_recovery,journal_mount,journal_outcomes))]
+        return sha256(canonical({f.name:journal_sql.file_hash(f) for f in files})).hexdigest()
+
     def _json(self,path,value,mode=0o444):
         atomic(path,value,mode,self.p.custody_uid)
 
@@ -132,6 +152,10 @@ class JournalController:
         return path
 
     def _sql(self,operation,args,*,seconds=10800):
+        objective=getattr(self,"_objective_deadline",None)
+        if objective is not None:
+            seconds=min(seconds,objective-time.monotonic()-0.1)
+            need(seconds>0,"JOURNAL_OBJECTIVE_TIME_BUDGET")
         deadline=getattr(self,"_handoff_deadline",None)
         if deadline is not None:
             seconds=min(seconds,deadline-time.monotonic()-0.1)
@@ -149,7 +173,13 @@ class JournalController:
             timeout=seconds,check=False)
         if self.fixture and completed.returncode!=0:
             raise RuntimeError("FIXTURE_SQL_"+operation+":"+completed.stderr)
-        need(completed.returncode==0,"JOURNAL_WRITER_OPERATION_FAILED")
+        if completed.returncode!=0:
+            import re
+            match=re.search(r"JOURNAL_[A-Z0-9_]+",completed.stderr[:4096])
+            reason=match.group(0) if match else "JOURNAL_WRITER_OPERATION_FAILED"
+            self._json(self.p.control/"last-error.json",{"operation":operation,"reason_code":reason,
+                "observed_at":datetime.now(timezone.utc).isoformat()})
+            raise RuntimeError(reason)
         return json.loads(completed.stdout)
 
     def _cleanup_job(self,job):
@@ -191,7 +221,12 @@ class JournalController:
             after=target.lstat()
             need(not target.is_symlink() and (after.st_dev,after.st_ino)==(before.st_dev,before.st_ino),
                  "JOURNAL_MOVE_SOURCE_CHANGED")
-            os.fchown(fd,uid,uid);os.fchmod(fd,mode);os.fsync(fd)
+            # Audit payloads are readable only by the existing writer group.
+            # Public control/source files keep their separate Root-only custody.
+            if uid==self.p.custody_uid and mode==0o444:
+                gid=self.p.writer_uid;mode=0o440
+            else:gid=uid
+            os.fchown(fd,uid,gid);os.fchmod(fd,mode);os.fsync(fd)
         finally:os.close(fd)
         sync(source.parent);sync(target.parent)
         return fingerprint(target.stat())
@@ -209,6 +244,7 @@ class JournalController:
             p.active_identity()
             require_no_handles(p.active)
             active=self._sql("state",{"path":str(p.active)},seconds=30)
+            need(active["pending_outcomes"]==0,"JOURNAL_UNRECONCILED_OUTCOMES_BLOCK_HANDOFF")
             identifier=uuid4().hex;epoch=uuid4().hex
             pending=p.pending/(identifier+".sqlite3")
             target=self._new_active(epoch,active["reservations"])
@@ -225,6 +261,9 @@ class JournalController:
             self._json(self.intent,intent,0o400)
             self._catalog({**before,"mode":"transition"})
             self.fault("transition_intent")
+            # Once the catalog blocks admission and EX excludes every updated
+            # consumer, remove the temporary operational triggers before seal.
+            self._sql("barrier",{"path":str(p.active),"enabled":False},seconds=10)
             self._sql("checkpoint",{"path":str(p.active)},seconds=30)
             fp=self._move(p.active,pending,p.custody_uid,0o444)
             self.fault("transition_preserved")
@@ -268,11 +307,12 @@ class JournalController:
                 pending=p.pending/tx["pending"];target=Path(tx["target"])
                 if not pending.exists():
                     p.active_identity();require_no_handles(p.active)
+                    self._sql("barrier",{"path":str(p.active),"enabled":False},seconds=10)
                     self._sql("checkpoint",{"path":str(p.active)},seconds=30)
                     self._move(p.active,pending,p.custody_uid,0o444)
                 meta=pending.lstat()
                 need(not pending.is_symlink() and stat.S_ISREG(meta.st_mode) and meta.st_nlink==1
-                     and meta.st_uid==p.custody_uid and stat.S_IMODE(meta.st_mode)==0o444
+                     and meta.st_uid==p.custody_uid and stat.S_IMODE(meta.st_mode)==0o440
                      and {"device":meta.st_dev,"inode":meta.st_ino}==tx["source_identity"],
                      "JOURNAL_RECOVERY_SOURCE_IDENTITY")
                 if target.exists():
@@ -334,8 +374,8 @@ class JournalController:
                 if os.path.lexists(target):
                     meta=target.lstat()
                     need(not target.is_symlink() and stat.S_ISREG(meta.st_mode)
-                         and meta.st_uid==p.custody_uid and meta.st_gid==p.custody_uid
-                         and meta.st_nlink==1 and stat.S_IMODE(meta.st_mode)==0o444,
+                         and meta.st_uid==p.custody_uid and meta.st_gid==p.writer_uid
+                         and meta.st_nlink==1 and stat.S_IMODE(meta.st_mode)==0o440,
                          "JOURNAL_EXISTING_ARCHIVE_CUSTODY")
                 else:self._move(copy,target,p.custody_uid,0o444)
                 require_no_handles(target)
@@ -346,8 +386,8 @@ class JournalController:
                     if not os.path.lexists(final):self._move(raw,final,p.custody_uid,0o444)
                     meta=final.lstat()
                     need(not final.is_symlink() and stat.S_ISREG(meta.st_mode) and meta.st_nlink==1
-                         and meta.st_uid==p.custody_uid and meta.st_gid==p.custody_uid
-                         and stat.S_IMODE(meta.st_mode)==0o444
+                         and meta.st_uid==p.custody_uid and meta.st_gid==p.writer_uid
+                         and stat.S_IMODE(meta.st_mode)==0o440
                          and journal_sql.file_hash(final)==item["sha256"],"JOURNAL_FILTER_CONFLICT")
                     require_no_handles(final)
                     published[key]={**item,"fingerprint":fingerprint(meta)}
@@ -380,9 +420,16 @@ class JournalController:
                 need(segment["state"]=="sealed" and segment["proof"].get("restore_verified") is True,
                      "JOURNAL_RECLAIM_PROOF_REQUIRED")
                 artifact=p.artifact(segment)
-                plan=read_control(self.rollback,p.custody_uid,0o400)
-                need(plan["covered_segments"].get(identifier)==segment["fingerprint"]
-                     and plan["proof"]["integrity"]=="ok","JOURNAL_RECLAIM_ROLLBACK_PROOF_REQUIRED")
+                recipe=read_control(self.private/"recovery-recipe.json",p.custody_uid,0o400)
+                need(recipe["covered_segments"].get(identifier)==segment["fingerprint"]
+                     and recipe["initial_full_reconstruction"]["integrity"]=="ok"
+                     and recipe["legacy_reader_restore"]["proof"]["integrity"]=="ok",
+                     "JOURNAL_RECLAIM_ROLLBACK_PROOF_REQUIRED")
+            need(recipe["verifier_source_sha256"]==self.verifier_digest(),
+                 "JOURNAL_RECLAIM_RECONSTRUCTION_VERIFIER_CHANGED")
+            readback=self._sql("archive_readback",{"source":str(artifact),
+                "profile":self.profile_arguments()},seconds=30)
+            need(readback["reads_verified"] is True,"JOURNAL_RECLAIM_ARCHIVED_READER_REQUIRED")
             need(journal_sql.file_hash(artifact)==segment["proof"]["file_sha256"],"JOURNAL_RECLAIM_HASH")
             need(self.fixture or artifact.stat().st_dev!=p.active.parent.stat().st_dev,
                  "JOURNAL_ARCHIVE_MUST_BE_SEPARATE_FILESYSTEM")
@@ -400,65 +447,24 @@ class JournalController:
                     {"status":"redundant_source_copy_reclaimed_or_reused_for_verified_rollback",
                      "segment_id":identifier,"all_events_retained":True,"off_host_backup_claimed":False},0o400)
 
-    def prepare_rollback(self):
-        p=self.p
-        with self.serialized():
-            with p.gate():
-                catalog=p.catalog()
-                need(catalog["mode"] in ("segmented","segmented_initializing"),"JOURNAL_ROLLBACK_MODE")
-                paths=[str(p.artifact(record)) for record in catalog["segments"]]
-                job=self._job();snapshot=job/"active.snapshot.sqlite3"
-                state=self._sql("snapshot",{"source":str(p.active),"target":str(snapshot)},seconds=60)
-            # A sealed, redundant local legacy before-image is an exact rollback
-            # seed. Reuse it only after independent archive routing/restore proof.
-            # This avoids allocating a second 44GB file on the small system disk.
-            local=self._job(local=True);target=local/"legacy.prepared.sqlite3"
-            seed=None
-            if catalog["segments"]:
-                first=catalog["segments"][0]
-                if first["state"]=="sealed" and first["proof"].get("restore_verified") is True:
-                    candidate=p.pending/first["proof"]["source_before_image"]
-                    if candidate.exists():
-                        need(fingerprint(candidate.stat())==first["proof"]["source_before_fingerprint"],
-                             "JOURNAL_ROLLBACK_SEED_CHANGED")
-                        require_no_handles(candidate)
-                        need(candidate.stat().st_dev==local.stat().st_dev,"JOURNAL_ROLLBACK_SEED_DEVICE")
-                        seed=candidate
-            required=snapshot.stat().st_size+sum(Path(path).stat().st_size for path in paths[(1 if seed else 0):])
-            need(shutil.disk_usage(local).free>required*2+268435456,"JOURNAL_ROLLBACK_LOCAL_SPACE_REQUIRED")
-            self._json(self.private/"rollback-preparation.json",
-                {"seed":str(seed) if seed else None,"target":str(target),"catalog":catalog},0o400)
-            if seed is not None:
-                self._move(seed,target,p.writer_uid,0o600)
-                proof=self._sql("append_sources",{"paths":[*paths[1:],str(snapshot)],"target":str(target)})
-            else:
-                proof=self._sql("rebuild",{"paths":[*paths,str(snapshot)],"target":str(target)})
-            # Parent is Root owned, so UID1000 cannot replace the adopted target.
-            adopted=self.local_work/(uuid4().hex+".rollback.sqlite3")
-            self._move(target,adopted,p.custody_uid,0o444)
-            require_no_handles(adopted)
-            need(journal_sql.file_hash(adopted)==proof["file_sha256"],"JOURNAL_ROLLBACK_PROOF_CHANGED")
-            plan={"generation":catalog["generation"],"epoch":catalog["epoch"],
-                "watermark":state["watermark"],"target":str(adopted),"proof":proof,
-                "target_fingerprint":fingerprint(adopted.stat()),
-                "covered_segments":{r["id"]:r["fingerprint"] for r in catalog["segments"]},
-                "catalog":catalog,"prepared_at":datetime.now(timezone.utc).isoformat()}
-            self._json(self.rollback,plan,0o400)
-            return {"status":"rollback_prepared","events":proof["events"]}
+    def prepare_rollback(self):return self.recovery().prepare()
 
     def finish_rollback(self):
         p=self.p
         with self.serialized(),self.handoff():
             before=p.catalog();plan=read_control(self.rollback,p.custody_uid,0o400)
+            active=self._sql("state",{"path":str(p.active)},seconds=10)
+            need(active["pending_outcomes"]==0,"JOURNAL_ROLLBACK_UNRECONCILED_OUTCOMES")
+            need(not active["reservations"],"JOURNAL_ROLLBACK_REQUIRES_DRAINED_EXECUTIONS")
             need(before["generation"]==plan["generation"] and before["epoch"]==plan["epoch"],
                  "JOURNAL_ROLLBACK_REBUILD_REQUIRED")
             require_no_handles(p.active)
             target=Path(plan["target"]);meta=target.lstat()
             need(not target.is_symlink() and meta.st_uid==p.custody_uid
-                 and stat.S_IMODE(meta.st_mode)==0o444
+                 and stat.S_IMODE(meta.st_mode)==0o440
                  and fingerprint(meta)==plan["target_fingerprint"],"JOURNAL_ROLLBACK_TARGET_CHANGED")
             self._sql("tail_budget",{"source":str(p.active),"watermark":plan["watermark"]},seconds=10)
-            write_job=self._job(local=True)
+            write_job=self._job()
             tx={"operation":"rollback","before":before,
                 "plan":{**plan,"target":str(write_job/"legacy.prepared.sqlite3")},
                 "sealed_target":str(target),
@@ -472,7 +478,7 @@ class JournalController:
         p=self.p;plan=tx["plan"];preserve=p.pending/tx["preserved"]
         if not preserve.exists():
             target=Path(plan["target"]);sealed=Path(tx["sealed_target"])
-            need(sealed.parent==self.local_work and target.parent.parent==self.local_work
+            need(sealed.parent==self.recovery().storage and target.parent.parent==self.work
                  and not target.is_symlink(),"JOURNAL_ROLLBACK_TARGET_SCOPE")
             if sealed.exists():
                 need(not target.exists(),"JOURNAL_ROLLBACK_TARGET_COLLISION")
@@ -484,19 +490,13 @@ class JournalController:
             result=self._sql("merge_tail",{"source":str(p.active),"target":plan["target"],
                 "watermark":plan["watermark"],"maximum_rows":100000,"maximum_bytes":134217728,"seconds":20},
                 seconds=30)
+            if (self.private/"release-plan.json").exists():
+                self._sql("barrier",{"path":str(target),"enabled":True,"block_invoking":True},seconds=10)
             self._sql("checkpoint",{"path":str(p.active)},seconds=30)
             self._move(p.active,preserve,p.custody_uid,0o444)
             self.fault("rollback_preserved")
-        target=Path(plan["target"])
-        if target.exists():
-            self._sql("checkpoint",{"path":str(target)},seconds=30)
-            # Large rollback files are built on archive storage, then staged to
-            # a same-device destination before the final pause by the release
-            # wrapper. Never perform a cross-device pseudo-atomic rename.
-            need(target.parent.stat().st_dev==p.active.parent.stat().st_dev,
-                 "JOURNAL_ROLLBACK_LOCAL_STAGE_REQUIRED")
-            self._move(target,p.active,p.writer_uid,0o600)
-            self.fault("rollback_swapped")
+        self.recovery().publish(tx)
+        self.fault("rollback_swapped")
         p.active_identity();meta=p.active.stat()
         need({"device":meta.st_dev,"inode":meta.st_ino}==tx["target_identity"],
              "JOURNAL_ROLLBACK_PUBLISHED_IDENTITY")
@@ -531,7 +531,7 @@ class JournalController:
                      "proof":proof,"observed_at":now.isoformat()},0o400)
             return {"status":"scrubbed","segment_id":record["id"]}
 
-    def maintain(self,*,now=None):
+    def maintain(self,*,now=None,force_rollover=False):
         from zoneinfo import ZoneInfo
         now=now or datetime.now(timezone.utc)
         if self.intent.exists():return self.recover()
@@ -543,10 +543,88 @@ class JournalController:
             local=now.astimezone(ZoneInfo("America/New_York"))
             boundary=local.replace(hour=0,minute=15,second=0,microsecond=0)
             if local<boundary:boundary-=timedelta(days=1)
-            due=opened<boundary or self.p.active_bytes()>=self.p.target_bytes
+            due=force_rollover or opened<boundary or self.p.active_bytes()>=self.p.target_bytes
+        active=self._sql("state",{"path":str(self.p.active)},seconds=10)
+        if active["pending_outcomes"]:
+            return self._sql("reconcile_outcomes",{"profile":self.profile_arguments(),"maximum":100},seconds=30)
         if pending:return self.seal_one()
+        recipe_path=self.private/"recovery-recipe.json"
+        if not recipe_path.exists():
+            self.prepare_rollback()
+            self.recovery().accept_recipe()
+            self.recovery().discard_prepared()
+            return {"status":"initial_full_legacy_reconstruction_and_restore_verified"}
+        recipe=read_control(recipe_path,self.p.custody_uid,0o400)
+        if recipe["covered_segments"]!={r["id"]:r["fingerprint"] for r in catalog["segments"]}:
+            return self.recovery().extend_recipe()
+        for record in catalog["segments"]:
+            before=self.p.pending/record["proof"]["source_before_image"]
+            if before.exists():
+                self.reclaim(record["id"])
+                return {"status":"verified_redundant_local_source_reclaimed","segment_id":record["id"]}
         if due:return self.transition()
         return self.scrub_one(now=now)
+
+    def maintenance_cycle(self):
+        # One scheduled invocation must finish its dependent seal/recipe/reclaim
+        # work, rather than leaving each phase until another day's timer.
+        if self.intent.exists():self.recover()
+        request=self.private/"first-scheduled-rollover.json"
+        steps=[]
+        for _ in range(12):
+            force=False
+            if request.exists():
+                row=read_control(request,self.p.custody_uid,0o400)
+                with self.p.gate():epoch=self.p.catalog()["epoch"]
+                if row.get("completed") is not True:
+                    if epoch!=row["before_epoch"]:
+                        self._json(request,{**row,"completed":True,"after_epoch":epoch},0o400)
+                    else:force=True
+            result=self.maintain(force_rollover=force);steps.append(result)
+            if result.get("status") in ("no_history","scrub_not_due"):
+                return {"steps":steps,"initial_scheduled_rollover_verified":
+                        request.exists() and read_control(request,self.p.custody_uid,0o400).get("completed") is True}
+        raise RuntimeError("JOURNAL_MAINTENANCE_CYCLE_STEP_BOUND")
+
+    def ensure_native_full_health(self,*,force_revalidate=False):
+        # Scheduling hint only. The independently installed full/fast checkers
+        # remain the authority for health and release control.
+        if self.fixture:return {"status":"fixture_native_health_request_skipped"}
+        with self.p.gate():
+            catalog=self.p.catalog()
+            if catalog["mode"]!="segmented":return {"status":"sealed_coverage_not_ready"}
+            digest=sha256(canonical(catalog)).hexdigest()
+        full=Path("/var/lib/jason/openclaw/operational-full-health.json")
+        needed=True
+        try:
+            report=read_control(full,self.p.writer_uid,0o600)
+            age=time.time()-full.stat().st_mtime
+            needed=not (0<=age<=30*60*60 and report.get("status")=="pass"
+                and report.get("snapshot_source_exit_code")==0
+                and report.get("orchestration_journal",{}).get("catalog_sha256")==digest)
+        except (OSError,ValueError,KeyError,TypeError,RuntimeError):pass
+        if needed:
+            result=subprocess.run(["/usr/bin/systemctl","--no-block","start",
+                "jason-openclaw-authority-full-integrity.service"],timeout=10,capture_output=True,check=False)
+            need(result.returncode==0,"JOURNAL_NATIVE_FULL_HEALTH_REQUEST_FAILED")
+        if needed or force_revalidate:
+            # Complete the existing native checks and ask the original Root
+            # controller to revalidate real observations. Never edit a PASS,
+            # breaker or LKG file directly.
+            units=(("jason-openclaw-authority-full-integrity.service",) if needed else ())+(
+                "jason-openclaw-authority-health.service","jason-production-drift-watchdog.service")
+            for unit in units:
+                result=subprocess.run(["/usr/bin/systemctl","start",unit],timeout=5500,capture_output=True,check=False)
+                need(result.returncode==0,"JOURNAL_SCHEDULED_NATIVE_VERIFICATION_FAILED")
+            code=("import sys;from pathlib import Path;sys.path.insert(0,'/home/al/.local/lib/jason');"
+                  "import release_manager_host_runner as r;r.request_root_control_transition("
+                  "Path('/var/lib/jason/openclaw/release-manager'),action='revalidate',"
+                  "revision='d1b8c196dadd4b672ec8ba47075f27bb61c98d63')")
+            result=subprocess.run(["/usr/sbin/runuser","-u","al","--","/usr/bin/python3","-B","-c",code],
+                                  timeout=100,capture_output=True,check=False)
+            need(result.returncode==0,"JOURNAL_SCHEDULED_NATIVE_REVALIDATION_FAILED")
+            return {"status":"existing_native_full_fast_drift_and_revalidation_verified"}
+        return {"status":"current_native_full_evidence_observed"}
 
     def status(self):
         with self.p.gate():
@@ -557,7 +635,7 @@ class JournalController:
                 "off_host_backup_claimed":False}
 
 
-def root_controller():
+def root_controller(*,recover_profile=False):
     need(os.geteuid()==0 and sys.flags.isolated==1 and Path(__file__).resolve()==ENTRY,
          "JOURNAL_INSTALLED_ISOLATED_ROOT_REQUIRED")
     policy=read_control(POLICY,0,0o600)
@@ -569,16 +647,31 @@ def root_controller():
     need(policy.get("schema_version")=="1.0" and policy.get("enabled") is True
          and policy.get("maintenance_operations")==["rotate","seal","scrub","recover"],
          "JOURNAL_ROOT_MAINTENANCE_POLICY")
-    expected_names={"tools/audit_journal_control.py",
-        "implementation/orchestrator/event_store.py","implementation/orchestrator/segmented_journal.py",
-        "implementation/orchestrator/journal_sql.py","implementation/orchestrator/journal_health.py"}
+    from tools.audit_journal_release_scope import SOURCES
+    expected_names=set(SOURCES)
     need(set(policy["trusted_source_sha256"])==expected_names,"JOURNAL_TRUSTED_SOURCE_CLOSURE")
     for name,expected in policy["trusted_source_sha256"].items():
         path=ENTRY.parent.parent/name;meta=path.lstat()
         need(not path.is_symlink() and stat.S_ISREG(meta.st_mode) and meta.st_uid==0 and meta.st_gid==0
              and stat.S_IMODE(meta.st_mode)==0o444 and meta.st_nlink==1
              and journal_sql.file_hash(path)==expected,"JOURNAL_TRUSTED_SOURCE_CHANGED")
+    from orchestrator.segmented_journal import PROFILE
+    if recover_profile and not os.path.lexists(PROFILE):
+        public=policy["public_profile"]
+        need(sha256(canonical(public)).hexdigest()==policy["profile_sha256"],
+             "JOURNAL_BOOT_PROFILE_BINDING")
+        directory=PROFILE.parent
+        directory.mkdir(mode=0o755,parents=True,exist_ok=True)
+        meta=directory.lstat()
+        need(not directory.is_symlink() and meta.st_uid==0 and not meta.st_mode&0o022,
+             "JOURNAL_BOOT_PROFILE_DIRECTORY")
+        atomic(PROFILE,public,0o444,0)
+    for ancestor in (Path("/srv"),Path("/srv/jason"),Path("/srv/jason/archive")):
+        meta=ancestor.lstat()
+        need(not ancestor.is_symlink() and stat.S_ISDIR(meta.st_mode) and meta.st_uid==0
+             and meta.st_gid==0 and not meta.st_mode&0o022,"JOURNAL_ARCHIVE_ANCESTOR_CUSTODY")
     p=JournalProfile.load()
+    need(p.control==Path("/var/lib/jason-audit-journal/control"),"JOURNAL_PERSISTENT_CONTROL_REQUIRED")
     need(sha256((p.control/"profile.json").read_bytes()).hexdigest()==policy["profile_sha256"]
          and p.active==Path("/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3")
          and p.archives==Path("/srv/jason/archive/governed-audit/orchestration")
@@ -593,7 +686,8 @@ def main():
     import argparse
     parser=argparse.ArgumentParser()
     parser.add_argument("--operation",choices=("status","cutover","rotate","recover","seal","reclaim",
-                                               "prepare-rollback","finish-rollback","maintain","scrub"))
+                                               "prepare-rollback","finish-rollback","maintain","scrub","boot-recover",
+                                               "verify-reconstruction","extend-reconstruction","discard-prepared","complete-release","rollback-release"))
     parser.add_argument("--segment-id")
     parser.add_argument("--sql-operation")
     parser.add_argument("--sql-arguments")
@@ -603,7 +697,7 @@ def main():
              "JOURNAL_FIXED_WRITER_HELPER_REQUIRED")
         print(json.dumps(journal_sql.dispatch(args.sql_operation,json.loads(args.sql_arguments))))
         return
-    controller=root_controller()
+    controller=root_controller(recover_profile=args.operation=="boot-recover")
     if args.operation=="status":result=controller.status()
     elif args.operation=="cutover":result=controller.transition(initial=True)
     elif args.operation=="rotate":result=controller.transition()
@@ -613,7 +707,36 @@ def main():
         need(args.segment_id is not None and len(args.segment_id)==32
              and all(c in "0123456789abcdef" for c in args.segment_id),"JOURNAL_SEGMENT_ID")
         controller.reclaim(args.segment_id);result={"status":"source_copy_reclaimed"}
-    elif args.operation=="maintain":result=controller.maintain()
+    elif args.operation=="boot-recover":
+        if controller.intent.exists():result=controller.recover()
+        elif (controller.private/"rollback-mounted.json").exists():
+            result=controller.recovery().restore_mount()
+        else:result={"status":"no_incomplete_data_transition"}
+    elif args.operation=="verify-reconstruction":result=controller.recovery().accept_recipe()
+    elif args.operation=="extend-reconstruction":result=controller.recovery().extend_recipe()
+    elif args.operation=="discard-prepared":result=controller.recovery().discard_prepared()
+    elif args.operation=="rollback-release":
+        from tools.audit_journal_release_executor import rollback_release
+        result=rollback_release(controller)
+    elif args.operation=="complete-release":
+        from tools.audit_journal_release_executor import complete
+        result=complete(controller)
+    elif args.operation=="maintain":
+        try:
+            maintenance=controller.maintenance_cycle()
+            initial=controller.private/"first-scheduled-rollover.json"
+            first=read_control(initial,0,0o400) if initial.exists() else {}
+            native=controller.ensure_native_full_health(force_revalidate=first.get("completed") is True
+                                                       and first.get("native_verified") is not True)
+            if first.get("completed") is True and native["status"]=="existing_native_full_fast_drift_and_revalidation_verified":
+                controller._json(initial,{**first,"native_verified":True},0o400)
+            result={"maintenance":maintenance,"native_health":native,
+                    "status":"pass","observed_at":datetime.now(timezone.utc).isoformat()}
+        except Exception:
+            controller._json(controller.p.control/"maintenance-status.json",
+                {"status":"fail","observed_at":datetime.now(timezone.utc).isoformat()})
+            raise
+        controller._json(controller.p.control/"maintenance-status.json",result)
     elif args.operation=="scrub":result=controller.scrub_one()
     elif args.operation=="prepare-rollback":result=controller.prepare_rollback()
     elif args.operation=="finish-rollback":result=controller.finish_rollback()
@@ -622,5 +745,7 @@ def main():
 
 
 if __name__=="__main__":
+    if Path(__file__).resolve()==ENTRY:
+        sys.path.insert(0,str(ENTRY.parent.parent))
     try:main()
     except Exception as exc:raise SystemExit("DENIED:"+type(exc).__name__+":"+str(exc).split(":")[0][:160])

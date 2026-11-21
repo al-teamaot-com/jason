@@ -15,7 +15,8 @@
     "new_approval_service": false,
     "new_scheduler": false,
     "new_work_scheduler": false,
-    "maintenance_integration_pending_review": true
+    "maintenance_integration_pending_review": true,
+    "new_database_or_approval_authority_for_outcome_receipts": false
   },
   "proposed_limits": {
     "timezone": "America/New_York",
@@ -29,12 +30,13 @@
     "size_metric": "main_database_bytes_plus_wal_bytes",
     "reserve_for_inflight_outcome_audit_required": true,
     "maximum_event_metadata_field_bytes": 512,
-    "execution_reserve_bytes": 8388608,
+    "execution_reserve_bytes": 25165824,
     "maximum_inflight_executions": 32,
     "cached_archive_handles": 32,
     "historical_scrub_after_days": 28,
     "historical_scrub_maximum_age_days": 31,
-    "archive_free_reserve_bytes": 4294967296
+    "archive_free_reserve_bytes": 4294967296,
+    "pending_outcome_reconciliation_grace_seconds": 60
   },
   "retention": {
     "archive_delete_allowed": false,
@@ -48,7 +50,9 @@
       "exact_approved_scope"
     ],
     "archive_destination": "owner_selected_archive_drive",
-    "off_host_backup_claimed": false
+    "off_host_backup_claimed": false,
+    "rollback_reconstruction_storage": "archive_drive",
+    "canonical_legacy_rollback_data_binding": "descriptor_guarded_file_bind_with_boot_recovery"
   },
   "integrity": {
     "active": "bounded consistent snapshot plus full integrity and restore proof",

@@ -29,7 +29,12 @@ COLUMNS = ("event_id","schema_version","event_type","execution_id","correlation_
            "organization_id","principal_id","capability_name","stage","payload","occurred_at")
 META_SCHEMA = """
 CREATE TABLE audit_journal_meta (epoch TEXT PRIMARY KEY);
-CREATE TABLE audit_journal_inflight (execution_id TEXT PRIMARY KEY, remaining_bytes INTEGER NOT NULL);
+CREATE TABLE audit_journal_inflight (execution_id TEXT PRIMARY KEY, remaining_bytes INTEGER NOT NULL,
+    provider_started INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE audit_journal_pending_outcomes (receipt_id TEXT PRIMARY KEY,event_id TEXT NOT NULL,
+    execution_id TEXT NOT NULL,values_json TEXT NOT NULL,queued_at REAL NOT NULL);
+CREATE INDEX ix_pending_outcome_event ON audit_journal_pending_outcomes(event_id);
+CREATE INDEX ix_pending_outcome_age ON audit_journal_pending_outcomes(queued_at);
 """
 INSERT = "INSERT INTO orchestration_events("+",".join(COLUMNS)+") VALUES ("+",".join("?" for _ in COLUMNS)+")"
 
@@ -71,7 +76,7 @@ class JournalProfile:
     target_bytes: int=1073741824
     ceiling_bytes: int=2147483648
     maximum_event_bytes: int=262144
-    execution_reserve_bytes: int=8388608
+    execution_reserve_bytes: int=25165824
     maximum_inflight: int=32
     cached_archives: int=32
     fixture: bool=False
@@ -93,7 +98,7 @@ class JournalProfile:
         need(all(type(data.get(k)) is int for k in ("writer_uid","target_bytes","ceiling_bytes",
              "maximum_event_bytes","execution_reserve_bytes","maximum_inflight")),
              "JOURNAL_POLICY_INTEGER_BOUNDS")
-        result=cls(active=Path(data["active"]),control=path.parent,
+        result=cls(active=Path(data["active"]),control=Path(data["control"]),
             archives=Path(data["archives"]),pending=Path(data["pending"]),
             custody_uid=owner,writer_uid=data["writer_uid"],
             target_bytes=data["target_bytes"],ceiling_bytes=data["ceiling_bytes"],
@@ -104,7 +109,7 @@ class JournalProfile:
         need(result.active.is_absolute() and result.archives.is_absolute() and result.pending.is_absolute()
              and 0<result.target_bytes<result.ceiling_bytes
              and 4096<=result.maximum_event_bytes<=1048576
-             and result.execution_reserve_bytes>=(((result.maximum_event_bytes+4095)//4096)+16)*8192*8
+             and result.execution_reserve_bytes>=(((result.maximum_event_bytes+4095)//4096)+16)*32768*8
              and result.maximum_inflight*result.execution_reserve_bytes<result.ceiling_bytes
              and 1<=result.maximum_inflight<=128 and 1<=result.cached_archives<=128,
              "JOURNAL_POLICY_BOUNDS")
@@ -154,8 +159,8 @@ class JournalProfile:
         path=base/name
         meta=path.lstat()
         need(not path.is_symlink() and stat.S_ISREG(meta.st_mode) and meta.st_uid==self.custody_uid
-             and meta.st_gid==self.custody_uid and meta.st_nlink==1
-             and stat.S_IMODE(meta.st_mode)==0o444
+             and meta.st_gid==self.writer_uid and meta.st_nlink==1
+             and stat.S_IMODE(meta.st_mode)==0o440
              and fingerprint(meta)==selected["fingerprint"],"JOURNAL_CUSTODY_OR_FINGERPRINT_CHANGED")
         return path
 
@@ -287,56 +292,82 @@ class SegmentedOrchestrationEventStore:
             stage=str(payload["stage"]),payload=dict(payload)))
 
     def append_event(self,event):
+        from .journal_outcomes import OutcomeReceipts,receipt_id
         serialized=json.dumps(dict(event.payload),sort_keys=True,separators=(",",":"),allow_nan=False)
         values=(event.event_id,event.schema_version,event.event_type,event.execution_id,event.correlation_id,
                 event.organization_id,event.principal_id,event.capability_name,event.stage,serialized,
                 event.occurred_at.astimezone(timezone.utc).isoformat())
-        need(all(len(str(value).encode())<=512 for value in values[:9]),
-             "JOURNAL_EVENT_METADATA_TOO_LARGE")
+        need(all(len(str(value).encode())<=512 for value in values[:9]),"JOURNAL_EVENT_METADATA_TOO_LARGE")
         bytecount=sum(len(str(v).encode()) for v in values)
         need(bytecount<=self.profile.maximum_event_bytes,"JOURNAL_EVENT_TOO_LARGE")
+        charge=(((bytecount+4095)//4096)+16)*32768
+        key=receipt_id(values)
         with self._mutex,self.profile.gate():
-            catalog=self.profile.catalog();self._refresh(catalog)
-            for record in catalog["segments"]:
-                if self._maybe(record,"event_id",event.event_id):
-                    with self._archive_query(record,"SELECT 1 FROM orchestration_events WHERE event_id=?",
-                                             (event.event_id,)) as rows:
-                        need(rows.fetchone() is None,"JOURNAL_EVENT_ALREADY_EXISTS")
+            catalog=self.profile.catalog()
+            # Record an already-invoked outcome BEFORE touching a potentially
+            # unavailable archive. Promotion/delete is then one active-DB tx.
+            staged=OutcomeReceipts(self).stage(catalog,event,values,charge)
+            try:
+                self._refresh(catalog)
+                for record in catalog["segments"]:
+                    if self._maybe(record,"event_id",event.event_id):
+                        with self._archive_query(record,"SELECT 1 FROM orchestration_events WHERE event_id=?",
+                                                 (event.event_id,)) as rows:
+                            need(rows.fetchone() is None,"JOURNAL_EVENT_ALREADY_EXISTS")
+            except (OSError,sqlite3.DatabaseError,JournalUnavailable):
+                if staged:return  # durable local receipt remains visible to reconciliation/health
+                raise
             with self._active(catalog,write=True) as db:
                 if catalog["mode"]!="legacy":
-                    # Serialize capacity reservations and the append in this ONE
-                    # SQLite transaction; no cross-database atomicity assumption.
                     db.execute("BEGIN IMMEDIATE")
-                    pending=db.execute("SELECT remaining_bytes FROM audit_journal_inflight WHERE execution_id=?",
-                                       (event.execution_id,)).fetchone()
-                    charge=(((bytecount+4095)//4096)+16)*8192
-                    if event.event_type=="orchestration.request.received" and pending is None:
-                        count=db.execute("SELECT count(*) FROM audit_journal_inflight").fetchone()[0]
-                        reserve=self.profile.maximum_inflight*self.profile.execution_reserve_bytes
-                        if count>=self.profile.maximum_inflight or (
-                            self.profile.active_bytes()+reserve+charge>=self.profile.ceiling_bytes):
-                            raise JournalCapacityExceeded("JOURNAL_NEW_EXECUTION_CAPACITY")
-                        db.execute("INSERT INTO audit_journal_inflight VALUES (?,?)",
-                                   (event.execution_id,self.profile.execution_reserve_bytes))
-                        pending=(self.profile.execution_reserve_bytes,)
-                    if pending is not None:
-                        if pending[0]<charge:raise JournalCapacityExceeded("JOURNAL_EXECUTION_RESERVE_EXHAUSTED")
-                        db.execute("UPDATE audit_journal_inflight SET remaining_bytes=remaining_bytes-? WHERE execution_id=?",
-                                   (charge,event.execution_id))
-                    elif self.profile.active_bytes()+charge+(
-                            self.profile.maximum_inflight*self.profile.execution_reserve_bytes
-                            )>=self.profile.ceiling_bytes:
-                        raise JournalCapacityExceeded("JOURNAL_OBSERVER_CAPACITY")
+                    queued=db.execute("SELECT 1 FROM audit_journal_pending_outcomes WHERE receipt_id=?",
+                                      (key,)).fetchone() is not None
+                    collision=db.execute("SELECT 1 FROM audit_journal_pending_outcomes "
+                        "WHERE event_id=? AND receipt_id<>? LIMIT 1",(event.event_id,key)).fetchone()
+                    need(collision is None,"JOURNAL_PENDING_OUTCOME_IDENTITY_CONFLICT")
+                    pending=db.execute("SELECT remaining_bytes,provider_started FROM audit_journal_inflight "
+                                       "WHERE execution_id=?",(event.execution_id,)).fetchone()
+                    if event.event_type=="orchestration.request.received":
+                        oldest=db.execute("SELECT min(queued_at) FROM audit_journal_pending_outcomes").fetchone()[0]
+                        need(oldest is None or time.time()-oldest<=60,"JOURNAL_OUTCOME_RECONCILIATION_REQUIRED")
+                        if pending is None:
+                            count=db.execute("SELECT count(*) FROM audit_journal_inflight").fetchone()[0]
+                            reserve=self.profile.maximum_inflight*self.profile.execution_reserve_bytes
+                            if count>=self.profile.maximum_inflight or (
+                                    self.profile.active_bytes()+reserve+charge>=self.profile.ceiling_bytes):
+                                raise JournalCapacityExceeded("JOURNAL_NEW_EXECUTION_CAPACITY")
+                            db.execute("INSERT INTO audit_journal_inflight VALUES (?,?,0)",
+                                       (event.execution_id,self.profile.execution_reserve_bytes))
+                            pending=(self.profile.execution_reserve_bytes,0)
+                    if not queued:
+                        if pending is not None:
+                            if pending[0]<charge:raise JournalCapacityExceeded("JOURNAL_EXECUTION_RESERVE_EXHAUSTED")
+                            db.execute("UPDATE audit_journal_inflight SET remaining_bytes=remaining_bytes-? "
+                                       "WHERE execution_id=?",(charge,event.execution_id))
+                        elif self.profile.active_bytes()+charge+(
+                                self.profile.maximum_inflight*self.profile.execution_reserve_bytes
+                                )>=self.profile.ceiling_bytes:
+                            raise JournalCapacityExceeded("JOURNAL_OBSERVER_CAPACITY")
+                    if event.event_type=="orchestration.capability.invoking" and pending is not None:
+                        maximum_charge=(((self.profile.maximum_event_bytes+4095)//4096)+16)*32768
+                        need(pending[0]-charge>=maximum_charge*2,"JOURNAL_PROVIDER_OUTCOME_RESERVE_REQUIRED")
+                        db.execute("UPDATE audit_journal_inflight SET provider_started=1 WHERE execution_id=?",
+                                   (event.execution_id,))
                 try:db.execute(INSERT,values)
                 except sqlite3.IntegrityError as exc:
                     if "JASON_AUDIT_JOURNAL_MAINTENANCE" in str(exc):
                         raise JournalUnavailable("JOURNAL_MAINTENANCE_ADMISSION_PAUSED") from exc
                     raise ValueError("Orchestration event already exists: "+event.event_id) from exc
-                if catalog["mode"]!="legacy" and (
-                    event.event_type in ("orchestration.capability.completed","orchestration.capability.failed",
-                                        "orchestration.request.terminated","orchestration.check_only.validated")
-                    or (event.stage.casefold()=="denied" and event.event_type.startswith("orchestration."))):
-                    db.execute("DELETE FROM audit_journal_inflight WHERE execution_id=?",(event.execution_id,))
+                if catalog["mode"]!="legacy":
+                    db.execute("DELETE FROM audit_journal_pending_outcomes WHERE receipt_id=?",(key,))
+                    if (event.event_type in ("orchestration.capability.completed","orchestration.capability.failed",
+                            "orchestration.request.terminated","orchestration.check_only.validated")
+                            or (event.stage.casefold()=="denied" and event.event_type.startswith("orchestration."))):
+                        db.execute("DELETE FROM audit_journal_inflight WHERE execution_id=?",(event.execution_id,))
+
+    def reconcile_outcomes(self,maximum=100):
+        from .journal_outcomes import OutcomeReceipts
+        return OutcomeReceipts(self).reconcile(maximum)
 
     def close(self):
         with self._mutex:

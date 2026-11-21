@@ -23,7 +23,7 @@ def event(identifier,execution="one",kind="test.observer",stage="observed",paylo
 @pytest.fixture
 def native(tmp_path):
     uid=os.geteuid()
-    for name in ("control","archive","pending","private","work","local"):
+    for name in ("control","archive","pending","private","work","local","rollback"):
         path=tmp_path/name;path.mkdir(mode=0o700);os.chown(path,uid,uid)
     (tmp_path/"fixture.json").write_text(json.dumps({"format":FIXTURE}))
     active=tmp_path/"active.sqlite3"
@@ -168,7 +168,7 @@ def test_reclaim_requires_verified_rollback_and_preserves_archive(native):
     p,c,s=native;c.transition(initial=True);c.seal_one()
     identifier=p.catalog()["segments"][0]["id"]
     with pytest.raises(FileNotFoundError):c.reclaim(identifier)
-    c.prepare_rollback();c.reclaim(identifier)
+    c.prepare_rollback();c.recovery().accept_recipe();c.reclaim(identifier)
     assert s.get("before").event_id=="before"
     s.append_event(event("new"))
     c.finish_rollback()
@@ -206,3 +206,81 @@ def test_bloom_corruption_detected_before_publication(native,tmp_path):
     item["sha256"]=journal_sql.file_hash(path)
     with pytest.raises(JournalUnavailable,match="FALSE_NEGATIVE"):
         journal_sql.validate_filters(p.active,directory,records)
+
+def test_maintenance_actually_frees_original_and_temporary_recovery_copy(native):
+    p,c,s=native;c.transition(initial=True)
+    assert c.maintain()["status"]=="sealed"
+    assert c.maintain()["status"]=="initial_full_legacy_reconstruction_and_restore_verified"
+    assert not list(c.recovery().storage.glob("*.prepared.sqlite3"))
+    assert list(p.pending.glob("*.sqlite3"))
+    assert c.maintain()["status"]=="verified_redundant_local_source_reclaimed"
+    assert not list(p.pending.glob("*.sqlite3"))
+    assert s.get("before").event_id=="before"
+
+
+def test_later_segment_recovery_coverage_extends_without_fake_full_rebuild(native):
+    p,c,s=native;c.transition(initial=True);c.seal_one()
+    c.prepare_rollback();c.recovery().accept_recipe()
+    c.reclaim(p.catalog()["segments"][0]["id"]);c.recovery().discard_prepared()
+    s.append_event(event("later"));c.transition();c.seal_one()
+    assert c.maintain()["status"]=="verified_reconstruction_recipe_extended"
+    assert c.maintain()["status"]=="verified_redundant_local_source_reclaimed"
+    assert not list(p.pending.glob("*.sqlite3"))
+    c.prepare_rollback();s.append_event(event("newest"));c.finish_rollback()
+    assert {e.event_id for e in s.list_by_execution("one")}=={"before","later","newest"}
+
+
+def test_completed_action_is_recorded_locally_when_archive_is_unavailable(native):
+    p,c,s=native;c.transition(initial=True);c.seal_one()
+    s.append_event(event("receive",kind="orchestration.request.received"))
+    s.append_event(event("invoke",kind="orchestration.capability.invoking"))
+    provider_invocations=1
+    offline=p.archives.with_name("temporarily-offline")
+    p.archives.rename(offline)
+    try:
+        s.append_event(event("done",kind="orchestration.capability.completed",stage="completed"))
+        state=journal_sql.active_state(p.active)
+        assert state["pending_outcomes"]==1 and len(state["reservations"])==1
+        with pytest.raises(JournalUnavailable,match="UNRECONCILED_OUTCOMES"):c.transition()
+    finally:offline.rename(p.archives)
+    assert s.reconcile_outcomes()=={"reconciled":1,"provider_invocations":0}
+    assert s.get("done").event_id=="done" and provider_invocations==1
+    assert journal_sql.active_state(p.active)["pending_outcomes"]==0
+    assert journal_sql.active_state(p.active)["reservations"]==[]
+
+
+def test_outcome_reserve_and_receipt_survive_rotation(native):
+    p,c,s=native;c.transition(initial=True);c.seal_one()
+    s.append_event(event("receive",kind="orchestration.request.received"))
+    s.append_event(event("invoke",kind="orchestration.capability.invoking"))
+    c.transition();c.seal_one()
+    offline=p.archives.with_name("temporarily-offline");p.archives.rename(offline)
+    try:
+        s.append_event(event("release",kind="orchestration.information_release.decided",stage="completed"))
+        s.append_event(event("done",kind="orchestration.capability.completed",stage="completed"))
+        assert journal_sql.active_state(p.active)["pending_outcomes"]==2
+    finally:offline.rename(p.archives)
+    assert s.reconcile_outcomes()["reconciled"]==2
+    assert journal_sql.active_state(p.active)["reservations"]==[]
+
+
+def test_pending_outcome_identity_conflict_is_retained_for_recovery(native):
+    p,c,s=native;c.transition(initial=True);c.seal_one()
+    s.append_event(event("receive",kind="orchestration.request.received"))
+    s.append_event(event("invoke",kind="orchestration.capability.invoking"))
+    # An actually executed outcome with a conflicting ID remains as durable
+    # evidence; it cannot overwrite verified history or trigger provider replay.
+    s.append_event(event("before",kind="orchestration.capability.completed",stage="completed"))
+    assert journal_sql.active_state(p.active)["pending_outcomes"]==1
+    with pytest.raises(JournalUnavailable,match="IDENTITY_CONFLICT"):s.reconcile_outcomes()
+    assert journal_sql.active_state(p.active)["pending_outcomes"]==1
+
+
+def test_normal_outcome_promotion_is_atomic_and_does_not_leave_a_receipt(native):
+    p,c,s=native;c.transition(initial=True);c.seal_one()
+    s.append_event(event("receive",kind="orchestration.request.received"))
+    s.append_event(event("invoke",kind="orchestration.capability.invoking"))
+    s.append_event(event("done",kind="orchestration.capability.completed",stage="completed"))
+    assert s.get("done") is not None
+    assert journal_sql.active_state(p.active)["pending_outcomes"]==0
+    assert journal_sql.active_state(p.active)["reservations"]==[]

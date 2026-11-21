@@ -1,15 +1,17 @@
 # Bounded daily audit-journal migration v1
 
-Status: **engineering preparation and synthetic rehearsal only**.
+Status: **dormant source implementation and isolated engineering validation; not deployed or production-authorized**.
 Owner request: November 21, 2026 — prepare one bounded migration covering
 writer coordination, searchable history, integrity verification and rollback.
 Classification: **High-Risk** (shared journal, consumer changes and health-proof policy).
 Baseline: a4194c9ee128e1f39938ec175fc52a4fbbd7f52d.
 Related work: #1324, #1948 and the Owner-objective framework in #2670/#2671.
 
-This package is a reviewable migration specification plus executable data-safety
-rehearsal. It is not a production installer, an adopted retention policy, a
-production event-store replacement or a request to approve unfinished deployment.
+This package now includes a source-only exact Root installer, data-recovery services,
+component-release plan, archive-backed rollback and safe synthetic tests. None is
+installed or activated in production. The installer requires separately verified
+Owner identity and an exact one-use approval. It is not an adopted retention policy
+or a successful production migration.
 Production integration and measured acceptance below are required before an exact
 release authorization package can be presented.
 
@@ -229,9 +231,11 @@ sealing/reclamation indefinitely. Slow full scans, copies, filter generation and
 cold-restore work run outside the exclusive writer handoff. Long hashing of the
 prepared rollback file also runs before the final pause; the final gate checks its
 Root-protected fingerprint, rechecks the tail budget and merges only the bounded
-tail. A verified redundant local legacy before-image may become the rollback seed
-after its archive is sealed and readers use that archive. This avoids allocating a
-second full legacy file on the small system disk. The seed is never the only copy.
+tail. The legacy-compatible rollback file is reconstructed and verified on the separate
+archive filesystem, then published to the canonical path through a Root-validated
+file bind. Its boot recovery mapping must be restored before Docker consumers
+restart. Only after proof of archive reads, recovery, and event identity may the
+original redundant local source be reclaimed. The archive drive is not off-host backup.
 
 New admission pauses only orchestration.request.received. Already-admitted
 invocations and their outcome records may finish. Unknown/consumed provider claims
@@ -241,7 +245,9 @@ The Root controller has no Owner authentication mechanism of its own. Its fixed
 production entry requires an immutable installed source closure, a Root policy and
 an adoption receipt issued by the existing independent Owner verification path.
 Scheduled maintenance cannot claim initial cutover or replay a consumed initial
-claim after rollback. There is no deployed Root archive action yet.
+claim after rollback. There is no deployed Root archive action yet. The dormant installer and four
+systemd units are source-prepared and remain gated on exact provenance, live
+Root inventory, signed Owner approval, and production postflight.
 
 ## Work required before a production authorization request
 
@@ -262,3 +268,35 @@ claim after rollback. There is no deployed Root archive action yet.
 Preparation does not grant production authority. Keep the existing
 Owner-objective installation candidate and its protected source unchanged while
 this review branch is open.
+
+## November 21, 2026 source validation and release-preparation checkpoint
+
+- Local CI-equivalent pytest invocation: 130 PASS, 0 FAIL, including the
+  original event-store/reconstruction and production-health compatibility suites.
+- Focused release/recovery tests: 17 PASS. A wider focused suite: 90 PASS.
+- No-network, no-host-mount disposable native Root fixture: PASS; actual UID 1000
+  SQLite WAL reads/writes, independent filesystems, Root custody, tested
+  cross-filesystem file-bind and recursive consumer mount, archive reconstruction,
+  recovery and reclamation, interruption/one-use protections and reboot mapping.
+- Documentation control and JSON syntax: PASS; source Python compile: PASS.
+- These tests demonstrate synthetic behavior only. They do not demonstrate a
+  production 44 GiB migration, 24-hour scheduled recurrence, actual three-image
+  production substitution or native Root release acceptance.
+- Exactly scoped sources: `tools/audit_journal_release_scope.py` and
+  `tools/audit_journal_install.py`; dormant data-recovery and maintenance units in
+  `infrastructure/jason-audit-journal/`. Source adoption must reconcile the
+  pending protected Main `a4194c9...` Owner-objective installer deliberately,
+  never overwrite its pinned source or reuse its consent.
+- The source-only Root path requires a current healthy breaker/drift result,
+  matching freeze/pause/hold hashes, complete Root process/producer inventory,
+  exact historical schema, archive capacity and custody, and one authenticated
+  Owner exact-action approval. Do not weaken failing gates to force release.
+- Explicit outstanding production acceptance: true provider/consumer continuity,
+  full initial archive parity/cold restore, genuine redundant 44 GiB reclamation,
+  live boot recovery, actual scheduled rollover, independent native full/fast
+  health/revalidation, and rollback preserving post-cutover events.
+- Storage policy is separate-disk preservation of all events with no off-host
+  backup claim and no age-based historical deletion.
+
+**Authorization state:** This checkpoint is engineering evidence only, not a
+request to execute a production cutover or permission to modify production.

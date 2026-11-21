@@ -1,7 +1,11 @@
 name: Audit Journal Migration Preparation
 on:
+  push:
+    branches: [main]
   pull_request:
     paths:
+      - 'tools/audit_journal*.py'
+      - 'tools/tests/*audit_journal*.py'
       - 'tools/audit_journal_migration.py'
       - 'tools/tests/test_audit_journal_migration.py'
       - 'tools/audit_journal_control.py'
@@ -15,6 +19,10 @@ on:
       - 'implementation/orchestrator/segmented_journal.py'
       - 'implementation/orchestrator/journal_sql.py'
       - 'implementation/orchestrator/journal_health.py'
+      - 'implementation/orchestrator/journal_recovery.py'
+      - 'implementation/orchestrator/journal_mount.py'
+      - 'implementation/orchestrator/journal_outcomes.py'
+      - 'tools/tests/test_audit_journal_persistent_profile.py'
       - 'tools/audit_journal_fast_health.py'
       - 'tools/audit_journal_full_health_snapshot.py'
       - 'tools/audit_journal_operational_health.py'
@@ -42,11 +50,11 @@ jobs:
           PYTHONPATH: .:tools:implementation
           PYTHONDONTWRITEBYTECODE: '1'
         run: |
-          python -B -m pytest -o addopts='' -q -p no:cacheprovider tools/tests/test_audit_journal_migration.py tools/tests/test_audit_journal_native.py tools/tests/test_audit_journal_health.py tools/tests/test_audit_journal_health_native.py tools/tests/test_openclaw_authority_operational_health.py tools/tests/test_openclaw_authority_fast_health.py implementation/orchestrator/tests/test_event_store.py implementation/orchestrator/tests/test_reconstruction.py
+          python -B -m pytest -o addopts='' -q -p no:cacheprovider tools/tests/test_audit_journal_migration.py tools/tests/test_audit_journal_native.py tools/tests/test_audit_journal_health.py tools/tests/test_audit_journal_health_native.py tools/tests/test_audit_journal_persistent_profile.py tools/tests/test_audit_journal_release_plan.py tools/tests/test_audit_journal_release_recovery.py tools/tests/test_audit_journal_cycle.py tools/tests/test_openclaw_authority_operational_health.py tools/tests/test_openclaw_authority_fast_health.py implementation/orchestrator/tests/test_event_store.py implementation/orchestrator/tests/test_reconstruction.py
           python -m json.tool config/operations/audit-journal-daily-archive-proposal-v1.json >/dev/null
           test ! -e /var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3
 
       - name: Root custody, UID 1000 writer and one-use crash recovery
         run: |
           docker build --network=none -f infrastructure/jason-audit-journal/tests.Dockerfile -t audit-journal-native-fixture .
-          docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=8g audit-journal-native-fixture
+          docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=FSETID --cap-add=SYS_ADMIN --security-opt=no-new-privileges --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined --tmpfs /tmp:rw,nosuid,nodev,size=8g --tmpfs /tmp/audit-native-root-fixture/archive-root:rw,nosuid,nodev,size=8g audit-journal-native-fixture

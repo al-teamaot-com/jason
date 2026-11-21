@@ -40,6 +40,9 @@ def full_integrity(path,*,profile=None,temp_root=None):
  with p.gate():
   catalog,digest=covered_catalog(p)
   p.active_identity()
+  active=journal_sql.active_state(p.active)
+  need(active["oldest_outcome_age_seconds"] is None or active["oldest_outcome_age_seconds"]<=60,
+       "JOURNAL_HEALTH_OUTCOME_RECONCILIATION_REQUIRED")
   if catalog["mode"]=="legacy":
    with journal_sql.connection(p.active) as db:
     need(db.execute("PRAGMA integrity_check").fetchone()[0]=="ok","JOURNAL_FULL_INTEGRITY_FAILED")
@@ -74,6 +77,9 @@ def validate_full_evidence(evidence,*,profile=None):
  p=profile or JournalProfile.load(PROFILE)
  with p.gate():
   catalog,digest=covered_catalog(p)
+  active=journal_sql.active_state(p.active)
+  need(active["oldest_outcome_age_seconds"] is None or active["oldest_outcome_age_seconds"]<=60,
+       "JOURNAL_HEALTH_OUTCOME_RECONCILIATION_REQUIRED")
   proof=evidence.get("orchestration_journal")
   if catalog["mode"]=="legacy" and proof is None:return True
   need(isinstance(proof,dict) and proof.get("integrity")=="ok"

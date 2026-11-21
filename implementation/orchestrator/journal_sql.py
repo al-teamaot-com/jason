@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import sqlite3
 import stat
+import shutil
 import time
 
 from .segmented_journal import COLUMNS, INSERT, META_SCHEMA, need
@@ -58,19 +59,36 @@ def create_active(target,epoch,reservations=()):
         db.executescript(_SCHEMA+META_SCHEMA)
         db.execute("INSERT INTO audit_journal_meta VALUES (?)",(epoch,))
         for row in reservations:
-            db.execute("INSERT INTO audit_journal_inflight VALUES (?,?)",row)
+            db.execute("INSERT INTO audit_journal_inflight VALUES (?,?,?)",
+                       tuple(row) if len(row)==3 else (*row,0))
         db.commit()
     path.chmod(0o600)
 
 
-def proof(path,*,deadline=None):
+def proof(path,*,deadline=None,chunks=None):
     with connection(path,deadline=deadline) as db:
         need(db.execute("PRAGMA integrity_check").fetchone()[0]=="ok","JOURNAL_FULL_INTEGRITY_FAILED")
-        digest=sha256();count=0
+        shape=[list(r) for r in db.execute(
+            "SELECT name,sql FROM sqlite_master WHERE tbl_name='orchestration_events' ORDER BY name")]
+        schema=sha256(canonical(shape)).hexdigest()
+        digest=sha256();count=0;part=sha256();part_count=0;index=0
+        expected=[] if chunks is None else list(chunks)
+        while index<len(expected) and expected[index]["events"]==0:
+            need(expected[index]["content_sha256"]==sha256(b"").hexdigest(),"JOURNAL_EMPTY_SEGMENT_PROOF");index+=1
         for row in db.execute("SELECT "+",".join(COLUMNS)+" FROM orchestration_events ORDER BY rowid"):
-            digest.update(canonical(list(row))+b"\n");count+=1
+            encoded=canonical(list(row))+b"\n";digest.update(encoded);count+=1
+            if chunks is not None:
+                need(index<len(expected),"JOURNAL_RECONSTRUCTION_EXTRA_ROWS")
+                part.update(encoded);part_count+=1
+                if part_count==expected[index]["events"]:
+                    need(part.hexdigest()==expected[index]["content_sha256"],"JOURNAL_RECONSTRUCTION_CONTENT_PARITY")
+                    index+=1;part=sha256();part_count=0
+                    while index<len(expected) and expected[index]["events"]==0:
+                        need(expected[index]["content_sha256"]==sha256(b"").hexdigest(),"JOURNAL_EMPTY_SEGMENT_PROOF");index+=1
+        if chunks is not None:
+            need(index==len(expected) and part_count==0,"JOURNAL_RECONSTRUCTION_MISSING_ROWS")
     return {"integrity":"ok","events":count,"content_order":"rowid","content_sha256":digest.hexdigest(),
-            "file_sha256":file_hash(path)}
+            "file_sha256":file_hash(path),"schema_sha256":schema}
 
 
 def checkpoint(path):
@@ -85,11 +103,14 @@ def checkpoint(path):
 def active_state(path):
     with connection(path) as db:
         tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        rows=[list(r) for r in db.execute("SELECT execution_id,remaining_bytes FROM audit_journal_inflight")
+        rows=[list(r) for r in db.execute("SELECT execution_id,remaining_bytes,provider_started FROM audit_journal_inflight")
               ] if "audit_journal_inflight" in tables else []
         epoch=db.execute("SELECT epoch FROM audit_journal_meta").fetchone()[0] if "audit_journal_meta" in tables else None
         watermark=db.execute("SELECT COALESCE(MAX(rowid),0) FROM orchestration_events").fetchone()[0]
-    return {"epoch":epoch,"watermark":watermark,"reservations":rows}
+        pending=db.execute("SELECT count(*),min(queued_at) FROM audit_journal_pending_outcomes").fetchone()             if "audit_journal_pending_outcomes" in tables else (0,None)
+    return {"epoch":epoch,"watermark":watermark,"reservations":rows,
+            "pending_outcomes":pending[0],
+            "oldest_outcome_age_seconds":None if pending[1] is None else max(0,time.time()-pending[1])}
 
 
 def snapshot(source,target,seconds=60):
@@ -156,18 +177,67 @@ def append_sources(paths,target):
     return proof(target)
 
 
-def rebuild(paths,target):
-    need(not os.path.lexists(target),"JOURNAL_ROLLBACK_TARGET_PRESENT")
-    with closing(sqlite3.connect(target)) as dst:
-        dst.executescript(_SCHEMA)
-        with dst:
-            for path in paths:
-                with connection(path) as src:
-                    for row in src.execute("SELECT "+",".join(COLUMNS)+" FROM orchestration_events ORDER BY rowid"):
-                        try:dst.execute(INSERT,tuple(row))
-                        except sqlite3.IntegrityError as exc:raise RuntimeError("JOURNAL_HISTORY_CONFLICT") from exc
-    Path(target).chmod(0o600)
-    return proof(target)
+def rebuild(paths,target,proofs=None):
+    need(paths and not os.path.lexists(target),"JOURNAL_ROLLBACK_TARGET_PRESENT")
+    provided=[None]*len(paths) if proofs is None else proofs
+    need(len(provided)==len(paths),"JOURNAL_RECONSTRUCTION_PROOF_COUNT")
+    expected=[given if given is not None else proof(path) for path,given in zip(paths,provided)]
+    need(all(p["integrity"]=="ok" and p["schema_sha256"]==expected[0]["schema_sha256"] for p in expected),
+         "JOURNAL_RECONSTRUCTION_SOURCE_SCHEMA")
+    # Copy the already indexed legacy baseline; never reinsert tens of millions
+    # of historical rows through Python. Later segments are appended in SQLite.
+    shutil.copyfile(paths[0],target);Path(target).chmod(0o600)
+    need(file_hash(target)==expected[0]["file_sha256"],"JOURNAL_RECONSTRUCTION_SEED_BYTES")
+    with connection(target,write=True) as dst:
+        for index,path in enumerate(paths[1:],1):
+            alias="journal_source_"+str(index)
+            dst.execute("ATTACH DATABASE ? AS "+alias,(Path(path).as_uri()+"?mode=ro",))
+            try:
+                with dst:
+                    try:
+                        dst.execute("INSERT INTO orchestration_events("+",".join(COLUMNS)+") SELECT "+
+                                    ",".join(COLUMNS)+" FROM "+alias+".orchestration_events ORDER BY rowid")
+                    except sqlite3.IntegrityError as exc:raise RuntimeError("JOURNAL_HISTORY_CONFLICT") from exc
+            finally:dst.execute("DETACH DATABASE "+alias)
+    # One actual full target integrity/content scan independently validates EACH
+    # source's ordered content hash, rather than combining hashes as if that were
+    # a fresh whole-file proof. Custodied source proofs avoid another old scan.
+    return proof(target,chunks=expected)
+
+
+def legacy_restore_proof(source,target):
+    need(not os.path.lexists(target),"JOURNAL_LEGACY_RESTORE_TARGET_PRESENT")
+    shutil.copyfile(source,target);Path(target).chmod(0o600)
+    with connection(target) as db:
+        ids=[r[0] for r in db.execute(
+            "SELECT event_id FROM orchestration_events WHERE rowid IN "
+            "((SELECT min(rowid) FROM orchestration_events),(SELECT max(rowid) FROM orchestration_events))")]
+    from .event_store import SQLiteOrchestrationEventStore
+    legacy=SQLiteOrchestrationEventStore(target)
+    try:
+        for identifier in ids:
+            need(legacy.get(identifier).event_id==identifier,"JOURNAL_LEGACY_READER_RESTORE_FAILED")
+    finally:legacy.close()
+    checkpoint(target)
+    return {"proof":proof(target),"legacy_reader_gets":len(ids),
+            "provider_contacted":False,"provider_credentials_used":False}
+
+
+def archive_readback(source,profile):
+    from .segmented_journal import JournalProfile,SegmentedOrchestrationEventStore
+    p=JournalProfile(**{k:(Path(v) if k in ("active","control","archives","pending") else v)
+                       for k,v in profile.items()})
+    with connection(source) as db:
+        rows=list(db.execute("SELECT * FROM orchestration_events WHERE rowid IN "
+             "((SELECT min(rowid) FROM orchestration_events),(SELECT max(rowid) FROM orchestration_events))"))
+    from .event_store import SQLiteOrchestrationEventStore
+    store=SegmentedOrchestrationEventStore(p)
+    try:
+        for row in rows:
+            need(store.get(row["event_id"])==SQLiteOrchestrationEventStore._from_row(row),
+                 "JOURNAL_ARCHIVED_READER_PARITY_FAILED")
+    finally:store.close()
+    return {"reads_verified":True,"event_probes":len(rows),"provider_contacted":False}
 
 
 def tail_budget(source,watermark,maximum_rows=100000,maximum_bytes=134217728,seconds=10):
@@ -198,7 +268,7 @@ def merge_tail(source,target,watermark,maximum_rows,maximum_bytes,seconds):
     return {"events":count,"bytes":size,"sha256":tail_hash.hexdigest()}
 
 
-def admission_barrier(path,enabled):
+def admission_barrier(path,enabled,block_invoking=False):
     # This is an explicitly scoped operational maintenance barrier, never a
     # grant or a way to execute provider work. Existing outcomes may finish.
     with connection(path,write=True) as db:
@@ -208,6 +278,29 @@ BEFORE INSERT ON orchestration_events
 WHEN NEW.event_type = 'orchestration.request.received'
 BEGIN SELECT RAISE(ABORT,'JASON_AUDIT_JOURNAL_MAINTENANCE'); END""")
         else:db.execute("DROP TRIGGER IF EXISTS audit_journal_maintenance_admission")
+        if enabled and block_invoking:
+            db.execute("""CREATE TRIGGER IF NOT EXISTS audit_journal_maintenance_invoking
+BEFORE INSERT ON orchestration_events
+WHEN NEW.event_type = 'orchestration.capability.invoking'
+BEGIN SELECT RAISE(ABORT,'JASON_AUDIT_JOURNAL_MAINTENANCE'); END""")
+        else:db.execute("DROP TRIGGER IF EXISTS audit_journal_maintenance_invoking")
+
+
+def live_claim_count(cutoff):
+    from datetime import datetime
+    stamp=datetime.fromisoformat(cutoff.replace("Z","+00:00"))
+    need(stamp.tzinfo is not None,"JOURNAL_DRAIN_CUTOFF_REQUIRES_TIMEZONE")
+    path=Path("/var/lib/jason/governed-ticket-shared/governed-execution.sqlite3")
+    with connection(path) as db:
+        # Historical unresolved claims remain untouched. Only a current process
+        # generation could still be executing an already-consumed provider write.
+        count=0
+        for row in db.execute("SELECT consumed_at FROM governed_action_approvals WHERE state='consumed'"):
+            try:at=datetime.fromisoformat(row[0].replace("Z","+00:00"))
+            except (ValueError,TypeError,AttributeError):raise RuntimeError("JOURNAL_CONSUMED_CLAIM_TIMESTAMP_UNKNOWN")
+            need(at.tzinfo is not None,"JOURNAL_CONSUMED_CLAIM_TIMESTAMP_UNKNOWN")
+            count+=at>=stamp
+    return {"consumed_since_cutoff":count,"claim_mutations":0}
 
 
 def dispatch(operation,args):
@@ -218,11 +311,29 @@ def dispatch(operation,args):
     if operation=="proof":return proof(args["path"],deadline=time.monotonic()+args.get("seconds",10800))
     if operation=="snapshot":return snapshot(args["source"],args["target"])
     if operation=="filters":return filters(args["source"],args["directory"],args["identifier"],args["events"])
-    if operation=="rebuild":return rebuild(args["paths"],args["target"])
+    if operation=="rebuild":return rebuild(args["paths"],args["target"],args.get("proofs"))
+    if operation=="legacy_restore_proof":return legacy_restore_proof(args["source"],args["target"])
+    if operation=="archive_readback":return archive_readback(args["source"],args["profile"])
+    if operation=="reconcile_outcomes":
+        from .segmented_journal import JournalProfile,SegmentedOrchestrationEventStore
+        p=JournalProfile(**{k:(Path(v) if k in ("active","control","archives","pending") else v)
+                           for k,v in args["profile"].items()})
+        store=SegmentedOrchestrationEventStore(p)
+        try:return store.reconcile_outcomes(args.get("maximum",100))
+        finally:store.close()
     if operation=="append_sources":return append_sources(args["paths"],args["target"])
     if operation=="validate_filters":return validate_filters(args["source"],args["directory"],args["records"])
     if operation=="merge_tail":return merge_tail(**args)
     if operation=="tail_budget":return tail_budget(**args)
+    if operation=="reader_probes":
+        need(1<=len(args["paths"])<=2,"JOURNAL_PROBE_PATH_BOUND")
+        identifiers=[]
+        for path in args["paths"]:
+            with connection(path) as db:
+                identifiers.extend(r[0] for r in db.execute("SELECT event_id FROM orchestration_events WHERE rowid IN "
+                    "((SELECT min(rowid) FROM orchestration_events),(SELECT max(rowid) FROM orchestration_events))"))
+        return {"event_ids":list(dict.fromkeys(identifiers)),"provider_invocations":0}
+    if operation=="live_claim_count":return live_claim_count(args["cutoff"])
     if operation=="barrier":
-        admission_barrier(args["path"],args["enabled"]);return {"enabled":args["enabled"]}
+        admission_barrier(args["path"],args["enabled"],args.get("block_invoking",False));return {"enabled":args["enabled"]}
     raise PermissionError("JOURNAL_SQL_OPERATION_NOT_REGISTERED")

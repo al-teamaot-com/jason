@@ -31,9 +31,9 @@ def scenario(base,segments,samples):
   filters=journal_sql.filters(path,p.archives,identifier,16)
   journal_sql.validate_filters(path,p.archives,filters)
   for item in filters.values():
-   file=p.archives/item["file"];os.chown(file,uid,uid);file.chmod(0o444)
+   file=p.archives/item["file"];os.chown(file,uid,uid);file.chmod(0o440)
    item["fingerprint"]=fingerprint(file.stat())
-  os.chown(path,uid,uid);path.chmod(0o444)
+  os.chown(path,uid,uid);path.chmod(0o440)
   records.append({"id":identifier,"file":path.name,"state":"sealed","fingerprint":fingerprint(path.stat()),
    "filters":filters,"proof":{**proof,"restore_verified":False,"benchmark_fixture_only":True}})
  journal_sql.create_active(p.active,"benchmark");os.chown(p.active,uid,uid)

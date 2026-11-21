@@ -54,6 +54,8 @@ def test_corrupt_history_invalidates_full_proof(native):
 def test_daily_boundary_uses_new_york_calendar_across_dst(native,date):
  from zoneinfo import ZoneInfo
  p,c,s=native;c.transition(initial=True);c.seal_one()
+ c.prepare_rollback();c.recovery().accept_recipe();c.reclaim(p.catalog()["segments"][0]["id"])
+ c.recovery().discard_prepared()
  zone=ZoneInfo("America/New_York")
  current=datetime.fromisoformat(date+"T00:14:00").replace(tzinfo=zone)
  catalog=p.catalog();catalog["opened_at"]=(current-timedelta(hours=1)).isoformat()
