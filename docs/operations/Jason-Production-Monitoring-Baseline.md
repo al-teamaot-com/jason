@@ -85,6 +85,19 @@ The monitoring exporter may inspect mount destinations and OpenBao's unauthentic
 
 Because `/run` is ephemeral, post-reboot operational checks must verify credential staging before dependent provider-read containers are treated as ready.
 
+## Mandatory AppRole expiry-prevention rule (2026-11-12)
+
+**Invariant: No production integration may silently run to an expiring OpenBao AppRole SecretID.** This is the canonical provider-secret lifecycle contract (see #2381), **not** a new rotation service or a standing authorization to mutate secrets.
+
+1. **Inventory and watch every finite-lived production AppRole**, including the canonical bootstrap credential and *each distinct runtime/MCP credential bind source*. A live OpenBao login/SecretID validity proof and authoritative, timezone-aware `expires_at_utc` metadata must both be considered; file presence, an unsealed OpenBao, nominal TTL configuration, and a healthy container are insufficient to claim credential readiness.
+2. **Warning thresholds:** At 30 days before the earliest actual credential expiry, issue a durable renewal-required warning. By **day 75 of a 90-day SecretID** (15 days remaining), the existing governed lifecycle must have completed a separately authorized, auditable renewal and proof. Escalate critically at 14 days, 7 days and 24 hours if not yet verified. Invalid, expired, locked, unknown-identity, or stale-monitoring conditions fail closed and must be visible as provider/authentication degradation, never `status: pass`.
+3. **No retry storm:** On AppRole 400/403, classify the provider and role, bound retries with backoff/circuit-breaking, and stop repeated logins that trigger `sys/locked-users`. Never unlock any other role or retry with broad administrator credentials.
+4. **Exact-action rotation only:** Use the existing canonical provider-secret lifecycle and a narrowly authorized root-mediated operation. Verify role/policy, host, release, existing mount paths and inode/permissions. Mint one same-role SecretID only when necessary; preserve provider API/KV credentials and original bind-mounted inodes; stage *all* affected canonical, runtime, and MCP sources; validate before retiring the prior valid accessor. On any failure, restore original bytes and metadata, revoke the unused new identity, preserve freeze/hold, and emit sanitized immutable audit evidence.
+5. **Acceptance before declaring healthy:** Verify an AppRole login and KV field contract separately in each affected service container, then the provider's existing governed read canary, and ensure ticket scans/other dependent workflows advance. Retain production release/rollback/freeze invariants; no restart, non-expiring TTL, production release, policy broadening, or credential rotation is implicitly authorized by this rule.
+6. **Observability and storage:** Existing provider-health reporting must expose `identity_expired`, `renewal_due`, `locked`, `invalid_secret_id`, or `unknown` as bounded, secret-safe classes. Monitor OpenBao audit-file growth/disk thresholds and provide governed retention; never delete or truncate audit evidence as an ad-hoc fix.
+
+**Incident evidence:** On November 12, 2026, `openai.semantic_intent` and `it_glue.readonly` had expired/invalid SecretIDs and role lockouts. OpenBao itself returned HTTP 200, while dependent MCP/provider reads failed. Owner-authorized, exact-role renewal restored four-of-four canaries. This rule must be implemented through the existing governed development, CI, acceptance, and separately approved deployment path before it is considered actively enforced in production.
+
 ## Authority / governance monitors
 
 Required invariants:
