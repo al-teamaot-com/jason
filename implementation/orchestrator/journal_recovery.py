@@ -35,6 +35,10 @@ class ArchiveRecovery:
    proof=c._sql("rebuild",{"paths":[*paths,str(snapshot)],"target":str(target),
        "proofs":[*(r["proof"] if r["state"]=="sealed" else None for r in catalog["segments"]),None]})
    adopted=self.storage/(uuid4().hex+".prepared.sqlite3")
+   meta=target.stat()
+   claim=c.private/("prepared-"+adopted.name+".json")
+   c._json(claim,{"path":str(adopted),"identity":[meta.st_dev,meta.st_ino],
+       "file_sha256":proof["file_sha256"],"finished":False},0o400)
    c._move(target,adopted,p.custody_uid,0o444)
    c.no_handles(adopted)
    need(journal_sql.file_hash(adopted)==proof["file_sha256"],"JOURNAL_ROLLBACK_PROOF_CHANGED")
@@ -45,6 +49,39 @@ class ArchiveRecovery:
    c._json(c.rollback,plan,0o400)
    c._cleanup_job(job)
    return {"status":"rollback_prepared_on_archive_drive","events":proof["events"]}
+
+ def cleanup_prepared(self):
+  c,p=self.c,self.p
+  protected=set()
+  for marker in (c.rollback,c.intent):
+   if not marker.exists():continue
+   row=read_control(marker,p.custody_uid,0o400)
+   for value in (row.get("target"),row.get("sealed_target"),row.get("plan",{}).get("target")):
+    if value:protected.add(value)
+  cleaned=0
+  for claim in sorted(c.private.glob("prepared-*.json")):
+   row=read_control(claim,p.custody_uid,0o400)
+   if row["finished"] or row["path"] in protected:continue
+   target=Path(row["path"]);identifier=target.name.removesuffix(".prepared.sqlite3")
+   need(target.parent==self.storage and target.name.endswith(".prepared.sqlite3")
+        and len(identifier)==32 and all(ch in "0123456789abcdef" for ch in identifier),
+        "JOURNAL_PREPARED_CLEANUP_SCOPE")
+   if target.exists():
+    m=target.lstat()
+    need(not target.is_symlink() and stat.S_ISREG(m.st_mode) and m.st_nlink==1
+         and [m.st_dev,m.st_ino]==row["identity"]
+         and m.st_uid in (p.custody_uid,p.writer_uid) and not m.st_mode&0o022,
+         "JOURNAL_PREPARED_CLEANUP_IDENTITY")
+    c.no_handles(target)
+    need(journal_sql.file_hash(target)==row["file_sha256"],"JOURNAL_PREPARED_CLEANUP_CONTENT")
+    target.unlink()
+    from os import open as osopen,close as osclose,fsync,O_RDONLY,O_DIRECTORY
+    fd=osopen(self.storage,O_RDONLY|O_DIRECTORY)
+    try:fsync(fd)
+    finally:osclose(fd)
+   c._json(claim,{**row,"finished":True},0o400);cleaned+=1
+   if cleaned>=8:break
+  return {"prepared_temporary_copies_cleaned":cleaned}
 
  def accept_recipe(self):
   c,p=self.c,self.p
@@ -106,7 +143,7 @@ class ArchiveRecovery:
    target=Path(plan["target"])
    need(target.parent==self.storage and fingerprint(target.stat())==plan["target_fingerprint"],
         "JOURNAL_DISCARD_TARGET_IDENTITY")
-   target.unlink()
+   c.no_handles(target);target.unlink()
    c._json(c.private/"last-reconstruction.json",plan,0o400)
    c.rollback.unlink()
    return {"status":"prepared_recovery_copy_discarded_history_retained"}

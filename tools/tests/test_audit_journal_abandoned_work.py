@@ -48,3 +48,36 @@ def test_claimed_work_identity_substitution_denied(native):
     with pytest.raises((PermissionError,ValueError,RuntimeError),match="JOURNAL_WORK_DIRECTORY_CHANGED"):
         controller.cleanup_abandoned_work()
     assert (job/"new-file").read_bytes()==b"do-not-delete"
+
+
+def test_release_history_probe_requires_both_current_and_sealed_events(native):
+    from tools.tests.test_audit_journal_native import event
+    from orchestrator import journal_sql
+    p,controller,store=native
+    controller.transition(initial=True)
+    controller.seal_one()
+    sealed=p.artifact(p.catalog()["segments"][0])
+    cold=journal_sql.dispatch("reader_probes",{"paths":[str(p.active),str(sealed)]})
+    assert cold["per_source_probe_counts"]==[0,1]
+    store.append_event(event("post-cutover"))
+    ready=journal_sql.dispatch("reader_probes",{"paths":[str(p.active),str(sealed)]})
+    assert ready["per_source_probe_counts"]==[1,1]
+    assert set(ready["event_ids"])=={"before","post-cutover"}
+
+
+def test_prepared_rollback_protected_until_receipt_and_recoverable_cleanup(native):
+    p,controller,_=native
+    controller.transition(initial=True)
+    controller.seal_one()
+    controller.prepare_rollback()
+    prepared=list(controller.recovery().storage.glob('*.prepared.sqlite3'))
+    assert len(prepared)==1
+    pending=controller.cleanup_abandoned_work()
+    assert pending['prepared_temporary_copies_cleaned']==0
+    assert prepared[0].exists()
+    controller.recovery().accept_recipe()
+    controller.recovery().discard_prepared()
+    cleaned=controller.cleanup_abandoned_work()
+    assert cleaned['prepared_temporary_copies_cleaned']==1
+    assert not prepared[0].exists()
+    assert controller.cleanup_abandoned_work()['prepared_temporary_copies_cleaned']==0

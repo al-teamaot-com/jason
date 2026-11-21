@@ -224,6 +224,7 @@ class JournalController:
                 if row.get("target"):protected.add(str(Path(row["target"]).parent))
                 if row.get("plan",{}).get("target"):
                     protected.add(str(Path(row["plan"]["target"]).parent))
+            prepared=self.recovery().cleanup_prepared()
             cleaned=0
             for claim in sorted(self.private.glob("work-*.json")):
                 row=read_control(claim,self.p.custody_uid,0o400)
@@ -236,7 +237,7 @@ class JournalController:
                 cleaned+=1
                 if cleaned>=32:break
             return {"status":"abandoned_claimed_temporary_work_recovered" if cleaned else "no_abandoned_work",
-                    "jobs_cleaned":cleaned}
+                    "jobs_cleaned":cleaned,**prepared}
 
     def claim_initial_cutover(self,intent):
         need(not self.fixture,"JOURNAL_INITIAL_CLAIM_PRODUCTION_ONLY")
