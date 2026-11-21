@@ -220,7 +220,7 @@ canonical journal. This source does not install the profile or activate a servic
 | implementation/orchestrator/journal_sql.py | Finite writer-UID SQLite operations; standalone checkpointing, full integrity/content proof, online snapshots, filter validation, reconstruction and bounded idempotent tail merge. |
 | tools/audit_journal_control.py | Installed isolated Root guard; protected adoption/source checks; one-use initial claim with crash recovery; serialized rotation, seal, scrub, guarded reclamation and event-preserving rollback. |
 | implementation/orchestrator/journal_health.py | Consistent active snapshot and cold restore; Root-custodied historical proof/fingerprint coverage; overdue historical scrub rejection. |
-| Existing operational/fast health tools | Explicit-profile integration; legacy defaults and authority/replay/security/authority-backup checks remain in effect. |
+| Separate audit_journal operational/fast/full health sources | Explicit-profile integration; the older pinned repair sources stay unchanged. Authority/replay/security/authority-backup checks remain in effect. |
 | tools/audit_journal_root_inventory.py | Read-only complete /proc handle inventory and protected baseline metadata; no privileged SQLite queries, credentials, audit payload export or deployment. |
 | Native fixture tests | Real SQLite WAL/processes, concurrency, interruption points, two actual UIDs, Root custody denial, post-snapshot event preservation and old-reader reconstruction. |
 

@@ -9,13 +9,15 @@ on:
       - 'tools/audit_journal_benchmark.py'
       - 'tools/tests/test_audit_journal_native.py'
       - 'tools/tests/test_audit_journal_health.py'
+      - 'tools/tests/test_audit_journal_health_native.py'
       - 'tools/tests/audit_journal_root_fixture.py'
       - 'implementation/orchestrator/event_store.py'
       - 'implementation/orchestrator/segmented_journal.py'
       - 'implementation/orchestrator/journal_sql.py'
       - 'implementation/orchestrator/journal_health.py'
-      - 'tools/openclaw_authority_fast_health.py'
-      - 'tools/openclaw_authority_operational_health.py'
+      - 'tools/audit_journal_fast_health.py'
+      - 'tools/audit_journal_full_health_snapshot.py'
+      - 'tools/audit_journal_operational_health.py'
       - 'infrastructure/jason-audit-journal/**'
       - 'config/operations/audit-journal-daily-archive-proposal-v1.json'
       - 'docs/engineering/Audit-Journal-Daily-Archive-Migration-v1.md'
@@ -40,7 +42,7 @@ jobs:
           PYTHONPATH: .:tools:implementation
           PYTHONDONTWRITEBYTECODE: '1'
         run: |
-          python -B -m pytest -o addopts='' -q -p no:cacheprovider tools/tests/test_audit_journal_migration.py tools/tests/test_audit_journal_native.py tools/tests/test_audit_journal_health.py tools/tests/test_openclaw_authority_operational_health.py tools/tests/test_openclaw_authority_fast_health.py implementation/orchestrator/tests/test_event_store.py implementation/orchestrator/tests/test_reconstruction.py
+          python -B -m pytest -o addopts='' -q -p no:cacheprovider tools/tests/test_audit_journal_migration.py tools/tests/test_audit_journal_native.py tools/tests/test_audit_journal_health.py tools/tests/test_audit_journal_health_native.py tools/tests/test_openclaw_authority_operational_health.py tools/tests/test_openclaw_authority_fast_health.py implementation/orchestrator/tests/test_event_store.py implementation/orchestrator/tests/test_reconstruction.py
           python -m json.tool config/operations/audit-journal-daily-archive-proposal-v1.json >/dev/null
           test ! -e /var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3
 

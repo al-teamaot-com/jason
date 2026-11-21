@@ -84,11 +84,8 @@ def full_proof(path: Path, databases: dict[str, Path], now: datetime) -> tuple[d
             return None
         if not isinstance(evidence.get("delegations"), dict):
             return None
-        if os.getenv("JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE",""):
-            from orchestrator.journal_health import validate_full_evidence
-            validate_full_evidence(evidence)
         return evidence, int(age)
-    except (OSError, ValueError, TypeError, KeyError, RuntimeError, json.JSONDecodeError):
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
         return None
 
 
