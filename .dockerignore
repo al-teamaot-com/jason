@@ -45,3 +45,8 @@ implementation/**/*.egg-info/**
 !tools/tests/audit_full_health_p0_finalize_root_fixture.py
 !infrastructure/jason-audit-full-health-finalize/
 !infrastructure/jason-audit-full-health-finalize/tests.Dockerfile
+
+# Exact same-owner native-only recovery fixture; no production Root mounts.
+!tools/audit_full_health_p0_native_resume.py
+!tools/tests/audit_full_health_p0_native_resume_root_fixture.py
+!infrastructure/jason-audit-full-health-finalize/native-resume.Dockerfile

@@ -5,6 +5,9 @@ on:
   pull_request:
     paths:
       - 'tools/audit_full_health_p0_finalize.py'
+      - 'tools/audit_full_health_p0_native_resume.py'
+      - 'tools/tests/test_audit_full_health_p0_native_resume.py'
+      - 'tools/tests/audit_full_health_p0_native_resume_root_fixture.py'
       - 'tools/audit_journal_release_scope.py'
       - 'tools/tests/test_audit_journal_protected_peers.py'
       - 'tools/tests/test_audit_full_health_p0_finalize.py'
@@ -36,6 +39,7 @@ jobs:
         run: |
           python -B -m pytest -o addopts='' -q -p no:cacheprovider \
             tools/tests/test_audit_full_health_p0_finalize.py \
+            tools/tests/test_audit_full_health_p0_native_resume.py \
             tools/tests/test_audit_journal_protected_peers.py \
             tools/tests/test_audit_full_health_p0_recovery.py \
             tools/tests/test_audit_journal_protected_peers.py \
@@ -46,6 +50,7 @@ jobs:
             tools/tests/test_openclaw_authority_health_snapshot.py
           python -m py_compile \
             tools/audit_full_health_p0_finalize.py \
+            tools/audit_full_health_p0_native_resume.py \
             tools/audit_full_health_p0_recovery.py
           python tools/validate_documentation_control.py
           test ! -e /var/lib/jason-owner-release/audit-full-health-p0-finalize-20261122
@@ -54,3 +59,7 @@ jobs:
         run: |
           docker build --network=none -f infrastructure/jason-audit-full-health-finalize/tests.Dockerfile -t audit-full-health-finalize-fixture .
           docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=FOWNER --cap-add=SETGID --cap-add=SETUID --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=1g audit-full-health-finalize-fixture
+      - name: Isolated Root continuation reuses signed one-use Owner proof
+        run: |
+          docker build --network=none -f infrastructure/jason-audit-full-health-finalize/native-resume.Dockerfile -t audit-full-health-native-resume-fixture .
+          docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=FOWNER --cap-add=SETGID --cap-add=SETUID --cap-add=DAC_OVERRIDE --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=1g audit-full-health-native-resume-fixture
