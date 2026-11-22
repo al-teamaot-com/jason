@@ -1,0 +1,51 @@
+name: PMv4 E Native Six-Unit Signed Controller Parity
+on:
+  pull_request:
+    paths:
+      - "tools/tests/test_pmv4_e_native_six_unit_release.py"
+      - "tools/pmv4_e_native_systemd_adapter.py"
+      - "tools/tests/test_pmv4_e_native_systemd_adapter.py"
+      - "tools/pmv4_e_systemd_root_ops.py"
+      - "tools/tests/test_pmv4_e_systemd_root_ops.py"
+      - "tools/pmv4_e_native_backend_bridge.py"
+      - "tools/tests/test_pmv4_e_native_backend_bridge.py"
+      - "tools/pmv4_e_exact_release_packet.py"
+      - "tools/tests/test_pmv4_e_exact_release_packet.py"
+      - "tools/pmv4_e_root_trust_stage.py"
+      - "tools/tests/test_pmv4_e_root_trust_stage.py"
+      - "tools/pmv4_e_six_unit_transaction_model.py"
+      - "tools/independent_component_release.py"
+      - "implementation/kernel/signed_owner_release.py"
+      - ".github/workflows/pmv4-e-native-six-unit-controller.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-signed-native-rollback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Existing native signed controller six-unit lifecycle and recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q pytest cryptography PyYAML
+          python_exe="$(command -v python)"
+          # Disposable GitHub runner UID0; synthetic Owner key and immutable
+          # temporary bundle only. No live OAuth, providers or Jason files.
+          sudo -n env PYTHONPATH=tools:.:implementation:implementation/mcp_service/src \
+            "$python_exe" -B -m pytest -q \
+              tools/tests/test_pmv4_e_native_six_unit_release.py \
+              tools/tests/test_pmv4_e_native_systemd_adapter.py \
+              tools/tests/test_pmv4_e_systemd_root_ops.py \
+              tools/tests/test_pmv4_e_native_backend_bridge.py \
+              tools/tests/test_pmv4_e_exact_release_packet.py \
+              tools/tests/test_pmv4_e_root_trust_stage.py
+          test ! -e /var/lib/jason/independent-component-release
+          test ! -e /etc/jason/release-readback-recovery/production-desired-state.json

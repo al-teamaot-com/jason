@@ -147,6 +147,11 @@ class PlanRequestRepository:
             raise PermissionError('no immutable server-owned request for this approval')
         return json.loads(row[0])
 
+    def contains(self, approval_id: str) -> bool:
+        with sqlite3.connect(self.path) as db:
+            return db.execute("SELECT 1 FROM universal_plan_requests WHERE approval_id=?",
+                              (approval_id,)).fetchone() is not None
+
     def require(self, approval_id: str) -> OrchestrationRequest:
         return self.steps(approval_id)[0]
 
@@ -164,7 +169,8 @@ class PlanRequestRepository:
             raise PermissionError('stored plan material changed after proposal')
 
 
-    def candidate_ids(self, *, limit: int = 32) -> tuple[str, ...]:
+    def candidate_ids(self, *, limit: int = 32, prefix: str = "",
+                      include_indeterminate: bool = False) -> tuple[str, ...]:
         # Receipt presence is scheduling evidence only. The worker independently
         # validates the receipt, plan fingerprint, identity, grants and policy.
         with sqlite3.connect(self.path) as db:
@@ -172,9 +178,67 @@ class PlanRequestRepository:
                 "SELECT r.approval_id FROM universal_plan_requests r "
                 "JOIN approval_decision_receipts d ON d.approval_id=r.approval_id "
                 "LEFT JOIN universal_plan_progress p ON p.approval_id=r.approval_id "
-                "WHERE p.state IS NULL OR p.state NOT IN ('completed','denied','blocked','indeterminate') "
-                "ORDER BY r.rowid LIMIT ?", (max(1,min(32,limit)),)).fetchall()
+                "WHERE (p.state IS NULL OR p.state NOT IN ('completed','denied','blocked','indeterminate') "
+                "OR (? AND p.state='indeterminate')) AND substr(r.approval_id,1,?)=? "
+                "ORDER BY r.rowid LIMIT ?", (include_indeterminate,len(prefix),prefix,max(1,min(32,limit)),)).fetchall()
         return tuple(row[0] for row in rows)
+
+    def objective_submission(self, *, approval_id: str, template_id: str, now: datetime,
+                             prefix: str, maximum_active: int, ttl_seconds: int) -> datetime:
+        """Stable issuance metadata in the canonical DB; this grants no authority."""
+        with sqlite3.connect(self.path) as db:
+            db.execute("CREATE TABLE IF NOT EXISTS universal_objective_submissions ("
+                       "approval_id TEXT PRIMARY KEY, template_id TEXT NOT NULL, issued_at TEXT NOT NULL)")
+            db.execute("BEGIN IMMEDIATE")
+            prior = db.execute("SELECT template_id,issued_at FROM universal_objective_submissions WHERE approval_id=?",
+                               (approval_id,)).fetchone()
+            if prior is not None:
+                if prior[0] != template_id:
+                    raise PermissionError("OBJECTIVE_SUBMISSION_CHANGED")
+                return datetime.fromisoformat(prior[1])
+            # Uncertain effects retain their slot. Expired, undecided
+            # requests cannot execute and must not permanently block new work.
+            if len(self._active_objectives(db, prefix=prefix, now=now,
+                                          ttl_seconds=ttl_seconds)) >= maximum_active:
+                raise PermissionError("OBJECTIVE_ACTIVE_LIMIT")
+            db.execute("INSERT INTO universal_objective_submissions VALUES (?,?,?)",
+                       (approval_id,template_id,now.isoformat()))
+        return now
+
+    @staticmethod
+    def _active_objectives(db, *, prefix, now, ttl_seconds):
+        from datetime import timedelta
+        rows = db.execute("SELECT x.approval_id,p.state,p.progress_json,r.material_json,s.issued_at,"
+            "d.approval_id FROM (SELECT approval_id FROM universal_objective_submissions UNION "
+            "SELECT approval_id FROM universal_plan_requests) x "
+            "LEFT JOIN universal_plan_progress p ON p.approval_id=x.approval_id "
+            "LEFT JOIN universal_plan_requests r ON r.approval_id=x.approval_id "
+            "LEFT JOIN universal_objective_submissions s ON s.approval_id=x.approval_id "
+            "LEFT JOIN approval_decision_receipts d ON d.approval_id=x.approval_id "
+            "WHERE substr(x.approval_id,1,?)=? ORDER BY x.approval_id", (len(prefix),prefix)).fetchall()
+        active = []
+        for identifier,state,progress,material,issued,decision in rows:
+            if state in ("completed","denied"):
+                continue
+            reason = json.loads(progress).get("reason_code","") if progress else ""
+            unstarted = state in (None,"awaiting_approval") or (
+                state=="blocked" and isinstance(reason,str) and reason.startswith("approval_delivery_"))
+            if decision is None and unstarted:
+                expires = (datetime.fromisoformat(json.loads(material)["scope"]["expires_at"])
+                           if material else datetime.fromisoformat(issued)+timedelta(seconds=ttl_seconds))
+                if now >= expires:
+                    continue
+            active.append(identifier)
+        return tuple(active)
+
+    def objective_submission_ids(self, *, prefix: str, now: datetime, ttl_seconds: int) -> tuple[str, ...]:
+        with sqlite3.connect(self.path) as db:
+            exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='universal_objective_submissions'").fetchone()
+            if not exists:
+                return ()
+            active = self._active_objectives(db,prefix=prefix,now=now,ttl_seconds=ttl_seconds)
+            return tuple(identifier for identifier in active if db.execute(
+                "SELECT 1 FROM universal_objective_submissions WHERE approval_id=?",(identifier,)).fetchone())[:2]
 
     def record_progress(self, approval_id: str, *, state: str, now: datetime,
                         completed_steps: int = 0, current_execution_id: str | None = None,

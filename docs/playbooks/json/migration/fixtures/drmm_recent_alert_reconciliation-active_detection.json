@@ -1,0 +1,10 @@
+{
+  "agent_id": "synthetic-agent-1",
+  "alert_in_24_hour_window": true,
+  "current_nonarchived_detection_count": 1,
+  "device_uid": "synthetic-device-1",
+  "exact_agent_and_av_engine_healthy": true,
+  "exact_alert_device_identity": true,
+  "exact_endpoint_online": true,
+  "registered_alert_class": "endpoint_security_threat_ctx"
+}

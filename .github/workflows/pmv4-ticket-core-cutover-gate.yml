@@ -1,0 +1,86 @@
+name: PMv4 Ticket Core Cutover Read-only Gate
+on:
+  pull_request:
+    paths:
+      - "tools/pmv4_ticket_core_cutover_preflight.py"
+      - "tests/test_pmv4_ticket_core_cutover_preflight.py"
+      - "tools/pmv4_ticket_core_exact_projection.py"
+      - "tools/pmv4_c_sqlite_family_handoff.py"
+      - "tools/pmv4_c_host_consumer_projection.py"
+      - "tools/pmv4_c_authority_health_adapter.py"
+      - "tools/pmv4_c_host_recovery_builder.py"
+      - "tools/pmv4_c_host_recovery_owner.py"
+      - "tools/pmv4_c_host_recovery_root.py"
+      - "tests/test_pmv4_c_host_recovery_exact_root.py"
+      - "tests/test_pmv4_c_host_recovery_synthetic_install.py"
+      - "tools/pmv4_host_release_guard.py"
+      - "tools/jason_self_heal_watchdog.py"
+      - "tests/test_pmv4_c_host_consumer_projection.py"
+      - "tests/test_pmv4_c_authority_health_adapter.py"
+      - "tests/test_pmv4_c_ticket_state_pointer_reconciliation.py"
+      - "tests/test_pmv4_host_release_guard.py"
+      - "tests/test_pmv4_c_sqlite_family_handoff.py"
+      - "tools/pmv4_c_service_manifest.py"
+      - "tests/test_pmv4_c_service_manifest.py"
+      - "tools/pmv4_c_atomic_root.py"
+      - "tools/pmv4_c_canonical_resume_root.py"
+      - "tests/test_pmv4_c_canonical_resume.py"
+      - "tests/test_pmv4_c_settled_drift_postflight.py"
+      - "tools/pmv4_c_atomic_owner.py"
+      - "tools/pmv4_c_immutable_builder.py"
+      - "tests/test_pmv4_c_atomic_root.py"
+      - "tests/test_pmv4_c_legacy_sqlite_modes.py"
+      - "tests/test_pmv4_c_immutable_builder.py"
+      - "tests/test_pmv4_c_owner_proof_contract.py"
+      - "infrastructure/pmv4-ticket-core/Dockerfile"
+      - "implementation/runtime_service/src/jason_runtime/ticket_worker_health.py"
+      - "implementation/runtime_service/src/jason_runtime/composition.py"
+      - "implementation/runtime_service/tests/test_ticket_worker_health.py"
+      - "tests/test_pmv4_ticket_core_exact_projection.py"
+      - "implementation/runtime_service/src/jason_runtime/maintenance_process.py"
+      - "implementation/runtime_service/tests/test_ticket_core_worker_only_composition.py"
+      - ".github/workflows/pmv4-ticket-core-cutover-gate.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cutover-baseline-no-production:
+    name: Stage C exact data and lock safety (no cutover)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify source-only evidence and fail-closed boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q pytest
+          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service
+          PYTHONPATH=tools:implementation:implementation/runtime_service/src:. python -B -m pytest -q \
+            tests/test_pmv4_ticket_core_cutover_preflight.py \
+            tests/test_pmv4_ticket_core_ledger_snapshot.py \
+            tests/test_pmv4_ticket_core_exact_projection.py \
+            tests/test_pmv4_c_sqlite_family_handoff.py \
+            tests/test_pmv4_c_service_manifest.py \
+            tests/test_pmv4_c_atomic_root.py \
+            tests/test_pmv4_c_canonical_resume.py \
+            tests/test_pmv4_c_settled_drift_postflight.py \
+            tests/test_pmv4_c_legacy_sqlite_modes.py \
+            tests/test_pmv4_c_host_consumer_projection.py \
+            tests/test_pmv4_c_authority_health_adapter.py \
+            tests/test_pmv4_c_host_recovery_exact_root.py \
+            tests/test_pmv4_c_host_recovery_synthetic_install.py \
+            tests/test_pmv4_c_ticket_state_pointer_reconciliation.py \
+            tests/test_pmv4_host_release_guard.py \
+            tests/test_pmv4_c_immutable_builder.py \
+            tests/test_pmv4_c_owner_proof_contract.py \
+            implementation/runtime_service/tests/test_ticket_worker_health.py \
+            implementation/runtime_service/tests/test_ticket_core_worker_only_composition.py \
+            implementation/runtime_service/tests/test_ticket_core_lifecycle.py
+          test ! -e /var/lib/jason/openclaw/autonomy-operational-work.sqlite3
+          test ! -e /var/lib/jason/ticket-core/autonomy-operational-work.sqlite3

@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import json
 import re
 import subprocess
+from urllib.parse import quote
 from typing import Any, Callable, Mapping
 
 REPO = "al-teamaot-com/jason"
@@ -70,10 +71,14 @@ def protected_main_ci_verified(candidate_sha: str, *,
             or main.get("protected") is not True):
             return False
         runs = github_json(
-            f"/repos/{REPO}/actions/runs?head_sha={candidate_sha}&per_page=100",
+            f"/repos/{REPO}/actions/runs?head_sha={candidate_sha}&event=push&per_page=100",
             runner=runner,
         )
-        if not isinstance(runs.get("workflow_runs"), list) or len(runs["workflow_runs"]) > 100:
+        if (not isinstance(runs.get("workflow_runs"), list)
+                or len(runs["workflow_runs"]) > 100
+                or not isinstance(runs.get("total_count"), int)
+                or isinstance(runs["total_count"], bool)
+                or runs["total_count"] > 100):
             return False
         latest: dict[str, tuple[datetime, bool]] = {}
         for workflow in runs["workflow_runs"]:
@@ -130,16 +135,24 @@ def protected_main_ci_verified(candidate_sha: str, *,
             or any(expected[name] != GITHUB_ACTIONS_APP_ID
                    for name in BASELINE_REQUIRED_CHECKS)):
             return False
-        checks = github_json(
-            f"/repos/{REPO}/commits/{candidate_sha}/check-runs?per_page=100",
-            runner=runner,
-        )
-        all_runs = checks.get("check_runs")
-        total = checks.get("total_count")
-        if (not isinstance(all_runs, list)
-            or not isinstance(total, int) or isinstance(total, bool)
-            or total > 100 or total != len(all_runs)):
-            return False
+        # Query exact required check names rather than a noisy, moving page
+        # of unrelated automation checks. GitHub filters these server-side.
+        all_runs = []
+        for name in sorted(expected):
+            checks = github_json(
+                f"/repos/{REPO}/commits/{candidate_sha}/check-runs"
+                f"?check_name={quote(name, safe='')}&per_page=100",
+                runner=runner,
+            )
+            batch = checks.get("check_runs")
+            total = checks.get("total_count")
+            if (not isinstance(batch, list)
+                    or not isinstance(total, int) or isinstance(total, bool)
+                    or total > 100 or total != len(batch)
+                    or any(not isinstance(check, dict)
+                           or check.get("name") != name for check in batch)):
+                return False
+            all_runs.extend(batch)
         observed: dict[str, tuple[datetime, bool]] = {}
         for check in all_runs:
             if not isinstance(check, dict) or check.get("name") not in expected:

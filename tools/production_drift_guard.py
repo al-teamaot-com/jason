@@ -14,16 +14,20 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "production-desired-state.json"
 FORBIDDEN_FIELD_NAMES = ("ExecStart", "WorkingDirectory")
-# This separately scheduled documentation writer is optional for production.
-# Only a DECLARED, NON-REQUIRED instance is advisory. All other failed units,
-# forbidden paths and undeclared units remain production drift problems.
-INDEPENDENT_OPTIONAL_SYSTEM_ONESHOTS = frozenset({
+# Only specifically reviewed, declared NON-REQUIRED observer/reporting units
+# are advisory. An absent/undeclared unit, required unit, forbidden path,
+# unexpected container, or independent safety/authority service stays HARD drift.
+# No broad "all allowed services" exception and no additional retry machinery.
+INDEPENDENT_OPTIONAL_OBSERVERS = frozenset({
     "jason-documentation-reconciliation.service",
-    # This optional daily scan is an advisory, not a deployment gate.
-    # The failed result remains in systemd/full-proof evidence.
     "jason-openclaw-authority-full-integrity.service",
+    "jason-grafana-assurance.service",
+    "jason-grafana-assurance-exporter.service",
+    "jason-grafana-assurance.timer",
+    "jason-isolated-provider-health.service",
+    "jason-isolated-provider-health.timer",
+    "jason-provider-health-canary.service",
 })
-
 
 def run(args: list[str], *, env: dict[str, str] | None = None) -> str:
     completed = subprocess.run(
@@ -144,7 +148,7 @@ def evaluate(config: dict[str, Any]) -> dict[str, Any]:
 
     for unit, state in sorted(system_states.items()):
         if state == "failed":
-            if (unit in INDEPENDENT_OPTIONAL_SYSTEM_ONESHOTS
+            if (unit in INDEPENDENT_OPTIONAL_OBSERVERS
                     and unit in allowed_system and unit not in required_system):
                 advisories.append({
                     "kind": "independent_optional_system_unit_failed",

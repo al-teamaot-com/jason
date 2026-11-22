@@ -178,3 +178,10 @@ def test_root_new_channel_remains_fail_closed_without_any_key(tmp_path, monkeypa
         raise root.HostReconcileError("root signer not installed")
     monkeypatch.setattr(root, "_trusted_owner_proof_module", missing)
     assert not root._authenticated_rollback_evidence(CANDIDATE, ROLLBACK, record)
+
+
+def test_root_owner_binding_matches_accepted_stage_c_canonical_store():
+    from tools import pmv4_c_host_consumer_projection as projection
+    assert root.ROOT_OWNER_BINDINGS == projection.exact_canonical_path(
+        "JASON_TEAMS_IDENTITY_BINDINGS_DB")
+    assert root.ROOT_OWNER_BINDINGS.parent != projection.LEGACY

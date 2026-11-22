@@ -58,6 +58,9 @@ MUTATION_ENV_OVERRIDES = {
     "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID": "",
     "JASON_AUTONOMY_WORKER_ENABLED": "false",
     "JASON_AUTONOMY_SHADOW_ENABLED": "false",
+    # Review maintenance is a separate child process; leaving it enabled
+    # races isolated SQLite startup and can perform preprod background work.
+    "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED": "false",
     "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED": "false",
     "JASON_UNIVERSAL_APPROVAL_MODE": "off",
     "JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED": "false",
@@ -1382,18 +1385,104 @@ def unit_active(unit: str, *, user: bool) -> bool:
     return completed.returncode == 0 and completed.stdout.strip() == "active"
 
 
+# PMv4 Stage E replacement admission is a read-only, root-trusted contract.
+# A missing cutover marker retains the current PMv3 behavior. Once any
+# marker exists, invalid proof must DENY rather than reinstall PMv3.
+PMV4_E_ACCEPTED_MARKER = Path(
+    "/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json"
+)
+PMV4_E_UNIT_GUARD = Path(
+    "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py"
+)
+PMV4_E_USER_TIMERS = (
+    "jason-pmv4-engineering.timer",
+    "jason-pmv4-release-approval.timer",
+    "jason-pmv4-component-release.timer",
+    "jason-self-heal-watchdog.timer",
+)
+PMV4_E_ROOT_TRIGGERS = (
+    "jason-pmv4-component-transition.timer",
+    "jason-pmv4-component-readback.timer",
+    "jason-pmv4-component-reconcile.path",
+)
+PMV4_E_RETIRED_USER = (
+    "jason-support-repair-worker.timer",
+    "jason-release-manager.timer",
+    "jason-release-approval-only.timer",
+)
+PMV4_E_RETIRED_ROOT = (
+    "jason-release-control-transition.timer",
+    "jason-release-control-readback.timer",
+    "jason-release-host-reconcile.path",
+)
+
+
+def pmv4_e_scheduling_mode() -> str:
+    try:
+        PMV4_E_ACCEPTED_MARKER.lstat()
+    except FileNotFoundError:
+        return "legacy"
+    except OSError as exc:
+        raise ReleaseManagerError("PMv4 E acceptance marker unreadable") from exc
+    # Only an independently installed root-owned entrypoint may attest.
+    try:
+        trusted = PMV4_E_UNIT_GUARD.lstat()
+    except OSError as exc:
+        raise ReleaseManagerError("PMv4 E root unit guard missing") from exc
+    if (not PMV4_E_UNIT_GUARD.is_file()
+            or PMV4_E_UNIT_GUARD.is_symlink()
+            or trusted.st_uid != 0 or trusted.st_gid != 0
+            or trusted.st_mode & 0o022):
+        raise ReleaseManagerError("PMv4 E root unit guard untrusted")
+    checked = subprocess.run(
+        ["/usr/bin/python3", "-I", "-B", str(PMV4_E_UNIT_GUARD),
+         "--mode", "component-release"],
+        env=user_systemd_env(), text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if checked.returncode != 0:
+        raise ReleaseManagerError("PMv4 E root accepted scheduling proof denied")
+    try:
+        proof = json.loads(checked.stdout)
+    except (TypeError, ValueError) as exc:
+        raise ReleaseManagerError("PMv4 E unit guard returned invalid proof") from exc
+    if (not isinstance(proof, dict)
+            or proof.get("status") != "accepted_for_one_configured_service"
+            or proof.get("role") != "component-release"
+            or proof.get("unit") != "jason-pmv4-component-release.timer"
+            or proof.get("owner_authority_issued") is not False
+            or proof.get("production_changes_performed") is not False):
+        raise ReleaseManagerError("PMv4 E unit guard proof mismatch")
+    return "replacement"
+
+
 def scheduled_control_alignment() -> dict[str, str]:
+    mode = pmv4_e_scheduling_mode()
+    user_required = (PMV4_E_USER_TIMERS if mode == "replacement"
+                     else USER_CONTROL_TIMERS)
+    system_required = (SYSTEM_CONTROL_TIMERS + PMV4_E_ROOT_TRIGGERS
+                       if mode == "replacement" else SYSTEM_CONTROL_TIMERS)
     states: dict[str, str] = {}
-    for unit in USER_CONTROL_TIMERS:
+    for unit in user_required:
         active = unit_active(unit, user=True)
         states[unit] = "active" if active else "inactive"
         if not active:
             raise ReleaseManagerError(f"required user control timer is not active: {unit}")
-    for unit in SYSTEM_CONTROL_TIMERS:
+    for unit in system_required:
         active = unit_active(unit, user=False)
         states[unit] = "active" if active else "inactive"
         if not active:
             raise ReleaseManagerError(f"required system control timer is not active: {unit}")
+    if mode == "replacement":
+        # Both old and new triggers active would duplicate engineering claims.
+        for unit in PMV4_E_RETIRED_USER:
+            if unit_active(unit, user=True):
+                raise ReleaseManagerError(f"retired user control still active: {unit}")
+            states[unit] = "inactive"
+        for unit in PMV4_E_RETIRED_ROOT:
+            if unit_active(unit, user=False):
+                raise ReleaseManagerError(f"retired root control still active: {unit}")
+            states[unit] = "inactive"
     return states
 
 
@@ -1607,6 +1696,7 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
         path.startswith("tools/release_manager")
         or path in {
             "config/release-manager-policy.json",
+            "tools/manual_release_scope.py",
             "config/production-desired-state.json",
             "config/mobile-release-approval-policy.json",
             "config/open-breaker-recovery-policy.json",
@@ -2521,7 +2611,10 @@ def require_host_reconciler_ready(state_root: Path) -> None:
         raise ReleaseManagerError(
             "root host reconciliation spool permissions are unavailable"
         )
-    worker = Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
+    replacement = pmv4_e_scheduling_mode()=="replacement"
+    worker = (Path("/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/release_host_reconcile_worker.py")
+              if replacement else
+              Path("/usr/local/lib/jason/release_host_reconcile_worker.py"))
     if not worker.is_file():
         raise ReleaseManagerError("root host reconciliation worker is not installed")
     meta = worker.stat()
@@ -2530,7 +2623,8 @@ def require_host_reconciler_ready(state_root: Path) -> None:
             "root host reconciliation worker ownership/mode is unsafe"
         )
     completed = subprocess.run(
-        ["systemctl", "is-active", "jason-release-host-reconcile.path"],
+        ["systemctl", "is-active", "jason-pmv4-component-reconcile.path"
+         if replacement else "jason-release-host-reconcile.path"],
         env=user_systemd_env(),
         text=True,
         stdout=subprocess.PIPE,
@@ -2721,6 +2815,32 @@ def install_release_manager_from_current(expected_sha: str) -> dict[str, Any]:
         raise ReleaseManagerError(
             "immutable host release is not aligned before Release Manager install"
         )
+    if pmv4_e_scheduling_mode() == "replacement":
+        # After accepted retirement, never invoke an installer that can
+        # re-enable jason-release-manager.timer. The exact root transaction
+        # must already have staged an immutable replacement controller.
+        source_link = Path.home() / ".local" / "lib" / "jason" / "release-manager-source"
+        installed_runner = Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+        marker=json.loads(PMV4_E_ACCEPTED_MARKER.read_bytes())
+        control_sha=exact_sha(str(marker.get("source_sha") or ""), "PMv4 E source SHA")
+        if marker.get("source_rollback_sha") != expected_sha:
+            raise ReleaseManagerError("PMv4 E source rollback does not match production")
+        expected_runner = Path("/usr/local/lib/jason/pmv4-e-bootstrap/releases") / control_sha / "tools/release_manager_host_runner.py"
+        if (source_link.resolve().name.casefold() != expected_sha
+                or not installed_runner.is_file() or not expected_runner.is_file()
+                or hashlib.sha256(installed_runner.read_bytes()).digest()
+                   != hashlib.sha256(expected_runner.read_bytes()).digest()):
+            raise ReleaseManagerError(
+                "PMv4 E immutable release controller not aligned; no legacy installer fallback"
+            )
+        scheduled_control_alignment()
+        return {
+            "source_revision": expected_sha,
+            "timer_active": True,
+            "source_link": str(source_link.resolve()),
+            "pmv4_replacement_verified": True,
+            "legacy_installer_invoked": False,
+        }
     installer = current / "tools" / "install_release_manager.py"
     if not installer.is_file():
         raise ReleaseManagerError(
@@ -3333,10 +3453,15 @@ def native_deploy_environment(
     if os.environ.get("JASON_RELEASE_MOBILE_APPROVAL_MODE") not in (None, mobile_policy["mode"]):
         raise ReleaseManagerError("invoking release approval mode conflicts with immutable candidate")
     env["JASON_RELEASE_MOBILE_APPROVAL_MODE"] = str(mobile_policy["mode"])
-    expected_admin = (
+    from jason_owner_auth_profile import declared_jason_owner_profile
+    historical_admin = (
         "admin-separated-v1"
         if mobile_policy["mode"] == "admin_approver_separated" else ""
     )
+    licensed_owner = declared_jason_owner_profile(candidate_tree)
+    if historical_admin and licensed_owner:
+        raise ReleaseManagerError("Jason Owner source policy conflicts with legacy admin profile")
+    expected_admin = licensed_owner or historical_admin
     if os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE") not in (None, expected_admin):
         raise ReleaseManagerError(
             "admin approver profile cannot override exact source policy"
@@ -6663,7 +6788,7 @@ def manual_release_scope_review(
     acknowledged_worktrees: tuple[str, ...] = (),
     record_review: bool = False,
 ) -> dict[str, Any]:
-    """Review a full exact-main release; no deployment or developer checkout edits.
+    """Review an exact protected-history release; no deployment or checkout edits.
 
     A scope acknowledgement is technical change-integration evidence, NOT
     owner deployment authorization. It is bound to the candidate and baseline
@@ -7432,9 +7557,9 @@ def authoritative_auto_promotion_head(repo: Path) -> str:
 def require_current_protected_release_source(repo: Path, record: dict[str, Any]) -> None:
     """Reject a superseded/manual candidate before a production transaction.
 
-    Automatic selection already compares to main; manual promotion must obey the
-    same immutable source rule. Neither a past exact-SHA approval nor a successful
-    preproduction run authorizes replacing more recent protected-main work.
+    Automatic selection remains latest-main. JES-005 permits an exact reviewed
+    protected ancestor only after independent lineage and newer-path checks.
+    This source proof grants no approval, freeze exception or mutation authority.
     """
     candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
     baseline = str(record.get("rollback_sha") or "")
@@ -7442,10 +7567,24 @@ def require_current_protected_release_source(repo: Path, record: dict[str, Any])
         raise ReleaseManagerError("production candidate or baseline SHA is invalid")
     current_main = authoritative_auto_promotion_head(repo)
     if candidate != current_main:
-        raise ReleaseManagerError(
-            "production release candidate is behind protected main; "
-            "reprepare and revalidate the exact current main revision"
-        )
+        # The same exact-candidate verifier is used by scope review and both
+        # under-lock promotion checks. Automatic selection remains latest-main.
+        import importlib.util
+        source = repo / "tools/manual_release_scope.py"
+        if source.is_symlink() or not source.is_file():
+            raise ReleaseManagerError("canonical pinned release verifier unavailable")
+        spec = importlib.util.spec_from_file_location("jason_pinned_release_scope", source)
+        if spec is None or spec.loader is None:
+            raise ReleaseManagerError("canonical pinned release verifier unavailable")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        try:
+            module.verify_pinned_candidate_against_main(
+                repo, baseline, candidate, current_main=current_main)
+        except (module.ScopeBlocked, OSError, ValueError, AttributeError) as exc:
+            raise ReleaseManagerError("pinned release lineage or newer changes unverified: "
+                                      + str(exc)) from exc
+        return
     # A valid candidate on main must also include the installed production
     # history; otherwise promoting it would drop production changes.
     ancestry = subprocess.run(
@@ -8585,6 +8724,29 @@ def main() -> int:
     recovery.add_argument("--revision", required=True)
     recovery.add_argument("--owner-approved", action="store_true")
 
+    # Generic exact-source backport admission; does NOT bypass main-only
+    # native production create/prepare/approve/promote or create a release.
+    backport = sub.add_parser("scoped-backport-admit")
+    backport.add_argument("--trusted-main-sha", required=True)
+
+    for name in ("scoped-backport-stage", "scoped-backport-promote",
+                 "scoped-backport-recover"):
+        typed = sub.add_parser(name)
+        typed.add_argument("--trusted-main-sha", required=True)
+        typed.add_argument("--release-id", required=True)
+        if name != "scoped-backport-stage":
+            typed.add_argument("--offer-sha256", required=True)
+
+    # Source-only scoped catalog admission. This subcommand is read-only:
+    # no release record, Owner decision, mutable state root or promotion.
+    sub.add_parser("catalog-scope-admit")
+    for name in ("catalog-scope-stage", "catalog-scope-promote", "catalog-scope-recover"):
+        scoped = sub.add_parser(name)
+        scoped.add_argument("--release-id", required=True)
+        scoped.add_argument("--protected-main-sha", required=True)
+        if name != "catalog-scope-stage":
+            scoped.add_argument("--offer-sha256", required=True)
+
     sub.add_parser("promote-eligible")
     sub.add_parser("approval-only-held")
     renew = sub.add_parser("renew-expired-owner-card")
@@ -8596,6 +8758,103 @@ def main() -> int:
     args = parser.parse_args()
     repo = args.repo.expanduser().resolve()
     state_root = args.state_root.expanduser().resolve()
+    if args.command == "scoped-backport-admit":
+        from tools.scoped_backport_release import (
+            source_admission, make_offer, validate_manifest, RELEASE_MANIFEST,
+            _git,
+        )
+        # This accepts ONLY protected-main manifest bytes and independently
+        # verifies an immutable LKG-descendant backport. No state-root write.
+        source = source_admission(repo, trusted_main_sha=args.trusted_main_sha)
+        pinned = validate_manifest(json.loads(
+            _git(repo, "show", args.trusted_main_sha + ":" + RELEASE_MANIFEST)))
+        offer = make_offer(pinned, main_sha=args.trusted_main_sha)
+        print(json.dumps({
+            "status": "source_admitted_not_production_eligible",
+            "source": source,
+            "offer": offer,
+            "native_release_record_created": False,
+            "owner_approval_recorded": False,
+            "production_mutations": False,
+            "provider_writes": False,
+            "root_installer_and_rollback_admission_required": True,
+        }, sort_keys=True, indent=2))
+        return 0
+    if args.command in {
+        "scoped-backport-stage", "scoped-backport-promote",
+        "scoped-backport-recover",
+    }:
+        from tools.scoped_backport_release import (
+            source_admission, make_offer, validate_manifest,
+            RELEASE_MANIFEST, _git,
+        )
+        from tools.scoped_backport_release_request import request, submit
+        source_admission(repo, trusted_main_sha=args.trusted_main_sha)
+        pinned = validate_manifest(json.loads(
+            _git(repo, "show", args.trusted_main_sha + ":" + RELEASE_MANIFEST)))
+        offer = make_offer(pinned, main_sha=args.trusted_main_sha)
+        if args.release_id != offer["release_id"]:
+            raise ReleaseManagerError("scoped backport release id is not exact")
+        action = "scoped_backport_" + args.command.rsplit("-", 1)[-1]
+        req = request(action, offer,
+                      offer_sha256=getattr(args, "offer_sha256", None))
+        # This is *not* native production approval. An independently
+        # installed, root-attested handler must validate each request.
+        # Currently absent: fail closed instead of creating an approval.
+        print(json.dumps(submit(req), sort_keys=True, indent=2))
+        return 0
+    if args.command == "catalog-scope-admit":
+        from catalog_scoped_release_admission import attest_source_scope
+        # All inputs come from immutable protected source, the published
+        # isolated snapshot, native CI and live Docker readbacks. Do not
+        # initialize state_root, use root authority or persist a release.
+        result = attest_source_scope(
+            repo, native_ci_checks=lambda sha: github_checks(
+                sha, list(dict.fromkeys(required_checks(repo) +
+                    ["governed-security-regressions"]))),
+        )
+        print(json.dumps(result, indent=2))
+        return 0
+    if args.command in {
+        "catalog-scope-stage", "catalog-scope-promote", "catalog-scope-recover",
+    }:
+        from catalog_scoped_promotion_request import (
+            exact_request, precheck_scoped_offer, root_worker_installed,
+            submit_to_native_worker,
+        )
+        action = "catalog_scope_" + args.command.rsplit("-", 1)[-1]
+        source_sha = exact_sha(args.protected_main_sha, "protected_main_sha")
+        if args.command == "catalog-scope-stage":
+            from catalog_scoped_release_admission import attest_source_scope
+            evidence = attest_source_scope(
+                repo, native_ci_checks=lambda sha: github_checks(
+                    sha, list(dict.fromkeys(required_checks(repo) +
+                        ["governed-security-regressions"]))),
+            )
+            if (evidence.get("protected_source", {}).get("verified_main_sha") != source_sha
+                    or "release-" + evidence["protected_source"]["snapshot_source_sha"][:16]
+                    != args.release_id):
+                raise ReleaseManagerError("catalog stage source identity changed")
+            offer_hash = None
+        else:
+            checked = precheck_scoped_offer(
+                Path('/var/lib/jason/authority/catalog-scoped-release'),
+                args.release_id, source_sha,
+                for_promotion=args.command == "catalog-scope-promote",
+            )
+            if checked["manifest_sha256"] != args.offer_sha256:
+                raise ReleaseManagerError("catalog exact offer changed")
+            offer_hash = args.offer_sha256
+        # Never create a production state root, alter the global freeze, or
+        # grant permissions from a CLI argument. Root worker and root-pinned
+        # exact one-use Owner evidence independently decide all mutations.
+        root_worker_installed()
+        request = exact_request(action,
+            release_id=args.release_id,source_revision=source_sha,
+            offer_sha256=offer_hash,
+        )
+        print(json.dumps(submit_to_native_worker(state_root, request), indent=2))
+        return 0
     state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     if args.command == "create":

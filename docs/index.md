@@ -18,6 +18,13 @@ This `docs/` tree is the single human-facing documentation control plane for Jas
 10. **Handoff template:** [`control/HANDOFF-TEMPLATE.md`](control/HANDOFF-TEMPLATE.md).
 11. **General durable-document template:** [`control/DOCUMENT-TEMPLATE.md`](control/DOCUMENT-TEMPLATE.md).
 
+## Current audit-storage migration preparation
+
+The source-only [bounded daily audit migration](engineering/Audit-Journal-Daily-Archive-Migration-v1.md)
+defines writer handoff, searchable archives, integrity/custody, capacity bounds and
+event-preserving rollback. It includes a synthetic rehearsal; production integration,
+policy adoption and live acceptance are still required.
+
 ## Current preferred technician architecture
 
 As of 2026-09-09, the accepted preferred technician conversational direction is **ChatGPT Business as the primary conversational surface with Jason exposed through a governed MCP/tool boundary**.

@@ -67,6 +67,36 @@ if grep -Fq "$DEVELOPER_CHECKOUT_PATH" "$0"; then
   echo "ERROR: production reconciliation script contains a developer checkout dependency" >&2
   exit 9
 fi
+# Detect the final root-owned accepted PMv4 E marker before changing files.
+# An invalid or stale marker DENIES rather than returning to old PMv3 mode.
+PMV4_E_MARKER="/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json"
+PMV4_E_HOST_GUARD="/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_root_reconcile_admission.py"
+PMV4_E_HOST_MODE=legacy
+# The runtime/MCP images stay pinned at PMv3 LKG when only the Stage E
+# control-plane transitions. A root-owned accepted marker is the sole
+# permissible source for a different exact baseline. An untrusted env var
+# or a new Git SHA cannot override the running images.
+PMV4_E_EXPECTED_MCP_REVISION="$SOURCE_REVISION"
+if [ -e "$PMV4_E_MARKER" ] || [ -L "$PMV4_E_MARKER" ]; then
+  PMV4_E_HOST_MODE="$(/usr/bin/python3 -I -B "$PMV4_E_HOST_GUARD" --source-revision "$SOURCE_REVISION" --mode-only)" || {
+    echo "ERROR: PMv4 E accepted root reconciliation admission denied" >&2
+    exit 14
+  }
+  if [ "$PMV4_E_HOST_MODE" != replacement ]; then
+    echo "ERROR: PMv4 E reconciliation cannot select obsolete mode after acceptance" >&2
+    exit 14
+  fi
+  PMV4_E_EXPECTED_MCP_REVISION="$(/usr/bin/python3 -I -B "$PMV4_E_HOST_GUARD" --source-revision "$SOURCE_REVISION" --runtime-baseline-only)" || {
+    echo "ERROR: PMv4 E root-authenticated runtime/MCP baseline not verified" >&2
+    exit 14
+  }
+  if [[ ! "$PMV4_E_EXPECTED_MCP_REVISION" =~ ^[0-9a-f]{40}$ ]] || [ "$PMV4_E_EXPECTED_MCP_REVISION" = "$SOURCE_REVISION" ]; then
+    echo "ERROR: PMv4 E root-accepted baseline is not a distinct exact SHA" >&2
+    exit 14
+  fi
+fi
+echo "PMV4_E_ROOT_RECONCILE_MODE=$PMV4_E_HOST_MODE"
+
 if [ "$REPO_ROOT" != "/home/al/.local/lib/jason/engineering-source-repo" ]; then
   echo "ERROR: production reconciliation is not using the managed engineering source" >&2
   exit 9
@@ -146,7 +176,7 @@ fi
 git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}"
 
 LIVE_MCP_REVISION="$(docker inspect jason-mcp-pilot --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
-if [ "$LIVE_MCP_REVISION" != "$SOURCE_REVISION" ]; then
+if [ "$LIVE_MCP_REVISION" != "$PMV4_E_EXPECTED_MCP_REVISION" ]; then
   echo "ERROR: live MCP revision does not match requested host release." >&2
   echo "LIVE_MCP_REVISION=$LIVE_MCP_REVISION" >&2
   echo "REQUESTED_SOURCE_REVISION=$SOURCE_REVISION" >&2
@@ -154,7 +184,7 @@ if [ "$LIVE_MCP_REVISION" != "$SOURCE_REVISION" ]; then
 fi
 
 mkdir -p "$RELEASE_ROOT" "$BACKUP_DIR" /var/lib/jason
-printf 'JASON_EXPECTED_MCP_SOURCE_REVISION=%s\n' "$SOURCE_REVISION" > /var/lib/jason/production-health.env
+printf 'JASON_EXPECTED_MCP_SOURCE_REVISION=%s\n' "$PMV4_E_EXPECTED_MCP_REVISION" > /var/lib/jason/production-health.env
 chown root:root /var/lib/jason/production-health.env
 chmod 0644 /var/lib/jason/production-health.env
 if [ ! -d "$RELEASE_DIR" ]; then
@@ -209,7 +239,12 @@ fi
 # not yet REQUIRED. The full required timer is committed only after
 # independent systemd activation checks pass near the end of this script.
 step_start protected_root_policy_stage
-/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py" --stage-only
+if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+  /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode component-reconcile >/dev/null
+  echo "PMV4_E_LEGACY_ROOT_POLICY_STAGE=SKIPPED_ACCEPTED_REPLACEMENT"
+else
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py" --stage-only
+fi
 cmp -s "$RELEASE_DIR/tools/protected_root_policy_migration.py" /usr/local/lib/jason/protected_root_policy_migration.py || {
   echo "ERROR: root policy migration helper differs from exact immutable release" >&2
   exit 9
@@ -557,10 +592,21 @@ done
 step_start user_worker_reconciliation
 wait_user_unit_inactive jason-support-repair-worker.service
 wait_user_unit_inactive jason-self-heal-watchdog.service
-run_as_al /usr/bin/python3 "$ENGINEERING_SOURCE_REPO/tools/install_support_repair_host_worker.py" \
-  --repo "$ENGINEERING_SOURCE_REPO" \
-  --spool /var/lib/jason/openclaw/support-repair \
-  --activate
+if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+  # Never invoke a PMv3 worker installer after accepted Stage E retirement.
+  if [ "$(run_as_al systemctl --user is-active jason-support-repair-worker.timer 2>/dev/null || true)" = active ]; then
+    echo "ERROR: retired PMv3 engineering timer reactivated" >&2
+    exit 14
+  fi
+  run_as_al /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode engineering >/dev/null
+  PMV4_E_ENGINEERING_TIMER=jason-pmv4-engineering.timer
+else
+  run_as_al /usr/bin/python3 "$ENGINEERING_SOURCE_REPO/tools/install_support_repair_host_worker.py" \
+    --repo "$ENGINEERING_SOURCE_REPO" \
+    --spool /var/lib/jason/openclaw/support-repair \
+    --activate
+  PMV4_E_ENGINEERING_TIMER=jason-support-repair-worker.timer
+fi
 run_as_al /usr/bin/python3 "$ENGINEERING_SOURCE_REPO/tools/install_self_heal_watchdog.py" \
   --repo "$ENGINEERING_SOURCE_REPO" \
   --root /var/lib/jason/openclaw/self-heal \
@@ -603,7 +649,7 @@ cmp -s "$ENGINEERING_SOURCE_REPO/tools/issue_resolution_engine.py" /home/al/.loc
   echo "ERROR: installed issue-resolution engine differs from production source" >&2
   exit 9
 }
-for timer in jason-support-repair-worker.timer jason-self-heal-watchdog.timer; do
+for timer in "$PMV4_E_ENGINEERING_TIMER" jason-self-heal-watchdog.timer; do
   if [ "$(run_as_al systemctl --user is-active "$timer" 2>/dev/null || true)" != "active" ]; then
     echo "ERROR: required user timer is not active after production install: $timer" >&2
     exit 9
@@ -670,14 +716,26 @@ echo "DOCUMENTATION_SOURCE_REPO=$DOCUMENTATION_SOURCE_REPO"
 # any subsequent protected-policy migration is reversible even if the
 # root transition install fails before the release can be certified.
 step_start root_reconciler_install
-/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py"
-cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
-  echo "ERROR: installed root host reconciler differs from production source" >&2
-  exit 9
-}
-if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || true)" != "active" ]; then
-  echo "ERROR: root host-reconcile path is not active after production install" >&2
-  exit 9
+if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+  /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode component-reconcile >/dev/null
+  if [ "$(systemctl is-active jason-pmv4-component-reconcile.path 2>/dev/null || true)" != active ]; then
+    echo "ERROR: PMv4 root reconcile path inactive" >&2
+    exit 14
+  fi
+  if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || true)" = active ]; then
+    echo "ERROR: retired root reconcile path reactivated" >&2
+    exit 14
+  fi
+else
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py"
+  cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
+    echo "ERROR: installed root host reconciler differs from production source" >&2
+    exit 9
+  }
+  if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || true)" != "active" ]; then
+    echo "ERROR: root host-reconcile path is not active after production install" >&2
+    exit 9
+  fi
 fi
 step_pass root_reconciler_install
 echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
@@ -688,8 +746,18 @@ echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
 # Install the newly staged user units BEFORE committing them as REQUIRED and
 # before the final drift guard. Do not replace the running release controller.
 step_start held_approval_user_unit_install
-run_as_al /usr/bin/python3 "$RELEASE_DIR/tools/install_release_manager.py" \
-  --approval-units-only --activate
+if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+  run_as_al /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode release-approval >/dev/null
+  for timer in jason-pmv4-release-approval.timer jason-pmv4-component-release.timer; do
+    if [ "$(run_as_al systemctl --user is-active "$timer" 2>/dev/null || true)" != active ]; then
+      echo "ERROR: accepted PMv4 user release timer inactive: $timer" >&2
+      exit 14
+    fi
+  done
+else
+  run_as_al /usr/bin/python3 "$RELEASE_DIR/tools/install_release_manager.py" \
+    --approval-units-only --activate
+fi
 step_pass held_approval_user_unit_install
 
 # Stage one isolated read-only provider-health worker and its timer as
@@ -771,14 +839,22 @@ step_pass boot_recovery_install
 echo "JASON_BOOT_RECOVERY_INSTALL=PASS"
 
 step_start root_release_transition_install
-/usr/bin/python3 "$RELEASE_DIR/tools/install_release_control_transition.py"
-cmp -s "$RELEASE_DIR/tools/release_control_transition_worker.py" /usr/local/lib/jason/release_control_transition_worker.py || {
-  echo "ERROR: installed root release-transition worker differs from production source" >&2
-  exit 9
-}
-if [ "$(systemctl is-active jason-release-control-transition.timer 2>/dev/null || true)" != "active" ]; then
-  echo "ERROR: root release-transition timer is not active after production install" >&2
-  exit 9
+if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+  /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode component-transition >/dev/null
+  if [ "$(systemctl is-active jason-pmv4-component-transition.timer 2>/dev/null || true)" != active ]; then
+    echo "ERROR: accepted PMv4 root transition timer inactive" >&2
+    exit 14
+  fi
+else
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_release_control_transition.py"
+  cmp -s "$RELEASE_DIR/tools/release_control_transition_worker.py" /usr/local/lib/jason/release_control_transition_worker.py || {
+    echo "ERROR: installed root release-transition worker differs from production source" >&2
+    exit 9
+  }
+  if [ "$(systemctl is-active jason-release-control-transition.timer 2>/dev/null || true)" != "active" ]; then
+    echo "ERROR: root release-transition timer is not active after production install" >&2
+    exit 9
+  fi
 fi
 step_pass root_release_transition_install
 echo "JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS"
@@ -824,7 +900,39 @@ else
 fi
 step_pass openbao_identity_lifecycle_install
 
+# Exact-SHA native release installation only. This installs two inert,
+# root-owned, reviewed files; it never changes provider credentials or
+# invokes the recovered identity. Local Owner action is a separate boundary.
+step_start itglue_read_owner_helper_install
+if [ -f "$RELEASE_DIR/tools/install_it_glue_approle_recovery.py" ]; then
+  for required in it_glue_approle_recovery.py provider_secret_provision.py; do
+    [ -f "$RELEASE_DIR/tools/$required" ] || {
+      echo "ERROR: IT Glue read recovery source incomplete" >&2
+      exit 9
+    }
+  done
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_it_glue_approle_recovery.py" --source-revision "$SOURCE_REVISION"
+  for required in it_glue_approle_recovery.py provider_secret_provision.py; do
+    cmp -s "$RELEASE_DIR/tools/$required" "/usr/local/lib/jason/$required" || {
+      echo "ERROR: installed IT Glue helper differs from reviewed release" >&2
+      exit 9
+    }
+  done
+  echo "JASON_ITGLUE_READ_OWNER_HELPER_INSTALL=PASS"
+else
+  [ ! -e "$RELEASE_DIR/tools/it_glue_approle_recovery.py" ] || {
+    echo "ERROR: orphaned IT Glue helper requires root installer" >&2
+    exit 9
+  }
+  echo "JASON_ITGLUE_READ_OWNER_HELPER_INSTALL=NOT_DECLARED"
+fi
+step_pass itglue_read_owner_helper_install
+
 if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+  if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+    echo "ERROR: Stage E controlplane-only release cannot restart protected runtime/MCP" >&2
+    exit 14
+  fi
   step_start provider_identity_release_recovery
   /usr/bin/python3 /usr/local/lib/jason/openbao_identity_lifecycle.py \
     recover-release --source-revision "$SOURCE_REVISION"

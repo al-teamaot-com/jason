@@ -1,0 +1,72 @@
+{
+  "status": "prepared_not_authorized_not_executed",
+  "identity_source": "https://github.com/al-teamaot-com/jason/issues/2294#issuecomment-6748110803",
+  "identity_last_verified": "2026-11-09",
+  "current_entra_readback": "unavailable_no_active_governed_app_permission_read_capability",
+  "display_name": "Jason - AOT Accounting SharePoint Writer",
+  "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+  "application_id": "3d362478-a873-4ba2-b8a5-c04e66ef2f32",
+  "application_object_id": "9dfa6cee-6261-4c03-9f99-2005333cc1bc",
+  "service_principal_id": "8bd224f1-81a3-4b32-9764-cc35e9378779",
+  "target_site": "https://absolnet.sharepoint.com/sites/AOTAccountingDocuments",
+  "target_site_id": "absolnet.sharepoint.com,8f4cd7bf-72b8-4f7e-9803-c47abcbb232f,e5b7a724-dc9b-406b-aed8-2961f1f71153",
+  "application_permission": "Sites.Selected",
+  "site_role": "write",
+  "gpt_sharepoint_connection_required": false,
+  "reuse_existing_registration": true,
+  "existing_kernel_profile": {
+    "provider": "microsoft_sharepoint",
+    "profile": "sharepoint-write",
+    "current_registered_boundaries": 0
+  },
+  "credential_provision_check": {
+    "status": "passed",
+    "network_contacted": false,
+    "provider": "microsoft_graph_sharepoint_write",
+    "logical_secret": "microsoft_graph.sharepoint_write",
+    "dedicated_runtime_credential_directory_present": false
+  },
+  "required_readback_before_any_grant": [
+    "application_and_service_principal_identity",
+    "current_application_role_assignments",
+    "exact_site_identity_and_existing_permissions",
+    "current_certificate_credentials"
+  ],
+  "staged_app_role_assignment": {
+    "method": "POST",
+    "endpoint": "https://graph.microsoft.com/v1.0/servicePrincipals/8bd224f1-81a3-4b32-9764-cc35e9378779/appRoleAssignments",
+    "body": {
+      "principalId": "8bd224f1-81a3-4b32-9764-cc35e9378779",
+      "resourceId": "f66aa297-6fc4-48b5-a80f-2a7b9cdf6ba5",
+      "appRoleId": "883ea226-0bf2-4a8f-9f9d-92c9162a727d"
+    },
+    "authority": "requires_current_identity_readback_and_auditable_exact_action_approval"
+  },
+  "staged_site_permission": {
+    "method": "POST",
+    "endpoint": "https://graph.microsoft.com/v1.0/sites/absolnet.sharepoint.com,8f4cd7bf-72b8-4f7e-9803-c47abcbb232f,e5b7a724-dc9b-406b-aed8-2961f1f71153/permissions",
+    "body": {
+      "roles": [
+        "write"
+      ],
+      "grantedToIdentities": [
+        {
+          "application": {
+            "id": "3d362478-a873-4ba2-b8a5-c04e66ef2f32",
+            "displayName": "Jason - AOT Accounting SharePoint Writer"
+          }
+        }
+      ]
+    },
+    "authority": "requires_separate_exact_scope_approval"
+  },
+  "approval_request_issued": false,
+  "production_permissions_changed": false,
+  "remaining_engineering_after_provision": [
+    "component_registry_registration",
+    "validated_boundary_only_snapshot",
+    "drive_id_provider_readback",
+    "dedicated_writer_readonly_preflight",
+    "PR_CI_and_exact_release_review"
+  ]
+}

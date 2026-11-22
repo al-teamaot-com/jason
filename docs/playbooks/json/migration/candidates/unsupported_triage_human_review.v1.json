@@ -1,0 +1,320 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "unsupported_triage_human_review",
+    "name": "Jason - Unsupported Triage Human Review Handoff Pilot",
+    "version": "1.0.0-migration.1",
+    "lifecycle": "pilot",
+    "target_type": "ticket",
+    "owner": "AOT Service Manager",
+    "source": "docs/playbooks/Jason-Unsupported-Triage-Human-Review-Handoff-Pilot.md"
+  },
+  "trigger": {
+    "provider": "autotask",
+    "exact_ticket_ids": [
+      143305,
+      143272
+    ],
+    "source_queue": "Jason"
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "customer_communication": false,
+    "ticket_closure": false,
+    "modification_allowlist": [
+      "queue_id",
+      "status_id"
+    ]
+  },
+  "expected_state": {
+    "queue_id": 29682833,
+    "status_id": 37,
+    "ticket_remains_open": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "source_version",
+      "current_worker_state",
+      "note_fingerprint",
+      "action_correlation",
+      "next_due_at"
+    ],
+    "waiting_and_retry": "existing_worker_contract"
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.search",
+      "arguments": {
+        "resource_id": {
+          "$fact": "ticket_id"
+        },
+        "page_size": 2
+      },
+      "next": "read_notes"
+    },
+    {
+      "id": "read_notes",
+      "type": "diagnostic",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "ticket_id"
+        }
+      },
+      "next": "pilot_gate"
+    },
+    {
+      "id": "pilot_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "ticket_id",
+            "operator": "in",
+            "value": [
+              143305,
+              143272
+            ]
+          },
+          "next": "unique_ticket_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "unique_ticket_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "unique_current_ticket",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "company_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "company_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "company_identity_exact",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "owner_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "owner_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "owned_by_jason",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "queue_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "queue_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "current_queue",
+            "operator": "eq",
+            "value": "Jason"
+          },
+          "next": "status_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "status_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "current_status",
+            "operator": "in",
+            "value": [
+              "New",
+              "In Progress"
+            ]
+          },
+          "next": "source_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "source_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "source_snapshot_unchanged",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "state_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "state_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "review_reason",
+            "operator": "in",
+            "value": [
+              "needs_human_review",
+              "needs_device_identity",
+              "needs_execution_authority",
+              "needs_security_review",
+              "needs_playbook_review",
+              "needs_diagnostic_evidence",
+              "read_only_assessed"
+            ]
+          },
+          "next": "note_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "note_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "internal_note_readback_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "promotion_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "promotion_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_handoff_promotion_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "handoff_update"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "handoff_update",
+      "type": "remediation",
+      "capability": "service.ticket.update",
+      "arguments": {
+        "payload": {
+          "id": {
+            "$fact": "ticket_id"
+          },
+          "queueID": "Help Desk I",
+          "status": "Human Review"
+        }
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "verification_step": "readback",
+      "retry": {
+        "max_attempts": 1
+      }
+    },
+    {
+      "id": "readback",
+      "type": "verification",
+      "capability": "service.ticket.search",
+      "arguments": {
+        "resource_id": {
+          "$fact": "ticket_id"
+        },
+        "page_size": 2
+      },
+      "next": "readback_gate"
+    },
+    {
+      "id": "readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_handoff_readback_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "handoff_complete"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "handoff_complete",
+      "type": "complete"
+    },
+    {
+      "id": "blocked",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Autotask current ticket via governed service.ticket.search",
+    "success_condition": "readback of exact ticket shows queueID=29682833 AND status=37; ticket remains open"
+  },
+  "completion": {
+    "terminal_disposition": "handoff verified; incident unresolved"
+  },
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "service.ticket.search",
+      "service.ticket.notes.search",
+      "service.ticket.update"
+    ],
+    "approval_bound_branches": [
+      "handoff_update"
+    ],
+    "disruptive_branches": []
+  },
+  "migration": {
+    "status": "candidate_not_accepted",
+    "legacy_source_blob_sha": "5f28c92f9d44e7f2a58cec30258b7d8f4c08ab27",
+    "known_gaps": [
+      "Current interpreter does not persist or enforce the declared workflow state, retries, queue/status field allowlist or live readback.",
+      "A trusted orchestrator must supply fresh facts after each capability call; synthetic facts alone do not prove provider integration.",
+      "No live acceptance or behavioral parity against production ticket write has been performed.",
+      "Source action arguments now match the legacy worker: payload.id/queueID/status; pre-read uses resource_id and page_size=2. Actual returned jasonVerification.verifiedFields remains an external trusted fact and has not been mapped from adapter output."
+    ],
+    "production_activation_authorized": false
+  }
+}

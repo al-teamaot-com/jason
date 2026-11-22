@@ -1,0 +1,40 @@
+# PMv4 Stage C — exact one-Owner canonical host health recovery
+
+**Status: SOURCE-ONLY until separately approved and installed through an authenticated Owner session and privileged native root preflight.** No production change or breaker recovery is authorized by a merged PR or this document. The previous Stage C Owner proof (`owner-mcp-2d58eede2bac4c9a82fb0328a15dfaa2`, source `13917410bb0ea1d5d37a314b3a3f131d416bf154`) has been consumed and must not be replayed.
+
+## Observed recovery state
+
+The previous exact Stage C release reached `PMV4_C_ATOMIC_ACTIVATION=VERIFIED` but was rejected at `C_POSTFLIGHT_READONLY_DRIFT_FAILED`. The signed root fallback correctly retained **all new canonical SQLite inodes and writes**, returned both existing-image runtime/MCP containers to operational service and restored **embedded** ticket processing. Real ticket scans on the new `/var/lib/jason/ticket-core/autonomy-operational-work.sqlite3` showed 131 provider items and zero duplicates. The previous Owner proof, released plan and root audit are preserved; no independent `jason-pmv4-ticket-core` worker exists.
+
+The root-installed `jason-openclaw-authority-health.service` still executes an expired emergency override that reads the *removed* legacy orchestration-audit path. Its failure opened the production drift circuit breaker, which must remain OPEN until real health proof and the native breaker recovery gate pass. The full-integrity proof from before migration names the old path and is invalid for current canonical state. Do not substitute it or a synthetic PASS. The five existing host exporters also carry obsolete DB environment bindings. Existing independently approved security-exporter and authority full-proof systemd overrides are **preserved, never replaced**.
+
+## Exact proposed one-Owner action
+
+Proposed action `pmv4-c-one-owner-exact-canonical-host-recovery-v1`, with fresh authenticated Entra Owner decision bound to the new protected-main SHA, exact scope SHA-256 and native pinned Owner signing public key. It **does not authorize** any database copy, rename, rollback to stale DB, new external ticket-worker activation, runtime/MCP image change or restart, provider execution, production hold/freeze change, breaker reset or PMv4 Stage D/E. Source-only package components:
+
+- `tools/pmv4_c_host_recovery_builder.py`: validate current protected source, existing LKG, prior consumed Owner proof, all 10 exact relocated DB inodes and no split brain, seven exact root-owned installed baseline service fragments plus three independently approved override fragments, current runtime/MCP image+container identities, freeze/hold hashes and pinned native Owner modules; assemble an immutable packet including its signed plan and exact reviewed source + 7 service dropins, atomically with no production write
+- `tools/pmv4_c_host_recovery_owner.py`: verify synthetic native Owner proof for **both** authorized Entra identities before requesting the device-code challenge; bind one new signed exact action to the immutable SHA/scope/rollback/freeze and reject replay
+- `tools/pmv4_c_host_recovery_root.py`: root-only preflight verifies protected current-main CI, previous signed Owner proof and hash-chained root audit with exact post-write embedded fallback, current OPEN breaker for the one known authority-health failure, all canonical DB inodes and current trusted service fragment/dropin bytes; acquire original host transaction lock plus PMv4 root lock and verify fresh signed Owner proof. It does **not** require a closed breaker for the separately authorized *recovery* of that breaker, and does not give release authority to other actions
+- Under those gates only: atomically create one fixed root-owned canonical health adapter and **seven** exact `99-pmv4-c-*` systemd dropins (two health units and five existing exporters). Keep all original units and Owner overrides. Reload systemd and restart **only** five exact non-ticket exporters. Start the genuine canonical full-integrity+backup/restore systemd job with 5,400-second inner bound and 5,700-second systemd bound. Full-proof service alone receives exact needed RW access to `/var/lib/jason/governed-ticket-shared` for SQLite WAL locking, fast health is read-only; no provider credentials or calls
+- Do not reset the failed `jason-openclaw-authority-health.service` before full proof, since doing so could accidentally clear drift before a real proof. The release returns `FULL_INTEGRITY=STARTED_NOT_YET_VERIFIED` if the root changes and job admission succeed. Record root-owned release audit and prevent reusing the same approval. Before full job admission, rollback only newly created override files and adapter if installing or restarting fails; after full job admission, keep its trusted dependencies intact and fail closed for verified later recovery
+
+## Acceptance requirements
+
+An **actual** full integrity and restore proof must complete with PASS on the **new** orchestration audit path (41+ GB), verify trusted registry and delegations, record full immutable evidence and zero provider contact. The canonical fast service must then pass independently, including the fresh full-proof path. Production drift watchdog must return PASS, followed by at least three distinct clean root drift observations and native root-signed breaker revalidation through the **existing** governed recovery manager. There is no manual breaker close. Review the five exporter statuses after their bounded restart and compare effective systemd environment/dropins to the approved exact plan. The independent Ticket Core still has **not** been accepted: its separate Owner-bound future activation, two distinct real provider-backed scans with zero duplicates and root postflight receipt are necessary. Stage D/E production work remains unauthorized.
+
+## Tests and process safeguards
+
+No untrusted owner-controlled source imported by root before release source hash verification; native signer and source CI verifiers remain root pinned; no broad service glob, shell command injection or Docker socket exposure. Disposable source test exercises approved exact seven-unit projection, success path with persistent systemd full proof admission, inability to claim proof PASS early, rollback on an injected exporter failure, immutable audit-chain checks, rejection of re-entry, root-only privilege gate, no Owner approval from ordinary source, and both allowed Owner identity bindings. CI must pass; local tests alone are not approval.
+
+## Exact systemd WAL locking regression prevention
+
+The full-integrity proof opens SQLite in native read/write mode to acquire WAL
+locks while checking the real 41+ GiB orchestration audit. A child
+`ReadOnlyPaths=/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3`
+would contradict `ReadWritePaths=/var/lib/jason/governed-ticket-shared` in the
+same full-proof drop-in. The immutable full-proof drop-in therefore uses **only**
+`ReadWritePaths=/var/lib/jason/governed-ticket-shared` for that canonical
+family, preserving LKG `ReadOnlyPaths=/opt/jason/current` and existing
+`ProtectSystem=strict`. Fast health independently gets only the exact
+read-only file bind, with no shared-state `ReadWritePaths`. A source test proves
+the two service modes never combine conflicting writable/read-only rules.

@@ -1,0 +1,25 @@
+name: jason-financial-statements
+services:
+  financial-statements:
+    image: ${JASON_FINANCIAL_IMAGE:?immutable component image required}
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 0.5
+    restart: "on-failure:5"
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m
+    volumes:
+      - ${JASON_FINANCIAL_CONFIG:?reviewed config required}:/etc/jason/financial-statements/config.json:ro
+      - ${JASON_FINANCIAL_BOUNDARY:?validated snapshot required}:/etc/jason/financial-statements/boundary.sqlite3:ro
+      - ${JASON_FINANCIAL_ROLE_ID:?dedicated role required}:/run/jason-financial-secrets/role_id:ro
+      - ${JASON_FINANCIAL_SECRET_ID:?dedicated secret required}:/run/jason-financial-secrets/secret_id:ro
+      - ${JASON_FINANCIAL_STATE:?isolated state required}:/var/lib/jason/financial-statements:rw
+    networks: [provider]
+networks:
+  provider:
+    external: true
+    name: ${JASON_FINANCIAL_NETWORK:?existing OpenBao network required}

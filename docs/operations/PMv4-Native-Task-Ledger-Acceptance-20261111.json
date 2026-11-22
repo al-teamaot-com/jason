@@ -1,0 +1,11 @@
+{
+  "actual_native_ledger_read": true,
+  "runtime": "subagent",
+  "run_sha256": "9fe0e5c1934bbc0fe9bc0d93e514cc74a7b65354815828a823f6498cdc2ea644",
+  "native_status": "succeeded",
+  "matched_disposition": "RECONCILE",
+  "mismatch_disposition": "HOLD",
+  "provider_write": false,
+  "completion_claimed": false,
+  "production_configuration_changed": false
+}

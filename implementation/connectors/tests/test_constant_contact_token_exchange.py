@@ -60,3 +60,26 @@ def test_token_response_missing_rotated_refresh_fails_closed():
     with pytest.raises(OAuthTokenError):
         rotate_refresh_token("old", client_id="c", client_secret="s",
                              transport=lambda req, timeout: Response(bad))
+
+
+@pytest.mark.parametrize("grant", ["authorization_code", "refresh_token"])
+def test_oauth_requests_identify_jason_to_provider_edge(grant):
+    """The provider rejects urllib's default User-Agent before OAuth validation."""
+    from urllib.error import HTTPError
+
+    def provider_edge(request, timeout):
+        if request.get_header("User-agent") != "Jason/1.0 (+https://teamaot.com)":
+            raise HTTPError(request.full_url, 403, "edge rejection", {}, None)
+        assert request.full_url == TOKEN_URL
+        assert request.get_method() == "POST"
+        assert timeout == 15
+        assert request.get_header("Authorization").startswith("Basic ")
+        return Response(valid_response())
+
+    if grant == "authorization_code":
+        result = exchange_code("auth-code", client_id="client", client_secret="private",
+                               transport=provider_edge)
+    else:
+        result = rotate_refresh_token("old-token", client_id="client", client_secret="private",
+                                     transport=provider_edge)
+    assert result["token_type"] == "Bearer"

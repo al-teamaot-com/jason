@@ -27,6 +27,12 @@ def repo(tmp_path):
     git(root, "config", "user.name", "Isolated Reviewer")
     git(root, "config", "user.email", "reviewer@example.invalid")
     (root / "shared.py").write_text("baseline\n")
+    (root / "config").mkdir()
+    (root / "config/release-manager-policy.json").write_text(json.dumps({
+        "protected_core_globs": ["tools/release_manager*.py", "tools/manual_release_scope.py",
+                                 "config/release-manager-policy.json"]}))
+    (root / "tools").mkdir()
+    (root / "tools/manual_release_scope.py").write_bytes(SOURCE.read_bytes())
     git(root, "add", ".")
     git(root, "commit", "-m", "baseline")
     git(root, "push", "-u", "origin", "main")
@@ -91,15 +97,89 @@ def test_open_pull_request_overlap_requires_explicit_acknowledgement(repo):
     assert approved["status"] == "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED"
 
 
-def test_superseded_candidate_is_not_releaseable(repo):
+def test_protected_ancestor_remains_reviewable_without_bundling_newer_main(repo):
     root, base, candidate, _ = repo
-    (root / "another.py").write_text("not approved\n")
+    before = m.review(root, "test/repo", base, candidate, allowed_prs=[101],
+                      pr_reader=reader([]))
+    (root / "another.py").write_text("not selected for release\n")
     git(root, "add", ".")
     git(root, "commit", "-m", "Another change (#102)")
     git(root, "push", "origin", "main")
-    with pytest.raises(m.ScopeBlocked, match="protected main"):
+    tip = git(root, "rev-parse", "HEAD")
+    after = m.review(root, "test/repo", base, candidate, allowed_prs=[101],
+                     pr_reader=reader([]))
+    assert after["status"] == "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED"
+    assert after["deployment_authorized"] is False
+    assert after["scope_sha256"] == before["scope_sha256"]
+    assert after["changed_files"] == ["shared.py"]
+    assert git(root, "rev-parse", "HEAD") == tip
+    assert git(root, "status", "--porcelain") == ""
+    assert git(root, "ls-remote", "origin", "refs/heads/main").split()[0] == tip
+    blocked = m.review(root, "test/repo", base, candidate, pr_reader=reader([]))
+    assert blocked["status"] == "BLOCKED_SCOPE"
+    assert blocked["unreviewed_commit_shas"] == [candidate]
+
+
+def test_unmerged_side_branch_is_not_a_protected_ancestor(repo):
+    root, base, candidate, _ = repo
+    git(root, "checkout", "--detach", base)
+    (root / "unmerged.py").write_text("unmerged\n")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "Unmerged local change (#103)")
+    unmerged = git(root, "rev-parse", "HEAD")
+    with pytest.raises(m.ScopeBlocked):
+        m.review(root, "test/repo", base, unmerged, allowed_prs=[103],
+                 pr_reader=reader([]))
+
+
+def test_remote_history_removal_invalidates_protected_ancestor(repo):
+    root, base, candidate, _ = repo
+    git(root, "push", "--force", "origin", base + ":refs/heads/main")
+    # A stale local remote-tracking ref must not conceal removal from origin.
+    git(root, "update-ref", "refs/remotes/origin/main", candidate)
+    with pytest.raises(m.ScopeBlocked):
         m.review(root, "test/repo", base, candidate, allowed_prs=[101],
                  pr_reader=reader([]))
+
+
+def test_unrelated_baseline_is_not_accepted(repo):
+    root, base, candidate, _ = repo
+    git(root, "checkout", "--detach", base)
+    (root / "unrelated.py").write_text("unrelated\n")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "Different lineage")
+    other = git(root, "rev-parse", "HEAD")
+    with pytest.raises(m.ScopeBlocked):
+        m.review(root, "test/repo", other, candidate, allowed_prs=[101],
+                 pr_reader=reader([]))
+
+
+@pytest.mark.parametrize("remote", ["", "not-a-sha refs/heads/main",
+    "a" * 40 + " refs/heads/other",
+    "a" * 40 + " refs/heads/main\n" + "b" * 40 + " refs/heads/main"])
+def test_malformed_or_ambiguous_main_advertisement_fails_closed(repo, monkeypatch, remote):
+    root, base, candidate, _ = repo
+    original = m.command
+    def read(args, cwd=None):
+        if args[:3] == ["git", "ls-remote", "origin"]:
+            return remote
+        return original(args, cwd)
+    monkeypatch.setattr(m, "command", read)
+    with pytest.raises(m.ScopeBlocked):
+        m.source_scope(root, base, candidate)
+
+
+def test_missing_advertised_main_object_fails_without_fetch(repo, monkeypatch):
+    root, base, candidate, _ = repo
+    original = m.command
+    def read(args, cwd=None):
+        assert "fetch" not in args
+        if args[:3] == ["git", "ls-remote", "origin"]:
+            return "f" * 40 + " refs/heads/main"
+        return original(args, cwd)
+    monkeypatch.setattr(m, "command", read)
+    with pytest.raises(m.ScopeBlocked):
+        m.source_scope(root, base, candidate)
 
 
 def test_unknown_or_false_acknowledgements_never_authorize_release(repo):
@@ -368,3 +448,24 @@ def test_prunable_missing_native_exact_sha_worktree_does_not_invalidate_review(
     assert following["registered_worktrees"] == original["registered_worktrees"]
     # The orphaned registry evidence remains intact and can be audited in Git.
     assert "worktree " + str(internal) in git(root, "worktree", "list", "--porcelain")
+
+
+def test_newer_candidate_path_change_blocks_even_when_reverted(repo):
+    root, base, candidate, _ = repo
+    (root / "shared.py").write_text("newer edit\n")
+    git(root, "commit", "-am", "Conflicting edit (#102)")
+    (root / "shared.py").write_text("approved change\n")
+    git(root, "commit", "-am", "Revert conflicting edit (#103)")
+    git(root, "push", "origin", "main")
+    with pytest.raises(m.ScopeBlocked, match="pinned scope or controls"):
+        m.source_scope(root, base, candidate)
+
+
+def test_newer_protected_control_change_blocks_pinned_release(repo):
+    root, base, candidate, _ = repo
+    (root / "tools/release_manager_new.py").write_text("new protected control\n")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "New release control (#102)")
+    git(root, "push", "origin", "main")
+    with pytest.raises(m.ScopeBlocked, match="pinned scope or controls"):
+        m.source_scope(root, base, candidate)

@@ -4,7 +4,19 @@ on:
   pull_request:
     paths:
       - "tools/pmv4_*"
+      - "tools/tests/test_pmv4_e_native_six_unit_release.py"
+      - "tools/pmv4_e_native_systemd_adapter.py"
+      - "tools/tests/test_pmv4_e_native_systemd_adapter.py"
+      - "tools/pmv4_e_systemd_root_ops.py"
+      - "tools/tests/test_pmv4_e_systemd_root_ops.py"
+      - "tools/pmv4_e_native_backend_bridge.py"
+      - "tools/tests/test_pmv4_e_native_backend_bridge.py"
+      - "tools/pmv4_e_exact_release_packet.py"
+      - "tools/tests/test_pmv4_e_exact_release_packet.py"
+      - "tools/pmv4_e_root_trust_stage.py"
+      - "tools/tests/test_pmv4_e_root_trust_stage.py"
       - "tests/test_pmv4_*"
+      - "infrastructure/pmv4-shadow-image/**"
       - "implementation/runtime_service/src/jason_runtime/ticket_worker_*"
       - "implementation/runtime_service/src/jason_runtime/main.py"
       - "implementation/autonomous_remediation/playbook_*"
@@ -21,6 +33,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  a1-shadow-source-package:
+    name: A1 shadow manifest and rollback packet (no production)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test offline image profile and immutable A1 staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q pytest cryptography
+          PYTHONPATH=implementation:. python -B -m pytest -q \
+            tests/test_pmv4_shadow_candidate_packet.py \
+            tests/test_pmv4_a1_atomic_shadow_root.py \
+            tests/test_pmv4_a1_atomic_one_owner.py
+          bash -n tools/pmv4_a1_one_owner_local.sh
+          test ! -e /var/lib/jason/pmv4-shadow
+          test ! -e /var/lib/jason/openclaw/autonomy-operational-work.sqlite3
+
   runbook-standalone:
     name: Isolated JSON runbook lifecycle (no production state)
     runs-on: ubuntu-24.04
