@@ -1710,6 +1710,8 @@ def _governed_read_for_identity(
             if capability_name == "automation.component.search"
             else _project_print_meter_usage_search(result.output)
             if capability_name == "print.meter.usage.search"
+            else _project_print_fleet_usage_report(result.output)
+            if capability_name == "print.fleet.usage.rank"
             else _safe(dict(result.output))
         ),
     }
@@ -1755,6 +1757,35 @@ def _project_print_meter_usage_search(output: Mapping[str, Any]) -> dict[str, An
     else:
         safe_data["records"] = _safe(raw_records)
 
+    result["data"] = safe_data
+    return result
+
+
+def _project_print_fleet_usage_report(output: Mapping[str, Any]) -> dict[str, Any]:
+    """Preserve complete, source-validated fleet lists with per-row redaction.
+
+    Generic MCP projection truncates arbitrary lists to 100. A report must
+    retain every source-reconciled device, or fail closed on impossible bounds.
+    """
+    root = dict(output or {})
+    raw_data = root.pop("data", None)
+    projected = _safe(root)
+    result = dict(projected) if isinstance(projected, Mapping) else {}
+    if not isinstance(raw_data, Mapping):
+        result["data"] = _safe(raw_data)
+        return result
+    data = dict(raw_data)
+    collections = {}
+    for field in ("ranked_devices", "listed_devices", "exceptions"):
+        if field not in data:
+            continue
+        records = data.pop(field)
+        if not isinstance(records, (list, tuple)) or len(records) > 1000:
+            raise ValueError("governed fleet report collection exceeds exact source bounds")
+        collections[field] = [_safe(item) for item in records]
+    safe_data = _safe(data)
+    safe_data = dict(safe_data) if isinstance(safe_data, Mapping) else {}
+    safe_data.update(collections)
     result["data"] = safe_data
     return result
 
@@ -7792,6 +7823,7 @@ def execute_read_capability(
         # boundary here would silently truncate its already-safe 1000-record
         # fleet dataset back to 100 and make fleet-wide analytics incomplete.
         "print.meter.usage.search",
+        "print.fleet.usage.rank",
     }
 
     if capability_name not in known_projected:

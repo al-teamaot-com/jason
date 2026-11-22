@@ -318,7 +318,7 @@ class KfsMeterHistoryStore:
                 ORDER BY ended_at DESC
                 LIMIT 1
             ), inventory_devices AS (
-                SELECT DISTINCT s.device_id,
+                SELECT DISTINCT s.device_id, s.management_status,
                        NULLIF(k.customer_name,'') AS inventory_customer,
                        NULLIF(k.equipment_id,'') AS inventory_equipment,
                        NULLIF(k.serial_number,'') AS inventory_serial,
@@ -338,7 +338,8 @@ class KfsMeterHistoryStore:
                        COALESCE(NULLIF(e.customer_name,''), NULLIF(b.customer_name,''), d.inventory_customer) AS customer_name,
                        COALESCE(NULLIF(e.equipment_id,''), NULLIF(b.equipment_id,''), d.inventory_equipment) AS equipment_id,
                        COALESCE(NULLIF(e.serial_number,''), NULLIF(b.serial_number,''), d.inventory_serial) AS serial_number,
-                       d.inventory_model AS model_name
+                       d.inventory_model AS model_name,
+                       d.management_status AS management_status
                 FROM devices d
                 CROSS JOIN (VALUES
                     ('total'),('blackWhite'),('color'),('printerTotal'),('copierTotal'),('scanTotal')
@@ -368,7 +369,7 @@ class KfsMeterHistoryStore:
             )
             SELECT b.device_id, b.counter_name, b.start_value, b.start_at,
                    b.end_value, b.end_at, b.customer_name, b.equipment_id,
-                   b.serial_number, b.model_name,
+                   b.serial_number, b.model_name, b.management_status,
                    r.id, r.ended_at, r.device_count, r.error_count,
                    (SELECT COUNT(*) FROM inventory_devices),
                    (SELECT COUNT(*) FROM devices)
@@ -398,7 +399,7 @@ class KfsMeterHistoryStore:
 
         for row in rows:
             (device_id, counter, before, before_at, after, after_at,
-             customer, equipment, serial, model, run_id, run_ended_at,
+             customer, equipment, serial, model, management_status, run_id, run_ended_at,
              run_count, run_errors, inventory_count, selected_count) = row
             snapshot_id = run_id
             snapshot_ended_at = run_ended_at
@@ -412,6 +413,7 @@ class KfsMeterHistoryStore:
                 "equipment_id": equipment or "",
                 "model_name": model or "",
                 "customer_name": customer or "",
+                "management_status": management_status,
                 "customer_mapping_status": "verified" if customer else "not_found",
                 "customer_mapping_source": "kfs" if customer else "none",
                 "counts": {},
@@ -604,6 +606,8 @@ class GovernedKfsMeterHistoryInvoker:
                     data,
                     metric=str(period_arguments.get("metric") or "total"),
                     top_n=period_arguments.get("top_n", 5),
+                    report_mode=str(period_arguments.get("report_mode") or "rank"),
+                    managed_only=period_arguments.get("managed_only", True),
                 )
         else:
             raise LookupError(

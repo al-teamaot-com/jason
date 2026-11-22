@@ -11,6 +11,7 @@ from orchestrator.print_capability_catalog import PRINT_FLEET_USAGE_RANK, KYOCER
 def device(number, total, *, customer="AOT Client", verified=True):
     return {
         "device_id": f"dev-{number}",
+        "management_status": 1,
         "serial_number": f"SER{number:04d}",
         "equipment_id": f"EQ-{number}",
         "customer_name": customer,
@@ -131,3 +132,118 @@ def test_client_specific_invocation_denied_without_mapping():
             request=request(client_id="client-123"),
             resolution=SimpleNamespace(selected_provider_id=KYOCERA_KFS_PROVIDER, capability_name=PRINT_FLEET_USAGE_RANK),
         )
+
+def test_complete_list_preserves_every_inventoried_device_and_missing_boundary_row():
+    records = [device(i, i * 10, customer="" if i % 3 == 0 else "Client") for i in range(435)]
+    for index in (2, 55, 434):
+        records[index] = device(index, 0, verified=False)
+    result = rank_fleet_usage(source(records), report_mode="list")
+    assert result["report_mode"] == "list"
+    assert result["selected_device_count"] == 435
+    assert result["returned_row_count"] == 435
+    assert len(result["listed_devices"]) == 435
+    assert len({row["device_id"] for row in result["listed_devices"]}) == 435
+    assert result["usage_verified_count"] == 432
+    assert result["usage_exception_count"] == 3
+    assert len(result["ranked_devices"]) == 0
+    failures = [x for x in result["listed_devices"] if x["usage_status"] == "exception"]
+    assert len(failures) == 3
+    assert all(x["total_impressions"] is None for x in failures)
+    assert all(x["black_white_impressions"] is None for x in failures)
+    assert all(x["color_impressions"] is None for x in failures)
+    assert all(x["exception_reasons"] for x in failures)
+
+
+def test_complete_list_never_guesses_unverified_customer_and_preserves_measured_zero():
+    records = [device(1, 0, customer=""), device(2, 15, customer="Known")]
+    result = rank_fleet_usage(source(records), report_mode="list")
+    rows = result["listed_devices"]
+    unknown = next(x for x in rows if x["serial_number"] == "SER0001")
+    assert unknown["customer_name"] == ""
+    assert unknown["customer_mapping_status"] == "not_found"
+    assert unknown["total_impressions"] == 0
+    assert unknown["usage_status"] == "verified"
+    assert result["customer_mapping_missing_count"] == 1
+
+
+def test_list_still_refuses_unverified_or_truncated_source():
+    records = [device(i, i * 5) for i in range(100)]
+    payload = source(records)
+    payload["selected_device_count"] = 435
+    with pytest.raises(ValueError, match="incomplete"):
+        rank_fleet_usage(payload, report_mode="list")
+
+
+def test_list_rejects_excessive_source_even_with_claimed_coverage():
+    records = [device(i, i) for i in range(1001)]
+    with pytest.raises(ValueError, match="incomplete"):
+        rank_fleet_usage(source(records), report_mode="list")
+
+
+def test_bad_report_mode_fails_closed():
+    with pytest.raises(ValueError, match="report_mode"):
+        rank_fleet_usage(source([device(1, 10)]), report_mode="export_and_bill")
+
+
+def test_invoker_complete_list_uses_full_source_and_never_device_filter():
+    store = Store()
+    req = request()
+    req.arguments["report_mode"] = "list"
+    result = GovernedKfsMeterHistoryInvoker(store).invoke(
+        request=req,
+        resolution=SimpleNamespace(
+            selected_provider_id=KYOCERA_KFS_PROVIDER,
+            capability_name=PRINT_FLEET_USAGE_RANK,
+        ),
+    )
+    assert result.output["data"]["returned_row_count"] == 2
+    assert len(result.output["data"]["listed_devices"]) == 2
+    assert "device_id" not in store.arguments
+    assert store.arguments["limit"] == 1000
+
+def test_managed_only_filters_unmanaged_from_435_before_billable_output():
+    records = [device(i, i * 7) for i in range(435)]
+    for index in range(20):
+        records[index]["management_status"] = 0
+    output = rank_fleet_usage(source(records), report_mode="list")
+    assert output["full_inventory_device_count"] == 435
+    assert output["selected_device_count"] == 415
+    assert output["unmanaged_excluded_count"] == 20
+    assert output["returned_row_count"] == 415
+    assert output["usage_verified_count"] == 415
+    assert not any(row["serial_number"] == "SER0000" for row in output["listed_devices"])
+    assert len({row["device_id"] for row in output["listed_devices"]}) == 415
+
+
+def test_unmanaged_can_be_included_only_when_explicitly_selected():
+    records = [device(i, i * 4) for i in range(2)]
+    records[0]["management_status"] = 0
+    result = rank_fleet_usage(source(records), report_mode="list", managed_only=False)
+    assert result["selected_device_count"] == 2
+    assert result["unmanaged_excluded_count"] == 0
+    assert result["listed_devices"][0]["management_status"] in (0, 1)
+
+
+def test_unknown_management_status_fails_closed_for_managed_report():
+    records = [device(1, 10)]
+    records[0].pop("management_status")
+    with pytest.raises(ValueError, match="management_status"):
+        rank_fleet_usage(source(records), report_mode="list")
+
+
+def test_invalid_managed_only_selector_does_not_silently_expand_fleet():
+    with pytest.raises(ValueError, match="managed_only"):
+        rank_fleet_usage(source([device(1, 10)]), managed_only="false")
+
+
+def test_invoker_defaults_to_managed_only_for_fleet_reports():
+    store = Store()
+    result = GovernedKfsMeterHistoryInvoker(store).invoke(
+        request=request(),
+        resolution=SimpleNamespace(
+            selected_provider_id=KYOCERA_KFS_PROVIDER,
+            capability_name=PRINT_FLEET_USAGE_RANK,
+        ),
+    )
+    assert result.output["data"]["managed_only"] is True
+    assert result.output["data"]["unmanaged_excluded_count"] == 0

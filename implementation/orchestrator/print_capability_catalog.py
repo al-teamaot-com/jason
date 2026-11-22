@@ -241,7 +241,7 @@ def print_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Rank a complete, reconciled AOT fleet period by measured total, black-white or color impressions.",
             resource_types="print_usage,print_device",
             operation="read",
-            selector_keys="month,start,end,timezone,metric,top_n,boundary_hours",
+            selector_keys="month,start,end,timezone,metric,top_n,report_mode,managed_only,boundary_hours",
             fact_hints="top highest volume printer copier fleet device usage impressions ranking monthly pages",
             selector_required=False,
         ),
