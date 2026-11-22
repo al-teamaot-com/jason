@@ -30,6 +30,7 @@ class UniversalPlanStatusMaintenance:
     token_file: Any
     clock: Callable[[],datetime]=lambda:datetime.now(timezone.utc)
     interval_seconds:int=5
+    approval_id_prefix:str=""
     _next_due:datetime|None=field(default=None,init=False)
     _after:str=field(default='',init=False)
 
@@ -45,6 +46,8 @@ class UniversalPlanStatusMaintenance:
             return False
         for approval_id in candidates:
             self._after=approval_id
+            if not approval_id.startswith(self.approval_id_prefix):
+                continue
             progress=self.handler.requests.progress(approval_id)
             state=progress['state']
             proposal=self.handler.proposals.require(approval_id)

@@ -1,0 +1,15 @@
+[Unit]
+Description=Jason bounded audit maintenance cadence
+Requires=jason-audit-journal-data-recovery.service
+After=jason-audit-journal-data-recovery.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+OnCalendar=*-*-* 00:15:00 America/New_York
+AccuracySec=1s
+Persistent=true
+Unit=jason-audit-journal-maintenance.service
+
+[Install]
+WantedBy=timers.target

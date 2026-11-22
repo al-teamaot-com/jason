@@ -14,7 +14,9 @@ from orchestrator.print_capability_catalog import (
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
     PRINT_METER_USAGE_SEARCH,
+    PRINT_FLEET_USAGE_RANK,
 )
+from .kfs_fleet_rank import rank_fleet_usage
 from orchestrator.service import InvocationResult
 
 
@@ -23,6 +25,7 @@ METER_HISTORY_AUTHORITY_GRANTS = (
     ("production-kfs-read-print-meter-history-search", PRINT_METER_HISTORY_SEARCH),
     ("production-kfs-read-print-meter-usage-read", PRINT_METER_USAGE_READ),
     ("production-kfs-read-print-meter-usage-search", PRINT_METER_USAGE_SEARCH),
+    ("production-kfs-read-print-fleet-usage-rank", PRINT_FLEET_USAGE_RANK),
 )
 
 
@@ -566,7 +569,7 @@ class GovernedKfsMeterHistoryInvoker:
 
         period_arguments = dict(request.arguments)
         now = datetime.now(timezone.utc)
-        if resolution.capability_name == PRINT_METER_USAGE_SEARCH and not period_arguments.get("month"):
+        if resolution.capability_name in (PRINT_METER_USAGE_SEARCH, PRINT_FLEET_USAGE_RANK) and not period_arguments.get("month"):
             if not period_arguments.get("start") and not period_arguments.get("end"):
                 period_arguments["start"] = (now - timedelta(days=30)).isoformat()
                 period_arguments["end"] = now.isoformat()
@@ -582,14 +585,26 @@ class GovernedKfsMeterHistoryInvoker:
             data = self.store.search(arguments=request.arguments, start=start, end=end)
         elif resolution.capability_name == PRINT_METER_USAGE_READ:
             data = self.store.usage(arguments=request.arguments, start=start, end=end)
-        elif resolution.capability_name == PRINT_METER_USAGE_SEARCH:
+        elif resolution.capability_name in (PRINT_METER_USAGE_SEARCH, PRINT_FLEET_USAGE_RANK):
             now = datetime.now(timezone.utc)
             effective_end = min(end, now)
             if start >= effective_end:
                 raise ValueError("usage search period must have started")
+            source_arguments = dict(period_arguments)
+            if resolution.capability_name == PRINT_FLEET_USAGE_RANK:
+                # Never rely on caller-limited first-page data for fleet ranking.
+                source_arguments["limit"] = 1000
+                source_arguments.pop("device_id", None)
+                source_arguments.pop("serial_number", None)
             data = self.store.usage_search(
-                arguments=period_arguments, start=start, end=effective_end,
+                arguments=source_arguments, start=start, end=effective_end,
             )
+            if resolution.capability_name == PRINT_FLEET_USAGE_RANK:
+                data = rank_fleet_usage(
+                    data,
+                    metric=str(period_arguments.get("metric") or "total"),
+                    top_n=period_arguments.get("top_n", 5),
+                )
         else:
             raise LookupError(
                 f"unsupported KFS meter history capability: {resolution.capability_name}"
