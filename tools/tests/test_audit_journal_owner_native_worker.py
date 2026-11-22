@@ -24,6 +24,15 @@ def setup(tmp_path,monkeypatch):
     monkeypatch.setattr(root,"PROCESSED",a/"processed")
     monkeypatch.setattr(client,"ROOT",a)
     monkeypatch.setattr(client,"WORKER",tmp_path/"root-worker")
+    # Synthetic runner files are owned by the actual unprivileged test UID.
+    # Production still enforces UID1000: the isolated UID0 fixture proves it.
+    synthetic_uid=os.getuid()
+    monkeypatch.setattr(client,"OWNER",synthetic_uid)
+    original_safe_file=root.safe_file
+    def synthetic_custody(path,uid,mode,maximum=30000):
+        expected=synthetic_uid if uid==1000 else uid
+        return original_safe_file(path,expected,mode,maximum)
+    monkeypatch.setattr(root,"safe_file",synthetic_custody)
     # The synthetic preflight verifies the installed Root worker externally.
     monkeypatch.setattr(client,"available",lambda:None)
     return a

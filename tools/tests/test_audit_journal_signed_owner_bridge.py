@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime,timezone,timedelta
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import stat
 from types import SimpleNamespace
@@ -87,8 +88,11 @@ def stage_and_sign(tmp_path,monkeypatch):
     scope=reviewed_scope()
     offer=bridge.create_staged_offer(scope,CANDIDATE,ROOT_GATE)
     signer=Ed25519PrivateKey.generate()
-    # Signature issuer runs as UID1000; Root staging is a separate process.
-    monkeypatch.setattr(issuer.os,"geteuid",lambda:1000)
+    # The issuer is UID1000 in production. GitHub-hosted runners use a
+    # different UID, so these synthetic temp files belong to the runner's
+    # actual UID; the separate isolated UID0/UID1000 fixture tests custody.
+    synthetic_unprivileged_uid=os.getuid()
+    monkeypatch.setattr(issuer.os,"geteuid",lambda:synthetic_unprivileged_uid)
     monkeypatch.setattr(issuer,"read_offer",
         lambda state,release_id:offer)
     row=issuer.queue_exact_archive_owner_approval(
