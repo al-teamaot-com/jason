@@ -19,5 +19,8 @@ On 2026-11-22 the existing governed `print.meter.usage.search` returned 435 dist
 ## Engineering acceptance versus operational acceptance
 Focused local tests cover 435 devices, exceptions, ties, incomplete source, duplicate IDs, invalid arguments, AOT-only requester restrictions, and invoker-enforced full source retrieval. Source-only test success is not release acceptance. The deployed MCP must independently discover the new capability and execute a full October report under an authorized AOT requester, verifying coverage and top-five against same-source facts; then Adam and LaToshia must confirm conversational use. Missing customer identities remain explicit data-quality exceptions, not a pretext to fabricate mapping. Export and delivery under issue #1735 remain a separate operational acceptance gate.
 
+## Source integration coordination
+PR #2624 separately changes SharePoint runtime composition. Its exact change hunks and this KFS proposal were reviewed: SharePoint imports/initialization and its conditional invoker registration do not intersect the KFS import and KFS invoker registration. The final integration must preserve both additive sections. The active CI change-integration gate uses the PR event body's exact `Integration coordination: #2624` acknowledgement; updated metadata requires a fresh PR event after review rather than re-running an earlier event with stale content.
+
 ## Release boundaries
 This branch does **not** deploy, grant Owner release approval, clear production drift, restart a protected service, lift freeze, or update KFS/Autotask. Current production on Jason remains independently governed. Require approved exact candidate/rollback, source CI, isolated run, and live non-regression checks before release.
