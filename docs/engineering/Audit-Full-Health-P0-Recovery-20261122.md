@@ -69,3 +69,11 @@ journal data-only migration*, not a broader Stage E acceptance waiver or
 a change to native watchdog policy, production circuit breaker, A1 shadow
 configuration, memory limit, or independent production approval. The shadow
 health incident remains separately actionable; never report it HEALTHY.
+
+## Protected-Main trust-core pin correction after #2674 (November 22, 2026)
+
+The first Root preflight on accepted Main `b3e20ef812f9f91106ed792a005d217910e231de` correctly stopped **before any installation or Owner challenge** with `AUDIT_P0_PREVIOUS_APPROVED_TRUST_CORE_CHANGED`. #2674 changed exactly the reviewed `tools/audit_journal_install.py` peer admission (and nothing about approved Owner identity or Root privileges); the P0 wrapper still pinned its earlier digest `75749e0acc4062e0a0160cb0d7ddc10504ea452f49fd432c0250193f02b86f81`. The actual exact Main Git blob digest is `64f451c03fe75b70c80462938d1199f35ce73b82f6b2ef4891e3c7d9c879e432`.
+
+The correction updates **only the expected exact hash** in `tools/audit_full_health_p0_recovery.py`, retaining the real pinned `git show <exact-main>:tools/audit_journal_install.py` byte-for-byte comparison and independent Root lock/CI/Entra consent. A new CI test asserts that all four chained trust-source pins equal the committed bytes: P0→journal installer→documentation publisher→PMv4 E closure→PMv4 E dispatcher. A separate portable positive test exercises the actual reviewed nested Root bootstrap source path without requiring the GitHub runner to possess Jason's Root identity; the negative test confirms an intentionally stale pin denies before authorization. This is a test of source bootstrap, **not** a claim that an unprivileged runner executed production Root preflight.
+
+Existing exact launcher referencing Main `b3e20ef8...` is superseded after this correction merges. The newly reviewed Main SHA must pass all required CI and the Root `--preflight-only` gate before *any* one-use real job is queued. The initial failed preflight did not consume or replay the Owner approval and did not change systemd, the breaker, or audit data.
