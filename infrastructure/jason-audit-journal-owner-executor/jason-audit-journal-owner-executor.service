@@ -1,0 +1,25 @@
+[Unit]
+Description=Jason one-use signed Owner audit archive Root execution
+Documentation=https://github.com/al-teamaot-com/jason/issues/2680
+After=docker.service local-fs.target
+Requires=docker.service
+RequiresMountsFor=/srv/jason/archive
+ConditionPathExists=/etc/jason-owner-release/audit-journal-owner-executor-v1.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/jason/audit-journal-owner-executor/worker.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/jason/authority/audit-journal-release /var/lib/jason-owner-release /var/lib/jason/governed-ticket-shared /var/lib/jason/openclaw/release-manager /srv/jason/archive /etc/systemd/system /etc/jason-owner-release /etc/jason/release-readback-recovery /usr/local/lib/jason /run /var/run/docker.sock
+ReadWritePaths=-/var/lib/jason-audit-journal
+TimeoutStartSec=1800

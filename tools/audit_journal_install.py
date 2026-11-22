@@ -17,7 +17,8 @@ SAFE=("GIT_CONFIG_NOSYSTEM=1","GIT_CONFIG_GLOBAL=/dev/null","GIT_OPTIONAL_LOCKS=
  "GIT_CONFIG_KEY_1=core.hooksPath","GIT_CONFIG_VALUE_1=/dev/null")
 USER=("/usr/sbin/runuser","-u","al","--")
 EXTRA=("tools/audit_journal_install.py","tools/audit_journal_install_transaction.py",
- "tools/audit_journal_root_inventory.py","tools/pmv4_e_ci_refresh.py",
+ "tools/audit_journal_root_inventory.py","tools/audit_journal_signed_owner_bridge.py",
+ "implementation/kernel/signed_owner_release.py","tools/pmv4_e_ci_refresh.py",
  "tools/documentation_publisher_install.py","tools/pmv4_e_operational_closure.py","tools/pmv4_e_dispatch_install.py")
 OVERRIDES=("93-jason-audit-data-recovery.conf","94-audit-data-compatible-release.conf")
 SYSTEMD=Path("/etc/systemd/system")
@@ -73,7 +74,7 @@ def staged_modules(candidate):
  sys.path.insert(0,str(stage));sys.path.insert(0,str(stage/"implementation"))
  modules={name:importlib.import_module("tools."+name) for name in (
   "audit_journal_release_scope","audit_journal_container_release","audit_journal_root_inventory","pmv4_e_ci_refresh",
-  "audit_journal_install_transaction")}
+  "audit_journal_install_transaction","audit_journal_signed_owner_bridge")}
  return temporary,payload,modules
 
 def ci(helper,candidate):
@@ -217,7 +218,7 @@ def record_read():
       and digest(canonical(row["scope"]))==row["scope_sha256"],"RECORDED_OWNER_SCOPE")
  return row
 
-def save_record(payload,scope,before,original,desired,actor,ci_proof):
+def save_record(payload,scope,before,original,desired,actor,ci_proof,*,signed_owner=None):
  parent=RECORD.parent;m=parent.lstat()
  need(not parent.is_symlink() and m.st_uid==m.st_gid==0 and not m.st_mode&0o022,"RECORD_PARENT_CUSTODY")
  need(not os.path.lexists(RECORD),"INITIAL_OWNER_CLAIM_ALREADY_EXISTS")
@@ -229,6 +230,16 @@ def save_record(payload,scope,before,original,desired,actor,ci_proof):
       "scope":scope,"scope_sha256":digest(canonical(scope)),
       "source_sha256":{name:digest(raw) for name,raw in payload.items()},
       "producer_before_sha256":digest(canonical(before))}
+ if signed_owner is not None:
+  need(signed_owner.get("owner_oid")==actor and signed_owner.get("candidate_sha")==scope["policy"]["candidate_sha"]
+       and signed_owner.get("scope_sha256")==digest(canonical(scope))
+       and signed_owner.get("same_scope_recheck_passed") is True
+       and signed_owner.get("new_global_unfreeze") is False,
+       "ONE_USE_SIGNED_OWNER_ROOT_BINDING")
+  row["signed_chatgpt_owner_approval"]={k:signed_owner[k] for k in (
+   "approval_id","signed_owner_proof_sha256","root_stage_receipt_sha256",
+   "owner_oid","scope_sha256","candidate_sha","verified_at")}
+  row["global_production_freeze_left_active"]=True
  for name,raw in payload.items():
   path=stage/"source"/name;path.parent.mkdir(mode=0o755,parents=True,exist_ok=True)
   atomic(path,raw,0o444)
@@ -277,7 +288,12 @@ def resume_bootstrap():
 def main():
  parser=argparse.ArgumentParser();parser.add_argument("--candidate-sha")
  parser.add_argument("--preflight-only",action="store_true");parser.add_argument("--resume-bootstrap",action="store_true")
+ parser.add_argument("--stage-signed-owner-offer",action="store_true")
+ parser.add_argument("--adopt-signed-chatgpt-owner",action="store_true")
  args=parser.parse_args()
+ need(sum(bool(flag) for flag in (
+  args.preflight_only,args.resume_bootstrap,args.stage_signed_owner_offer,
+  args.adopt_signed_chatgpt_owner))<=1,"ONE_EXACT_INSTALLER_OPERATION")
  if args.resume_bootstrap:
   need(args.candidate_sha is None and not args.preflight_only,"EXACT_RESUME_ARGUMENTS");return resume_bootstrap()
  candidate=args.candidate_sha
@@ -294,10 +310,31 @@ def main():
    print("REVIEWED_SCOPE_SHA256="+s.digest(scope),flush=True)
    if args.preflight_only:
     print("PRODUCTION_MUTATIONS=false;OWNER_APPROVAL_ISSUED=false",flush=True);return
-   actor=auth["owner"](scope);need(actor==s.OWNER,"EXACT_LICENSED_OWNER")
+   bridge=modules["audit_journal_signed_owner_bridge"]
+   root_gate={"breaker":"closed","drift":"pass","peers_verified":True,
+              "mount_verified":True,"dataset_identity":scope["dataset_identity"]}
+   if args.stage_signed_owner_offer:
+    offer=bridge.create_staged_offer(scope,candidate,root_gate)
+    print("AUDIT_SIGNED_OWNER_ROOT_OFFER_STAGED=PASS",flush=True)
+    print("OWNER_RELEASE_ID="+offer["release_id"],flush=True)
+    print("OWNER_SCOPE_SHA256="+offer["scope_sha256"],flush=True)
+    print("OWNER_MANIFEST_SHA256="+offer["manifest_sha256"],flush=True)
+    print("GLOBAL_PRODUCTION_FREEZE_REMAINS_ACTIVE=true",flush=True)
+    print("NO_DATABASE_OR_PROVIDER_MUTATIONS=true",flush=True)
+    return
+   signed_owner=None
+   if args.adopt_signed_chatgpt_owner:
+    signed_owner=bridge.verify_previously_signed_root_offer(
+       scope,candidate,root_gate)
+    actor=s.OWNER
+   else:
+    actor=auth["owner"](scope);need(actor==s.OWNER,"EXACT_LICENSED_OWNER")
    again,after,again_original,again_desired=inspect(s,engine,modules["audit_journal_root_inventory"],candidate,payload,c)
    need(again==scope and again_original==original and again_desired==desired,"LIVE_REVIEWED_SCOPE_CHANGED")
-   save_record(payload,scope,before,original,desired,actor,ci_proof)
+   save_record(payload,scope,before,original,desired,actor,ci_proof,
+               signed_owner=signed_owner)
+   if signed_owner is not None:
+    bridge.consume_one_use(candidate,signed_owner)
    install(s,payload,scope,before,original,desired,actor,ci_proof,c)
  finally:temporary.cleanup()
 
