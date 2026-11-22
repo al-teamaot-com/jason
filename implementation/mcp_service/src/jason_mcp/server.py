@@ -1717,6 +1717,45 @@ def _governed_read_for_identity(
     }
 
 
+def _repair_kfs_device_projection_pagination(evidence: Any) -> Any:
+    """Never mark a 100-entry MCP-bound KFS page as a complete larger fleet.
+
+    The underlying KFS DeviceList contract supplies matched_count and an
+    absolute zero-based offset. Generic evidence projection may cap rich
+    device entries without updating next_offset/complete. Correct *metadata
+    only*; do not widen disclosure or synthesize device records.
+    """
+    if not isinstance(evidence, Mapping):
+        return evidence
+    data = evidence.get("data")
+    if not isinstance(data, Mapping):
+        return evidence
+    devices = data.get("devices")
+    offset = data.get("offset")
+    matched = data.get("matched_count")
+    if (
+        not isinstance(devices, list)
+        or type(offset) is not int
+        or type(matched) is not int
+        or offset < 0 or matched < 0
+    ):
+        return evidence
+    actual_count = len(devices)
+    if devices and devices[-1] == "[collection-bounded]":
+        actual_count -= 1
+    next_offset = offset + actual_count
+    if data.get("complete") is True and next_offset < matched:
+        fixed_data = dict(data)
+        fixed_data["complete"] = False
+        fixed_data["next_offset"] = next_offset
+        fixed_data["projection_bounded"] = True
+        fixed_data["returned_device_count"] = actual_count
+        fixed_evidence = dict(evidence)
+        fixed_evidence["data"] = fixed_data
+        return fixed_evidence
+    return evidence
+
+
 def _project_print_meter_usage_search(output: Mapping[str, Any]) -> dict[str, Any]:
     """Preserve the governed fleet dataset without weakening global MCP bounds.
 
@@ -7885,6 +7924,14 @@ def execute_read_capability(
                 result["evidence"] = _safe(
                     evidence
                 )
+
+    # Generic safe projections can cap KFS's rich DeviceList to 100 entries.
+    # Do not then claim the full 443+ device fleet was returned. Preserve a
+    # deterministic continuation offset while retaining the existing bound.
+    if capability_name == "print.device.search":
+        result["evidence"] = _repair_kfs_device_projection_pagination(
+            result.get("evidence")
+        )
 
     # The native Production Manager cannot accept a read-surface release
     # based on HTTP 200 alone. Only a real Entra-authenticated owner request
