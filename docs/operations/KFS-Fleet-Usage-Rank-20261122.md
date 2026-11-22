@@ -19,6 +19,11 @@ Provide a governed AOT-internal `print.fleet.usage.rank` read capability for top
 ## Verified live baseline
 On 2026-11-22 the existing governed `print.meter.usage.search` returned 435 distinct of 435 KFS inventory devices for October 2026 (correlation `corr_mcp_4429eb04a4a04802bac4c79715942924`), 432 valid measured usage records, 3 missing-meter-boundary exceptions, and 304 missing verified customer mappings. The operation is provider-backed and read-only.
 
+## KFS rich device-search projection integrity — 2026-11-22
+Live `print.device.search` with `limit=1000` returned only 100 richly structured records while its original provider metadata claimed `matched_count=443`, `complete=true` and `next_offset=null`. This is an MCP collection-bound projection defect, not KFS inventory source loss. Five normal provider-backed `limit=100` pages at offsets 0/100/200/300/400 independently reconciled to 443 unique IDs: 424 `managementStatus=1` and 19 `managementStatus=2`, all consecutive continuation offsets and final page 43. This is current inventory, not October 2026 meter coverage.
+
+The report fix preserves the security bound on individual rich device responses and repairs only contradictory completeness metadata to `complete=false`, `next_offset=offset+actual_returned`, `projection_bounded=true`, without inventing device records or changing provider state. Only a genuinely complete last page can report `complete=true`. Clients must honor returned continuation or use the governed full-fleet period report; never equate `matched_count` with the number actually returned in one rich search response.
+
 ## Engineering acceptance versus operational acceptance
 Focused local tests cover 435 devices, exceptions, ties, incomplete source, duplicate IDs, invalid arguments, AOT-only requester restrictions, and invoker-enforced full source retrieval. Source-only test success is not release acceptance. The deployed MCP must independently discover the new capability and execute a full October report under an authorized AOT requester, verifying coverage and top-five against same-source facts; then Adam and LaToshia must confirm conversational use. Missing customer identities remain explicit data-quality exceptions, not a pretext to fabricate mapping. Export and delivery under issue #1735 remain a separate operational acceptance gate.
 
