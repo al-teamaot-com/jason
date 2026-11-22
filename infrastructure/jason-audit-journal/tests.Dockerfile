@@ -15,5 +15,7 @@ COPY --chown=0:0 tools/audit_journal_owner_native_worker.py /test-source/audit_j
 COPY --chown=0:0 infrastructure/jason-audit-journal-owner-executor/jason-audit-journal-owner-executor.service /test-source/jason-audit-journal-owner-executor.service
 COPY --chown=0:0 infrastructure/jason-audit-journal-owner-executor/jason-audit-journal-owner-executor.path /test-source/jason-audit-journal-owner-executor.path
 COPY --chown=0:0 tools/tests/audit_journal_owner_executor_root_bootstrap_fixture.py /root-bootstrap-fixture.py
+COPY --chown=0:0 tools/audit_executor_drift_recovery.py /test-source/audit_executor_drift_recovery.py
+COPY --chown=0:0 tools/tests/audit_executor_drift_recovery_root_fixture.py /root-executor-retire-fixture.py
 COPY --chown=0:0 tools/tests/audit_journal_owner_native_worker_root_fixture.py /root-worker-fixture.py
 ENTRYPOINT ["/usr/bin/python3","-I","-B","/test.py"]

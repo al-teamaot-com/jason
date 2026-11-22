@@ -127,8 +127,11 @@ def test_installer_source_closure_pins_signed_owner_verifier_code():
     assert "signed_chatgpt_owner_approval" in body
 
 
-def test_actual_reviewed_scope_schema_has_source_dataset_identity_not_fake_alias():
+def test_actual_reviewed_scope_schema_has_source_dataset_identity_not_fake_alias(
+        tmp_path,monkeypatch):
     from tools import audit_journal_release_scope as scope
+    monkeypatch.setattr(scope,"OWNER_EXACT_ROOT_POLICY",
+                        tmp_path/"synthetic-no-root-policy.json")
     reviewed=scope.reviewed_scope(CANDIDATE,{}, {}, {}, {
         "dataset_identity":{"device":3,"inode":7},
         "producer_before":{},"producer_after":{},

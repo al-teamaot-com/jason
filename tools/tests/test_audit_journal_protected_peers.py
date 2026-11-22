@@ -9,6 +9,19 @@ from types import SimpleNamespace
 import pytest
 from tools import audit_journal_release_scope as scope
 
+
+@pytest.fixture(autouse=True)
+def independent_test_peer_policy(tmp_path,monkeypatch):
+    """Synthetic original peer fixtures never read a live Root-only policy.
+
+    Once Jason's approved Root watcher is installed, its mode0600 trust file
+    exists on production. Hosted CI has no such file. Keep deterministic
+    synthetic peer cases isolated without relaxing actual Root checks.
+    The dedicated provenance tests exercise the real conditional gate.
+    """
+    monkeypatch.setattr(scope,"OWNER_EXACT_ROOT_POLICY",
+                        tmp_path/"no-real-host-Root-policy-fixture.json")
+
 def peers():
     rows=[]
     for n,image in scope.EXPECTED_PEER_IMAGES.items():
