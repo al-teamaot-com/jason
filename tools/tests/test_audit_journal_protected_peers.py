@@ -118,3 +118,76 @@ def test_invalid_docker_status_rejected_without_any_mutation(monkeypatch):
     monkeypatch.setattr(scope.subprocess,"run",error)
     with pytest.raises(PermissionError,match="INVENTORY_UNAVAILABLE"):
         scope.protected_peer_inventory()
+
+
+def oom_stopped(rows):
+    shadow=next(x for x in rows if x["Name"]=="/jason-pmv4-shadow-gateway")
+    shadow["State"].update({
+        "Running":False,"Status":"exited","OOMKilled":True,
+        "ExitCode":137,"Pid":0})
+    shadow["RestartCount"]=0
+    return shadow
+
+
+def test_exact_oom_stopped_isolated_shadow_is_observed_not_restarted(monkeypatch):
+    rows=peers()
+    shadow=oom_stopped(rows)
+    seen=project(monkeypatch,rows)
+    result=scope.protected_peer_inventory()
+    evidence=result["jason-pmv4-shadow-gateway"]
+    assert evidence["running"] is False
+    assert evidence["observed_state"]=="exact_oom_stopped"
+    assert evidence["oom_killed"] is True
+    assert evidence["exit_code"]==137
+    assert evidence["health"]=="unhealthy"
+    assert evidence["preproduction_only"] is True
+    assert all(result[n]["health"] in ("healthy","none")
+               for n in result if n!="jason-pmv4-shadow-gateway")
+    assert len(seen)==1 and seen[0][1]=="inspect"
+    assert not any("start" in part or "update" in part or "run" in part
+                   for argv in seen for part in argv[1:4])
+
+
+@pytest.mark.parametrize("mutation",[
+    lambda r:r["State"].update(OOMKilled=False),
+    lambda r:r["State"].update(ExitCode=0),
+    lambda r:r["State"].update(ExitCode=143),
+    lambda r:r["State"].update(Status="created"),
+    lambda r:r["State"].update(Pid=1000),
+    lambda r:r.update(RestartCount=1),
+    lambda r:r["State"].update(Health={"Status":"none"}),
+    lambda r:r["HostConfig"].update(NetworkMode="bridge"),
+    lambda r:r["HostConfig"].update(ReadonlyRootfs=False),
+    lambda r:r["HostConfig"].update(CapDrop=[]),
+    lambda r:r["HostConfig"].update(Memory=8589934592),
+    lambda r:r["HostConfig"].update(Privileged=True),
+    lambda r:r["Config"]["Labels"].update(
+        {"com.aot.jason.provider-mutation":"enabled"}),
+    lambda r:r["Config"]["Labels"].update(
+        {"com.aot.jason.production-core":"true"}),
+    lambda r:r["Mounts"].append(
+        {"Type":"bind","Destination":"/var/lib/jason/governed-ticket-shared"}),
+    lambda r:r.update(Image="sha256:changed"),
+])
+def test_stopped_shadow_must_be_exact_original_oom_isolation(
+        monkeypatch,mutation):
+    rows=peers();shadow=oom_stopped(rows)
+    mutation(shadow)
+    project(monkeypatch,rows)
+    with pytest.raises(PermissionError):
+        scope.protected_peer_inventory()
+
+
+@pytest.mark.parametrize("n",[
+    "jason-runtime","jason-mcp-pilot","jason-pmv4-ticket-core",
+    "jason-teams-gateway","openbao"])
+def test_no_production_container_can_use_shadow_oom_exception(monkeypatch,n):
+    rows=peers()
+    row=next(x for x in rows if x["Name"]=="/"+n)
+    row["State"].update({
+        "Running":False,"Status":"exited","OOMKilled":True,
+        "ExitCode":137,"Pid":0})
+    row["RestartCount"]=0
+    project(monkeypatch,rows)
+    with pytest.raises(PermissionError,match="AUDIT_PEER_RUNNING_STATE_UNTRUSTED"):
+        scope.protected_peer_inventory()
