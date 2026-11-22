@@ -386,3 +386,96 @@ def test_incomplete_or_failed_full_service_cannot_revalidate_even_if_root_claime
     with pytest.raises(r.Denied,match="INTEGRITY_MISSING"):
         r.after_full_native_revalidation("2026-11-22T05:00:00+00:00")
     assert acted==[]
+
+
+def test_full_approved_root_trust_chain_is_pinned_to_exact_current_bytes():
+    """A downstream Main edit cannot silently invalidate a previous root pin."""
+    from hashlib import sha256
+    from tools import audit_journal_install as install
+    from tools import documentation_publisher_install as publisher
+    from tools import pmv4_e_operational_closure as closure
+
+    chain = (
+        (r.CORE_SHA, ROOT / "tools/audit_journal_install.py"),
+        (install.PRIMITIVES_SHA, ROOT / "tools/documentation_publisher_install.py"),
+        (publisher.PRIMITIVES, ROOT / "tools/pmv4_e_operational_closure.py"),
+        (closure.INSTALLER_SHA, ROOT / "tools/pmv4_e_dispatch_install.py"),
+    )
+    for expected, source in chain:
+        assert expected == sha256(source.read_bytes()).hexdigest(), (
+            f"stale exact-approval Root trust pin: {source.name}"
+        )
+
+
+def test_current_protected_main_root_bootstrap_reaches_reviewed_primitives_offline(
+        monkeypatch):
+    """Exercise the previously untested positive path, not just its denial."""
+    from types import SimpleNamespace
+
+    sha = "a" * 40
+
+    def offline_git(*args):
+        return {"rev-parse": sha, "status": "",
+                "ls-remote": sha + "\trefs/heads/main"}[args[0]]
+
+    monkeypatch.setattr(r, "os", SimpleNamespace(geteuid=lambda: 0))
+    monkeypatch.setattr(r, "sys", SimpleNamespace(
+        flags=SimpleNamespace(isolated=1)))
+    monkeypatch.setattr(r, "git", offline_git)
+    # Every file here is real source committed in the tested checkout.
+    # GitHub independently verifies its exact Main SHA before production.
+    monkeypatch.setattr(r, "exact_source",
+                        lambda candidate, name: (ROOT / name).read_bytes())
+    # The nested established installer verifies the original file's UID1000
+    # and uses a service-user `git show`. Portable CI does not have that UID
+    # or the `al` account: simulate only custody and exact Git readback for
+    # this committed file, never the approval/lock/Root production services.
+    import subprocess
+    original_run = subprocess.run
+    original_lstat = Path.lstat
+    document_source = ROOT / "tools/documentation_publisher_install.py"
+
+    def synthetic_lstat(self, *args, **kwargs):
+        result = original_lstat(self, *args, **kwargs)
+        if self == document_source:
+            return SimpleNamespace(st_mode=result.st_mode, st_uid=1000,
+                                   st_nlink=result.st_nlink, st_size=result.st_size)
+        return result
+
+    def synthetic_source_git(argv, *args, **kwargs):
+        if (argv[0] == "/usr/sbin/runuser" and
+                "/usr/bin/git" in argv and "show" in argv):
+            actual_candidate, name = argv[-1].split(":", 1)
+            assert actual_candidate == sha
+            assert name == "tools/documentation_publisher_install.py"
+            return subprocess.CompletedProcess(argv, 0,
+                                               stdout=(ROOT / name).read_bytes())
+        return original_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", synthetic_lstat)
+    monkeypatch.setattr(subprocess, "run", synthetic_source_git)
+    blobs, controls, authority = r.source_bootstrap(sha)
+    assert set(blobs) == set(r.SOURCES)
+    assert all(callable(controls[name]) for name in
+               ("peers", "verify_units", "directory"))
+    assert all(callable(authority[name]) for name in ("locks", "owner"))
+
+
+def test_stale_root_chain_pin_denied_before_owner_identity_or_mutation(
+        monkeypatch):
+    from types import SimpleNamespace
+
+    sha = "b" * 40
+    monkeypatch.setattr(r, "os", SimpleNamespace(geteuid=lambda: 0))
+    monkeypatch.setattr(r, "sys", SimpleNamespace(
+        flags=SimpleNamespace(isolated=1)))
+    monkeypatch.setattr(r, "git", lambda *args:
+        sha + "\trefs/heads/main" if args[0] == "ls-remote"
+        else "" if args[0] == "status" else sha)
+    monkeypatch.setattr(r, "exact_source",
+                        lambda candidate, name: (ROOT / name).read_bytes())
+    monkeypatch.setattr(r, "CORE_SHA", "0" * 64)
+
+    with pytest.raises(r.Denied,
+                       match="AUDIT_P0_PREVIOUS_APPROVED_TRUST_CORE_CHANGED"):
+        r.source_bootstrap(sha)
