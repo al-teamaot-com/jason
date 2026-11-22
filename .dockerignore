@@ -29,3 +29,13 @@ implementation/**/*.egg-info/**
 **/*.key
 **/*.pfx
 **/*.p12
+
+# Exact source-only P0 full-audit Root fixture; no additional host data.
+!tools/audit_full_health_p0_recovery.py
+!tools/audit_full_health_p0_snapshot.py
+!tools/audit_full_health_p0_operational.py
+!tools/openclaw_authority_health_snapshot.py
+!tools/tests/
+!tools/tests/audit_full_health_p0_root_fixture.py
+!infrastructure/jason-audit-full-health-p0/
+!infrastructure/jason-audit-full-health-p0/tests.Dockerfile
