@@ -388,15 +388,23 @@ def test_incomplete_or_failed_full_service_cannot_revalidate_even_if_root_claime
     assert acted==[]
 
 
-def test_full_approved_root_trust_chain_is_pinned_to_exact_current_bytes():
-    """A downstream Main edit cannot silently invalidate a previous root pin."""
+def test_approved_historical_p0_pin_stays_immutable_after_new_archive_source():
+    """Do not rebind a consumed P0 Owner approval to a new archive installer."""
     from hashlib import sha256
     from tools import audit_journal_install as install
     from tools import documentation_publisher_install as publisher
     from tools import pmv4_e_operational_closure as closure
 
+    historical_p0_approved_sha = (
+        "64f451c03fe75b70c80462938d1199f35ce73b82f6b2ef4891e3c7d9c879e432"
+    )
+    current_archive_sha = sha256((ROOT / "tools/audit_journal_install.py").read_bytes()).hexdigest()
+    assert r.CORE_SHA == historical_p0_approved_sha
+    assert current_archive_sha != r.CORE_SHA, (
+        "the new signed Owner installer must NOT be treated as the old P0 approval"
+    )
+    # These reusable native primitives still require unchanged exact bytes.
     chain = (
-        (r.CORE_SHA, ROOT / "tools/audit_journal_install.py"),
         (install.PRIMITIVES_SHA, ROOT / "tools/documentation_publisher_install.py"),
         (publisher.PRIMITIVES, ROOT / "tools/pmv4_e_operational_closure.py"),
         (closure.INSTALLER_SHA, ROOT / "tools/pmv4_e_dispatch_install.py"),
@@ -454,6 +462,12 @@ def test_current_protected_main_root_bootstrap_reaches_reviewed_primitives_offli
 
     monkeypatch.setattr(Path, "lstat", synthetic_lstat)
     monkeypatch.setattr(subprocess, "run", synthetic_source_git)
+    # Only this synthetic primitive-integration test substitutes the current
+    # archive installer digest. Real Root source_bootstrap retains the old
+    # approved digest and must refuse the new installer (tested separately).
+    from hashlib import sha256 as synthetic_digest
+    monkeypatch.setattr(r, "CORE_SHA", synthetic_digest(
+        (ROOT / "tools/audit_journal_install.py").read_bytes()).hexdigest())
     blobs, controls, authority = r.source_bootstrap(sha)
     assert set(blobs) == set(r.SOURCES)
     assert all(callable(controls[name]) for name in
@@ -476,6 +490,23 @@ def test_stale_root_chain_pin_denied_before_owner_identity_or_mutation(
                         lambda candidate, name: (ROOT / name).read_bytes())
     monkeypatch.setattr(r, "CORE_SHA", "0" * 64)
 
+    with pytest.raises(r.Denied,
+                       match="AUDIT_P0_PREVIOUS_APPROVED_TRUST_CORE_CHANGED"):
+        r.source_bootstrap(sha)
+
+
+def test_old_p0_owner_approval_refuses_new_signed_archive_installer(monkeypatch):
+    """New archive adoption is a DIFFERENT action and may not inherit P0 consent."""
+    from types import SimpleNamespace
+    sha = "a" * 40
+    monkeypatch.setattr(r, "os", SimpleNamespace(geteuid=lambda: 0))
+    monkeypatch.setattr(r, "sys", SimpleNamespace(
+        flags=SimpleNamespace(isolated=1)))
+    monkeypatch.setattr(r, "git", lambda *args:
+        sha + "\trefs/heads/main" if args[0] == "ls-remote"
+        else "" if args[0] == "status" else sha)
+    monkeypatch.setattr(r, "exact_source",
+        lambda candidate, name: (ROOT / name).read_bytes())
     with pytest.raises(r.Denied,
                        match="AUDIT_P0_PREVIOUS_APPROVED_TRUST_CORE_CHANGED"):
         r.source_bootstrap(sha)
