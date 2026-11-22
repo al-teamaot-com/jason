@@ -17,7 +17,8 @@ PACKET = ROOT / "config/jason-owner-audit-unified-scoped-release.json"
 LKG = "d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 OWNER = "ec891ae49428357ccae8fa3b990c021a124b41d9"
 AUDIT = "1bb2fe561b1189b3c46363a84ecf3eaaa39f5877"
-UNIFIED = "cddf6c38d4516d14c2840a5475dbd59c95f7306a"
+UNIFIED = "6f5d2896a80ec4f4b995430fe4fedf3ef1340943"
+UNIFIED_PREVIOUS = "cddf6c38d4516d14c2840a5475dbd59c95f7306a"
 ORIGINAL_TOOLS_SHA = "6ea28fc61d43096a8def64750ee2d5ad76c92486e6539c1a08660bfdbe037d64"
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
@@ -75,7 +76,8 @@ def verify_denied_authority(packet: dict) -> None:
 
 
 def test_exact_source_ancestry_is_reachable_from_reviewed_main():
-    assert git("rev-list", "--parents", "-n", "1", UNIFIED).decode().strip() == f"{UNIFIED} {OWNER}"
+    assert git("rev-list", "--parents", "-n", "1", UNIFIED).decode().strip() == f"{UNIFIED} {UNIFIED_PREVIOUS}"
+    assert git("rev-list", "--parents", "-n", "1", UNIFIED_PREVIOUS).decode().strip() == f"{UNIFIED_PREVIOUS} {OWNER}"
     assert git("rev-list", "--parents", "-n", "1", OWNER).decode().strip() == f"{OWNER} {LKG}"
     assert git("rev-list", "--parents", "-n", "1", AUDIT).decode().split()[1] == LKG
     assert subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", UNIFIED, "HEAD"]).returncode == 0
@@ -96,6 +98,9 @@ def test_images_are_exact_nonidentical_source_bound_candidates():
     runtime = packet["unchanged_runtime_image_id"]
     assert all(isinstance(x, str) and DIGEST.fullmatch(x) for x in (image, rollback, runtime))
     assert len({image, rollback, runtime}) == 3
+    assert image == "sha256:7ae7bb3b39d226fbf5684408737ce11b57b2b75604e883014af50e9a5c6b94f0"
+    assert packet["candidate_image_scope_label"] == "licensed-owner-plus-audit-issuer-only"
+    assert packet["supersedes_candidate_sha"] == UNIFIED_PREVIOUS
     assert packet["original_freeze_sha256"] == "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f"
 
 
@@ -105,6 +110,9 @@ def test_reviewed_candidate_has_one_issuer_and_one_licensed_owner_policy():
     assert text.count("def _licensed_jason_owner(") == 1
     assert "JASON_AUDIT_JOURNAL_OWNER_ISSUER_ENABLED" in text
     assert "JASON_AOT_ADMIN_APPROVER_PROFILE" in text
+    dockerfile = git("show", UNIFIED + ":infrastructure/jason-audit-owner-issuer/Dockerfile").decode()
+    assert 'LABEL com.teamaot.jason.scope="licensed-owner-plus-audit-issuer-only"' in dockerfile
+    assert 'com.teamaot.jason.scope="audit-journal-owner-issuer-only"' not in dockerfile
 
 
 def test_changed_source_hash_fails_closed():

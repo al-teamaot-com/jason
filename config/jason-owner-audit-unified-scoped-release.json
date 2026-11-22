@@ -1,8 +1,9 @@
 {
   "archive_adoption_performed": false,
   "audit_issuer_source_sha": "1bb2fe561b1189b3c46363a84ecf3eaaa39f5877",
-  "candidate_mcp_image_id": "sha256:47e55b6ac711128b0567b416f48d08d0663b8201f13dfdbfc0b02e45e6358f2f",
-  "candidate_sha": "cddf6c38d4516d14c2840a5475dbd59c95f7306a",
+  "candidate_image_scope_label": "licensed-owner-plus-audit-issuer-only",
+  "candidate_mcp_image_id": "sha256:7ae7bb3b39d226fbf5684408737ce11b57b2b75604e883014af50e9a5c6b94f0",
+  "candidate_sha": "6f5d2896a80ec4f4b995430fe4fedf3ef1340943",
   "exact_change_scope": {
     "added_owner_tool": "approve_audit_journal_adoption",
     "archive_stage_requires_separate_live_signed_offer": true,
@@ -63,7 +64,7 @@
     "implementation/mcp_service/src/jason_mcp/server.py": "de3815918aecef3bd2429a5ce3448adf0ae692655ea15b46547e7019786f9857",
     "implementation/mcp_service/tests/test_audit_journal_adoption_approval.py": "b1b5bfb4d0035e21adc0205766e94be1a49437a219d58c11230c842e6c8df457",
     "implementation/mcp_service/tests/test_jason_licensed_owner_profile.py": "b3bb90c8e83c97934a8e573ff2f3da3103b1aed8f1155a5a42c1249e23a1bb31",
-    "infrastructure/jason-audit-owner-issuer/Dockerfile": "11e3b9e2c10fbc4985c23c12bf88f9deebf690f4cef53880c156f9a51b628aca",
+    "infrastructure/jason-audit-owner-issuer/Dockerfile": "5c09f9281dae0d75da2b517820dc36609fb7c6a3cb842ef66f83ed62c558562f",
     "infrastructure/jason-mcp/production-deploy.sh": "ae22bc7777d3c073dac34e7706ff83e89d2b4104d9f4aa947ae5552a74a0c63f",
     "tools/jason_owner_auth_profile.py": "96623c201396a7d53931a747064e6e726c1f3586cc4289a86caed7a52bd3a334",
     "tools/release_manager_host_runner.py": "bd75a17bc23f98b00c531c83793c30549bfb7f65ae85e81102af53826ac1cd06",
@@ -71,5 +72,7 @@
     "tools/tests/test_jason_owner_auth_profile.py": "8c0c82218409c5605ce5b6f281432fa56f2ba4931f33f98ea8842932bcffd311"
   },
   "stage": "source_image_isolated_preproduction_only",
+  "supersedes_candidate_mcp_image_id": "sha256:47e55b6ac711128b0567b416f48d08d0663b8201f13dfdbfc0b02e45e6358f2f",
+  "supersedes_candidate_sha": "cddf6c38d4516d14c2840a5475dbd59c95f7306a",
   "unchanged_runtime_image_id": "sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132"
 }
