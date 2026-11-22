@@ -10,5 +10,10 @@ COPY --chown=0:0 tools/tests/audit_journal_bootstrap_fixture.py /bootstrap_fixtu
 COPY --chown=0:0 tools/tests/audit_journal_installer_fixture.py /installer_fixture.py
 COPY --chown=0:0 tools/tests/audit_journal_signed_owner_root_fixture.py /signed-owner-fixture.py
 COPY --chown=0:0 tools/audit_journal_owner_native_worker.py /test-source/worker.py
+COPY --chown=0:0 tools/audit_journal_owner_executor_bootstrap.py /test-source/audit_journal_owner_executor_bootstrap.py
+COPY --chown=0:0 tools/audit_journal_owner_native_worker.py /test-source/audit_journal_owner_native_worker.py
+COPY --chown=0:0 infrastructure/jason-audit-journal-owner-executor/jason-audit-journal-owner-executor.service /test-source/jason-audit-journal-owner-executor.service
+COPY --chown=0:0 infrastructure/jason-audit-journal-owner-executor/jason-audit-journal-owner-executor.path /test-source/jason-audit-journal-owner-executor.path
+COPY --chown=0:0 tools/tests/audit_journal_owner_executor_root_bootstrap_fixture.py /root-bootstrap-fixture.py
 COPY --chown=0:0 tools/tests/audit_journal_owner_native_worker_root_fixture.py /root-worker-fixture.py
 ENTRYPOINT ["/usr/bin/python3","-I","-B","/test.py"]

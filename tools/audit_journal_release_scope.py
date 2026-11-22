@@ -1,7 +1,11 @@
 """Exact, reviewable scope of the bounded audit-journal installation."""
 from __future__ import annotations
 from hashlib import sha256
+from datetime import datetime,timezone
 import json
+import os
+import re
+import stat
 import subprocess
 from pathlib import Path
 
@@ -73,6 +77,67 @@ BASE_IMAGES={
 # is recorded, but an otherwise exact, network-isolated and immutable shadow
 # is not a prerequisite for genuine native SQLite recovery. The five actual
 # production peers remain hard health requirements. No native drift exception.
+OWNER_EXACT_ROOT_POLICY=Path("/etc/jason-owner-release/audit-journal-owner-executor-v1.json")
+OWNER_MCP_BASE_IMAGE=BASE_IMAGES["jason-mcp-pilot"]
+
+
+def current_base_images(candidate=None):
+ """Allow only a separately Root-attested exact additive Owner MCP image.
+
+ Missing policy means original immutable MCP only; no request, environment
+ variable, source-only change or model assertion can authorize a different
+ production peer. The one-use Root-installed file binds image, code SHA,
+ protected Main, LKG and expiry. All other production images stay exact.
+ """
+ images=dict(BASE_IMAGES)
+ policy_path=OWNER_EXACT_ROOT_POLICY
+ if not os.path.lexists(policy_path):return images
+ try:
+  m=policy_path.lstat();parent=policy_path.parent.lstat()
+  if (policy_path.is_symlink() or not stat.S_ISREG(m.st_mode)
+      or m.st_uid!=0 or stat.S_IMODE(m.st_mode)!=0o600
+      or m.st_nlink!=1 or m.st_size>8192
+      or parent.st_uid!=0 or parent.st_mode&0o022):
+   raise ValueError("OWNER_ROOT_TRUST_CUSTODY")
+  policy=json.loads(policy_path.read_bytes())
+  candidate_sha=policy.get("candidate_sha")
+  overlay=policy.get("mcp_overlay_image_id")
+  base=policy.get("mcp_base_image_id")
+  expire=datetime.fromisoformat(policy["expires_at"])
+  if (policy.get("schema_version")!="1.0"
+      or policy.get("action")!="ADOPT-EXACT-DAILY-AUDIT-JOURNAL"
+      or not isinstance(candidate_sha,str)
+      or re.fullmatch(r"[0-9a-f]{40}",candidate_sha) is None
+      or candidate is not None and candidate!=candidate_sha
+      or policy.get("rollback_sha")!=ROLLBACK
+      or base!=OWNER_MCP_BASE_IMAGE
+      or not isinstance(overlay,str)
+      or re.fullmatch(r"sha256:[0-9a-f]{64}",overlay) is None
+      or policy.get("one_use_executor") is not True
+      or policy.get("global_freeze_unchanged") is not True
+      or policy.get("standing_authority") is not False
+      or expire.tzinfo is None
+      or not datetime.now(timezone.utc)<expire):
+   raise ValueError("OWNER_ROOT_TRUST_SCOPE")
+  cmd=subprocess.run(["/usr/bin/docker","image","inspect",overlay],
+                     capture_output=True,text=True,timeout=18,check=False)
+  if cmd.returncode:raise ValueError("OWNER_ADDON_IMAGE_MISSING")
+  rows=json.loads(cmd.stdout)
+  if not isinstance(rows,list) or len(rows)!=1:raise ValueError("OWNER_ADDON_AMBIGUOUS")
+  row=rows[0];labels=row.get("Config",{}).get("Labels",{})
+  if (row.get("Id")!=overlay
+      or labels.get("com.teamaot.jason.audit_overlay_reviewed_main_sha")!=candidate_sha
+      or labels.get("com.teamaot.jason.audit_overlay_base_image_sha256")!=base[7:]
+      or labels.get("com.teamaot.jason.audit_overlay_purpose")!=
+       "one-use-owner-archive-adoption"
+      or row.get("Config",{}).get("User")!="1000:1000"):
+   raise ValueError("OWNER_ADDON_IMAGE_PROVENANCE")
+  images["jason-mcp-pilot"]=overlay
+  return images
+ except (OSError,ValueError,KeyError,TypeError,subprocess.TimeoutExpired) as exc:
+  raise PermissionError("AUDIT_OWNER_MCP_EXACT_PROVENANCE_DENIED") from exc
+
+
 EXPECTED_PEER_IMAGES={
  **BASE_IMAGES,
  "jason-pmv4-shadow-gateway":"sha256:679d3334efe7fbe32878b10fb06077912b57473bc3998316d26e9fd7a3d46bbd",
@@ -92,13 +157,14 @@ def protected_peer_inventory():
  if not isinstance(rows,list) or len(rows)!=len(EXPECTED_PEER_IMAGES):
   raise PermissionError("AUDIT_PEER_INVENTORY_INCOMPLETE")
  verified={}
+ active_expected={**EXPECTED_PEER_IMAGES,**current_base_images()}
  for row in rows:
   name=str(row.get("Name","")).lstrip("/")
   if name not in EXPECTED_PEER_IMAGES or name in verified:
    raise PermissionError("AUDIT_PEER_NAME_UNTRUSTED")
   state=row.get("State") or {}
   health=(state.get("Health") or {}).get("Status","none")
-  if (row.get("Image")!=EXPECTED_PEER_IMAGES[name]
+  if (row.get("Image")!=active_expected[name]
       or not state.get("StartedAt")
       or not isinstance(row.get("Id"),str) or len(row["Id"])<30):
    raise PermissionError("AUDIT_PEER_IDENTITY_UNTRUSTED:"+name)
@@ -196,7 +262,7 @@ def reviewed_scope(candidate,code_hashes,native_hashes,unit_hashes,facts):
   "native_health_sha256":native_hashes,"unit_source_sha256":unit_hashes,
   "source_dataset_identity":facts["dataset_identity"],
   "producer_before":facts["producer_before"],"producer_after_configuration_sha256":facts["producer_after"],
-  "same_base_images":BASE_IMAGES,"initial_container_replacements":3,
+  "same_base_images":current_base_images(candidate),"initial_container_replacements":3,
   "possible_recovery_container_replacements":3,"availability_interruption_authorized":True,
   "inflight_write_drain_required":True,"historical_consumed_claims_unchanged":True,
   "cross_release_transaction_exclusion_required":True,

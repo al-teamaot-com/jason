@@ -36,6 +36,8 @@ with tempfile.TemporaryDirectory(prefix="audit-root-executor-fixture-",dir="/tmp
        "candidate_sha":sha,"rollback_sha":x.ROLLBACK,
        "worker_sha256":sha256(worker.read_bytes()).hexdigest(),
        "installer_sha256":"b"*64,
+       "mcp_base_image_id":"sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477",
+       "mcp_overlay_image_id":"sha256:"+"a"*64,
        "source_worktree":str(checkout),
        "standing_authority":False,"one_use_executor":True,
        "permitted_actions":sorted(x.ALLOWED),
