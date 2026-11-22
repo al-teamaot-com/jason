@@ -68,6 +68,10 @@ def prepared_live(tmp_path,monkeypatch,payload):
         "observed_at":datetime.now(timezone.utc).isoformat()
     }
     monkeypatch.setattr(x,"DRIFT_READBACK",record("drift.json",drift))
+    # Synthetic CI has no Root-owned desired policy. The real UID0 Root fixture
+    # independently checks the actual file ownership/mode/declared names.
+    monkeypatch.setattr(x,"root_desired_state_predeclares_temporary_watcher",
+                        lambda:"d"*64)
     monkeypatch.setattr(x,"FAST_READBACK",record(
         "fast.json",{"status":"pass","failures":[]}))
     monkeypatch.setattr(x,"FULL_READBACK",record(
@@ -181,6 +185,7 @@ def test_approved_readonly_root_preflight_pins_exact_live_image(
     result=x.live_readonly_admission(source,CANDIDATE,rows)
     assert result["mcp_overlay_image_id"]==OVERLAY
     assert result["original_mcp_image_id"]==x.MCP_BASE
+    assert result["original_root_desired_policy_sha256"]=="d"*64
     assert result["original_freeze_sha256"]
     assert result["archive_only"] is True
     assert result["freeze_left_active"] is True

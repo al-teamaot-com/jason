@@ -32,6 +32,8 @@ DRIFT_READBACK=Path("/var/lib/jason/openclaw/release-manager/protected-readback/
 FAST_READBACK=Path("/var/lib/jason/openclaw/operational-health.json")
 FULL_READBACK=Path("/var/lib/jason/openclaw/operational-full-health.json")
 FREEZE_PATH=Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
+ROOT_DRIFT_POLICY=Path("/etc/jason/release-readback-recovery/production-desired-state.json")
+WATCHDOG_UNIT="jason-production-drift-watchdog.service"
 CANONICAL_DB=Path("/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3")
 ARCHIVE_DRIVE=Path("/srv/jason/archive")
 ROLLBACK_SHA="d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
@@ -115,6 +117,56 @@ def source_verified(source,candidate):
                 "ROOT_PRIVATE_SOURCE_HASH_REQUIRED")
     return out
 
+def root_desired_state_predeclares_temporary_watcher():
+    """Independent Root desired state must already admit both new units.
+
+    The prior bootstrap omitted this check and the watchdog OPENED the
+    production breaker. NEVER install a systemd unit before its protected
+    inventory explicitly lists the exact name. This checker is read-only;
+    only a separately governed Root policy release can create an allowance.
+    """
+    path=ROOT_DRIFT_POLICY
+    parent=path.parent
+    pmeta=path.lstat();dmeta=parent.lstat()
+    require(not path.is_symlink() and not parent.is_symlink()
+            and stat.S_ISREG(pmeta.st_mode) and pmeta.st_uid==0
+            and stat.S_IMODE(pmeta.st_mode)==0o600
+            and pmeta.st_nlink==1 and 0<pmeta.st_size<=131072
+            and stat.S_ISDIR(dmeta.st_mode) and dmeta.st_uid==0
+            and not (dmeta.st_mode&0o022),
+            "INDEPENDENT_ROOT_DRIFT_POLICY_CUSTODY")
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    try:
+        observed=os.fstat(fd)
+        require((pmeta.st_dev,pmeta.st_ino,pmeta.st_size)==
+                (observed.st_dev,observed.st_ino,observed.st_size),
+                "INDEPENDENT_ROOT_DRIFT_POLICY_CHANGED")
+        raw=os.read(fd,131073)
+        require(len(raw)==pmeta.st_size,"ROOT_DRIFT_POLICY_SHORT_READ")
+    finally:
+        os.close(fd)
+    policy=json.loads(raw)
+    require(isinstance(policy,dict)
+            and policy.get("schema_version")=="1.0"
+            and isinstance(policy.get("allowed_system_units"),list)
+            and isinstance(policy.get("required_system_units"),list),
+            "ROOT_DRIFT_POLICY_SCHEMA")
+    allowed=policy["allowed_system_units"]
+    required=policy["required_system_units"]
+    units=(UNIT_SERVICE,UNIT_PATH)
+    require(all(allowed.count(u)==1 for u in units)
+            and all(u not in required for u in units),
+            "ROOT_DESIRED_STATE_AUDIT_WATCHER_NOT_PREDECLARED")
+    # Ensure the Root watchdog actually consumes THIS protected config;
+    # an unused policy file is not release authority.
+    out=command(["/usr/bin/systemctl","show",WATCHDOG_UNIT,
+                 "--property=ExecStart","--value"],timeout=15)
+    require(str(path) in out and
+            "/opt/jason/current/tools/production_drift_watchdog.py" in out,
+            "LIVE_DRIFT_WATCHDOG_NOT_USING_APPROVED_POLICY")
+    return digest(raw)
+
+
 def live_readonly_admission(source,candidate,payload):
     control=json.loads(CONTROL_READBACK.read_bytes())
     drift=json.loads(DRIFT_READBACK.read_bytes())
@@ -131,6 +183,7 @@ def live_readonly_admission(source,candidate,payload):
     require(drift.get("status")=="pass" and drift.get("problems")==[]
             and 0<=age<=180,
             "PRODUCTION_DRIFT_NOT_FRESH_PASS")
+    root_desired_policy_sha256=root_desired_state_predeclares_temporary_watcher()
     require(health.get("status")=="pass" and health.get("failures")==[]
             and full.get("status")=="pass" and full.get("failures")==[],
             "GENUINE_HEALTH_NOT_PASS")
@@ -216,6 +269,7 @@ def live_readonly_admission(source,candidate,payload):
             "mcp_overlay_image_id":image[0]["Id"],
             "source_digest_sha256":{k:digest(v) for k,v in payload.items()},
             "original_freeze_sha256":digest(freeze.read_bytes()),
+            "original_root_desired_policy_sha256":root_desired_policy_sha256,
             "canonical_journal_inode":st.st_ino,
             "canonical_journal_bytes":st.st_size,
             "separate_archive_volume":True,"breaker":"closed",
@@ -237,6 +291,10 @@ def exclusive(path,raw,uid,mode):
 
 def root_install(source,candidate,payload,facts):
     require(os.geteuid()==0,"EXACT_HOST_ROOT_REQUIRED")
+    # Recheck before writing anything to avoid a policy race after preflight.
+    require(root_desired_state_predeclares_temporary_watcher()==
+            facts.get("original_root_desired_policy_sha256"),
+            "ROOT_DESIRED_STATE_CHANGED_SINCE_PREFLIGHT")
     for parent,uid in ((ROOT_CODE.parent.parent,0),
                        (ROOT_POLICY.parent,0),(NATIVE_UNIT_DIR,0),
                        (TRUST_DIR,0),(PUBLIC.parent,1000)):
