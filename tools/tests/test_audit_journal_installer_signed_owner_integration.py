@@ -14,7 +14,7 @@ from tools import audit_journal_signed_owner_bridge as bridge
 CANDIDATE="a"*40
 SCOPE={"action":bridge.ACTION,"policy":{
     "candidate_sha":CANDIDATE,"rollback_sha":bridge.ROLLBACK},
-    "dataset_identity":{"device":3,"inode":7}}
+    "source_dataset_identity":{"device":3,"inode":7}}
 BEFORE={"jason-runtime":{"Id":"fixture"}}
 ORIGINAL=b'{"protected":"policy"}'
 DESIRED={"protected":"policy","archive":"reviewed"}
@@ -80,6 +80,8 @@ def test_original_signed_root_offer_stages_without_migration(tmp_path,monkeypatc
     install.main()
     names=[name for name,_ in rec]
     assert names==["live-root-inspect","root-stage-offer","clean-releases"]
+    stage_args=[args for name,args in rec if name=="root-stage-offer"][0]
+    assert stage_args[2]["dataset_identity"]==SCOPE["source_dataset_identity"]
     output=capsys.readouterr().out
     assert "GLOBAL_PRODUCTION_FREEZE_REMAINS_ACTIVE=true" in output
     assert "NO_DATABASE_OR_PROVIDER_MUTATIONS=true" in output
@@ -93,6 +95,8 @@ def test_verified_signed_owner_is_required_before_exact_root_transaction(
         "live-root-inspect","immutable-root-approved-record",
         "one-use-owner-claim","original-reviewed-install",
         "clean-releases"]
+    verify_args=[args for name,args in rec if name=="verify-real-owner-signature"][0]
+    assert verify_args[2]["dataset_identity"]==SCOPE["source_dataset_identity"]
     claim=[args for name,args in rec if name=="immutable-root-approved-record"]
     assert claim[0]["signed_owner"]["approval_id"]==OWN["approval_id"]
 
@@ -121,3 +125,15 @@ def test_installer_source_closure_pins_signed_owner_verifier_code():
     assert "bridge.consume_one_use" in body
     assert "GLOBAL_PRODUCTION_FREEZE_REMAINS_ACTIVE" in body
     assert "signed_chatgpt_owner_approval" in body
+
+
+def test_actual_reviewed_scope_schema_has_source_dataset_identity_not_fake_alias():
+    from tools import audit_journal_release_scope as scope
+    reviewed=scope.reviewed_scope(CANDIDATE,{}, {}, {}, {
+        "dataset_identity":{"device":3,"inode":7},
+        "producer_before":{},"producer_after":{},
+        "desired_after_sha256":"f"*64,
+        "archive_root_metadata":{"uid":1000,"gid":984,"mode":"0o2770"},
+    })
+    assert reviewed["source_dataset_identity"]==SCOPE["source_dataset_identity"]
+    assert "dataset_identity" not in reviewed

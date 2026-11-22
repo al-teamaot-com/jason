@@ -312,7 +312,7 @@ def main():
     print("PRODUCTION_MUTATIONS=false;OWNER_APPROVAL_ISSUED=false",flush=True);return
    bridge=modules["audit_journal_signed_owner_bridge"]
    root_gate={"breaker":"closed","drift":"pass","peers_verified":True,
-              "mount_verified":True,"dataset_identity":scope["dataset_identity"]}
+              "mount_verified":True,"dataset_identity":scope["source_dataset_identity"]}
    if args.stage_signed_owner_offer:
     offer=bridge.create_staged_offer(scope,candidate,root_gate)
     print("AUDIT_SIGNED_OWNER_ROOT_OFFER_STAGED=PASS",flush=True)
