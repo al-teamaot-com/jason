@@ -197,9 +197,8 @@ def verify_previously_signed_root_offer(scope,candidate,root_gate):
          "ROOT_STAGE_EVIDENCE_CHANGED")
     now=datetime.now(timezone.utc)
     earlier=datetime.fromisoformat(stage["staged_at"])
-    need(earlier.tzinfo is not None and
-         0 <= (now-earlier).total_seconds()<=600,
-         "ROOT_STAGE_EXPIRED")
+    need(earlier.tzinfo is not None,
+         "ROOT_STAGE_TIME_INVALID")
     need(offer=={
        "schema_version":"1.0","action":ACTION,
        "release_id":release_id,"candidate_sha":candidate,
@@ -240,6 +239,16 @@ def verify_previously_signed_root_offer(scope,candidate,root_gate):
         expected_manifest_sha256=stage["manifest_sha256"],
         expected_freeze_sha256=stage["freeze_sha256"],at=now,
     )
+    # A Root offer must be signed within its ORIGINAL ten-minute window.
+    # Once signed, the exact Owner proof has its OWN shorter-lived deadline
+    # (15 minutes after signing) which the cryptographic verifier enforces.
+    # Do not deny a genuine proof merely because a queued Root consumer
+    # resumed 10+ minutes after the original stage: that would force a new
+    # Owner approval for the SAME already signed, unchanged exact action.
+    issued=datetime.fromisoformat(proof["issued_at"])
+    need(issued.tzinfo is not None
+         and -10 <= (issued-earlier).total_seconds() <= 600,
+         "OWNER_SIGNATURE_OUTSIDE_ORIGINAL_OFFER_WINDOW")
     need(proof.get("owner_oid")==OWNER
          and proof.get("owner_principal")==OWNER_PRINCIPAL
          and proof.get("tenant_id")==TENANT

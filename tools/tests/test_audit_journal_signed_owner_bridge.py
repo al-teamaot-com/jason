@@ -204,3 +204,48 @@ def test_signed_mcp_source_never_claims_to_deploy():
     assert "available" not in source or "Root" in source
     assert "verify_exact_owner_release" in source
     assert "O_EXCL" in source
+
+
+def test_existing_owner_signature_remains_usable_after_stage_offer_ttl(
+        tmp_path,monkeypatch):
+    """A queued native Root service need not demand a SECOND Owner approval."""
+    base=datetime.now(timezone.utc)
+    class Clock(datetime):
+        stage_offset_minutes=-8
+        @classmethod
+        def now(cls,tz=None):
+            result=base+timedelta(minutes=cls.stage_offset_minutes)
+            return result.astimezone(tz) if tz else result.replace(tzinfo=None)
+    monkeypatch.setattr(bridge,"datetime",Clock)
+    # Root stages eight minutes before the licensed Owner signs.
+    offer,scope,signer,public,staged=stage_and_sign(tmp_path,monkeypatch)
+    # The signed 15-minute proof is still valid four minutes after signing,
+    # even though the ten-minute *offer* window has already ended.
+    Clock.stage_offset_minutes=4
+    evidence=bridge.verify_previously_signed_root_offer(
+        scope,CANDIDATE,ROOT_GATE)
+    assert evidence["approval_id"].startswith("owner-mcp-")
+    assert evidence["same_scope_recheck_passed"] is True
+    assert evidence["new_global_unfreeze"] is False
+
+
+def test_owner_signature_created_after_stage_offer_window_is_denied(
+        tmp_path,monkeypatch):
+    """Even a mathematically valid signature cannot extend the initial offer."""
+    base=datetime.now(timezone.utc)
+    class Clock(datetime):
+        stage_offset_minutes=-11
+        @classmethod
+        def now(cls,tz=None):
+            result=base+timedelta(minutes=cls.stage_offset_minutes)
+            return result.astimezone(tz) if tz else result.replace(tzinfo=None)
+    # Stage is 11 minutes old. This helper intentionally signs a synthetic
+    # offer without the real MCP read_offer() freshness check, to prove the
+    # independent Root also rejects that invalid authorization timing.
+    monkeypatch.setattr(bridge,"datetime",Clock)
+    offer,scope,signer,public,staged=stage_and_sign(tmp_path,monkeypatch)
+    Clock.stage_offset_minutes=1
+    with pytest.raises(bridge.ArchiveOwnerDenied,
+                       match="OWNER_SIGNATURE_OUTSIDE_ORIGINAL_OFFER_WINDOW"):
+        bridge.verify_previously_signed_root_offer(
+            scope,CANDIDATE,ROOT_GATE)
