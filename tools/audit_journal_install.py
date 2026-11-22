@@ -104,7 +104,7 @@ def capacity(s):
 def native_gate(s,c):
  need(Path("/opt/jason/current").resolve().name==s.ROLLBACK,"LIVE_BASELINE")
  for path,expected in s.PROTECTED.items():need(digest(read(Path(path)))==expected,"PROTECTED_BASELINE")
- c["verify_units"](retired_files_absent=True);peers=c["peers"]()
+ c["verify_units"](retired_files_absent=True);peers=s.protected_peer_inventory()
  control=json.loads(read(s.STATE/"production-control-state.json"))
  drift=json.loads(read(s.STATE/"production-drift.json"))
  age=(datetime.now(timezone.utc)-datetime.fromisoformat(drift["observed_at"].replace("Z","+00:00"))).total_seconds()

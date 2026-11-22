@@ -23,6 +23,7 @@ on:
       - 'implementation/orchestrator/journal_mount.py'
       - 'implementation/orchestrator/journal_outcomes.py'
       - 'tools/tests/test_audit_journal_persistent_profile.py'
+      - 'tools/tests/test_audit_journal_protected_peers.py'
       - 'tools/tests/test_audit_journal_abandoned_work.py'
       - 'tools/tests/test_audit_journal_work_recovery.py'
       - 'tools/audit_journal_fast_health.py'

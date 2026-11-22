@@ -296,8 +296,13 @@ def test_scope_no_breaker_bypass_and_only_existing_health_service(monkeypatch):
     monkeypatch.setattr(r,"no_previous_claim",lambda:None)
     monkeypatch.setattr(r,"root_read",lambda p,*args:b"reviewed")
     c={"peers":lambda:{f"peer-{i}":{"image":f"sha256:{i}","id":f"{i}"} for i in range(6)}}
+    fake_peer_source=("def protected_peer_inventory(): return "+
+        repr(c["peers"]())+"\n").encode()
+    monkeypatch.setattr(r,"exact_source",lambda candidate,name:fake_peer_source)
     blobs={name:name.encode() for name in r.SOURCES}
     scope=r.review_scope("a"*40,blobs,c)
+    assert scope["protected_peers_source_sha256"]==r.sha(fake_peer_source)
+    assert scope["isolated_preproduction_shadow_health_is_observed_not_a_core_dependency"] is True
     assert scope["action"]==r.ACTION
     assert scope["native_root_breaker_bypass_allowed"] is False
     assert scope["audit_data_deletion_allowed"] is False
