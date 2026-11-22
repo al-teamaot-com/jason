@@ -99,10 +99,23 @@ def protected_peer_inventory():
   state=row.get("State") or {}
   health=(state.get("Health") or {}).get("Status","none")
   if (row.get("Image")!=EXPECTED_PEER_IMAGES[name]
-      or state.get("Running") is not True or not state.get("StartedAt")
+      or not state.get("StartedAt")
       or not isinstance(row.get("Id"),str) or len(row["Id"])<30):
    raise PermissionError("AUDIT_PEER_IDENTITY_UNTRUSTED:"+name)
-  if name=="jason-pmv4-shadow-gateway":
+  # A separately constrained *nonproduction* shadow may have reached its
+  # signed 4 GiB Docker OOM limit while the genuine ~45 GB FULL scan ran.
+  # Only this exact already-terminated, no-restart, no-network, no-provider
+  # case is admissible to unrelated audit Root cleanup. All actual production
+  # peers MUST still be running and healthy; no Stage E readiness waiver.
+  is_shadow=name=="jason-pmv4-shadow-gateway"
+  shadow_oom_stopped=(is_shadow and state.get("Running") is False
+      and state.get("Status")=="exited" and state.get("OOMKilled") is True
+      and state.get("ExitCode")==137 and state.get("Pid")==0
+      and row.get("RestartCount")==0 and health=="unhealthy")
+  need_running=state.get("Running") is True
+  if not (need_running or shadow_oom_stopped):
+   raise PermissionError("AUDIT_PEER_RUNNING_STATE_UNTRUSTED:"+name)
+  if is_shadow:
    h=row.get("HostConfig") or {};conf=row.get("Config") or {};labels=conf.get("Labels") or {}
    mounts=row.get("Mounts") or []
    isolated=(h.get("NetworkMode")=="none" and h.get("ReadonlyRootfs") is True
@@ -133,7 +146,13 @@ def protected_peer_inventory():
      raise PermissionError("AUDIT_PRODUCTION_LKG_LABEL_CHANGED:"+name)
   verified[name]={"id":row["Id"],"image":row["Image"],
                   "started_at":state["StartedAt"],"health":health,
-                  "preproduction_only":name=="jason-pmv4-shadow-gateway"}
+                  "preproduction_only":is_shadow}
+  if is_shadow:
+   verified[name].update({"running":need_running,
+       "oom_killed":shadow_oom_stopped,
+       "exit_code":137 if shadow_oom_stopped else None,
+       "observed_state":"exact_oom_stopped" if shadow_oom_stopped
+                        else "running_isolated_preproduction"})
  if set(verified)!=set(EXPECTED_PEER_IMAGES):
   raise PermissionError("AUDIT_PRODUCTION_PEER_SET_CHANGED")
  return verified

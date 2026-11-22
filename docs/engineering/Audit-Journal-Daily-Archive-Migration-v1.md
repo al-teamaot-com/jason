@@ -250,3 +250,9 @@ shadow to report its *actual* UNHEALTHY state as a recorded advisory rather
 than block unrelated Root SQLite recovery. This does not alter native drift,
 the circuit breaker or Stage E general peer-health policy. Shadow isolation,
 resource, memory, image or security drift still denies Root cutover.
+
+### OOM-stopped, exactly isolated preproduction shadow (November 22, 2026)
+
+Live Docker evidence shows the separately bounded `jason-pmv4-shadow-gateway` exited at **06:42:03 EST**, with `OOMKilled=true`, exit code 137, and zero restarts. The exact already-reviewed preproduction image/source, 4 GiB memory cap, CPU limit, `NetworkMode=none`, read-only filesystem, dropped all capabilities, disabled provider mutation, no production bind mounts and `RestartPolicy=no` remain unchanged. All five actual production peers remain running with exact identity and required health. The Root production drift reported no findings for this isolated preproduction shadow.
+
+The audit-only peer inventory now also accepts this one **specific observed exit state**, without restarting it and without pretending it is healthy. A stopped preproduction shadow must have all the exact isolation controls, `Status=exited`, `OOMKilled=true`, `ExitCode=137`, `Pid=0`, `RestartCount=0` and its previously observed unhealthy state. Its actual `running=false`, OOM and exit code are recorded in the Owner-bound release scope. A production peer that stops, a shadow that exits for another reason, any changed image/capability/port/mount/source/security setting, or any unknown state **still denies** the Root release. This is not a Stage E operational acceptance exception; shadow health/recovery is a separate objective and is not silently remediated by the audit migration.
