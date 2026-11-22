@@ -23,10 +23,18 @@ from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.datto_edr.connector import DattoEdrConnector
 from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
+from connectors.microsoft_graph.sharepoint_manifest import build_sharepoint_read_manifest
 from connectors.dnsfilter.connector import DnsFilterConnector
 from connectors.dnsfilter.mcp_connector import DnsFilterMcpConnector
 from connectors.darkwebid.connector import DarkWebIdConnector
 from connectors.dnsfilter.mcp_oauth import DnsFilterMcpOAuthStore
+from jason_runtime.microsoft_group_admin_activation import (
+    register_group_admin_from_env, ensure_group_admin_owner_authority,
+)
+from jason_runtime.microsoft_group_admin import (
+    build_microsoft_group_admin_openbao_invoker,
+    register_microsoft_group_admin_invoker,
+)
 from jason_runtime.dnsfilter_mcp_mutation import (
     build_dnsfilter_mcp_mutation_invoker,
     register_dnsfilter_mcp_mutation_invokers,
@@ -174,6 +182,7 @@ from orchestrator.print_capability_catalog import (
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
     PRINT_METER_USAGE_SEARCH,
+    PRINT_FLEET_USAGE_RANK,
     PRINT_SUPPLIES_READ,
     register_print_resource_foundation,
 )
@@ -424,6 +433,10 @@ from .constant_contact_import_runtime import (
     build_import_invoker as build_constant_contact_import_invoker,
     register_import_invoker as register_constant_contact_import_invoker,
 )
+from .sharepoint_read_activation import register_sharepoint_runtime_foundation
+from .sharepoint_reads import build_sharepoint_read_invoker, register_sharepoint_read_invokers
+from .microsoft_sharepoint import require_validated_sharepoint_service_boundary
+
 from .quickbooks_reads import (
     build_quickbooks_read_invoker,
     register_quickbooks_read_invokers,
@@ -1454,9 +1467,28 @@ def _deterministic_resource_contracts(
     return tuple(contracts)
 
 
+@dataclass(frozen=True, slots=True)
+class TicketWorkerComponentRuntime:
+    """No HTTP, Teams ingress, approval listener or PM auxiliary lifecycle.
+
+    This bounded component is only the ticket worker and its governed ports.
+    It is NOT itself an installation/authorization/credential projection.
+    """
+    maintenance: Any
+
+
+def _shadow_processes_targeted_wakes(settings: RuntimeSettings) -> bool:
+    """Only historical embedded hosting may leave targeted wakes to shadow."""
+    return (
+        settings.ticket_worker_hosting == "embedded"
+        and not settings.autonomy_worker_enabled
+    )
+
+
 def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile: str = "all",
                               health_probe=None, universal_approval_handler=None,
-        teams_workflow_approval_handlers: Mapping[str, Any] | None = None) -> RuntimeHttpApplication:
+        teams_workflow_approval_handlers: Mapping[str, Any] | None = None
+        ) -> RuntimeHttpApplication | TicketWorkerComponentRuntime:
     settings.validate()
     if maintenance_profile not in {"all", "ticket_worker", "auxiliary"}:
         raise ValueError("unknown maintenance profile")
@@ -1550,6 +1582,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             now=now,
         )
     )
+    group_admin_activation = register_group_admin_from_env(
+        capabilities=capabilities, providers=providers, now=now,
+    )
     register_email_send(capabilities=capabilities, providers=providers)
     constant_contact_activation = register_constant_contact_runtime_foundation(
         capabilities=capabilities,
@@ -1568,6 +1603,42 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         now=now,
     )
 
+    # Separately governed SharePoint foundation is strictly opt-in.
+    # Unset profile performs no registry, provider or filesystem changes.
+    sharepoint_profile = os.getenv("JASON_SHAREPOINT_READER_PROFILE", "").strip()
+    sharepoint_boundary_db = Path(os.getenv(
+        "JASON_SHAREPOINT_BOUNDARY_DB", str(microsoft_boundary_db)))
+    sharepoint_state_db = Path(os.getenv(
+        "JASON_SHAREPOINT_SITE_ACCESS_DB",
+        "/var/lib/jason/sharepoint/sites.sqlite3"))
+    sharepoint_role_id = Path(os.getenv(
+        "JASON_SHAREPOINT_OPENBAO_ROLE_ID_PATH",
+        "/run/jason-secrets/openbao/sharepoint/role-id"))
+    sharepoint_secret_id = Path(os.getenv(
+        "JASON_SHAREPOINT_OPENBAO_SECRET_ID_PATH",
+        "/run/jason-secrets/openbao/sharepoint/secret-id"))
+    sharepoint_tenant = os.getenv("JASON_SHAREPOINT_AOT_TENANT_ID", "").strip()
+    sharepoint_boundary_approved = False
+    if sharepoint_profile and sharepoint_boundary_db.is_file() and sharepoint_tenant:
+        sharepoint_boundaries = SQLiteClientBoundaryRepository(
+            SQLiteClientBoundaryStore(sharepoint_boundary_db))
+        try:
+            require_validated_sharepoint_service_boundary(
+                boundaries=sharepoint_boundaries, tenant_id=sharepoint_tenant,
+                expected_client_id="client-aot-internal",
+                expected_domain="teamaot.com",
+            )
+            sharepoint_boundary_approved = True
+        except (PermissionError, ValueError):
+            sharepoint_boundary_approved = False
+    sharepoint_active = register_sharepoint_runtime_foundation(
+        capabilities=capabilities, providers=providers, now=now,
+        app_boundary_approved=sharepoint_boundary_approved,
+        app_credential_present=(sharepoint_role_id.is_file() and
+                                sharepoint_secret_id.is_file()),
+        site_registry_present=sharepoint_state_db.is_file(),
+    )
+
     integration_broker = IntegrationBroker(
         capabilities=capabilities,
         providers=providers,
@@ -1581,6 +1652,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     integration_broker.register(
         build_reflection_manifest()
     )
+    if sharepoint_active:
+        integration_broker.register(build_sharepoint_read_manifest())
+
     register_provider_read_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1723,6 +1797,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     )
     ensure_aot_staff_internal_note_authority(
         identity_authority, enabled=staff_internal_note_enabled,
+    )
+    ensure_group_admin_owner_authority(
+        identity_authority, enabled=group_admin_activation.enabled,
     )
     ensure_teams_message_send_authority(
         identity_authority, enabled=configured_teams_message_send(),
@@ -1965,6 +2042,38 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         )
         if quickbooks_activation.enabled
         else None
+    )
+    # Dormant unless the separately authorized exact AOT pilot profile is active.
+    # Existing Microsoft directory identity and ticket/core composition stay intact.
+    microsoft_group_admin_invoker = (
+        build_microsoft_group_admin_openbao_invoker(
+            boundaries=SQLiteClientBoundaryRepository(microsoft_directory.store),
+            openbao_url=settings.openbao_url,
+            read_role_id_path=Path("/run/jason-secrets/openbao/microsoft-group-read/role_id"),
+            read_secret_id_path=Path("/run/jason-secrets/openbao/microsoft-group-read/secret_id"),
+            write_role_id_path=Path("/run/jason-secrets/openbao/microsoft-group-write/role_id"),
+            write_secret_id_path=Path("/run/jason-secrets/openbao/microsoft-group-write/secret_id"),
+            transport=http_transport,
+            entitlement=None,  # exact active Owner/AOT pilot policy, never broad default
+            audit=ConnectorEventAudit(orchestration_events),
+        )
+        if group_admin_activation.enabled
+        else None
+    )
+    sharepoint_read_invoker = (
+        build_sharepoint_read_invoker(
+            boundary_db=sharepoint_boundary_db,
+            state_db=sharepoint_state_db,
+            openbao_url=settings.openbao_url,
+            role_id_path=sharepoint_role_id,
+            secret_id_path=sharepoint_secret_id,
+            tenant_id=sharepoint_tenant,
+            transport=http_transport,
+            audit=ConnectorEventAudit(orchestration_events),
+            approved_owner_ids=frozenset(approval_owner_identities()),
+            original_identity_bindings=source_authorization_bindings,
+        )
+        if sharepoint_active else None
     )
     ticket_create_invoker = build_autotask_ticket_create_invoker(
         openbao_url=settings.openbao_url,
@@ -2291,6 +2400,16 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             invokers=invokers,
             invoker=quickbooks_read_invoker,
         )
+    if microsoft_group_admin_invoker is not None:
+        register_microsoft_group_admin_invoker(
+            invokers=invokers,
+            invoker=microsoft_group_admin_invoker,
+        )
+    if sharepoint_read_invoker is not None:
+        register_sharepoint_read_invokers(
+            invokers=invokers,
+            invoker=sharepoint_read_invoker,
+        )
     register_autotask_ticket_create_invoker(
         invokers=invokers,
         invoker=ticket_create_invoker,
@@ -2372,6 +2491,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     invokers.register(PRINT_METER_HISTORY_SEARCH, kfs_history_invoker)
     invokers.register(PRINT_METER_USAGE_READ, kfs_history_invoker)
     invokers.register(PRINT_METER_USAGE_SEARCH, kfs_history_invoker)
+    invokers.register(PRINT_FLEET_USAGE_RANK, kfs_history_invoker)
     invokers.register(PRINT_SUPPLIES_READ, kfs_invoker)
     invokers.register(PRINT_ALERT_SEARCH, kfs_invoker)
     invokers.register(BACKUP_ENDPOINT_ASSET_SEARCH, backup_net_invoker)
@@ -2434,6 +2554,44 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         require_authority_context=True,
         governed_execution_ledger=governed_execution_ledger,
     )
+
+    if maintenance_profile == "ticket_worker":
+        # Stage C component seam: build only the existing governed Ticket Core
+        # worker. Do NOT create the HTTP ingress/replay/continuation, Teams
+        # approval services, client-question HTTP flow, PM release watchers,
+        # procurement mailboxes, or auxiliary processes in this worker child.
+        # Its provider/orchestrator dependencies above remain governed and
+        # must be isolated separately before any production C cutover.
+        if not settings.autonomy_worker_enabled:
+            raise RuntimeError("TICKET_CORE_WORKER_PROFILE_DISABLED")
+        worker_completion_notifier = build_autonomous_completion_notifier(
+            enabled=autonomous_completion_notifications_enabled,
+            identity_authority=identity_authority,
+            capabilities=capabilities,
+            approvals=approval_repository,
+            execution_ledger=governed_execution_ledger,
+            orchestrator=orchestrator,
+            promotion_db=settings.autonomy_promotion_db,
+        )
+        worker_maintenance = build_autonomy_worker_maintenance(
+            enabled=True,
+            identity_authority=identity_authority,
+            capabilities=capabilities,
+            approvals=approval_repository,
+            execution_ledger=governed_execution_ledger,
+            orchestrator=orchestrator,
+            work_db=settings.autonomy_worker_db,
+            promotion_db=settings.autonomy_promotion_db,
+            targeted_wake_db=settings.autonomy_targeted_wake_db,
+            owned_autotask_resource_ids=settings.autonomy_owned_autotask_resource_ids,
+            max_active_work_items=settings.autonomy_max_active_work_items,
+            interval_seconds=settings.autonomy_worker_interval_seconds,
+            targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
+            audit=reflection_audit,
+            completion_notifier=worker_completion_notifier,
+        )
+        ticket_attention_relay.bind(worker_maintenance)
+        return TicketWorkerComponentRuntime(maintenance=worker_maintenance)
 
     resource_response_renderer = GovernedTeamsResourceResponseRenderer(
         interpreter=GovernedResourceEvidenceInterpreter(
@@ -2965,7 +3123,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         interval_seconds=settings.autonomy_shadow_interval_seconds,
         failure_retry_seconds=settings.autonomy_shadow_failure_retry_seconds,
         targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
-        process_targeted_wakes=not settings.autonomy_worker_enabled,
+        process_targeted_wakes=_shadow_processes_targeted_wakes(settings),
     )
     autonomous_completion_notifier = build_autonomous_completion_notifier(
         enabled=autonomous_completion_notifications_enabled,

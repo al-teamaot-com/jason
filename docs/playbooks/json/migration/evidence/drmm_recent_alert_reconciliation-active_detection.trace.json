@@ -1,0 +1,84 @@
+{
+  "authority_granted": false,
+  "facts_sha256": "2f04ca62e0e3cb3c18f3e29f8ab5edf59bc11e56661ba07709d50d5ce16c4a35",
+  "fingerprint": "53753e4f1d69f243f614c52b82de44384626a06e16d3686b0762c99127507055",
+  "instructions": [
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "status": "open"
+      },
+      "capability": "management.alert.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "read_open_alerts",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "resource_id": "synthetic-device-1"
+      },
+      "capability": "endpoint.device.read",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "read_device",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "resource_id": "synthetic-device-1"
+      },
+      "capability": "endpoint.security.status.read",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "read_security_status",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "agent_id": "synthetic-agent-1",
+        "archived": false,
+        "limit": 50
+      },
+      "capability": "endpoint.security.detection.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "read_active_detections",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {},
+      "capability": null,
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "skip_no_mutation",
+      "step_type": "complete",
+      "terminal": true,
+      "version": "1.0.0-migration.1"
+    }
+  ],
+  "mode": "synthetic_shadow_trace",
+  "operational_acceptance": false,
+  "playbook_id": "drmm_recent_alert_reconciliation",
+  "provider_calls": 0,
+  "provider_mutations": 0,
+  "terminal_step": "skip_no_mutation",
+  "version": "1.0.0-migration.1"
+}

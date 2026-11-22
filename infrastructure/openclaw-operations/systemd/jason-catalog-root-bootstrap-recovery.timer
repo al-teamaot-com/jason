@@ -1,0 +1,12 @@
+[Unit]
+Description=Jason bounded one-use catalog root-install rollback monitor
+
+[Timer]
+OnActiveSec=20s
+OnUnitActiveSec=35s
+AccuracySec=10s
+Persistent=true
+Unit=jason-catalog-root-bootstrap-recovery.service
+
+[Install]
+WantedBy=timers.target

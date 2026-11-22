@@ -97,6 +97,15 @@ class OrchestrationEventStore(Protocol):
 class SQLiteOrchestrationEventStore:
     """Append-only durable orchestration event store for the local pilot."""
 
+    def __new__(cls, path: str | Path = ":memory:"):
+        if cls is SQLiteOrchestrationEventStore and str(path) != ":memory:" and os.getenv(
+                "JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE", ""):
+            from .segmented_journal import configured_journal
+            configured = configured_journal(path)
+            if configured is not None:
+                return configured
+        return super().__new__(cls)
+
     def __init__(self, path: str | Path = ":memory:") -> None:
         self._path = path
         # MCP synchronous tools may execute in worker threads while the runtime is

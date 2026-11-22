@@ -75,8 +75,20 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "microsoft_graph.directory_read": (
         "secret/data/connectors/microsoft-graph/production/directory-read"
     ),
+    "microsoft_graph.sharepoint_read": (
+        "secret/data/connectors/microsoft-graph/production/sharepoint-read"
+    ),
     "microsoft_graph.mail_read": (
         "secret/data/connectors/microsoft-graph/production/mail-read"
+    ),
+    "microsoft_graph.sharepoint_write": (
+        "secret/data/connectors/microsoft-graph/production/sharepoint-write"
+    ),
+    "microsoft_graph.group_read": (
+        "secret/data/connectors/microsoft-graph/production/group-read"
+    ),
+    "microsoft_graph.group_write": (
+        "secret/data/connectors/microsoft-graph/production/group-write"
     ),
     "kyocera_kfs.readonly": (
         "secret/data/connectors/kyocera-kfs/production/read-only"
@@ -128,7 +140,39 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
             "generation",
         }
     ),
+    "microsoft_graph.sharepoint_write": frozenset(
+        {
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        }
+    ),
+    "microsoft_graph.sharepoint_read": frozenset(
+        {
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        }
+    ),
     "microsoft_graph.mail_read": frozenset(
+        {
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        }
+    ),
+    "microsoft_graph.group_read": frozenset(
+        {
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        }
+    ),
+    "microsoft_graph.group_write": frozenset(
         {
             "private_key_pem",
             "certificate_pem",

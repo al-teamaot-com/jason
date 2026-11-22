@@ -98,3 +98,56 @@ requirements; do not present this narrow drift-only automation as completing
 those broader issues.
 
 Integration coordination: #1078, #1301, #1440, #1517, #1526, #1601, #1603, #1604.
+
+## November 14, 2026 — PMv4 independent recovery installation gap (source-only)
+
+**Observed live host, read-only:** production LKG remained
+`d1b8c196dadd4b672ec8ba47075f27bb61c98d63`; the scheduled
+full SQLite integrity proof returned PASS at 03:47 EST, the five-minute
+authority health check passed, the drift watchdog returned PASS with no
+blocking problems, and runtime/MCP containers remained up. Nonetheless
+the root-owned breaker was still OPEN because of an earlier failed system
+unit. The engineering pipeline's recovery stage last ran November 4,
+and the unprivileged recovery ledger was last updated November 12.
+The existing `jason-release-breaker-recovery.service` and matching
+timer existed in the pinned source but were absent from the actual
+`al` systemd user unit directory. Merely having the manager and unit
+definitions in source does **not** demonstrate autonomous recovery.
+
+**Source-only correction:** `tools/install_support_repair_host_worker.py`
+now supports an *explicit opt-in* `--activate-breaker-recovery`
+**together with** the existing `--activate`. The ordinary installation
+path is unchanged and never stages or starts this recovery timer.
+The opt-in copies only the two already-defined recovery units using
+the existing installer; reuses the already installed, policy-limited
+`release_breaker_recovery_manager.py`; reloads the user systemd manager;
+enables the timer; and requires `is-active` success. If activation or
+readback fails, it attempts to disable the unverified recovery timer
+and reports failure. No new scheduler, signer, policy store, release
+engine, or provider-write authority is introduced.
+
+**Authority boundary:** This flag is an installation mechanism, **not**
+production approval. Do not invoke it on Jason's live host merely
+because the code is merged or because the breaker is currently open.
+An approved, exact-source governed release transaction must first
+authorize the independent timer activation. Preserve the protected
+production freeze, automatic-promotion hold, root-owned breaker and
+last-known-good until the authorized release process performs its
+separate health and rollback checks. The timer can only request the
+existing native root revalidation: root alone can close the breaker,
+after policy-required healthy observations. The flag does not activate
+PMv4 Stage A0, Ticket Core cutover or PMv3 retirement.
+
+**Preproduction acceptance:** disposable installer fixtures must prove
+unchanged default service deployment, rejection of opt-in without
+activation, exact paired recovery-unit installation, fail-closed missing
+unit, and disable-on-failed-readback. The existing recovery policy,
+isolation, concurrency and denied-transition regressions must also pass.
+After a separately authorized activation, verify the exact installed
+unit hashes, active timer, three distinct fresh clean root drift
+observations, the signed/guarded native revalidation result, protected
+breaker readback, and unchanged runtime/MCP, ticket processing,
+freeze/hold, and providers. If the native revalidation denies, leave
+the breaker OPEN and report its sanitized cause; never reset the
+attempt ledger, bypass root or repurpose the release manager's
+approval-only hold.

@@ -1,0 +1,343 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "service.ticket.read",
+      "service.contact.read",
+      "service.ticket.notes.search",
+      "service.notification.history.search",
+      "service.ticket.client.notification.create"
+    ],
+    "approval_bound_branches": [
+      "send_question"
+    ],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "one routine catalog question delivered and verified client reply resumes source diagnostic; never resolve ticket"
+  },
+  "expected_state": {
+    "approved_questions": 120,
+    "one_outbound_notification_verified": true,
+    "reply_contact_identity_exact": true,
+    "external_note_is_not_ticket_completion": true,
+    "maximum_send_attempts": 1
+  },
+  "migration": {
+    "source_conversion": "source_catalog_120_and_intent_planner_not_accepted",
+    "legacy_registry_version": "1.0.0",
+    "legacy_source_blob_sha": "d073ca8a92f661f0a546e2ca6cc5c9433ea03b82",
+    "source_map": "docs/playbooks/json/migration/source_maps/client_information_request.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "Exact resumed originating playbook authority from persisted worker state not fully composed with JSON runtime",
+      "Existing SQLiteClientQuestionLedger reservation, uncertain-send reconciliation, reply verifier and 10-day expiration not wired to JSON interpreter",
+      "External notification provider write, independent new same-contact recipient history and note readback not accepted in isolated live preproduction",
+      "Server-side immutable catalog body reconstruction and client profile/Owner promotion must be independently verified for source version and exact action",
+      "One send per ticket/question/evidence fingerprint across crashes and duplicates needs full end-to-end acceptance"
+    ],
+    "accepted_for_execution": false,
+    "production_activation_authorized": false
+  },
+  "playbook": {
+    "id": "client_information_request",
+    "lifecycle": "pilot",
+    "name": "Jason - Approved Client Information Requests (Round 1)",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-Client-Information-Requests-Round1.md",
+    "target_type": "ticket",
+    "version": "1.0.0-migration.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "same_company_contact_only": true,
+    "no_recipient_override": true,
+    "one_send_per_exact_ticket_question_evidence_hash": true,
+    "no_temporary_unapproved_authority": true,
+    "source_only": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "ticket_number",
+      "company_id",
+      "contact_id",
+      "contact_email_fingerprint",
+      "question_id",
+      "evidence_sha256",
+      "baseline_notification_id",
+      "outbound_note_id",
+      "reply_note_id",
+      "resume_phase",
+      "state",
+      "next_due_at"
+    ],
+    "source_ledger": "existing SQLiteClientQuestionLedger",
+    "state_lifecycle": [
+      "reserved",
+      "send_uncertain",
+      "delivery_pending",
+      "awaiting_reply",
+      "reply_verified",
+      "resumed"
+    ],
+    "never_resend_indeterminate": true,
+    "aging_review_days": 10
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_gate"
+    },
+    {
+      "id": "ticket_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_open_ticket_company_contact_and_trigger",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_contact"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_contact",
+      "type": "diagnostic",
+      "capability": "service.contact.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "contact_id"
+        }
+      },
+      "next": "contact_gate"
+    },
+    {
+      "id": "contact_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_same_company_notifications_enabled",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_notes"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_notes",
+      "type": "diagnostic",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        },
+        "page_size": 100
+      },
+      "next": "read_history"
+    },
+    {
+      "id": "read_history",
+      "type": "diagnostic",
+      "capability": "service.notification.history.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        },
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "page_size": 100
+      },
+      "next": "question_gate"
+    },
+    {
+      "id": "question_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "verified_question_disposition",
+            "operator": "eq",
+            "value": "already_present"
+          },
+          "next": "already_present"
+        },
+        {
+          "when": {
+            "fact": "verified_question_disposition",
+            "operator": "eq",
+            "value": "information_already_available"
+          },
+          "next": "already_present"
+        },
+        {
+          "when": {
+            "fact": "verified_question_disposition",
+            "operator": "eq",
+            "value": "proposed_not_authorized"
+          },
+          "next": "promotion_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "promotion_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_current_owner_promotion_and_profile_and_reservation",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "send_question"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "send_question",
+      "type": "remediation",
+      "capability": "service.ticket.client.notification.create",
+      "arguments": {
+        "$fact": "trusted_exact_catalog_notification_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_outbound"
+    },
+    {
+      "id": "verify_outbound",
+      "type": "verification",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        },
+        "page_size": 100
+      },
+      "next": "outbound_gate"
+    },
+    {
+      "id": "outbound_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_catalog_note_provider_readback_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_delivery"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_delivery",
+      "type": "diagnostic",
+      "capability": "service.notification.history.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        },
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "page_size": 100
+      },
+      "next": "delivery_gate"
+    },
+    {
+      "id": "delivery_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "verified_same_contact_delivery_after_baseline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "wait_for_reply"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "wait_for_reply",
+      "type": "wait",
+      "seconds": 3600,
+      "resume": "read_replies"
+    },
+    {
+      "id": "read_replies",
+      "type": "diagnostic",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        },
+        "page_size": 100
+      },
+      "next": "reply_gate"
+    },
+    {
+      "id": "reply_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "new_same_contact_reply_verified_and_source_resume_authorized",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "resumed"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "resumed",
+      "type": "complete"
+    },
+    {
+      "id": "already_present",
+      "type": "complete"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Autotask",
+    "verified_diagnostic_gap_only": true,
+    "no_freeform_ticket_prose_selection": true,
+    "exact_catalog": "aot-client-information-requests-round1-v1",
+    "question_count": 120,
+    "nonroutine_requires_human_review": true
+  },
+  "verification": {
+    "authoritative_source": "current Autotask ticket, contact, notes, notification history, existing source-controlled 120-item catalog and original persisted ledger",
+    "success_condition": "same-company notification and exact client reply verified, original authorized diagnostic resumed; ticket not closed"
+  }
+}
