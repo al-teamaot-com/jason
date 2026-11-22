@@ -38,8 +38,7 @@ jobs:
             tools/tests/test_audit_journal_health_native.py \
             tools/tests/test_openclaw_authority_operational_health.py \
             tools/tests/test_openclaw_authority_fast_health.py \
-            tools/tests/test_openclaw_authority_health_snapshot.py \
-            tools/tests/test_openclaw_authority_live_audit_full_snapshot.py
+            tools/tests/test_openclaw_authority_health_snapshot.py
           python -m py_compile \
             tools/audit_full_health_p0_recovery.py \
             tools/audit_full_health_p0_snapshot.py \

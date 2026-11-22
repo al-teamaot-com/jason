@@ -39,6 +39,18 @@ def write_report(tmp_path,monkeypatch,data):
     path.write_text(json.dumps(data))
     path.chmod(0o600)
     monkeypatch.setattr(r,"FULL",path)
+    # GitHub's unprivileged runner has a variable UID. Supply only the
+    # synthetic lstat UID for this disposable test file, leaving the actual
+    # production UID=1000 check in recovery.py unchanged and executable.
+    original=Path.lstat
+    def synthetic_uid(self,*args,**kwargs):
+        meta=original(self,*args,**kwargs)
+        if self!=path:return meta
+        from types import SimpleNamespace
+        return SimpleNamespace(st_mode=meta.st_mode,st_uid=1000,
+             st_nlink=meta.st_nlink,st_size=meta.st_size,
+             st_mtime=meta.st_mtime)
+    monkeypatch.setattr(Path,"lstat",synthetic_uid)
     return path
 
 def test_one_use_scope_constants_and_full_sqlite_non_bypass():
