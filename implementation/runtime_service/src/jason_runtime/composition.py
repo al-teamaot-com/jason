@@ -23,6 +23,7 @@ from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.datto_edr.connector import DattoEdrConnector
 from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
+from connectors.microsoft_graph.sharepoint_manifest import build_sharepoint_read_manifest
 from connectors.dnsfilter.connector import DnsFilterConnector
 from connectors.dnsfilter.mcp_connector import DnsFilterMcpConnector
 from connectors.darkwebid.connector import DarkWebIdConnector
@@ -432,6 +433,10 @@ from .constant_contact_import_runtime import (
     build_import_invoker as build_constant_contact_import_invoker,
     register_import_invoker as register_constant_contact_import_invoker,
 )
+from .sharepoint_read_activation import register_sharepoint_runtime_foundation
+from .sharepoint_reads import build_sharepoint_read_invoker, register_sharepoint_read_invokers
+from .microsoft_sharepoint import require_validated_sharepoint_service_boundary
+
 from .quickbooks_reads import (
     build_quickbooks_read_invoker,
     register_quickbooks_read_invokers,
@@ -1598,6 +1603,42 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         now=now,
     )
 
+    # Separately governed SharePoint foundation is strictly opt-in.
+    # Unset profile performs no registry, provider or filesystem changes.
+    sharepoint_profile = os.getenv("JASON_SHAREPOINT_READER_PROFILE", "").strip()
+    sharepoint_boundary_db = Path(os.getenv(
+        "JASON_SHAREPOINT_BOUNDARY_DB", str(microsoft_boundary_db)))
+    sharepoint_state_db = Path(os.getenv(
+        "JASON_SHAREPOINT_SITE_ACCESS_DB",
+        "/var/lib/jason/sharepoint/sites.sqlite3"))
+    sharepoint_role_id = Path(os.getenv(
+        "JASON_SHAREPOINT_OPENBAO_ROLE_ID_PATH",
+        "/run/jason-secrets/openbao/sharepoint/role-id"))
+    sharepoint_secret_id = Path(os.getenv(
+        "JASON_SHAREPOINT_OPENBAO_SECRET_ID_PATH",
+        "/run/jason-secrets/openbao/sharepoint/secret-id"))
+    sharepoint_tenant = os.getenv("JASON_SHAREPOINT_AOT_TENANT_ID", "").strip()
+    sharepoint_boundary_approved = False
+    if sharepoint_profile and sharepoint_boundary_db.is_file() and sharepoint_tenant:
+        sharepoint_boundaries = SQLiteClientBoundaryRepository(
+            SQLiteClientBoundaryStore(sharepoint_boundary_db))
+        try:
+            require_validated_sharepoint_service_boundary(
+                boundaries=sharepoint_boundaries, tenant_id=sharepoint_tenant,
+                expected_client_id="client-aot-internal",
+                expected_domain="teamaot.com",
+            )
+            sharepoint_boundary_approved = True
+        except (PermissionError, ValueError):
+            sharepoint_boundary_approved = False
+    sharepoint_active = register_sharepoint_runtime_foundation(
+        capabilities=capabilities, providers=providers, now=now,
+        app_boundary_approved=sharepoint_boundary_approved,
+        app_credential_present=(sharepoint_role_id.is_file() and
+                                sharepoint_secret_id.is_file()),
+        site_registry_present=sharepoint_state_db.is_file(),
+    )
+
     integration_broker = IntegrationBroker(
         capabilities=capabilities,
         providers=providers,
@@ -1611,6 +1652,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     integration_broker.register(
         build_reflection_manifest()
     )
+    if sharepoint_active:
+        integration_broker.register(build_sharepoint_read_manifest())
+
     register_provider_read_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -2016,6 +2060,21 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         if group_admin_activation.enabled
         else None
     )
+    sharepoint_read_invoker = (
+        build_sharepoint_read_invoker(
+            boundary_db=sharepoint_boundary_db,
+            state_db=sharepoint_state_db,
+            openbao_url=settings.openbao_url,
+            role_id_path=sharepoint_role_id,
+            secret_id_path=sharepoint_secret_id,
+            tenant_id=sharepoint_tenant,
+            transport=http_transport,
+            audit=ConnectorEventAudit(orchestration_events),
+            approved_owner_ids=frozenset(approval_owner_identities()),
+            original_identity_bindings=source_authorization_bindings,
+        )
+        if sharepoint_active else None
+    )
     ticket_create_invoker = build_autotask_ticket_create_invoker(
         openbao_url=settings.openbao_url,
         role_id_path=settings.autotask_write_openbao_role_id_path,
@@ -2345,6 +2404,11 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         register_microsoft_group_admin_invoker(
             invokers=invokers,
             invoker=microsoft_group_admin_invoker,
+        )
+    if sharepoint_read_invoker is not None:
+        register_sharepoint_read_invokers(
+            invokers=invokers,
+            invoker=sharepoint_read_invoker,
         )
     register_autotask_ticket_create_invoker(
         invokers=invokers,

@@ -7,6 +7,7 @@
 tools/*
 !tools/pmv4_shadow_owner_issuer.py
 !tools/pmv4_shadow_release.py
+!tools/sharepoint_site_access_service.py
 !infrastructure/
 !infrastructure/jason-mcp/
 !infrastructure/jason-mcp/Dockerfile
