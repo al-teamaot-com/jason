@@ -213,6 +213,47 @@ def plan_database(c):
     return digest("\n".join(rows).encode())
 
 
+def accepted_installation_policy(c,raw,legacy_sha):
+    """Accept the original policy or the exact already-accepted journal layer.
+
+    This reads Root-owned consent/acceptance and verifies its installed source.
+    It never permits arbitrary policy edits or grants a new release action.
+    """
+    observed=digest(raw)
+    if observed==legacy_sha:return {"kind":"accepted_stage_e_policy","sha256":observed}
+    root=Path("/var/lib/jason-audit-journal/private")
+    policy=json.loads(c["read"](Path("/etc/jason-owner-release/audit-journal-v1.json"),0,0o600))
+    adoption=json.loads(c["read"](root/"adoption.json",0,0o400))
+    plan=json.loads(c["read"](root/"release-plan.json",0,0o400))
+    result=json.loads(c["read"](root/"release-journal.json",0,0o400))
+    scope=plan["scope"];scope_hash=digest(canonical(scope))
+    need(policy.get("enabled") is True and policy.get("schema_version")=="1.0"
+         and adoption.get("action")==plan.get("action")=="ADOPT-EXACT-DAILY-AUDIT-JOURNAL"
+         and adoption.get("owner_oid")==plan.get("owner_oid")==OID
+         and adoption.get("independently_verified_entra_owner") is True
+         and plan.get("independently_verified_entra_owner") is True
+         and adoption.get("policy_sha256")==digest(canonical(policy))
+         and adoption.get("scope_sha256")==plan.get("scope_sha256")==scope_hash
+         and scope["policy"]["rollback_sha"]==ROLLBACK
+         and policy["candidate_sha"]==plan["candidate_sha"]==scope["policy"]["candidate_sha"]
+         and scope["desired_state_before_sha256"]==legacy_sha,
+         "ADOPTED_JOURNAL_POLICY_BINDING")
+    sources=policy["trusted_source_sha256"]
+    need(sources==scope["source_sha256"] and 8<=len(sources)<=64,"ADOPTED_JOURNAL_SOURCE_CLOSURE")
+    for name,expected in sources.items():
+        need(isinstance(name,str) and re.fullmatch(r"[A-Za-z0-9_./-]+",name)
+             and not name.startswith("/") and ".." not in Path(name).parts,
+             "ADOPTED_JOURNAL_SOURCE_PATH")
+        path=Path("/usr/local/lib/jason/audit-journal/trusted")/name
+        need(digest(c["read"](path,0,0o444))==expected,"ADOPTED_JOURNAL_SOURCE_CHANGED")
+    outcome=result.get("outcome")
+    need(outcome in ("accepted","rolled_back") and result.get("scope_sha256")==scope_hash,
+         "JOURNAL_OBJECTIVE_NOT_FINISHED")
+    expected=scope["desired_state_after_sha256"] if outcome=="accepted" else scope["rollback_desired_state_sha256"]
+    need(observed==expected,"ADOPTED_JOURNAL_DESIRED_POLICY_CHANGED")
+    return {"kind":"accepted_journal_policy","sha256":observed,"scope_sha256":scope_hash,"outcome":outcome}
+
+
 def inspect(c,ns,candidate,artifacts,campaign):
     scope_module=load_module(c,candidate,"tools/owner_objective_install_scope.py","objective_install_scope")
     need(c["git"](REPO,"rev-parse","HEAD")==candidate
@@ -232,7 +273,7 @@ def inspect(c,ns,candidate,artifacts,campaign):
         base=peers["jason-runtime" if name=="component" else "jason-teams-gateway"]["image"]
         image_identity(c,artifacts[name+"_image"],candidate,base,"1000:1000" if name=="component" else "node")
     policy_raw=c["read"](ROOT_POLICY,0,0o600)
-    need(digest(policy_raw)==scope_module.BASE_POLICY,"ACCEPTED_POLICY_CHANGED")
+    policy_acceptance=accepted_installation_policy(c,policy_raw,scope_module.BASE_POLICY)
     before=json.loads(policy_raw)
     after=scope_module.desired_policy(before)
     marker=c["read"](MARKER,0,0o444)
@@ -300,6 +341,7 @@ def inspect(c,ns,candidate,artifacts,campaign):
         "queue_cutover":False,"installation_targets":list(scope_module.ROOT_TARGETS),
         "artifacts":artifacts,"protected_peers":peers,"protection_files":fixed,
         "accepted_marker_sha256":digest(marker),"root_policy_before_sha256":digest(policy_raw),
+        "inherited_data_policy_acceptance":policy_acceptance,
         "root_policy_after_sha256":digest(canonical(after)),"owner_pause_sha256":pause,
         "canonical_plan_rows_sha256":plan_database(c),"canonical_plan_migration":"preserve-all-rows-and-compatibility-link",
         "new_grants":grants,"gateway_public_key_sha256":key["fingerprint"],

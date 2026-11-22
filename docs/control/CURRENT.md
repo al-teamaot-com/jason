@@ -112,3 +112,18 @@ Primary autonomy acceptance: `docs/sessions/Jason-Autonomous-Execution-Productio
 Morning handoff: `docs/sessions/Jason-Morning-Production-Checkpoint-2026-09-25.md`.
 
 Historical production proofs remain under `docs/sessions/`; they should not be rewritten to look current.
+
+## Audit-journal migration preparation — 2026-11-21
+
+Owner requested one bounded daily-archive migration with coordinated writers,
+searchable history, segment-aware integrity and rollback preserving newer events.
+The preparation specification is
+[Audit-Journal-Daily-Archive-Migration-v1](../engineering/Audit-Journal-Daily-Archive-Migration-v1.md).
+Its proposed policy is disabled and its executable is synthetic-rehearsal-only.
+Production consumer integration, protected custody, backup/scale evidence and exact
+release authorization remain required.
+
+Keep this preparation branch unmerged while the separate a4194c9 Owner-objective
+installation candidate is pending. It does not change that candidate, the live
+journal, health policy, release freeze or accepted Stage E source. Reread native
+health and private recovery evidence on Jason before any operational claim.

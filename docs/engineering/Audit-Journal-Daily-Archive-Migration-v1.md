@@ -1,0 +1,240 @@
+# Bounded daily audit-journal migration v1
+
+Status: **source under review; production not installed or adopted**.
+Owner direction: November 21, 2026 — prepare one bounded migration and rollback.
+Destination: **the existing archive drive**, as selected by the Owner.
+Classification: **High-Risk**: shared journal, three consumer replacements,
+Root storage custody, boot recovery and integrity-policy adoption.
+Preparation baseline: a4194c9ee128e1f39938ec175fc52a4fbbd7f52d.
+Related work: #1324, #1948, Owner-objective framework #2670/#2671; preparation #2672.
+
+This is one defined storage objective. The source remains dormant until the
+exact protected candidate passes complete Root preflight and the existing
+independent Entra Owner verifier authorizes its immutable scope. Source tests,
+a PR and source publication do not constitute production acceptance.
+
+## Outcome and limits
+
+Keep the active orchestration journal bounded while preserving all committed
+history, event-ID uniqueness, historical lookup and execution/correlation
+reconstruction. Retain the existing service identities and Root protections.
+No provider business write, authority/grant change or approval-record repair
+belongs to this migration.
+
+| Item | Defined behavior |
+| --- | --- |
+| Canonical journal | /var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3 |
+| Historical archive | /srv/jason/archive/governed-audit/orchestration |
+| Daily boundary | 00:15 America/New_York, including 23/25-hour days |
+| Size rollover | 1 GiB main database plus WAL |
+| Admission ceiling | 2 GiB main database plus WAL |
+| Reserved outcome capacity | 24 MiB per admitted execution; at most 32 in flight |
+| Event envelope | 256 KiB total; each metadata field at most 512 bytes |
+| Storage evaluation | Existing systemd scheduler; dedicated bounded storage timer every 60 seconds and at the daily boundary |
+| Handoff | Exclusive gate at most 30 seconds; slow copies/checks run outside it |
+| Final rollback delta | At most 128 MiB / 100,000 rows, within the same handoff |
+| Initial execution | One claimed exact Owner objective, at most eight hours |
+| Covered recovery | At most eight additional hours, with the same exact rollback scope |
+| Archive retention | All history retained; no age-based archive deletion |
+| Backup claim | Separate-disk archival; off-host backup is outside this scope |
+
+These are enforced policy limits and execution budgets. Synthetic latency
+measurements are not promises about a production file with millions of rows.
+A budget failure preserves evidence and history and cannot be labeled accepted.
+
+## Verified preparation evidence
+
+Root inventory completed with no denied process entries and four open handles,
+all belonging to the three expected consumers. Their installed event-store
+source bytes matched. Their configured journal path and physical shared mount
+were separately inspected. Root and archive storage use distinct filesystems.
+
+A later read-only size sample covered 2,000 recent events: maximum payload
+1,534 bytes and maximum metadata field 61 bytes. It exported no payloads.
+The append-only high-water mark was about 32.6 million rows. These observations
+support the chosen preparation approach; they do not describe every historic
+payload or prove future workload limits.
+
+Keep live container IDs, complete configurations, private source receipts,
+file identities and detailed host measurements in Jason's private artifacts.
+Public source contains no live audit/customer records or service credentials.
+
+## Exact application changes
+
+The Runtime, MCP and Ticket Core keep their **same already-running image IDs**,
+commands, entrypoints, service identities, secrets, ports, volumes and network
+configuration. Replacement adds three read-only source-file mounts, four
+read-only profile/history mounts, a fixed journal-profile environment variable
+and the journal component's source label. Static network addresses or conflicting
+mounts fail planning before mutation.
+
+Three controlled container replacements are included in the approval scope,
+with up to three original-configuration recovery replacements. Availability
+interruption is part of that scope. Docker itself is not restarted.
+
+The opted-in factory selects the new reader/writer only for the fixed canonical
+journal. Other paths and the legacy default remain unchanged. Every active
+operation uses the protected shared handoff gate and opens its current database
+connection for that operation. Closed pending connections are not retained.
+
+Historical get, execution and correlation queries include the active journal and
+all closed segments, ordered by occurrence time and event ID. Root-custodied
+Bloom filters and an LRU of 32 archived handles bound lookup resources. Global
+event-ID checks continue across rollover. An unavailable or changed archive
+invalidates access and blocks new admission.
+
+Already-invoked outcomes first enter bounded durable receipts **inside the same
+active SQLite database**. Reconciliation promotes the original event ID and bytes
+after uniqueness checks; it never invokes a provider. An old unreconciled receipt
+blocks new admission and health. Completed, denied, check-only, terminated and
+deduplicated paths release their reserved capacity.
+
+## One approval through operational acceptance
+
+1. Verify exact clean source and metadata against the immutable candidate.
+   Verify protected Main CI, the migration's Main-push acceptance, live native
+   protection, source schema, consumer configurations, complete Root process
+   inventory, storage identity/reserves and stopped-container recovery capacity.
+   All this runs before the Owner prompt.
+2. Use the existing pinned Entra verifier once. Display the exact source,
+   rollback, targets, disruption and scope digest and require the exact action.
+   Claim that scope in a Root-only durable approval/source snapshot.
+3. Install the immutable fixed-path controller, native health bundle, policy,
+   persistent catalog, boot support and exact release worker. Queue the Root
+   worker as an actual persistent systemd job.
+4. Hold both existing cross-release transaction locks. Block new admissions,
+   drain current-generation governed writes, replace the exact consumers with
+   dormant compatible code and verify their loaded source. Historical unresolved
+   consumed claims remain unchanged and are never interpreted as permission
+   to retry a provider.
+5. Under the exclusive handoff, verify no legacy handles, write and fsync the
+   one-use intent, checkpoint and preserve the old source and publish a small
+   active journal. Remove temporary operational triggers before historical seal.
+6. Outside the handoff, fully integrity-check closed history, copy and checksum
+   it, verify standalone read-only restore access and publish Root-custodied
+   proof/fingerprints. Verify historical reader routing.
+7. Actually reconstruct a complete legacy-compatible database on the archive
+   drive, full-check its content/schema/counts and perform a cold legacy restore.
+   Only then may the exact redundant local source copy be reclaimed.
+8. Run an actual scheduled acceptance rollover and complete dependent seal,
+   reconstruction-coverage and reclamation work in that invocation. Complete
+   the existing full, fast and drift checks and original protected revalidation.
+9. Confirm genuine current activity and historical reads through all three
+   consumers, verify protected peers and unchanged freeze/hold/Stage E evidence,
+   then record acceptance. No synthetic production event is injected as a canary.
+
+An unknown Docker response is resolved from exact IDs, stopped before-images,
+configuration and native state before retry. A lost response after stop, rename,
+create or start does not authorize another blind replacement.
+
+Source CI and other non-production engineering can run without another Owner
+decision. An amended impact, expired grant or changed protected boundary requires
+a revised exact objective rather than replaying an old decision.
+
+## Root custody and boot support
+
+The public /run/jason/audit-journal/profile.json points to persistent control at
+/var/lib/jason-audit-journal/control. The catalog and lock survive reboot.
+Root restores the ephemeral pointer from its adopted policy.
+
+Seal only the **top directory metadata** of /srv/jason/archive as Root:Root 0755;
+do not recursively change engineering directories. Existing Al-owned engineering
+children remain usable. Historical databases and filters are Root:writer-group
+0440. Public metadata/source is Root:Root 0444. Private approvals, configurations
+and recovery records remain in Root-only directories.
+
+Boot recovery runs in the Host mount namespace before Docker starts. If rollback
+requires an archive-backed legacy database, it restores the descriptor-guarded
+canonical file bind before containers inherit their recursive shared mount.
+Root recovery cannot use a private mount namespace. Held no-follow source/target
+descriptors prevent privileged symlink redirection.
+
+The Root desired-state update declares the new storage units and exact recovery
+container prefix. The accepted Stage E marker, accepted native tree and original
+shared Root worker bytes remain unchanged.
+
+The unchanged shared worker receives a separate compatibility wrapper. Generic
+whole-host materialization must explicitly support the adopted data layout.
+Original typed actions retain their existing authorization and safety checks.
+A future incompatible whole-host recreation must not silently drop data mounts.
+
+## Integrity and resource model
+
+Active health uses a bounded consistent snapshot, actual full integrity and a
+real restore proof. Historical proof is accepted only under protected custody,
+unchanged fingerprints, the bound verifier and complete catalog coverage.
+Full historical scrub becomes due at 28 days and fails health after 31 days.
+A checksum alone is not a SQLite full-integrity check.
+
+The new health implementation is installed in its own immutable bundle. Older
+pinned repair sources remain byte-identical. Existing authority/replay/security,
+key and delegation checks and the original 5,400-second checker deadline remain
+effective. Routine maintenance requests real native checks and the original
+Root revalidation; it never edits a PASS, breaker or LKG document.
+
+Rollback reconstruction copies the already indexed historical baseline, then
+appends newer segments in SQLite. A real full target proof independently checks
+each source segment's ordered content hash. It does not reinsert tens of millions
+of old rows through Python or pretend combined hashes are a fresh full check.
+
+Preflight reserves three source-file equivalents plus workspace on the archive
+drive and local active/WAL workspace. Per-operation gates enforce additional
+reserve checks. Root-owned creation records identify disposable temporary work
+and prepared copies. Recovery removes only unreferenced exact work with no open
+handles; a live handoff, current recovery plan and published history are protected.
+
+## Rollback preserving all new events
+
+Disable rollover scheduling and stop the active maintenance service before
+starting recovery. Pause new admission, reconcile pending outcomes and drain
+admitted executions. While current writers still run, reconstruct and
+fully verify the legacy database on the archive drive from every closed segment
+and a consistent active snapshot. Bind catalog generation and snapshot watermark.
+
+Recheck the generation, then merge only the bounded post-snapshot tail under the
+handoff. Preserve the small active source and publish the archive-backed legacy
+file through the canonical descriptor bind. Keep admission paused until fresh
+containers with the exact original configurations inherit that mapping. Remove
+the barrier, complete actual native health and protected revalidation and retain
+all receipts.
+
+Rollback restores legacy application behavior and data format with newer events
+included. It retains archive custody, minimal data recovery/boot support, the
+compatible health bundle/scratch directory and the declared compatibility guard.
+It does not claim every filesystem setting returns byte-for-byte to its old state.
+The adopted rollback desired state disables the storage timer while declaring
+the retained recovery support.
+
+An initial cutover cannot replay after its completed one-use claim. New rollback
+publication requires the original exact release/recovery window; boot recovery
+may finish an already-recorded intent without creating new release authority.
+
+## Preparation tests and remaining release gates
+
+Disposable tests cover real SQLite WAL, concurrent writers, day/size/DST rollover,
+global uniqueness, missing/corrupt archives, outcome receipts, full reconstruction,
+cold restore, final-tail preservation, changed-generation rejection, custody and
+symlink/inode substitution, claimed-work cleanup and paused legacy publication.
+
+The isolated Root image additionally exercises UID 1000 writes, distinct
+filesystems, actual kernel file binds, recursive container mounts, reboot mapping,
+one-use recovery and filesystem bootstrap interruption/rollback. It has no Host
+or secret mounts, no Docker socket and no network. Three existing consumer images
+also passed read-only source-mount smoke tests with synthetic data only.
+
+Before a production command is offered, finish source review/CI, unit verification,
+exact source publication and release-candidate reconciliation. The older pending
+Owner-objective installation must be reconciled deliberately when material Main
+changes; its old launcher cannot simply be assumed valid against a new candidate.
+Install the audit layer first. The updated Owner-objective installer accepts its
+policy only after Root-owned consent, installed source hashes, exact scope and a
+completed acceptance or rollback receipt all agree. Other desired-state changes
+remain denied; the older documentation-install primitives stay byte-identical.
+
+The final local regression run passed 168 tests with three Root-only tests skipped
+in that unprivileged run. The separate disposable Root fixture passed filesystem
+bootstrap interruptions, actual file-bind recovery and tracked SQL-helper timeout
+cleanup. GitHub's protected-candidate checks remain a separate release gate.
+
+Production acceptance still requires one real consent, controlled native execution
+and the live evidence above. Nothing in this document represents those as complete.

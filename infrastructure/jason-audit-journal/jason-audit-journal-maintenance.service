@@ -1,0 +1,23 @@
+[Unit]
+Description=Jason bounded audit rotation integrity archival and recovery
+After=local-fs.target jason-audit-journal-data-recovery.service
+Requires=jason-audit-journal-data-recovery.service
+RequiresMountsFor=/srv/jason/archive /var/lib/jason/governed-ticket-shared
+ConditionPathExists=/var/lib/jason-audit-journal/private/adoption.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/usr/local/lib/jason/audit-journal/trusted
+ExecStart=/usr/bin/python3 -I -B -c "import runpy,sys;sys.path.insert(0,'/usr/local/lib/jason/audit-journal/trusted/implementation');runpy.run_path('/usr/local/lib/jason/audit-journal/trusted/tools/audit_journal_control.py',run_name='__main__')" --operation maintain
+TimeoutStartSec=6h
+Nice=19
+IOSchedulingClass=idle
+MemoryMax=768M
+TasksMax=16
+NoNewPrivileges=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_KILL CAP_AUDIT_WRITE
+UMask=0077
+# Recovery must publish in the Host mount namespace; code/policy/paths are fixed.
