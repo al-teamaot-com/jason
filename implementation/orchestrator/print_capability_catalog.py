@@ -31,6 +31,7 @@ PRINT_METER_READ = "print.meter.read"
 PRINT_METER_HISTORY_SEARCH = "print.meter.history.search"
 PRINT_METER_USAGE_READ = "print.meter.usage.read"
 PRINT_METER_USAGE_SEARCH = "print.meter.usage.search"
+PRINT_FLEET_USAGE_RANK = "print.fleet.usage.rank"
 PRINT_SUPPLIES_READ = "print.supplies.read"
 PRINT_ALERT_SEARCH = "print.alert.search"
 KYOCERA_KFS_PROVIDER = "kyocera_kfs"
@@ -42,6 +43,7 @@ _PRINT_CAPABILITIES = (
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
     PRINT_METER_USAGE_SEARCH,
+    PRINT_FLEET_USAGE_RANK,
     PRINT_SUPPLIES_READ,
     PRINT_ALERT_SEARCH,
 )
@@ -231,6 +233,17 @@ def print_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
                 "usage_status": "verified when required period meter boundaries reconcile; otherwise exception",
                 "inventory_coverage_verified": "whether the reporting-period fleet inventory reconciled to the successful KFS snapshot",
             },
+        ),
+        _read_capability(
+            now=now,
+            name=PRINT_FLEET_USAGE_RANK,
+            display_name="Rank AOT Print Fleet Usage",
+            purpose="Rank a complete, reconciled AOT fleet period by measured total, black-white or color impressions.",
+            resource_types="print_usage,print_device",
+            operation="read",
+            selector_keys="month,start,end,timezone,metric,top_n,boundary_hours",
+            fact_hints="top highest volume printer copier fleet device usage impressions ranking monthly pages",
+            selector_required=False,
         ),
         _read_capability(
             now=now,

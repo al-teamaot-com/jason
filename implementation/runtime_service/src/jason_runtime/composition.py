@@ -181,6 +181,7 @@ from orchestrator.print_capability_catalog import (
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
     PRINT_METER_USAGE_SEARCH,
+    PRINT_FLEET_USAGE_RANK,
     PRINT_SUPPLIES_READ,
     register_print_resource_foundation,
 )
@@ -2426,6 +2427,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     invokers.register(PRINT_METER_HISTORY_SEARCH, kfs_history_invoker)
     invokers.register(PRINT_METER_USAGE_READ, kfs_history_invoker)
     invokers.register(PRINT_METER_USAGE_SEARCH, kfs_history_invoker)
+    invokers.register(PRINT_FLEET_USAGE_RANK, kfs_history_invoker)
     invokers.register(PRINT_SUPPLIES_READ, kfs_invoker)
     invokers.register(PRINT_ALERT_SEARCH, kfs_invoker)
     invokers.register(BACKUP_ENDPOINT_ASSET_SEARCH, backup_net_invoker)
