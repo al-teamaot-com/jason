@@ -39,3 +39,9 @@ implementation/**/*.egg-info/**
 !tools/tests/audit_full_health_p0_root_fixture.py
 !infrastructure/jason-audit-full-health-p0/
 !infrastructure/jason-audit-full-health-p0/tests.Dockerfile
+
+# One-use post-proof recovery finalization; exact-source isolated Root fixture.
+!tools/audit_full_health_p0_finalize.py
+!tools/tests/audit_full_health_p0_finalize_root_fixture.py
+!infrastructure/jason-audit-full-health-finalize/
+!infrastructure/jason-audit-full-health-finalize/tests.Dockerfile
