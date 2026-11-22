@@ -238,3 +238,15 @@ cleanup. GitHub's protected-candidate checks remain a separate release gate.
 
 Production acceptance still requires one real consent, controlled native execution
 and the live evidence above. Nothing in this document represents those as complete.
+
+### Actual production-peer isolation scope, November 22, 2026
+
+The journal migration replaces three canonical audit producers but does not
+mutate the separately signed preproduction shadow. The exact reviewed
+`protected_peer_inventory` binds all six peer image IDs, source/release
+identity, running state and full production health. It permits only an
+otherwise exact and fully network/provider-isolated 4 GiB preproduction
+shadow to report its *actual* UNHEALTHY state as a recorded advisory rather
+than block unrelated Root SQLite recovery. This does not alter native drift,
+the circuit breaker or Stage E general peer-health policy. Shadow isolation,
+resource, memory, image or security drift still denies Root cutover.

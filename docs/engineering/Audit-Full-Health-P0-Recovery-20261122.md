@@ -42,3 +42,30 @@ This recovery approval does **not** by itself approve the subsequent archive ins
 **Whole archive objective** requires a separately verified post-install event-parity / cold restore / ongoing current writes / daily timer / reboot mapping / actual source reclamation. Source-only code is not sufficient.
 
 If a proof cannot finish even under the bounded current-state repair, return FAIL/124 and design the next independently reviewed recovery; **never** extend an expired emergency adapter or manufacture a PASS. The original 92 drop-ins remain the rollback configuration, and failure may leave the original full unit failed as expected.
+
+## Exact protected-peer dependency correction (November 22, 2026)
+
+The original one-use P0 source copied a **Stage E generic six-peer health**
+helper. Live readback found that the running, separately signed preproduction
+shadow gateway (4 GiB memory limit) is reporting UNHEALTHY because its
+15-second CLI probe times out under isolated CPU/memory pressure. That shadow
+uses `network_mode:none`, immutable preproduction-only image+source label,
+read-only filesystem, no provider writes, no ports, dropped ALL capabilities
+and no production audit database mount. Its health does **not** enter native
+Root drift (`production-drift.json` reports only the failed production
+fast-health one-shot), and this recovery never touches its image or resources.
+
+The reviewed `tools/audit_journal_release_scope.py::protected_peer_inventory`
+now explicitly verifies all **six** pinned production/current images, identity,
+start, running state, and production peer health. For the isolated preproduction
+shadow alone, it verifies its exact image/source and complete nonproduction
+containment before recording its actual health (`unhealthy` remains visible)
+without blocking a Root health-only SQLite repair. Any unexpected image,
+network bridge, data bind, source label, missing isolation, privileged
+capability, stopped container, or unhealthy production peer fails closed.
+
+This is an *admission dependency correction for the bounded P0 repair and
+journal data-only migration*, not a broader Stage E acceptance waiver or
+a change to native watchdog policy, production circuit breaker, A1 shadow
+configuration, memory limit, or independent production approval. The shadow
+health incident remains separately actionable; never report it HEALTHY.

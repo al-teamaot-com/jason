@@ -2,6 +2,7 @@
 from __future__ import annotations
 from hashlib import sha256
 import json
+import subprocess
 from pathlib import Path
 
 ACTION="ADOPT-EXACT-DAILY-AUDIT-JOURNAL"
@@ -67,6 +68,76 @@ BASE_IMAGES={
  "jason-mcp-pilot":"sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477",
  "jason-pmv4-ticket-core":"sha256:a949be281262b94da02c7438f7a2cd97521d83749a8e27f0c01768b3d0353185",
 }
+# The preproduction shadow is not an audit database writer or producer. P0
+# health recovery and audit-only cutover must never mutate it. Its health state
+# is recorded, but an otherwise exact, network-isolated and immutable shadow
+# is not a prerequisite for genuine native SQLite recovery. The five actual
+# production peers remain hard health requirements. No native drift exception.
+EXPECTED_PEER_IMAGES={
+ **BASE_IMAGES,
+ "jason-pmv4-shadow-gateway":"sha256:679d3334efe7fbe32878b10fb06077912b57473bc3998316d26e9fd7a3d46bbd",
+ "jason-teams-gateway":"sha256:0a3529f8052ee85516b3fd73e2f2f4edae7748fd7633ecaf7ae5a318602eb4f5",
+ "openbao":"sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0",
+}
+
+def protected_peer_inventory():
+ """Exact reviewed P0 and journal-scope peers, no preprod health waiver elsewhere."""
+ try:
+  result=subprocess.run(["/usr/bin/docker","inspect","--type","container",
+     *EXPECTED_PEER_IMAGES],capture_output=True,text=True,timeout=28,check=False)
+  if result.returncode:raise ValueError("AUDIT_PEER_INSPECT_FAILED")
+  rows=json.loads(result.stdout)
+ except (OSError,ValueError,subprocess.TimeoutExpired) as exc:
+  raise PermissionError("AUDIT_PEER_INVENTORY_UNAVAILABLE") from exc
+ if not isinstance(rows,list) or len(rows)!=len(EXPECTED_PEER_IMAGES):
+  raise PermissionError("AUDIT_PEER_INVENTORY_INCOMPLETE")
+ verified={}
+ for row in rows:
+  name=str(row.get("Name","")).lstrip("/")
+  if name not in EXPECTED_PEER_IMAGES or name in verified:
+   raise PermissionError("AUDIT_PEER_NAME_UNTRUSTED")
+  state=row.get("State") or {}
+  health=(state.get("Health") or {}).get("Status","none")
+  if (row.get("Image")!=EXPECTED_PEER_IMAGES[name]
+      or state.get("Running") is not True or not state.get("StartedAt")
+      or not isinstance(row.get("Id"),str) or len(row["Id"])<30):
+   raise PermissionError("AUDIT_PEER_IDENTITY_UNTRUSTED:"+name)
+  if name=="jason-pmv4-shadow-gateway":
+   h=row.get("HostConfig") or {};conf=row.get("Config") or {};labels=conf.get("Labels") or {}
+   mounts=row.get("Mounts") or []
+   isolated=(h.get("NetworkMode")=="none" and h.get("ReadonlyRootfs") is True
+      and h.get("Memory")==4294967296 and h.get("NanoCpus")==1000000000
+      and h.get("PidsLimit")==256 and h.get("Privileged") is False
+      and (h.get("RestartPolicy") or {}).get("Name")=="no"
+      and h.get("CapDrop")==["ALL"]
+      and "no-new-privileges:true" in (h.get("SecurityOpt") or [])
+      and conf.get("User")=="1000:1000"
+      and labels.get("com.aot.jason.component")=="pmv4-shadow"
+      and labels.get("com.aot.jason.lifecycle")=="preproduction-only"
+      and labels.get("com.aot.jason.provider-mutation")=="disabled"
+      and labels.get("com.aot.jason.production-core")=="excluded"
+      and labels.get("com.aot.jason.source_revision")=="75f2b4c0c48a15bd17d700b9f039fe56623e3f52"
+      and isinstance(mounts,list) and len(mounts)==1
+      and mounts[0].get("Type")=="volume"
+      and mounts[0].get("Destination")=="/home/node/.openclaw"
+      and not h.get("PortBindings") and not h.get("Devices"))
+   if not isolated or health not in ("healthy","unhealthy"):
+    raise PermissionError("AUDIT_PREPRODUCTION_SHADOW_ISOLATION_UNTRUSTED")
+  else:
+   if health not in ("healthy","none"):
+    raise PermissionError("AUDIT_PRODUCTION_PEER_UNHEALTHY:"+name)
+   if name in ("jason-runtime","jason-pmv4-ticket-core") and health!="healthy":
+    raise PermissionError("AUDIT_REQUIRED_PRODUCTION_HEALTH_MISSING:"+name)
+   if name in ("jason-runtime","jason-mcp-pilot"):
+    if (row.get("Config",{}).get("Labels") or {}).get("com.teamaot.jason.source_revision")!=ROLLBACK:
+     raise PermissionError("AUDIT_PRODUCTION_LKG_LABEL_CHANGED:"+name)
+  verified[name]={"id":row["Id"],"image":row["Image"],
+                  "started_at":state["StartedAt"],"health":health,
+                  "preproduction_only":name=="jason-pmv4-shadow-gateway"}
+ if set(verified)!=set(EXPECTED_PEER_IMAGES):
+  raise PermissionError("AUDIT_PRODUCTION_PEER_SET_CHANGED")
+ return verified
+
 BASE_STORE="9648faaa0007f95cbc0ad616c99551c90ba49aef462bbf0db5bb6203f6bb91b9"
 DESIRED_BEFORE="9110f982e7294fa789c8cd976223aa223143e924fd8bcec368f72b83a8d785b1"
 

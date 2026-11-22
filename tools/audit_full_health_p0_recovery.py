@@ -219,7 +219,11 @@ def review_scope(candidate,blobs,c):
     health_gate()
     identity=dataset()
     no_previous_claim()
-    peers=c["peers"]()
+    raw=exact_source(candidate,"tools/audit_journal_release_scope.py")
+    module={"__name__":"exact_audit_recovery_peer_scope",
+            "__file__":str(REPO/"tools/audit_journal_release_scope.py")}
+    exec(compile(raw,module["__file__"],"exec"),module)
+    peers=module["protected_peer_inventory"]()
     need(len(peers)==6,"UNEXPECTED_PROTECTED_CONTAINER_SET")
     return {
       "schema_version":"1.0","action":ACTION,
@@ -230,6 +234,8 @@ def review_scope(candidate,blobs,c):
           str(p):sha(root_read(p)) for p in (FULL_DROPIN,FAST_DROPIN,CURRENT_WRAPPER)},
       "live_source_identity":identity,
       "protected_peers":peers,
+      "protected_peers_source_sha256":sha(raw),
+      "isolated_preproduction_shadow_health_is_observed_not_a_core_dependency":True,
       "freeze_sha256":FREEZE_SHA,"hold_sha256":HOLD_SHA,
       "queue_cutover":False,"audit_data_deletion_allowed":False,
       "audit_db_schema_change_allowed":False,

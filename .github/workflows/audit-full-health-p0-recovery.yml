@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - 'tools/audit_full_health_p0_*.py'
+      - 'tools/audit_journal_release_scope.py'
+      - 'tools/tests/test_audit_journal_protected_peers.py'
       - 'tools/tests/test_audit_full_health_p0_recovery.py'
       - 'tools/tests/audit_full_health_p0_root_fixture.py'
       - 'infrastructure/jason-audit-full-health-p0/**'
@@ -34,6 +36,7 @@ jobs:
         run: |
           python -B -m pytest -o addopts='' -q -p no:cacheprovider \
             tools/tests/test_audit_full_health_p0_recovery.py \
+            tools/tests/test_audit_journal_protected_peers.py \
             tools/tests/test_audit_journal_health.py \
             tools/tests/test_audit_journal_health_native.py \
             tools/tests/test_openclaw_authority_operational_health.py \
