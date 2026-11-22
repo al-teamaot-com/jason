@@ -72,7 +72,8 @@ def root_stage_trust():
     policy=json.loads(raw)
     expected={
        "schema_version","action","candidate_sha","rollback_sha",
-       "worker_sha256","installer_sha256","source_worktree",
+       "worker_sha256","installer_sha256","mcp_base_image_id",
+       "mcp_overlay_image_id","source_worktree",
        "standing_authority","one_use_executor","permitted_actions",
        "expires_at","licensed_owner_oid","global_freeze_unchanged",
     }
@@ -83,6 +84,10 @@ def root_stage_trust():
          and policy["rollback_sha"]==ROLLBACK
          and all(DIGEST.fullmatch(policy[k]) is not None
                  for k in ("worker_sha256","installer_sha256"))
+         and policy["mcp_base_image_id"]==
+             "sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477"
+         and re.fullmatch(r"sha256:[a-f0-9]{64}",
+             policy["mcp_overlay_image_id"]) is not None
          and policy["permitted_actions"]==sorted(ALLOWED)
          and policy["standing_authority"] is False
          and policy["one_use_executor"] is True
