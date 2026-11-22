@@ -31,6 +31,15 @@ with tempfile.TemporaryDirectory(prefix="audit-owner-root-bootstrap-",dir="/tmp"
     root_policy_dir=base/"root-policy"
     root_policy_dir.mkdir(mode=0o755)
     root_policy_dir.chmod(0o755)
+    desired=root_policy_dir/"production-desired-state.json"
+    desired.write_text(json.dumps({
+        "schema_version":"1.0",
+        "required_system_units":["jason-production-drift-watchdog.service"],
+        "allowed_system_units":[
+            "jason-audit-journal-owner-executor.service",
+            "jason-audit-journal-owner-executor.path"],
+    },sort_keys=True)+"\n")
+    desired.chmod(0o600)
     authority=base/"authority"
     authority.mkdir(mode=0o700)
     os.chown(authority,1000,1000)
@@ -40,6 +49,7 @@ with tempfile.TemporaryDirectory(prefix="audit-owner-root-bootstrap-",dir="/tmp"
     x.NATIVE_UNIT_DIR=native_dir
     x.TRUST_DIR=trust_dir
     x.PUBLIC=authority/"audit-journal-release"
+    x.ROOT_DRIFT_POLICY=desired
     actor=base/"reviewed"
     actor.mkdir(mode=0o755)
     os.chown(actor,1000,1000)
@@ -56,15 +66,31 @@ with tempfile.TemporaryDirectory(prefix="audit-owner-root-bootstrap-",dir="/tmp"
     # No systemd host executable is present in the isolated test image;
     # model it without performing any host service action, including rollback.
     x.subprocess.run=lambda argv,**kw:None
+    def show_watchdog(argv):
+        return ("path=/usr/bin/python3 ; argv[]=/usr/bin/python3 "
+                "/opt/jason/current/tools/production_drift_watchdog.py --config "+str(desired))
     x.command=lambda argv,timeout=45:(
         calls.append((tuple(argv),timeout)),
+        show_watchdog(argv) if len(argv)>1 and argv[1]=="show" else
         "active" if argv[-2:]==["is-active",x.UNIT_PATH] else ""
     )[1]
     owner_sha="a"*40
-    evidence=x.root_install(actor,owner_sha,payload,{
-        "mcp_overlay_image_id":"sha256:"+"b"*64,
-    })
+    source_policy_sha=x.root_desired_state_predeclares_temporary_watcher()
+    assert source_policy_sha==x.digest(desired.read_bytes())
+    facts={"mcp_overlay_image_id":"sha256:"+"b"*64,
+           "original_root_desired_policy_sha256":source_policy_sha}
+    evidence=x.root_install(actor,owner_sha,payload,facts)
     assert evidence["status"]=="root_exact_audit_executor_installed"
+    # Deliberately remove one declaration and confirm genuine Root denial.
+    original_policy=desired.read_bytes()
+    unlisted=json.loads(original_policy)
+    unlisted["allowed_system_units"].remove(x.UNIT_SERVICE)
+    desired.write_text(json.dumps(unlisted,sort_keys=True))
+    try:x.root_desired_state_predeclares_temporary_watcher()
+    except x.AuditBootstrapDenied as exc:
+        assert "ROOT_DESIRED_STATE_AUDIT_WATCHER_NOT_PREDECLARED" in str(exc)
+    else:raise AssertionError("UNLISTED_ROOT_AUDIT_WATCHER_ACCEPTED")
+    desired.write_bytes(original_policy)
     assert evidence["root_path_enabled"] is True
     assert evidence["owner_signature_not_yet_issued"] is True
     assert evidence["mcp_not_restarted"] is True
@@ -100,8 +126,7 @@ with tempfile.TemporaryDirectory(prefix="audit-owner-root-bootstrap-",dir="/tmp"
     assert any(v[0][-3:]==("enable","--now",x.UNIT_PATH)
                for v in calls)
     try:
-        x.root_install(actor,owner_sha,payload,{
-            "mcp_overlay_image_id":"sha256:"+"b"*64})
+        x.root_install(actor,owner_sha,payload,facts)
     except x.AuditBootstrapDenied:
         pass
     else:
@@ -136,10 +161,10 @@ with tempfile.TemporaryDirectory(prefix="audit-owner-root-bootstrap-",dir="/tmp"
     def partial_failure(argv,timeout=45):
         if argv[:3]==["/usr/bin/systemctl","enable","--now"]:
             raise RuntimeError("simulated untrusted unit activation failure")
-        return "active" if argv[-2:]==["is-active",x.UNIT_PATH] else ""
+        return show_watchdog(argv) if len(argv)>1 and argv[1]=="show" else (
+            "active" if argv[-2:]==["is-active",x.UNIT_PATH] else "")
     x.command=partial_failure
-    try:x.root_install(actor,owner_sha,payload,{
-        "mcp_overlay_image_id":"sha256:"+"b"*64})
+    try:x.root_install(actor,owner_sha,payload,facts)
     except RuntimeError:
         pass
     else:raise AssertionError("failed systemd operation was accepted")
