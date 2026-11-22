@@ -20,6 +20,17 @@ def prepared_source(tmp_path,monkeypatch):
     source=tmp_path/"audit-owner-main-fixture"
     source.mkdir(mode=0o755)
     source.chmod(0o755)
+    # Synthetic hosted-runner source files are owned by the runner (often UID
+    # 1001), not Jason's real UID1000. Change only fixture metadata readback;
+    # Root production source_verified still requires literal UID1000.
+    actual_lstat=Path.lstat
+    def synthetic_ownership(path,*args,**kwargs):
+        info=actual_lstat(path,*args,**kwargs)
+        if path==source or path.is_relative_to(source):
+            return SimpleNamespace(st_uid=1000,st_mode=info.st_mode,
+                                   st_nlink=info.st_nlink,st_size=info.st_size)
+        return info
+    monkeypatch.setattr(Path,"lstat",synthetic_ownership)
     monkeypatch.setattr(x,"SOURCE_PREFIX",tmp_path)
     expected={}
     for index,name in enumerate(x.SOURCE):
@@ -68,6 +79,14 @@ def prepared_live(tmp_path,monkeypatch,payload):
     }
     freeze=record("freeze.json",frozen)
     freeze.chmod(0o600)
+    actual_lstat=Path.lstat
+    def synthetic_freeze_ownership(path,*args,**kwargs):
+        info=actual_lstat(path,*args,**kwargs)
+        if path==freeze:
+            return SimpleNamespace(st_uid=1000,st_mode=info.st_mode,
+                                   st_nlink=info.st_nlink,st_size=info.st_size)
+        return info
+    monkeypatch.setattr(Path,"lstat",synthetic_freeze_ownership)
     monkeypatch.setattr(x,"FREEZE_PATH",freeze)
     journal=root/"orchestration-events.sqlite3"
     journal.write_bytes(b"fixture-sqlite")
