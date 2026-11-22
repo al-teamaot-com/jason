@@ -5278,6 +5278,54 @@ def _release_approval_owner() -> tuple[str, str]:
 
 
 @mcp.tool()
+def approve_audit_journal_adoption(
+    release_id: str,
+    candidate_sha: str,
+    scope_sha256: str,
+    manifest_sha256: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Owner OAuth-signs ONE Root-preflighted daily audit archive adoption.
+
+    Separate from a full Jason software release and administrative grants.
+    No device-code flow, terminal prompt, provider writes, or Root execution.
+    The independent native Root consumer validates the original signed offer,
+    installed Root source, freeze, and the live migration scope before cutover.
+    Disabled unless a separately governed installed Root consumer is enabled.
+    """
+    try:
+        if os.getenv("JASON_AUDIT_JOURNAL_OWNER_ISSUER_ENABLED") != "true":
+            raise PermissionError("AUDIT_JOURNAL_OWNER_ISSUER_NOT_ACTIVATED")
+        principal, organization = _release_approval_owner()
+        token = get_access_token()
+        if token is None:
+            raise PermissionError("AUDIT_JOURNAL_ENTRA_BEARER_REQUIRED")
+        signer_path = os.getenv("JASON_OWNER_RELEASE_ED25519_KEY_PATH", "").strip()
+        if not signer_path.startswith("/"):
+            raise PermissionError("AUDIT_JOURNAL_SERVICE_SIGNER_NOT_CONFIGURED")
+        from kernel.signed_owner_release import read_service_owner_signing_key
+        from jason_mcp.audit_journal_adoption_approval import (
+            queue_exact_archive_owner_approval,
+        )
+        signer = read_service_owner_signing_key(Path(signer_path))
+        receipt = queue_exact_archive_owner_approval(
+            state_root=Path("/var/lib/jason/authority/audit-journal-release"),
+            release_id=release_id,
+            candidate_sha=candidate_sha,
+            scope_sha256=scope_sha256,
+            manifest_sha256=manifest_sha256,
+            approved_by=principal,
+            organization_id=organization,
+            verified_token_claims=token.claims or {},
+            service_signer=signer,
+            affirmative_decision=affirmative_decision,
+        )
+        return dict(receipt)
+    except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+
+@mcp.tool()
 def approve_release_candidate(
     release_id: str,
     candidate_sha: str,
