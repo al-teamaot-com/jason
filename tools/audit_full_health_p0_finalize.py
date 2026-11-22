@@ -170,6 +170,11 @@ def scope(candidate,r,claim,previous,source):
          "ACTUAL_USED_ROOT_WORKER_CHANGED")
     return {"schema_version":"1.0","action":ACTION,
             "candidate_sha":candidate,"rollback_sha":r.LKG,
+            # Installed Entra Owner authorization reads scope.policy.*.
+            # Preserve top-level bindings for existing immutable P0 receipts.
+            "policy":{"candidate_sha":candidate,"rollback_sha":r.LKG},
+            "installation_targets":[str(r.DROPIN),FULL_UNIT,FAST_UNIT],
+            "queue_cutover":False,
             "previous_approved_action":r.ACTION,
             "previous_owner_claim_sha256":sha(r.root_read(r.RECORD/"attempt.json",200000)),
             "previous_worker_result_sha256":sha(r.root_read(r.RECORD/"result.json",200000)),
@@ -189,6 +194,20 @@ def scope(candidate,r,claim,previous,source):
             "existing_lkg_and_freezes_unchanged":True,
             "original_data_identity":identity,
             "peers":peers}
+
+
+def exact_installed_owner_contract(planned,candidate,r):
+    # Match the reviewed installed pmv4_e_dispatch_install.owner(scope)
+    # interface BEFORE issuing an Entra challenge or claiming one-use Root.
+    need(planned.get("action")==ACTION
+         and planned.get("candidate_sha")==candidate
+         and planned.get("rollback_sha")==r.LKG
+         and planned.get("policy")=={
+             "candidate_sha":candidate,"rollback_sha":r.LKG}
+         and planned.get("installation_targets")==[
+             str(r.DROPIN),FULL_UNIT,FAST_UNIT]
+         and planned.get("queue_cutover") is False,
+         "INSTALLED_OWNER_ADAPTER_SCOPE_CONTRACT_INVALID")
 
 
 def verified_ci(candidate,r):
@@ -314,6 +333,7 @@ def main():
         verified_ci(candidate,r)
         prior,prior_result=read_approval(r)
         planned=scope(candidate,r,prior,prior_result,own_source)
+        exact_installed_owner_contract(planned,candidate,r)
         print("P0_GENUINE_FULL_HEALTH_FINALIZATION_PREFLIGHT=PASS",flush=True)
         print("REVIEWED_SOURCE_SHA="+candidate,flush=True)
         print("EXACT_SCOPE_SHA256="+sha(canon(planned)),flush=True)
@@ -324,6 +344,7 @@ def main():
         actor=auth["owner"](planned)
         need(actor==OWNER,"VERIFIED_EXACT_LICENSED_OWNER_MISSING")
         again=scope(candidate,r,prior,prior_result,own_source)
+        exact_installed_owner_contract(again,candidate,r)
         need(planned==again,"LIVE_EXACT_RELEASE_SCOPE_CHANGED_DURING_APPROVAL")
         receipt=claim_one_use(r,candidate,planned,actor)
         finalize(r,receipt,prior["approved_at"])

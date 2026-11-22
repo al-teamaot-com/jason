@@ -307,3 +307,123 @@ def test_finalizer_is_intentionally_not_an_archive_deployer():
 def test_finalization_uses_exact_native_fast_proof_freshness_policy():
     from tools import openclaw_authority_fast_health as native
     assert f.MAX_PROOF_AGE==native.MAX_FULL_AGE_SECONDS==30*60*60
+
+
+def test_live_installed_owner_interface_contract_offline_without_credentials(
+        tmp_path,monkeypatch,capsys):
+    """Exercise the REAL installed Owner code, not a mocked owner callback.
+
+    Only the network response and credential verifier are deterministic fakes.
+    This test would have raised KeyError in the previously released finalizer.
+    """
+    from tools import pmv4_e_dispatch_install as installed
+    r,claim,result,system,override,report,policy=fake_original(tmp_path,monkeypatch)
+    candidate="a"*40
+    scope=f.scope(candidate,r,claim,result,b"reviewed exact owner source")
+    assert scope["policy"]=={"candidate_sha":candidate,"rollback_sha":old.LKG}
+    assert scope["candidate_sha"]==scope["policy"]["candidate_sha"]
+    assert scope["rollback_sha"]==scope["policy"]["rollback_sha"]
+    assert scope["installation_targets"]==[str(override),f.FULL_UNIT,f.FAST_UNIT]
+    assert scope["queue_cutover"] is False
+    assert scope["action"]==f.ACTION
+    # Do NOT fetch an Entra challenge or use any real secrets in CI.
+    safe_source=b"synthetic installed-verifier-source-with-no-secrets"
+    monkeypatch.setattr(installed,"OAUTH_HASH",installed.digest(safe_source))
+    monkeypatch.setattr(installed,"read",lambda *args,**kw:safe_source)
+    calls=[]
+    def mock_form(url,data):
+        calls.append((url,dict(data)))
+        if url.endswith("devicecode"):
+            return {"user_code":"MOCK-CODE","device_code":"mock-device",
+                    "verification_uri":"https://test.invalid/verify",
+                    "expires_in":"600","interval":"5"}
+        if url.endswith("token"):
+            return {"access_token":"mock-authenticated-owner"}
+        raise AssertionError("unrecognized identity endpoint")
+    fake_auth={
+        "TENANT":"test-aot-tenant","CLIENT_ID":"test-client",
+        "SCOPE":"openid profile",
+        "_form":mock_form,
+        "jwt_owner":lambda token:
+            f.OWNER if token=="mock-authenticated-owner" else None,
+    }
+    monkeypatch.setattr(installed,"load_code",lambda *args,**kw:fake_auth)
+    monkeypatch.setattr(installed.time,"sleep",lambda duration:None)
+    prompts=[]
+    def mock_input(prompt):
+        prompts.append(prompt)
+        return f.ACTION
+    monkeypatch.setattr("builtins.input",mock_input)
+    actor=installed.owner(scope)
+    captured=capsys.readouterr().out
+    assert actor==f.OWNER
+    assert "EXACT_ACTION="+f.ACTION in captured
+    assert "CANDIDATE_SHA="+candidate in captured
+    assert "ROLLBACK_SHA="+old.LKG in captured
+    assert "INSTALL_SCOPE_SHA256="+installed.digest(installed.canonical(scope)) in captured
+    assert "INSTALL_TARGETS="+",".join(scope["installation_targets"]) in captured
+    assert "CUTOVER=false" in captured
+    assert "BROWSER_VERIFICATION_URL=https://test.invalid/verify" in captured
+    assert "SIGN_IN_CODE=MOCK-CODE" in captured
+    assert prompts==["Type "+f.ACTION+" to approve this exact scope and rollback: "]
+    assert len(calls)==2
+    assert calls[0][0].endswith("devicecode")
+    assert calls[1][0].endswith("token")
+    # The scope remains immutable and replay-proof for the succeeding Root claim.
+    assert f.sha(f.canon(scope))==installed.digest(installed.canonical(scope))
+    assert not f.RECEIPT.exists()
+    assert override.exists()
+
+
+def test_old_broken_scope_cannot_pass_installed_owner_contract(
+        tmp_path,monkeypatch):
+    """Prevents a repeat of the real release's KeyError after preflight PASS."""
+    from tools import pmv4_e_dispatch_install as installed
+    r,claim,result,*_=fake_original(tmp_path,monkeypatch)
+    scope=f.scope("a"*40,r,claim,result,b"source")
+    del scope["policy"]
+    safe_source=b"offline-auth-code"
+    monkeypatch.setattr(installed,"OAUTH_HASH",installed.digest(safe_source))
+    monkeypatch.setattr(installed,"read",lambda *args,**kw:safe_source)
+    monkeypatch.setattr(installed,"load_code",lambda *args,**kw:{
+        "TENANT":"test","CLIENT_ID":"test-client","SCOPE":"openid",
+        "_form":lambda *args,**kw:{
+            "user_code":"mock","device_code":"mock",
+            "verification_uri":"https://test.invalid/verify",
+            "expires_in":"600","interval":"5"}
+    })
+    with pytest.raises(KeyError,match="policy"):
+        installed.owner(scope)
+
+
+@pytest.mark.parametrize("mutate",[
+    lambda x:x.pop("policy"),
+    lambda x:x["policy"].update(candidate_sha="0"*40),
+    lambda x:x["policy"].update(rollback_sha="0"*40),
+    lambda x:x.update(action="foreign-action"),
+    lambda x:x.update(installation_targets=["/etc/untrusted-service"]),
+    lambda x:x.update(queue_cutover=True),
+    lambda x:x.update(candidate_sha="0"*40),
+    lambda x:x.update(rollback_sha="0"*40),
+])
+def test_preflight_rejects_bad_installed_owner_scope_before_any_oauth(
+        tmp_path,monkeypatch,mutate):
+    r,claim,result,*_=fake_original(tmp_path,monkeypatch)
+    candidate="a"*40
+    planned=f.scope(candidate,r,claim,result,b"approved owner adapter")
+    mutate(planned)
+    with pytest.raises(f.Denied,
+                       match="INSTALLED_OWNER_ADAPTER_SCOPE_CONTRACT_INVALID"):
+        f.exact_installed_owner_contract(planned,candidate,r)
+    assert not f.RECEIPT.exists()
+
+
+def test_preflight_contract_passes_real_installed_owner_adapter_scope(
+        tmp_path,monkeypatch):
+    r,claim,result,*_=fake_original(tmp_path,monkeypatch)
+    candidate="a"*40
+    planned=f.scope(candidate,r,claim,result,b"approved owner adapter")
+    f.exact_installed_owner_contract(planned,candidate,r)
+    assert planned["policy"]["candidate_sha"]==candidate
+    assert planned["policy"]["rollback_sha"]==old.LKG
+    assert not f.RECEIPT.exists()
