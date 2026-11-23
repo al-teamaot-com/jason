@@ -1,0 +1,11 @@
+# Consistent audit migration final peer verification
+
+Status: source engineering; no production restart, policy update or archive adoption.
+
+Final source review after the rollback-capacity correction found a deterministic mismatch before privileged deployment. The existing exact audit-admission contract permits one original, network-isolated, immutable preproduction shadow in its recorded OOM-stopped state. The actual five production peers must still run with their exact images and required health. The release executor duplicated a broader running/healthy check over all six peers and would therefore reject the unchanged shadow after the lengthy archive and restore proof, unnecessarily rolling back the migration.
+
+Final consumer verification now calls the same strict `protected_peer_inventory()` implementation as admission. That function verifies the fixed six-peer set, exact approved images, production health and source labels, and all original shadow limits, labels, network isolation, non-Root identity, no-restart policy, mounts and exact OOM termination evidence. It does not start the shadow or represent it as healthy. Final verification additionally binds the peer set and images to the exact Owner-reviewed before-scope and retains unchanged IDs and start times for unrelated peers. New IDs are permitted only for the three explicitly replaced journal producers. Real current and historical event reads through all three producers still run before peer acceptance.
+
+Regression tests invoke the real executor consumer-verification path and the real shared inventory verifier with synthetic Docker readbacks. They cover recorded isolated running and OOM-stopped shadow states, authorized producer replacement IDs, every production peer stopped/unhealthy/image fault, unrelated peer ID/restart changes, changed shadow isolation and missing Owner-scope peers. No synthetic event is sent to production and no provider or Docker mutation is performed by those tests.
+
+This closes a duplicate-check inconsistency inside the existing reviewed audit scope. It does not waive Stage E readiness, broaden images or authorize deployment. Exact protected Main CI, Root admission, independently verified exact-action Owner approval, unchanged freeze and event-preserving rollback remain required.

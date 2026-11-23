@@ -13,7 +13,7 @@ from hashlib import sha256
 from http.client import HTTPException
 import json,os,signal,subprocess,sys,time
 from pathlib import Path
-from tools.audit_journal_release_scope import ACTION,PRIVATE,POLICY,BASE,OWNER,ROLLBACK,PROTECTED,STATE,digest
+from tools.audit_journal_release_scope import ACTION,PRIVATE,POLICY,BASE,OWNER,ROLLBACK,PROTECTED,STATE,digest,protected_peer_inventory
 from tools.audit_journal_container_release import DockerEngine,ROLES,planned_configuration,exact_original_configuration,configuration_matches
 from orchestrator.segmented_journal import read_control,need
 ENTRY=BASE/"trusted/tools/audit_journal_release_executor.py"
@@ -216,17 +216,15 @@ class ExactRelease:
       code,str(self.c.p.active),json.dumps(probes["event_ids"])],capture_output=True,text=True,timeout=60,check=False)
    need(result.returncode==0 and result.stdout.strip()==str(len(probes["event_ids"])),
         "JOURNAL_ACTUAL_CONSUMER_HISTORY_READ_FAILED")
+  # Reuse the exact admission contract: all actual production peers must
+  # run healthy; the fixed isolated preproduction shadow is observed as-is.
+  peers=protected_peer_inventory()
+  need(set(peers)==set(self.plan["scope"]["protected_peer_before"]),"JOURNAL_FIXED_PROTECTED_PEER")
   for role,before in self.plan["scope"]["protected_peer_before"].items():
-   need(role in (*ROLES,"jason-pmv4-shadow-gateway","jason-teams-gateway","openbao"),
-        "JOURNAL_FIXED_PROTECTED_PEER")
-   fmt='{"id":"{{.Id}}","image":"{{.Image}}","state":{{json .State}}}'
-   result=subprocess.run(["/usr/bin/docker","inspect","--format",fmt,role],
-                         capture_output=True,text=True,timeout=15,check=True)
-   value=json.loads(result.stdout);state=value["state"]
-   need(value["image"]==before["image"] and state["Running"]
-        and state.get("Health",{}).get("Status","none") in ("none","healthy"),"JOURNAL_PROTECTED_PEER_NOT_HEALTHY")
+   value=peers[role]
+   need(value["image"]==before["image"],"JOURNAL_PROTECTED_PEER_NOT_HEALTHY")
    if role not in ROLES:
-    need(value["id"]==before["id"] and state["StartedAt"]==before["started_at"],
+    need(value["id"]==before["id"] and value["started_at"]==before["started_at"],
          "JOURNAL_UNRELATED_PROTECTED_PEER_CHANGED")
   self.status("actual_consumer_history_and_protected_health_verified",consumers=3)
 
