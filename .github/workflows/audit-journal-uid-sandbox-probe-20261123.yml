@@ -47,14 +47,14 @@ jobs:
             --property="RestrictAddressFamilies=AF_UNIX AF_NETLINK" \
             --property="TasksMax=32" \
             /usr/bin/python3 -I -B /tmp/jason-audit-writer-systemd-probe.py
-          echo "TEST_AMBIENT_SETUID_SETGID_START"
+          echo "TEST_AMBIENT_SETUID_ONLY_START"
           timeout 50s sudo systemd-run --wait --collect --pipe \
             --unit="audit-uid-boundary-ci-ambient-$GITHUB_RUN_ID" \
             --property="User=root" \
             --property="Group=root" \
             --property="NoNewPrivileges=yes" \
             --property="CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_KILL CAP_AUDIT_WRITE" \
-            --property="AmbientCapabilities=CAP_SETUID CAP_SETGID" \
+            --property="AmbientCapabilities=CAP_SETUID" \
             --property="RestrictAddressFamilies=AF_UNIX AF_NETLINK" \
             --property="TasksMax=32" \
             /usr/bin/python3 -I -B /tmp/jason-audit-writer-systemd-probe.py
