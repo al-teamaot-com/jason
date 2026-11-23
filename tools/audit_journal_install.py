@@ -140,11 +140,18 @@ def schema_and_sample(s):
       and result["maximum_metadata_bytes"]<=512,"RECENT_EVENT_ENVELOPE_INCOMPATIBLE")
  return result["actual"]
 
+def installation_parent_custody(c):
+ # Root code, policy and new private state stay under Root-owned parents.
+ for parent in (Path("/usr/local/lib/jason"),Path("/etc/jason-owner-release"),
+                Path("/etc/systemd/system"),Path("/var/lib"),Path("/srv"),Path("/srv/jason")):
+  c["directory"](parent,0)
+ # Existing live data belongs to the service account; never chown it to
+ # satisfy an installation check. Preserve exact UID, GID and access mode.
+ c["directory"](Path("/var/lib/jason"),1000,0o750)
+
 def inspect(s,engine,inventory,candidate,payload,c):
  need(Path("/proc/self/ns/mnt").stat().st_ino==Path("/proc/1/ns/mnt").stat().st_ino,"HOST_MOUNT_NAMESPACE")
- for parent in (Path("/usr/local/lib/jason"),Path("/etc/jason-owner-release"),
-                Path("/etc/systemd/system"),Path("/var/lib/jason"),Path("/srv"),Path("/srv/jason")):
-  c["directory"](parent,0)
+ installation_parent_custody(c)
  dataset=capacity(s);peers=native_gate(s,c);schema=schema_and_sample(s)
  for unit in s.UNITS:
   need(not os.path.lexists(SYSTEMD/unit),"NEW_UNIT_ALREADY_PRESENT:"+unit)
