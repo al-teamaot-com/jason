@@ -105,8 +105,10 @@ else:raise AssertionError("startup timeout did not occur")
 controller.no_handles(p.active)
 bootstrap=runpy.run_path("/bootstrap_fixture.py")
 cases=bootstrap["exercise"](BASE,TRUST)
-composition=runpy.run_path("/installer_fixture.py")["exercise"](BASE,TRUST)
-print(json.dumps({"sql_helper_timeout_group_reaped":True,"root_install_composition_cases":composition,"root_bootstrap_interruption_cases":cases,"test":"isolated-native-root-two-identity","result":"passed",
+installer_fixture=runpy.run_path("/installer_fixture.py")
+parent_admission=installer_fixture["exercise_parents"](BASE,TRUST)
+composition=installer_fixture["exercise"](BASE,TRUST)
+print(json.dumps({"sql_helper_timeout_group_reaped":True,"root_parent_admission_cases":parent_admission,"root_install_composition_cases":composition,"root_bootstrap_interruption_cases":cases,"test":"isolated-native-root-two-identity","result":"passed",
  "root_custody":True,"writer_uid":1000,"distinct_filesystems":True,"production_mounts":False,
  "all_events_retained":True,"original_source_reclaimed":True,"reboot_mapping_restored":True,
  "recursive_container_bind_verified":True}))

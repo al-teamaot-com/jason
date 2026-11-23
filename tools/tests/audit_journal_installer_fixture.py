@@ -1,7 +1,8 @@
 """Composition of installer files/rollback in an isolated Root filesystem.
 
-No admission, Owner issuer, Docker daemon or systemd call runs in this fixture.
-Only the filesystem component receives synthetic paths and source bytes.
+Parent-directory admission uses real isolated UID0/UID1000 filesystem metadata.
+Owner issuer, remaining live admission, Docker daemon and systemd do not run.
+The installation component receives synthetic paths and source bytes.
 """
 from datetime import datetime,timezone
 from pathlib import Path
@@ -67,4 +68,52 @@ def exercise(base,trust):
    assert archive.stat().st_uid==0 and stat.S_IMODE(archive.stat().st_mode)==0o755
   assert active.read_bytes()==b"untouched-canonical" and (active.stat().st_dev,active.stat().st_ino)==identity
   total+=1
+ return total
+
+
+def exercise_parents(base,trust):
+ """Actual preflight parent phase with the unchanged native directory guard."""
+ install=load(trust/"tools/audit_journal_install.py","fixture_parent_install")
+ native=load(trust/"tools/pmv4_e_operational_closure.py","fixture_parent_guard")
+ root=base/"parent-admission";root.mkdir(mode=0o755)
+ roots=("/usr/local/lib/jason","/etc/jason-owner-release","/etc/systemd/system", "/var/lib","/srv","/srv/jason")
+ mapping={Path(n):root/n.lstrip("/") for n in roots}
+ for p in mapping.values():
+  p.mkdir(mode=0o755,parents=True,exist_ok=True);os.chown(p,0,0);p.chmod(0o755)
+ service=Path("/var/lib/jason");mapping[service]=root/"var/lib/jason"
+ mapping[service].mkdir(mode=0o750);os.chown(mapping[service],1000,1000);mapping[service].chmod(0o750)
+ class ReachedDataAdmission(Exception):pass
+ reached=[]
+ def stop(_):
+  reached.append(True);raise ReachedDataAdmission
+ install.capacity=stop
+ def guard(path,uid,mode=None):native.directory(mapping[path],uid,mode)
+ def invoke():install.inspect(None,None,None,"a"*40,{}, {"directory":guard})
+ def metadata():return {str(p):(p.lstat().st_uid,p.lstat().st_gid,stat.S_IMODE(p.lstat().st_mode)) for p in mapping.values()}
+ before=metadata()
+ try:invoke()
+ except ReachedDataAdmission:pass
+ else:raise AssertionError("parent admission did not reach data phase")
+ assert reached==[True] and metadata()==before
+ total=1
+ cases=[(service,*bad) for bad in ((0,0,0o750,False),(1001,1000,0o750,False),(1000,984,0o750,False),
+       (1000,1000,0o770,False),(1000,1000,0o752,False),(1000,1000,0o755,False),(1000,1000,0o750,True))]
+ cases.extend((Path(name),*bad) for name in roots for bad in ((1000,1000,0o755,False),
+       (0,1000,0o755,False),(0,0,0o775,False),(0,0,0o755,True)))
+ for name,uid,gid,mode,link in cases:
+  path=mapping[name];original=path.lstat();saved=(original.st_uid,original.st_gid,stat.S_IMODE(original.st_mode))
+  backing=path.with_name(path.name+".fixture-original")
+  reached.clear()
+  try:
+   if link:path.rename(backing);path.symlink_to(backing)
+   else:os.chown(path,uid,gid);path.chmod(mode)
+   try:invoke()
+   except native.ClosureDenied:pass
+   else:raise AssertionError("unsafe parent custody accepted")
+   assert reached==[]
+   total+=1
+  finally:
+   if link:path.unlink();backing.rename(path)
+   else:os.chown(path,saved[0],saved[1]);path.chmod(saved[2])
+ assert metadata()==before
  return total
