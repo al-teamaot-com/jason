@@ -104,4 +104,53 @@ def admission(candidate: dict[str, Any], existing: list[dict[str, Any]],
         return {'state': 'blocked_by_dependency', 'conflicts': conflicts}
     return {'state': 'admitted', 'conflicts': [], 'production_authority': False}
 
+
+
+def atomic_claim(candidate: dict[str, Any], ledger: Path, *,
+                 production_healthy: bool = False) -> dict[str, Any]:
+    """Linux claim-store transaction, using one sidecar lock and atomic rename.
+
+    This store is dedicated to development coordination, not production drift.
+    The caller must supply an authoritative reconciled inventory before the
+    first claim; an uninitialized ledger cannot silently admit new work.
+    """
+    import fcntl
+    import os
+    import tempfile
+    lock = ledger.with_name(ledger.name + '.lock')
+    if not ledger.is_file():
+        return {'state': 'blocked', 'reasons': ['authoritative_inventory_missing']}
+    with lock.open('a+', encoding='utf-8') as guard:
+        fcntl.flock(guard.fileno(), fcntl.LOCK_EX)
+        try:
+            source = json.loads(ledger.read_text(encoding='utf-8'))
+            items = source.get('items')
+            if source.get('schema_version') != '1.0' or not isinstance(items, list):
+                return {'state': 'blocked', 'reasons': ['invalid_claim_ledger']}
+            if any(i.get('id') == candidate.get('id') for i in items):
+                return {'state': 'blocked', 'reasons': ['workstream_already_exists']}
+            result = admission(candidate, items, production_healthy=production_healthy)
+            if result['state'] != 'admitted':
+                return result
+            added = {**candidate, 'state': 'active'}
+            source['items'].append(added)
+            fd, temp = tempfile.mkstemp(prefix='.claim-', dir=str(ledger.parent))
+            try:
+                with os.fdopen(fd, 'w', encoding='utf-8') as out:
+                    json.dump(source, out, sort_keys=True, separators=(',', ':'))
+                    out.flush()
+                    os.fsync(out.fileno())
+                os.replace(temp, ledger)
+                directory_fd = os.open(str(ledger.parent), os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            finally:
+                if os.path.exists(temp):
+                    os.unlink(temp)
+            return {'state': 'claimed', 'id': candidate['id'], 'production_authority': False}
+        finally:
+            fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
+
 if __name__=='__main__': raise SystemExit(main())

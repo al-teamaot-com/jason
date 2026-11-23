@@ -11,6 +11,7 @@ Prevent concurrent engineering from modifying the same files, components, contra
 - Detects file and semantic-domain overlap; explicit upstream dependencies remain blocked until `production_verified`.
 - Missing scope declarations, invalid inventory, unknown workstream types/states, and unverified feature-production health block admission.
 - CLI accepts `--candidate`, reads the inventory at `--input`, and writes an explicit JSON decision at `--output`; exit 0 permits development admission and exit 2 denies it. The older advisory CLI remains available without `--candidate`.
+- Adds `atomic_claim()` with a dedicated initialized development-only ledger, serialized Linux file locking, atomic replacement, and crash-durable fsync; simultaneous conflicting claims cannot both succeed. This primitive is not wired into the live worker.
 - No deploy, runtime mutation, gateway modification, breaker change, credential access, or provider writes.
 
 ## Remaining integration gates
