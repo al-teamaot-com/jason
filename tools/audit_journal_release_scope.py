@@ -59,7 +59,11 @@ TARGETS=(
  "/etc/systemd/system/jason-openclaw-authority-full-integrity.service.d/94-audit-journal.conf",
  str(DESIRED),
 )
+ROOT_TRANSITION=Path("/usr/local/lib/jason/release_control_transition_worker.py")
+ROOT_DRIFT_EVALUATOR=Path("/opt/jason/current/tools/production_drift_guard.py")
 PROTECTED={
+ str(ROOT_TRANSITION):"02ce315d9e96e1e655c3465f5fc2761661f78e5ced5b13f849680a85f2a1ff7e",
+ str(ROOT_DRIFT_EVALUATOR):"03cfc08c7b8d4d9f63d22700c7a5dc6f58ff9c19b8d7060ab1cdb41192b9c56a",
  "/usr/local/lib/jason/release_host_reconcile_worker.py":
   "dca0c480265426c3c73f9cf8f7b8a9a4c5ab555640bd6953eb127cf3963a1896",
  "/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json":
@@ -71,6 +75,40 @@ PROTECTED={
  "/var/lib/jason/openclaw/support-repair/pmv3-engineering-owner-pause.json":
   "4a5de8286bf9d77842ca94dafe6f1d38c1a835e8f12bc0dfda46b7a3cf867747",
 }
+def refresh_native_drift():
+ """Use the unchanged Root controller's independent evaluator under our lock.
+
+ The scheduled watchdog deliberately defers under the transaction lock. Its
+ successful exit is not verification. Only the existing transition worker
+ may close the breaker after this native routine regenerates real evidence.
+ """
+ if os.geteuid()!=0:raise PermissionError("JOURNAL_NATIVE_DRIFT_ROOT_REQUIRED")
+ source=None
+ for path in (ROOT_TRANSITION,ROOT_DRIFT_EVALUATOR):
+  fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+  with os.fdopen(fd,"rb") as stream:
+   m=os.fstat(stream.fileno())
+   if not (stat.S_ISREG(m.st_mode) and m.st_uid==m.st_gid==0 and m.st_nlink==1
+           and not m.st_mode&0o002 and 0<m.st_size<=2000000):
+    raise PermissionError("JOURNAL_NATIVE_DRIFT_CUSTODY")
+   raw=stream.read(2000001)
+  if sha256(raw).hexdigest()!=PROTECTED[str(path)]:
+   raise PermissionError("JOURNAL_NATIVE_DRIFT_SOURCE_CHANGED")
+  if path==ROOT_TRANSITION:source=raw
+ ns={"__name__":"audit_journal_existing_root_transition","__file__":str(ROOT_TRANSITION)}
+ exec(compile(source,str(ROOT_TRANSITION),"exec"),ns)
+ ns["refresh_stale_drift"]()
+
+
+def native_revalidation_code():
+ # Native rejection detail is already bounded by the Root controller.
+ return ("import sys,json;from pathlib import Path;sys.path.insert(0,'/home/al/.local/lib/jason');"
+  "import release_manager_host_runner as r;\ntry:\n r.request_root_control_transition(Path("
+  +repr(str(STATE))+"),action='revalidate',revision="+repr(ROLLBACK)+")\n"
+  "except Exception as exc:\n print(json.dumps({'native_revalidation':'denied','kind':type(exc).__name__,"
+  "'detail':str(exc)[:400]}),flush=True);raise SystemExit(1)\n")
+
+
 BASE_IMAGES={
  "jason-runtime":"sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132",
  "jason-mcp-pilot":"sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477",
