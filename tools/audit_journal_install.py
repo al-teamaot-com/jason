@@ -157,7 +157,7 @@ def inspect(s,engine,inventory,candidate,payload,c):
 
  # Keep complete specs private in memory/Root before-image; never print Env.
  client=engine.DockerEngine();before={role:client.inspect(role) for role in engine.ROLES}
- exact_producer_images=s.current_base_images(candidate)
+ exact_producer_images=s.current_base_images(candidate,observed_mcp_image=before["jason-mcp-pilot"]["Image"])
  for role,row in before.items():
   need(row["Image"]==exact_producer_images[role] and row["State"]["Running"],"EXACT_BASE_CONSUMER:"+role)
   probe="import hashlib,orchestrator.event_store as e;print(hashlib.sha256(open(e.__file__,'rb').read()).hexdigest())"
