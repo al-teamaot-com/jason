@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -146,4 +146,14 @@ test('unknown interrupted provider attempt remains blocked without a made-up rec
   assert.equal(retry.accepted,false);
   assert.equal(retry.record.state,'processing');
   assert.equal(recovered.sendReceipt(scope).result,undefined);
+});
+
+
+test('corrupted valid-JSON store shape never becomes an empty retry ledger',()=>{
+  const {path,store}=fixture();
+  for (const invalid of ['[]','null','0','"invalid"']) {
+    writeFileSync(path,invalid);
+    assert.throws(()=>store.beginSend({tenantId:'tenant-a',aadObjectId:'user-a',
+      communicationId:'comm-'+'d'.repeat(64),payloadDigest:'e'.repeat(64)}),/unreadable/);
+  }
 });

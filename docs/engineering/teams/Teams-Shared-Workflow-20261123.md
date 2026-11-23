@@ -121,7 +121,7 @@ Older claims lacking a persisted recovery plan still require evidence review.
 
 Latest local verification: **277 Python tests passed** across targeted runtime,
 composition, procurement, MCP handoff, canonical approval/security and architecture
-suites; **45 Node gateway tests passed**. Engineering standards, documentation
+suites; **46 Node gateway tests passed**. Engineering standards, documentation
 control, syntax/compilation and diff checks PASS. The gateway workflow now runs all
 its test files. A packaging regression test found and corrected a missing
 `objective-approval-route.mjs` copy; new modules are also explicitly packaged.

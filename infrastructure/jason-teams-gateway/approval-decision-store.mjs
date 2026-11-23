@@ -5,7 +5,10 @@ function load(path) {
   if (!existsSync(path)) return {};
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Teams approval decision store has invalid structure");
+    }
+    return parsed;
   } catch {
     throw new Error("Teams approval decision store is unreadable");
   }
