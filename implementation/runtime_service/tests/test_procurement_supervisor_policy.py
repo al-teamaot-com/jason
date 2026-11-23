@@ -133,3 +133,13 @@ def test_file_policy_reloads_without_restart_and_revokes_stale_approval(tmp_path
     path.write_text('{}')
     with pytest.raises(SupervisorPolicyError):
         policy.revalidate(digest=previous)
+
+
+@pytest.mark.parametrize('raw,expected', [('10000.0000','10000.00'),('0.0000','0.00'),('10.1200','10.12')])
+def test_autotask_numeric_udf_trailing_zeros_are_exact_money(raw,expected):
+    assert money(raw)==Decimal(expected)
+
+
+@pytest.mark.parametrize('raw',['10.1201','0.0001','999.9999'])
+def test_autotask_numeric_udf_fractional_cents_are_never_rounded(raw):
+    with pytest.raises(SupervisorPolicyError):money(raw)

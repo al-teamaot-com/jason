@@ -80,10 +80,22 @@ there is no self-escalation and silence never approves anything.
 
 ## Acceptance and limits
 
-Latest local verification: **249 tests passed** across the targeted runtime,
+Latest local verification: **255 tests passed** across the targeted runtime,
 composition, procurement, canonical approval/security and architecture suites.
 Engineering standards, documentation control, compilation and diff checks PASS.
-No provider/production calls were used in these tests.
+No provider/production calls were used in these tests. Separately, governed
+read-only Contact and Entra checks succeeded. Autotask numeric spending UDFs
+use four decimal places: parser acceptance now allows exact trailing zeros
+without rounding fractional cents. The current internal Contact query returned
+45 records (29 active), with no Supervisor assignments yet. No contact values,
+limits or reporting relationships were modified. The configured fallback is
+therefore necessary until verified relationships are entered.
+
+The live exact-Owner authority probe rejected with
+`AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED`; MCP reports protected production approval
+evidence unavailable or mismatched. No authority/grant/profile change or
+authentication bypass was attempted. Live Owner-path acceptance depends on the
+existing governed identity/recovery work; this draft cannot authorize itself.
 
 Offline coverage: business hours, weekends, holidays, DST, one-business-day
 escalation, expiry/renewal, denial, policy reload, stale routing rejection,

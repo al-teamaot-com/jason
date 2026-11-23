@@ -28,9 +28,17 @@ def money(value: Any) -> Decimal:
         amount=Decimal(str(value))
     except InvalidOperation as exc:
         raise SupervisorPolicyError('invalid monetary amount') from exc
-    if not amount.is_finite() or amount < 0 or amount.as_tuple().exponent < -2:
+    if not amount.is_finite() or amount < 0:
         raise SupervisorPolicyError('money requires nonnegative cents and finite value')
-    return amount.quantize(Decimal('0.01'))
+    try:
+        cents = amount.quantize(Decimal('0.01'))
+    except InvalidOperation as exc:
+        raise SupervisorPolicyError('money exceeds supported decimal bounds') from exc
+    # Autotask serializes numeric UDFs with four places, including .0000.
+    # Accept exact cents with trailing zeros; never round a fractional cent.
+    if cents != amount:
+        raise SupervisorPolicyError('money requires nonnegative cents and finite value')
+    return cents
 
 
 def identity(value: Any) -> str:
