@@ -46,7 +46,10 @@ behavior. The supplied `config/communications/teams-workflow-policy-v1.json` is
 each operation. Apply edits by atomic file replacement, through an authorized
 configuration change path. Full config digest supports evidence; the routing
 scope digest pins fallback routing independently of presentation and timing.
-Changing labels/reminder intervals does not demand new purchase consent.
+Changing labels/reminder intervals does not demand new purchase consent. The
+existing supervisor policy also reloads its file for decisions and revalidation;
+policy changes cannot be hidden by an old in-memory snapshot. Existing granted
+authority still bounds the eligible recipient set.
 
 The common renderer chooses an existing capability/mode and reads facts only
 from its persisted approval. It copies existing signed action IDs/nonces rather
@@ -71,10 +74,16 @@ procurement offers are cancelled through canonical compare-and-set and replaced
 with a new nonce/request for the same business digest; the business clock is not
 reset. A simultaneous valid decision races against that existing atomic terminal
 transition, not against an ad hoc approval database write. The old request remains
-immutable history. Al receives continued hourly reminders at the final fallback;
+immutable history. A late click that already marked it EXPIRED does not strand
+the business request; only an undecided offer may be renewed. Al receives continued hourly reminders at the final fallback;
 there is no self-escalation and silence never approves anything.
 
 ## Acceptance and limits
+
+Latest local verification: **249 tests passed** across the targeted runtime,
+composition, procurement, canonical approval/security and architecture suites.
+Engineering standards, documentation control, compilation and diff checks PASS.
+No provider/production calls were used in these tests.
 
 Offline coverage: business hours, weekends, holidays, DST, one-business-day
 escalation, expiry/renewal, denial, policy reload, stale routing rejection,
@@ -94,7 +103,9 @@ The lifecycle owner must emit it only after its verified final readbacks.
 The following remain release-blocking integration/operational acceptance:
 
 1. Real active AOT requester/supervisor/Owner roster and exact role review; fresh
-   Contact UDF/spending readbacks and changes-between-review-and-execution test.
+   Contact UDF/spending readbacks. Source re-reads the relationship and spending
+   limit under the actual signed approver identity before accepting consent, and
+   rejects changes before recording a decision; prove this on real controlled data.
 2. Recovery/reconciliation of an interrupted replacement after canonical cancel
    or an ambiguous partial send. The safe current disposition is blocked, never
    repeating a possibly delivered card or continuing execution on assumed consent.

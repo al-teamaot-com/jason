@@ -114,3 +114,22 @@ def test_reviewed_role_memberships_not_teams_claims():
         pol.decide_from_reviewed_identities(requester_id='person-unknown',
             purchase_type='copy_print', amount=Decimal('550.01'),
             autotask_contact_udf_limit=Decimal('600.00'))
+
+
+def test_file_policy_reloads_without_restart_and_revokes_stale_approval(tmp_path):
+    import json
+    path=tmp_path/'supervisors.json'
+    path.write_text(json.dumps(rules()))
+    policy=SupervisorSpendingPolicy.load(path)
+    previous=policy.current().canonical_digest
+    revised=rules()
+    revised['rules'][0]['maximum_without_approval']='25.00'
+    path.write_text(json.dumps(revised))
+    assert policy.decide_from_reviewed_identities(requester_id='person-tech1',
+        purchase_type='it',amount=Decimal('50'),
+        autotask_contact_udf_limit=Decimal('300')).requires_approval
+    with pytest.raises(PermissionError,match='policy changed'):
+        policy.revalidate(digest=previous)
+    path.write_text('{}')
+    with pytest.raises(SupervisorPolicyError):
+        policy.revalidate(digest=previous)

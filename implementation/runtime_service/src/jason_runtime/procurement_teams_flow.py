@@ -1978,7 +1978,8 @@ class ProcurementTeamsFlow:
         ) or email
         return int(contact["id"]), display_name, limit
 
-    def _configured_supervisor_route(self, *, principal, evidence, correlation_id, amount):
+    def _configured_supervisor_route(self, *, principal, evidence, correlation_id, amount,
+            requester_id=None, requester_email=None, expected_contact_id=None, expected_limit=None):
         from .supervisor_contact_routing import resolve_supervisor_contacts
         configuration = self.workflow_configuration.load()
         fallback_email = configuration.raw['fallback_email'].casefold()
@@ -2002,15 +2003,34 @@ class ProcurementTeamsFlow:
                     or binding.client_id is not None):
                 return None
             return binding.jason_identity_id
-        requester = lookup(principal.email_address)
+        requester = lookup(requester_email or principal.email_address)
         if requester is None:
             raise PermissionError('requester contact is ambiguous')
+        if expected_contact_id is not None and requester.get('id') != expected_contact_id:
+            raise PermissionError('requester contact identity changed')
+        if expected_limit is not None and money(_exact_udf(requester, 'Spending limit')) != money(expected_limit):
+            raise PermissionError('requester spending limit changed; amended review required')
         allowed = frozenset(self.owner_ids) | (
             self.supervisor_policy.allowed_approver_ids if self.supervisor_policy else frozenset())
-        return resolve_supervisor_contacts(requester_id=principal.principal_id,
+        return resolve_supervisor_contacts(requester_id=requester_id or principal.principal_id,
             requester_contact=requester, amount=amount, fallback_id=fallbacks[0],
             allowed_approvers=allowed, lookup_contact=lookup, resolve_identity=resolve,
             udf=_exact_udf)
+
+    def revalidate_supervisor_contact_route(self, submission, *, tenant, object_id,
+                                           conversation_id, message_id):
+        # Read as the actual authenticated approver, never as the requester.
+        principal, evidence = self._principal(tenant=tenant, object_id=object_id,
+            conversation_id=conversation_id, message_id=message_id)
+        route = self._configured_supervisor_route(principal=principal, evidence=evidence,
+            correlation_id='corr_supervisor_' + uuid4().hex,
+            amount=money(submission['total_commitment']),
+            requester_id=submission['requester_principal_id'],
+            requester_email=submission['requester_email'],
+            expected_contact_id=submission['requester_contact_id'],
+            expected_limit=submission['spending_limit'])
+        if route.evidence_digest != submission.get('supervisor_route_digest'):
+            raise PermissionError('supervisor relationship or authority changed; amended review required')
 
     def notify_approval_event(self, request: ApprovalRequest, event: str) -> None:
         configuration = self.workflow_configuration.load() if self.workflow_configuration else None
@@ -3299,6 +3319,9 @@ class ProcurementApprovalInteractionFlow:
                     or configuration.approval_scope_digest != configuration_digest
                     or request.metadata.get('workflow_configuration_digest') != configuration_digest):
                 raise PermissionError('workflow configuration changed; approval is stale')
+            self.processor.revalidate_supervisor_contact_route(submission,
+                tenant=microsoft_tenant_id, object_id=microsoft_object_id,
+                conversation_id=conversation_id, message_id=channel_response_id)
         if str(submission.get('approval_id')) != approval_id:
             raise PermissionError('purchase approval has been superseded or escalated')
         digest = str(request.metadata.get('supervisor_policy_digest') or '')

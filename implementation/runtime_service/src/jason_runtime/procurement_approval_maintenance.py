@@ -44,12 +44,15 @@ class ProcurementApprovalMaintenance:
                     or request.capability!=PROCUREMENT_APPROVAL_CAPABILITY
                     or request.requested_mode!='purchase'
                     or request.organization_id!='aot' or request.client_id is not None
-                    or request.status is not ApprovalRequestStatus.PENDING):
+                    or request.status not in {ApprovalRequestStatus.PENDING, ApprovalRequestStatus.EXPIRED}):
                 continue
             submission=self.submissions.get(str(request.metadata.get('submission_id') or ''))
             if (not submission or submission.get('approval_id')!=request.approval_id
                     or submission.get('digest')!=request.metadata.get('submission_digest')
                     or submission.get('status') not in {'approval_required','approval_delivery_blocked'}):
+                continue
+            if (request.status is ApprovalRequestStatus.EXPIRED
+                    and not submission.get('workflow_configuration_digest')):
                 continue
             summary['checked']+=1
             if submission.get('workflow_configuration_digest'):
@@ -153,7 +156,10 @@ class ProcurementApprovalMaintenance:
         if escalation or current >= request.expires_at:
             # Retire the old challenge with canonical CAS before replacement;
             # a simultaneous legitimate click wins or loses atomically.
-            self.approval_service.repository.transition_pending(request, status=ApprovalRequestStatus.CANCELLED)
+            if request.status is ApprovalRequestStatus.PENDING:
+                self.approval_service.repository.transition_pending(request, status=ApprovalRequestStatus.CANCELLED)
+            elif request.status is not ApprovalRequestStatus.EXPIRED:
+                raise PermissionError('only pending or undecided expired offers may be replaced')
             new_request = self.processor._create_owner_approval(submission,
                 approver_override=target, escalation_from=request.approval_id, approval_now=current)
             latest = self.submissions.get(submission['submission_id'])

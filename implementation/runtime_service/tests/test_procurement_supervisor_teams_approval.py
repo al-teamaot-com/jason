@@ -184,3 +184,21 @@ def test_borrowed_or_replayed_card_nonce_is_not_accepted():
         flow.handle(**(kwargs|{'selections':{'card_challenge':'f'*48},
             'signed_envelope':{'card_challenge':'f'*48}}))
     assert calls==[] and not repo.decisions
+
+
+def test_changed_live_supervisor_route_rejected_before_recording_decision():
+    flow,repo,store,calls,kwargs=setup()
+    digest='c'*64
+    store.record['workflow_configuration_digest']=digest
+    request=repo.get('procapproval-test')
+    repo.put(replace(request,metadata=request.metadata|{'workflow_configuration_digest':digest}))
+    flow.processor.workflow_configuration=SimpleNamespace(load=lambda:SimpleNamespace(
+        enabled=True,approval_scope_digest=digest))
+    def changed(*args,**kwargs):
+        raise PermissionError('supervisor relationship changed')
+    flow.processor.revalidate_supervisor_contact_route=changed
+    with pytest.raises(PermissionError,match='supervisor relationship changed'):
+        flow.handle(**kwargs)
+    assert repo.get('procapproval-test').status is ApprovalRequestStatus.PENDING
+    assert not repo.accepted_decision('procapproval-test')
+    assert calls==[]

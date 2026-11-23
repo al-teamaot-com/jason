@@ -317,3 +317,13 @@ def test_requester_receives_notification_without_approval_buttons(tmp_path,monke
     assert calls[0]['card']['actions']==[]
     sender.send_event(req,event='denied')
     assert [c['binding'].jason_identity_id for c in calls[1:]]==['person-tech','person-lead']
+
+
+def test_expired_click_does_not_strand_business_request(tmp_path):
+    m,svc,store,sender,_=configured_maintenance(tmp_path)
+    now=instant('2026-11-23T08:30:00-05:00')
+    assert svc.expire_if_due('procapproval-original',now=now)
+    assert m.run_once(now=now)['reminded']==1
+    assert store.get('s1')['approval_id']!='procapproval-original'
+    assert svc.repository.get('procapproval-original').status.value=='expired'
+    assert not svc.repository.accepted_decision('procapproval-original')
