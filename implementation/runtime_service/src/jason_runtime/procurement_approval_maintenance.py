@@ -22,6 +22,7 @@ class ProcurementApprovalMaintenance:
     sender: Any
     now: Any = lambda:datetime.now(timezone.utc)
     interval: timedelta = timedelta(minutes=5)
+    workflow_configuration: Any | None = None
     _next_due: datetime | None = field(default=None, init=False)
 
     def tick(self) -> bool:
@@ -51,6 +52,14 @@ class ProcurementApprovalMaintenance:
                     or submission.get('status') not in {'approval_required','approval_delivery_blocked'}):
                 continue
             summary['checked']+=1
+            if submission.get('workflow_configuration_digest'):
+                try:
+                    outcome = self._configured_tick(request, submission, current)
+                    if outcome:
+                        summary[outcome] += 1
+                except (PermissionError, RuntimeError, OSError, ValueError):
+                    summary['blocked'] += 1
+                continue
             policy_digest=request.metadata.get('supervisor_policy_digest')
             if policy_digest!='owner-udf-only':
                 if self.processor.supervisor_policy is None:
@@ -101,3 +110,67 @@ class ProcurementApprovalMaintenance:
                 except (PermissionError, RuntimeError, OSError, ValueError):
                     summary['blocked']+=1
         return summary
+
+    def _configured_tick(self, request, submission, current):
+        if any(claim.get('state') == 'claimed_reconciliation_required'
+               for claim in submission.get('communication_claims', {}).values()):
+            raise PermissionError('prior communication outcome requires reconciliation')
+        configuration = self.workflow_configuration.load() if self.workflow_configuration else None
+        if (configuration is None or not configuration.enabled
+                or configuration.approval_scope_digest != submission['workflow_configuration_digest']):
+            raise PermissionError('workflow timing policy changed; renewed review required')
+        policy_digest = request.metadata.get('supervisor_policy_digest')
+        if policy_digest != 'owner-udf-only':
+            if self.processor.supervisor_policy is None:
+                raise PermissionError('supervisor policy missing')
+            self.processor.supervisor_policy.revalidate(digest=policy_digest)
+        since = datetime.fromisoformat(submission.get('business_stage_started_at')
+                                       or submission['workflow_requested_at'])
+        previous = submission.get('last_business_reminder_at')
+        last = datetime.fromisoformat(previous) if previous else since
+        event = configuration.due(since=since, now=current, last_reminder=last)
+        if event is None:
+            return None
+        chain = tuple(submission.get('supervisor_chain_ids') or ())
+        active = tuple(request.authorized_approver_ids)
+        if len(active) != 1 or active[0] not in chain:
+            raise PermissionError('current approval is outside verified supervisor chain')
+        index = chain.index(active[0])
+        escalation = event == 'escalated' and index + 1 < len(chain)
+        if not escalation and configuration.calendar.minutes_between(last, current) < configuration.raw['reminder_business_minutes']:
+            return None
+        event = 'escalated' if escalation else 'reminder'
+        if event not in configuration.raw['events']:
+            return None
+        # One durable event claim across workers/restarts, before any send or
+        # replacement request. Unknown partial outcomes require reconciliation.
+        bucket = configuration.calendar.minutes_between(since, current) // configuration.raw['reminder_business_minutes']
+        key = event + ':' + str(bucket)
+        if not self.submissions.claim_communication(submission['submission_id'],
+                approval_id=request.approval_id, event_key=key):
+            return None
+        target = (chain[index + 1],) if escalation else active
+        if escalation or current >= request.expires_at:
+            # Retire the old challenge with canonical CAS before replacement;
+            # a simultaneous legitimate click wins or loses atomically.
+            self.approval_service.repository.transition_pending(request, status=ApprovalRequestStatus.CANCELLED)
+            new_request = self.processor._create_owner_approval(submission,
+                approver_override=target, escalation_from=request.approval_id, approval_now=current)
+            latest = self.submissions.get(submission['submission_id'])
+            updates = {**latest, 'approval_id': new_request.approval_id,
+                       'status': 'approval_required', 'last_business_reminder_at': current.isoformat()}
+            if escalation:
+                updates['business_stage_started_at'] = current.isoformat()
+            self.submissions.update(submission['submission_id'], updates)
+            receipts = self.sender.send(new_request)
+            # Initial/actionable card is approver-only; the status copy informs
+            # both parties without giving the requester approval buttons.
+            receipts += self.sender.send_event(new_request, event=event, requester_only=True)
+        else:
+            receipts = self.sender.send_event(request, event=event)
+            latest = self.submissions.get(submission['submission_id'])
+            self.submissions.update(submission['submission_id'], {
+                **latest, 'last_business_reminder_at': current.isoformat()})
+        self.submissions.complete_communication(submission['submission_id'],
+            approval_id=request.approval_id, event_key=key, receipts=receipts)
+        return 'escalated' if escalation else 'reminded'

@@ -179,6 +179,47 @@ class SQLiteProcurementSubmissionStore:
             ).fetchall()
         return tuple(dict(json.loads(str(row[0]))) for row in rows)
 
+    def claim_communication(self, submission_id: str, *, approval_id: str, event_key: str) -> bool:
+        """Atomic attempt claim in the existing submission; unknown sends stay claimed."""
+        with sqlite3.connect(str(self.path)) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT payload FROM procurement_submissions WHERE submission_id=?',
+                                     (submission_id,)).fetchone()
+            if row is None:
+                raise ProcurementFlowError('notification submission missing')
+            payload = json.loads(row[0])
+            if (payload.get('approval_id') != approval_id
+                    or payload.get('status') not in {'approval_required', 'approval_delivery_blocked',
+                        'approved', 'denied', 'completed', 'failed_retryable'}):
+                return False
+            claims = dict(payload.get('communication_claims') or {})
+            key = sha256((approval_id + ':' + event_key).encode()).hexdigest()
+            if key in claims:
+                return False
+            claims[key] = {'state': 'claimed_reconciliation_required', 'event': event_key,
+                           'at': datetime.now(timezone.utc).isoformat()}
+            payload['communication_claims'] = claims
+            connection.execute('UPDATE procurement_submissions SET payload=? WHERE submission_id=?',
+                (json.dumps(payload, sort_keys=True, separators=(',', ':')), submission_id))
+            return True
+
+    def complete_communication(self, submission_id: str, *, approval_id: str,
+                               event_key: str, receipts: tuple[str, ...]) -> None:
+        with sqlite3.connect(str(self.path)) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT payload FROM procurement_submissions WHERE submission_id=?',
+                                     (submission_id,)).fetchone()
+            if row is None:
+                raise ProcurementFlowError('notification submission missing')
+            payload = json.loads(row[0])
+            key = sha256((approval_id + ':' + event_key).encode()).hexdigest()
+            claim = payload.get('communication_claims', {}).get(key)
+            if claim is None or not receipts or any(not r or r.startswith('accepted:') for r in receipts):
+                raise ProcurementFlowError('notification provider evidence missing')
+            claim.update(state='provider_accepted', receipts=list(receipts))
+            connection.execute('UPDATE procurement_submissions SET payload=? WHERE submission_id=?',
+                (json.dumps(payload, sort_keys=True, separators=(',', ':')), submission_id))
+
     def record_receipt(self, submission_id: str, *, received_quantity: int) -> dict[str, Any]:
         payload = self.get(submission_id)
         if payload is None:
@@ -1182,6 +1223,7 @@ class ProcurementTeamsFlow:
     approval_sender: Any
     owner_ids: tuple[str, ...]
     supervisor_policy: SupervisorSpendingPolicy | None = None
+    workflow_configuration: Any | None = None
     parts_ledger: SQLitePartsLifecycleLedger | None = None
     structured_client: Any | None = None
     inventory_location_id: int = 1
@@ -1936,6 +1978,51 @@ class ProcurementTeamsFlow:
         ) or email
         return int(contact["id"]), display_name, limit
 
+    def _configured_supervisor_route(self, *, principal, evidence, correlation_id, amount):
+        from .supervisor_contact_routing import resolve_supervisor_contacts
+        configuration = self.workflow_configuration.load()
+        fallback_email = configuration.raw['fallback_email'].casefold()
+        fallbacks = [identity for identity in self.owner_ids
+            if (binding := self.approval_sender._binding_for_identity(identity)) is not None
+            and str(binding.email_address or '').casefold() == fallback_email
+            and binding.status == 'active'
+            and binding.microsoft_tenant_id == evidence.microsoft_tenant_id]
+        if len(fallbacks) != 1:
+            raise PermissionError('configured fallback is not one current authorized Owner')
+        def lookup(email):
+            records = _items(self._read(principal=principal, evidence=evidence,
+                capability=SERVICE_CONTACT_SEARCH,
+                arguments={'company_id': 0, 'email': email, 'page_size': 2},
+                correlation_id=correlation_id))
+            return records[0] if len(records) == 1 else None
+        def resolve(email):
+            binding = self.approval_sender.bindings.find_active_by_email(email_address=email)
+            if (binding is None or binding.status != 'active'
+                    or binding.microsoft_tenant_id != evidence.microsoft_tenant_id
+                    or binding.client_id is not None):
+                return None
+            return binding.jason_identity_id
+        requester = lookup(principal.email_address)
+        if requester is None:
+            raise PermissionError('requester contact is ambiguous')
+        allowed = frozenset(self.owner_ids) | (
+            self.supervisor_policy.allowed_approver_ids if self.supervisor_policy else frozenset())
+        return resolve_supervisor_contacts(requester_id=principal.principal_id,
+            requester_contact=requester, amount=amount, fallback_id=fallbacks[0],
+            allowed_approvers=allowed, lookup_contact=lookup, resolve_identity=resolve,
+            udf=_exact_udf)
+
+    def notify_approval_event(self, request: ApprovalRequest, event: str) -> None:
+        configuration = self.workflow_configuration.load() if self.workflow_configuration else None
+        if configuration is None or not configuration.enabled or event not in configuration.raw['events']:
+            return
+        submission_id = request.metadata['submission_id']
+        if self.store.claim_communication(submission_id, approval_id=request.approval_id, event_key=event):
+            receipts = self.approval_sender.send_event(request, event=event,
+                requester_only=event == 'approval_required')
+            self.store.complete_communication(submission_id, approval_id=request.approval_id,
+                                             event_key=event, receipts=receipts)
+
     def _ticket(
         self,
         *,
@@ -2388,6 +2475,18 @@ class ProcurementTeamsFlow:
         else:
             submitted['effective_spending_threshold'] = f'{spending_limit:.2f}'
         submitted['spending_authority_source'] = 'autotask_contact_udf:Spending limit'
+        configuration = self.workflow_configuration.load() if self.workflow_configuration else None
+        if configuration is not None and configuration.enabled and approval_needed:
+            route = self._configured_supervisor_route(principal=principal, evidence=evidence,
+                correlation_id=correlation, amount=money(commitment))
+            submitted['supervisor_approver_ids'] = [route.approvers[0]]
+            submitted['supervisor_chain_ids'] = list(route.approvers)
+            submitted['supervisor_route_digest'] = route.evidence_digest
+            submitted['supervisor_route_reason'] = route.reason
+            submitted['owner_escalation_ids'] = [route.approvers[-1]]
+            submitted['workflow_configuration_digest'] = configuration.approval_scope_digest
+            submitted['workflow_configuration_version'] = configuration.raw['policy_version']
+            submitted['workflow_requested_at'] = datetime.now(timezone.utc).isoformat()
         submitted['digest'] = _submission_digest(submitted)
 
         # Spend authority governs the purchase branch only. Catalog/client quote
@@ -2403,13 +2502,22 @@ class ProcurementTeamsFlow:
                 },
             )
             try:
-                self.approval_sender.send(approval)
+                if configuration is not None and configuration.enabled:
+                    if not self.store.claim_communication(submission_id,
+                            approval_id=approval.approval_id, event_key='initial_card'):
+                        raise PermissionError('approval card already claimed; reconcile delivery')
+                    receipts = self.approval_sender.send(approval)
+                    self.store.complete_communication(submission_id, approval_id=approval.approval_id,
+                        event_key='initial_card', receipts=receipts)
+                else:
+                    self.approval_sender.send(approval)
+                self.notify_approval_event(approval, 'approval_required')
             except (PermissionError, RuntimeError, OSError, ValueError) as exc:
                 # The canonical approval remains pending; no PO is executed.
                 # A bounded maintenance cycle can route this same immutable
                 # scope to the configured owner fallback or Human Review.
                 self.store.update(submission_id, {
-                    **submitted, 'status': 'approval_delivery_blocked',
+                    **(self.store.get(submission_id) or submitted), 'status': 'approval_delivery_blocked',
                     'approval_id': approval.approval_id,
                     'delivery_error_type': type(exc).__name__,
                 })
@@ -2421,7 +2529,8 @@ class ProcurementTeamsFlow:
                 "status": "completed",
                 "submission_id": submission_id,
                 "reply": {
-                    "text": (
+                    "text": ("Your purchase request is waiting for approval. Nothing has been ordered."
+                        if configuration is not None and configuration.enabled else (
                         "Submitted. Purchase total $"
                         + f"{commitment:.2f}"
                         + " exceeds "
@@ -2430,7 +2539,7 @@ class ProcurementTeamsFlow:
                         + str(submitted['effective_spending_threshold'])
                         + " (capped by the Autotask Contact Spending limit UDF)"
                         + "; a Teams approval request was sent."
-                    )
+                    ))
                 },
             }
 
@@ -2491,6 +2600,8 @@ class ProcurementTeamsFlow:
                         + ")",
                     ),
                     ("Total Commitment", "$" + str(submission["total_commitment"])),
+                    ("Tax", "$" + str(submission.get('tax') or '0.00')),
+                    ("Fees", "$" + str(submission.get('fees') or '0.00')),
                     ("Autotask Contact UDF limit", "$" + str(submission["spending_limit"])),
                     ("Effective threshold", "$" + str(submission['effective_spending_threshold'])),
                     ("Customer", str(submission.get('selected_company_name') or submission.get('ticket_company_id') or 'AOT internal')),
@@ -2507,6 +2618,8 @@ class ProcurementTeamsFlow:
             metadata={
                 "submission_id": str(submission["submission_id"]),
                 "submission_digest": str(submission["digest"]),
+                **({'workflow_configuration_digest': submission['workflow_configuration_digest']}
+                   if submission.get('workflow_configuration_digest') else {}),
                 "supervisor_policy_digest": str(submission.get('supervisor_policy_digest') or 'owner-udf-only'),
                 "spending_authority_source": 'autotask_contact_udf:Spending limit',
                 "card_instance_challenge": challenge,
@@ -2569,6 +2682,11 @@ class ProcurementTeamsFlow:
         if str(current.get("digest")) != str(submission.get("digest")):
             raise PermissionError("procurement submission changed after authorization")
         stored_policy = current.get('supervisor_policy_digest')
+        configuration_digest = current.get('workflow_configuration_digest')
+        if configuration_digest:
+            configuration = self.workflow_configuration.load() if self.workflow_configuration else None
+            if configuration is None or not configuration.enabled or configuration.approval_scope_digest != configuration_digest:
+                raise PermissionError('workflow configuration changed; purchase requires renewed review')
         if stored_policy:
             if self.supervisor_policy is None:
                 raise PermissionError('supervisor spending policy unavailable at execution')
@@ -3173,6 +3291,14 @@ class ProcurementApprovalInteractionFlow:
             raise ProcurementFlowError('procurement approval submission no longer exists')
         if request.metadata.get('submission_digest') != submission.get('digest'):
             raise PermissionError('procurement approval scope changed')
+        configuration_digest = submission.get('workflow_configuration_digest')
+        if configuration_digest:
+            source = self.processor.workflow_configuration
+            configuration = source.load() if source else None
+            if (configuration is None or not configuration.enabled
+                    or configuration.approval_scope_digest != configuration_digest
+                    or request.metadata.get('workflow_configuration_digest') != configuration_digest):
+                raise PermissionError('workflow configuration changed; approval is stale')
         if str(submission.get('approval_id')) != approval_id:
             raise PermissionError('purchase approval has been superseded or escalated')
         digest = str(request.metadata.get('supervisor_policy_digest') or '')
@@ -3211,20 +3337,30 @@ class ProcurementApprovalInteractionFlow:
             raise PermissionError("procurement approval scope changed")
         if accepted.status != "approved":
             self.submissions.update(submission_id, {**submission, "status": accepted.status})
+            if configuration_digest:
+                self.processor.notify_approval_event(request, 'denied')
             label = "Declined" if accepted.status == "denied" else "Changes requested"
             return {
                 "status": "completed",
                 "approval_id": approval_id,
-                "reply": {"text": label + ". No procurement write was performed."},
+                "reply": {"text": ("Purchase declined. Nothing was ordered." if configuration_digest
+                    else label + ". No procurement write was performed.")},
             }
         approved_submission = {
             **submission,
             "owner_approval_id": approval_id,
         }
-        result = self.processor.execute_submission_with_retry_state(
-            approved_submission,
-            owner_approval_id=approval_id,
-        )
+        try:
+            result = self.processor.execute_submission_with_retry_state(
+                approved_submission,
+                owner_approval_id=approval_id,
+            )
+        except Exception:
+            if configuration_digest:
+                self.processor.notify_approval_event(request, 'blocked')
+            raise
+        # A submitted PO is not the completion of receiving/invoice matching.
+        # The owning lifecycle must emit completion only after those readbacks.
         return {
             "status": "completed",
             "approval_id": approval_id,

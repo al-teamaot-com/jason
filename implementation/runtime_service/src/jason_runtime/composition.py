@@ -363,6 +363,7 @@ from .procurement_billing_audit_maintenance import (
 )
 from .procurement_supervisor_policy import SupervisorSpendingPolicy
 from .procurement_approval_maintenance import ProcurementApprovalMaintenance
+from .teams_workflow_configuration import TeamsWorkflowConfigurationFile
 from .parts_inventory_lifecycle import SQLitePartsLifecycleLedger
 from .procurement_inventory_billing import (
     HardwareBillingDispositionFlow,
@@ -2828,6 +2829,11 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         == PROCUREMENT_WEB_READ_PROFILE
     )
     if procurement_enabled:
+        workflow_policy_path = os.getenv('JASON_TEAMS_WORKFLOW_POLICY_PATH', '').strip()
+        workflow_configuration = (
+            TeamsWorkflowConfigurationFile(Path(workflow_policy_path)) if workflow_policy_path else None)
+        if workflow_configuration is not None:
+            workflow_configuration.load()  # invalid explicit configuration fails closed
         ensure_procurement_worker_authority(identity_authority, enabled=True)
         procurement_owner_ids = approval_owner_identities()
         supervisor_policy = (
@@ -2863,6 +2869,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             token_file=settings.teams_proactive_token_file,
             bindings=bindings,
             owner_identity_ids=procurement_approval_recipient_ids,
+            workflow_configuration=workflow_configuration,
         )
         procurement_worker = ProcurementWorkerExecutor(
             authority=identity_authority,
@@ -2881,6 +2888,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             approval_sender=procurement_approval_sender,
             owner_ids=tuple(procurement_owner_ids),
             supervisor_policy=supervisor_policy,
+            workflow_configuration=workflow_configuration,
             parts_ledger=SQLitePartsLifecycleLedger(settings.procurement_parts_evidence_db),
             structured_client=hosted_conversation_client or ollama_client,
             inventory_location_id=settings.procurement_inventory_location_id,
@@ -2904,6 +2912,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             submissions=procurement_submission_store,
             processor=procurement_teams_flow,
             sender=procurement_approval_sender,
+            workflow_configuration=workflow_configuration,
         )
         billing_audit_store = SQLiteBillingLeakageStore(
             settings.procurement_billing_audit_db

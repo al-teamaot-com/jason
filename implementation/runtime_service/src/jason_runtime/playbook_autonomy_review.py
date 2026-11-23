@@ -182,10 +182,12 @@ class TeamsGatewayPlaybookApprovalSender:
         owner_identity_ids,
         owner_identity_email_fallbacks: Mapping[str, str] | None = None,
         owner_identity_entra_bindings: Mapping[str, tuple[str, str]] | None = None,
+        workflow_configuration=None,
     ) -> None:
         self.gateway_url = str(gateway_url).rstrip("/")
         self.token_file = Path(token_file)
         self.bindings = bindings
+        self.workflow_configuration = workflow_configuration
         self.owner_identity_ids = tuple(sorted(str(x).strip() for x in owner_identity_ids if str(x).strip()))
         self.owner_identity_email_fallbacks = {
             str(identity).strip(): str(email).strip().casefold()
@@ -260,6 +262,9 @@ class TeamsGatewayPlaybookApprovalSender:
     def send(self, request: ApprovalRequest) -> tuple[str, ...]:
         card = render_approval_card(request)
         adaptive = self._adaptive_card(card)
+        configuration = self.workflow_configuration.load() if self.workflow_configuration else None
+        if configuration is not None and configuration.enabled:
+            adaptive = configuration.render_approval(card) or adaptive
         # Every approval type uses one canonical card renderer + gateway.
         # Select recipients from the persisted immutable ApprovalRequest, not
         # from user-supplied Teams data or a separate procurement sender.
@@ -279,9 +284,49 @@ class TeamsGatewayPlaybookApprovalSender:
                     f"authorized Microsoft identity binding unavailable: {identity}")
             bindings.append(binding)
         transport = self._existing_transport()
-        return tuple(transport.send(binding=binding, text=card.summary,
-                                    card=adaptive).message_id
-                     for binding in bindings)
+        receipts = []
+        for binding in bindings:
+            receipt = transport.send(binding=binding, text=card.summary, card=adaptive)
+            if configuration is not None and configuration.enabled and (
+                    receipt.message_id_synthetic or not receipt.message_id):
+                raise RuntimeError("approval delivery unverified; reconciliation required")
+            receipts.append(receipt.message_id)
+        return tuple(receipts)
+
+    def send_event(self, request: ApprovalRequest, *, event: str,
+                   requester_only: bool = False) -> tuple[str, ...]:
+        """Inform requester and current approvers; copies never carry buttons."""
+        configuration = self.workflow_configuration.load() if self.workflow_configuration else None
+        if configuration is None or not configuration.enabled or event not in configuration.raw['events']:
+            return ()
+        labels = {'approval_required': 'Approval requested', 'reminder': 'Approval reminder',
+                  'escalated': 'Approval escalated', 'completed': 'Purchase completed',
+                  'blocked': 'Purchase needs attention', 'denied': 'Purchase declined',
+                  'cancelled': 'Request cancelled', 'restored': 'Service restored'}
+        facts = dict(request.presentation.facts if request.presentation else ())
+        text = labels[event] + '. ' + str(facts.get('Product') or (
+            request.presentation.title if request.presentation else 'Request'))
+        if facts.get('Total Commitment'):
+            text += ' — ' + facts['Total Commitment']
+        if event in {'approval_required', 'reminder', 'escalated'}:
+            text += '. Waiting for the authorized approver.'
+        if any(identity not in self.owner_identity_ids for identity in request.authorized_approver_ids):
+            raise PermissionError('notification approver is outside approved audience')
+        recipients = (request.requested_by,) if requester_only else tuple(
+            dict.fromkeys((request.requested_by, *request.authorized_approver_ids)))
+        bindings = [self._binding_for_identity(identity) for identity in recipients]
+        if any(binding is None or binding.status != 'active' for binding in bindings):
+            raise PermissionError('notification recipient binding unavailable')
+        if len({binding.microsoft_tenant_id for binding in bindings}) != 1:
+            raise PermissionError('notification recipients cross tenant boundary')
+        transport = self._existing_transport()
+        receipts = []
+        for binding in bindings:
+            receipt = transport.send(binding=binding, text=text)
+            if receipt.message_id_synthetic or not receipt.message_id:
+                raise RuntimeError('notification delivery unverified; reconciliation required')
+            receipts.append(receipt.message_id)
+        return tuple(receipts)
 
     def send_status(self, *, text: str) -> tuple[str, ...]:
         """Existing governed owner status messaging, no approval implied."""
