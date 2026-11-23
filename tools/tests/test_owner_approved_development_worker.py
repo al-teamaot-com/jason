@@ -1134,7 +1134,7 @@ def test_shared_anchor_preflight_queues_fresh_edit_plan_without_mutation(monkeyp
 
 def test_both_worker_branches_invoke_shared_anchor_preflight():
     import inspect
-    source = inspect.getsource(module.main)
+    source = inspect.getsource(module._run_main)
     assert source.count('if preflight_or_refresh_exact_anchors(') == 2
 
 

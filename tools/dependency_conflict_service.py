@@ -153,4 +153,173 @@ def atomic_claim(candidate: dict[str, Any], ledger: Path, *,
         finally:
             fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
 
+# A claim is an engineering reservation, not authorization to change production.
+WORKER_ACTIVE_PHASES = frozenset(('identified', 'diagnosing', 'implementing',
+    'ci_repair_needed', 'ci_repairing', 'pr_validating', 'pr_monitoring', 'pr_ready'))
+
+
+def load_claim_scopes(path: Path) -> dict[str, dict[str, Any]]:
+    source = json.loads(path.read_text(encoding='utf-8'))
+    if (not isinstance(source, dict) or source.get('schema_version') != '1.0'
+            or not isinstance(source.get('workstreams'), dict)):
+        raise ValueError('invalid development concurrency scope registry')
+    scopes = {}
+    for work_id, value in source['workstreams'].items():
+        if not isinstance(work_id, str) or not work_id.startswith('DEV-') or not isinstance(value, dict):
+            raise ValueError('invalid development scope identifier')
+        if value.get('kind') not in ('repair', 'infrastructure', 'feature'):
+            raise ValueError('invalid development workstream kind')
+        if any(key not in value for key in (*DOMAINS, 'depends_on')):
+            raise ValueError('incomplete development scope')
+        for key in (*DOMAINS, 'depends_on'):
+            _tokens(value, key)
+        if not any(value[key] for key in DOMAINS):
+            raise ValueError('empty development scope')
+        scopes[work_id] = {**value, 'id': work_id}
+    return scopes
+
+
+def plan_worker_claims(state: dict[str, Any], eligible: list[dict[str, Any]],
+                       scopes: dict[str, dict[str, Any]], *,
+                       capacity: int, production_healthy: bool = False,
+                       verified_merged_ids: set[str] | None = None,
+                       resumed_from_blocked: set[str] | None = None) -> list[str]:
+    """Plan and reserve new development claims in the existing worker state.
+
+    Call under the worker's exclusive lease, and persist the state atomically
+    before invoking a new task. Legacy active work is reconciled, never seized.
+    Missing legacy scope and stale PR status refuse only *new* claims.
+    """
+    verified_merged_ids = verified_merged_ids or set()
+    resumed_from_blocked = resumed_from_blocked or set()
+    records = state.get('items')
+    if not isinstance(records, dict):
+        raise ValueError('missing authoritative development-state items')
+    selected = []
+    active = []
+    unknown = []
+    eligible_ids = {item['id'] for item in eligible}
+    for work_id, record in records.items():
+        if not isinstance(record, dict):
+            raise ValueError('malformed existing development record')
+        if (record.get('phase') not in WORKER_ACTIVE_PHASES
+                or work_id in verified_merged_ids
+                or work_id in resumed_from_blocked):
+            continue
+        if work_id in eligible_ids:
+            selected.append(work_id)
+        scope = scopes.get(work_id)
+        if scope is None:
+            unknown.append(work_id)
+            continue
+        active.append({**scope, 'state': 'ready_for_integration' if record['phase'] in
+                       ('pr_ready', 'pr_validating', 'pr_monitoring') else 'active'})
+    existing_conflicts = analyze(active)['conflicts']
+    holds = {}
+    limit = max(0, int(capacity))
+    # A source/reasoning repair may independently reopen a formerly blocked
+    # record in the same worker pass. Re-admission is NOT a free claim: it must
+    # pass the same dependency gate before any resumed source edit.
+    for item in eligible:
+        work_id = item['id']
+        if work_id not in resumed_from_blocked:
+            continue
+        record = records.get(work_id)
+        if not isinstance(record, dict) or record.get('phase') not in WORKER_ACTIVE_PHASES:
+            continue
+        scope = scopes.get(work_id)
+        if scope is None:
+            decision = {'state': 'blocked', 'reasons': ['scope_declaration_missing']}
+        elif unknown:
+            decision = {'state': 'blocked_by_dependency',
+                        'conflicts': [{'with': prior, 'reasons': ['unclassified_active_workstream']}
+                                      for prior in sorted(unknown)]}
+        else:
+            decision = admission(scope, active, production_healthy=production_healthy)
+        if decision['state'] != 'admitted':
+            record.update({'phase': 'blocked', 'blocker_class': 'blocked_by_dependency',
+                           'dependency_admission_hold': decision,
+                           'reason': 'Re-admission held by current development dependency gate.',
+                           'recovery_next_action': 'Recheck exact dependency and health evidence.',
+                           'updated_at': now_iso()})
+            holds[work_id] = decision
+            continue
+        record.update({'dependency_claim_status': 'active',
+                       'dependency_scope': scope, 'dependency_admission_hold': None,
+                       'updated_at': now_iso()})
+        active.append({**scope, 'state': 'active'})
+        selected.append(work_id)
+    for item in eligible:
+        work_id = item['id']
+        if work_id in records:
+            continue  # Do not silently re-admit a blocked or completed record.
+        if limit == 0:
+            holds[work_id] = {'state': 'queued', 'reasons': ['engineering_capacity_unavailable']}
+            continue
+        scope = scopes.get(work_id)
+        if scope is None:
+            holds[work_id] = {'state': 'blocked', 'reasons': ['scope_declaration_missing']}
+            continue
+        if unknown:
+            holds[work_id] = {'state': 'blocked_by_dependency',
+                              'conflicts': [{'with': old, 'reasons': ['unclassified_active_workstream']}
+                                            for old in sorted(unknown)]}
+            continue
+        decision = admission(scope, active, production_healthy=production_healthy)
+        if decision['state'] != 'admitted':
+            holds[work_id] = decision
+            continue
+        # Record a *durable* claim before the worker opens a worktree or queues AI.
+        records[work_id] = {
+            'phase': 'identified', 'attempts': 0, 'claimed_at': now_iso(),
+            'approval_source': item['approval_source'],
+            'approved_by': item['approved_by'],
+            'issue_number': item['issue_number'],
+            'worker': 'jason-owner-approved-development-worker',
+            'dependency_scope': scope,
+            'dependency_claim_status': 'active',
+            'updated_at': now_iso(),
+        }
+        active.append({**scope, 'state': 'active'})
+        selected.append(work_id)
+        limit -= 1
+    # Historical active work may predate the controller. Do not silently let
+    # two existing editors evolve a shared dependency. Permit PR observation
+    # but hold source edits until the upstream PR is verified merged, or the
+    # earlier editor reaches a stable checkpoint.
+    editor_phases = {'identified', 'diagnosing', 'implementing',
+                     'ci_repair_needed', 'ci_repairing'}
+    editor_holds = {}
+    for conflict in existing_conflicts:
+        left, right = conflict['a'], conflict['b']
+        left_rec, right_rec = records.get(left, {}), records.get(right, {})
+        left_edit = left_rec.get('phase') in editor_phases
+        right_edit = right_rec.get('phase') in editor_phases
+        if not (left_edit or right_edit):
+            continue
+        if left_edit and not right_edit:
+            hold = left
+        elif right_edit and not left_edit:
+            hold = right
+        else:
+            # Stable deterministic fallback for precontroller legacy claims;
+            # later claims are always denied before reaching this point.
+            hold = max(left, right)
+        other = right if hold == left else left
+        editor_holds.setdefault(hold, []).append({'with': other, 'reasons': conflict['reasons']})
+    selected = [work_id for work_id in selected if work_id not in editor_holds]
+    state['dependency_admission'] = {
+        'schema_version': '1.0', 'observed_at': now_iso(),
+        'active_editor_holds': editor_holds,
+        'active_claims': sorted(i['id'] for i in active),
+        'existing_conflicts': existing_conflicts,
+        'unclassified_active': sorted(unknown),
+        'verified_merged_pr_work': sorted(verified_merged_ids),
+        'queue': holds,
+        'production_health_verified_for_new_features': bool(production_healthy),
+        'production_authority': False,
+    }
+    return selected
+
+
 if __name__=='__main__': raise SystemExit(main())

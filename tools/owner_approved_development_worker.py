@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
+import stat
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -22,6 +24,7 @@ import support_repair_host_worker as support
 import todo_release_bridge as todo_bridge
 import change_integration_gate
 import documentation_impact_gate
+import dependency_conflict_service as dependency
 
 DEFAULT_REPO = Path('/home/al/projects/jason')
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
@@ -2034,7 +2037,103 @@ def sync_lifecycle_notification(
         record['lifecycle_notification_error'] = f'{type(exc).__name__}: {str(exc)[:300]}'
 
 
+def verified_merged_claim_work(state: dict[str, Any], repo: Path,
+                               open_prs: list[dict[str, Any]],
+                               scopes: dict[str, dict[str, Any]] | None = None) -> set[str]:
+    """Do not let ten-year-old stale PR-ready records monopolize new claims.
+
+    Only an exact GitHub merged-at + merge-commit readback clears a PR's
+    development reservation. Closed, unknown, and transport failures remain
+    active for conflict analysis. A persisted verified merge is immutable.
+    """
+    open_numbers = {int(pr['number']) for pr in open_prs}
+    verified = set()
+    records = state.get('items') or {}
+    for work_id, record in records.items():
+        if not isinstance(record, dict) or record.get('phase') not in ('pr_ready', 'pr_validating', 'pr_monitoring'):
+            continue
+        number = record.get('pr_number')
+        if not isinstance(number, int):
+            continue
+        if number in open_numbers:
+            # Live PR files are evidence, not a replacement for semantic
+            # declarations. Failure to prove a complete bounded inventory
+            # makes this active scope unknown, blocking new claims safely.
+            if scopes is not None and work_id in scopes:
+                try:
+                    fresh = support.pr_view(repo, number)
+                    files = fresh.get('files')
+                    if (not isinstance(files, list) or not files or len(files) >= 300
+                            or any(not isinstance(row, Mapping)
+                                   or not isinstance(row.get('path'), str)
+                                   or not row['path'].strip() for row in files)):
+                        raise ValueError('unverified PR changed-file inventory')
+                    scopes[work_id] = {**scopes[work_id],
+                        'files': sorted(set(scopes[work_id]['files']) |
+                                        {row['path'] for row in files})}
+                except (support.WorkerError, ValueError, TimeoutError, OSError):
+                    scopes.pop(work_id, None)
+            continue
+        prior = record.get('dependency_verified_merge') or {}
+        if isinstance(prior, dict) and prior.get('pr_number') == number and re.fullmatch(
+                r'[0-9a-f]{40}', str(prior.get('merge_sha') or '')):
+            verified.add(work_id)
+            continue
+        try:
+            observed = support.pr_view(repo, number)
+        except (support.WorkerError, ValueError, TimeoutError, OSError):
+            continue
+        commit = observed.get('mergeCommit') or {}
+        sha = str(commit.get('oid') or '') if isinstance(commit, Mapping) else ''
+        if observed.get('mergedAt') and re.fullmatch(r'[0-9a-f]{40}', sha):
+            record['dependency_verified_merge'] = {
+                'pr_number': number, 'merge_sha': sha, 'verified_at': now()}
+            verified.add(work_id)
+    return verified
+
+
+def acquire_development_claim_lease(spool: Path) -> int | None:
+    """One durable state owner across scheduler paths, before reading claims.
+
+    None means another live worker owns the claim path; do not assert idle.
+    """
+    spool.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = spool / 'development-state.json.lock'
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_CLOEXEC', 0)
+    fd = os.open(path, flags, 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1 or info.st_mode & 0o077:
+            raise support.WorkerError('untrusted development claim lock identity')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            return None
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def main() -> int:
+    # Guard the entire load -> admission -> queued work -> save cycle.  The
+    # shared state file is already atomically written by support.save_state.
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--spool', type=Path, default=DEFAULT_SPOOL)
+    args, _ = parser.parse_known_args()
+    fd = acquire_development_claim_lease(args.spool.resolve())
+    if fd is None:
+        print('DEVELOPMENT_DEFERRED=concurrent_claim_owner')
+        return 0
+    try:
+        return _run_main()
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def _run_main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--repo', type=Path, default=DEFAULT_REPO)
     parser.add_argument('--spool', type=Path, default=DEFAULT_SPOOL)
@@ -2047,6 +2146,10 @@ def main() -> int:
     state_path = spool / 'development-state.json'
     state = support.load_state(state_path)
     state.setdefault('items', {})
+    # Capture exact previously blocked identities before autonomous recovery
+    # attempts. A transition back to an active phase cannot bypass admission.
+    prior_blocked = {work_id for work_id, record in state['items'].items()
+                     if isinstance(record, Mapping) and record.get('phase') == 'blocked'}
 
     support.run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
     all_eligible = owner_approved_issues(repo)
@@ -2072,9 +2175,6 @@ def main() -> int:
     admitted=apply_owner_development_focus(state,admitted,focus)
     admitted_ids = {item['id'] for item in admitted}
     reconcile_removed_approval(state, eligible_ids)
-    monitored_ids=set(reconcile_owner_selected_pull_requests(repo,state,admitted))
-    state['focus']={'enabled':bool(focus.get('enabled')),'issue_numbers':focus.get('issue_numbers',[]),
-                    'observed_at':now(),'owner_selected_pr_items':sorted(monitored_ids)}
     readmit_verified_ccc_owner_review(state, admitted_ids, source_repo=repo)
     recycle_self_recoverable_blockers(state, admitted_ids)
     queue_exhausted_recovery_diagnostics(state, admitted, spool)
@@ -2140,8 +2240,33 @@ def main() -> int:
         0,
         max(1, int(args.max_active)) - support_active - development_active,
     )
-    selected = [item_id for item_id in select_items(state, admitted, capacity=capacity)
-                if item_id not in monitored_ids]
+    # The actual admission transaction: use reviewed semantic scope declarations
+    # and the *current* worker state. An unknown active scope blocks only new
+    # claims; existing work may reconcile without another Owner approval.
+    scope_path = repo / 'config' / 'development-concurrency-scopes.json'
+    scopes = dependency.load_claim_scopes(scope_path) if scope_path.is_file() else {}
+    verified_merged = verified_merged_claim_work(state, repo, prs, scopes=scopes)
+    selected = dependency.plan_worker_claims(
+        state, admitted, scopes, capacity=capacity, production_healthy=False,
+        verified_merged_ids=verified_merged,
+        resumed_from_blocked={work_id for work_id in prior_blocked
+                              if (state['items'].get(work_id) or {}).get('phase')
+                              in dependency.WORKER_ACTIVE_PHASES},
+    )
+    # Owner-selected PR adoption previously created an unexamined development
+    # record before the admission gate. It can now adopt/monitor *only* claims
+    # already accepted by the same locked claim transaction.
+    claimed_by_id = {item['id']: item for item in admitted}
+    monitored_ids = set(reconcile_owner_selected_pull_requests(
+        repo, state, [claimed_by_id[work_id] for work_id in selected]
+    ))
+    state['focus'] = {'enabled': bool(focus.get('enabled')),
+                      'issue_numbers': focus.get('issue_numbers', []),
+                      'observed_at': now(), 'owner_selected_pr_items': sorted(monitored_ids)}
+    selected = [work_id for work_id in selected if work_id not in monitored_ids]
+    # Persist reservations before opening a worktree or submitting reasoning.
+    # An interrupted worker is resumed from this exact state, not re-claimed.
+    support.save_state(state_path, state)
     by_id = {item['id']: item for item in admitted}
     for item_id in selected:
         item = by_id[item_id]
