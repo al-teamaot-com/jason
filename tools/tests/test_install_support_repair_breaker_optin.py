@@ -10,6 +10,7 @@ from tools import install_support_repair_host_worker as installer
 SOURCES = (
     "support_repair_host_worker", "engineering_pipeline", "pmv3_engineering_controller",
     "pmv3_integration_queue", "owner_approved_development_worker",
+    "dependency_conflict_service", "isolated_service_common",
     "engineering_supervisor", "release_breaker_recovery_manager",
     "engineering_evidence_tools", "todo_engineering_intake", "todo_release_bridge",
     "operational_acceptance_reader", "release_manager_gate", "pmv3_worker_release_gate",
