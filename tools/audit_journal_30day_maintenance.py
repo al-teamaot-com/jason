@@ -45,7 +45,29 @@ def exact_cutoff(now):
 def prepare_incremental_maintenance(path,*,must_be_on_archive=False):
     """One-time offline conversion; runs only on a stand-alone recent-only DB."""
     p=permitted_nonproduction_database(path,must_be_on_archive=must_be_on_archive)
+    # SQLite VACUUM may create a full-sized transient database on the system
+    # /tmp drive, even when the canonical destination lives on Drive 2.
+    # Prevent a recurrence of the root-drive ENOSPC observed on November 23.
+    if must_be_on_archive:
+        temp_env=os.environ.get("SQLITE_TMPDIR","")
+        temp=Path(temp_env).resolve(strict=True) if temp_env else None
+        require(temp is not None and temp.is_dir() and not temp.is_symlink()
+                and temp.stat().st_uid==os.geteuid()
+                and stat.S_IMODE(temp.stat().st_mode)==0o700
+                and temp.stat().st_dev==p.stat().st_dev,
+                "VACUUM_TEMP_MUST_BE_PRIVATE_SECOND_DRIVE")
+        space=os.statvfs(temp)
+        require(space.f_bavail*space.f_frsize >= 2*p.stat().st_size + 8*1024**3,
+                "VACUUM_SECOND_DRIVE_CAPACITY")
+        os.environ["TMPDIR"]=str(temp)
     with sqlite3.connect(p,timeout=10) as db:
+        if must_be_on_archive:
+            # Standalone process only. PRAGMA sets SQLite's process-global
+            # temp directory; other worker threads are not involved here.
+            escaped=str(temp).replace("'","''")
+            db.execute("PRAGMA temp_store_directory='"+escaped+"'")
+            require(db.execute("PRAGMA temp_store_directory").fetchone()[0]==str(temp),
+                    "VACUUM_TEMP_DIRECTORY_NOT_VERIFIED")
         mode=db.execute("PRAGMA journal_mode").fetchone()[0]
         require(mode in ("delete","truncate"),"SINGLE_FILE_OFFLINE_ONLY")
         require(db.execute("PRAGMA auto_vacuum").fetchone()[0] in (0,2),
