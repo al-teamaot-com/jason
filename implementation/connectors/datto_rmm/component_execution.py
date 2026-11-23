@@ -142,6 +142,10 @@ class DattoRmmComponentExecutionPolicy:
     _AD_HOC_LINUX_SHELL_NAME = (
         "Run Ad Hoc Command (Shell) [MAC] [LIN]"
     )
+    _DEB_NATIVE_READONLY_CANARY_UID = "6efeedfb-fc41-4cee-a499-3641efe056f4"
+    _DEB_NATIVE_READONLY_CANARY_NAME = (
+        "AOT DEB Recovery - Native Read-Only Canary [WIN]"
+    )
 
     def __init__(self, *, allowlist: ComponentAllowlistResolver) -> None:
         self._allowlist = allowlist
@@ -157,6 +161,20 @@ class DattoRmmComponentExecutionPolicy:
         # Source-controlled variable contracts remain exact and fail closed.
         # Unknown variable names are never accepted merely because a live
         # component exposes some variable.
+        # This is an input contract only. It creates no component approval,
+        # execution grant or source-code integrity claim. Runtime selection,
+        # exact per-run authority and target isolation remain independent.
+        if (
+            entry.provider_component_uid == cls._DEB_NATIVE_READONLY_CANARY_UID
+            and entry.display_name == cls._DEB_NATIVE_READONLY_CANARY_NAME
+        ):
+            return (
+                ComponentVariablePolicy(
+                    name="AOTDebCanaryProfile", variable_type="string",
+                    required=True, maximum_length=4096,
+                ),
+            )
+
         if (
             entry.display_name.casefold()
             == cls._SERVICE_DETAIL_DIAGNOSTIC_NAME.casefold()

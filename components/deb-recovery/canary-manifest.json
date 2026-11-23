@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "name": "AOT DEB Recovery - Native Read-Only Canary [WIN]",
-  "status": "unpublished_candidate",
+  "status": "published_readonly_candidate_not_executed",
   "runtime": "Windows PowerShell 5.1",
   "run_as": "SYSTEM",
   "timeout_seconds": 300,
-  "component_uid": null,
+  "component_uid": "6efeedfb-fc41-4cee-a499-3641efe056f4",
   "playbook_activation_authorized": false,
   "standing_approval_created": false,
   "side_effect_ceiling": {
@@ -45,7 +45,8 @@
     "new RMM component UID and full file hashes bound by existing approval service"
   ],
   "activation_blockers": [
-    "No published candidate component or verified native Windows acceptance",
+    "Published read-only component exists; native Windows acceptance is not verified",
+    "Exact AOTDebCanaryProfile input contract is source-tested but not installed in production",
     "No trusted runtime binding for new diagnostic/repair/backup-request profiles",
     "Production JSON component-mutation dispatcher remains unaccepted; existing narrow bridge does not cover DEB",
     "Any modifying canary/release requires its own reviewed exact action; current package canary is read-only only"
