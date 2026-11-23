@@ -167,3 +167,53 @@ def test_live_peer_mismatch_fails_even_with_root_pin(tmp_path,monkeypatch):
     live[0]["Image"]="sha256:"+"f"*64
     with pytest.raises(PermissionError):
         scope.protected_peer_inventory()
+
+
+@pytest.mark.parametrize("stale", ["expired", "different_candidate"])
+def test_original_live_mcp_does_not_require_unused_overlay_trust(tmp_path,monkeypatch,stale):
+    p,policy,_=root_addon(tmp_path,monkeypatch)
+    if stale=="expired":
+        policy["expires_at"]=(datetime.now(timezone.utc)-timedelta(hours=3)).isoformat()
+    else:
+        policy["candidate_sha"]="0"*40
+    p.write_bytes(json.dumps(policy,sort_keys=True).encode())
+    from test_audit_journal_protected_peers import peers
+    live=peers()
+    def dispatch(argv,**kwargs):
+        assert argv[:4]==["/usr/bin/docker","inspect","--type","container"]
+        return SimpleNamespace(returncode=0,stdout=json.dumps(live))
+    monkeypatch.setattr(scope.subprocess,"run",dispatch)
+    verified=scope.protected_peer_inventory()
+    assert verified["jason-mcp-pilot"]["image"]==BASE
+    facts={"dataset_identity":{"device":3,"inode":7},
+           "producer_before":{"jason-mcp-pilot":{"image":BASE}},
+           "producer_after":{},"archive_root_metadata":{},
+           "desired_after_sha256":"a"*64}
+    assert scope.reviewed_scope(CANDIDATE,{}, {}, {},facts)["same_base_images"]==scope.BASE_IMAGES
+
+
+def test_expired_overlay_still_denies_an_actual_overlay_peer(tmp_path,monkeypatch):
+    p,policy,_=root_addon(tmp_path,monkeypatch)
+    policy["expires_at"]=(datetime.now(timezone.utc)-timedelta(hours=3)).isoformat()
+    p.write_bytes(json.dumps(policy).encode())
+    from test_audit_journal_protected_peers import peers
+    live=peers()
+    for row in live:
+        if row["Name"]=="/jason-mcp-pilot":row["Image"]=OVERLAY
+    def dispatch(argv,**kwargs):
+        assert argv[:4]==["/usr/bin/docker","inspect","--type","container"]
+        return SimpleNamespace(returncode=0,stdout=json.dumps(live))
+    monkeypatch.setattr(scope.subprocess,"run",dispatch)
+    with pytest.raises(PermissionError,match="AUDIT_OWNER_MCP_EXACT_PROVENANCE_DENIED"):
+        scope.protected_peer_inventory()
+
+
+def test_unknown_live_mcp_still_denied_without_overlay_trust(tmp_path,monkeypatch):
+    monkeypatch.setattr(scope,"OWNER_EXACT_ROOT_POLICY",tmp_path/"absent-policy")
+    from test_audit_journal_protected_peers import peers
+    live=peers()
+    for row in live:
+        if row["Name"]=="/jason-mcp-pilot":row["Image"]="sha256:"+"f"*64
+    monkeypatch.setattr(scope.subprocess,"run",lambda *a,**kw:SimpleNamespace(returncode=0,stdout=json.dumps(live)))
+    with pytest.raises(PermissionError,match="AUDIT_PEER_IDENTITY_UNTRUSTED"):
+        scope.protected_peer_inventory()

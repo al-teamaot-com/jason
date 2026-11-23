@@ -81,15 +81,20 @@ OWNER_EXACT_ROOT_POLICY=Path("/etc/jason-owner-release/audit-journal-owner-execu
 OWNER_MCP_BASE_IMAGE=BASE_IMAGES["jason-mcp-pilot"]
 
 
-def current_base_images(candidate=None):
+def current_base_images(candidate=None, *, observed_mcp_image=None):
  """Allow only a separately Root-attested exact additive Owner MCP image.
 
- Missing policy means original immutable MCP only; no request, environment
+ An observed original MCP needs no optional overlay grant. Missing policy
+ permits only the original immutable MCP; no request, environment
  variable, source-only change or model assertion can authorize a different
  production peer. The one-use Root-installed file binds image, code SHA,
  protected Main, LKG and expiry. All other production images stay exact.
  """
  images=dict(BASE_IMAGES)
+ # The original immutable MCP image is independently allowed by the baseline.
+ # Only an actual non-baseline image needs the optional overlay grant. Callers
+ # obtain this selector from Docker inspection, never a request or environment.
+ if observed_mcp_image==OWNER_MCP_BASE_IMAGE:return images
  policy_path=OWNER_EXACT_ROOT_POLICY
  if not os.path.lexists(policy_path):return images
  try:
@@ -157,7 +162,11 @@ def protected_peer_inventory():
  if not isinstance(rows,list) or len(rows)!=len(EXPECTED_PEER_IMAGES):
   raise PermissionError("AUDIT_PEER_INVENTORY_INCOMPLETE")
  verified={}
- active_expected={**EXPECTED_PEER_IMAGES,**current_base_images()}
+ mcp=[row for row in rows if isinstance(row,dict)
+      and str(row.get("Name","")).lstrip("/")=="jason-mcp-pilot"]
+ if len(mcp)!=1:raise PermissionError("AUDIT_PEER_NAME_UNTRUSTED:mcp_inventory")
+ active_expected={**EXPECTED_PEER_IMAGES,**current_base_images(
+     observed_mcp_image=mcp[0].get("Image"))}
  for row in rows:
   name=str(row.get("Name","")).lstrip("/")
   if name not in EXPECTED_PEER_IMAGES or name in verified:
@@ -262,7 +271,9 @@ def reviewed_scope(candidate,code_hashes,native_hashes,unit_hashes,facts):
   "native_health_sha256":native_hashes,"unit_source_sha256":unit_hashes,
   "source_dataset_identity":facts["dataset_identity"],
   "producer_before":facts["producer_before"],"producer_after_configuration_sha256":facts["producer_after"],
-  "same_base_images":current_base_images(candidate),"initial_container_replacements":3,
+  "same_base_images":current_base_images(candidate,observed_mcp_image=
+      facts.get("producer_before",{}).get("jason-mcp-pilot",{}).get("image")),
+  "initial_container_replacements":3,
   "possible_recovery_container_replacements":3,"availability_interruption_authorized":True,
   "inflight_write_drain_required":True,"historical_consumed_claims_unchanged":True,
   "cross_release_transaction_exclusion_required":True,
