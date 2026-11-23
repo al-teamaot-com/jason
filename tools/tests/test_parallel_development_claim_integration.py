@@ -172,7 +172,7 @@ def test_legacy_sharepoint_editor_waits_for_open_pr_without_losing_its_place():
     assert state['items']['DEV-2294']['phase'] == 'diagnosing'
     # Exact verified upstream merge makes it eligible on the next pass.
     assert admission.plan_worker_claims(state, [issue(2294)], scopes(), capacity=0,
-        verified_merged_ids={'DEV-1117'}) == ['DEV-2294']
+        verified_merged_ids={'DEV-1117'}, production_healthy=True) == ['DEV-2294']
 
 
 def test_live_pr_files_enrich_semantic_scope_and_missing_readback_blocks(monkeypatch,tmp_path):
@@ -196,3 +196,49 @@ def test_pr_ready_counts_as_active_reservation_but_never_restarts_source_worker(
     assert 'DEV-1117' not in selected
     assert 'DEV-2294' not in selected
     assert state['dependency_admission']['active_editor_holds']['DEV-2294'][0]['with'] == 'DEV-1117'
+
+def test_controller_block_rechecks_and_resumes_without_new_owner_approval():
+    state = {'items': {'DEV-1117': {'phase': 'pr_ready'},
+                       'DEV-2294': {'phase': 'blocked',
+                                    'dependency_prior_phase': 'diagnosing',
+                                    'blocker_class': 'blocked_by_dependency',
+                                    'dependency_admission_hold': {
+                                        'state': 'blocked_by_dependency',
+                                        'conflicts': [{'with': 'DEV-1117', 'reasons': ['contracts']}]
+                                    },
+                                    'reasoning_request_id': 'still-original'}}}
+    candidate = issue(2294)
+    assert admission.plan_worker_claims(state, [candidate], scopes(), capacity=1, production_healthy=True) == []
+    assert state['items']['DEV-2294']['phase'] == 'blocked'
+    # Upstream PR merge no longer counts as active source edit. This does not
+    # grant authority to deploy an unverified release to production.
+    assert admission.plan_worker_claims(state, [candidate], scopes(), capacity=1,
+        verified_merged_ids={'DEV-1117'}, production_healthy=True) == ['DEV-2294']
+    assert state['items']['DEV-2294']['phase'] == 'diagnosing'
+    assert state['items']['DEV-2294']['reasoning_request_id'] == 'still-original'
+    assert state['items']['DEV-2294']['dependency_admission_hold'] is None
+    assert state['items']['DEV-2294']['reason'].startswith('Re-admitted following verified')
+
+
+def test_controller_block_waits_for_capacity_and_does_not_readmit_manual_holds():
+    blocked = {'phase': 'blocked', 'blocker_class': 'blocked_by_dependency',
+               'dependency_prior_phase': 'diagnosing',
+               'dependency_admission_hold': {'state': 'blocked_by_dependency'}}
+    state = {'items': {'DEV-1069': blocked.copy(), 'DEV-759': {
+        **blocked, 'blocker_class': 'external_authority'}}}
+    items = [issue(1069), issue(759)]
+    assert admission.plan_worker_claims(state, items, scopes(), capacity=0) == []
+    assert state['items']['DEV-1069']['phase'] == 'blocked'
+    assert state['dependency_admission']['queue']['DEV-1069']['state'] == 'queued'
+    assert admission.plan_worker_claims(state, items, scopes(), capacity=1) == ['DEV-1069']
+    assert state['items']['DEV-759']['phase'] == 'blocked'
+
+
+def test_controller_hold_does_not_resume_feature_without_verified_health():
+    blocked = {'phase': 'blocked', 'blocker_class': 'blocked_by_dependency',
+               'dependency_prior_phase': 'diagnosing',
+               'dependency_admission_hold': {'state': 'blocked'}}
+    state = {'items': {'DEV-1545': blocked}}
+    assert admission.plan_worker_claims(state, [issue(1545)], scopes(), capacity=1,
+                                        production_healthy=False) == []
+    assert state['items']['DEV-1545']['phase'] == 'blocked'

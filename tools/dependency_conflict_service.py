@@ -9,7 +9,7 @@ except ModuleNotFoundError:
  from tools.isolated_service_common import atomic_json,load_json,now_iso
 
 def overlaps(a:dict[str,Any],b:dict[str,Any])->list[str]:
- keys=("files","components","contracts","providers","schemas","deployment_paths")
+ keys=("files","components","contracts","providers","schemas","deployment_paths","authorization_paths","tenant_scopes")
  out=[]
  for k in keys:
   av=set(a.get(k) or []); bv=set(b.get(k) or [])
@@ -241,6 +241,7 @@ def plan_worker_claims(state: dict[str, Any], eligible: list[dict[str, Any]],
             decision = admission(scope, active, production_healthy=production_healthy)
         if decision['state'] != 'admitted':
             record.update({'phase': 'blocked', 'blocker_class': 'blocked_by_dependency',
+                           'dependency_prior_phase': record['phase'],
                            'dependency_admission_hold': decision,
                            'reason': 'Re-admission held by current development dependency gate.',
                            'recovery_next_action': 'Recheck exact dependency and health evidence.',
@@ -252,6 +253,48 @@ def plan_worker_claims(state: dict[str, Any], eligible: list[dict[str, Any]],
                        'updated_at': now_iso()})
         active.append({**scope, 'state': 'active'})
         selected.append(work_id)
+    # Dependency holds caused by this controller are rechecked automatically
+    # on every later approved worker pass. Manual/credential holds stay closed.
+    # A source PR merge is never proof of Production Verified acceptance.
+    for item in eligible:
+        work_id = item['id']
+        record = records.get(work_id)
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        prior = record.get('dependency_prior_phase')
+        held = record.get('dependency_admission_hold')
+        if (record.get('blocker_class') != 'blocked_by_dependency'
+                or prior not in WORKER_ACTIVE_PHASES
+                or not isinstance(held, dict)
+                or held.get('state') not in ('blocked', 'blocked_by_dependency')):
+            continue
+        scope = scopes.get(work_id)
+        if scope is None:
+            decision = {'state': 'blocked', 'reasons': ['scope_declaration_missing']}
+        elif unknown:
+            decision = {'state': 'blocked_by_dependency',
+                        'conflicts': [{'with': other,
+                                       'reasons': ['unclassified_active_workstream']}
+                                      for other in sorted(unknown)]}
+        else:
+            decision = admission(scope, active, production_healthy=production_healthy)
+        if decision['state'] == 'admitted' and limit > 0:
+            record.update({'phase': prior, 'dependency_claim_status': 'active',
+                           'dependency_scope': scope, 'dependency_admission_hold': None,
+                           'dependency_prior_phase': None, 'blocker_class': None,
+                           'recovery_next_action': None,
+                           'reason': 'Re-admitted following verified current dependency and capacity recheck.',
+                           'updated_at': now_iso()})
+            active.append({**scope, 'state': 'active'})
+            selected.append(work_id)
+            limit -= 1
+            continue
+        if decision['state'] == 'admitted':
+            holds[work_id] = {'state': 'queued',
+                              'reasons': ['engineering_capacity_unavailable']}
+        else:
+            record['dependency_admission_hold'] = decision
+            holds[work_id] = decision
     for item in eligible:
         work_id = item['id']
         if work_id in records:

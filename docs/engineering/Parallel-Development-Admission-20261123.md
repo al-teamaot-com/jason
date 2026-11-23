@@ -11,8 +11,11 @@ This source candidate extends existing `tools/dependency_conflict_service.py` ra
 - Approved development issues are still sourced through existing Owner verification. Admission does not create owner authorization or bypass the production release manager.
 - New work is persisted in the existing `development-state.json` through the existing atomic save before worktree creation or model requests. No competing development state database is introduced.
 - Existing old-phase records can reconcile, but a previously blocked claim that is recovered must be re-admitted. Existing conflicting editors are held from further source edits until the overlapping PR/claim is stable. PR monitoring remains nonmutating.
+- Controller-owned dependency holds are automatically reassessed on every later authorized worker pass. Release requires verified scope, free capacity, no active conflicts and current production-health evidence for feature work. Manual/credential/issue approval holds do not reopen. An upstream PR merge is source stability, never proof of Production Verified acceptance.
+- Legacy overlap detection now covers authorization paths and tenant scopes as well as files, contracts, providers, schemas and deployment paths.
 - Existing Owner-selected PR adoption is placed *after* dependency admission, closing the path that previously inserted a development record before the controller.
 - Historical PR-ready records are excluded from active claims only after explicit GitHub merged-at and merge-commit SHA readback; stale, unknown, or closed-unmerged records remain protected. Live open PR changed files are added to the reviewed semantic scope; an absent or unbounded file inventory is treated as unknown rather than as an empty overlap.
+- A GitHub-only scheduled board refresh preserves a recent host-admission advisory observation for up to 30 minutes; it refuses forged/invalid previous content, and expires to not-verified when no fresh host observation exists. This is board display, never engineering authority.
 - Updated installer copies the dependency conflict controller and its shared JSON helper to the installed worker module directory. Merely adding an import would have broken the live worker on installation.
 - New **feature** claims default to held unless independently verified current production health is supplied. Bootstrap/repair engineering is separately categorized; no production or provider privileges are expanded.
 - Worker state exposes `dependency_admission` with queued holds, unclassified work, verified merged PRs, active claims, and existing conflicts. The existing Development & Release Control Board now has a read-only projection for fresh host claim evidence, including legacy editor holds and queued dependency blocks. The GitHub-only publisher will correctly display **not verified** when host evidence is unavailable; a separately governed host-to-board publisher remains necessary for authoritative live visibility in GitHub.
@@ -40,3 +43,9 @@ Read-only reports are saved at `/srv/jason/archive/engineering-artifacts/paralle
 6. Postrelease, verify concurrent independent claims, blocked overlapping claims, automatic recheck of blocked/resumed work, protected Core health, release serialization and absence of false drift, with rollback available.
 
 **Current status:** Integrated and exercised in an isolated source branch. Not merged, installed, deployed, or production verified. No protected service was modified or restarted by this work.
+
+## November 23 dependency safety follow-up
+
+Source-level regression additions now verify automatic hold recheck, capacity and production health gates, manual hold isolation, legacy tenant/authorization overlaps, and control-board observation freshness. The owner-approved source branch remains isolated; none of these checks operated the production database or activated any root-owned service.
+
+Fresh read-only production control evidence on 2026-11-23 reported drift_detected, breaker open, and required_system_unit_not_active for jason-audit-journal-maintenance.timer. The database cleanup and drift repair remain separate activities. Do not merge or deploy this change as a normal feature rollout while the breaker is open. A new health/rollback preflight and exact-action Owner approval are required before release.

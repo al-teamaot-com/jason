@@ -387,6 +387,70 @@ def preserve_newer_host_board_observation(
     return new_body.rstrip() + "\n\n" + HOST_PRODUCTION_REPORT_MARKER + "\n"
 
 
+HOST_DEVELOPMENT_ADMISSION_MARKER = "<!-- jason-host-development-admission:v1 -->"
+DEVELOPMENT_BOARD_HEADER = "## Development dependency admission (host evidence)"
+DEVELOPMENT_BOARD_NEXT = "## Open support defects"
+
+
+def preserve_fresh_host_development_admission(
+    new_body: str, previous_body: str, *,
+    max_age_minutes: int = 30,
+    now: datetime | None = None,
+) -> str:
+    """Keep fresh host dependency evidence visible across GH-only refreshes.
+
+    The GitHub control board is advisory only and never feeds source claims,
+    production-state decisions, or release approval.
+    """
+    if HOST_DEVELOPMENT_ADMISSION_MARKER not in previous_body:
+        return new_body
+    def section(body: str) -> str:
+        before, boundary, remainder = body.partition(DEVELOPMENT_BOARD_HEADER)
+        if not boundary:
+            return ""
+        content, next_boundary, _ = remainder.partition(DEVELOPMENT_BOARD_NEXT)
+        if not next_boundary or len(content) > 6000 or len(content.splitlines()) > 45:
+            return ""
+        return content
+    prior = section(previous_body)
+    if not prior or prior.count(HOST_DEVELOPMENT_ADMISSION_MARKER) != 1:
+        return new_body
+    match = re.search(r"(?m)^- Claim snapshot observed: [`]([^`]+)[`];", prior)
+    if not match:
+        return new_body
+    observed = _observation_time(match.group(1))
+    now = now or datetime.now(timezone.utc)
+    if observed is None:
+        return new_body
+    age_seconds = (now - observed).total_seconds()
+    if not -120 <= age_seconds <= max_age_minutes * 60:
+        return new_body
+    allowed_lines = [
+        "- Claim snapshot observed:", "- Active or integration-reserved development:",
+        "- **Blocked by dependency**:", "- **Unclassified active work**",
+        HOST_DEVELOPMENT_ADMISSION_MARKER,
+    ]
+    for line in prior.splitlines():
+        line = line.strip()
+        if line and not (line.startswith("- `DEV-")
+                         or any(line.startswith(prefix) for prefix in allowed_lines)):
+            return new_body
+    current = section(new_body)
+    if current and HOST_DEVELOPMENT_ADMISSION_MARKER in current:
+        current_match = re.search(r"(?m)^- Claim snapshot observed: [`]([^`]+)[`];", current)
+        if current_match:
+            newer = _observation_time(current_match.group(1))
+            if newer and newer >= observed:
+                return new_body
+    before, boundary, remainder = new_body.partition(DEVELOPMENT_BOARD_HEADER)
+    if not boundary:
+        return new_body
+    _, next_boundary, after = remainder.partition(DEVELOPMENT_BOARD_NEXT)
+    if not next_boundary:
+        return new_body
+    return before + boundary + prior + next_boundary + after
+
+
 def latest_checks(check_runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
     for check in check_runs:
@@ -770,7 +834,7 @@ def render(board: dict[str, Any]) -> str:
     lines.extend(["", "## Development dependency admission (host evidence)", ""])
     admission = board.get("development_admission") or {"status": "not_verified"}
     if admission.get("status") != "read_only_verified_snapshot":
-        lines.append("- **Not verified**: fresh, authenticated host claim evidence is unavailable. "
+        lines.append("- **Not verified**: fresh host claim evidence is unavailable. "
                      "The board cannot infer an idle or conflict-free engineering queue.")
     else:
         lines.append(f"- Claim snapshot observed: `{admission['observed_at']}`; "
@@ -787,6 +851,7 @@ def render(board: dict[str, Any]) -> str:
         if unclassified:
             lines.append("- **Unclassified active work** (new admissions fail closed): " +
                          ", ".join(f"`{x}`" for x in unclassified[:24]))
+        lines.append("<!-- jason-host-development-admission:v1 -->")
 
     lines.extend(["", "## Open support defects", ""])
     if board["support"]:
@@ -887,9 +952,12 @@ def publish(
     # documentation PR merge. Scheduled GitHub refreshes may not regress
     # that evidence to an older main-branch snapshot.
     existing = api.request(f"/issues/{issue_number}")
+    previous = str(existing.get("body") or "")
     body = preserve_newer_host_board_observation(
-        body, str(existing.get("body") or ""),
-        max_age_minutes=max_age_minutes, now=now,
+        body, previous, max_age_minutes=max_age_minutes, now=now,
+    )
+    body = preserve_fresh_host_development_admission(
+        body, previous, max_age_minutes=max_age_minutes, now=now,
     )
     api.request(f"/issues/{issue_number}", method="PATCH", payload={"body": body})
 

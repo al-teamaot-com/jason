@@ -89,3 +89,12 @@ def test_atomic_claim_serializes_concurrent_collision(tmp_path):
 def test_atomic_claim_requires_initialized_authoritative_inventory(tmp_path):
     from tools.dependency_conflict_service import atomic_claim
     assert atomic_claim(work('A', components=['core']), tmp_path / 'missing.json')['state'] == 'blocked'
+
+
+def test_legacy_overlap_analysis_also_sees_shared_authorization_and_tenant_scope():
+    from tools.dependency_conflict_service import analyze
+    a = work('A', authorization_paths=['owner-approval'], tenant_scopes=['aot-shared'])
+    b = work('B', authorization_paths=['owner-approval'], tenant_scopes=['aot-shared'])
+    result = analyze([a, b])
+    assert result['status'] == 'conflict'
+    assert set(result['conflicts'][0]['reasons']) == {'authorization_paths', 'tenant_scopes'}
