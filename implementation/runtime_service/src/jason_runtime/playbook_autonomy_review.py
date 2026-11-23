@@ -299,17 +299,15 @@ class TeamsGatewayPlaybookApprovalSender:
         configuration = self.workflow_configuration.load() if self.workflow_configuration else None
         if configuration is None or not configuration.enabled or event not in configuration.raw['events']:
             return ()
-        labels = {'approval_required': 'Approval requested', 'reminder': 'Approval reminder',
-                  'escalated': 'Approval escalated', 'completed': 'Purchase completed',
-                  'blocked': 'Purchase needs attention', 'denied': 'Purchase declined',
-                  'cancelled': 'Request cancelled', 'restored': 'Service restored'}
+        template = configuration.raw['events'][event]
         facts = dict(request.presentation.facts if request.presentation else ())
-        text = labels[event] + '. ' + str(facts.get('Product') or (
+        text = template['title'] + '. ' + str(facts.get('Product') or (
             request.presentation.title if request.presentation else 'Request'))
         if facts.get('Total Commitment'):
             text += ' — ' + facts['Total Commitment']
-        if event in {'approval_required', 'reminder', 'escalated'}:
-            text += '. Waiting for the authorized approver.'
+        text += '. ' + template['message']
+        from .universal_interaction.teams import render_configured_event
+        status_card = render_configured_event(configuration, render_approval_card(request), event=event)
         if any(identity not in self.owner_identity_ids for identity in request.authorized_approver_ids):
             raise PermissionError('notification approver is outside approved audience')
         recipients = (request.requested_by,) if requester_only else tuple(
@@ -322,7 +320,7 @@ class TeamsGatewayPlaybookApprovalSender:
         transport = self._existing_transport()
         receipts = []
         for binding in bindings:
-            receipt = transport.send(binding=binding, text=text)
+            receipt = transport.send(binding=binding, text=text, card=status_card)
             if receipt.message_id_synthetic or not receipt.message_id:
                 raise RuntimeError('notification delivery unverified; reconciliation required')
             receipts.append(receipt.message_id)

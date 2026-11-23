@@ -196,7 +196,9 @@ def configured_maintenance(tmp_path):
         authorized_approver_ids=('person-lead',),
         presentation=ApprovalPresentation(title='Purchase',summary='Review the purchase'),
         metadata={'submission_id':'s1','submission_digest':'a'*64,
-                  'supervisor_policy_digest':'owner-udf-only'})
+                  'supervisor_policy_digest':'owner-udf-only',
+                  'card_instance_challenge':'a'*48,
+                  'card_instance_challenge_sha256':__import__('hashlib').sha256(('a'*48).encode()).hexdigest()})
     svc.create(request,now=start)
     store.put_new('s1',dict(submission_id='s1',approval_id=request.approval_id,
         digest='a'*64,status='approval_required',workflow_configuration_digest=p.approval_scope_digest,
@@ -297,7 +299,7 @@ def test_requester_receives_notification_without_approval_buttons(tmp_path,monke
     m,svc,store,_,source=configured_maintenance(tmp_path)
     req=replace(svc.repository.get('procapproval-original'),
         presentation=ApprovalPresentation('Purchase','Review the purchase',
-            facts=(('Product','Laptop'),('Total Commitment','$999.00'))))
+            facts=card().facts))
     bindings={p:SimpleNamespace(jason_identity_id=p,status='active',
                 microsoft_tenant_id='same-tenant') for p in ('person-tech','person-lead')}
     sender=TeamsGatewayPlaybookApprovalSender(gateway_url='https://unused.example.test',
@@ -312,6 +314,6 @@ def test_requester_receives_notification_without_approval_buttons(tmp_path,monke
     monkeypatch.setattr(sender,'_existing_transport',lambda:Transport())
     sender.send_event(req,event='approval_required',requester_only=True)
     assert len(calls)==1 and calls[0]['binding'].jason_identity_id=='person-tech'
-    assert 'card' not in calls[0]
+    assert calls[0]['card']['actions']==[]
     sender.send_event(req,event='denied')
     assert [c['binding'].jason_identity_id for c in calls[1:]]==['person-tech','person-lead']

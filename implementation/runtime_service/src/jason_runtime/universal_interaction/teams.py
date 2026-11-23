@@ -178,3 +178,18 @@ def render_configured_approval(configuration, card: Any, *, actionable: bool = T
                          "data": {**data, "decision": decision}}
                         for label, decision in (("Approve", "approve"), ("Deny", "deny"))]
             if actionable else []}
+
+
+def render_configured_event(configuration, card: Any, *, event: str) -> dict[str, Any]:
+    """All event presentation remains in the existing canonical Teams adapter."""
+    template = configuration.raw['events'][event]
+    approved_layout = render_configured_approval(configuration, card, actionable=False)
+    facts = []
+    if approved_layout is not None:
+        facts = [block for block in approved_layout['body'] if block['type'] == 'FactSet']
+    return {'type': 'AdaptiveCard', 'version': '1.4', 'body': [
+        {'type': 'TextBlock', 'text': template['title'], 'weight': 'Bolder',
+         'size': 'Medium', 'wrap': True},
+        {'type': 'TextBlock', 'text': template['message'], 'wrap': True},
+        *facts,
+    ], 'actions': []}

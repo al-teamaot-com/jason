@@ -111,10 +111,13 @@ class TeamsWorkflowConfiguration:
             raise TeamsConfigurationError("fallback email required; identity authority is checked separately")
         allowed_events = {"approval_required", "reminder", "escalated", "completed",
                           "blocked", "denied", "cancelled", "restored"}
-        if (not isinstance(raw["events"], list) or not raw["events"]
-                or len(set(raw["events"])) != len(raw["events"])
+        if (not isinstance(raw["events"], dict) or not raw["events"]
                 or set(raw["events"]) - allowed_events):
             raise TeamsConfigurationError("unknown or duplicate notification event")
+        for event in raw['events'].values():
+            _keys(event, {'title', 'message'})
+            _text(event['title'])
+            _text(event['message'], 600)
         if not isinstance(raw["templates"], list) or not raw["templates"]:
             raise TeamsConfigurationError("template registry required")
         selectors = set()

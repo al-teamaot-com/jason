@@ -18,16 +18,40 @@
   "reminder_business_minutes": 60,
   "escalation_business_minutes": 600,
   "fallback_email": "al@teamaot.com",
-  "events": [
-    "approval_required",
-    "reminder",
-    "escalated",
-    "completed",
-    "blocked",
-    "denied",
-    "cancelled",
-    "restored"
-  ],
+  "events": {
+    "approval_required": {
+      "title": "Approval requested",
+      "message": "Waiting for the authorized approver."
+    },
+    "reminder": {
+      "title": "Approval reminder",
+      "message": "Waiting for the authorized approver."
+    },
+    "escalated": {
+      "title": "Approval escalated",
+      "message": "Waiting for the next authorized approver."
+    },
+    "completed": {
+      "title": "Request completed",
+      "message": "The requested work is complete and verified."
+    },
+    "blocked": {
+      "title": "Action required",
+      "message": "The request could not continue. Review the request for the next action."
+    },
+    "denied": {
+      "title": "Request declined",
+      "message": "No further action will be taken on this request."
+    },
+    "cancelled": {
+      "title": "Request cancelled",
+      "message": "No further action will be taken on this request."
+    },
+    "restored": {
+      "title": "Service restored",
+      "message": "The service has been checked and is working again."
+    }
+  },
   "templates": [
     {
       "capability": "procurement.submission.execute",
