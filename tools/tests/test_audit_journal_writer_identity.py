@@ -48,9 +48,13 @@ def test_native_revalidation_uses_same_fixed_identity(monkeypatch):
  executor.status=lambda *args,**kwargs:None;seen=[]
  def run(argv,**kwargs):seen.append((argv,kwargs));return SimpleNamespace(returncode=0)
  monkeypatch.setattr(release.subprocess,"run",run)
+ from datetime import datetime,timedelta,timezone
+ rows=iter(({"status":"pass","problems":[],"observed_at":(datetime.now(timezone.utc)-timedelta(seconds=3600)).isoformat()},
+  {"status":"pass","problems":[],"observed_at":datetime.now(timezone.utc).isoformat()}))
+ monkeypatch.setattr(release,"read_control",lambda *args:next(rows))
  executor.native()
- assert len(seen)==4 and all(argv[0]=="/usr/bin/systemctl" for argv,_ in seen[:3])
+ assert len(seen)==3 and all(argv[0]=="/usr/bin/systemctl" for argv,_ in seen[:2])
  argv,kw=seen[-1]
- assert argv[:3]==["/usr/bin/python3","-B","-c"]
+ assert argv[:4]==["/usr/bin/python3","-I","-B","-c"]
  assert kw["user"]==kw["group"]==1000 and kw["extra_groups"]==()
  assert "request_root_control_transition" in argv[-1]

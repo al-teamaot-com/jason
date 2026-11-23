@@ -23,7 +23,7 @@ def test_ready_policy_is_bound_to_real_timer_and_native_revalidation(monkeypatch
  monkeypatch.setattr(release,"read_control",read);monkeypatch.setattr(release.subprocess,"run",run)
  if fault is None:
   executor.finalize_desired()
-  assert writes==[(scope.DESIRED,final,0o600)] and events==["real_native_drift","guarded_native_revalidation"]
+  assert writes==[(scope.DESIRED,final,0o600)] and events==["guarded_native_revalidation"]
  else:
   with pytest.raises(JournalUnavailable):executor.finalize_desired()
   assert writes==[] and events==[]
