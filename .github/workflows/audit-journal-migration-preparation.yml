@@ -67,6 +67,14 @@ jobs:
           docker build --network=none -f infrastructure/jason-audit-journal/tests.Dockerfile -t audit-journal-native-fixture .
           docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=FSETID --cap-add=KILL --cap-add=SYS_ADMIN --security-opt=no-new-privileges --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined --tmpfs /tmp:rw,nosuid,nodev,size=8g --tmpfs /tmp/audit-native-root-fixture/archive-root:rw,nosuid,nodev,size=8g audit-journal-native-fixture
 
+      - name: Hardened writer handoff despite required PAM session denial
+        run: |
+          docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=128m --tmpfs /etc/pam.d:rw,nosuid,nodev,size=1m --entrypoint /usr/bin/python3 audit-journal-native-fixture -I -B /writer-context-fixture.py
+
+      - name: Exact pre-cutover repair, immutable failure records and bounded power-loss resume
+        run: |
+          docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=128m --entrypoint /usr/bin/python3 audit-journal-native-fixture -I -B /context-repair-fixture.py
+
       - name: Root staged Owner offer, immutable freeze, one-use signed request custody
         run: |
           docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=1g --entrypoint /usr/bin/python3 audit-journal-native-fixture -I -B /signed-owner-fixture.py

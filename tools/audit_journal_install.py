@@ -9,6 +9,7 @@ import argparse,importlib,importlib.util,json,os,re,shutil,stat,subprocess,sys,t
 from datetime import datetime,timezone
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 REPO=Path(__file__).resolve().parents[1]
 PRIMITIVES_SHA="31af4fcfa40e6e976c10dc2bef8709f32e542358f89929b232dc18b8295f027a"
 SAFE=("GIT_CONFIG_NOSYSTEM=1","GIT_CONFIG_GLOBAL=/dev/null","GIT_OPTIONAL_LOCKS=0",
@@ -19,10 +20,12 @@ USER=("/usr/sbin/runuser","-u","al","--")
 EXTRA=("tools/audit_journal_install.py","tools/audit_journal_install_transaction.py",
  "tools/audit_journal_root_inventory.py","tools/audit_journal_signed_owner_bridge.py",
  "implementation/kernel/signed_owner_release.py","tools/pmv4_e_ci_refresh.py",
- "tools/documentation_publisher_install.py","tools/pmv4_e_operational_closure.py","tools/pmv4_e_dispatch_install.py")
+ "tools/documentation_publisher_install.py","tools/pmv4_e_operational_closure.py","tools/pmv4_e_dispatch_install.py",
+ "tools/audit_journal_pre_cutover_repair.py")
 OVERRIDES=("93-jason-audit-data-recovery.conf","94-audit-data-compatible-release.conf")
 SYSTEMD=Path("/etc/systemd/system")
 RECORD=Path("/var/lib/jason-owner-release/audit-journal-install")
+CONTEXT_REPAIRS=Path("/var/lib/jason-owner-release/audit-journal-service-context-repairs")
 
 def need(ok,code):
  if not ok:raise PermissionError("JOURNAL_INSTALL_"+code)
@@ -39,8 +42,29 @@ def read(path,maximum=2000000):
   m=os.fstat(stream.fileno())
   need(stat.S_ISREG(m.st_mode) and m.st_nlink==1 and 0<m.st_size<=maximum,"REGULAR_FILE_REQUIRED")
   raw=stream.read(maximum+1);need(len(raw)==m.st_size,"FILE_CHANGED");return raw
+def context_record_read(candidate):
+ root=CONTEXT_REPAIRS/candidate
+ for p in (CONTEXT_REPAIRS,root):
+  m=p.lstat();need(not p.is_symlink() and stat.S_ISDIR(m.st_mode) and m.st_uid==m.st_gid==0
+   and stat.S_IMODE(m.st_mode)==0o700,"CONTEXT_RECORD_CUSTODY")
+ path=root/"authorization.json";m=path.lstat()
+ need(not path.is_symlink() and m.st_uid==m.st_gid==0 and stat.S_IMODE(m.st_mode)==0o400,"CONTEXT_AUTHORIZATION_CUSTODY")
+ row=json.loads(read(path,16000000))
+ need(row["candidate_sha"]==candidate and row["scope"]["policy"]["candidate_sha"]==candidate
+  and row["owner_oid"]=="bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+  and row["independently_verified_entra_owner"] is True and row["scope"]["action"]=="ADOPT-EXACT-DAILY-AUDIT-JOURNAL"
+  and digest(canonical(row["scope"]))==row["scope_sha256"],"CONTEXT_EXACT_OWNER_SCOPE")
+ age=(datetime.now(timezone.utc)-datetime.fromisoformat(row["claimed_at"])).total_seconds()
+ need(0<=age<=28800,"CONTEXT_EXECUTION_WINDOW")
+ return row
+
 def source(candidate,name):
  path=REPO/name;m=path.lstat()
+ if REPO==CONTEXT_REPAIRS/candidate/"source":
+  need(not path.is_symlink() and m.st_uid==m.st_gid==0 and stat.S_IMODE(m.st_mode)==0o444,"CONTEXT_SOURCE_CUSTODY")
+  raw=read(path);proof=context_record_read(candidate)
+  need(proof["source_sha256"].get(name)==digest(raw),"CONTEXT_EXACT_SOURCE")
+  return raw
  if REPO==RECORD/"source":
   need(m.st_uid==m.st_gid==0 and stat.S_IMODE(m.st_mode)==0o444 and not path.is_symlink(),"RESUME_SOURCE_CUSTODY")
   raw=read(path);proof=record_read()
@@ -74,7 +98,7 @@ def staged_modules(candidate):
  sys.path.insert(0,str(stage));sys.path.insert(0,str(stage/"implementation"))
  modules={name:importlib.import_module("tools."+name) for name in (
   "audit_journal_release_scope","audit_journal_container_release","audit_journal_root_inventory","pmv4_e_ci_refresh",
-  "audit_journal_install_transaction","audit_journal_signed_owner_bridge")}
+  "audit_journal_install_transaction","audit_journal_signed_owner_bridge","audit_journal_pre_cutover_repair")}
  return temporary,payload,modules
 
 def ci(helper,candidate):
@@ -214,6 +238,7 @@ def inspect(s,engine,inventory,candidate,payload,c):
  scope["protected_peer_before"]=peers
  scope["initial_scheduled_acceptance_rollover"]=True
  scope["rollback_desired_state_sha256"]=digest(canonical(s.desired_rollback(json.loads(original))))
+ scope["desired_state_initial_sha256"]=digest(canonical(s.desired_initial(json.loads(original))))
  scope["health_native_dropin_sha256"]={name:digest(raw) for name,raw in health_dropins(s).items()}
  return scope,before,original,desired
 
@@ -312,20 +337,30 @@ def main():
  parser.add_argument("--preflight-only",action="store_true");parser.add_argument("--resume-bootstrap",action="store_true")
  parser.add_argument("--stage-signed-owner-offer",action="store_true")
  parser.add_argument("--adopt-signed-chatgpt-owner",action="store_true")
+ parser.add_argument("--repair-before-cutover",action="store_true")
+ parser.add_argument("--resume-context-repair",action="store_true")
  args=parser.parse_args()
  need(sum(bool(flag) for flag in (
   args.preflight_only,args.resume_bootstrap,args.stage_signed_owner_offer,
-  args.adopt_signed_chatgpt_owner))<=1,"ONE_EXACT_INSTALLER_OPERATION")
+  args.adopt_signed_chatgpt_owner,args.repair_before_cutover,args.resume_context_repair))<=1,"ONE_EXACT_INSTALLER_OPERATION")
  if args.resume_bootstrap:
   need(args.candidate_sha is None and not args.preflight_only,"EXACT_RESUME_ARGUMENTS");return resume_bootstrap()
  candidate=args.candidate_sha
  need(os.geteuid()==0 and sys.flags.isolated==1 and isinstance(candidate,str)
       and re.fullmatch("[0-9a-f]{40}",candidate),"ISOLATED_ROOT_EXACT_SOURCE")
- need(git("rev-parse","HEAD")==candidate and git("status","--porcelain","--untracked-files=all")=="","CLEAN_EXACT_CHECKOUT")
+ if args.resume_context_repair:
+  need(REPO==CONTEXT_REPAIRS/candidate/"source","FROZEN_CONTEXT_RESUME_ENTRY")
+  context_record_read(candidate)
+ else:
+  need(git("rev-parse","HEAD")==candidate and git("status","--porcelain","--untracked-files=all")=="","CLEAN_EXACT_CHECKOUT")
  c,auth=primitives(candidate);temporary,payload,modules=staged_modules(candidate)
  try:
   s=modules["audit_journal_release_scope"];engine=modules["audit_journal_container_release"]
   with auth["locks"]():
+   if args.resume_context_repair or args.repair_before_cutover:
+    ci_proof={} if args.resume_context_repair else ci(modules["pmv4_e_ci_refresh"],candidate)
+    return modules["audit_journal_pre_cutover_repair"].execute(SimpleNamespace(**globals()),candidate,
+     payload,modules,c,auth,ci_proof,resume=args.resume_context_repair)
    ci_proof=ci(modules["pmv4_e_ci_refresh"],candidate)
    scope,before,original,desired=inspect(s,engine,modules["audit_journal_root_inventory"],candidate,payload,c)
    print("AUDIT_JOURNAL_COMPLETE_ROOT_PREFLIGHT=PASS",flush=True)
@@ -400,6 +435,7 @@ def install(s,payload,scope,before,original,desired,actor,ci_proof,c):
   tx.write(s.PRIVATE/"producer-before.json",canonical(before),0o400)
   tx.write(s.PRIVATE/"desired-before.json",original,0o400)
   tx.write(s.PRIVATE/"desired-rollback.json",canonical(s.desired_rollback(json.loads(original))),0o400)
+  tx.write(s.PRIVATE/"desired-final.json",canonical(desired),0o400)
   tx.write(s.PRIVATE/"protected-ci-before.json",canonical(ci_proof),0o400)
   tx.write(s.PRIVATE/"release-plan.json",canonical(plan),0o400)
   for unit in s.UNITS:tx.write(SYSTEMD/unit,payload["infrastructure/jason-audit-journal/"+unit],0o644)
@@ -411,7 +447,7 @@ def install(s,payload,scope,before,original,desired,actor,ci_proof,c):
    for name in names:tx.write(parent/name,payload["infrastructure/jason-audit-journal/"+name],0o644)
   for unit,raw in health_dropins(s).items():
    parent=SYSTEMD/(unit+".d");tx.directory(parent);tx.write(parent/"94-audit-journal.conf",raw,0o644)
-  tx.replace(s.DESIRED,canonical(desired))
+  tx.replace(s.DESIRED,canonical(s.desired_initial(json.loads(original))))
   # Source/file bytes are now immutable; no Root worker loads this worktree.
   for path in [Path(r["path"]) for r in tx.state["entries"] if r["kind"]=="file"]:
    directory=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
