@@ -27,7 +27,7 @@ def exercise(base,trust):
   active.write_bytes(b"untouched-canonical");os.chown(active,1000,1000);active.chmod(0o600)
   identity=(active.stat().st_dev,active.stat().st_ino)
   desired=root/"desired.json"
-  original=json.dumps({"required_system_units":[],"allowed_system_units":[],"rollback_container_prefixes":[]}).encode()
+  original=json.dumps({"required_system_units":[],"allowed_system_units":[],"rollback_container_prefixes":[],"max_stopped_rollback_containers":21}).encode()
   desired.write_bytes(original);desired.chmod(0o600)
   s.BASE=root/"library";s.PRIVATE=root/"data/private";s.CONTROL=root/"data/control"
   s.POLICY=root/"policy.json";s.ACTIVE=active;s.ARCHIVE=archive;s.PROFILE=root/"run/profile.json";s.DESIRED=desired
@@ -66,6 +66,7 @@ def exercise(base,trust):
    assert all(stat.S_IMODE((systemd/unit).stat().st_mode)==0o644 for unit in s.UNITS)
    assert json.loads((record/"transaction.json").read_bytes())["outcome"]=="queued"
    assert archive.stat().st_uid==0 and stat.S_IMODE(archive.stat().st_mode)==0o755
+   assert json.loads(desired.read_bytes())["max_stopped_rollback_containers"]==27
   assert active.read_bytes()==b"untouched-canonical" and (active.stat().st_dev,active.stat().st_ino)==identity
   total+=1
  return total
@@ -117,3 +118,46 @@ def exercise_parents(base,trust):
    else:os.chown(path,saved[0],saved[1]);path.chmod(saved[2])
  assert metadata()==before
  return total
+
+
+def exercise_reserve(base,trust):
+ """Root-private before-policy, native population and exact six-slot reserve."""
+ install=load(trust/"tools/audit_journal_install.py","fixture_capacity_install")
+ s=load(trust/"tools/audit_journal_release_scope.py","fixture_capacity_scope")
+ root=base/"rollback-capacity";root.mkdir(mode=0o700)
+ path=root/"before.json"
+ before={"schema_version":"1.0","required_system_units":[],"allowed_system_units":[],
+  "rollback_container_prefixes":["jason-runtime-rollback-","jason-mcp-pilot-rollback-",
+   "jason-mcp-rollback-","jason-teams-gateway-rollback-"],"max_stopped_rollback_containers":21}
+ original=install.canonical(before);path.write_bytes(original);path.chmod(0o600)
+ assert path.stat().st_uid==path.stat().st_gid==0 and stat.S_IMODE(path.stat().st_mode)==0o600
+ names=[]
+ def command(argv,**kwargs):
+  assert argv==["/usr/bin/docker","ps","-a","--filter","status=exited","--format","{{.Names}}"]
+  return "\n".join(names)
+ install.command=command
+ total=0
+ for count in (0,20,21,22,27):
+  names[:]=["jason-runtime-rollback-fixture-"+str(i) for i in range(count)]+[
+   "jason-pmv4-shadow-gateway","jason-mcp-signer-recovery-prior"]
+  try:after,facts=install.recovery_capacity(s,json.loads(install.read(path)))
+  except PermissionError as exc:
+   assert count>21 and str(exc)=="JOURNAL_INSTALL_STOPPED_CONTAINER_BASELINE_CAPACITY"
+  else:
+   assert count<=21 and after["max_stopped_rollback_containers"]==27
+   assert facts["existing_count"]==count and len(facts["existing_names"])==count
+   assert facts["reserved_slots"]==6 and facts["cleanup_allowed"] is False
+  assert path.read_bytes()==original;total+=1
+ for limit in (20,22,27,200,True,21.0,"21",None):
+  changed={**before,"max_stopped_rollback_containers":limit}
+  try:install.recovery_capacity(s,changed)
+  except PermissionError as exc:assert str(exc)=="AUDIT_REVIEWED_ROLLBACK_BASELINE_REQUIRED"
+  else:raise AssertionError("unreviewed rollback baseline accepted")
+  assert path.read_bytes()==original;total+=1
+ names[:]=["jason-runtime-rollback-fixture-"+str(i) for i in range(21)]+[
+  "jason-pmv4-ticket-core-rollback-audit-before-"+"a"*12]
+ try:install.recovery_capacity(s,before)
+ except PermissionError as exc:assert str(exc)=="JOURNAL_INSTALL_STOPPED_CONTAINER_BASELINE_CAPACITY"
+ else:raise AssertionError("preexisting ticket recovery escaped the capacity gate")
+ assert path.read_bytes()==original
+ return total+1

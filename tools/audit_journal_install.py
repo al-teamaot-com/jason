@@ -140,6 +140,21 @@ def schema_and_sample(s):
       and result["maximum_metadata_bytes"]<=512,"RECENT_EVENT_ENVELOPE_INCOMPATIBLE")
  return result["actual"]
 
+def recovery_capacity(s,before):
+ # Match the native drift policy's declared-prefix population. A stopped
+ # preproduction peer or unrelated historical container is not a rollback slot.
+ desired=s.desired_after(before)
+ names=command(["/usr/bin/docker","ps","-a","--filter","status=exited","--format","{{.Names}}"]).splitlines()
+ need(len(names)==len(set(names)) and all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*",n) for n in names),
+      "STOPPED_CONTAINER_INVENTORY")
+ stopped=sorted(n for n in names if any(n.startswith(prefix) for prefix in desired["rollback_container_prefixes"]))
+ need(len(stopped)<=s.ROLLBACK_LIMIT_BEFORE,"STOPPED_CONTAINER_BASELINE_CAPACITY")
+ need(len(stopped)+s.ROLLBACK_CONTAINER_RESERVE<=desired["max_stopped_rollback_containers"],
+      "STOPPED_CONTAINER_RECOVERY_CAPACITY")
+ return desired,{"existing_count":len(stopped),"existing_names":stopped,
+  "limit_before":s.ROLLBACK_LIMIT_BEFORE,"limit_after":desired["max_stopped_rollback_containers"],
+  "reserved_slots":s.ROLLBACK_CONTAINER_RESERVE,"cleanup_allowed":False}
+
 def installation_parent_custody(c):
  # Root code, policy and new private state stay under Root-owned parents.
  for parent in (Path("/usr/local/lib/jason"),Path("/etc/jason-owner-release"),
@@ -176,11 +191,9 @@ def inspect(s,engine,inventory,candidate,payload,c):
   cgroup=Path("/proc")/str(row["pid"])/"cgroup"
   text=cgroup.read_text()
   need(row["uid"]==1000 and any(identifier in text for identifier in ids),"UNBOUND_CANONICAL_READER")
- # Reserve stopped recovery containers within the existing policy ceiling.
+ # Bind both the before-policy and the fixed six-slot delta to Owner scope.
  original=read(s.DESIRED);need(digest(original)==s.DESIRED_BEFORE,"DESIRED_POLICY_BASELINE")
- desired=s.desired_after(json.loads(original))
- stopped=command(["/usr/bin/docker","ps","-aq","--filter","status=exited"]).splitlines()
- need(len(stopped)+6<=desired["max_stopped_rollback_containers"],"STOPPED_CONTAINER_RECOVERY_CAPACITY")
+ desired,retention=recovery_capacity(s,json.loads(original))
  archive=s.ARCHIVE.lstat()
  facts={"dataset_identity":dataset,
   "archive_root_metadata":{"uid":archive.st_uid,"gid":archive.st_gid,"mode":oct(stat.S_IMODE(archive.st_mode))},
@@ -193,6 +206,7 @@ def inspect(s,engine,inventory,candidate,payload,c):
  units={name:digest(payload["infrastructure/jason-audit-journal/"+name]) for name in (*s.UNITS,*OVERRIDES)}
  scope=s.reviewed_scope(candidate,code,health,units,facts)
  scope["source_schema_sha256"]=schema
+ scope["rollback_container_capacity_before"]=retention
  scope["installer_sha256"]=digest(payload["tools/audit_journal_install.py"])
  scope["bootstrap_source_sha256"]={name:digest(payload[name]) for name in EXTRA}
  scope["bootstrap_resume_record"]=str(RECORD)

@@ -107,8 +107,9 @@ bootstrap=runpy.run_path("/bootstrap_fixture.py")
 cases=bootstrap["exercise"](BASE,TRUST)
 installer_fixture=runpy.run_path("/installer_fixture.py")
 parent_admission=installer_fixture["exercise_parents"](BASE,TRUST)
+capacity_admission=installer_fixture["exercise_reserve"](BASE,TRUST)
 composition=installer_fixture["exercise"](BASE,TRUST)
-print(json.dumps({"sql_helper_timeout_group_reaped":True,"root_parent_admission_cases":parent_admission,"root_install_composition_cases":composition,"root_bootstrap_interruption_cases":cases,"test":"isolated-native-root-two-identity","result":"passed",
+print(json.dumps({"sql_helper_timeout_group_reaped":True,"root_parent_admission_cases":parent_admission,"root_rollback_capacity_cases":capacity_admission,"root_install_composition_cases":composition,"root_bootstrap_interruption_cases":cases,"test":"isolated-native-root-two-identity","result":"passed",
  "root_custody":True,"writer_uid":1000,"distinct_filesystems":True,"production_mounts":False,
  "all_events_retained":True,"original_source_reclaimed":True,"reboot_mapping_restored":True,
  "recursive_container_bind_verified":True}))

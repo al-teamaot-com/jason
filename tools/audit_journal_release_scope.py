@@ -13,6 +13,10 @@ ACTION="ADOPT-EXACT-DAILY-AUDIT-JOURNAL"
 ROLLBACK="d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 OWNER="bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
 TENANT="f7054323-d52b-4863-8c2f-1898f0b6077c"
+ROLLBACK_LIMIT_BEFORE=21
+INITIAL_CONTAINER_REPLACEMENTS=3
+RECOVERY_CONTAINER_REPLACEMENTS=3
+ROLLBACK_CONTAINER_RESERVE=INITIAL_CONTAINER_REPLACEMENTS+RECOVERY_CONTAINER_REPLACEMENTS
 BASE=Path("/usr/local/lib/jason/audit-journal")
 PRIVATE=Path("/var/lib/jason-audit-journal/private")
 POLICY=Path("/etc/jason-owner-release/audit-journal-v1.json")
@@ -246,7 +250,13 @@ def public_profile(candidate):
   "maximum_event_bytes":262144,"execution_reserve_bytes":25165824,"maximum_inflight":32,"cached_archives":32}
 
 def desired_after(before):
+ # The protected before-policy is pinned independently by DESIRED_BEFORE.
+ # Reserve only this exact release's three before-images and three possible
+ # failed candidates; preserve every existing recovery asset.
+ if type(before.get("max_stopped_rollback_containers")) is not int or before["max_stopped_rollback_containers"]!=ROLLBACK_LIMIT_BEFORE:
+  raise PermissionError("AUDIT_REVIEWED_ROLLBACK_BASELINE_REQUIRED")
  value=json.loads(json.dumps(before))
+ value["max_stopped_rollback_containers"]=ROLLBACK_LIMIT_BEFORE+ROLLBACK_CONTAINER_RESERVE
  for field,unit in (("required_system_units","jason-audit-journal-data-recovery.service"),
                     ("required_system_units","jason-audit-journal-maintenance.timer"),
                     ("allowed_system_units","jason-audit-journal-maintenance.service"),
@@ -273,8 +283,12 @@ def reviewed_scope(candidate,code_hashes,native_hashes,unit_hashes,facts):
   "producer_before":facts["producer_before"],"producer_after_configuration_sha256":facts["producer_after"],
   "same_base_images":current_base_images(candidate,observed_mcp_image=
       facts.get("producer_before",{}).get("jason-mcp-pilot",{}).get("image")),
-  "initial_container_replacements":3,
-  "possible_recovery_container_replacements":3,"availability_interruption_authorized":True,
+  "initial_container_replacements":INITIAL_CONTAINER_REPLACEMENTS,
+  "possible_recovery_container_replacements":RECOVERY_CONTAINER_REPLACEMENTS,"availability_interruption_authorized":True,
+  "rollback_container_limit_before":ROLLBACK_LIMIT_BEFORE,
+  "rollback_container_limit_after":ROLLBACK_LIMIT_BEFORE+ROLLBACK_CONTAINER_RESERVE,
+  "rollback_container_reserve":ROLLBACK_CONTAINER_RESERVE,
+  "existing_rollback_containers_preserved":True,"rollback_container_cleanup_allowed":False,
   "inflight_write_drain_required":True,"historical_consumed_claims_unchanged":True,
   "cross_release_transaction_exclusion_required":True,
   "release_initiated_business_provider_writes":0,
