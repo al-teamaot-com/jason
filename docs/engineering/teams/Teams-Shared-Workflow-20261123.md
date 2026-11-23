@@ -191,7 +191,7 @@ The following remain operational/integration acceptance:
 ## Integration and release boundary
 
 Original baseline: `2e231c0b5462a2d86abd434ba6074005c4d87c80`.
-Reconciled main baseline: `4ba98e05e4512d7accb77595b8e8c05086d8b0a6`. Changes touch runtime
+Reconciled main baseline: `b9274191a79bda16bb687a866b4458bda6bf6361`. Changes touch runtime
 composition, existing procurement flow/maintenance and shared approval sender;
 these overlap PMv4/identity/procurement consumers. Preserve active source pins.
 No automatic merge or promotion. Risk classification: **High-Risk** because

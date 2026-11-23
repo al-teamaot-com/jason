@@ -75,6 +75,10 @@ jobs:
         run: |
           docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=128m --entrypoint /usr/bin/python3 audit-journal-native-fixture -I -B /context-repair-fixture.py
 
+      - name: Native admission with held mutex, deferred watchdog and immutable LKG
+        run: |
+          docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=128m --entrypoint /usr/bin/python3 audit-journal-native-fixture -I -B /native-admission-fixture.py
+
       - name: Root staged Owner offer, immutable freeze, one-use signed request custody
         run: |
           docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=1g --entrypoint /usr/bin/python3 audit-journal-native-fixture -I -B /signed-owner-fixture.py

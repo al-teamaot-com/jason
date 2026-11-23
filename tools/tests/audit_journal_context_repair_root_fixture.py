@@ -40,14 +40,14 @@ for scenario in ("queued","failure-before-queue","power-loss","tamper","queued-r
  originals["release-journal.json"]=r.canon({"steps":{},"scope_sha256":r.OLD_SCOPE,"recovery_started_at":"2026-11-23T14:18:07+00:00"})
  for n,raw in originals.items():p=private/n;p.write_bytes(raw);p.chmod(0o400)
  candidate="b"*40;payload={"tools/fixture.py":b"new-code","tools/audit_journal_install.py":b"frozen-installer-fixture"}
- scope={"action":"ADOPT-EXACT-DAILY-AUDIT-JOURNAL","policy":{"candidate_sha":candidate},
+ scope={"action":"ADOPT-EXACT-DAILY-AUDIT-JOURNAL","policy":{"candidate_sha":candidate,"rollback_sha":"d"*40},
   "source_sha256":{"tools/fixture.py":r.digest(b"new-code")},"source_dataset_identity":{"device":identity[0],"inode":identity[1]},
   "protected_peer_before":{},"desired_state_initial_sha256":r.digest(b'{"limit":27,"timer":"allowed"}'),
-  "desired_state_after_sha256":r.digest(desired.read_bytes()),"pre_cutover_context_repair":{"previous_scope_sha256":r.OLD_SCOPE,"catalog_before_sha256":r.digest(catalog.read_bytes())}}
+  "desired_state_after_sha256":r.digest(desired.read_bytes()),"desired_state_before_sha256":r.digest(desired.read_bytes()),"pre_cutover_context_repair":{"previous_scope_sha256":r.OLD_SCOPE,"catalog_before_sha256":r.digest(catalog.read_bytes())}}
  s=SimpleNamespace(BASE=base,PRIVATE=private,CONTROL=control,POLICY=policy,PROFILE=profile,DESIRED=desired,
   ACTIVE=active,PROTECTED={},digest=lambda value:r.digest(r.canon(value)),protected_peer_inventory=lambda:{},
   desired_initial=lambda value:{"limit":27,"timer":"allowed"},desired_after=lambda value:{"limit":27},
-  ACTION=scope["action"],public_profile=public)
+  ACTION=scope["action"],OWNER="bee80bdc-ffb0-4c50-b453-c09d4d411f5f",ROLLBACK="d"*40,public_profile=public)
  engine=SimpleNamespace(DockerEngine=lambda:SimpleNamespace(inspect=lambda role:before[role]),
   exact_original_configuration=lambda row:{"Image":row["Image"]})
  modules={"audit_journal_release_scope":s,"audit_journal_container_release":engine}
@@ -82,6 +82,34 @@ for scenario in ("queued","failure-before-queue","power-loss","tamper","queued-r
   assert scenario in ("failure-before-queue","native-failure")
   assert source.read_bytes()==b"old-code" and policy.read_bytes()==r.canon(old_policy)
   assert all((private/n).read_bytes()==raw for n,raw in originals.items())
+  if scenario=="native-failure":
+   previous_constants=(r.FAILED_CONTEXT_CANDIDATE,r.FAILED_CONTEXT_SCOPE)
+   r.FAILED_CONTEXT_CANDIDATE=candidate;r.FAILED_CONTEXT_SCOPE=row["scope_sha256"]
+   attested=r.verify_rolled_back_context(s,originals,r.canon(old_policy))
+   assert attested["outcome"]=="rolled_back" and not attested["old_execution_authority_reused"]
+   # An altered before-image, queued transaction, Owner grant or retry denies.
+   source.write_bytes(b"unknown-restored-code");source.chmod(0o444)
+   try:r.verify_rolled_back_context(s,originals,r.canon(old_policy))
+   except PermissionError:pass
+   else:raise AssertionError("altered restored target accepted")
+   source.write_bytes(b"old-code");source.chmod(0o444)
+   txpath=r.ledger(candidate)/"transaction.json";txraw=txpath.read_bytes()
+   transaction=json.loads(txraw);transaction["outcome"]="queued";txpath.write_bytes(r.canon(transaction))
+   try:r.verify_rolled_back_context(s,originals,r.canon(old_policy))
+   except PermissionError:pass
+   else:raise AssertionError("queued prior execution accepted")
+   txpath.write_bytes(txraw)
+   authpath=r.ledger(candidate)/"authorization.json";authraw=authpath.read_bytes()
+   grant=json.loads(authraw);grant["independently_verified_entra_owner"]=False;authpath.write_bytes(r.canon(grant))
+   try:r.verify_rolled_back_context(s,originals,r.canon(old_policy))
+   except PermissionError:pass
+   else:raise AssertionError("unverified old Owner accepted")
+   authpath.write_bytes(authraw)
+   retry=r.ledger(candidate)/"retry.json";retry.write_bytes(b'{}');retry.chmod(0o400)
+   try:r.verify_rolled_back_context(s,originals,r.canon(old_policy))
+   except PermissionError:pass
+   else:raise AssertionError("concurrently claimed old retry accepted")
+   retry.unlink();r.FAILED_CONTEXT_CANDIDATE,r.FAILED_CONTEXT_SCOPE=previous_constants
   r.execute(I,candidate,{}, modules,None,None,{},resume=True)
  except SystemExit:
   assert scenario in ("power-loss","tamper")
@@ -106,6 +134,6 @@ for scenario in ("queued","failure-before-queue","power-loss","tamper","queued-r
   else:raise AssertionError("unbounded retry accepted")
  total+=1
 print(json.dumps({"test":"isolated-root-precutover-context-repair","result":"passed","cases":total,
- "original_approval_preserved":True,"failed_execution_preserved":True,"new_exact_scope_binding":True,
+ "original_approval_preserved":True,"failed_execution_preserved":True,"prior_failed_context_restoration_cases":5,"new_exact_scope_binding":True,
  "power_loss_resumed_once":True,"unknown_changed_target_denied":True,"actual_immutable_file_modes":True,
  "canonical_data_unchanged":True,"provider_contacted":False,"production_authority_issued":False}))

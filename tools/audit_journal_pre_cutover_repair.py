@@ -12,6 +12,8 @@ from tools.audit_journal_install_transaction import raw_file,atomic,InstallTrans
 
 OLD="f0f71c46e054f46f6cba1f945a404f148f441501"
 OLD_SCOPE="6b792b74869d31f2072929d8ace08236161284b5875d3c2fb7a9dff6d3c56c80"
+FAILED_CONTEXT_CANDIDATE="4ba98e05e4512d7accb77595b8e8c05086d8b0a6"
+FAILED_CONTEXT_SCOPE="301b077f04c7dfd2757da47949aede12b18f34ca82c692d6b8173f769875261f"
 ROOT=Path("/var/lib/jason-owner-release/audit-journal-service-context-repairs")
 PRIVATE_NAMES=frozenset(("adoption.json","producer-before.json","desired-before.json",
  "desired-rollback.json","protected-ci-before.json","release-plan.json","release-journal.json","last-handoff.json"))
@@ -60,15 +62,60 @@ def validate_pre_cutover(journal,catalog):
   and catalog["segments"]==[],"UNCHANGED_LEGACY_CATALOG")
 
 
-def validate_known_drift(drift,control):
+def validate_known_drift(drift,control,*,rolled_back_context=False):
  expected={("required_system_unit_not_active","jason-audit-journal-maintenance.timer","inactive"),
   ("failed_system_unit","jason-audit-journal-release.service","failed")}
- need({(r["kind"],r["unit"],r["state"]) for r in drift["problems"]}==expected and len(drift["problems"])==2
+ if rolled_back_context:expected.remove(("failed_system_unit","jason-audit-journal-release.service","failed"))
+ need({(r["kind"],r["unit"],r["state"]) for r in drift["problems"]}==expected and len(drift["problems"])==len(expected)
   and drift["status"]=="drift_detected","ONLY_KNOWN_INCOMPLETE_INSTALL_DRIFT")
  age=(datetime.now(timezone.utc)-datetime.fromisoformat(drift["observed_at"].replace("Z","+00:00"))).total_seconds()
  need(0<=age<=180 and control["circuit_breaker"]["state"]=="open"
   and control["circuit_breaker"]["reason"]=="continuous_production_drift_detected","KNOWN_GUARDED_BREAKER")
  return expected
+
+
+def verify_rolled_back_context(s,private,old_policy_raw):
+ """Verify the exact approved 4ba attempt was fully undone; never reuse it."""
+ root=ledger(FAILED_CONTEXT_CANDIDATE)
+ if not os.path.lexists(root):return None
+ for p in (ROOT,root):
+  m=p.lstat();need(not p.is_symlink() and stat.S_ISDIR(m.st_mode) and m.st_uid==m.st_gid==0
+   and stat.S_IMODE(m.st_mode)==0o700,"PRIOR_CONTEXT_CUSTODY")
+ approval_raw=raw_file(root/"authorization.json",0o400);row=json.loads(approval_raw)
+ need(row["candidate_sha"]==FAILED_CONTEXT_CANDIDATE and row["scope_sha256"]==FAILED_CONTEXT_SCOPE
+  and digest(canon(row["scope"]))==FAILED_CONTEXT_SCOPE and row["owner_oid"]==s.OWNER
+  and row["independently_verified_entra_owner"] is True
+  and row["scope"]["policy"]["candidate_sha"]==FAILED_CONTEXT_CANDIDATE
+  and row["scope"]["policy"]["rollback_sha"]==s.ROLLBACK
+  and row["scope"]["action"]==s.ACTION,"EXACT_PRIOR_CONTEXT_APPROVAL")
+ need(not (root/"retry.json").exists(),"PRIOR_CONTEXT_RETRY_ALREADY_CLAIMED")
+ for name,wanted in row["source_sha256"].items():
+  need(digest(raw_file(root/"source"/name,0o444))==wanted,"PRIOR_CONTEXT_FROZEN_SOURCE")
+ old_policy=json.loads(old_policy_raw)
+ expected={str(s.BASE/"trusted"/n):(wanted,0o444) for n,wanted in old_policy["trusted_source_sha256"].items()}
+ expected.update({str(s.PROFILE):(old_policy["profile_sha256"],0o444),
+  str(s.CONTROL/"profile.json"):(old_policy["profile_sha256"],0o444),
+  str(s.POLICY):(digest(old_policy_raw),0o600),
+  str(s.DESIRED):(row["scope"]["desired_state_before_sha256"],0o600)})
+ for n in ("adoption.json","release-plan.json","release-journal.json","protected-ci-before.json"):
+  expected[str(s.PRIVATE/n)]=(digest(private[n]),0o400)
+ raw=raw_file(root/"transaction.json",0o600);tx=json.loads(raw)
+ need(tx["scope_sha256"]==FAILED_CONTEXT_SCOPE and tx["outcome"]=="rolled_back","PRIOR_CONTEXT_FULLY_ROLLED_BACK")
+ replacements=[r for r in tx["entries"] if r["kind"]=="replace"]
+ files=[r for r in tx["entries"] if r["kind"]=="file"]
+ need(len(replacements)==len(expected) and {r["path"] for r in replacements}==set(expected)
+  and len(files)==1 and len(tx["entries"])==len(expected)+1
+  and files[0]["path"]==str(s.PRIVATE/"desired-final.json") and files[0]["mode"]==0o400
+  and not os.path.lexists(s.PRIVATE/"desired-final.json"),"EXACT_PRIOR_TRANSACTION_ACTIONS")
+ for item in replacements:
+  wanted,mode=expected[item["path"]]
+  need(item["mode"]==mode and digest(bytes.fromhex(item["before_hex"]))==wanted
+   and digest(raw_file(Path(item["path"]),mode))==wanted,"PRIOR_CONTEXT_BEFORE_IMAGE_RESTORED")
+ for name,original in private.items():
+  need(raw_file(root/"before-private"/name,0o400)==original,"ORIGINAL_FAILED_PRIVATE_RECORD_UNCHANGED")
+ return {"candidate_sha":FAILED_CONTEXT_CANDIDATE,"scope_sha256":FAILED_CONTEXT_SCOPE,
+  "authorization_sha256":digest(approval_raw),"transaction_sha256":digest(raw),
+  "outcome":"rolled_back","old_approval_retained":True,"old_execution_authority_reused":False}
 
 
 def preflight(I,s,engine,inventory,candidate,payload,c):
@@ -143,11 +190,13 @@ def preflight(I,s,engine,inventory,candidate,payload,c):
   user=1000,group=1000,extra_groups=(),capture_output=True,text=True,timeout=30,check=True,
   env={"PATH":"/usr/bin:/bin","HOME":"/home/al","USER":"al","LOGNAME":"al","LANG":"C.UTF-8"}).stdout
  need(json.loads(result)==[],"NO_DATA_BARRIER_OR_JOURNAL_METADATA")
+ prior_context=verify_rolled_back_context(s,private,old_policy_raw)
  release=props(I,"jason-audit-journal-release.service");timer=props(I,"jason-audit-journal-maintenance.timer")
- need(release["ActiveState"]=="failed" and release["MainPID"]=="0" and release["UnitFileState"]=="enabled"
+ expected_release=("inactive","disabled") if prior_context else ("failed","enabled")
+ need((release["ActiveState"],release["UnitFileState"])==expected_release and release["MainPID"]=="0"
   and timer["ActiveState"]=="inactive","EXACT_FAILED_WORKER_STATE")
  drift=json.loads(raw_file(s.STATE/"production-drift.json",0o600));control=json.loads(raw_file(s.STATE/"production-control-state.json",0o600))
- expected=validate_known_drift(drift,control)
+ expected=validate_known_drift(drift,control,rolled_back_context=prior_context is not None)
  health={}
  for name,limit in (("operational-health.json",600),("operational-full-health.json",30*3600)):
   p=s.STATE.parent/name;m=p.lstat();row=json.loads(I.read(p))
@@ -184,7 +233,8 @@ def preflight(I,s,engine,inventory,candidate,payload,c):
    "previous_failed_execution_preserved":True,"fresh_exact_owner_grant_required":True,
    "initial_data_claim_absent":True,"unit_hardening_unchanged":True,"breaker_remains_guarded":True,
    "existing_six_recovery_slots_reused":True,"native_revalidation_required_before_queue":True,
-   "initial_timer_declared_but_not_ready":True,"known_drift":sorted([list(r) for r in expected])})
+   "initial_timer_declared_but_not_ready":True,"known_drift":sorted([list(r) for r in expected]),
+   "prior_context_attempt":prior_context,"native_under_lock_drift_refresh":True})
  scope["installation_targets"]=[*scope["installation_targets"],str(ROOT),str(ledger(candidate))]
  return scope,before,private,old_policy_raw,current
 
@@ -226,14 +276,14 @@ def replace_bound(tx,path,raw,before_sha,mode):
 
 
 def revalidate_before_queue(I,s,scope):
- for unit in ("jason-openclaw-authority-health.service","jason-production-drift-watchdog.service"):
-  I.command(["/usr/bin/systemctl","start",unit],timeout=100)
- code=("import sys;from pathlib import Path;sys.path.insert(0,'/home/al/.local/lib/jason');"
-  "import release_manager_host_runner as r;r.request_root_control_transition(Path("
-  +repr(str(s.STATE))+"),action='revalidate',revision="+repr(s.ROLLBACK)+")")
- result=subprocess.run(["/usr/bin/python3","-I","-B","-c",code],user=1000,group=1000,extra_groups=(),
+ need(digest(raw_file(s.DESIRED,0o600))==scope["desired_state_initial_sha256"],"BOUND_INITIAL_POLICY")
+ I.command(["/usr/bin/systemctl","start","jason-openclaw-authority-health.service"],timeout=100)
+ s.refresh_native_drift()
+ result=subprocess.run(["/usr/bin/python3","-I","-B","-c",s.native_revalidation_code()],
+  user=1000,group=1000,extra_groups=(),
   env={"PATH":"/usr/bin:/bin","HOME":"/home/al","USER":"al","LOGNAME":"al","LANG":"C.UTF-8"},
   capture_output=True,text=True,timeout=110,check=False)
+ if result.returncode:print(result.stdout[:800],flush=True)
  need(result.returncode==0,"GUARDED_NATIVE_REVALIDATION")
  control=json.loads(raw_file(s.STATE/"production-control-state.json",0o600));drift=json.loads(raw_file(s.STATE/"production-drift.json",0o600))
  age=(datetime.now(timezone.utc)-datetime.fromisoformat(drift["observed_at"].replace("Z","+00:00"))).total_seconds()
@@ -254,6 +304,12 @@ def apply(I,s,candidate,engine):
 
 def apply_locked(I,s,candidate,engine,row,tx):
  root=ledger(candidate);scope=row["scope"]
+ prior=scope["pre_cutover_context_repair"].get("prior_context_attempt")
+ if prior:
+  previous=ledger(FAILED_CONTEXT_CANDIDATE)
+  for name,key,mode in (("authorization.json","authorization_sha256",0o400),("transaction.json","transaction_sha256",0o600)):
+   need(digest(raw_file(previous/name,mode))==prior[key],"UNCHANGED_PRIOR_CONTEXT_EVIDENCE")
+  need(not (previous/"retry.json").exists(),"PRIOR_CONTEXT_RETRY_ALREADY_CLAIMED")
  for path,wanted in s.PROTECTED.items():need(digest(I.read(Path(path)))==wanted,"PROTECTED_BASELINE")
  meta=s.ACTIVE.lstat()
  need(not s.ACTIVE.is_symlink() and stat.S_ISREG(meta.st_mode) and meta.st_uid==meta.st_gid==1000
