@@ -107,15 +107,16 @@ class InstallTransaction:
   if os.path.lexists(path):
    need(digest(raw_file(path,mode))==expected,"NEW_FILE_CHANGED:"+path.name);return
   atomic(path,raw,mode);self.fault("file_published")
- def replace(self,path,raw):
+ def replace(self,path,raw,mode=0o600):
+  need(mode in (0o400,0o444,0o600),"REPLACEMENT_MODE")
   path=Path(path);expected=digest(raw)
   prior=[r for r in self.state["entries"] if r["kind"]=="replace" and r["path"]==str(path)]
-  item=prior[0] if prior else self.record("replace",path,before_hex=raw_file(path,0o600).hex(),
-                                         after_sha256=expected)
-  need(item["after_sha256"]==expected,"REPLACEMENT_SOURCE_CHANGED")
-  current=raw_file(path,0o600)
+  item=prior[0] if prior else self.record("replace",path,before_hex=raw_file(path,mode).hex(),
+                                         after_sha256=expected,mode=mode)
+  need(item["after_sha256"]==expected and item.get("mode",0o600)==mode,"REPLACEMENT_SOURCE_CHANGED")
+  current=raw_file(path,mode)
   need(digest(current) in (digest(bytes.fromhex(item["before_hex"])),expected),"MODIFIED_TARGET_CHANGED")
-  if digest(current)!=expected:atomic(path,raw,0o600)
+  if digest(current)!=expected:atomic(path,raw,mode)
   self.fault("replacement_published")
  def rollback(self):
   need(not self.queued,"QUEUED_WORKER_REQUIRES_GOVERNED_RECOVERY")
@@ -123,9 +124,9 @@ class InstallTransaction:
   for item in reversed(self.state["entries"]):
    path=Path(item["path"]);kind=item["kind"]
    if kind=="replace":
-    current=raw_file(path,0o600);old=bytes.fromhex(item["before_hex"])
+    mode=item.get("mode",0o600);current=raw_file(path,mode);old=bytes.fromhex(item["before_hex"])
     need(digest(current) in (digest(old),item["after_sha256"]),"ROLLBACK_TARGET_CHANGED")
-    atomic(path,old,0o600)
+    atomic(path,old,mode)
    elif kind=="file":
     if path.parent.exists():remove_scoped_temp(path,item["sha256"])
     if os.path.lexists(path):

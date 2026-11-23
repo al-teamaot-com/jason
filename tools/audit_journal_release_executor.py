@@ -234,12 +234,34 @@ class ExactRelease:
                "jason-production-drift-watchdog.service"):
    result=subprocess.run(["/usr/bin/systemctl","start",unit],capture_output=True,timeout=5500,check=False)
    need(result.returncode==0,"JOURNAL_NATIVE_SERVICE_DID_NOT_PASS")
+  self.revalidate()
+
+ def revalidate(self):
   code=("import sys;from pathlib import Path;sys.path.insert(0,'/home/al/.local/lib/jason');"
         "import release_manager_host_runner as r;r.request_root_control_transition(Path("
         +repr(str(STATE))+"),action='revalidate',revision="+repr(ROLLBACK)+")")
-  result=subprocess.run(["/usr/sbin/runuser","-u","al","--","/usr/bin/python3","-B","-c",code],
-                       capture_output=True,timeout=100,check=False)
+  result=subprocess.run(["/usr/bin/python3","-B","-c",code],
+                       capture_output=True,timeout=100,check=False,**self.c.writer_identity())
   need(result.returncode==0,"JOURNAL_GOVERNED_NATIVE_REVALIDATION_DID_NOT_PASS")
+
+ def finalize_desired(self):
+  from tools.audit_journal_release_scope import DESIRED
+  final=read_control(PRIVATE/"desired-final.json",0,0o400)
+  scope=self.plan["scope"]
+  need(digest(final)==scope["desired_state_after_sha256"],"JOURNAL_FINAL_DESIRED_SCOPE")
+  current=read_control(DESIRED,0,0o600)
+  need(digest(current) in (scope["desired_state_initial_sha256"],scope["desired_state_after_sha256"]),
+       "JOURNAL_UNEXPECTED_DESIRED_POLICY")
+  status=subprocess.run(["/usr/bin/systemctl","show","jason-audit-journal-maintenance.timer",
+   "--property=ActiveState,UnitFileState"],capture_output=True,text=True,timeout=15,check=True)
+  props=dict(line.split("=",1) for line in status.stdout.splitlines() if "=" in line)
+  need(props.get("ActiveState")=="active" and props.get("UnitFileState")=="enabled",
+       "JOURNAL_ACTUAL_MAINTENANCE_TIMER_REQUIRED")
+  self.c._json(DESIRED,final,0o600)
+  result=subprocess.run(["/usr/bin/systemctl","start","jason-production-drift-watchdog.service"],
+   capture_output=True,timeout=100,check=False)
+  need(result.returncode==0,"JOURNAL_FINAL_NATIVE_DRIFT")
+  self.revalidate()
 
  def complete(self):
   if self.journal.get("outcome") in ("accepted","rolled_back"):return
@@ -249,6 +271,8 @@ class ExactRelease:
    self.status("rolled_back",all_history_retained=True);return
   self.claim()
   try:
+   self.status("verifying_writer_account_execution")
+   self.sql("state",{"path":str(self.c.p.active)},seconds=30)
    self.c.recover()
    self.c.cleanup_abandoned_work()
    if self.c.p.catalog()["mode"]=="legacy" and not (PRIVATE/"initial-cutover-complete.json").exists():
@@ -268,7 +292,7 @@ class ExactRelease:
    for row in self.c.p.catalog()["segments"]:
     if (self.c.p.pending/row["proof"]["source_before_image"]).exists():
      self.status("reclaiming_verified_redundant_local_copy");self.c.reclaim(row["id"])
-   self.scheduled_cycle();self.verify_modules();self.verify_consumers();self.protected()
+   self.scheduled_cycle();self.finalize_desired();self.verify_modules();self.verify_consumers();self.protected()
    self.journal["outcome"]="accepted";self.save()
    self.status("accepted",whole_objective_verified=True,off_host_backup_claimed=False)
   except Exception as exc:
