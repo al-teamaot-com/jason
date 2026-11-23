@@ -10,6 +10,8 @@ The original approved migration f0f71c46e054f46f6cba1f945a404f148f441501 failed 
 
 The b927 failure was traced to an unconditional systemctl reset-failed on a collected, inactive, unloaded release unit. Source fix #2706 checks real state and only resets an actual failed, stopped worker; it also improves bounded diagnostics. The present candidate includes that correction.
 
+Integration coordination: #2706 is intentionally incorporated as an ancestor of this combined repair candidate. Do not merge/deploy the standalone #2706 build or reuse the consumed b927 approval for this changed source. Preserve independent PR review, protected Main CI and a fresh exact Root release scope.
+
 ## Scope of this source repair
 
 - Require a fresh exact protected candidate and independently authenticated Owner action/scope approval. The Owner's broader objective consent does not turn an expired/consumed one-use receipt into an executor.
