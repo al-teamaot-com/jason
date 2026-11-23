@@ -72,6 +72,9 @@ def test_review_and_explicit_decision_use_existing_receipt_and_no_raw_bearer_in_
     evidence=json.loads(audit[0]['reason_codes'][1])
     assert receipt.authentication_evidence_hash==sha256(json.dumps(evidence,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     assert token.token not in json.dumps(audit)
+    reviewed_again=server.workflow_approval('procapproval-fixture')
+    assert reviewed_again['status']=='approved' and not reviewed_again['can_decide']
+    assert reviewed_again['review']['body'][0]['text']=='Purchase approved'
     # A repeated tool decision cannot execute the purchase again.
     assert server.workflow_approval('procapproval-fixture','approve','a'*64)['status']=='blocked'
     assert len(calls)==1

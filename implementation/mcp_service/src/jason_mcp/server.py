@@ -8353,7 +8353,11 @@ def workflow_approval(approval_id: str, decision: str = "review",
             from connectors.microsoft_graph.teams_approval_channel import render_approval_card
             presentation = render_approval_card(request)
             # Shared configured labels and immutable facts, without callback buttons.
-            card = current.render_approval(presentation, actionable=False)
+            if request.status.value in {'approved', 'denied'} and request.status.value in current.raw['events']:
+                from jason_runtime.universal_interaction.teams import render_configured_event
+                card = render_configured_event(current, presentation, event=request.status.value)
+            else:
+                card = current.render_approval(presentation, actionable=False)
             return {"status": request.status.value, "approval_id": approval_id,
                     "reviewed_scope_sha256": submission["digest"],
                     "expires_at": request.expires_at.isoformat(),
