@@ -202,7 +202,7 @@ class SupervisorSpendingPolicy:
 
 def require_signed_purchase_approval(*, service: Any, approval_id: str,
                                      submission: Mapping[str, Any]) -> Any:
-    """Reusable, canonical signed Teams approval receipt guard for PO/parts.
+    """Reusable canonical authenticated approval receipt guard for PO/parts.
 
     The same immutable ApprovalRequestService used for production-style cards
     is required. A bare approval ID or local record cannot grant write access.
@@ -226,7 +226,8 @@ def require_signed_purchase_approval(*, service: Any, approval_id: str,
             or receipt is None or receipt.status != 'approved'
             or receipt.decided_by == request.requested_by
             or receipt.decided_by not in request.authorized_approver_ids
-            or receipt.channel != 'microsoft_teams'
+            or receipt.channel not in ({'microsoft_teams', 'jason_mcp_entra'}
+                if submission.get('workflow_configuration_digest') else {'microsoft_teams'})
             or not receipt.authentication_evidence_hash):
         raise PermissionError('canonical signed Teams purchase approval receipt not verified')
     return receipt

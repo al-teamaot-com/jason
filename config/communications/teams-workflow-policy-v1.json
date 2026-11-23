@@ -50,6 +50,14 @@
     "restored": {
       "title": "Service restored",
       "message": "The service has been checked and is working again."
+    },
+    "approved": {
+      "title": "Purchase approved",
+      "message": "The decision is recorded. The purchase can continue within the reviewed scope."
+    },
+    "approval_replaced": {
+      "title": "Approval link replaced",
+      "message": "This approval link is no longer active. Use the latest request when it arrives."
     }
   },
   "templates": [

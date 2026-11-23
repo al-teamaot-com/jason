@@ -266,6 +266,15 @@ def desired_after(before):
  if prefix not in value["rollback_container_prefixes"]:value["rollback_container_prefixes"].append(prefix)
  return value
 
+def desired_initial(before):
+ # Installation is not operational readiness. Keep the inactive timer declared
+ # until the release verifies a real scheduled cycle, then require it.
+ value=desired_after(before)
+ value["required_system_units"].remove("jason-audit-journal-maintenance.timer")
+ value["allowed_system_units"].append("jason-audit-journal-maintenance.timer")
+ value["allowed_system_units"].sort()
+ return value
+
 def desired_rollback(before):
  # Legacy applications still need the event-preserving archive mount at boot.
  # The archive maintenance timer stays installed but is explicitly stopped.

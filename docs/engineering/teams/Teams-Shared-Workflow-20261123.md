@@ -78,64 +78,120 @@ immutable history. A late click that already marked it EXPIRED does not strand
 the business request; only an undecided offer may be renewed. Al receives continued hourly reminders at the final fallback;
 there is no self-escalation and silence never approves anything.
 
+## Additional canonical integration
+
+The disabled-by-default `workflow_approval` MCP action reviews an existing
+configured purchase and accepts an explicit Approve/Deny with its exact reviewed
+scope. The server independently derives tenant/OID/principal and assurance from
+validated Entra OAuth; none are tool inputs. It audits a token fingerprint plus
+exact decision/scope/response/time evidence through the existing authority audit
+before consuming the **same** canonical one-use receipt. Raw bearers are not
+logged. Live binding, organization, current Supervisor relationship, spending
+policy, material digest, expiry and no-self-approval gates remain. The new channel
+`jason_mcp_entra` is accepted only for configured purchases; legacy purchase
+receipts retain their Teams-only guard. No global Owner-admin role or release
+permission is granted. A provider-execution or notification failure cannot erase
+an already durable human decision or demand a duplicate decision.
+
+The existing gateway records real issued-card references in its existing decision
+store. A canonical terminal receipt can replace only the original bot messages
+bound to that tenant, recipient, conversation and approval. Editable callback data
+cannot select another message. Configured terminal cards have no hidden or visible
+vote actions. The reactive Teams callback and authenticated MCP fallback both
+reuse the existing bot update API. Existing procurement maintenance queues and
+reconciles terminal presentation separately from purchase execution. Old replaced
+offers show a configured inactive-link state. An update failure retains the
+canonical decision and a reconciliation requirement, never a repeat purchase.
+Untracked pre-upgrade or synthetic-message references remain unverified.
+
+Configured sends carry stable per-approval/event/recipient communication IDs.
+The existing gateway store claims the send before provider message execution,
+retains real acceptance receipts and returns an identical saved receipt on a
+matching retry. A changed payload is denied. An interrupted provider outcome
+without a stored receipt remains blocked; synthetic IDs never prove delivery.
+The internal receipt-read route performs no send or approval. Maintenance stores
+an exact replacement plan and deterministic approval ID in the existing submission
+row before retiring an offer. Canonical CAS and immutable scope checks make
+recovery after cancellation, request creation, pointer transition or a partial
+fan-out reuse the same request/nonce. Business clocks remain unchanged. Expired
+undecided replacements are superseded without invented delivery or consent.
+Older claims lacking a persisted recovery plan still require evidence review.
+
 ## Acceptance and limits
 
-Latest local verification: **255 tests passed** across the targeted runtime,
-composition, procurement, canonical approval/security and architecture suites.
-Engineering standards, documentation control, compilation and diff checks PASS.
-No provider/production calls were used in these tests. Separately, governed
-read-only Contact and Entra checks succeeded. Autotask numeric spending UDFs
-use four decimal places: parser acceptance now allows exact trailing zeros
-without rounding fractional cents. The current internal Contact query returned
-45 records (29 active), with no Supervisor assignments yet. No contact values,
-limits or reporting relationships were modified. The configured fallback is
-therefore necessary until verified relationships are entered.
+Latest local verification: **277 Python tests passed** across targeted runtime,
+composition, procurement, MCP handoff, canonical approval/security and architecture
+suites; **45 Node gateway tests passed**. Engineering standards, documentation
+control, syntax/compilation and diff checks PASS. The gateway workflow now runs all
+its test files. A packaging regression test found and corrected a missing
+`objective-approval-route.mjs` copy; new modules are also explicitly packaged.
+The installed SDK's pinned 1.6.1 source confirms `updateActivity` support.
 
-The live exact-Owner authority probe rejected with
-`AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED`; MCP reports protected production approval
-evidence unavailable or mismatched. No authority/grant/profile change or
-authentication bypass was attempted. Live Owner-path acceptance depends on the
-existing governed identity/recovery work; this draft cannot authorize itself.
+These are source/fixture tests, not provider-backed acceptance. No production
+application, credential, authority, service, contact or provider state was changed.
+Previously governed read-only Contact/Entra checks succeeded: the internal query
+returned 45 contacts (29 active), no Supervisor assignments. Autotask serializes
+numeric spending UDFs with four decimal places; exact trailing zeros are accepted
+without rounding fractional cents. Al remains the configured fallback.
 
-Offline coverage: business hours, weekends, holidays, DST, one-business-day
-escalation, expiry/renewal, denial, policy reload, stale routing rejection,
-no second consent on presentation-only edits, insufficient supervisor limit,
-cycle/cross-company/inactive/ambiguous fallback, requester non-action copy,
-second configured approval template, concurrent/restarted send claims and
-unknown delivery. Existing procurement, shared sender, playbook and composition
-regressions must also pass before publication.
+Fresh November 23 host inspection verified runtime/MCP remain on the original
+`d1b8c196dadd4b672ec8ba47075f27bb61c98d63` images and gateway on
+`0f423d54a3acce61ff7b944897a074b482488f15`. Exact rollback image IDs:
 
-These are source/fixture tests, not Teams/provider-backed acceptance. Do not claim
-all workflows migrated or real approvals/notifications operational from these tests.
+- runtime: `sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132`
+- MCP: `sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477`
+- gateway: `sha256:0a3529f8052ee85516b3fd73e2f2f4edae7748fd7633ecaf7ae5a318602eb4f5`
 
-The current PO processor ends at `ordered`, not invoice/receiving completion.
-Do not send a whole-purchase completion notification at that intermediate state.
-The lifecycle owner must emit it only after its verified final readbacks.
+Protected freeze SHA256 remains
+`bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f`.
+The protected readback at 15:58:12 UTC (10:58:12 Eastern) reports circuit breaker
+**OPEN**, `continuous_production_drift_detected`, one
+`required_system_unit_not_active` problem. The audit journal service and its
+maintenance timer were inactive on the independent host check. Those are live
+release blockers belonging to the active audit recovery, not authorization to
+repair its units from this Teams workstream. The projected readback is evidence;
+only native Root verification can restore the gate. Remote execution is UID1000;
+its configured privilege blocks remain unchanged.
 
-The following remain release-blocking integration/operational acceptance:
+The global Owner-admin probe still rejects `AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED`.
+That result is **not** proof of release-Owner rejection: release approval has a
+separate exact OAuth identity policy. Do not expand admin roles as a Teams fix.
+MCP's published release-approval evidence also remains unavailable/mismatched.
 
-1. Real active AOT requester/supervisor/Owner roster and exact role review; fresh
-   Contact UDF/spending readbacks. Source re-reads the relationship and spending
-   limit under the actual signed approver identity before accepting consent, and
-   rejects changes before recording a decision; prove this on real controlled data.
-2. Recovery/reconciliation of an interrupted replacement after canonical cancel
-   or an ambiguous partial send. The safe current disposition is blocked, never
-   repeating a possibly delivered card or continuing execution on assumed consent.
-3. Existing independently authenticated ChatGPT-to-canonical-receipt bridge;
-   procurement currently accepts its signed Teams receipt only. Do not relax that
-   receipt guard or claim fallback is active until the real bridge is verified.
-4. Existing gateway transport sends cards but does not currently edit the original
-   card to a terminal state. Signed replay rejection is retained; visible terminal
-   card updates and all-producer migration still need their provider-backed seam.
-5. Completion integration across receiving/invoice matching and approved service
-   paused/restored producers; no false "completed" event at PO submission.
-6. Teams desktop/mobile real Approve and Deny, expiry, wrong actor/tenant, replay,
-   restart, send/readback failure, requester visibility, exact controlled provider
-   execution/readback, original detector recheck and no collateral regressions.
+Source tests cover business hours, weekends/holidays/DST, policy reload, stale
+routing and scope, exact-cent numeric UDFs, requester non-action copies, a second
+configured template, denial/replay/expiry, authenticated alternate-channel
+receipts, authority/audit failures, recovery at both cancellation/create
+interruption points, unknown provider outcomes, original-message isolation and
+terminal card updates without repeat execution.
+
+The following remain operational/integration acceptance:
+
+1. Clear the native production breaker through the **existing audit-recovery
+   owner**, then reverify health, freeze, exact live sources and release lane.
+2. Reconcile open core-service changes and prepare an exact reviewed protected
+   core release. The independent-component controller explicitly protects runtime,
+   MCP and Teams gateway; it must not be repurposed to swap them. Do not deploy
+   full current Main as a Teams-only update or transplant unrelated Owner/audit
+   changes from the feature branch's complete MCP server file.
+3. Deploy the coupled gateway/runtime/MCP interfaces under the existing exact
+   source/image/rollback release controls. Keep the policy disabled until the
+   controlled canary is approved and the app's tool publication is verified.
+4. Real active requester/supervisor/Owner roster/authority review; fresh Contact
+   spending/Supervisor readbacks and controlled changed-before-consent rejection.
+5. Real Teams mobile/desktop Approve/Deny; ChatGPT fallback with independent OAuth;
+   expiry, replay, partial send/restart recovery, original-card update/readback,
+   requester visibility, exact provider execution/readback, original detector
+   recheck and no PMv4/Ticket Core collateral regression.
+6. Complete the existing producer migration and final receiving/invoice matching
+   plus service paused/restored integration after core canary acceptance. The
+   current PO processor ends at `ordered`; it must not emit whole-purchase
+   completion before the owning lifecycle verifies its remaining final gates.
 
 ## Integration and release boundary
 
-Baseline: `2e231c0b5462a2d86abd434ba6074005c4d87c80`. Changes touch runtime
+Original baseline: `2e231c0b5462a2d86abd434ba6074005c4d87c80`.
+Reconciled main baseline: `4ba98e05e4512d7accb77595b8e8c05086d8b0a6`. Changes touch runtime
 composition, existing procurement flow/maintenance and shared approval sender;
 these overlap PMv4/identity/procurement consumers. Preserve active source pins.
 No automatic merge or promotion. Risk classification: **High-Risk** because

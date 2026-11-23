@@ -7,6 +7,7 @@ from hashlib import sha256
 import hmac
 import secrets
 import json
+import re
 import os
 from pathlib import Path
 import sqlite3
@@ -179,7 +180,8 @@ class SQLiteProcurementSubmissionStore:
             ).fetchall()
         return tuple(dict(json.loads(str(row[0]))) for row in rows)
 
-    def claim_communication(self, submission_id: str, *, approval_id: str, event_key: str) -> bool:
+    def claim_communication(self, submission_id: str, *, approval_id: str, event_key: str,
+                            plan: Mapping[str, Any] | None = None) -> bool:
         """Atomic attempt claim in the existing submission; unknown sends stay claimed."""
         with sqlite3.connect(str(self.path)) as connection:
             connection.execute('BEGIN IMMEDIATE')
@@ -190,13 +192,15 @@ class SQLiteProcurementSubmissionStore:
             payload = json.loads(row[0])
             if (payload.get('approval_id') != approval_id
                     or payload.get('status') not in {'approval_required', 'approval_delivery_blocked',
-                        'approved', 'denied', 'completed', 'failed_retryable'}):
+                        'approved', 'denied', 'completed', 'failed_retryable', 'ordered',
+                        'received', 'received_pending_disposition', 'released'}):
                 return False
             claims = dict(payload.get('communication_claims') or {})
             key = sha256((approval_id + ':' + event_key).encode()).hexdigest()
             if key in claims:
                 return False
             claims[key] = {'state': 'claimed_reconciliation_required', 'event': event_key,
+                           'approval_id': approval_id, 'plan': dict(plan or {}),
                            'at': datetime.now(timezone.utc).isoformat()}
             payload['communication_claims'] = claims
             connection.execute('UPDATE procurement_submissions SET payload=? WHERE submission_id=?',
@@ -216,7 +220,44 @@ class SQLiteProcurementSubmissionStore:
             claim = payload.get('communication_claims', {}).get(key)
             if claim is None or not receipts or any(not r or r.startswith('accepted:') for r in receipts):
                 raise ProcurementFlowError('notification provider evidence missing')
+            if claim['state'] != 'claimed_reconciliation_required':
+                if claim['state'] == 'provider_accepted' and claim.get('receipts') == list(receipts):
+                    return
+                raise ProcurementFlowError('notification evidence is immutable')
             claim.update(state='provider_accepted', receipts=list(receipts))
+            connection.execute('UPDATE procurement_submissions SET payload=? WHERE submission_id=?',
+                (json.dumps(payload, sort_keys=True, separators=(',', ':')), submission_id))
+
+    def supersede_communication(self, submission_id: str, *, approval_id: str,
+                                event_key: str, reason: str) -> None:
+        # Internal maintenance only. Superseded is deliberately NOT delivery.
+        with sqlite3.connect(str(self.path)) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT payload FROM procurement_submissions WHERE submission_id=?',
+                                     (submission_id,)).fetchone()
+            payload = json.loads(row[0])
+            key = sha256((approval_id + ':' + event_key).encode()).hexdigest()
+            claim = payload.get('communication_claims', {}).get(key)
+            if claim is None or claim['state'] != 'claimed_reconciliation_required':
+                raise ProcurementFlowError('pending communication claim missing')
+            claim.update(state='superseded', reason=reason)
+            connection.execute('UPDATE procurement_submissions SET payload=? WHERE submission_id=?',
+                (json.dumps(payload, sort_keys=True, separators=(',', ':')), submission_id))
+
+    def activate_communication_replacement(self, submission_id: str, *, old_id: str,
+            new_id: str, digest: str, at: str, escalated: bool) -> None:
+        with sqlite3.connect(str(self.path)) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            row = connection.execute('SELECT payload FROM procurement_submissions WHERE submission_id=?',
+                                     (submission_id,)).fetchone()
+            payload = json.loads(row[0])
+            if (payload.get('approval_id') not in {old_id, new_id}
+                    or payload.get('digest') != digest
+                    or payload.get('status') not in {'approval_required', 'approval_delivery_blocked'}):
+                raise PermissionError('replacement no longer owns the pending purchase')
+            payload.update(approval_id=new_id, status='approval_required', last_business_reminder_at=at)
+            if escalated:
+                payload['business_stage_started_at'] = at
             connection.execute('UPDATE procurement_submissions SET payload=? WHERE submission_id=?',
                 (json.dumps(payload, sort_keys=True, separators=(',', ':')), submission_id))
 
@@ -2037,7 +2078,9 @@ class ProcurementTeamsFlow:
         if configuration is None or not configuration.enabled or event not in configuration.raw['events']:
             return
         submission_id = request.metadata['submission_id']
-        if self.store.claim_communication(submission_id, approval_id=request.approval_id, event_key=event):
+        if self.store.claim_communication(submission_id, approval_id=request.approval_id, event_key=event,
+                plan={'kind':'event', 'event':event, 'at':datetime.now(timezone.utc).isoformat(),
+                      'requester_only':event == 'approval_required'}):
             receipts = self.approval_sender.send_event(request, event=event,
                 requester_only=event == 'approval_required')
             self.store.complete_communication(submission_id, approval_id=request.approval_id,
@@ -2524,7 +2567,8 @@ class ProcurementTeamsFlow:
             try:
                 if configuration is not None and configuration.enabled:
                     if not self.store.claim_communication(submission_id,
-                            approval_id=approval.approval_id, event_key='initial_card'):
+                            approval_id=approval.approval_id, event_key='initial_card',
+                            plan={'kind':'initial_card','at':datetime.now(timezone.utc).isoformat()}):
                         raise PermissionError('approval card already claimed; reconcile delivery')
                     receipts = self.approval_sender.send(approval)
                     self.store.complete_communication(submission_id, approval_id=approval.approval_id,
@@ -2579,16 +2623,35 @@ class ProcurementTeamsFlow:
     def _create_owner_approval(self, submission: Mapping[str, Any], *,
             approver_override: tuple[str,...] | None = None,
             escalation_from: str | None = None,
-            approval_now: datetime | None = None) -> ApprovalRequest:
+            approval_now: datetime | None = None,
+            approval_id_override: str | None = None) -> ApprovalRequest:
         now = approval_now or datetime.now(timezone.utc)
         approvers = tuple(approver_override if approver_override is not None
                           else (submission.get('supervisor_approver_ids') or self.owner_ids))
         if not approvers or str(submission['requester_principal_id']) in approvers:
             raise PermissionError('procurement requester cannot authorize their own purchase')
+        def existing_replacement():
+            existing = self.approval_service.repository.get(approval_id_override) if approval_id_override else None
+            if existing is not None and (
+                    existing.capability != PROCUREMENT_APPROVAL_CAPABILITY
+                    or existing.organization_id != 'aot' or existing.client_id is not None
+                    or existing.requested_mode != 'purchase'
+                    or existing.requested_by != submission['requester_principal_id']
+                    or existing.authorized_approver_ids != approvers
+                    or existing.metadata.get('submission_id') != submission['submission_id']
+                    or existing.metadata.get('submission_digest') != submission['digest']
+                    or existing.metadata.get('escalated_from') != escalation_from):
+                raise PermissionError('replacement approval scope mismatch')
+            return existing
+        if approval_id_override and not re.fullmatch(r'procapproval-[a-f0-9]{32}', approval_id_override):
+            raise PermissionError('invalid replacement approval reference')
+        existing = existing_replacement()
+        if existing is not None:
+            return existing
         ttl = int(submission.get('approval_ttl_minutes') or 2880)
         challenge = secrets.token_hex(24)
         approval = ApprovalRequest(
-            approval_id=f"procapproval-{uuid4().hex}",
+            approval_id=approval_id_override or f"procapproval-{uuid4().hex}",
             request_id=f"procreq-{uuid4().hex}",
             correlation_id=f"corr_procapproval_{uuid4().hex}",
             organization_id="aot",
@@ -2647,7 +2710,15 @@ class ProcurementTeamsFlow:
                 **({'escalated_from':escalation_from} if escalation_from else {}),
             },
         )
-        return self.approval_service.create(approval, now=now)
+        try:
+            return self.approval_service.create(approval, now=now)
+        except ValueError:
+            # Concurrent recovery can create this deterministic ID only once.
+            # Canonical repository rejects nonce/scope replacement atomically.
+            existing = existing_replacement()
+            if existing is None:
+                raise
+            return existing
 
     def execute_submission_with_retry_state(
         self,
@@ -3305,6 +3376,55 @@ class ProcurementApprovalInteractionFlow:
                 or identity.organization_id != request.organization_id
                 or identity.identity_id != binding.jason_identity_id):
             raise PermissionError('approver lacks active AOT identity')
+        return self._accept_verified_decision(request=request, binding=binding,
+            decision=decision, decided_at=decided_at, channel="microsoft_teams",
+            authentication_evidence_hash=verified.authentication_evidence_hash,
+            microsoft_tenant_id=microsoft_tenant_id, microsoft_object_id=microsoft_object_id,
+            conversation_id=conversation_id, channel_response_id=channel_response_id)
+
+    def handle_authenticated(self, *, approval_id: str, decision: str,
+            reviewed_scope_sha256: str, principal_id: str, organization_id: str,
+            assurance: str, microsoft_tenant_id: str, microsoft_object_id: str,
+            authentication_evidence_hash: str, channel_response_id: str,
+            decided_at: datetime) -> Mapping[str, object]:
+        """Trusted in-process MCP adapter; no HTTP or caller-provided identity.
+
+        The MCP Entra middleware verifies the bearer. The server adapter alone
+        derives these identity/evidence arguments, never a card or chat message.
+        Reuse the canonical CAS receipt and exact same live procurement checks.
+        """
+        request = self.approval_service.repository.get(approval_id)
+        if (request is None or request.capability != PROCUREMENT_APPROVAL_CAPABILITY
+                or request.requested_mode != 'purchase' or request.organization_id != 'aot'
+                or request.client_id is not None or organization_id != request.organization_id
+                or assurance != 'entra-oauth-bearer' or self.identities is None
+                or not re.fullmatch(r'[0-9a-f]{64}', authentication_evidence_hash or '')
+                or not re.fullmatch(r'[0-9a-f]{64}', reviewed_scope_sha256 or '')
+                or reviewed_scope_sha256 != request.metadata.get('submission_digest')):
+            raise PermissionError('authenticated exact purchase review required')
+        submission = self.submissions.get(request.metadata['submission_id'])
+        if not submission or not submission.get('workflow_configuration_digest'):
+            raise PermissionError('authenticated fallback is not enabled for this purchase')
+        binding = self.bindings.find(microsoft_tenant_id=microsoft_tenant_id,
+                                     microsoft_object_id=microsoft_object_id)
+        identity = self.identities.get(principal_id)
+        if (binding is None or binding.status != 'active'
+                or binding.jason_identity_id != principal_id
+                or getattr(binding, 'client_id', None) is not None
+                or identity is None or identity.status != 'active'
+                or identity.identity_id != principal_id
+                or identity.organization_id != organization_id):
+            raise PermissionError('authenticated approver binding is not active')
+        return self._accept_verified_decision(request=request, binding=binding,
+            decision=decision, decided_at=decided_at, channel='jason_mcp_entra',
+            authentication_evidence_hash=authentication_evidence_hash,
+            microsoft_tenant_id=microsoft_tenant_id, microsoft_object_id=microsoft_object_id,
+            conversation_id='mcp-procurement-approval', channel_response_id=channel_response_id)
+
+    def _accept_verified_decision(self, *, request, binding, decision, decided_at,
+            channel, authentication_evidence_hash, microsoft_tenant_id,
+            microsoft_object_id, conversation_id, channel_response_id):
+        approval_id = request.approval_id
         submission_id = request.metadata['submission_id']
         submission = self.submissions.get(submission_id)
         if submission is None:
@@ -3339,6 +3459,13 @@ class ProcurementApprovalInteractionFlow:
             raise PermissionError('invalid procurement approval decision') from exc
         if parsed not in {ApprovalDecision.APPROVE, ApprovalDecision.DENY}:
             raise PermissionError('procurement approval accepts only Approve or Deny')
+        decision_view = {}
+        if configuration_digest:
+            from .universal_interaction.teams import render_configured_event
+            from connectors.microsoft_graph.teams_approval_channel import render_approval_card
+            event = 'approved' if parsed is ApprovalDecision.APPROVE else 'denied'
+            terminal_card = (render_configured_event(configuration, render_approval_card(request), event=event)
+                if event in getattr(configuration, 'raw', {}).get('events', {}) else None)
         accepted = self.approval_service.accept_response(
             ApprovalResponse(
                 approval_id=approval_id,
@@ -3346,12 +3473,16 @@ class ProcurementApprovalInteractionFlow:
                 approver_identity_id=binding.jason_identity_id,
                 decision=parsed,
                 decided_at=decided_at,
-                channel="microsoft_teams",
+                channel=channel,
                 channel_response_id=channel_response_id,
-                authentication_evidence_hash=verified.authentication_evidence_hash,
+                authentication_evidence_hash=authentication_evidence_hash,
             ),
             now=decided_at,
         )
+        if configuration_digest:
+            decision_view = {'approval_decision': {'approval_id': approval_id,
+                'decision': parsed.value, 'status': accepted.status,
+                'card': terminal_card}}
         submission_id = request.metadata["submission_id"]
         submission = self.submissions.get(submission_id)
         if submission is None:
@@ -3360,11 +3491,17 @@ class ProcurementApprovalInteractionFlow:
             raise PermissionError("procurement approval scope changed")
         if accepted.status != "approved":
             self.submissions.update(submission_id, {**submission, "status": accepted.status})
+            notification_state = {}
             if configuration_digest:
-                self.processor.notify_approval_event(request, 'denied')
+                try:
+                    self.processor.notify_approval_event(request, 'denied')
+                except (PermissionError, RuntimeError, OSError, ValueError):
+                    notification_state = {'notification_state':'reconciliation_required'}
             label = "Declined" if accepted.status == "denied" else "Changes requested"
             return {
                 "status": "completed",
+                **decision_view,
+                **notification_state,
                 "approval_id": approval_id,
                 "reply": {"text": ("Purchase declined. Nothing was ordered." if configuration_digest
                     else label + ". No procurement write was performed.")},
@@ -3380,12 +3517,18 @@ class ProcurementApprovalInteractionFlow:
             )
         except Exception:
             if configuration_digest:
-                self.processor.notify_approval_event(request, 'blocked')
+                try:
+                    self.processor.notify_approval_event(request, 'blocked')
+                except (PermissionError, RuntimeError, OSError, ValueError):
+                    pass  # Durable send claim retains the separate delivery uncertainty.
+                return {"status": "blocked", **decision_view, "approval_id": approval_id,
+                    "reply": {"text": "Your decision was recorded. The purchase needs review before continuing."}}
             raise
         # A submitted PO is not the completion of receiving/invoice matching.
         # The owning lifecycle must emit completion only after those readbacks.
         return {
             "status": "completed",
+            **decision_view,
             "approval_id": approval_id,
             "reply": {
                 "text": result["summary"],

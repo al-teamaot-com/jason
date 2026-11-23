@@ -194,7 +194,7 @@ def configured_maintenance(tmp_path):
         capability='procurement.submission.execute',requested_mode='purchase',
         requested_at=start,expires_at=start+timedelta(minutes=60),
         authorized_approver_ids=('person-lead',),
-        presentation=ApprovalPresentation(title='Purchase',summary='Review the purchase'),
+        presentation=ApprovalPresentation(title='Purchase',summary='Review the purchase',facts=card().facts),
         metadata={'submission_id':'s1','submission_digest':'a'*64,
                   'supervisor_policy_digest':'owner-udf-only',
                   'card_instance_challenge':'a'*48,
@@ -205,19 +205,23 @@ def configured_maintenance(tmp_path):
         workflow_requested_at=start.isoformat(),supervisor_chain_ids=['person-lead','person-owner']))
     class Processor:
         supervisor_policy=None
-        def _create_owner_approval(self,submission,*,approver_override,escalation_from,approval_now):
+        def _create_owner_approval(self,submission,*,approver_override,escalation_from,approval_now,approval_id_override=None):
             from dataclasses import replace
-            new = replace(request,approval_id='procapproval-'+uuid4().hex,
+            if approval_id_override and svc.repository.get(approval_id_override):
+                return svc.repository.get(approval_id_override)
+            new = replace(request,approval_id=approval_id_override or 'procapproval-'+uuid4().hex,
                 requested_at=approval_now,expires_at=approval_now+timedelta(hours=1),
                 authorized_approver_ids=approver_override,
                 metadata=request.metadata|{'escalated_from':escalation_from})
             return svc.create(new,now=approval_now)
     class Sender:
         def __init__(self):self.events=[];self.cards=[]
+        def update_decision(self,req,**kwargs):
+            return ('real-updated-card',)
         def send(self, req):
             self.cards.append(req)
             return ('real-card-id',)
-        def send_event(self,req,*,event,requester_only=False):
+        def send_event(self,req,*,event,requester_only=False,event_key=None):
             self.events.append((req,event))
             return ('real-requester-id','real-approver-id')
     sender=Sender()
@@ -327,3 +331,38 @@ def test_expired_click_does_not_strand_business_request(tmp_path):
     assert store.get('s1')['approval_id']!='procapproval-original'
     assert svc.repository.get('procapproval-original').status.value=='expired'
     assert not svc.repository.accepted_decision('procapproval-original')
+
+
+def test_interruption_after_cancellation_resumes_one_deterministic_replacement(tmp_path):
+    m,svc,store,sender,_=configured_maintenance(tmp_path)
+    create=m.processor._create_owner_approval
+    def failed(*args,**kwargs):raise OSError('interrupted before replacement persisted')
+    m.processor._create_owner_approval=failed
+    first=instant('2026-11-23T08:30:00-05:00')
+    assert m.run_once(now=first)['blocked']==1
+    assert svc.repository.get('procapproval-original').status.value=='cancelled'
+    plan=next(iter(store.get('s1')['communication_claims'].values()))['plan']
+    m.processor._create_owner_approval=create
+    m.run_once(now=instant('2026-11-23T08:33:00-05:00'))
+    replacement=store.get('s1')['approval_id']
+    assert replacement==plan['replacement_id']
+    assert len(svc.repository.list_all())==2
+    assert len(sender.cards)==1
+    m.run_once(now=instant('2026-11-23T08:34:00-05:00'))
+    assert len(sender.cards)==1 and len(svc.repository.list_all())==2
+    assert all(c['state']=='provider_accepted' for c in store.get('s1')['communication_claims'].values())
+    assert store.get('s1')['workflow_requested_at']=='2026-11-20T17:30:00-05:00'
+
+
+def test_interruption_after_replacement_persisted_reuses_same_nonce(tmp_path,monkeypatch):
+    m,svc,store,sender,_=configured_maintenance(tmp_path)
+    activate=type(store).activate_communication_replacement
+    def failed(*args,**kwargs):raise OSError('interrupted before pointer transition')
+    monkeypatch.setattr(type(store),'activate_communication_replacement',failed)
+    assert m.run_once(now=instant('2026-11-23T08:30:00-05:00'))['blocked']==1
+    replacement=[r for r in svc.repository.list_all() if r.approval_id!='procapproval-original'][0]
+    monkeypatch.setattr(type(store),'activate_communication_replacement',activate)
+    m.run_once(now=instant('2026-11-23T08:33:00-05:00'))
+    assert store.get('s1')['approval_id']==replacement.approval_id
+    assert svc.repository.get(replacement.approval_id).metadata['card_instance_challenge']==replacement.metadata['card_instance_challenge']
+    assert len(svc.repository.list_all())==2 and len(sender.cards)==1

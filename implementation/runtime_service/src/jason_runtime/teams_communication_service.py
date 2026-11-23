@@ -57,7 +57,8 @@ class ExistingTeamsGatewayTransport:
     timeout_seconds: int = 20
 
     def send(self, *, binding: Any, text: str,
-             card: Mapping[str, Any] | None = None) -> TeamsDeliveryReceipt:
+             card: Mapping[str, Any] | None = None,
+             communication_id: str | None = None) -> TeamsDeliveryReceipt:
         if getattr(binding, "status", None) != "active":
             raise PermissionError("Teams recipient binding is not active")
         tenant = _uuid(getattr(binding, "microsoft_tenant_id", None))
@@ -67,6 +68,10 @@ class ExistingTeamsGatewayTransport:
         payload: dict[str, Any] = {
             "aadObjectId": actor, "tenantId": tenant, "text": text,
         }
+        if communication_id is not None:
+            if not re.fullmatch(r'comm-[a-f0-9]{64}', communication_id):
+                raise ValueError('invalid durable communication reference')
+            payload['communicationId'] = communication_id
         if card is not None:
             if (not isinstance(card, Mapping)
                     or card.get("type") != "AdaptiveCard"
@@ -96,6 +101,19 @@ class ExistingTeamsGatewayTransport:
             message_id_synthetic=result["message_id_synthetic"],
             delivery_evidence_type=result["delivery_evidence_type"],
         )
+
+    def update_approval(self, *, binding: Any, approval_id: str, status: str,
+                        card: Mapping[str, Any]) -> tuple[str, ...]:
+        if getattr(binding, 'status', None) != 'active' or status not in {'approved','denied','replaced'}:
+            raise PermissionError('terminal approval recipient or status invalid')
+        tenant = _uuid(getattr(binding, 'microsoft_tenant_id', None))
+        actor = _uuid(getattr(binding, 'microsoft_object_id', None))
+        token = Path(self.token_file).read_text(encoding='utf-8').strip()
+        result = post_existing_teams_gateway(gateway_url=self.gateway_url, token=token,
+            operation='update-approval', timeout_seconds=self.timeout_seconds,
+            payload={'tenantId':tenant, 'aadObjectId':actor, 'approvalId':approval_id,
+                     'decisionStatus':status, 'card':dict(card)})
+        return tuple(result['message_ids'])
 
 
 @dataclass(frozen=True)

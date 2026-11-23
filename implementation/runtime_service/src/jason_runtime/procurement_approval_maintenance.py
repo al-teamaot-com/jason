@@ -7,6 +7,7 @@ through every escalation request, with a new independent signed card instance.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from hashlib import sha256
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -38,6 +39,8 @@ class ProcurementApprovalMaintenance:
         if current.tzinfo is None:
             raise ValueError('maintenance requires aware clock')
         summary={'checked':0,'reminded':0,'escalated':0,'blocked':0}
+        if self.workflow_configuration is not None:
+            self._recover_communications(current)
         # Use only canonical persisted, still-pending, AOT procurement approvals.
         for request in self.approval_service.repository.list_all():
             if (not request.approval_id.startswith('procapproval-')
@@ -112,7 +115,25 @@ class ProcurementApprovalMaintenance:
                     summary['reminded']+=1
                 except (PermissionError, RuntimeError, OSError, ValueError):
                     summary['blocked']+=1
+        if self.workflow_configuration is not None:
+            self._queue_terminal_card_updates(current)
         return summary
+
+    def _queue_terminal_card_updates(self, current):
+        for submission in self.submissions.list_all():
+            if not submission.get('workflow_configuration_digest'):
+                continue
+            request = self.approval_service.repository.get(str(submission.get('approval_id') or ''))
+            if request is None or request.status not in {ApprovalRequestStatus.APPROVED, ApprovalRequestStatus.DENIED}:
+                continue
+            if self.approval_service.repository.accepted_decision(request.approval_id) is None:
+                continue
+            key='terminal_card'
+            plan={'kind':'terminal_card', 'at':current.isoformat()}
+            if self.submissions.claim_communication(submission['submission_id'],
+                    approval_id=request.approval_id, event_key=key, plan=plan):
+                try:self._resume_communication(request, submission, key, plan, current)
+                except (AttributeError, PermissionError, RuntimeError, OSError, ValueError):pass
 
     def _configured_tick(self, request, submission, current):
         if any(claim.get('state') == 'claimed_reconciliation_required'
@@ -149,34 +170,133 @@ class ProcurementApprovalMaintenance:
         # replacement request. Unknown partial outcomes require reconciliation.
         bucket = configuration.calendar.minutes_between(since, current) // configuration.raw['reminder_business_minutes']
         key = event + ':' + str(bucket)
+        replacement = escalation or current >= request.expires_at
+        plan = {'kind':'maintenance', 'at':current.isoformat(), 'event':event,
+                'target': list((chain[index + 1],) if escalation else active),
+                'escalated':escalation,
+                'replacement_id': ('procapproval-' + sha256((request.approval_id + ':' + key).encode()).hexdigest()[:32])
+                    if replacement else None}
         if not self.submissions.claim_communication(submission['submission_id'],
-                approval_id=request.approval_id, event_key=key):
+                approval_id=request.approval_id, event_key=key, plan=plan):
             return None
-        target = (chain[index + 1],) if escalation else active
-        if escalation or current >= request.expires_at:
-            # Retire the old challenge with canonical CAS before replacement;
-            # a simultaneous legitimate click wins or loses atomically.
+        self._resume_communication(request, submission, key, plan, current)
+        return 'escalated' if escalation else 'reminded'
+
+    def _recover_communications(self, current):
+        # Existing maintenance owner, submission row and gateway receipts only.
+        # Older claims without a persisted plan remain blocked for human review.
+        for submission in self.submissions.list_all():
+            if not submission.get('workflow_configuration_digest'):
+                continue
+            for claim in submission.get('communication_claims', {}).values():
+                plan = claim.get('plan') or {}
+                if claim.get('state') != 'claimed_reconciliation_required' or plan.get('kind') not in {'maintenance', 'initial_card', 'event', 'terminal_card'}:
+                    continue
+                try:
+                    if current < datetime.fromisoformat(plan['at']) + timedelta(minutes=2):
+                        continue
+                    request = self.approval_service.repository.get(claim['approval_id'])
+                    if request is None:
+                        continue
+                    self._resume_communication(request, submission, claim['event'], plan, current)
+                except (PermissionError, RuntimeError, OSError, ValueError):
+                    # Never clear an unknown provider outcome or invent consent.
+                    continue
+
+    def _resume_communication(self, request, submission, key, plan, current):
+        configuration = self.workflow_configuration.load()
+        if (not configuration.enabled or configuration.approval_scope_digest != submission['workflow_configuration_digest']
+                or request.metadata.get('submission_digest') != submission.get('digest')):
+            raise PermissionError('recovery scope or configuration changed')
+        if (request.metadata.get('submission_id') != submission['submission_id']
+                or request.capability != PROCUREMENT_APPROVAL_CAPABILITY or request.organization_id != 'aot'
+                or request.client_id is not None or request.requested_mode != 'purchase'):
+            raise PermissionError('recovery canonical approval scope mismatch')
+        policy = request.metadata.get('supervisor_policy_digest')
+        if policy != 'owner-udf-only':
+            if self.processor.supervisor_policy is None:
+                raise PermissionError('recovery spending authority missing')
+            self.processor.supervisor_policy.revalidate(digest=policy)
+        def supersede(reason):
+            self.submissions.supersede_communication(submission['submission_id'],
+                approval_id=request.approval_id, event_key=key, reason=reason)
+        if plan['kind'] == 'terminal_card':
+            accepted = self.approval_service.repository.accepted_decision(request.approval_id)
+            if accepted is None or accepted.status not in {'approved','denied'}:
+                raise PermissionError('terminal card requires a canonical decision')
+            from connectors.microsoft_graph.teams_approval_channel import render_approval_card
+            from .universal_interaction.teams import render_configured_event
+            card = render_configured_event(configuration, render_approval_card(request), event=accepted.status)
+            receipts = self.sender.update_decision(request, status=accepted.status, card=card)
+            self.submissions.complete_communication(submission['submission_id'],
+                approval_id=request.approval_id, event_key=key, receipts=receipts)
+            return
+        if plan['kind'] in {'initial_card', 'event'}:
+            pending_only = plan['kind'] == 'initial_card' or plan.get('event') in {'approval_required','reminder','escalated'}
+            if pending_only and (request.status is not ApprovalRequestStatus.PENDING or current >= request.expires_at):
+                if request.status is ApprovalRequestStatus.PENDING:
+                    self.approval_service.expire_if_due(request.approval_id, now=current)
+                supersede('canonical_offer_no_longer_pending')
+                return
+            if plan['kind'] == 'initial_card':
+                receipts = self.sender.send(request)
+            else:
+                receipts = self.sender.send_event(request, event=plan['event'], event_key=key,
+                    requester_only=plan.get('requester_only', False))
+            self.submissions.complete_communication(submission['submission_id'],
+                approval_id=request.approval_id, event_key=key, receipts=receipts)
+            if plan['kind'] == 'initial_card':
+                self.processor.notify_approval_event(request, 'approval_required')
+            return
+        if request.status in {ApprovalRequestStatus.APPROVED, ApprovalRequestStatus.DENIED,
+                              ApprovalRequestStatus.CHANGES_REQUESTED}:
+            supersede('canonical_decision_recorded')
+            return
+        chain = tuple(submission.get('supervisor_chain_ids') or ())
+        active = tuple(request.authorized_approver_ids)
+        if len(active) != 1 or active[0] not in chain:
+            raise PermissionError('recovery approval outside supervisor chain')
+        index = chain.index(active[0])
+        target = ((chain[index + 1],) if plan['escalated'] and index + 1 < len(chain) else active)
+        if tuple(plan['target']) != target or plan['event'] not in {'reminder','escalated'}:
+            raise PermissionError('recovery target changed')
+        replacement_id = plan.get('replacement_id')
+        if replacement_id:
+            expected = 'procapproval-' + sha256((request.approval_id + ':' + key).encode()).hexdigest()[:32]
+            if replacement_id != expected:
+                raise PermissionError('recovery replacement reference changed')
             if request.status is ApprovalRequestStatus.PENDING:
                 self.approval_service.repository.transition_pending(request, status=ApprovalRequestStatus.CANCELLED)
-            elif request.status is not ApprovalRequestStatus.EXPIRED:
-                raise PermissionError('only pending or undecided expired offers may be replaced')
+            elif request.status not in {ApprovalRequestStatus.EXPIRED, ApprovalRequestStatus.CANCELLED}:
+                raise PermissionError('recovery offer is not replaceable')
             new_request = self.processor._create_owner_approval(submission,
-                approver_override=target, escalation_from=request.approval_id, approval_now=current)
-            latest = self.submissions.get(submission['submission_id'])
-            updates = {**latest, 'approval_id': new_request.approval_id,
-                       'status': 'approval_required', 'last_business_reminder_at': current.isoformat()}
-            if escalation:
-                updates['business_stage_started_at'] = current.isoformat()
-            self.submissions.update(submission['submission_id'], updates)
+                approver_override=target, escalation_from=request.approval_id,
+                approval_now=current, approval_id_override=replacement_id)
+            self.submissions.activate_communication_replacement(submission['submission_id'],
+                old_id=request.approval_id, new_id=new_request.approval_id, digest=submission['digest'],
+                at=plan['at'], escalated=plan['escalated'])
+            if 'approval_replaced' in configuration.raw['events']:
+                from connectors.microsoft_graph.teams_approval_channel import render_approval_card
+                from .universal_interaction.teams import render_configured_event
+                self.sender.update_decision(request, status='replaced', card=render_configured_event(
+                    configuration, render_approval_card(request), event='approval_replaced'))
+            if current >= new_request.expires_at:
+                self.approval_service.expire_if_due(new_request.approval_id, now=current)
+                supersede('replacement_expired_before_delivery_reconciled')
+                return
+            if new_request.status is not ApprovalRequestStatus.PENDING:
+                supersede('replacement_decided')
+                return
             receipts = self.sender.send(new_request)
-            # Initial/actionable card is approver-only; the status copy informs
-            # both parties without giving the requester approval buttons.
-            receipts += self.sender.send_event(new_request, event=event, requester_only=True)
+            receipts += self.sender.send_event(new_request, event=plan['event'],
+                                               requester_only=True, event_key=key)
         else:
-            receipts = self.sender.send_event(request, event=event)
+            if request.status is not ApprovalRequestStatus.PENDING:
+                supersede('offer_no_longer_pending')
+                return
+            receipts = self.sender.send_event(request, event=plan['event'], event_key=key)
             latest = self.submissions.get(submission['submission_id'])
             self.submissions.update(submission['submission_id'], {
-                **latest, 'last_business_reminder_at': current.isoformat()})
+                **latest, 'last_business_reminder_at': plan['at']})
         self.submissions.complete_communication(submission['submission_id'],
             approval_id=request.approval_id, event_key=key, receipts=receipts)
-        return 'escalated' if escalation else 'reminded'

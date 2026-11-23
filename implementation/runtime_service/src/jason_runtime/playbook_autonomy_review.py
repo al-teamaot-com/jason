@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
+from hashlib import sha256
 from pathlib import Path
 import os
 import re
@@ -286,7 +287,11 @@ class TeamsGatewayPlaybookApprovalSender:
         transport = self._existing_transport()
         receipts = []
         for binding in bindings:
-            receipt = transport.send(binding=binding, text=card.summary, card=adaptive)
+            delivery = {}
+            if configuration is not None and configuration.enabled:
+                delivery['communication_id'] = 'comm-' + sha256(
+                    (request.approval_id + ':initial_card:' + binding.jason_identity_id).encode()).hexdigest()
+            receipt = transport.send(binding=binding, text=card.summary, card=adaptive, **delivery)
             if configuration is not None and configuration.enabled and (
                     receipt.message_id_synthetic or not receipt.message_id):
                 raise RuntimeError("approval delivery unverified; reconciliation required")
@@ -294,7 +299,7 @@ class TeamsGatewayPlaybookApprovalSender:
         return tuple(receipts)
 
     def send_event(self, request: ApprovalRequest, *, event: str,
-                   requester_only: bool = False) -> tuple[str, ...]:
+                   requester_only: bool = False, event_key: str | None = None) -> tuple[str, ...]:
         """Inform requester and current approvers; copies never carry buttons."""
         configuration = self.workflow_configuration.load() if self.workflow_configuration else None
         if configuration is None or not configuration.enabled or event not in configuration.raw['events']:
@@ -320,10 +325,26 @@ class TeamsGatewayPlaybookApprovalSender:
         transport = self._existing_transport()
         receipts = []
         for binding in bindings:
-            receipt = transport.send(binding=binding, text=text, card=status_card)
+            communication_id = 'comm-' + sha256((request.approval_id + ':' + (event_key or event)
+                                             + ':' + binding.jason_identity_id).encode()).hexdigest()
+            receipt = transport.send(binding=binding, text=text, card=status_card,
+                                     communication_id=communication_id)
             if receipt.message_id_synthetic or not receipt.message_id:
                 raise RuntimeError('notification delivery unverified; reconciliation required')
             receipts.append(receipt.message_id)
+        return tuple(receipts)
+
+    def update_decision(self, request: ApprovalRequest, *, status: str, card) -> tuple[str, ...]:
+        if status not in {'approved', 'denied', 'replaced'} or card is None:
+            raise PermissionError('canonical terminal card required')
+        if any(identity not in self.owner_identity_ids for identity in request.authorized_approver_ids):
+            raise PermissionError('terminal approval recipient outside approved audience')
+        transport = self._existing_transport()
+        receipts = []
+        for identity in request.authorized_approver_ids:
+            binding = self._binding_for_identity(identity)
+            receipts.extend(transport.update_approval(binding=binding, approval_id=request.approval_id,
+                                                     status=status, card=card))
         return tuple(receipts)
 
     def send_status(self, *, text: str) -> tuple[str, ...]:

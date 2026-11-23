@@ -8300,6 +8300,109 @@ def _runtime_procurement_flow():
     return flow
 
 
+
+def _runtime_procurement_approval_flow():
+    governed = getattr(getattr(_runtime(), "ingress", None), "ingress", None)
+    handler = getattr(getattr(governed, "approval_flow", None), "procurement", None)
+    if handler is None:
+        raise PermissionError("MCP_PROCUREMENT_APPROVAL_UNAVAILABLE")
+    return handler
+
+
+@mcp.tool()
+def workflow_approval(approval_id: str, decision: str = "review",
+                      reviewed_scope_sha256: str = "") -> dict[str, Any]:
+    """Review or decide an existing configured purchase approval in Jason.
+
+    Review first and show the actual purchase facts to the human. Approve/deny
+    only on an explicit human decision, using that exact reviewed scope digest.
+    Identity comes exclusively from validated Entra OAuth, never input text.
+    This reuses existing purchase authority, receipt and one-use execution.
+    No release, role grant or other workflow is authorized by this tool.
+    """
+    try:
+        principal, organization, assurance, client_id = _authenticated_identity()
+        token = get_access_token()
+        claims = (token.claims or {}) if token is not None else {}
+        if (assurance != "entra-oauth-bearer" or organization != "aot"
+                or client_id is not None or token is None
+                or claims.get("tid") != JASON_ENTRA_TENANT_ID
+                or not isinstance(claims.get("oid"), str)
+                or not re.fullmatch(r"procapproval-[A-Za-z0-9-]{1,100}", approval_id)
+                or decision not in {"review", "approve", "deny"}):
+            raise PermissionError("MCP_WORKFLOW_APPROVAL_IDENTITY_OR_SCOPE_INVALID")
+        handler = _runtime_procurement_approval_flow()
+        request = handler.approval_service.repository.get(approval_id)
+        if (request is None or request.organization_id != organization
+                or request.client_id is not None
+                or request.capability != "procurement.submission.execute"
+                or request.requested_mode != "purchase"
+                or principal not in (request.requested_by, *request.authorized_approver_ids)):
+            raise PermissionError("MCP_WORKFLOW_APPROVAL_NOT_AUTHORIZED")
+        configuration = handler.processor.workflow_configuration
+        current = configuration.load() if configuration else None
+        submission = handler.submissions.get(request.metadata["submission_id"])
+        if (not submission or current is None or not current.enabled
+                or not submission.get("workflow_configuration_digest")
+                or current.approval_scope_digest != submission["workflow_configuration_digest"]
+                or submission.get("approval_id") != approval_id
+                or submission.get("digest") != request.metadata.get("submission_digest")):
+            raise PermissionError("MCP_WORKFLOW_APPROVAL_STALE_OR_DISABLED")
+        now = datetime.now(timezone.utc)
+        if decision == "review":
+            from connectors.microsoft_graph.teams_approval_channel import render_approval_card
+            presentation = render_approval_card(request)
+            # Shared configured labels and immutable facts, without callback buttons.
+            card = current.render_approval(presentation, actionable=False)
+            return {"status": request.status.value, "approval_id": approval_id,
+                    "reviewed_scope_sha256": submission["digest"],
+                    "expires_at": request.expires_at.isoformat(),
+                    "can_decide": (principal in request.authorized_approver_ids
+                        and principal != request.requested_by
+                        and request.status.value == "pending" and now < request.expires_at),
+                    "review": card}
+        if not isinstance(getattr(token, "token", None), str) or not token.token:
+            raise PermissionError("MCP_WORKFLOW_APPROVAL_BEARER_EVIDENCE_MISSING")
+        response_id = "mcp-approval-" + uuid4().hex
+        evidence = {"assurance": assurance, "principal": principal,
+                    "tenant": claims["tid"], "object": claims["oid"],
+                    "bearer_sha256": hashlib.sha256(token.token.encode()).hexdigest(),
+                    "approval_id": approval_id, "decision": decision,
+                    "reviewed_scope_sha256": reviewed_scope_sha256,
+                    "response_id": response_id, "at": now.isoformat()}
+        evidence_hash = hashlib.sha256(json.dumps(evidence, sort_keys=True,
+                                    separators=(",", ":")).encode()).hexdigest()
+        audit = _runtime().identity_authority.audit
+        if audit is None:
+            raise PermissionError("MCP_WORKFLOW_APPROVAL_AUDIT_UNAVAILABLE")
+        audit.append_authority_audit(event_type="workflow.approval.authenticated",
+            correlation_id=response_id, principal_id=principal, organization_id=organization,
+            capability=request.capability, outcome="verified_identity_decision_attempt",
+            reason_codes=(evidence_hash, json.dumps(evidence, sort_keys=True,
+                                                   separators=(",", ":"))))
+        result = dict(handler.handle_authenticated(approval_id=approval_id, decision=decision,
+            reviewed_scope_sha256=reviewed_scope_sha256, principal_id=principal,
+            organization_id=organization, assurance=assurance,
+            microsoft_tenant_id=claims["tid"], microsoft_object_id=claims["oid"],
+            authentication_evidence_hash=evidence_hash, channel_response_id=response_id,
+            decided_at=now))
+        recorded = result.get('approval_decision')
+        if recorded and recorded.get('card'):
+            try:
+                handler.processor.approval_sender.update_decision(request,
+                    status=recorded['status'], card=recorded['card'])
+                result['original_card_state'] = 'provider_updated'
+            except (AttributeError, PermissionError, RuntimeError, OSError, ValueError):
+                result['original_card_state'] = 'reconciliation_required'
+        return result
+    except PermissionError as exc:
+        return {"status": "denied", "error_code": "workflow_approval_not_authorized",
+                "reason": str(exc)[:240]}
+    except Exception:
+        # A decision may already be durable when provider execution fails.
+        # Report uncertainty; never retry the decision or report it rejected.
+        return {"status": "blocked", "error_code": "workflow_approval_reconciliation_required"}
+
 def _authenticated_microsoft_transport_identity() -> tuple[str, str]:
     # _authenticated_identity performs tenant validation, JIT binding, and
     # active Jason identity checks. The Microsoft ids below are then used only

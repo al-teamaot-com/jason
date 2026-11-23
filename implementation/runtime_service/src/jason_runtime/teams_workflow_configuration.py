@@ -109,7 +109,7 @@ class TeamsWorkflowConfiguration:
         fallback = _text(raw["fallback_email"], 254)
         if fallback.count("@") != 1 or any(c.isspace() for c in fallback):
             raise TeamsConfigurationError("fallback email required; identity authority is checked separately")
-        allowed_events = {"approval_required", "reminder", "escalated", "completed",
+        allowed_events = {"approval_replaced", "approved", "approval_required", "reminder", "escalated", "completed",
                           "blocked", "denied", "cancelled", "restored"}
         if (not isinstance(raw["events"], dict) or not raw["events"]
                 or set(raw["events"]) - allowed_events):

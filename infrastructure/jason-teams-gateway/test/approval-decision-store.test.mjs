@@ -123,3 +123,27 @@ test("release refuses a mismatched sender or decision", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('communication receipts survive restart and suppress duplicate provider sends',()=>{
+  const {path,store}=fixture();
+  const scope={tenantId:'tenant-a',aadObjectId:'user-a',communicationId:'comm-'+ 'a'.repeat(64),payloadDigest:'b'.repeat(64)};
+  assert.equal(store.beginSend(scope).accepted,true);
+  const result={status:'succeeded',message_id:'real-provider-id',message_id_synthetic:false};
+  store.completeSend({...scope,result});
+  const recovered=createApprovalDecisionStore({path});
+  assert.equal(recovered.beginSend(scope).accepted,false);
+  assert.deepEqual(recovered.sendReceipt(scope).result,result);
+  assert.throws(()=>recovered.beginSend({...scope,payloadDigest:'c'.repeat(64)}),/scope changed/);
+  assert.equal(recovered.sendReceipt({...scope,aadObjectId:'different-user'}),null);
+});
+
+test('unknown interrupted provider attempt remains blocked without a made-up receipt',()=>{
+  const {path,store}=fixture();
+  const scope={tenantId:'tenant-a',aadObjectId:'user-a',communicationId:'comm-'+ 'c'.repeat(64),payloadDigest:'b'.repeat(64)};
+  assert.equal(store.beginSend(scope).accepted,true);
+  const recovered=createApprovalDecisionStore({path});
+  const retry=recovered.beginSend(scope);
+  assert.equal(retry.accepted,false);
+  assert.equal(retry.record.state,'processing');
+  assert.equal(recovered.sendReceipt(scope).result,undefined);
+});
