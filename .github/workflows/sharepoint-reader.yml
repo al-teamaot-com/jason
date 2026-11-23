@@ -14,6 +14,9 @@ on:
       - 'tools/sharepoint_site_access_service.py'
       - 'tools/sharepoint_grafana_install.py'
       - 'tools/sharepoint_release_preflight.py'
+      - 'tools/sharepoint_install_package.py'
+      - 'tools/tests/test_sharepoint_install_package.py'
+      - 'docs/releases/SharePoint-Install-Rollback-20261123.md'
       - 'tools/tests/test_sharepoint_release_preflight.py'
       - 'tools/tests/test_sharepoint_grafana_install.py'
       - 'infrastructure/sharepoint-site-control/**'
@@ -50,6 +53,9 @@ on:
       - 'tools/sharepoint_site_access_service.py'
       - 'tools/sharepoint_grafana_install.py'
       - 'tools/sharepoint_release_preflight.py'
+      - 'tools/sharepoint_install_package.py'
+      - 'tools/tests/test_sharepoint_install_package.py'
+      - 'docs/releases/SharePoint-Install-Rollback-20261123.md'
       - 'tools/tests/test_sharepoint_release_preflight.py'
       - 'tools/tests/test_sharepoint_grafana_install.py'
       - 'infrastructure/sharepoint-site-control/**'
@@ -99,12 +105,13 @@ jobs:
           python -m py_compile tools/sharepoint_site_access_service.py
           python -m py_compile tools/sharepoint_grafana_install.py
           python -m py_compile tools/sharepoint_release_preflight.py
+          python -m py_compile tools/sharepoint_install_package.py
           python -m py_compile implementation/runtime_service/src/jason_runtime/microsoft_sharepoint.py
           python -m py_compile implementation/runtime_service/src/jason_runtime/sharepoint_reads.py
           python -m py_compile implementation/runtime_service/src/jason_runtime/sharepoint_read_activation.py
           python -m py_compile implementation/runtime_service/src/jason_runtime/composition.py
           python -m py_compile implementation/orchestrator/sharepoint_capability_catalog.py
-          python -m pytest -q implementation/connectors/microsoft_graph/test_site_access_registry.py implementation/connectors/microsoft_graph/test_site_discovery.py implementation/connectors/microsoft_graph/test_site_gated_connector.py implementation/connectors/microsoft_graph/test_site_access_admin.py implementation/connectors/microsoft_graph/test_aot_site_document_policy.py implementation/connectors/microsoft_graph/test_site_control_http.py implementation/connectors/microsoft_graph/test_sharepoint_reader.py implementation/connectors/microsoft_graph/test_sharepoint_connector.py implementation/connectors/microsoft_graph/test_sharepoint_manifest.py implementation/connectors/microsoft_graph/test_aot_document_policy.py implementation/runtime_service/tests/test_microsoft_sharepoint.py implementation/runtime_service/tests/test_sharepoint_read_activation.py tools/tests/test_provider_secret_provision.py tools/tests/test_sharepoint_grafana_install.py tools/tests/test_sharepoint_release_preflight.py
+          python -m pytest -q implementation/connectors/microsoft_graph/test_site_access_registry.py implementation/connectors/microsoft_graph/test_site_discovery.py implementation/connectors/microsoft_graph/test_site_gated_connector.py implementation/connectors/microsoft_graph/test_site_access_admin.py implementation/connectors/microsoft_graph/test_aot_site_document_policy.py implementation/connectors/microsoft_graph/test_site_control_http.py implementation/connectors/microsoft_graph/test_sharepoint_reader.py implementation/connectors/microsoft_graph/test_sharepoint_connector.py implementation/connectors/microsoft_graph/test_sharepoint_manifest.py implementation/connectors/microsoft_graph/test_aot_document_policy.py implementation/runtime_service/tests/test_microsoft_sharepoint.py implementation/runtime_service/tests/test_sharepoint_read_activation.py tools/tests/test_provider_secret_provision.py tools/tests/test_sharepoint_grafana_install.py tools/tests/test_sharepoint_release_preflight.py tools/tests/test_sharepoint_install_package.py
       - name: Verify no-network lifecycle preflight
         run: |
           python tools/provider_secret.py create microsoft_graph_sharepoint --check-only > /tmp/check.json
