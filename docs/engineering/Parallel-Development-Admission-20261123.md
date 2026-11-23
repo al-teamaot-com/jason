@@ -15,7 +15,7 @@ This source candidate extends existing `tools/dependency_conflict_service.py` ra
 - Historical PR-ready records are excluded from active claims only after explicit GitHub merged-at and merge-commit SHA readback; stale, unknown, or closed-unmerged records remain protected. Live open PR changed files are added to the reviewed semantic scope; an absent or unbounded file inventory is treated as unknown rather than as an empty overlap.
 - Updated installer copies the dependency conflict controller and its shared JSON helper to the installed worker module directory. Merely adding an import would have broken the live worker on installation.
 - New **feature** claims default to held unless independently verified current production health is supplied. Bootstrap/repair engineering is separately categorized; no production or provider privileges are expanded.
-- Worker state exposes `dependency_admission` with queued holds, unclassified work, verified merged PRs, active claims, and existing conflicts. The UI board still requires an authenticated host-to-board evidence bridge before it can display authoritative live holds.
+- Worker state exposes `dependency_admission` with queued holds, unclassified work, verified merged PRs, active claims, and existing conflicts. The existing Development & Release Control Board now has a read-only projection for fresh host claim evidence, including legacy editor holds and queued dependency blocks. The GitHub-only publisher will correctly display **not verified** when host evidence is unavailable; a separately governed host-to-board publisher remains necessary for authoritative live visibility in GitHub.
 
 ## Read-only reconciliation against live workstreams — November 23, 2026
 
@@ -23,7 +23,7 @@ Authoritative sources were the currently stored development-state JSON (43 histo
 
 With a **simulated** current production-health acceptance and simulated eligible new claims (not actual authorization), independent DEV-1069 and DEV-1545 are admissible; QuickBooks DEV-1470 conflicts with the active SharePoint work; procurement DEV-759 conflicts with the Teams approver. These are evidence-based dependency examples, not production activation or permission to re-admit previously blocked records.
 
-Read-only reports are saved at `/srv/jason/archive/engineering-artifacts/parallel-development-live-readback-20261123.json` and `/srv/jason/archive/engineering-artifacts/parallel-development-live-readback-v2-20261123.json`. The second readback verified PR #1330 changed-file evidence, showed a direct editor hold on DEV-2294, and confirmed no editor selected while shared SharePoint work is unresolved. The existing production development state was byte-identical before and after validation.
+Read-only reports are saved at `/srv/jason/archive/engineering-artifacts/parallel-development-live-readback-20261123.json` and `/srv/jason/archive/engineering-artifacts/parallel-development-live-readback-v2-20261123.json`. The second readback verified PR #1330 changed-file evidence, showed a direct editor hold on DEV-2294, and confirmed no editor selected while shared SharePoint work is unresolved. The board projection and its missing/stale/forged-evidence cases were tested in isolation without accessing the host audit database. The existing production development state was byte-identical before and after validation.
 
 ## Source verification
 
@@ -35,7 +35,7 @@ Read-only reports are saved at `/srv/jason/archive/engineering-artifacts/paralle
 1. Confirm the source package passes protected GitHub CI and any relevant integration/check contracts. This PR stays draft until independently reviewed.
 2. Integrate a fresh authoritative production-health attestation feed before allowing **new feature** admission. Never infer that health from a stale repository status field.
 3. Confirm every workstream intended for new concurrent admission has complete, source-reviewed semantic metadata; an undeclared scope must remain queued or held. Add source-scope freshness checks if issue contents expand beyond the reviewed declaration.
-4. Publish read-only admission evidence to the Development & Release Control Board through the existing governed host mechanism; do not expose the writable ledger to GitHub Actions.
+4. Connect the new read-only Development & Release Control Board projection to the existing authenticated host publication mechanism. GitHub-only runs must show **not verified**, not assume an empty queue. Do not expose the writable ledger to GitHub Actions.
 5. Prepare an exact candidate revision, rollback revision and reviewed installer scope under PMV3/PMv4 policy. Obtain applicable authenticated exact-revision authorization before production deployment.
 6. Postrelease, verify concurrent independent claims, blocked overlapping claims, automatic recheck of blocked/resumed work, protected Core health, release serialization and absence of false drift, with rollback available.
 
