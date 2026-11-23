@@ -43,6 +43,14 @@ def props(I,unit):
  return dict(line.split("=",1) for line in I.command(["/usr/bin/systemctl","show",unit,
   "--property=ActiveState,SubState,MainPID,UnitFileState"]).splitlines() if "=" in line)
 
+
+def reset_failed_worker(I):
+ """Reset only an actual stopped failure; an already inactive unit needs none."""
+ unit="jason-audit-journal-release.service"
+ state=props(I,unit)
+ need(state["MainPID"]=="0" and state["ActiveState"] in ("failed","inactive"),"NO_RUNNING_WORKER")
+ if state["ActiveState"]=="failed":I.command(["/usr/bin/systemctl","reset-failed",unit])
+
 @contextmanager
 def maintenance_lock(s):
  fd=os.open(s.PRIVATE/"maintenance.lock",os.O_RDWR|os.O_NOFOLLOW|os.O_CLOEXEC)
@@ -357,7 +365,7 @@ def apply_locked(I,s,candidate,engine,row,tx):
   need(digest(initial)==scope["desired_state_initial_sha256"] and digest(final)==scope["desired_state_after_sha256"],"DECLARED_POLICY_STAGES")
   replace_bound(tx,s.DESIRED,initial,digest(raw_file(root/"desired-current.json",0o400)),0o600)
   tx.write(s.PRIVATE/"desired-final.json",final,0o400)
-  I.command(["/usr/bin/systemctl","reset-failed","jason-audit-journal-release.service"])
+  reset_failed_worker(I)
   revalidate_before_queue(I,s,scope)
   # The new Owner claim is durable before enabling any execution/boot path.
   tx.queued=True

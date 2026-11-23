@@ -31,9 +31,26 @@ def need(ok,code):
  if not ok:raise PermissionError("JOURNAL_INSTALL_"+code)
 def canonical(value):return json.dumps(value,sort_keys=True,separators=(",",":"),allow_nan=False).encode()
 def digest(raw):return sha256(raw).hexdigest()
+def command_failure(argv,result):
+ # Never emit raw arguments, stdout/stderr, credentials or private JSON.
+ exe=Path(argv[0]).name
+ if re.fullmatch(r"[A-Za-z0-9_.-]{1,64}",exe) is None:exe="unlisted"
+ operations={"show","disable","reset-failed","start","enable","daemon-reload","exec",
+  "rev-parse","status","ls-remote","show-ref","diff","log","merge-base"}
+ operation=next((v for v in argv[1:] if v in operations),"other")
+ unit=next((v for v in argv[1:] if re.fullmatch(r"jason-[a-z0-9_.@-]{1,120}\.(service|timer|path)",v)),"none")
+ reason="unit_not_loaded" if "not loaded" in (result.stderr or "") else "command_exit"
+ return "JOURNAL_INSTALL_COMMAND_FAILED:exe="+exe+":operation="+operation+":unit="+unit+":exit="+str(result.returncode)+":reason="+reason
+
+def denial_text(exc):
+ reason=str(exc)
+ if reason.startswith("JOURNAL_INSTALL_COMMAND_FAILED:"):return reason[:400]
+ return reason.split(":")[0][:160]
+
 def command(argv,timeout=60):
  result=subprocess.run(list(argv),cwd="/",capture_output=True,text=True,timeout=timeout,check=False)
- need(result.returncode==0,"COMMAND_FAILED:"+Path(argv[0]).name);return result.stdout.strip()
+ if result.returncode:raise PermissionError(command_failure(list(argv),result))
+ return result.stdout.strip()
 def git(*args):
  return command([*USER,"/usr/bin/env",*SAFE,"/usr/bin/git","-C",str(REPO),*args])
 def read(path,maximum=2000000):
@@ -470,4 +487,4 @@ def install(s,payload,scope,before,original,desired,actor,ci_proof,c):
 
 if __name__=="__main__":
  try:main()
- except Exception as exc:raise SystemExit("DENIED:"+type(exc).__name__+":"+str(exc).split(":")[0][:160])
+ except Exception as exc:raise SystemExit("DENIED:"+type(exc).__name__+":"+denial_text(exc))
