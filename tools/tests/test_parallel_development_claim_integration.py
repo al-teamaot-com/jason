@@ -186,3 +186,13 @@ def test_live_pr_files_enrich_semantic_scope_and_missing_readback_blocks(monkeyp
     inventory = scopes()
     assert worker.verified_merged_claim_work(state,tmp_path,[{'number':1330}],inventory)==set()
     assert 'DEV-1117' not in inventory
+
+
+def test_pr_ready_counts_as_active_reservation_but_never_restarts_source_worker():
+    state = {'items': {'DEV-1117': {'phase': 'pr_ready', 'pr_number': 1330},
+                       'DEV-2294': {'phase': 'diagnosing'}}}
+    selected = admission.plan_worker_claims(state, [issue(1117), issue(2294)],
+                                            scopes(), capacity=0)
+    assert 'DEV-1117' not in selected
+    assert 'DEV-2294' not in selected
+    assert state['dependency_admission']['active_editor_holds']['DEV-2294'][0]['with'] == 'DEV-1117'

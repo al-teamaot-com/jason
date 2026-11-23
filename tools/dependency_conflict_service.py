@@ -206,7 +206,10 @@ def plan_worker_claims(state: dict[str, Any], eligible: list[dict[str, Any]],
                 or work_id in verified_merged_ids
                 or work_id in resumed_from_blocked):
             continue
-        if work_id in eligible_ids:
+        # Keep PR-ready records as dependency reservations, but never send
+        # them through the source-edit worker a second time. Existing
+        # pr_validating/monitoring records still need read-only reconciliation.
+        if work_id in eligible_ids and record['phase'] != 'pr_ready':
             selected.append(work_id)
         scope = scopes.get(work_id)
         if scope is None:
