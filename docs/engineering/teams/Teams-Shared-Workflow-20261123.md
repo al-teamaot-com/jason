@@ -129,34 +129,9 @@ The installed SDK's pinned 1.6.1 source confirms `updateActivity` support.
 
 These are source/fixture tests, not provider-backed acceptance. No production
 application, credential, authority, service, contact or provider state was changed.
-Previously governed read-only Contact/Entra checks succeeded: the internal query
-returned 45 contacts (29 active), no Supervisor assignments. Autotask serializes
-numeric spending UDFs with four decimal places; exact trailing zeros are accepted
-without rounding fractional cents. Al remains the configured fallback.
-
-Fresh November 23 host inspection verified runtime/MCP remain on the original
-`d1b8c196dadd4b672ec8ba47075f27bb61c98d63` images and gateway on
-`0f423d54a3acce61ff7b944897a074b482488f15`. Exact rollback image IDs:
-
-- runtime: `sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132`
-- MCP: `sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477`
-- gateway: `sha256:0a3529f8052ee85516b3fd73e2f2f4edae7748fd7633ecaf7ae5a318602eb4f5`
-
-Protected freeze SHA256 remains
-`bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f`.
-The protected readback at 15:58:12 UTC (10:58:12 Eastern) reports circuit breaker
-**OPEN**, `continuous_production_drift_detected`, one
-`required_system_unit_not_active` problem. The audit journal service and its
-maintenance timer were inactive on the independent host check. Those are live
-release blockers belonging to the active audit recovery, not authorization to
-repair its units from this Teams workstream. The projected readback is evidence;
-only native Root verification can restore the gate. Remote execution is UID1000;
-its configured privilege blocks remain unchanged.
-
-The global Owner-admin probe still rejects `AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED`.
-That result is **not** proof of release-Owner rejection: release approval has a
-separate exact OAuth identity policy. Do not expand admin roles as a Teams fix.
-MCP's published release-approval evidence also remains unavailable/mismatched.
+Operational identity, routing, provider, release-health and receipt evidence must
+be verified through the governed internal acceptance process. Public source tests
+and published repository revisions do not establish those live conditions.
 
 Source tests cover business hours, weekends/holidays/DST, policy reload, stale
 routing and scope, exact-cent numeric UDFs, requester non-action copies, a second
@@ -167,8 +142,8 @@ terminal card updates without repeat execution.
 
 The following remain operational/integration acceptance:
 
-1. Clear the native production breaker through the **existing audit-recovery
-   owner**, then reverify health, freeze, exact live sources and release lane.
+1. Satisfy the existing native production health, freeze, exact-source and
+   serialized-release gates before requesting deployment or activation.
 2. Reconcile open core-service changes and prepare an exact reviewed protected
    core release. The independent-component controller explicitly protects runtime,
    MCP and Teams gateway; it must not be repurposed to swap them. Do not deploy
@@ -201,8 +176,8 @@ not an isolated Teams deployment merely because this branch is isolated.
 Before release, reconcile relevant active PRs and exact current production
 component sources, review the complete delta, select immutable tested candidate
 and rollback, verify PMv4/audit recovery state and serialize activation through
-existing release control. Do not substitute this source branch for an active
-root/audit release candidate. No production approval is requested by this draft.
+existing release control. Do not substitute this source branch for another
+workstream's release candidate. No production approval is requested by this draft.
 
 Rollback: withhold activation; for a future activated component, restore its
 exact prior reviewed artifact/config. Retain immutable approvals, submission
