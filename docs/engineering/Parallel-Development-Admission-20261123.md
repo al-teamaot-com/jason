@@ -6,6 +6,8 @@ Parallel engineering must not be confused with production releases. Development 
 
 This source candidate extends existing `tools/dependency_conflict_service.py` rather than building a competing controller. `tools/owner_approved_development_worker.py` is the development stage called by `engineering_pipeline.py` under the currently configured PMv4 engineering timer via `pmv3_engineering_controller.py`.
 
+- Real worker file locking is covered by an independent-process contention test, not just a synthetic in-memory collision. A redundant standalone claim-ledger primitive was retired; the existing worker development-state file remains the sole canonical claim database.
+- An unclassified legacy active source editor is held until reviewed scope exists, because unknown dependencies cannot be assumed independent.
 - One secure, nonblocking exclusive lease covers worker state read, admission, durable claim save, and subsequent reconciliation. Concurrent invocations defer; they never claim an empty queue.
 - The worker consults source-reviewed `config/development-concurrency-scopes.json` before new development claims, matching files and semantic/shared provider, contract, schema, authorization and deployment domains. Missing or malformed metadata fails closed. This metadata is **not** approval authority.
 - Approved development issues are still sourced through existing Owner verification. Admission does not create owner authorization or bypass the production release manager.

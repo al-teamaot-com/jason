@@ -106,53 +106,6 @@ def admission(candidate: dict[str, Any], existing: list[dict[str, Any]],
 
 
 
-def atomic_claim(candidate: dict[str, Any], ledger: Path, *,
-                 production_healthy: bool = False) -> dict[str, Any]:
-    """Linux claim-store transaction, using one sidecar lock and atomic rename.
-
-    This store is dedicated to development coordination, not production drift.
-    The caller must supply an authoritative reconciled inventory before the
-    first claim; an uninitialized ledger cannot silently admit new work.
-    """
-    import fcntl
-    import os
-    import tempfile
-    lock = ledger.with_name(ledger.name + '.lock')
-    if not ledger.is_file():
-        return {'state': 'blocked', 'reasons': ['authoritative_inventory_missing']}
-    with lock.open('a+', encoding='utf-8') as guard:
-        fcntl.flock(guard.fileno(), fcntl.LOCK_EX)
-        try:
-            source = json.loads(ledger.read_text(encoding='utf-8'))
-            items = source.get('items')
-            if source.get('schema_version') != '1.0' or not isinstance(items, list):
-                return {'state': 'blocked', 'reasons': ['invalid_claim_ledger']}
-            if any(i.get('id') == candidate.get('id') for i in items):
-                return {'state': 'blocked', 'reasons': ['workstream_already_exists']}
-            result = admission(candidate, items, production_healthy=production_healthy)
-            if result['state'] != 'admitted':
-                return result
-            added = {**candidate, 'state': 'active'}
-            source['items'].append(added)
-            fd, temp = tempfile.mkstemp(prefix='.claim-', dir=str(ledger.parent))
-            try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as out:
-                    json.dump(source, out, sort_keys=True, separators=(',', ':'))
-                    out.flush()
-                    os.fsync(out.fileno())
-                os.replace(temp, ledger)
-                directory_fd = os.open(str(ledger.parent), os.O_RDONLY)
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
-            finally:
-                if os.path.exists(temp):
-                    os.unlink(temp)
-            return {'state': 'claimed', 'id': candidate['id'], 'production_authority': False}
-        finally:
-            fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
-
 # A claim is an engineering reservation, not authorization to change production.
 WORKER_ACTIVE_PHASES = frozenset(('identified', 'diagnosing', 'implementing',
     'ci_repair_needed', 'ci_repairing', 'pr_validating', 'pr_monitoring', 'pr_ready'))
@@ -353,6 +306,22 @@ def plan_worker_claims(state: dict[str, Any], eligible: list[dict[str, Any]],
             hold = max(left, right)
         other = right if hold == left else left
         editor_holds.setdefault(hold, []).append({'with': other, 'reasons': conflict['reasons']})
+    if unknown:
+        # A legacy editor without reviewed semantic scope could conflict with
+        # any active editor. Continue read-only PR observations only; never
+        # infer that the unmatched workstream is safe from an empty file list.
+        for work_id in selected:
+            if records[work_id].get('phase') not in editor_phases:
+                continue
+            competing = [wid for wid in sorted(unknown) if wid != work_id]
+            if not competing:
+                competing = [work_id]
+            editor_holds.setdefault(work_id, []).extend(
+                {'with': other,
+                 'reasons': ['unclassified_active_workstream'
+                             if other != work_id else 'scope_declaration_missing']}
+                for other in competing
+            )
     selected = [work_id for work_id in selected if work_id not in editor_holds]
     state['dependency_admission'] = {
         'schema_version': '1.0', 'observed_at': now_iso(),

@@ -73,24 +73,6 @@ def test_cli_refuses_conflict_with_nonzero_status(tmp_path):
     assert json.loads(out.read_text())['state'] == 'blocked_by_dependency'
 
 
-def test_atomic_claim_serializes_concurrent_collision(tmp_path):
-    import concurrent.futures
-    import json
-    from tools.dependency_conflict_service import atomic_claim
-    ledger = tmp_path / 'claims.json'
-    ledger.write_text(json.dumps({'schema_version': '1.0', 'items': []}))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        outcomes = list(pool.map(lambda candidate: atomic_claim(candidate, ledger), [
-            work('A', components=['core']), work('B', components=['core'])]))
-    assert sorted(o['state'] for o in outcomes) == ['blocked_by_dependency', 'claimed']
-    assert len(json.loads(ledger.read_text())['items']) == 1
-
-
-def test_atomic_claim_requires_initialized_authoritative_inventory(tmp_path):
-    from tools.dependency_conflict_service import atomic_claim
-    assert atomic_claim(work('A', components=['core']), tmp_path / 'missing.json')['state'] == 'blocked'
-
-
 def test_legacy_overlap_analysis_also_sees_shared_authorization_and_tenant_scope():
     from tools.dependency_conflict_service import analyze
     a = work('A', authorization_paths=['owner-approval'], tenant_scopes=['aot-shared'])

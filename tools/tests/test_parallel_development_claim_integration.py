@@ -242,3 +242,57 @@ def test_controller_hold_does_not_resume_feature_without_verified_health():
     assert admission.plan_worker_claims(state, [issue(1545)], scopes(), capacity=1,
                                         production_healthy=False) == []
     assert state['items']['DEV-1545']['phase'] == 'blocked'
+
+
+def test_unclassified_existing_source_editor_cannot_keep_editing_unchecked():
+    state = {'items': {'DEV-8888': {'phase': 'implementing'},
+                       'DEV-2294': {'phase': 'diagnosing'}}}
+    selected = admission.plan_worker_claims(state, [issue(2294)], scopes(),
+                                            capacity=0)
+    assert selected == []
+    assert state['dependency_admission']['unclassified_active'] == ['DEV-8888']
+    assert state['dependency_admission']['active_editor_holds']['DEV-2294'][0]['with'] == 'DEV-8888'
+    assert state['items']['DEV-2294']['phase'] == 'diagnosing'
+
+
+def test_cross_process_development_lease_is_exclusive(tmp_path):
+    import os
+    import select
+    import subprocess
+    import sys
+    import fcntl
+    root = Path(__file__).resolve().parents[2]
+    code = """
+import os,sys,fcntl
+sys.path.insert(0,sys.argv[1])
+from tools.owner_approved_development_worker import acquire_development_claim_lease
+from pathlib import Path
+fd=acquire_development_claim_lease(Path(sys.argv[2]))
+assert isinstance(fd,int)
+print('CHILD_OWNS_LEASE',flush=True)
+sys.stdin.readline()
+fcntl.flock(fd,fcntl.LOCK_UN)
+os.close(fd)
+"""
+    p = subprocess.Popen([sys.executable, '-c', code, str(root), str(tmp_path)],
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True)
+    try:
+        readable, _, _ = select.select([p.stdout], [], [], 8)
+        assert readable, 'child failed to announce lock acquisition'
+        assert p.stdout.readline().strip() == 'CHILD_OWNS_LEASE'
+        assert worker.acquire_development_claim_lease(tmp_path) is None
+        p.stdin.write('release\n')
+        p.stdin.flush()
+        assert p.wait(timeout=8) == 0
+        new = worker.acquire_development_claim_lease(tmp_path)
+        assert isinstance(new,int)
+        fcntl.flock(new,fcntl.LOCK_UN)
+        os.close(new)
+    finally:
+        if p.poll() is None:
+            p.kill()
+            p.wait(timeout=5)
+        p.stdin.close()
+        p.stdout.close()
+        p.stderr.close()
