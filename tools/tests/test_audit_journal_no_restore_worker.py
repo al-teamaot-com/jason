@@ -281,8 +281,11 @@ def test_reclaim_denies_changed_prepared_receipt_without_deletion(specimen):
     assert archive.exists() and source.exists()
 
 
-def test_native_acceptance_requires_real_new_request_after_barrier_removed(specimen):
+def test_native_acceptance_requires_real_new_request_after_barrier_removed(specimen,monkeypatch):
     c,grant,archive,source=specimen
+    # The safety gate must be deterministic on development, production-sized
+    # GitHub runners and low-space CI workers alike. Never inspect host space.
+    monkeypatch.setattr(fwd.shutil,'disk_usage',lambda _:SimpleNamespace(free=10_000_000_000))
     fwd.recover_forward(c,grant)
     with pytest.raises(JournalUnavailable,match='REAL_POST_BARRIER_REQUEST_NOT_OBSERVED'):
         fwd.safe_native_acceptance(c,grant)
