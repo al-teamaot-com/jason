@@ -90,8 +90,9 @@ def test_new_scope_health_fixes_only_one_shm_file_not_full_archive():
     assert 'legacy.prepared.sqlite3' not in str(units)
 
 
-def test_no_unprivileged_root_preflight(tmp_path):
-    assert os.geteuid()!=0
+def test_no_unprivileged_root_preflight(tmp_path,monkeypatch):
+    # Run this test deterministically on both unprivileged GitHub and root CI.
+    monkeypatch.setattr(mod.os,'geteuid',lambda:1000)
     with pytest.raises(PermissionError,match='ISOLATED_ROOT_REQUIRED'):
         mod.preflight(None,None,'0'*40,{})
 
