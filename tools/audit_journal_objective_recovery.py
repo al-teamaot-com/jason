@@ -198,18 +198,20 @@ def verify_known_native_incident(control,drift,*,now=None):
 
 def verify_recovery_container_capacity(I,s,eng,previous):
     """Match the installed release's exact exited rollback-slot semantics."""
-    # The prior Owner-signed scope is hash-verified by existing_release().
-    # Its observed stopped-container snapshot is historical, not a current
-    # capacity policy, and may use a different prior snapshot schema.
-    # Enforce the original reviewed *policy* fields and independently count
-    # the current exited containers below; do not treat old telemetry as
-    # current approval or deny a safe recovery because of stale telemetry.
-    prior_scope=previous["plan"]["scope"]
-    need(prior_scope.get("rollback_container_limit_before")==s.ROLLBACK_LIMIT_BEFORE
-         and prior_scope.get("rollback_container_reserve")==s.ROLLBACK_CONTAINER_RESERVE
-         and prior_scope.get("rollback_container_limit_after")==
-         s.ROLLBACK_LIMIT_BEFORE+s.ROLLBACK_CONTAINER_RESERVE,
-         "PREVIOUS_REVIEWED_ROLLBACK_POLICY_CHANGED")
+    # Previously approved Root history is governed by its independently
+    # verified immutable scope digest, NOT an inferred schema. Both previous
+    # fixes incorrectly required historical capacity telemetry/policy fields
+    # before inspecting the actual protected record. No historic values
+    # authorize today's slots. Verify original full scope hash and enforce
+    # current independently reviewed limits on today's Docker inventory.
+    prior_plan=previous["plan"]
+    need(prior_plan.get("scope_sha256")==OLD_SCOPE and
+         isinstance(prior_plan.get("scope"),dict) and
+         digest(prior_plan["scope"])==OLD_SCOPE,
+         "PREVIOUS_IMMUTABLE_OWNER_SCOPE_CHANGED")
+    need(s.ROLLBACK_LIMIT_BEFORE==21 and s.ROLLBACK_CONTAINER_RESERVE==6
+         and s.ROLLBACK_LIMIT_BEFORE+s.ROLLBACK_CONTAINER_RESERVE==27,
+         "CURRENT_PROTECTED_ROLLBACK_LIMITS_CHANGED")
     names=I.command(["/usr/bin/docker","ps","-a","--filter","status=exited",
                      "--format","{{.Names}}"]).splitlines()
     import re
