@@ -6,6 +6,7 @@ import pytest
 from tools import audit_journal_objective_recovery as r
 from tools import audit_journal_release_scope as s
 from tools import audit_journal_container_release as eng
+from tools import audit_journal_rollback_slot_reservation as retention
 from tools.tests.test_audit_journal_release_plan import before as fixture_before
 
 CANDIDATE="a"*40
@@ -34,8 +35,8 @@ def synthetic():
             role:s.digest(eng.planned_configuration(row,r.OLD)) for role,row in original.items()},
         "protected_peer_before":{"jason-runtime":{"id":original["jason-runtime"]["Id"]}},
         "source_dataset_identity":{"device":66306,"inode":10261846},
-        "rollback_container_limit_before":s.ROLLBACK_LIMIT_BEFORE,
-        "rollback_container_limit_after":s.ROLLBACK_LIMIT_BEFORE+s.ROLLBACK_CONTAINER_RESERVE,
+        "rollback_container_limit_before":27,
+        "rollback_container_limit_after":27,
         "rollback_container_reserve":s.ROLLBACK_CONTAINER_RESERVE,
         "desired_state_after_sha256":"8"*64,
         "desired_state_initial_sha256":"7"*64,
@@ -83,7 +84,7 @@ def synthetic():
     return data,current,mocked_review
 
 def test_fixed_approval_plan_covers_migration_recovery_verification_not_provider_mutations():
-    assert len(r.STEPS)==6 and len(r.RECOVERY_BRANCHES)==5
+    assert len(r.STEPS)==8 and len(r.RECOVERY_BRANCHES)==6
     assert len(set(r.STEPS))==len(r.STEPS)
     assert all(v in r.STEPS for v in
                ("reconcile_exact_interrupted_legacy_release",
@@ -173,7 +174,7 @@ def test_only_one_approved_source_delta_and_exact_units(monkeypatch):
     from pathlib import Path
     source_root=Path(__file__).resolve().parents[2]
     fake=SimpleNamespace(SOURCES=("tools/audit_journal_control.py",r.MATCHER),
-                         UNITS=("jason-audit-journal-release.service",),BASE=s.BASE)
+                         NATIVE={},UNITS=("jason-audit-journal-release.service",),BASE=s.BASE)
     payload={
         "tools/audit_journal_control.py":b"unchanged",
         r.MATCHER:(source_root/r.MATCHER).read_bytes(),
@@ -203,13 +204,15 @@ def test_wrong_owner_denied_before_any_root_authorization_or_service_write(monke
     pre={"old":old,"now":current,"source":(66306,10261846),
          "prior_hashes":{"original":"a"*64},"desired_hash":"b"*64}
     monkeypatch.setattr(r,"independent_preflight",lambda *args,**kwargs:(scope,pre))
+    scope["bounded_objective_continuation"]["rollback_container_capacity_revalidated"]={
+        "count":21,"new_release_slots_after":27,"retirement":None}
     @__import__('contextlib').contextmanager
     def locks():
         yield
     called=[]
     auth={"locks":locks,"owner":lambda review:"UNLICENSED"}
     with pytest.raises(PermissionError,match="INDEPENDENT_LICENSED_OWNER_REQUIRED"):
-        r.execute(None,None,None,None,auth,CANDIDATE,{})
+        r.execute(None,s,{"audit_journal_container_release":eng},None,auth,CANDIDATE,{})
     assert called==[]
 
 
@@ -274,6 +277,7 @@ def bounded_grant_fixture(*,outcome="installing",age_minutes=1):
             "root_execution_recovery_claims_maximum":2,
             "reviewed_objective_installer_sha256":r.digest(b"reviewed-installer"),
             "reviewed_objective_recovery_sha256":r.digest(b"reviewed-recovery"),
+            "reviewed_slot_reservation_source_sha256":r.digest(b"reviewed-slots"),
         },
     }
     grant={
@@ -351,8 +355,11 @@ def test_resume_keeps_original_decision_and_never_calls_owner(monkeypatch,tmp_pa
     fake_s=FakeS()
     targets=r.bounded_transaction_targets(s)
     monkeypatch.setattr(r,"bounded_transaction_targets",lambda _s:targets)
+    old,current,review=synthetic()
+    grant["producer_before_snapshot_sha256"]=r.digest(current)
     mock_files={child/"authorization.json":grant,
-                child/"transaction.json":state}
+                child/"transaction.json":state,
+                child/"producer-before.json":current}
     class FakeTx:
         def raw_file(self,path,mode):
             return r.canonical(mock_files[Path(path)])
@@ -378,22 +385,25 @@ def test_resume_keeps_original_decision_and_never_calls_owner(monkeypatch,tmp_pa
                         lambda *args:{"ActiveState":"failed","MainPID":"0"})
     monkeypatch.setattr(r,"independent_preflight",
                         lambda *args,**kwargs:(grant["scope"],{"valid":"after_rollback"}))
+    monkeypatch.setattr(r,"frozen_producer_snapshot",
+                        lambda _s,_eng,_review,rows:rows)
     monkeypatch.setattr(r,"install_reviewed_claim",
                         lambda *args:effects.append("queued_from_same_plan"))
     @contextmanager
     def locks():yield
     auth={"locks":locks}
     payload={"tools/audit_journal_install.py":b"reviewed-installer",
-             "tools/audit_journal_objective_recovery.py":b"reviewed-recovery"}
+             "tools/audit_journal_objective_recovery.py":b"reviewed-recovery",
+             "tools/audit_journal_rollback_slot_reservation.py":b"reviewed-slots"}
     r.resume_prequeue(I,fake_s,
-                      {"audit_journal_install_transaction":FakeTxModule},
+                      {"audit_journal_install_transaction":FakeTxModule,"audit_journal_container_release":eng},
                       None,auth,CANDIDATE,payload)
     assert effects==["prequeue_claim","transaction_rollback","queued_from_same_plan"]
     assert "owner" not in auth
     (child/"revoked.json").write_text('{"revoked":true}')
     with pytest.raises(PermissionError,match="BOUNDED_OWNER_PLAN_REVOKED"):
         r.resume_prequeue(I,fake_s,
-                          {"audit_journal_install_transaction":FakeTxModule},
+                          {"audit_journal_install_transaction":FakeTxModule,"audit_journal_container_release":eng},
                           None,auth,CANDIDATE,payload)
     assert effects==["prequeue_claim","transaction_rollback","queued_from_same_plan"]
 
@@ -406,95 +416,74 @@ def pin_prior_root_scope(monkeypatch,old):
     return sha
 
 
+def native_policy():
+    return {"max_stopped_rollback_containers":27,
+            "rollback_container_prefixes":[
+                "jason-runtime-rollback-","jason-mcp-pilot-rollback-",
+                "jason-mcp-rollback-","jason-teams-gateway-rollback-",
+                "jason-pmv4-ticket-core-rollback-audit-"]}
+
+
 def test_stopped_rollback_slots_checked_before_full_journal_migration(monkeypatch):
     old,_,_=synthetic()
     old["plan"]["scope"]["rollback_container_capacity_before"]={
-        "existing_count":2,
-        "existing_names":["jason-runtime-rollback-old","jason-mcp-pilot-rollback-old"],
-        "limit_before":s.ROLLBACK_LIMIT_BEFORE,
-        "reserved_slots":s.ROLLBACK_CONTAINER_RESERVE,
-    }
+        "existing_count":21,"existing_names":["historic-"+str(i) for i in range(21)],
+        "limit_before":27,"limit_after":27,"reserved_slots":6,"cleanup_allowed":False}
     pin_prior_root_scope(monkeypatch,old)
     class I:
         values=[
             "jason-runtime-rollback-old",
             "jason-mcp-pilot-rollback-old",
+            "jason-mcp-rollback-constant-contact-oauth-20261112",
             "jason-pmv4-ticket-core-rollback-audit-before-20b32548402d",
         ]
         @classmethod
         def command(cls,argv):
             assert argv[:2]==["/usr/bin/docker","ps"]
             return "\n".join(cls.values)
-    got=r.verify_recovery_container_capacity(I,s,eng,old)
-    assert got["count"]==3 and got["new_release_slots_after"]==9
-    assert got["reserve_for_new_release"]==6
-    I.values=["jason-runtime-rollback-%02d"%x for x in range(22)]
+    got=r.verify_recovery_container_capacity(I,s,eng,old,native_policy())
+    assert got["count"]==4 and got["new_release_slots_after"]==10
+    assert got["reserve_for_new_release"]==6 and got["retirement"] is None
+    I.values=["jason-runtime-rollback-%02d"%x for x in range(23)]
     with pytest.raises(PermissionError,match="INSUFFICIENT_RECOVERY_CONTAINER_SLOTS"):
-        r.verify_recovery_container_capacity(I,s,eng,old)
+        r.verify_recovery_container_capacity(I,s,eng,old,native_policy())
     I.values=["jason-runtime-rollback-same"]*2
     with pytest.raises(PermissionError,match="MALFORMED_STOPPED_CONTAINER_INVENTORY"):
-        r.verify_recovery_container_capacity(I,s,eng,old)
+        r.verify_recovery_container_capacity(I,s,eng,old,native_policy())
 
 
-def test_historical_rollback_snapshot_is_not_a_current_authority_or_capacity_limit(monkeypatch):
-    """Reproduces both real pre-Owner denials without presuming Root schema."""
+def test_exact_historical_census_scope_uses_current_native_policy(monkeypatch):
+    """Actual historical record contains 27/27/6 and 21 old stopped names."""
     old,_,_=synthetic()
     class Live:
         @staticmethod
         def command(argv):
             assert argv[:2]==["/usr/bin/docker","ps"]
             return "\n".join("jason-runtime-rollback-%02d"%i for i in range(20))
-    variants=(
-        None, # exact old scope with no historical snapshot
-        {"existing_count":19,"existing_names":["historic"]*19,
-         "limit_before":18,"reserved_slots":3,"cleanup_allowed":False},
-        {"existing_count":5,"existing_names":[],"cleanup_allowed":False},
-        {"schema_version":"0.9","observed_at":"2026-11-22T00:00:00Z"},
-    )
-    for prior in variants:
-        scope=old["plan"]["scope"]
-        if prior is None:scope.pop("rollback_container_capacity_before",None)
-        else:scope["rollback_container_capacity_before"]=prior
-        # Each is a separately pinned valid historic Root record, NOT an
-        # attempt to substitute new contents under the same original hash.
-        pin_prior_root_scope(monkeypatch,old)
-        outcome=r.verify_recovery_container_capacity(Live,s,eng,old)
-        assert outcome=={
-            "count":20,"stopped_names":[
-                "jason-runtime-rollback-%02d"%i for i in range(20)],
-            "limit_before":21,"reserve_for_new_release":6,
-            "new_release_slots_after":26,
-        }
     scope=old["plan"]["scope"]
-    # Historical release scopes may omit these optional top-level fields.
-    # Full Root signature is still required.
-    for field in ("rollback_container_limit_before","rollback_container_limit_after",
-                  "rollback_container_reserve","rollback_container_capacity_before"):
-        scope.pop(field,None)
+    scope["rollback_container_limit_before"]=27
+    scope["rollback_container_limit_after"]=27
+    scope["rollback_container_reserve"]=6
+    scope["rollback_container_capacity_before"]={
+        "existing_count":21,"existing_names":["historic-%02d"%i for i in range(21)],
+        "limit_before":27,"limit_after":27,"reserved_slots":6,"cleanup_allowed":False}
     pin_prior_root_scope(monkeypatch,old)
-    assert r.verify_recovery_container_capacity(Live,s,eng,old)["count"]==20
-    # Even harmless mutation becomes invalid if digest no longer matches
-    # immutable Root scope, including when someone updates the untrusted
-    # scope_sha256 but not the independently pinned scope.
+    result=r.verify_recovery_container_capacity(Live,s,eng,old,native_policy())
+    assert result["count"]==20 and result["limit_before"]==21
+    assert result["new_release_slots_after"]==26 and result["retirement"] is None
+    # Hash identity, not a historical scalar assertion, is the authority.
     scope["rollback_container_limit_before"]=999
     with pytest.raises(PermissionError,match="PREVIOUS_IMMUTABLE_OWNER_SCOPE_CHANGED"):
-        r.verify_recovery_container_capacity(Live,s,eng,old)
+        r.verify_recovery_container_capacity(Live,s,eng,old,native_policy())
     old["plan"]["scope_sha256"]=r.digest(scope)
     with pytest.raises(PermissionError,match="PREVIOUS_IMMUTABLE_OWNER_SCOPE_CHANGED"):
-        r.verify_recovery_container_capacity(Live,s,eng,old)
-    scope.pop("rollback_container_limit_before")
+        r.verify_recovery_container_capacity(Live,s,eng,old,native_policy())
+    scope["rollback_container_limit_before"]=27
     pin_prior_root_scope(monkeypatch,old)
-    # Today's policy must remain exactly 21+6, regardless of old telemetry.
-    monkeypatch.setattr(s,"ROLLBACK_LIMIT_BEFORE",22)
+    policy=native_policy();policy["max_stopped_rollback_containers"]=28
     with pytest.raises(PermissionError,match="CURRENT_PROTECTED_ROLLBACK_LIMITS_CHANGED"):
-        r.verify_recovery_container_capacity(Live,s,eng,old)
-    monkeypatch.setattr(s,"ROLLBACK_LIMIT_BEFORE",21)
-    class TooMany:
-        @staticmethod
-        def command(argv):
-            return "\n".join("jason-runtime-rollback-%02d"%i for i in range(22))
-    with pytest.raises(PermissionError,match="INSUFFICIENT_RECOVERY_CONTAINER_SLOTS"):
-        r.verify_recovery_container_capacity(TooMany,s,eng,old)
+        r.verify_recovery_container_capacity(Live,s,eng,old,policy)
+
 
 def test_root_hash_guard_rejects_unsigned_history_before_even_listing_docker(monkeypatch):
     old,_,_=synthetic()
@@ -503,8 +492,154 @@ def test_root_hash_guard_rejects_unsigned_history_before_even_listing_docker(mon
         def command(argv):
             pytest.fail("Unsigned historical state must be denied before Docker read")
     with pytest.raises(PermissionError,match="PREVIOUS_IMMUTABLE_OWNER_SCOPE_CHANGED"):
-        r.verify_recovery_container_capacity(NoDockerCalls,s,eng,old)
+        r.verify_recovery_container_capacity(NoDockerCalls,s,eng,old,native_policy())
+
+
+def test_frozen_snapshot_reuses_exact_bytes_despite_volatile_health_changes():
+    old,current,review=synthetic()
+    frozen=copy.deepcopy(current)
+    r.frozen_producer_snapshot(s,eng,review,frozen)
+    current["jason-runtime"]["State"]["Health"]={"Status":"healthy","Log":[{"End":"later"}]}
+    r.frozen_producer_snapshot(s,eng,review,current)
+    pre={"old":old,"now":frozen}
+    first=r.prepare_new_claim(s,CANDIDATE,review,pre,"2026-11-24T13:00:00+00:00")
+    retry=r.prepare_new_claim(s,CANDIDATE,review,{**pre,"now":frozen},"2026-11-24T13:00:00+00:00")
+    assert first==retry
+    current["jason-runtime"]["Config"]["User"]="root"
+    with pytest.raises((PermissionError,ValueError)):
+        r.frozen_producer_snapshot(s,eng,review,current)
+
+
+def test_single_command_continues_existing_grant_without_owner(monkeypatch,tmp_path):
+    root=tmp_path/"ledger";(root/CANDIDATE).mkdir(parents=True)
+    monkeypatch.setattr(r,"ROOT",root)
+    monkeypatch.setattr(r,"execute",lambda *a:pytest.fail("new human decision not permitted"))
+    effects=[]
+    monkeypatch.setattr(r,"resume_prequeue",lambda *a:effects.append("existing_claim"))
+    r.execute_with_continuation(None,None,{},None,{},CANDIDATE,{})
+    assert effects==["existing_claim"]
+
+
+@pytest.mark.parametrize("phase",["pre_owner","installing","queued"])
+def test_single_invocation_automatically_reconciles_only_durable_unqueued_claim(
+        monkeypatch,tmp_path,phase):
+    root=tmp_path/"ledger";root.mkdir()
+    monkeypatch.setattr(r,"ROOT",root)
+    effects=[]
+    def execute(*args):
+        effects.append("original")
+        if phase!="pre_owner":
+            folder=root/CANDIDATE;folder.mkdir()
+            (folder/"authorization.json").write_text("{}")
+            (folder/"transaction.json").write_text("{}")
+        raise PermissionError("test interruption")
+    monkeypatch.setattr(r,"execute",execute)
+    monkeypatch.setattr(r,"resume_prequeue",lambda *a:effects.append("same_claim"))
+    tx=SimpleNamespace(raw_file=lambda path,mode:r.canonical({"outcome":phase}))
+    args=(None,None,{"audit_journal_install_transaction":tx},None,{},CANDIDATE,{})
+    if phase=="installing":
+        r.execute_with_continuation(*args)
+        assert effects==["original","same_claim"]
+    else:
+        with pytest.raises(PermissionError,match="test interruption"):
+            r.execute_with_continuation(*args)
+        assert effects==["original"]
+
+def test_complete_preflight_builds_native_slot_plan_and_rechecks_identically(
+        monkeypatch,tmp_path):
+    """Integration of full preflight using sealed historical record shape.
+
+    Real filesystem, Docker, and privileged read boundaries are substituted;
+    the new scope construction and all intermediate semantic gates run.
+    """
+    from tools import audit_journal_install as installer
+    from tools import audit_journal_legacy_admission_rescue as admission
+    from tools.tests.test_audit_journal_rollback_slot_reservation import Docker
+    old,current,_=synthetic()
+    current["jason-pmv4-ticket-core"]["State"]["Health"]={"Status":"healthy"}
+    live=tmp_path/"live.sqlite3";live.write_bytes(b"fixture")
+    archive=tmp_path/"archive";archive.mkdir()
+    private=tmp_path/"private";private.mkdir()
+    control=tmp_path/"control";control.mkdir()
+    (tmp_path/"pending").mkdir()
+    (archive/"governed-audit"/"orchestration").mkdir(parents=True)
+    fake_s=SimpleNamespace(**{
+        k:getattr(s,k) for k in ("ACTION","SOURCES","NATIVE","UNITS","BASE",
+        "ROLLBACK_LIMIT_BEFORE","ROLLBACK_CONTAINER_RESERVE","public_profile","digest")
+    },ARCHIVE=archive,PRIVATE=private,CONTROL=control,
+        PROFILE=tmp_path/"profile.json",POLICY=tmp_path/"policy.json",
+        DESIRED=tmp_path/"desired.json",STATE=tmp_path/"state")
+    desired=native_policy()
+    desired_raw=r.canonical(desired)
+    original_scope=old["plan"]["scope"]
+    original_scope["desired_state_initial_sha256"]=r.digest(desired_raw)
+    original_scope["rollback_desired_state_sha256"]=r.digest(desired_raw)
+    original_scope["desired_state_after_sha256"]=r.digest(desired_raw)
+    original_scope["rollback_container_capacity_before"]={
+        "existing_count":21,"existing_names":["historic-"+str(i) for i in range(21)],
+        "limit_before":27,"limit_after":27,"reserved_slots":6,"cleanup_allowed":False}
     pin_prior_root_scope(monkeypatch,old)
-    old["plan"]["scope_sha256"]="f"*64
-    with pytest.raises(PermissionError,match="PREVIOUS_IMMUTABLE_OWNER_SCOPE_CHANGED"):
-        r.verify_recovery_container_capacity(NoDockerCalls,s,eng,old)
+    old["policy"]["profile_sha256"]=r.digest(r.canonical(s.public_profile(r.OLD)))
+    old["adoption"]["policy_sha256"]=r.digest(old["policy"])
+    old["adoption"]["scope_sha256"]=r.OLD_SCOPE
+    old["journal"]["scope_sha256"]=r.OLD_SCOPE
+    monkeypatch.setattr(r,"LIVE",live)
+    monkeypatch.setattr(r,"ROOT",tmp_path/"root")
+    # Synthetic file metadata models the known Root-protected live identity.
+    real_lstat=Path.lstat
+    real_stat=Path.stat
+    def lstat(path):
+        if path==live:
+            return SimpleNamespace(st_mode=0o100600,st_uid=1000,st_gid=1000,
+                                   st_nlink=1,st_dev=66306,st_ino=10261846,st_size=47_500_000_000)
+        return real_lstat(path)
+    def stat_path(path,*args,**kwargs):
+        value=real_stat(path,*args,**kwargs)
+        if path==archive:
+            fields=list(value);fields[2]=2049
+            return __import__("os").stat_result(fields)
+        return value
+    monkeypatch.setattr(Path,"lstat",lstat)
+    monkeypatch.setattr(Path,"stat",stat_path)
+    monkeypatch.setattr(r.os.path,"ismount",lambda path:path==archive)
+    monkeypatch.setattr(r.shutil,"disk_usage",lambda path:SimpleNamespace(free=175_000_000_000))
+    monkeypatch.setattr(r,"existing_release",lambda *args,**kwargs:old)
+    monkeypatch.setattr(r,"approved_prior_receipts",lambda *args:{"sealed":"c"*64})
+    monkeypatch.setattr(r,"validate_reviewed_trust",lambda *args:[r.MATCHER])
+    monkeypatch.setattr(retention,"check_archive_destination",lambda *args,**kwargs:None)
+    monkeypatch.setattr(admission,"sql",lambda operation:{
+        "before":{},"after":{},"writer_uid":1000,"operation":operation})
+    peers=original_scope["protected_peer_before"]
+    fake_s.protected_peer_inventory=lambda:peers
+    fake_eng=SimpleNamespace(**{
+        k:getattr(eng,k) for k in ("ROLES","configuration_matches","planned_configuration",
+                                  "exact_original_configuration")
+    },DockerEngine=lambda:SimpleNamespace(inspect=lambda role:current[role]))
+    payload={name:b"fixture-"+name.encode() for name in (
+        *s.SOURCES,*s.NATIVE,*installer.EXTRA,
+        *("infrastructure/jason-audit-journal/"+name for name in (*s.UNITS,*installer.OVERRIDES)))}
+    raw_files={fake_s.PROFILE:r.canonical(s.public_profile(r.OLD)),
+               control/"profile.json":r.canonical(s.public_profile(r.OLD)),
+               private/"desired-final.json":desired_raw,
+               private/"desired-rollback.json":desired_raw,
+               fake_s.DESIRED:desired_raw}
+    tx=SimpleNamespace(raw_file=lambda path,mode:raw_files[Path(path)])
+    docker=Docker()
+    I=SimpleNamespace(EXTRA=installer.EXTRA,OVERRIDES=installer.OVERRIDES,
+                      command=docker.command,health_dropins=lambda _: {},
+                      schema_and_sample=lambda _:"a"*64)
+    modules={"audit_journal_install_transaction":tx,"audit_journal_container_release":fake_eng}
+    review,pre=r.independent_preflight(I,fake_s,modules,None,CANDIDATE,payload,production=False)
+    assert review["rollback_container_limit_before"]==21
+    assert review["rollback_container_capacity_before"]["existing_count"]==21
+    assert review["bounded_objective_continuation"]["rollback_container_capacity_revalidated"]["count"]==22
+    assert review["bounded_objective_continuation"]["rollback_container_capacity_revalidated"]["retirement"]["id"]==retention.ID
+    assert any(retention.ID in x for x in review["installation_targets"])
+    assert review["source_dataset_identity"]=={"device":66306,"inode":10261846}
+    again,pre2=r.independent_preflight(I,fake_s,modules,None,CANDIDATE,payload,production=False)
+    assert review==again and pre["source"]==pre2["source"]
+    profile,policy,adoption,plan,journal=r.prepare_new_claim(
+        fake_s,CANDIDATE,review,pre,"2026-11-24T15:00:00+00:00")
+    assert plan["scope_sha256"]==r.digest(plan["scope"])==adoption["scope_sha256"]==journal["scope_sha256"]
+    assert plan["scope"]["rollback_container_limit_before"]==21
+    assert docker.removed==[]

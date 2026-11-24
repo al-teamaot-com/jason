@@ -23,7 +23,7 @@ EXTRA=("tools/audit_journal_install.py","tools/audit_journal_install_transaction
  "tools/documentation_publisher_install.py","tools/pmv4_e_operational_closure.py","tools/pmv4_e_dispatch_install.py",
  "tools/audit_journal_pre_cutover_repair.py","tools/audit_journal_fresh_owner_recovery.py",
  "tools/audit_journal_ticket_core_rescue.py","tools/audit_journal_legacy_admission_rescue.py",
- "tools/audit_journal_objective_recovery.py")
+ "tools/audit_journal_objective_recovery.py","tools/audit_journal_rollback_slot_reservation.py")
 OVERRIDES=("93-jason-audit-data-recovery.conf","94-audit-data-compatible-release.conf")
 SYSTEMD=Path("/etc/systemd/system")
 RECORD=Path("/var/lib/jason-owner-release/audit-journal-install")
@@ -394,7 +394,7 @@ def main():
   if args.complete_bounded_audit_objective:
    ci_proof=ci(modules["pmv4_e_ci_refresh"],candidate)
    need(ci_proof.get("required_ci_passed") is True,"BOUNDED_OBJECTIVE_PROTECTED_CI")
-   return modules["audit_journal_objective_recovery"].execute(
+   return modules["audit_journal_objective_recovery"].execute_with_continuation(
     SimpleNamespace(**globals()),s,modules,c,auth,candidate,payload)
   if args.restore_exact_legacy_admission:
    ci_proof=ci(modules["pmv4_e_ci_refresh"],candidate)

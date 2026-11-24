@@ -15,6 +15,7 @@ from pathlib import Path
 import json,os,stat,shutil,subprocess,time
 
 from tools import audit_journal_install_transaction as txlib
+from tools import audit_journal_rollback_slot_reservation as retention
 
 ACTION="COMPLETE-REMAINING-BOUNDED-DAILY-AUDIT-JOURNAL-OBJECTIVE"
 OLD="20b32548402d160f9c6a5ee33a0a17592eb9fa68"
@@ -30,7 +31,9 @@ ROOT=PREVIOUS_GRANT_ROOT/"audit-journal-bounded-objective"
 MATCHER="tools/audit_journal_container_release.py"
 STEPS=(
     "reconcile_exact_interrupted_legacy_release",
+    "archive_and_retire_one_exact_historical_rollback_only_if_native_slots_require",
     "refresh_reviewed_docker29_matcher_and_audit_bindings",
+    "refresh_real_native_drift_before_queue_without_overriding_breaker",
     "queue_one_full_journal_migration_with_inbuilt_rollback",
     "verify_sealed_history_and_cold_restore",
     "verify_current_writes_daily_rollover_and_native_health",
@@ -42,6 +45,7 @@ RECOVERY_BRANCHES=(
     "preserve_backup_and_required_history_on_any_failure",
     "rollback_only_within_fresh_claim_and_canonical_guardrails",
     "resume_unqueued_exact_root_install_once_after_transaction_rollback",
+    "verify_exact_archived_retirement_and_native_slots_before_resuming",
 )
 ALLOW_UNIT_CHANGES=False
 LIVE=Path("/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3")
@@ -106,7 +110,7 @@ def approved_prior_receipts(tx):
         hashes[label]=digest(raw)
     return hashes
 
-def existing_release(s,I,tx):
+def existing_release(s,I,tx,*,allow_inactive=False):
     policy=read(tx,s.POLICY,0o600)
     adoption=read(tx,s.PRIVATE/"adoption.json",0o400)
     plan=read(tx,s.PRIVATE/"release-plan.json",0o400)
@@ -138,8 +142,9 @@ def existing_release(s,I,tx):
          catalog.get("mode")=="legacy" and catalog.get("generation")==0 and
          catalog.get("epoch") is None and catalog.get("segments")==[],
          "PRIOR_BEFORE_IMAGE_OR_LEGACY_CATALOG_CHANGED")
-    need(systemd_show(I,"jason-audit-journal-release.service").get("ActiveState")=="failed"
-         and systemd_show(I,"jason-audit-journal-release.service").get("MainPID")=="0"
+    release=systemd_show(I,"jason-audit-journal-release.service")
+    need(release.get("ActiveState") in (("failed","inactive") if allow_inactive else ("failed",))
+         and release.get("MainPID")=="0"
          and systemd_show(I,"jason-audit-journal-maintenance.timer").get("ActiveState")=="inactive"
          and systemd_show(I,"jason-audit-journal-maintenance.timer").get("UnitFileState")=="disabled",
          "INTERRUPTED_RELEASE_NOT_QUIESCED")
@@ -159,79 +164,73 @@ def validate_reviewed_trust(s,payload,tx):
                  "EXACT_DOCKER_NORMALIZATION_MISSING")
             changes.append(name)
     need(changes==[MATCHER],"EXACT_ONE_TRUSTED_SOURCE_REPAIR_REQUIRED")
+    for name,target in s.NATIVE.items():
+        need(read_raw(tx,s.BASE/"native-health"/target,0o444)==payload[name],
+             "UNEXPECTED_NATIVE_HEALTH_SOURCE:"+name)
     for unit in s.UNITS:
         location=Path("/etc/systemd/system")/unit
         need(read_raw(tx,location,0o644)==payload["infrastructure/jason-audit-journal/"+unit],
              "UNEXPECTED_INSTALLED_SYSTEMD_UNIT:"+unit)
     return changes
 
-def verify_known_native_incident(control,drift,*,now=None):
-    """Deny any new or stale native drift outside this exact known failure."""
+def verify_known_native_incident(control,drift,*,now=None,allow_clean=False):
+    """Permit only the recorded incident, or a genuine clean resumed state."""
     now=now or datetime.now(timezone.utc)
-    breaker=control.get("circuit_breaker",{})
-    need(breaker.get("state")=="open" and
-         breaker.get("reason")=="continuous_production_drift_detected",
-         "PROTECTED_BREAKER_NOT_IN_KNOWN_INCIDENT_HOLD")
-    problems=drift.get("problems",[])
-    need(drift.get("status")=="drift_detected" and isinstance(problems,list)
-         and len(problems)>0 and len(problems)<=3,
-         "NATIVE_DRIFT_UNEXPECTED_STATUS")
-    allowed={"jason-audit-journal-release.service",
-             "jason-production-drift-watchdog.service",
-             "jason-audit-journal-maintenance.timer"}
-    failed_release=False
-    for item in problems:
-        need(isinstance(item,dict) and
-             item.get("kind") in ("failed_system_unit","required_system_unit_not_active")
-             and (item.get("unit") or item.get("name")) in allowed,
-             "UNRELATED_PRODUCTION_NATIVE_DRIFT")
-        if (item.get("unit") or item.get("name"))=="jason-audit-journal-release.service":
-            failed_release=True
-    need(failed_release,"KNOWN_FAILED_RELEASE_NOT_IN_NATIVE_EVIDENCE")
     observed=datetime.fromisoformat(drift["observed_at"].replace("Z","+00:00"))
-    age=(now-observed).total_seconds()
-    need(observed.tzinfo is not None and -10<=age<=240,
+    need(observed.tzinfo is not None and -10<=(now-observed).total_seconds()<=240,
          "NATIVE_DRIFT_EVIDENCE_EXPIRED")
-    return {"known_incident":True,"problem_count":len(problems),
-            "drift_observed_at":drift["observed_at"]}
+    breaker=control.get("circuit_breaker",{})
+    problems=drift.get("problems",[])
+    incident=(breaker.get("state")=="open" and
+              breaker.get("reason")=="continuous_production_drift_detected")
+    if allow_clean and drift.get("status")=="pass" and problems==[]:
+        need(incident or breaker.get("state")=="closed",
+             "PROTECTED_BREAKER_NOT_IN_KNOWN_INCIDENT_HOLD")
+        return {"known_incident":True,"problem_count":0}
+    need(incident,"PROTECTED_BREAKER_NOT_IN_KNOWN_INCIDENT_HOLD")
+    need(drift.get("status")=="drift_detected" and isinstance(problems,list)
+         and 0<len(problems)<=3,"NATIVE_DRIFT_UNEXPECTED_STATUS")
+    allowed={
+        ("failed_system_unit","jason-audit-journal-release.service","failed"),
+        ("failed_system_unit","jason-production-drift-watchdog.service","failed"),
+        ("required_system_unit_not_active","jason-audit-journal-maintenance.timer","inactive"),
+    }
+    rows={(x.get("kind"),x.get("unit") or x.get("name"),x.get("state"))
+          for x in problems if isinstance(x,dict)}
+    need(len(rows)==len(problems) and rows<=allowed,"UNRELATED_PRODUCTION_NATIVE_DRIFT")
+    need(allow_clean or
+         ("failed_system_unit","jason-audit-journal-release.service","failed") in rows,
+         "KNOWN_FAILED_RELEASE_NOT_IN_NATIVE_EVIDENCE")
+    return {"known_incident":True,"problem_count":len(problems)}
 
 
-def verify_recovery_container_capacity(I,s,eng,previous):
-    """Match the installed release's exact exited rollback-slot semantics."""
-    # Previously approved Root history is governed by its independently
-    # verified immutable scope digest, NOT an inferred schema. Both previous
-    # fixes incorrectly required historical capacity telemetry/policy fields
-    # before inspecting the actual protected record. No historic values
-    # authorize today's slots. Verify original full scope hash and enforce
-    # current independently reviewed limits on today's Docker inventory.
-    prior_plan=previous["plan"]
-    need(prior_plan.get("scope_sha256")==OLD_SCOPE and
-         isinstance(prior_plan.get("scope"),dict) and
-         digest(prior_plan["scope"])==OLD_SCOPE,
-         "PREVIOUS_IMMUTABLE_OWNER_SCOPE_CHANGED")
-    need(s.ROLLBACK_LIMIT_BEFORE==21 and s.ROLLBACK_CONTAINER_RESERVE==6
-         and s.ROLLBACK_LIMIT_BEFORE+s.ROLLBACK_CONTAINER_RESERVE==27,
-         "CURRENT_PROTECTED_ROLLBACK_LIMITS_CHANGED")
-    names=I.command(["/usr/bin/docker","ps","-a","--filter","status=exited",
-                     "--format","{{.Names}}"]).splitlines()
-    import re
-    need(len(names)==len(set(names)) and all(
-         re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*",n) for n in names),
-         "MALFORMED_STOPPED_CONTAINER_INVENTORY")
-    prefixes=tuple(role+"-rollback" for role in eng.ROLES)
-    stopped=sorted(name for name in names if name.startswith(prefixes))
-    need(len(stopped)<=s.ROLLBACK_LIMIT_BEFORE and
-         len(stopped)+s.ROLLBACK_CONTAINER_RESERVE<=
-         s.ROLLBACK_LIMIT_BEFORE+s.ROLLBACK_CONTAINER_RESERVE,
-         "INSUFFICIENT_RECOVERY_CONTAINER_SLOTS")
-    return {"count":len(stopped),"stopped_names":stopped,
-            "limit_before":s.ROLLBACK_LIMIT_BEFORE,
-            "reserve_for_new_release":s.ROLLBACK_CONTAINER_RESERVE,
-            "new_release_slots_after":len(stopped)+s.ROLLBACK_CONTAINER_RESERVE}
+def observe_native_readonly(s):
+    """Run the already pinned native evaluator without --output or mutation."""
+    result=subprocess.run(
+        ["/usr/bin/python3",str(s.ROOT_DRIFT_EVALUATOR),"--config",str(s.DESIRED)],
+        cwd="/",env={"PATH":"/usr/local/bin:/usr/bin:/bin","HOME":"/root",
+                    "LANG":"C.UTF-8"},capture_output=True,text=True,timeout=70,check=False)
+    need(result.returncode in (0,2),"NATIVE_READONLY_EVALUATION_UNAVAILABLE")
+    row=json.loads(result.stdout)
+    need(row.get("schema_version")=="1.0" and
+         ((result.returncode==0 and row.get("status")=="pass" and row.get("problems")==[]) or
+          (result.returncode==2 and row.get("status")=="drift_detected" and row.get("problems"))),
+         "NATIVE_READONLY_RESULT_INVALID")
+    return row
+
+
+def verify_recovery_container_capacity(I,s,eng,previous,desired,*,approved=None,
+                                       retirement_verified=False):
+    """Historical scope is immutable evidence; count today's native policy."""
+    prior=previous["plan"]
+    need(prior.get("scope_sha256")==OLD_SCOPE and isinstance(prior.get("scope"),dict)
+         and digest(prior["scope"])==OLD_SCOPE,"PREVIOUS_IMMUTABLE_OWNER_SCOPE_CHANGED")
+    return retention.plan_capacity(I,s,eng,desired,approved=approved,
+                                   retirement_verified=retirement_verified)
 
 
 def independent_preflight(I,s,modules,c,candidate,payload,*,production=True,
-                          existing_bounded_claim=False):
+                          existing_bounded_claim=False,approved_review=None):
     need(os.geteuid()==0 or not production,"ROOT_ONLY")
     if production:
         need(len(candidate)==40 and all(ch in "0123456789abcdef" for ch in candidate),
@@ -248,14 +247,25 @@ def independent_preflight(I,s,modules,c,candidate,payload,*,production=True,
             need(digest(I.read(Path(file)))==expected,"PROTECTED_PRODUCTION_BASELINE_CHANGED")
     tx=modules["audit_journal_install_transaction"]
     eng=modules["audit_journal_container_release"]
-    old=existing_release(s,I,tx)
+    need(not existing_bounded_claim or isinstance(approved_review,dict),
+         "APPROVED_RESUME_SCOPE_REQUIRED")
+    old=existing_release(s,I,tx,allow_inactive=existing_bounded_claim)
     prior_hashes=approved_prior_receipts(tx)
     if production:
         control=read(tx,s.STATE/"production-control-state.json",0o600)
-        drift=read(tx,s.STATE/"production-drift.json",0o600)
-        verify_known_native_incident(control,drift)
+        # The current policy is checked against the original immutable
+        # desired-state proof below. The independent evaluator is read-only.
+        drift=observe_native_readonly(s)
+        verify_known_native_incident(control,drift,allow_clean=existing_bounded_claim)
     changed=validate_reviewed_trust(s,payload,tx)
-    slots=verify_recovery_container_capacity(I,s,eng,old)
+    for unit,raw in I.health_dropins(s).items():
+        need(read_raw(tx,Path("/etc/systemd/system")/(unit+".d")/"94-audit-journal.conf",0o644)==raw,
+             "UNEXPECTED_NATIVE_HEALTH_DROPIN:"+unit)
+    for path in (s.PROFILE,s.CONTROL/"profile.json"):
+        need(digest(read_raw(tx,path,0o444))==old["policy"].get("profile_sha256"),
+             "OLD_PROFILE_BYTES_DIVERGED")
+    need(old["adoption"].get("policy_sha256")==digest(old["policy"]),
+         "OLD_ADOPTION_POLICY_DIVERGED")
     source=LIVE.lstat()
     need(stat.S_ISREG(source.st_mode) and not LIVE.is_symlink()
          and source.st_uid==source.st_gid==1000 and
@@ -270,6 +280,10 @@ def independent_preflight(I,s,modules,c,candidate,payload,*,production=True,
     need(not any((s.ARCHIVE/"governed-audit/orchestration").iterdir())
          and not any((s.PRIVATE.parent/"pending").iterdir()),
          "SEGMENTED_FILES_ALREADY_PRESENT")
+    need(not (s.PRIVATE/"initial-cutover-claimed.json").exists()
+         and not (s.PRIVATE/"initial-cutover-complete.json").exists()
+         and not (s.PRIVATE/"recovery-recipe.json").exists(),
+         "LEGACY_CUTOVER_OR_RECONSTRUCTION_ALREADY_CLAIMED")
     from tools.audit_journal_legacy_admission_rescue import sql as read_admission
     status=read_admission("read")
     need(status["before"]=={} and status["after"]=={} and status["writer_uid"]==1000,
@@ -287,6 +301,13 @@ def independent_preflight(I,s,modules,c,candidate,payload,*,production=True,
                  "TICKET_CORE_RECOVERY_NOT_HEALTHY")
         elif role in ("jason-runtime","jason-mcp-pilot"):
             need(row["Id"]==previous["Id"],"OTHER_CONSUMER_REPLACED")
+    if production:
+        inventory=modules["audit_journal_root_inventory"].handles(LIVE)
+        need(inventory["complete"],"INCOMPLETE_LIVE_DB_HANDLE_INVENTORY")
+        for row in inventory["open_handles"]:
+            cgroup=(Path("/proc")/str(row["pid"])/"cgroup").read_text()
+            need(row["uid"]==1000 and any(v["Id"] in cgroup for v in now.values()),
+                 "UNBOUND_LIVE_DB_HANDLE")
     peers=s.protected_peer_inventory()
     old_peers=old["plan"]["scope"]["protected_peer_before"]
     need(set(peers)==set(old_peers),"NATIVE_PROTECTED_PEER_SET_CHANGED")
@@ -296,11 +317,35 @@ def independent_preflight(I,s,modules,c,candidate,payload,*,production=True,
     original_desired=read_raw(tx,s.PRIVATE/"desired-final.json",0o400)
     need(digest(json.loads(original_desired))==old["plan"]["scope"]["desired_state_after_sha256"],
          "FINAL_DESIRED_STATE_PROOF_CHANGED")
+    rollback_desired=read_raw(tx,s.PRIVATE/"desired-rollback.json",0o400)
+    need(digest(json.loads(rollback_desired))==old["plan"]["scope"]["rollback_desired_state_sha256"],
+         "ROLLBACK_DESIRED_STATE_PROOF_CHANGED")
     live_desired=read_raw(tx,s.DESIRED,0o600)
     need(digest(live_desired) in (
          old["plan"]["scope"]["desired_state_initial_sha256"],
          old["plan"]["scope"]["rollback_desired_state_sha256"]),
          "UNKNOWN_PRODUCTION_DESIRED_STATE")
+    # Original desired_initial and desired_rollback are identical by design.
+    # The unchanged live policy must match the initial stage used by the
+    # native pre-queue revalidation; no desired-policy rewrite is needed.
+    need(digest(live_desired)==old["plan"]["scope"]["desired_state_initial_sha256"],
+         "LIVE_DESIRED_NOT_BOUND_INITIAL_STAGE")
+    desired=json.loads(live_desired)
+    old_slots=(approved_review["bounded_objective_continuation"]["rollback_container_capacity_revalidated"]
+               if existing_bounded_claim else None)
+    retired=False
+    if old_slots and old_slots.get("retirement") and retention.NAME not in retention.inventory(
+            I,desired["rollback_container_prefixes"]):
+        retention.verified_absence(I,s,candidate,ROOT/candidate,digest(approved_review),
+                                   old_slots["retirement"])
+        retired=True
+    slots=verify_recovery_container_capacity(I,s,eng,old,desired,approved=old_slots,
+                                             retirement_verified=retired)
+    if slots["retirement"] is not None:
+        retention.check_archive_destination(s,candidate,resuming=existing_bounded_claim)
+        if not retired:
+            need(shutil.disk_usage(s.ARCHIVE).free>source.st_size*3+RESERVE+retention.ARCHIVE_RESERVE,
+                 "ARCHIVE_RESERVE_INCLUDES_EXACT_HISTORICAL_EXPORT")
     # Determine exact reviewed replacement before identities without reusing
     # the original stopped backup's immutable container IDs.
     source_hashes={name:digest(payload[name]) for name in s.SOURCES}
@@ -320,6 +365,25 @@ def independent_preflight(I,s,modules,c,candidate,payload,*,production=True,
         role:s.digest(eng.planned_configuration(row,candidate)) for role,row in now.items()}
     scope["protected_peer_before"]=peers
     scope["source_dataset_identity"]={"device":source.st_dev,"inode":source.st_ino}
+    scope["source_schema_sha256"]=I.schema_and_sample(s)
+    scope["desired_state_before_sha256"]=digest(live_desired)
+    scope["rollback_container_limit_before"]=21
+    scope["rollback_container_limit_after"]=27
+    scope["rollback_container_reserve"]=6
+    scope["rollback_container_capacity_before"]={
+        "existing_count":len(slots["after_stopped_names"]),
+        "existing_names":slots["after_stopped_names"],
+        "limit_before":21,"limit_after":27,"reserved_slots":6,"cleanup_allowed":False}
+    scope["existing_rollback_containers_preserved"]=slots["retirement"] is None
+    # Only the separately named archived retirement in this new Owner plan is
+    # eligible. The installed migration worker gets no general cleanup authority.
+    scope["rollback_container_cleanup_allowed"]=False
+    scope["installer_sha256"]=digest(payload["tools/audit_journal_install.py"])
+    scope["bootstrap_source_sha256"]={name:digest(payload[name]) for name in I.EXTRA}
+    scope["bootstrap_resume_record"]=str(ROOT/candidate)
+    scope["bootstrap_retry_limit"]=1
+    scope.pop("pre_cutover_context_repair",None)
+    scope.pop("fresh_owner_recovery",None)
     scope["bounded_objective_continuation"]={
         "schema_version":"1.0",
         "action":ACTION,
@@ -332,6 +396,11 @@ def independent_preflight(I,s,modules,c,candidate,payload,*,production=True,
         "prior_exact_recovery_receipts_sha256":prior_hashes,
         "known_safe_source_repairs":changed,
         "rollback_container_capacity_revalidated":slots,
+        "historical_rollback_slot_policy_is_provenance_only":True,
+        "native_drift_refresh_before_queue":True,
+        "native_breaker_only_original_governed_transition":True,
+        "reviewed_slot_reservation_source_sha256":
+            digest(payload["tools/audit_journal_rollback_slot_reservation.py"]),
         "allowed_steps":list(STEPS),
         "allowed_recovery_branches":list(RECOVERY_BRANCHES),
         "one_owner_decision_for_bounded_objective":True,
@@ -365,10 +434,21 @@ def independent_preflight(I,s,modules,c,candidate,payload,*,production=True,
         *(str(s.PRIVATE/name) for name in (
             "producer-before.json","adoption.json","release-plan.json","release-journal.json")),
         str(ROOT/candidate),
-        "systemd://jason-audit-journal-release.service#reset-failed-enable-start",
+        "systemd://jason-audit-journal-release.service#disable-reset-failed-enable-start",
+        *(f"docker://containers/{role}#exact-reviewed-replacement-and-rollback" for role in eng.ROLES),
+        str(s.DESIRED),
+        "systemd://jason-audit-journal-maintenance.timer#enable-after-cutover",
+        str(s.STATE/"production-drift.json")+"#independent-native-evaluator-only",
+        str(s.STATE/"production-control-state.json")+"#existing-governed-lkg-revalidation-only",
+        "systemd://jason-production-drift-watchdog.service#reset-known-failed-oneshot-only",
+        "systemd://jason-openclaw-authority-health.service#verify-current-native-health",
         str(LIVE)+"#approved-journal-and-rollback-only",
         str(s.ARCHIVE/"governed-audit/orchestration"),
     ]
+    if slots["retirement"] is not None:
+        consent["installation_targets"].extend((
+            str(retention.archive_path(s,candidate)),
+            "docker://containers/"+slots["retirement"]["id"]+"#archive-and-retire-exact-stopped-container"))
     consent["policy"]={"candidate_sha":candidate,"rollback_sha":OLD_ROLLBACK}
     return consent,{"old":old,"now":now,"peers":peers,
                     "prior_hashes":prior_hashes,"source":(source.st_dev,source.st_ino),
@@ -382,18 +462,9 @@ def root_dir(path):
 
 def prepare_new_claim(s,candidate,review,pre,stamp):
     old=pre["old"]
-    core_scope=dict(review)
-    core_scope["action"]=s.ACTION
-    core_scope.pop("installation_targets")
-    core_scope.pop("bounded_objective_continuation",None)
-    # The Root executor does not consume the extra objective metadata.
-    # It does consume these new exact producer IDs, source hashes and policy.
-    original_scope=dict(old["plan"]["scope"])
-    for name in ("policy","source_sha256","native_health_sha256","unit_source_sha256",
-                 "producer_before","producer_after_configuration_sha256",
-                 "protected_peer_before","source_dataset_identity"):
-        original_scope[name]=core_scope[name]
     objective_sha=digest(review)
+    original_scope=dict(review)
+    original_scope["action"]=s.ACTION
     original_scope["bounded_objective_grant_sha256"]=objective_sha
     profile=s.public_profile(candidate)
     policy=dict(old["policy"])
@@ -401,17 +472,15 @@ def prepare_new_claim(s,candidate,review,pre,stamp):
                   trusted_source_sha256=original_scope["source_sha256"],
                   profile_sha256=digest(canonical(profile)),
                   public_profile=profile)
-    adoption=dict(old["adoption"])
-    adoption.update(approved_at=stamp,scope_sha256=digest(original_scope),
-                    policy_sha256=digest(canonical(policy)))
-    plan=dict(old["plan"])
-    plan.update(candidate_sha=candidate,scope=original_scope,
-                scope_sha256=digest(original_scope),approved_at=stamp,
-                claimed_at=stamp,
-                oldest_producer_started_at=min(row["State"]["StartedAt"]
-                                              for row in pre["now"].values()),
-                producer_before_sha256=digest(pre["now"]),
-                bounded_objective_consent_sha256=objective_sha)
+    adoption={"action":s.ACTION,"owner_oid":OLD_OWNER,
+              "independently_verified_entra_owner":True,"approved_at":stamp,
+              "scope_sha256":digest(original_scope),"policy_sha256":digest(canonical(policy)),
+              "maintenance_policy_adopted":True,"predecessor_scope_sha256":OLD_SCOPE,
+              "bounded_objective_consent_sha256":objective_sha}
+    plan={**adoption,"candidate_sha":candidate,"scope":original_scope,
+          "claimed_at":stamp,"oldest_producer_started_at":min(
+              row["State"]["StartedAt"] for row in pre["now"].values()),
+          "producer_before_sha256":digest(pre["now"])}
     journal={"steps":{},"scope_sha256":digest(original_scope),
              "started_at":stamp,
              "bounded_objective_consent_sha256":objective_sha,
@@ -423,6 +492,18 @@ def prepare_new_claim(s,candidate,review,pre,stamp):
          and plan["producer_before_sha256"]==digest(pre["now"]),
          "NEW_RELEASE_PLAN_NOT_INTERNALLY_CONSISTENT")
     return profile,policy,adoption,plan,journal
+
+def frozen_producer_snapshot(s,eng,review,rows):
+    need(isinstance(rows,dict) and set(rows)==set(eng.ROLES),"FROZEN_PRODUCER_ROLE_SET")
+    for role,row in rows.items():
+        need(review["producer_before"][role]=={
+            "id":row["Id"],"image":row["Image"],
+            "configuration_sha256":s.digest(eng.exact_original_configuration(row))}
+             and review["producer_after_configuration_sha256"][role]==
+                 s.digest(eng.planned_configuration(row,review["policy"]["candidate_sha"])),
+             "FROZEN_PRODUCER_CONFIGURATION_CHANGED")
+    return rows
+
 
 def bounded_transaction_targets(s):
     """Only exact reviewed Root-file targets may occur in a resumable record."""
@@ -499,6 +580,13 @@ def install_reviewed_claim(I,s,candidate,payload,review,current,stamp,transactio
     profile,policy,adoption,plan,journal=prepare_new_claim(
         s,candidate,review,current,stamp)
     try:
+        # Do not leave an automatic boot path pointing at partially updated
+        # private records. This disable is included in the same Owner scope.
+        I.command(["/usr/bin/systemctl","disable","jason-audit-journal-release.service"])
+        slots=review["bounded_objective_continuation"]["rollback_container_capacity_revalidated"]
+        retention.apply(I,s,candidate,transaction.path.parent,digest(review),slots)
+        need(shutil.disk_usage(s.ARCHIVE).free>LIVE.stat().st_size*3+RESERVE,
+             "ARCHIVE_RESERVE_AFTER_EXACT_RETIREMENT")
         transaction.replace(s.BASE/"trusted"/MATCHER,payload[MATCHER],0o444)
         transaction.replace(s.PROFILE,canonical(profile),0o444)
         transaction.replace(s.CONTROL/"profile.json",canonical(profile),0o444)
@@ -508,9 +596,27 @@ def install_reviewed_claim(I,s,candidate,payload,review,current,stamp,transactio
         transaction.replace(s.PRIVATE/"adoption.json",canonical(adoption),0o400)
         transaction.replace(s.PRIVATE/"release-plan.json",canonical(plan),0o400)
         transaction.replace(s.PRIVATE/"release-journal.json",canonical(journal),0o400)
+        # The native transition worker rejects dirty evidence before it can
+        # refresh an aged PASS. Clear only the actual stopped failed service,
+        # then obtain a genuine independent native PASS under the existing
+        # transaction lock; never write a fabricated PASS or close the breaker.
+        release=systemd_show(I,"jason-audit-journal-release.service")
+        need(release.get("MainPID")=="0" and release.get("ActiveState") in ("failed","inactive"),
+             "RELEASE_NOT_QUIESCED_BEFORE_NATIVE_READMISSION")
+        if release["ActiveState"]=="failed":
+            I.command(["/usr/bin/systemctl","reset-failed","jason-audit-journal-release.service"])
+        watchdog=systemd_show(I,"jason-production-drift-watchdog.service")
+        if watchdog.get("ActiveState")=="failed":
+            need(watchdog.get("MainPID")=="0","NATIVE_WATCHDOG_STILL_RUNNING")
+            I.command(["/usr/bin/systemctl","reset-failed","jason-production-drift-watchdog.service"])
+        # Reuse the reviewed, existing pre-cutover admission mechanism. It
+        # performs fast health, genuine drift refresh, and the original
+        # verified-LKG Root transition; the open breaker is never bypassed.
+        from tools.audit_journal_pre_cutover_repair import revalidate_before_queue
+        revalidate_before_queue(I,s,review)
+        print("BOUNDED_JOURNAL_INDEPENDENT_NATIVE_DRIFT_REFRESH=PASS",flush=True)
         # Durable one-use queue BEFORE any executable systemd activation path.
         transaction.queued=True
-        I.command(["/usr/bin/systemctl","reset-failed","jason-audit-journal-release.service"])
         I.command(["/usr/bin/systemctl","enable","jason-audit-journal-release.service"])
         I.command(["/usr/bin/systemctl","--no-block","start","jason-audit-journal-release.service"])
         print("BOUNDED_JOURNAL_OBJECTIVE_RELEASE=QUEUED",flush=True)
@@ -526,20 +632,20 @@ def execute(I,s,modules,c,auth,candidate,payload):
     need(os.geteuid()==0,"ROOT_ISOLATION_REQUIRED")
     with auth["locks"]():
         review,prior=independent_preflight(I,s,modules,c,candidate,payload)
+        # Build every exact new binding before involving the Owner.
+        frozen_producer_snapshot(s,modules["audit_journal_container_release"],review,prior["now"])
+        prepare_new_claim(s,candidate,review,prior,datetime.now(timezone.utc).isoformat())
+        slots=review["bounded_objective_continuation"]["rollback_container_capacity_revalidated"]
+        print("NATIVE_ROLLBACK_CONTAINER_COUNT="+str(slots["count"]),flush=True)
+        print("NATIVE_ROLLBACK_RESERVED_AFTER="+str(slots["new_release_slots_after"]),flush=True)
+        if slots["retirement"] is not None:
+            print("EXACT_HISTORICAL_ROLLBACK_TO_ARCHIVE_AND_RETIRE="+slots["retirement"]["name"],flush=True)
         print("BOUNDED_JOURNAL_FULL_OBJECTIVE_PREFLIGHT=PASS",flush=True)
         print("BOUNDED_OBJECTIVE_ACTION="+ACTION,flush=True)
         print("BOUNDED_OBJECTIVE_SCOPE_SHA256="+digest(review),flush=True)
         print("LAST_OWNER_APPROVAL_NOT_REPLAYED=true",flush=True)
         actor=auth["owner"](review)
         need(actor==OLD_OWNER,"INDEPENDENT_LICENSED_OWNER_REQUIRED")
-        reviewed_again,current=independent_preflight(I,s,modules,c,candidate,payload)
-        need(reviewed_again==review and
-             prior["source"]==current["source"] and
-             prior["prior_hashes"]==current["prior_hashes"] and
-             prior["desired_hash"]==current["desired_hash"] and
-             {role:item["Id"] for role,item in prior["now"].items()}==
-             {role:item["Id"] for role,item in current["now"].items()},
-             "HOST_CHANGED_DURING_OWNER_OBJECTIVE_DECISION")
         root_dir(ROOT.parent)
         if not ROOT.exists():
             ROOT.mkdir(mode=0o700);os.chown(ROOT,0,0);ROOT.chmod(0o700)
@@ -549,6 +655,11 @@ def execute(I,s,modules,c,auth,candidate,payload):
         folder.mkdir(mode=0o700);os.chown(folder,0,0);folder.chmod(0o700)
         txlib.sync(ROOT)
         stamp=datetime.now(timezone.utc).isoformat()
+        # Preserve the authentic exact decision before any transient second
+        # preflight. The same bounded grant can be resumed without another
+        # Owner challenge, but never applied to a changed scope.
+        frozen=frozen_producer_snapshot(s,modules["audit_journal_container_release"],
+                                        review,prior["now"])
         record={
             "schema_version":"1.0","action":ACTION,
             "candidate_sha":candidate,"rollback_sha":OLD_ROLLBACK,
@@ -561,11 +672,22 @@ def execute(I,s,modules,c,auth,candidate,payload):
                 datetime.fromisoformat(stamp).timestamp()+28800,
                 timezone.utc).isoformat(),
             "previous_exact_grants_reused":False,
+            "producer_before_snapshot_sha256":digest(frozen),
             "scope":review,
         }
+        txlib.atomic(folder/"producer-before.json",canonical(frozen),0o400)
         txlib.atomic(folder/"authorization.json",canonical(record),0o400)
         transaction=txlib.InstallTransaction(folder/"transaction.json",digest(review))
-        install_reviewed_claim(I,s,candidate,payload,review,current,stamp,transaction)
+        reviewed_again,current=independent_preflight(
+            I,s,modules,c,candidate,payload,existing_bounded_claim=True,approved_review=review)
+        need(reviewed_again==review and
+             prior["source"]==current["source"] and
+             prior["prior_hashes"]==current["prior_hashes"] and
+             prior["desired_hash"]==current["desired_hash"] and
+             {role:item["Id"] for role,item in prior["now"].items()}==
+             {role:item["Id"] for role,item in current["now"].items()},
+             "HOST_CHANGED_DURING_OWNER_OBJECTIVE_DECISION")
+        install_reviewed_claim(I,s,candidate,payload,review,{**current,"now":frozen},stamp,transaction)
 
 
 def resume_prequeue(I,s,modules,c,auth,candidate,payload):
@@ -596,14 +718,16 @@ def resume_prequeue(I,s,modules,c,auth,candidate,payload):
         need(digest(payload["tools/audit_journal_objective_recovery.py"])==
              approved["bounded_objective_continuation"]["reviewed_objective_recovery_sha256"]
              and digest(payload["tools/audit_journal_install.py"])==
-             approved["bounded_objective_continuation"]["reviewed_objective_installer_sha256"],
+             approved["bounded_objective_continuation"]["reviewed_objective_installer_sha256"] and
+             digest(payload["tools/audit_journal_rollback_slot_reservation.py"])==
+             approved["bounded_objective_continuation"]["reviewed_slot_reservation_source_sha256"],
              "REVIEWED_BOUNDED_INSTALLER_SOURCE_CHANGED")
         I.installation_parent_custody(c)
         for name,expected in s.PROTECTED.items():
             need(digest(I.read(Path(name)))==expected,
                  "REVIEWED_PROTECTED_BASELINE_CHANGED")
         release=systemd_show(I,"jason-audit-journal-release.service")
-        need(release.get("ActiveState")=="failed" and
+        need(release.get("ActiveState") in ("failed","inactive") and
              release.get("MainPID")=="0","RELEASE_MAY_HAVE_BEEN_QUEUED")
         # Consume bounded prequeue repair before modifying a Root file. This
         # is ONE finite technical branch of the original authenticated grant.
@@ -626,10 +750,43 @@ def resume_prequeue(I,s,modules,c,auth,candidate,payload):
         # exact Owner consent after the protected rollback. This check is
         # independent of whether the old attempt was interrupted or undone.
         review,current=independent_preflight(
-            I,s,modules,c,candidate,payload,existing_bounded_claim=True)
+            I,s,modules,c,candidate,payload,existing_bounded_claim=True,approved_review=approved)
         need(review==approved and
              digest(review)==grant["scope_sha256"],
              "RECOVERED_ROOT_HOST_NO_LONGER_WITHIN_ONE_OWNER_PLAN")
+        frozen=read(tx,child/"producer-before.json",0o400)
+        need(digest(frozen)==grant.get("producer_before_snapshot_sha256"),
+             "FROZEN_PRODUCER_SNAPSHOT_CHANGED")
+        frozen_producer_snapshot(s,modules["audit_journal_container_release"],review,frozen)
+        # Current live configuration and identities were independently checked
+        # above. Reuse exact bytes first bound to the authenticated decision.
+        current={**current,"now":frozen}
         stamp=grant["decided_at"]
         install_reviewed_claim(I,s,candidate,payload,review,current,stamp,journal_tx)
         print("BOUNDED_JOURNAL_PREQUEUE_RESUME_NO_NEW_OWNER=PASS",flush=True)
+
+
+def execute_with_continuation(I,s,modules,c,auth,candidate,payload):
+    """At most one approved prequeue reconciliation, never a new Owner prompt.
+
+    If authorization has already been durably recorded, this command either
+    safely continues that exact plan or denies. An ambiguous queued release
+    is not restarted. A pre-Owner failure is returned unchanged.
+    """
+    folder=ROOT/candidate
+    if os.path.lexists(folder):
+        return resume_prequeue(I,s,modules,c,auth,candidate,payload)
+    try:
+        return execute(I,s,modules,c,auth,candidate,payload)
+    except (OSError,TimeoutError,subprocess.SubprocessError,RuntimeError) as error:
+        if not (folder/"authorization.json").is_file() or not (folder/"transaction.json").is_file():
+            raise
+        tx=modules["audit_journal_install_transaction"]
+        state=read(tx,folder/"transaction.json",0o600)
+        if state.get("outcome") not in ("installing","rolling_back","rolled_back"):
+            raise
+        # Original execution's host locks have been released. The exact
+        # continuation reacquires them, validates the immutable grant and
+        # records its one-use claim before any approved mutation.
+        print("BOUNDED_PREQUEUE_SAME_OWNER_RECONCILIATION=REQUESTED",flush=True)
+        return resume_prequeue(I,s,modules,c,auth,candidate,payload)
