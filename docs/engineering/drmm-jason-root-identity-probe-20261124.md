@@ -33,3 +33,7 @@ The activation variable `JASON_DATTO_JASON_ROOT_PROBE_DEVICE_UID` is **empty by 
 ## Test-ledger isolation finding
 
 During the first host-only harness runs, the unconfigured default path `/var/lib/jason/openclaw/governed-execution.sqlite3` was created. Read-only inspection on 2026-11-24 identified exactly two `automation.component.execute` **reserved** rows with five-minute expiries, and no consumed/provider-executed rows. Preserve those historical test records; do not delete or treat them as an Owner approval. No live Datto dispatch was made. The root probe tests and CI now pin approval storage to a separate disposable test ledger, preventing further host default-path writes.
+
+## Concurrent release overlap review
+
+PR #2700 changes the procurement workflow approval handler in the shared MCP `server.py` module, while this candidate changes only Datto component selection and exact root-probe canonicalization. Reviewed against the live PR source on 2026-11-24: the touched function boundaries are distinct, with no shared new symbols or override. Integration coordination: #2700. Reconcile the two branches if either lands first; the production release still requires independent exact approval. Dedicated root-probe GitHub CI and the Datto RMM/MCP discovery checks passed; the initial repository-wide hygiene failure used the original immutable PR-event payload before coordination was added to the PR body, so a new event must be generated to check the updated metadata.
