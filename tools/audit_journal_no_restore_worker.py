@@ -154,7 +154,30 @@ def archive_readback(c,archive,events):
     return out
 
 
-def ensure_immutable_worker(grant):
+def validate_execution_window(grant,operation,*,now=None):
+    """New Root recovery expires; accepted daily maintenance persists only with native proof."""
+    now=now or datetime.now(timezone.utc)
+    approved=datetime.fromisoformat(grant['approved_at'].replace('Z','+00:00'))
+    need(approved.tzinfo is not None,'FORWARD_OWNER_APPROVAL_TIMESTAMP_REQUIRED')
+    age=(now-approved).total_seconds()
+    need(age>=0,'FORWARD_OWNER_APPROVAL_FROM_FUTURE')
+    if age<=28800:return
+    need(operation=='maintain','FORWARD_EXPIRED_ONE_USE_ROOT_GRANT')
+    # Continuous maintenance is a separate, narrower accepted-state authority,
+    # not an unlimited continuation of the one-shot recovery action.
+    from tools import audit_journal_release_scope as scope
+    accepted=read_control(scope.CONTROL/'forward-release-status.json',0,0o444)
+    rollover=read_control(ROLLOVER_RECEIPT,0,0o400)
+    need(accepted.get('phase')=='accepted' and
+         accepted.get('scope_sha256')==grant['scope_sha256'] and
+         accepted.get('no_legacy_rebuild') is True and
+         accepted.get('full_health')=='pass' and accepted.get('drift')=='pass' and
+         rollover.get('scope_sha256')==grant['scope_sha256'] and
+         rollover.get('completed') is True and rollover.get('native_verified') is True,
+         'FORWARD_DAILY_MAINTENANCE_NOT_ACCEPTED')
+
+
+def ensure_immutable_worker(grant,operation):
     need(os.geteuid()==0 and sys.flags.isolated==1 and Path(__file__).resolve()==SOURCE,
          'FORWARD_INSTALLED_ROOT_ONLY')
     meta=SOURCE.lstat()
@@ -172,6 +195,7 @@ def ensure_immutable_worker(grant):
          'FORWARD_OWNER_SCOPE_ACTION')
     need(grant['scope']['source_sha256']==grant['source_sha256'],
          'FORWARD_OWNER_SCOPE_SOURCE')
+    validate_execution_window(grant,operation)
 
 
 def verify_and_reclaim(c,record,grant):
@@ -255,6 +279,38 @@ def verify_and_reclaim(c,record,grant):
 
 def recover_forward(c,grant):
     """Retain reservations and original evidence; no provider replay."""
+    if ADMISSION_RECEIPT.exists():
+        # A previous pass may already have opened admission and rotated/sealed
+        # new segments. Reconcile that exact same approved objective instead
+        # of requiring initial epoch/generation or replaying provider actions.
+        scope_current(c,grant,verify_reservations=False)
+        receipt=read_control(ADMISSION_RECEIPT,c.p.custody_uid,0o400)
+        need(receipt.get('scope_sha256')==grant['scope_sha256']
+             and receipt.get('status')=='admissions_restored'
+             and receipt.get('unknown_reservations_retained')==len(grant['initial_reservations'])
+             and receipt.get('no_legacy_rebuild') is True,
+             'FORWARD_PREVIOUS_ADMISSION_RECEIPT_CHANGED')
+        original=c.p.catalog()['segments'][0]
+        # The original's exact reclaim receipt is required even when a later
+        # maintenance cycle has changed the archive generation and epoch.
+        image=c.p.pending/original['proof']['source_before_image']
+        need(not image.exists(),'FORWARD_PREVIOUS_RECLAIM_REAPPEARED')
+        reclaimed=read_control(RECEIPTS/('forward-reclaim-'+original['id']+'.json'),
+                               c.p.custody_uid,0o400)
+        need(reclaimed.get('status')=='reclaimed'
+             and reclaimed.get('scope_sha256')==grant['scope_sha256']
+             and reclaimed.get('archive_sha256')==original['proof']['file_sha256'],
+             'FORWARD_PREVIOUS_RECLAIM_RECEIPT_CHANGED')
+        archive=exact_sealed(c.p,original,initial=grant['original_archive'])
+        archive_readback(c,archive,original['proof']['events'])
+        import sqlite3
+        with sqlite3.connect(c.p.active.as_uri()+'?mode=ro',uri=True,timeout=3) as db:
+            active_barriers=db.execute("SELECT name FROM sqlite_master WHERE type='trigger' "
+                 "AND name LIKE 'audit_journal_maintenance_%'").fetchall()
+        need(not active_barriers,'FORWARD_PREVIOUS_BARRIER_REAPPEARED')
+        return {'status':'admissions_restored','reclaim':{'status':'already_reclaimed'},
+                'unknown_results_preserved':len(grant['initial_reservations']),
+                'recovered_prior_bounded_attempt':True,'no_legacy_rebuild':True}
     scope_current(c,grant)
     need(not c.intent.exists() and not (c.private/'rollback-mounted.json').exists(),
          'FORWARD_UNRESOLVED_TRANSITION')
@@ -435,11 +491,12 @@ def finish_initial_native_setup(c,grant):
          'FORWARD_PREVIOUS_FINAL_DESIRED_SCOPE')
     desired=read_control(scope.DESIRED,0,0o600)
     initial=old_plan['scope']['desired_state_initial_sha256']
-    need(sha256(old.canonical(desired)).hexdigest() in (initial,final_digest),
+    amended=reviewed_forward_desired(old_final)
+    need(sha256(old.canonical(desired)).hexdigest() in
+             (initial,final_digest,sha256(old.canonical(amended)).hexdigest()),
          'FORWARD_DESIRED_POLICY_UNEXPECTED')
     # Keep every old final policy field unchanged. The only addition is the
     # separately Owner-authorized one-shot recovery unit's allow-list entry.
-    amended=reviewed_forward_desired(old_final)
     need(sha256(old.canonical(amended)).hexdigest()==
          grant['scope']['immutable_evidence']['new_desired_sha256'],
          'FORWARD_NEW_DESIRED_POLICY_NOT_OWNER_BOUND')
@@ -455,7 +512,7 @@ def root_main():
     parser.add_argument('--operation',choices=tuple(sorted(NO_RESTORE_OPS)),required=True)
     args=parser.parse_args()
     grant=read_control(GRANT,0,0o400)
-    ensure_immutable_worker(grant)
+    ensure_immutable_worker(grant,args.operation)
     c=old.root_controller()
     if args.operation=='read-status':
         result={'status':c.status(),'no_legacy_rebuild':True}

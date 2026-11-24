@@ -88,6 +88,8 @@ def test_new_scope_health_fixes_only_one_shm_file_not_full_archive():
     assert 'AmbientCapabilities=CAP_SETUID' in units[mod.RELEASE_UNIT].decode()
     assert 'CAP_SYS_ADMIN' not in units[mod.RELEASE_UNIT].decode()
     assert 'CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SETUID CAP_SETGID CAP_SYS_PTRACE CAP_KILL' in units[mod.RELEASE_UNIT].decode()
+    assert 'StartLimitIntervalSec=1h\nStartLimitBurst=3\n\n[Service]' in units[mod.RELEASE_UNIT].decode()
+    assert 'Restart=on-failure\nRestartSec=120' in units[mod.RELEASE_UNIT].decode()
     assert 'ExecStart=' in units[mod.MAINTENANCE_DROPIN].decode()
     assert 'legacy.prepared.sqlite3' not in str(units)
 

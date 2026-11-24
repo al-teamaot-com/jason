@@ -125,6 +125,8 @@ After=local-fs.target jason-audit-journal-data-recovery.service
 Requires=jason-audit-journal-data-recovery.service
 RequiresMountsFor=/srv/jason/archive /var/lib/jason/governed-ticket-shared
 ConditionPathExists=/var/lib/jason-audit-journal/private/no-restore-grant.json
+StartLimitIntervalSec=1h
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
@@ -132,6 +134,8 @@ User=root
 Group=root
 WorkingDirectory=/usr/local/lib/jason/audit-journal/trusted
 '''+ 'ExecStart='+execute+' --operation recover\n'+'''TimeoutStartSec=8h
+Restart=on-failure
+RestartSec=120
 Nice=19
 IOSchedulingClass=idle
 MemoryMax=768M
@@ -234,6 +238,7 @@ def preflight(I,s,candidate,payload):
            'archive_history_delete_allowed':False,
            'redundant_local_before_image_reclaim_allowed':True,
            'one_use_owner_authentication_required':True,
+           'same_exact_grant_bounded_idempotent_recovery_retries':2,
            'source_sha256':evidence['source_sha256'],
            'installed_targets':[str(SOURCE),str(GRANT),str(RECORD),
                                 *(str(path) for path in proposed_units(s))],

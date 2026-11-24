@@ -1,6 +1,6 @@
 """Disposable, non-root, no-provider tests of forward-only journal recovery."""
 from contextlib import contextmanager
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
@@ -310,3 +310,68 @@ def test_owner_bound_desired_state_can_add_only_exact_one_shot_unit():
     assert initial==copy
     with pytest.raises(JournalUnavailable,match='EXACT_PREVIOUS_FINAL_DESIRED_POLICY'):
         fwd.reviewed_forward_desired(final)
+
+
+def test_interrupted_exact_recovery_resumes_after_new_segment_epoch(specimen):
+    c,grant,archive,source=specimen
+    assert fwd.recover_forward(c,grant)['status']=='admissions_restored'
+    assert fwd.maintenance_step(c,grant,force_initial=True)['status']=='rotated'
+    assert c.p.catalog()['epoch']!='sealed-initial'
+    resumed=fwd.recover_forward(c,grant)
+    assert resumed['status']=='admissions_restored'
+    assert resumed['recovered_prior_bounded_attempt'] is True
+    assert resumed['unknown_results_preserved']==3
+    assert not source.exists() and archive.exists()
+    assert c.requests.count('barrier')==1
+    assert 'rebuild' not in c.requests and 'legacy_restore_proof' not in c.requests
+
+
+def test_interrupted_recovery_rejects_forged_admission_receipt(specimen):
+    c,grant,archive,source=specimen
+    fwd.recover_forward(c,grant)
+    path=fwd.ADMISSION_RECEIPT
+    row=json.loads(path.read_text());row['scope_sha256']='0'*64
+    c._json(path,row,0o400)
+    with pytest.raises(JournalUnavailable,match='PREVIOUS_ADMISSION_RECEIPT_CHANGED'):
+        fwd.recover_forward(c,grant)
+    assert archive.exists()
+
+
+def test_interrupted_recovery_rejects_reintroduced_admission_barrier(specimen):
+    c,grant,archive,source=specimen
+    fwd.recover_forward(c,grant)
+    from orchestrator.journal_sql import admission_barrier
+    admission_barrier(c.p.active,True)
+    with pytest.raises(JournalUnavailable,match='PREVIOUS_BARRIER_REAPPEARED'):
+        fwd.recover_forward(c,grant)
+    assert archive.exists()
+
+
+def test_original_one_use_grant_expires_for_recovery_and_cannot_replay():
+    now=datetime.now(timezone.utc)
+    grant={'approved_at':now.isoformat(),'scope_sha256':'f'*64}
+    fwd.validate_execution_window(grant,'recover',now=now)
+    fwd.validate_execution_window(grant,'recover',now=now+timedelta(hours=7))
+    with pytest.raises(JournalUnavailable,match='EXPIRED_ONE_USE_ROOT_GRANT'):
+        fwd.validate_execution_window(grant,'recover',now=now+timedelta(hours=9))
+    with pytest.raises(JournalUnavailable,match='OWNER_APPROVAL_FROM_FUTURE'):
+        fwd.validate_execution_window(grant,'recover',now=now-timedelta(minutes=1))
+
+
+def test_post_expiry_maintenance_requires_exact_accepted_health_and_rollover(monkeypatch):
+    now=datetime.now(timezone.utc)
+    grant={'approved_at':(now-timedelta(days=1)).isoformat(),'scope_sha256':'f'*64}
+    native={'phase':'accepted','scope_sha256':'f'*64,'no_legacy_rebuild':True,
+            'full_health':'pass','drift':'pass'}
+    rollover={'scope_sha256':'f'*64,'completed':True,'native_verified':True}
+    monkeypatch.setattr(fwd,'read_control',lambda path,uid,mode: native if str(path).endswith('forward-release-status.json') else rollover)
+    fwd.validate_execution_window(grant,'maintain',now=now)
+    with pytest.raises(JournalUnavailable,match='EXPIRED_ONE_USE_ROOT_GRANT'):
+        fwd.validate_execution_window(grant,'recover',now=now)
+    rollover['native_verified']=False
+    with pytest.raises(JournalUnavailable,match='DAILY_MAINTENANCE_NOT_ACCEPTED'):
+        fwd.validate_execution_window(grant,'maintain',now=now)
+    rollover['native_verified']=True
+    native['scope_sha256']='0'*64
+    with pytest.raises(JournalUnavailable,match='DAILY_MAINTENANCE_NOT_ACCEPTED'):
+        fwd.validate_execution_window(grant,'maintain',now=now)
