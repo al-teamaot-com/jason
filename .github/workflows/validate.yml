@@ -236,7 +236,7 @@ jobs:
       - name: Test owner-approved development recovery and legacy handoff
         env:
           PYTHONPATH: tools
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tools/tests/test_owner_approved_development_worker.py
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tools/tests/test_owner_approved_development_worker.py tools/tests/test_parallel_development_admission.py tools/tests/test_parallel_development_claim_integration.py tools/tests/test_parallel_development_board.py tools/tests/test_parallel_development_install.py
       - name: Test PMV3 durable work engine and scheduler
         env:
           PYTHONPATH: tools
