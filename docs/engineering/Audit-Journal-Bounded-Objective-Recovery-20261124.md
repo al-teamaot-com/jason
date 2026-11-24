@@ -60,3 +60,8 @@ No source merge or Root `QUEUED` result constitutes completion. The Root release
 **User boundary:** This chat's unprivileged Remote Desktop Commander cannot invoke Root or synthesize Entra Owner identity. When protected Main CI, source, Root preflight and full plan are ready, present at most **one exact Root invocation with one authenticated full-plan approval**. Do not present multiple diagnostic sudo instructions. Future material-out-of-scope approval is a new decision boundary, not a reason to replay past approvals.
 
 Tracking: #2680, #1440; past engineering #2714–#2718. No production activation performed by this document.
+
+
+## Rollback-container capacity verified before Owner interaction
+
+The live pre-repair Docker inventory has **20 exited role-specific rollback containers** and one additional Created dormant planned audit rollback container. The reviewed original release requires a maximum of **21 pre-release exited backup containers** and six additional slots (three planned and three exact recovery roles). The bounded Root preflight now independently runs the exact stopped-container Docker inventory, checks names/uniqueness, matches original scope's reserved-slot contract, and denies if current role-specific exited rollback count exceeds 21 or cannot reserve all six required new slots. Its count, names and dynamic reserve are recorded in the authenticated objective scope and rechecked immediately after Owner authorization. The Created dormant planned container is preserved, not used as spare space or deleted. Neither this capacity proof nor the Owner plan permits deleting old stopped backup containers.

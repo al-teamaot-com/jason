@@ -393,3 +393,32 @@ def test_resume_keeps_original_decision_and_never_calls_owner(monkeypatch,tmp_pa
                           {"audit_journal_install_transaction":FakeTxModule},
                           None,auth,CANDIDATE,payload)
     assert effects==["prequeue_claim","transaction_rollback","queued_from_same_plan"]
+
+
+def test_stopped_rollback_slots_checked_before_full_journal_migration():
+    old,_,_=synthetic()
+    old["plan"]["scope"]["rollback_container_capacity_before"]={
+        "existing_count":2,
+        "existing_names":["jason-runtime-rollback-old","jason-mcp-pilot-rollback-old"],
+        "limit_before":s.ROLLBACK_LIMIT_BEFORE,
+        "reserved_slots":s.ROLLBACK_CONTAINER_RESERVE,
+    }
+    class I:
+        values=[
+            "jason-runtime-rollback-old",
+            "jason-mcp-pilot-rollback-old",
+            "jason-pmv4-ticket-core-rollback-audit-before-20b32548402d",
+        ]
+        @classmethod
+        def command(cls,argv):
+            assert argv[:2]==["/usr/bin/docker","ps"]
+            return "\n".join(cls.values)
+    got=r.verify_recovery_container_capacity(I,s,eng,old)
+    assert got["count"]==3 and got["new_release_slots_after"]==9
+    assert got["reserve_for_new_release"]==6
+    I.values=["jason-runtime-rollback-%02d"%x for x in range(22)]
+    with pytest.raises(PermissionError,match="INSUFFICIENT_RECOVERY_CONTAINER_SLOTS"):
+        r.verify_recovery_container_capacity(I,s,eng,old)
+    I.values=["jason-runtime-rollback-same"]*2
+    with pytest.raises(PermissionError,match="MALFORMED_STOPPED_CONTAINER_INVENTORY"):
+        r.verify_recovery_container_capacity(I,s,eng,old)

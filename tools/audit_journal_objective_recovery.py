@@ -196,6 +196,34 @@ def verify_known_native_incident(control,drift,*,now=None):
             "drift_observed_at":drift["observed_at"]}
 
 
+def verify_recovery_container_capacity(I,s,eng,previous):
+    """Match the installed release's exact exited rollback-slot semantics."""
+    previous_capacity=previous["plan"]["scope"].get("rollback_container_capacity_before",{})
+    need(isinstance(previous_capacity,dict) and
+         previous_capacity.get("reserved_slots")==s.ROLLBACK_CONTAINER_RESERVE and
+         previous_capacity.get("limit_before")==s.ROLLBACK_LIMIT_BEFORE,
+         "PREVIOUS_ROLLBACK_RESERVATION_CHANGED")
+    names=I.command(["/usr/bin/docker","ps","-a","--filter","status=exited",
+                     "--format","{{.Names}}"]).splitlines()
+    import re
+    need(len(names)==len(set(names)) and all(
+         re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*",n) for n in names),
+         "MALFORMED_STOPPED_CONTAINER_INVENTORY")
+    prefixes=tuple(role+"-rollback" for role in eng.ROLES)
+    stopped=sorted(name for name in names if name.startswith(prefixes))
+    need(len(stopped)<=s.ROLLBACK_LIMIT_BEFORE and
+         len(stopped)+s.ROLLBACK_CONTAINER_RESERVE<=
+         s.ROLLBACK_LIMIT_BEFORE+s.ROLLBACK_CONTAINER_RESERVE,
+         "INSUFFICIENT_RECOVERY_CONTAINER_SLOTS")
+    need(previous_capacity.get("existing_count")==len(
+         previous_capacity.get("existing_names",[])),
+         "PREVIOUS_STOPPED_INVENTORY_CHANGED")
+    return {"count":len(stopped),"stopped_names":stopped,
+            "limit_before":s.ROLLBACK_LIMIT_BEFORE,
+            "reserve_for_new_release":s.ROLLBACK_CONTAINER_RESERVE,
+            "new_release_slots_after":len(stopped)+s.ROLLBACK_CONTAINER_RESERVE}
+
+
 def independent_preflight(I,s,modules,c,candidate,payload,*,production=True,
                           existing_bounded_claim=False):
     need(os.geteuid()==0 or not production,"ROOT_ONLY")
@@ -221,6 +249,7 @@ def independent_preflight(I,s,modules,c,candidate,payload,*,production=True,
         drift=read(tx,s.STATE/"production-drift.json",0o600)
         verify_known_native_incident(control,drift)
     changed=validate_reviewed_trust(s,payload,tx)
+    slots=verify_recovery_container_capacity(I,s,eng,old)
     source=LIVE.lstat()
     need(stat.S_ISREG(source.st_mode) and not LIVE.is_symlink()
          and source.st_uid==source.st_gid==1000 and
@@ -296,6 +325,7 @@ def independent_preflight(I,s,modules,c,candidate,payload,*,production=True,
         "original_trusted_policy_sha256":digest(old["policy"]),
         "prior_exact_recovery_receipts_sha256":prior_hashes,
         "known_safe_source_repairs":changed,
+        "rollback_container_capacity_revalidated":slots,
         "allowed_steps":list(STEPS),
         "allowed_recovery_branches":list(RECOVERY_BRANCHES),
         "one_owner_decision_for_bounded_objective":True,
