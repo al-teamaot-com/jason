@@ -77,10 +77,22 @@ DATTO_AD_HOC_LINUX_SHELL_NAME = (
     "Run Ad Hoc Command (Shell) [MAC] [LIN]"
 )
 
+# These three owner-authorized operational components are never eligible for
+# standing-safe promotion, regardless of durable registry or server config.
+# A technician must approve every concrete execution; component-input safety
+# contracts are independent and never authorize an unattended repair.
+DATTO_PER_RUN_ACTION_IDENTITIES = (
+    ("479d1a75-8f98-42b7-b6fb-408242bcc17e", "Change Hostname [WIN]"),
+    ("f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967", "Datto Endpoint Backup Agent v2 [WIN]"),
+    ("9c30dab8-b76c-417d-a264-b3ca91995179",
+     "Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024"),
+)
+
 _FORCED_PER_RUN_COMPONENT_UIDS = frozenset(
     {
         DATTO_AD_HOC_POWERSHELL_UID,
         DATTO_AD_HOC_LINUX_SHELL_UID,
+        *(identity[0] for identity in DATTO_PER_RUN_ACTION_IDENTITIES),
     }
 )
 
@@ -88,6 +100,7 @@ _FORCED_PER_RUN_COMPONENT_NAMES = frozenset(
     {
         DATTO_AD_HOC_POWERSHELL_NAME.casefold(),
         DATTO_AD_HOC_LINUX_SHELL_NAME.casefold(),
+        *(identity[1].casefold() for identity in DATTO_PER_RUN_ACTION_IDENTITIES),
     }
 )
 

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Mapping, Protocol
+
+from .source_component_contracts import resolve_source_component_contract
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,7 +21,7 @@ class ComponentVariablePolicy:
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("component variable name must be non-empty")
-        if self.variable_type not in {"string", "boolean", "date", "selection"}:
+        if self.variable_type not in {"string", "boolean", "date", "selection", "hostname", "search_term"}:
             raise ValueError("unsupported component variable type")
         if self.maximum_length < 1 or self.maximum_length > 20_000:
             raise ValueError("component variable maximum length must be 1..20000")
@@ -151,6 +154,15 @@ class DattoRmmComponentExecutionPolicy:
         cls,
         entry: ComponentAllowlistEntry,
     ) -> tuple[ComponentVariablePolicy, ...]:
+        # Source-owned exact-identity contracts have precedence over runtime
+        # policy fields; a runtime allowlist cannot expand their safe inputs.
+        source_contract = resolve_source_component_contract(
+            entry.provider_component_uid, entry.display_name
+        )
+        if source_contract is not None:
+            return tuple(
+                ComponentVariablePolicy(**policy) for policy in source_contract.variables
+            )
         if entry.variable_policies:
             return entry.variable_policies
 
@@ -382,6 +394,27 @@ class DattoRmmComponentExecutionPolicy:
                 date.fromisoformat(normalized)
             except ValueError as exc:
                 raise ValueError("date component variable must use YYYY-MM-DD") from exc
+        elif policy.variable_type == "hostname":
+            if not isinstance(value, str):
+                raise ValueError("hostname component variable must be text")
+            normalized = value.strip()
+            if (
+                len(normalized) > 15
+                or not re.fullmatch(
+                    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,13}[A-Za-z0-9])?",
+                    normalized,
+                )
+                or normalized.isdecimal()
+            ):
+                raise ValueError("hostname component variable is invalid")
+        elif policy.variable_type == "search_term":
+            if not isinstance(value, str):
+                raise ValueError("search term must be text")
+            normalized = value.strip()
+            # Avoid passing PowerShell expression or statement syntax into
+            # a provider component whose full script has not been audited.
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._:/\-]{0,79}", normalized):
+                raise ValueError("search term contains unsupported characters")
         else:
             if not isinstance(value, (str, int, float)) or isinstance(value, bool):
                 raise ValueError("component variable must be a scalar value")
@@ -390,7 +423,7 @@ class DattoRmmComponentExecutionPolicy:
         if len(normalized) > policy.maximum_length:
             raise ValueError("component variable exceeds approved maximum length")
 
-        if policy.variable_type == "selection" and normalized not in policy.allowed_values:
+        if policy.allowed_values and normalized not in policy.allowed_values:
             raise PermissionError("component variable value is not allowlisted")
 
         return normalized
