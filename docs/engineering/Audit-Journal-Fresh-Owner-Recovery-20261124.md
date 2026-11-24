@@ -38,3 +38,12 @@ Synthetic and no-production-source tests require: wrong principal denial; missin
 A successful one-time native Entra Owner recovery **does not by itself activate** `JASON_AOT_ADMIN_APPROVER_PROFILE=jason-owner-v1` on `jason-mcp-pilot`. Once the native breaker is genuinely CLOSED and release gates pass, independently promote the separately reviewed MCP Owner-profile candidate with its own exact source/image rollback, signed Owner consent and live authenticated requester readback; do not reuse audit authorization or silently enable it under the production freeze.
 
 Linked tracking issue: #2680. All previous exact-scope approvals and failure records remain immutable.
+
+
+## November 24 protected adoption snapshot denial — root cause and correction
+
+The first attempted exact fresh-Owner recovery returned `JOURNAL_FRESH_OWNER_RECOVERY_PREVIOUS_PROTECTED_ADOPTION_HASH_CHANGED` before any licensed-Owner authentication or production mutation. A subsequent **checksum-pinned, read-only Root diagnostic** established that the real `adoption.json` raw bytes were unchanged from the historical Root inventory, matched the immutable queued transaction's exact *after-image*, and agreed with the original plan, scope, independently verified Owner, and installed policy. The canonical catalog was also still legacy and unmodified.
+
+**Engineering defect:** The recovery source copied the adoption SHA-256 as only **63** hex characters, missing one `f` in `...ecfbcf4822...`. It also copied the catalog SHA-256 as only **63** hex characters, missing one `f` in `...e3cb257c4072fdeb...`. These malformed pins are not evidence of production drift and must never be normalized from unknown bytes. The corrected adoption fingerprint was independently verified from Root-only read-only evidence; the corrected catalog fingerprint was independently computed against the live, publicly readable 0444 catalog file.
+
+**Regression protection:** The Root preflight now validates that every captured previous approval/evidence digest, previous transaction/retry digest, and before/after service-unit digest is a full 64-character lowercase hexadecimal SHA-256 *before any Root record is evaluated*. Focused negative tests intentionally truncate each of the five baseline fingerprints, inject non-hex characters, and truncate a prior transaction digest; every case fails closed. No historical Root record, authorization, unit, producer, global freeze/breaker, or database is changed by this source correction. This incident does **not** constitute a new Owner grant.

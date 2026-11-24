@@ -61,8 +61,8 @@ EXPECTED_INODE = 10261846
 EXPECTED_PRIOR_SHA = {
     "plan":"f88b423c8cf7922201e9b5020cd99a21f4df6ed36f5491b5d7f5fbb383a3c24e",
     "journal":"45b1d0154583c8f40c4d4b8b9755ac98a02ad481cde1b1c9c1543eea3ffaabbc",
-    "adoption":"2cbf005b417a42fef41d6623849a598dfecfbc4822bc6105b2d9bec63722410",
-    "catalog":"42de60cb250626f938228baf51b5e063f27a9e03cb257c4072deb467616a572",
+    "adoption":"2cbf005b417a42fef41d6623849a598dfecfbcf4822bc6105b2d9bec63722410",
+    "catalog":"42de60cb250626f938228baf51b5e063f27a9e03cb257c4072fdeb467616a572",
     "policy":"18ea2f52d7c72146c128dcdc9cdb1360cd35376e57c11fc663f19edd971e5dd4",
 }
 PREVIOUS_ATTEMPTS = {
@@ -101,6 +101,33 @@ def root_record(path, mode, maximum=16_000_000):
     return raw_file(path,mode)
 
 
+def validate_reference_pins():
+    """Reject malformed recorded hashes before inspecting Root evidence.
+
+    SHA-256 digests are always exactly 64 lowercase hexadecimal characters.
+    The prior rejected candidate contained two accidentally truncated hashes;
+    that coding error must never reach a live Root adoption check again.
+    """
+    groups=(("original_evidence",EXPECTED_PRIOR_SHA),
+            ("unit_before",UNIT_BEFORE_SHA),
+            ("unit_after",UNIT_AFTER_SHA))
+    for label,records in groups:
+        for name,value in records.items():
+            need(isinstance(value,str) and len(value)==64 and
+                 all(c in "0123456789abcdef" for c in value),
+                 "INVALID_REFERENCE_SHA256:"+label+":"+name)
+    for candidate,records in PREVIOUS_ATTEMPTS.items():
+        need(isinstance(candidate,str) and len(candidate)==40 and
+             all(c in "0123456789abcdef" for c in candidate),
+             "INVALID_PREVIOUS_CANDIDATE")
+        for label in ("scope","transaction","retry"):
+            if label in records:
+                value=records[label]
+                need(isinstance(value,str) and len(value)==64 and
+                     all(c in "0123456789abcdef" for c in value),
+                     "INVALID_REFERENCE_SHA256:prior:"+label)
+
+
 def exact_unit_pair(new):
     """Return the exact reviewed new and installed before-image unit bytes."""
     need(isinstance(new,bytes) and new.count(b"AmbientCapabilities=CAP_SETUID\n")==1,
@@ -133,6 +160,7 @@ def preflight(candidate,source_units,*,get_plan=None,get_journal=None,
     the pinned production defaults and never accepts caller-supplied paths.
     """
     need(os.geteuid()==0 or not check_live,"ROOT_REQUIRED")
+    validate_reference_pins()
     need(len(candidate)==40 and all(v in "0123456789abcdef" for v in candidate),
          "REVIEWED_SOURCE_SHA")
     if check_live:
