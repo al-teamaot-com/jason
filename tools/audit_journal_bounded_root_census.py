@@ -102,15 +102,22 @@ def check():
      "existing_names_length":len(snap.get("existing_names",[])) if isinstance(snap.get("existing_names"),list) else None}
  else:result["historical_retention_snapshot_summary"]={"type":type(snap).__name__}
  for name in DESIRED_FILES:
-  data=read_json(BASE/"private"/name,0o400)
-  expected_key=("desired_state_after_sha256" if name=="desired-final.json"
-                else "rollback_desired_state_sha256")
-  result["desired_proofs"][name+"_matches_approved_scope"]=sha(data)==scope.get(expected_key)
- current=read_json(DESIRED,0o600)
- result["desired_proofs"]["live_desired_matches_canonical_initial_or_rollback"]=sha(current) in {
-  scope.get("desired_state_initial_sha256"),scope.get("rollback_desired_state_sha256")}
- result["desired_proofs"]["live_desired_json_sha256_equals_raw_bytes_sha256"]=(
+  key=name+"_matches_approved_scope"
+  try:
+   data=read_json(BASE/"private"/name,0o400)
+   expected_key=("desired_state_after_sha256" if name=="desired-final.json"
+                 else "rollback_desired_state_sha256")
+   result["desired_proofs"][key]=sha(data)==scope.get(expected_key)
+  except (OSError,AssertionError,ValueError,KeyError,TypeError) as exc:
+   result["desired_proofs"][key]={"read_error_type":type(exc).__name__}
+ try:
+  current=read_json(DESIRED,0o600)
+  result["desired_proofs"]["live_desired_matches_canonical_initial_or_rollback"]=sha(current) in {
+   scope.get("desired_state_initial_sha256"),scope.get("rollback_desired_state_sha256")}
+  result["desired_proofs"]["live_desired_json_sha256_equals_raw_bytes_sha256"]=(
    sha(current)==hashlib.sha256(DESIRED.read_bytes()).hexdigest())
+ except (OSError,AssertionError,ValueError,KeyError,TypeError) as exc:
+  result["desired_proofs"]["live_desired_read_error_type"]=type(exc).__name__
  d=DB.lstat()
  result["dataset_dev_inode_identity_matches"]=(d.st_dev,d.st_ino)==(66306,10261846)
  result["dataset_size_bytes"]=d.st_size
