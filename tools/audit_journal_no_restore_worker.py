@@ -475,6 +475,16 @@ def finish_recovery(c,grant):
         except (FileNotFoundError,KeyError,ValueError,RuntimeError,JournalUnavailable):
             time.sleep(5)
             continue
+        # Durable accepted-state authority is narrower than this one-shot
+        # recovery grant: only independently verified daily maintenance can
+        # continue after the recovery approval's eight-hour window.
+        first=read_control(ROLLOVER_RECEIPT,0,0o400)
+        need(first['scope_sha256']==grant['scope_sha256'] and
+             first['completed'] is True,
+             'FORWARD_ACCEPTED_ROLLOVER_RECEIPT_CHANGED')
+        if first.get('native_verified') is not True:
+            c._json(ROLLOVER_RECEIPT,{**first,'native_verified':True,
+                'native_verified_at':datetime.now(timezone.utc).isoformat()},0o400)
         progress('accepted',**accepted)
         return accepted
     raise RuntimeError('FORWARD_NATIVE_SCHEDULED_ACCEPTANCE_DEADLINE')
