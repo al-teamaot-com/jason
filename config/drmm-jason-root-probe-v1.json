@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "status": "source_prepared_not_activated",
+  "device_name": "Jason",
+  "device_uid": "85fc3097-ac2f-18b2-afc4-6cf07131275d",
+  "datto_site": "Atlantic Office Machines",
+  "reported_device_class": "Desktop",
+  "operating_system": "Ubuntu Linux 24.04",
+  "component_uid": "bc7c4531-6869-4658-b1d6-7639a477045e",
+  "component_name": "Run Ad Hoc Command (Shell) [MAC] [LIN]",
+  "approved_command": "id -u",
+  "permission": "per_run_only",
+  "authority": "exact_current_user_instruction_and_separate_governed_release",
+  "activation": "disabled_by_default_on_mcp_and_runtime; exact_device_gate_only",
+  "negative_tests": [
+    "missing_or_changed_activation_gate",
+    "wrong_device",
+    "other_shell_command",
+    "multiple_variables",
+    "wrong_component",
+    "no_explicit_per_run_approval",
+    "autonomous_shell",
+    "revoke_after_prepare"
+  ],
+  "prohibited": [
+    "production_repair",
+    "arbitrary_shell",
+    "reboot",
+    "service_restart",
+    "database_mutation",
+    "production_freeze_bypass",
+    "approval_impersonation"
+  ],
+  "verification": "DRMM job terminal status, stdout showing root UID 0, auditable exact-action approval; no orchestration-event-store mutation",
+  "rollback": "disable exact environment gate in both MCP and runtime; restore original reviewed images",
+  "owner_identity": "must_be_independently_verified_by_Jason_before_release"
+}
