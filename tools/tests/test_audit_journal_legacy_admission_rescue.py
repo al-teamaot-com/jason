@@ -97,6 +97,22 @@ def test_unapproved_or_changed_prior_evidence_denied(monkeypatch,t,what):
     with pytest.raises(PermissionError):
         check(t)
 
+def ci_sqlite_fixture_program():
+    # Production must run as Jason's fixed writer UID/GID 1000. GitHub-hosted
+    # disposable SQLite runners use arbitrary UIDs; change ONLY the assertion
+    # in this test's in-memory copy. Never loosen production SQL_PROGRAM.
+    guard="assert os.geteuid()==1000 and os.getegid()==1000 and len(sys.argv)==3"
+    assert a.SQL_PROGRAM.count(guard)==1
+    assert "DROP TRIGGER audit_journal_maintenance_admission" in a.SQL_PROGRAM
+    assert "DROP TRIGGER audit_journal_maintenance_invoking" in a.SQL_PROGRAM
+    return a.SQL_PROGRAM.replace(
+        guard,
+        "assert os.geteuid()=="+str(os.geteuid())+
+        " and os.getegid()=="+str(os.getegid())+
+        " and len(sys.argv)==3",
+    )
+
+
 def test_real_sqlite_atomic_dual_drop_never_modifies_data_rows(tmp_path):
     dbpath=tmp_path/"audit.sqlite3"
     db=sqlite3.connect(dbpath)
@@ -110,7 +126,7 @@ def test_real_sqlite_atomic_dual_drop_never_modifies_data_rows(tmp_path):
                    "BEGIN SELECT RAISE(ABORT,'JASON_AUDIT_JOURNAL_MAINTENANCE'); END")
     db.commit();db.close()
     def child(mode):
-        out=subprocess.run([sys.executable,"-I","-B","-c",a.SQL_PROGRAM,mode,str(dbpath)],
+        out=subprocess.run([sys.executable,"-I","-B","-c",ci_sqlite_fixture_program(),mode,str(dbpath)],
                            capture_output=True,text=True,timeout=12)
         assert out.returncode==0,out.stderr
         return json.loads(out.stdout)
@@ -131,7 +147,7 @@ def test_ambiguous_or_changed_ddl_refuses_execution(tmp_path):
     db.execute("CREATE TABLE orchestration_events (event_type TEXT)")
     db.execute("CREATE TRIGGER audit_journal_maintenance_admission BEFORE INSERT ON orchestration_events BEGIN SELECT RAISE(ABORT,'UNKNOWN'); END")
     db.commit();db.close()
-    out=subprocess.run([sys.executable,"-I","-B","-c",a.SQL_PROGRAM,"clear",str(dbpath)],
+    out=subprocess.run([sys.executable,"-I","-B","-c",ci_sqlite_fixture_program(),"clear",str(dbpath)],
                        capture_output=True,text=True,timeout=12)
     assert out.returncode!=0
     db=sqlite3.connect(dbpath)
