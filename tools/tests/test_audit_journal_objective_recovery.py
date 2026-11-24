@@ -34,6 +34,9 @@ def synthetic():
             role:s.digest(eng.planned_configuration(row,r.OLD)) for role,row in original.items()},
         "protected_peer_before":{"jason-runtime":{"id":original["jason-runtime"]["Id"]}},
         "source_dataset_identity":{"device":66306,"inode":10261846},
+        "rollback_container_limit_before":s.ROLLBACK_LIMIT_BEFORE,
+        "rollback_container_limit_after":s.ROLLBACK_LIMIT_BEFORE+s.ROLLBACK_CONTAINER_RESERVE,
+        "rollback_container_reserve":s.ROLLBACK_CONTAINER_RESERVE,
         "desired_state_after_sha256":"8"*64,
         "desired_state_initial_sha256":"7"*64,
         "rollback_desired_state_sha256":"6"*64,
@@ -422,3 +425,54 @@ def test_stopped_rollback_slots_checked_before_full_journal_migration():
     I.values=["jason-runtime-rollback-same"]*2
     with pytest.raises(PermissionError,match="MALFORMED_STOPPED_CONTAINER_INVENTORY"):
         r.verify_recovery_container_capacity(I,s,eng,old)
+
+
+def test_historical_rollback_snapshot_is_not_a_current_authority_or_capacity_limit():
+    """Regression for actual pre-Owner denial on 2026-11-24.
+
+    The old Root scope was already authenticated, checked against a pinned
+    SHA-256, and had reviewed scalar rollback limits. A stale schema/value
+    from a prior historical snapshot must neither grant more live slots nor
+    reject a currently safe release.
+    """
+    old,_,_=synthetic()
+    class I:
+        @staticmethod
+        def command(argv):
+            assert argv[:2]==["/usr/bin/docker","ps"]
+            return "\n".join("jason-runtime-rollback-%02d"%x for x in range(20))
+    for prior in (
+        None, # early verified owner scope did not carry that telemetry
+        {"existing_count":19,"existing_names":["historic"]*19,
+         "limit_before":18,"reserved_slots":3,"cleanup_allowed":False},
+        {"existing_count":5,"existing_names":[],"cleanup_allowed":False},
+        {"schema_version":"0.9","observed_at":"2026-11-22T00:00:00Z"},
+    ):
+        scope=old["plan"]["scope"]
+        if prior is None:
+            scope.pop("rollback_container_capacity_before",None)
+        else:
+            scope["rollback_container_capacity_before"]=prior
+        outcome=r.verify_recovery_container_capacity(I,s,eng,old)
+        assert outcome["count"]==20
+        assert outcome["limit_before"]==21
+        assert outcome["reserve_for_new_release"]==6
+        assert outcome["new_release_slots_after"]==26
+    # A materially different original OWNER-APPROVED ROLLBACK POLICY still
+    # fails before any change. The pinned old SHA is checked separately.
+    for key,bad in (("rollback_container_limit_before",22),
+                    ("rollback_container_limit_after",28),
+                    ("rollback_container_reserve",9)):
+        scope=old["plan"]["scope"]
+        good=scope[key]
+        scope[key]=bad
+        with pytest.raises(PermissionError,match="PREVIOUS_REVIEWED_ROLLBACK_POLICY_CHANGED"):
+            r.verify_recovery_container_capacity(I,s,eng,old)
+        scope[key]=good
+    # Current host capacity cannot be enlarged by a historical snapshot.
+    class TooMany:
+        @staticmethod
+        def command(argv):
+            return "\n".join("jason-runtime-rollback-%02d"%x for x in range(22))
+    with pytest.raises(PermissionError,match="INSUFFICIENT_RECOVERY_CONTAINER_SLOTS"):
+        r.verify_recovery_container_capacity(TooMany,s,eng,old)
