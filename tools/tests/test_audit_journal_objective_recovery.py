@@ -216,6 +216,26 @@ def test_wrong_owner_denied_before_any_root_authorization_or_service_write(monke
     assert called==[]
 
 
+def test_native_readonly_evaluator_can_resolve_system_administration_tools(monkeypatch):
+    from shutil import which
+    actual_run=r.subprocess.run
+    def evaluator(argv, **kwargs):
+        assert argv==["/usr/bin/python3",str(s.ROOT_DRIFT_EVALUATOR),"--config",str(s.DESIRED)]
+        assert kwargs["cwd"]=="/" and kwargs["env"]["HOME"]=="/root"
+        path=kwargs["env"]["PATH"]
+        assert "/usr/sbin" in path.split(":")
+        assert which("runuser",path=path) is not None
+        result=actual_run(["runuser","--version"],env=kwargs["env"],capture_output=True,text=True,check=True)
+        assert "runuser" in result.stdout
+        return SimpleNamespace(returncode=2,stdout=json.dumps({"schema_version":"1.0",
+            "status":"drift_detected","problems":[{"kind":"failed_system_unit"}]}))
+    monkeypatch.setattr(r.subprocess,"run",evaluator)
+    assert r.observe_native_readonly(s)["status"]=="drift_detected"
+    monkeypatch.setattr(r.subprocess,"run",lambda *a,**k:SimpleNamespace(returncode=1,stdout=""))
+    with pytest.raises(PermissionError,match="NATIVE_READONLY_EVALUATION_UNAVAILABLE"):
+        r.observe_native_readonly(s)
+
+
 def test_native_open_breaker_allows_only_documented_failed_journal():
     from datetime import datetime,timezone
     now=datetime.now(timezone.utc)
