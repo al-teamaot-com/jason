@@ -48,6 +48,10 @@ def _inspect(I,identifier,name):
          and type(row.get("SizeRootFs")) is int and 0<row["SizeRootFs"]<MAX_TAR
          and type(row.get("SizeRw")) is int and 0<=row["SizeRw"]<MAX_TAR,
          "HISTORIC_CONTAINER_IDENTITY_OR_MOUNT_CHANGED")
+    # Docker enumerates the resolved bind mounts from an unordered map.
+    # Canonicalize only that list; preserve every field and duplicate entry.
+    # This same normalized record is used for approval, archive and readback.
+    row["Mounts"]=sorted(row["Mounts"],key=tx.canonical)
     return row
 
 def retained_sibling(I):

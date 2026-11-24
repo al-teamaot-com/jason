@@ -58,6 +58,22 @@ def test_native_counts_older_mcp_and_reserves_exact_one_slot():
     engine.names.remove("jason-runtime-rollback-old-00")
     assert r.plan_capacity(engine,s,eng,POLICY)["retirement"] is None
 
+def test_mount_order_is_not_drift_but_changed_mount_is_denied():
+    engine=Docker()
+    mounts=[{"Type":"bind","Source":"/host/a","Destination":"/a","RW":False},
+            {"Type":"bind","Source":"/host/b","Destination":"/b","RW":True}]
+    engine.inspect[r.ID]["Mounts"]=copy.deepcopy(mounts)
+    approved=r.plan_capacity(engine,s,eng,POLICY)
+    engine.inspect[r.ID]["Mounts"].reverse()
+    assert r.plan_capacity(engine,s,eng,POLICY,approved=approved)==approved
+    for key,value in (("RW",False),("Source","/host/changed"),("Destination","/changed")):
+        engine.inspect[r.ID]["Mounts"]=copy.deepcopy(mounts[::-1])
+        engine.inspect[r.ID]["Mounts"][0][key]=value
+        with pytest.raises(PermissionError,match="APPROVED_RETENTION_PLAN_CHANGED"):
+            r.plan_capacity(engine,s,eng,POLICY,approved=approved)
+    assert engine.removed==[]
+
+
 @pytest.mark.parametrize("fault",["extra","wrong_target","wrong_sibling","running","volume","image","limit"])
 def test_native_reservation_never_widens_limit_or_substitutes_retirement(fault):
     engine=Docker();policy=copy.deepcopy(POLICY)
@@ -77,6 +93,13 @@ def archive_fixture(monkeypatch,tmp_path):
     ledger=tmp_path/"ledger";ledger.mkdir()
     fake_s=SimpleNamespace(ARCHIVE=tmp_path)
     engine=Docker()
+    engine.inspect[r.ID]["Mounts"]=[{"Type":"bind","Destination":"/a","RW":False},
+                                      {"Type":"bind","Destination":"/b","RW":True}]
+    original=engine.command
+    def reorder_mounts(argv):
+        if argv[1]=="inspect":engine.inspect[argv[-1]]["Mounts"].reverse()
+        return original(argv)
+    engine.command=reorder_mounts
     slots=r.plan_capacity(engine,s,eng,POLICY)
     monkeypatch.setattr(r,"_archive_dirs",lambda *a,**k:root)
     # Real tar parsing, with local fixture files standing in for Root custody.
