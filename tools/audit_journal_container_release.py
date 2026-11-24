@@ -161,7 +161,17 @@ def configuration_matches(current,body):
         if k not in ("Image","HostConfig","NetworkingConfig")):return False
  # Docker normalizes mount syntax. Validate destinations and read/write modes
  # independently; every remaining HostConfig setting must be preserved.
- if any(current["HostConfig"].get(k)!=v for k,v in body["HostConfig"].items() if k!="Mounts"):return False
+ # Docker Engine 29 normalizes an omitted OomKillDisable (None) to the
+ # effective default False on container/create. This *single-direction* 0-risk
+ # normalization must not be confused with a changed security policy.
+ # All other HostConfig attributes, including privileges, mounts, namespaces,
+ # security options, resource limits and the opposite False->None transition
+ # retain exact comparison and fail closed.
+ for key,wanted in body["HostConfig"].items():
+  if key=="Mounts":continue
+  observed=current["HostConfig"].get(key)
+  if key=="OomKillDisable" and wanted is None and observed is False:continue
+  if observed!=wanted:return False
  networks=current["NetworkSettings"]["Networks"]
  expected=body.get("NetworkingConfig",{}).get("EndpointsConfig",{})
  if set(networks)!=set(expected):return False
