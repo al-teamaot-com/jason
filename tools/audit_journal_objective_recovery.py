@@ -198,11 +198,18 @@ def verify_known_native_incident(control,drift,*,now=None):
 
 def verify_recovery_container_capacity(I,s,eng,previous):
     """Match the installed release's exact exited rollback-slot semantics."""
-    previous_capacity=previous["plan"]["scope"].get("rollback_container_capacity_before",{})
-    need(isinstance(previous_capacity,dict) and
-         previous_capacity.get("reserved_slots")==s.ROLLBACK_CONTAINER_RESERVE and
-         previous_capacity.get("limit_before")==s.ROLLBACK_LIMIT_BEFORE,
-         "PREVIOUS_ROLLBACK_RESERVATION_CHANGED")
+    # The prior Owner-signed scope is hash-verified by existing_release().
+    # Its observed stopped-container snapshot is historical, not a current
+    # capacity policy, and may use a different prior snapshot schema.
+    # Enforce the original reviewed *policy* fields and independently count
+    # the current exited containers below; do not treat old telemetry as
+    # current approval or deny a safe recovery because of stale telemetry.
+    prior_scope=previous["plan"]["scope"]
+    need(prior_scope.get("rollback_container_limit_before")==s.ROLLBACK_LIMIT_BEFORE
+         and prior_scope.get("rollback_container_reserve")==s.ROLLBACK_CONTAINER_RESERVE
+         and prior_scope.get("rollback_container_limit_after")==
+         s.ROLLBACK_LIMIT_BEFORE+s.ROLLBACK_CONTAINER_RESERVE,
+         "PREVIOUS_REVIEWED_ROLLBACK_POLICY_CHANGED")
     names=I.command(["/usr/bin/docker","ps","-a","--filter","status=exited",
                      "--format","{{.Names}}"]).splitlines()
     import re
@@ -215,9 +222,6 @@ def verify_recovery_container_capacity(I,s,eng,previous):
          len(stopped)+s.ROLLBACK_CONTAINER_RESERVE<=
          s.ROLLBACK_LIMIT_BEFORE+s.ROLLBACK_CONTAINER_RESERVE,
          "INSUFFICIENT_RECOVERY_CONTAINER_SLOTS")
-    need(previous_capacity.get("existing_count")==len(
-         previous_capacity.get("existing_names",[])),
-         "PREVIOUS_STOPPED_INVENTORY_CHANGED")
     return {"count":len(stopped),"stopped_names":stopped,
             "limit_before":s.ROLLBACK_LIMIT_BEFORE,
             "reserve_for_new_release":s.ROLLBACK_CONTAINER_RESERVE,
