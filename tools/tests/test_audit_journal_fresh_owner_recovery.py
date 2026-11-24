@@ -268,3 +268,49 @@ def test_real_readmission_checks_protected_peers_and_open_breaker(monkeypatch):
     live["jason-runtime"]["State"]["Running"]=False
     with pytest.raises(PermissionError,match="PRODUCER_IMAGE_OR_CONFIG_CHANGED"):
         r.governed_readmission(fake,fake_s,modules,None,given)
+
+
+def test_every_preapproved_root_evidence_hash_has_full_sha256_length():
+    """Regression: the first new recovery attempt mistakenly pinned 63-hex hashes."""
+    r.validate_reference_pins()
+    assert set(r.EXPECTED_PRIOR_SHA)=={"plan","journal","adoption","catalog","policy"}
+    assert r.EXPECTED_PRIOR_SHA["adoption"] == (
+        "2cbf005b417a42fef41d6623849a598dfecfbcf4822bc6105b2d9bec63722410"
+    )
+    assert r.EXPECTED_PRIOR_SHA["catalog"] == (
+        "42de60cb250626f938228baf51b5e063f27a9e03cb257c4072fdeb467616a572"
+    )
+    assert all(len(v)==64 for v in r.EXPECTED_PRIOR_SHA.values())
+    assert all(len(v)==64 for v in r.UNIT_BEFORE_SHA.values())
+    assert all(len(v)==64 for v in r.UNIT_AFTER_SHA.values())
+    for record in r.PREVIOUS_ATTEMPTS.values():
+        assert all(len(value)==64 for value in record.values())
+
+
+@pytest.mark.parametrize("field",["adoption","catalog","plan","journal","policy"])
+def test_truncated_root_evidence_fingerprint_fails_before_any_read(monkeypatch,subject,field):
+    other=dict(r.EXPECTED_PRIOR_SHA)
+    other[field]=other[field][:-1]
+    monkeypatch.setattr(r,"EXPECTED_PRIOR_SHA",other)
+    called=[]
+    subject["read_fn"]=lambda *args:called.append(args) or b"never_read"
+    with pytest.raises(PermissionError,match="INVALID_REFERENCE_SHA256:original_evidence:"+field):
+        verify(subject)
+    assert called==[]
+
+
+def test_non_hex_root_evidence_pin_denied(monkeypatch,subject):
+    data=dict(r.EXPECTED_PRIOR_SHA)
+    data["adoption"]=data["adoption"][:-1]+"x"
+    monkeypatch.setattr(r,"EXPECTED_PRIOR_SHA",data)
+    with pytest.raises(PermissionError,match="INVALID_REFERENCE_SHA256:original_evidence:adoption"):
+        verify(subject)
+
+
+def test_malformed_previous_approval_scope_pin_denied(monkeypatch,subject):
+    records={k:dict(v) for k,v in r.PREVIOUS_ATTEMPTS.items()}
+    key=next(iter(records))
+    records[key]["transaction"]=records[key]["transaction"][1:]
+    monkeypatch.setattr(r,"PREVIOUS_ATTEMPTS",records)
+    with pytest.raises(PermissionError,match="INVALID_REFERENCE_SHA256:prior:transaction"):
+        verify(subject)
