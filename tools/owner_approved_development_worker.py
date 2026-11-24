@@ -50,6 +50,20 @@ TERMINAL_PHASES = {
 APPROVED_BODY_LIMIT = 30000
 
 
+def reviewed_claim_scope_path(repo: Path) -> Path:
+    """Keep host-worker policy with its installed code, not the shared source link.
+
+    A scoped engineering-worker release must not advance the accepted Stage E
+    checkout or adopt unrelated changes from main. A missing installed registry
+    remains a closed admission gate; never fall back to another revision.
+    """
+    worker_dir = Path(__file__).resolve().parent
+    installed_dir = (Path.home() / '.local/lib/jason').resolve()
+    if worker_dir == installed_dir:
+        return installed_dir / 'development-concurrency-scopes.json'
+    return repo / 'config' / 'development-concurrency-scopes.json'
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -2243,7 +2257,7 @@ def _run_main() -> int:
     # The actual admission transaction: use reviewed semantic scope declarations
     # and the *current* worker state. An unknown active scope blocks only new
     # claims; existing work may reconcile without another Owner approval.
-    scope_path = repo / 'config' / 'development-concurrency-scopes.json'
+    scope_path = reviewed_claim_scope_path(repo)
     scopes = dependency.load_claim_scopes(scope_path) if scope_path.is_file() else {}
     verified_merged = verified_merged_claim_work(state, repo, prs, scopes=scopes)
     selected = dependency.plan_worker_claims(

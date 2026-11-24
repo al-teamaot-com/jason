@@ -21,6 +21,28 @@ def scopes():
     return admission.load_claim_scopes(ROOT / 'config/development-concurrency-scopes.json')
 
 
+def test_scoped_installed_worker_does_not_read_mutable_checkout_registry(monkeypatch, tmp_path):
+    home = tmp_path / 'home'
+    installed = home / '.local/lib/jason'
+    installed.mkdir(parents=True)
+    repo = tmp_path / 'accepted-source'
+    (repo / 'config').mkdir(parents=True)
+    checkout_registry = repo / 'config/development-concurrency-scopes.json'
+    checkout_registry.write_text((ROOT / 'config/development-concurrency-scopes.json').read_text())
+    monkeypatch.setattr(Path, 'home', lambda: home)
+    monkeypatch.setattr(worker, '__file__', str(installed / 'owner_approved_development_worker.py'))
+    path = worker.reviewed_claim_scope_path(repo)
+    assert path == installed / 'development-concurrency-scopes.json'
+    assert not path.exists()  # no fall back to the existing checkout policy
+    state = {'items': {}}
+    assert admission.plan_worker_claims(state, [issue(1069)], {}, capacity=1) == []
+    path.write_bytes(checkout_registry.read_bytes())
+    assert admission.plan_worker_claims({'items': {}}, [issue(1069)], admission.load_claim_scopes(path), capacity=1) == ['DEV-1069']
+    # Normal source checkout testing continues to use the checked-out policy.
+    monkeypatch.setattr(worker, '__file__', str(ROOT / 'tools/owner_approved_development_worker.py'))
+    assert worker.reviewed_claim_scope_path(repo) == checkout_registry
+
+
 def test_actual_existing_workstreams_block_overlapping_new_claims():
     state = {'items': {'DEV-1117': {'phase': 'pr_ready', 'pr_number': 1330},
                        'DEV-2294': {'phase': 'diagnosing'}}}
