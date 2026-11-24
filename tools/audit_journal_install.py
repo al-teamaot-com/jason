@@ -21,7 +21,8 @@ EXTRA=("tools/audit_journal_install.py","tools/audit_journal_install_transaction
  "tools/audit_journal_root_inventory.py","tools/audit_journal_signed_owner_bridge.py",
  "implementation/kernel/signed_owner_release.py","tools/pmv4_e_ci_refresh.py",
  "tools/documentation_publisher_install.py","tools/pmv4_e_operational_closure.py","tools/pmv4_e_dispatch_install.py",
- "tools/audit_journal_pre_cutover_repair.py","tools/audit_journal_fresh_owner_recovery.py")
+ "tools/audit_journal_pre_cutover_repair.py","tools/audit_journal_fresh_owner_recovery.py",
+ "tools/audit_journal_ticket_core_rescue.py")
 OVERRIDES=("93-jason-audit-data-recovery.conf","94-audit-data-compatible-release.conf")
 SYSTEMD=Path("/etc/systemd/system")
 RECORD=Path("/var/lib/jason-owner-release/audit-journal-install")
@@ -116,7 +117,7 @@ def staged_modules(candidate):
  modules={name:importlib.import_module("tools."+name) for name in (
   "audit_journal_release_scope","audit_journal_container_release","audit_journal_root_inventory","pmv4_e_ci_refresh",
   "audit_journal_install_transaction","audit_journal_signed_owner_bridge","audit_journal_pre_cutover_repair",
-  "audit_journal_fresh_owner_recovery")}
+  "audit_journal_fresh_owner_recovery","audit_journal_ticket_core_rescue")}
  return temporary,payload,modules
 
 def ci(helper,candidate):
@@ -358,11 +359,12 @@ def main():
  parser.add_argument("--repair-before-cutover",action="store_true")
  parser.add_argument("--resume-context-repair",action="store_true")
  parser.add_argument("--fresh-owner-expired-recovery",action="store_true")
+ parser.add_argument("--rescue-exact-ticket-core",action="store_true")
  args=parser.parse_args()
  need(sum(bool(flag) for flag in (
   args.preflight_only,args.resume_bootstrap,args.stage_signed_owner_offer,
   args.adopt_signed_chatgpt_owner,args.repair_before_cutover,args.resume_context_repair,
-  args.fresh_owner_expired_recovery))<=1,"ONE_EXACT_INSTALLER_OPERATION")
+  args.fresh_owner_expired_recovery,args.rescue_exact_ticket_core))<=1,"ONE_EXACT_INSTALLER_OPERATION")
  if args.resume_bootstrap:
   need(args.candidate_sha is None and not args.preflight_only,"EXACT_RESUME_ARGUMENTS");return resume_bootstrap()
  candidate=args.candidate_sha
@@ -376,6 +378,11 @@ def main():
  c,auth=primitives(candidate);temporary,payload,modules=staged_modules(candidate)
  try:
   s=modules["audit_journal_release_scope"];engine=modules["audit_journal_container_release"]
+  if args.rescue_exact_ticket_core:
+   ci_proof=ci(modules["pmv4_e_ci_refresh"],candidate)
+   need(ci_proof.get("required_ci_passed") is True,"TICKET_CORE_RESCUE_PROTECTED_CI")
+   return modules["audit_journal_ticket_core_rescue"].execute(
+    SimpleNamespace(**globals()),s,modules,c,auth,candidate,payload)
   if args.fresh_owner_expired_recovery:
    ci_proof=ci(modules["pmv4_e_ci_refresh"],candidate)
    need(ci_proof.get("required_ci_passed") is True,"EXACT_RECOVERY_CI")
