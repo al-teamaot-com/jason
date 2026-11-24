@@ -268,13 +268,18 @@ def health_dropins(s):
   "Environment=PYTHONPATH="+str(s.BASE/"trusted/implementation")+"\n"
   "ReadOnlyPaths="+str(s.BASE)+"\n")
  base=s.BASE/"native-health"
+ # Read-only SQLite WAL readers need writable -shm mapping support. Allow
+ # the exact optional -shm auxiliary only. The journal, WAL data file,
+ # parent directory and unrelated governed databases all remain read-only.
+ wal_aux="-"+str(s.ACTIVE)+"-shm"
  return {
  "jason-openclaw-authority-health.service":("[Service]\n"+common+"ExecStart=\nExecStart=/usr/bin/python3 "+
  str(base/"openclaw_authority_fast_health.py")+" --output /var/lib/jason/openclaw/operational-health.json "
- "--full-evidence /var/lib/jason/openclaw/operational-full-health.json\n").encode(),
+ "--full-evidence /var/lib/jason/openclaw/operational-full-health.json\n"
+ "ReadWritePaths="+wal_aux+"\n").encode(),
  "jason-openclaw-authority-full-integrity.service":("[Service]\n"+common+"ExecStart=\nExecStart=/usr/bin/python3 "+
  str(base/"openclaw_authority_live_audit_full_snapshot.py")+" --output /var/lib/jason/openclaw/operational-full-health.json\n"
- "ReadWritePaths=\nReadWritePaths=/var/lib/jason/openclaw /srv/jason/archive/authority-health-scratch\n").encode()}
+ "ReadWritePaths=\nReadWritePaths=/var/lib/jason/openclaw /srv/jason/archive/authority-health-scratch "+wal_aux+"\n").encode()}
 
 def record_read():
  meta=RECORD.lstat();path=RECORD/"approval.json";m=path.lstat()

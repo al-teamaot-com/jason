@@ -50,3 +50,41 @@ def test_invalid_activation_path_cannot_enable_journal_health(monkeypatch):
  monkeypatch.setenv("JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE","/tmp/unreviewed.json")
  with pytest.raises(JournalUnavailable,match="FIXED_PROFILE"):
   journal_health.enabled()
+
+
+def test_native_health_sandbox_allows_only_journal_wal_shm():
+    from tools.audit_journal_install import health_dropins
+    from tools import audit_journal_release_scope as scope
+
+    raw = health_dropins(scope)
+    fast = raw["jason-openclaw-authority-health.service"].decode()
+    full = raw["jason-openclaw-authority-full-integrity.service"].decode()
+    auxiliary = "-" + str(scope.ACTIVE) + "-shm"
+    assert "ReadWritePaths=" + auxiliary + "\n" in fast
+    assert ("ReadWritePaths=/var/lib/jason/openclaw "
+            "/srv/jason/archive/authority-health-scratch " + auxiliary + "\n") in full
+    for unit in (fast, full):
+        assert "ReadOnlyPaths=" + str(scope.BASE) + "\n" in unit
+        assert "Environment=JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE=" + str(scope.PROFILE) in unit
+        assert "ReadWritePaths=" + str(scope.ACTIVE.parent) + "\n" not in unit
+        assert "-" + str(scope.ACTIVE) + "-shm" in unit
+        assert "-" + str(scope.ACTIVE) + "-wal" not in unit
+        assert "ReadWritePaths=/var/lib/jason " not in unit
+
+
+def test_native_health_sandbox_auxiliary_paths_are_optional_and_not_wildcards():
+    from tools.audit_journal_install import health_dropins
+    from tools import audit_journal_release_scope as scope
+
+    for name, raw in health_dropins(scope).items():
+        directives = [line.removeprefix("ReadWritePaths=").split()
+                      for line in raw.decode().splitlines()
+                      if line.startswith("ReadWritePaths=") and line != "ReadWritePaths="]
+        assert len(directives) == 1, name
+        paths = directives[0]
+        optional = {"-" + str(scope.ACTIVE) + "-shm"}
+        assert optional.issubset(paths), name
+        assert "-" + str(scope.ACTIVE) + "-wal" not in paths, name
+        assert not any(p == str(scope.ACTIVE.parent) or p == str(scope.ACTIVE)
+                       for p in paths), name
+        assert all("*" not in p and "?" not in p for p in paths), name
