@@ -208,7 +208,7 @@ def observe_native_readonly(s):
     """Run the already pinned native evaluator without --output or mutation."""
     result=subprocess.run(
         ["/usr/bin/python3",str(s.ROOT_DRIFT_EVALUATOR),"--config",str(s.DESIRED)],
-        cwd="/",env={"PATH":"/usr/local/bin:/usr/bin:/bin","HOME":"/root",
+        cwd="/",env={"PATH":"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","HOME":"/root",
                     "LANG":"C.UTF-8"},capture_output=True,text=True,timeout=70,check=False)
     need(result.returncode in (0,2),"NATIVE_READONLY_EVALUATION_UNAVAILABLE")
     row=json.loads(result.stdout)
