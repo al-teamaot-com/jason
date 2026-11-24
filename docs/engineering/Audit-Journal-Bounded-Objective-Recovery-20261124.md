@@ -19,7 +19,7 @@ Current verified legacy state (2026-11-24 ~08:43 EST):
 
 New action: `COMPLETE-REMAINING-BOUNDED-DAILY-AUDIT-JOURNAL-OBJECTIVE`.
 
-The Owner reviews one complete Root-owned plan: protected source Main commit, rollback `d1b8c196dadd4b672ec8ba47075f27bb61c98d63`, live host, exact files/containers, known interruption, source repair, archive/Root storage effects, time budget, all six allowed stages, four bounded recovery branches, preserved immutable failed records, runtime availability, native freeze, and observable end-to-end acceptance. An independently authenticated **licensed AOT Owner Entra decision** mints one Root0400 grant with its exact scope and a new, separate one-use release claim; earlier exact-action grants are evidence only, never replayable authority. Production is never authorized solely by this documentation, GitHub merge, Owner chat assertion or code tests.
+The Owner reviews one complete Root-owned plan: protected source Main commit, rollback `d1b8c196dadd4b672ec8ba47075f27bb61c98d63`, live host, exact files/containers, known interruption, source repair, archive/Root storage effects, time budget, all six allowed stages, five bounded recovery branches, preserved immutable failed records, runtime availability, native freeze, and observable end-to-end acceptance. An independently authenticated **licensed AOT Owner Entra decision** mints one Root0400 grant with its exact scope and a new, separate one-use release claim; earlier exact-action grants are evidence only, never replayable authority. Production is never authorized solely by this documentation, GitHub merge, Owner chat assertion or code tests.
 
 ### Included reviewed stages
 
@@ -36,6 +36,8 @@ The Owner reviews one complete Root-owned plan: protected source Main commit, ro
 - If the new release fails **before cutover**, recover/restore the original producer configurations and exact known barriers under its original reviewed rollback branch.
 - Retain all original/failed before-images, sealed journal, Root receipt and required restore assets on failure; no ad hoc cleanup.
 - Roll back only within the newly approved eight-hour claim and established native safety/rollback gates. A partially **queued** service must not be restarted by the pre-queue recovery helper.
+
+- Roll back a not-yet-queued Root installation and resume the same exact transaction **once** under the still-valid Owner plan; reject a revoked, stale or ambiguous queued claim.
 
 ### Pre-queue continuation without duplicate Owner approval
 

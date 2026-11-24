@@ -80,7 +80,7 @@ def synthetic():
     return data,current,mocked_review
 
 def test_fixed_approval_plan_covers_migration_recovery_verification_not_provider_mutations():
-    assert len(r.STEPS)==6 and len(r.RECOVERY_BRANCHES)==4
+    assert len(r.STEPS)==6 and len(r.RECOVERY_BRANCHES)==5
     assert len(set(r.STEPS))==len(r.STEPS)
     assert all(v in r.STEPS for v in
                ("reconcile_exact_interrupted_legacy_release",
@@ -267,6 +267,8 @@ def bounded_grant_fixture(*,outcome="installing",age_minutes=1):
         "policy":{"candidate_sha":CANDIDATE,"rollback_sha":r.OLD_ROLLBACK},
         "bounded_objective_continuation":{
             "one_owner_decision_for_bounded_objective":True,
+            "allowed_recovery_branches":list(r.RECOVERY_BRANCHES),
+            "root_execution_recovery_claims_maximum":2,
             "reviewed_objective_installer_sha256":r.digest(b"reviewed-installer"),
             "reviewed_objective_recovery_sha256":r.digest(b"reviewed-recovery"),
         },
@@ -385,3 +387,9 @@ def test_resume_keeps_original_decision_and_never_calls_owner(monkeypatch,tmp_pa
                       None,auth,CANDIDATE,payload)
     assert effects==["prequeue_claim","transaction_rollback","queued_from_same_plan"]
     assert "owner" not in auth
+    (child/"revoked.json").write_text('{"revoked":true}')
+    with pytest.raises(PermissionError,match="BOUNDED_OWNER_PLAN_REVOKED"):
+        r.resume_prequeue(I,fake_s,
+                          {"audit_journal_install_transaction":FakeTxModule},
+                          None,auth,CANDIDATE,payload)
+    assert effects==["prequeue_claim","transaction_rollback","queued_from_same_plan"]

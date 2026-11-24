@@ -41,6 +41,7 @@ RECOVERY_BRANCHES=(
     "restore_exact_precutover_original_consumers_and_clear_exact_barriers",
     "preserve_backup_and_required_history_on_any_failure",
     "rollback_only_within_fresh_claim_and_canonical_guardrails",
+    "resume_unqueued_exact_root_install_once_after_transaction_rollback",
 )
 ALLOW_UNIT_CHANGES=False
 LIVE=Path("/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3")
@@ -421,6 +422,10 @@ def validate_prequeue_recovery_grant(grant,state,candidate,targets,*,now=None):
          review.get("policy")=={"candidate_sha":candidate,"rollback_sha":OLD_ROLLBACK}
          and review.get("bounded_objective_continuation",{}).get(
              "one_owner_decision_for_bounded_objective") is True and
+         review.get("bounded_objective_continuation",{}).get(
+             "allowed_recovery_branches")==list(RECOVERY_BRANCHES) and
+         review.get("bounded_objective_continuation",{}).get(
+             "root_execution_recovery_claims_maximum")==2 and
          digest(review)==grant.get("scope_sha256")==
          state.get("scope_sha256"),"PREVIOUS_BOUNDED_GRANT_SCOPE_CHANGED")
     issued=datetime.fromisoformat(grant["decided_at"].replace("Z","+00:00"))
@@ -545,6 +550,8 @@ def resume_prequeue(I,s,modules,c,auth,candidate,payload):
         state=read(tx,child/"transaction.json",0o600)
         approved=validate_prequeue_recovery_grant(
             grant,state,candidate,bounded_transaction_targets(s))
+        need(not (child/"revoked.json").exists(),
+             "BOUNDED_OWNER_PLAN_REVOKED")
         need(not (child/"prequeue-resume.json").exists(),
              "BOUNDED_PREQUEUE_RESUME_ALREADY_CONSUMED")
         # Privilege, source, policy and native exactness are still gated by the
