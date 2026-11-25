@@ -31,13 +31,14 @@ def build_microsoft_sharepoint_runtime(
     role_id_path: Path,
     secret_id_path: Path,
     transport: UrlLibJsonHttpTransport,
+    boundary_read_only: bool = False,
 ) -> MicrosoftSharePointRuntime:
     """Compose an independent sharepoint-read profile, never borrowing mail/directory access.
 
     The caller must separately install/validate the client boundary and run the
     governed document connector. This builder never permits automatic activation.
     """
-    store = SQLiteClientBoundaryStore(boundary_db)
+    store = SQLiteClientBoundaryStore(boundary_db, read_only=boundary_read_only)
     boundaries = SQLiteClientBoundaryRepository(store)
     resolver = OpenBaoSecretResolver(
         base_url=openbao_url,
