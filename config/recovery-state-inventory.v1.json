@@ -1,0 +1,164 @@
+{
+  "schema_version": "1.0",
+  "classes": [
+    {
+      "state_class": "deployment-configuration",
+      "category": "configuration",
+      "recovery_action": "restore",
+      "full_recovery_export": true,
+      "portable_deployment_export": true,
+      "contains_secrets": false,
+      "machine_bound": false,
+      "consistency": "atomic_file",
+      "examples": ["deployment descriptor", "MSP configuration", "provider non-secret settings"]
+    },
+    {
+      "state_class": "msp-policy",
+      "category": "policy",
+      "recovery_action": "restore",
+      "full_recovery_export": true,
+      "portable_deployment_export": true,
+      "contains_secrets": false,
+      "machine_bound": false,
+      "consistency": "atomic_file",
+      "examples": ["disruption policy", "autonomy policy", "ticketing policy"]
+    },
+    {
+      "state_class": "authority-and-identity",
+      "category": "authority",
+      "recovery_action": "restore",
+      "full_recovery_export": true,
+      "portable_deployment_export": false,
+      "contains_secrets": false,
+      "machine_bound": false,
+      "consistency": "sqlite_consistent_snapshot",
+      "examples": ["identity authority", "authority grants", "approval state", "single-use continuation state"]
+    },
+    {
+      "state_class": "audit-and-orchestration",
+      "category": "audit",
+      "recovery_action": "restore",
+      "full_recovery_export": true,
+      "portable_deployment_export": false,
+      "contains_secrets": false,
+      "machine_bound": false,
+      "consistency": "sqlite_consistent_snapshot",
+      "examples": ["security audit", "orchestration events", "governed execution ledger"]
+    },
+    {
+      "state_class": "workflow-state",
+      "category": "workflow",
+      "recovery_action": "restore",
+      "full_recovery_export": true,
+      "portable_deployment_export": false,
+      "contains_secrets": false,
+      "machine_bound": false,
+      "consistency": "sqlite_consistent_snapshot",
+      "examples": ["autonomy work items", "playbook run history", "Teams continuation state"]
+    },
+    {
+      "state_class": "provider-client-mappings",
+      "category": "provider_mapping",
+      "recovery_action": "restore",
+      "full_recovery_export": true,
+      "portable_deployment_export": true,
+      "contains_secrets": false,
+      "machine_bound": false,
+      "consistency": "sqlite_consistent_snapshot",
+      "examples": ["Autotask company mapping", "Datto site mapping", "IT Glue organization mapping", "DNSFilter organization mapping"]
+    },
+    {
+      "state_class": "business-operational-state",
+      "category": "business_state",
+      "recovery_action": "restore",
+      "full_recovery_export": true,
+      "portable_deployment_export": false,
+      "contains_secrets": false,
+      "machine_bound": false,
+      "consistency": "database_native_backup",
+      "examples": ["procurement state", "reconciliation state", "resolution memory", "reflection state", "KFS PostgreSQL data"]
+    },
+    {
+      "state_class": "provider-secrets",
+      "category": "secret",
+      "recovery_action": "restore",
+      "full_recovery_export": true,
+      "portable_deployment_export": false,
+      "contains_secrets": true,
+      "machine_bound": false,
+      "consistency": "provider_export",
+      "examples": ["API credentials", "OAuth secrets", "provider tokens", "AppRole recovery material"],
+      "notes": "Included only inside the authenticated encrypted Full Recovery Export boundary when exportable."
+    },
+    {
+      "state_class": "signing-and-recovery-keys",
+      "category": "cryptographic_material",
+      "recovery_action": "restore",
+      "full_recovery_export": true,
+      "portable_deployment_export": false,
+      "contains_secrets": true,
+      "machine_bound": false,
+      "consistency": "provider_export",
+      "examples": ["Jason signing private keys", "trusted promotion key material", "OpenBao recovery material"],
+      "notes": "Independent recovery-key custody must not depend solely on the source host."
+    },
+    {
+      "state_class": "service-and-schedule-definitions",
+      "category": "service_definition",
+      "recovery_action": "reconstruct",
+      "full_recovery_export": false,
+      "portable_deployment_export": false,
+      "contains_secrets": false,
+      "machine_bound": false,
+      "consistency": "versioned_source",
+      "examples": ["systemd units", "timers", "Docker networks", "container definitions"],
+      "notes": "Restore from immutable release and deployment configuration, not by copying host-installed definitions."
+    },
+    {
+      "state_class": "observability-history",
+      "category": "observability",
+      "recovery_action": "restore",
+      "full_recovery_export": true,
+      "portable_deployment_export": false,
+      "contains_secrets": false,
+      "machine_bound": false,
+      "consistency": "database_native_backup",
+      "examples": ["Prometheus durable data", "Grafana state"],
+      "notes": "Retention may be profile-dependent; recovery contract must state whether history is required."
+    },
+    {
+      "state_class": "model-and-download-cache",
+      "category": "cache",
+      "recovery_action": "reconstruct",
+      "full_recovery_export": false,
+      "portable_deployment_export": false,
+      "contains_secrets": false,
+      "machine_bound": false,
+      "consistency": "reconstructable",
+      "examples": ["Ollama model cache", "download cache", "build cache"]
+    },
+    {
+      "state_class": "ephemeral-runtime-state",
+      "category": "transient",
+      "recovery_action": "discard",
+      "full_recovery_export": false,
+      "portable_deployment_export": false,
+      "contains_secrets": false,
+      "machine_bound": false,
+      "consistency": "not_applicable",
+      "examples": ["/tmp", "container IDs", "process state", "stale locks", "runtime sockets"]
+    },
+    {
+      "state_class": "host-bound-identity",
+      "category": "machine_identity",
+      "recovery_action": "reenroll",
+      "full_recovery_export": false,
+      "portable_deployment_export": false,
+      "contains_secrets": true,
+      "machine_bound": true,
+      "consistency": "not_applicable",
+      "examples": ["TPM-bound identity", "device registration", "machine certificate private key"],
+      "notes": "Package records the requirement and source metadata but does not silently transplant unsafe machine-bound identity."
+    }
+  ]
+}
