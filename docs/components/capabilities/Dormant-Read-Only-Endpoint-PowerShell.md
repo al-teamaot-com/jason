@@ -1,6 +1,6 @@
-# Dormant Read-Only Endpoint PowerShell Foundation
+# Governed Read-Only Endpoint PowerShell
 
-Status: source-only candidate capability; not deployed; not registered for production runtime use.
+Status: production-active through the governed Datto RMM Quick Job/component transport.
 
 ## Purpose
 
@@ -10,7 +10,7 @@ Canonical capability name:
 
 `endpoint.powershell.read`
 
-The capability is intended for future use with a separately reviewed real-time endpoint transport such as a supported Datto RMM/Web Remote integration. This change does not implement or enable that transport.
+The production implementation currently uses Datto RMM Quick Jobs with the exact reviewed component `Run Ad Hoc Command (PowerShell 2-5) [WIN]` (UID `8a1c153c-feee-41c5-9c9b-58a48e0214fe`) as its execution transport. This is not Datto Web Remote or an interactive real-time shell. A separately reviewed supported Web Remote/real-time transport remains future work; when available, it may be preferred while this component path remains the reliable fallback.
 
 ## Safety model
 
@@ -85,24 +85,49 @@ The original fixed diagnostic operations remain as convenience wrappers. They re
 
 ## Execution boundary
 
-The policy exposes a `ReadOnlyPowerShellTransport` protocol but provides no Datto transport implementation.
+Production execution is bound to the supported Datto RMM Quick Job path and the exact reviewed ad-hoc PowerShell component:
 
-If no reviewed transport is injected, execution fails closed with:
+- component UID: `8a1c153c-feee-41c5-9c9b-58a48e0214fe`
+- component name: `Run Ad Hoc Command (PowerShell 2-5) [WIN]`
+- component approval mode in the shared MCP component scope: `per_run`
+- capability activation profile: `JASON_DATTO_POWERSHELL_READ_PROFILE=readonly-v1`
 
-`read-only PowerShell transport is not configured`
+The capability performs its own read-only classifier and authority checks before the component transport is invoked. Generic Datto component execution is not enabled merely by activating this capability.
 
-Before production activation, a transport must be separately reviewed for:
+Datto execution is asynchronous. A successful dispatch may initially return a durable job ID while the job is still active. Follow-up must read that same job and its output; it must not redispatch the PowerShell command simply because inline polling expired.
+
+The production transport must preserve:
 
 1. authoritative device identity binding;
-2. provider-supported authentication/session establishment;
-3. exact command, classification, endpoint, and correlation audit evidence;
-4. output bounding and sensitive-data controls;
-5. timeout/cancellation behavior;
-6. ticket/device context binding;
-7. confirmation that the transport cannot silently broaden into arbitrary shell authority.
+2. provider-supported authentication through the dedicated Datto execution AppRole;
+3. exact command classification, endpoint, component, correlation, and job evidence;
+4. bounded output retrieval and sensitive-data controls;
+5. timeout behavior that does not create duplicate jobs;
+6. ticket/device context binding when applicable;
+7. the rule that this read capability cannot silently broaden into arbitrary shell authority.
+
+### Real-time transport boundary
+
+Datto Web Remote/interactive PowerShell is **not implemented by this capability today**. The current production path remains the ad-hoc component/Quick Job transport. Future Web Remote work must be separately researched and reviewed to determine whether Datto exposes a supported authenticated API, session, or WebSocket transport suitable for Jason. If admitted, it should preserve the same `endpoint.powershell.read` governance contract and use the current Quick Job/component path as fallback rather than creating an ungoverned shell path.
 
 ## Deployment state
 
-No production runtime, MCP catalog, compose file, OpenBao policy, credential, provider activation profile, or deployment configuration is modified by this feature branch.
+Production activation was proven on 2026-09-25.
 
-The capability remains dormant until a later governed activation decision.
+The production runtime and MCP expose `endpoint.powershell.read` under the dedicated `readonly-v1` activation profile. The transport uses the dedicated Datto RMM execution AppRole mounted read-only. The exact ad-hoc component remains explicitly scoped rather than permitting caller-selected arbitrary components.
+
+Authority remains separate from activation. The controlled acceptance used an exact `observe` grant for principal `person-al` and capability `endpoint.powershell.read`.
+
+### Production acceptance evidence
+
+The controlled acceptance targeted AOT-50282 after resolving its authoritative Datto device UID. The command was `Get-Date`.
+
+- exactly one PowerShell Quick Job was dispatched;
+- Datto returned job ID `d4db5540-6c2f-4d41-ac70-0f45f42c0ff7`;
+- the initial bounded inline poll timed out while the job remained active;
+- Jason followed the same job through `automation.job.read` and `automation.job.output.read` rather than redispatching;
+- stdout was returned from the exact reviewed component;
+- the command completed with exit code `0`;
+- the endpoint returned `Friday, September 25, 2026 9:33:24 AM`.
+
+This proves the governed component-backed read path. It does **not** constitute proof of a Datto Web Remote/interactive PowerShell transport.
