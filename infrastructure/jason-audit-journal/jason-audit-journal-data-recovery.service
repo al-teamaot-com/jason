@@ -19,6 +19,7 @@ TimeoutStartSec=120
 NoNewPrivileges=true
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_KILL CAP_AUDIT_WRITE
+AmbientCapabilities=CAP_SETUID
 UMask=0077
 # Host mount namespace is required: consumers must see the recorded file bind.
 # Do not add mount-namespace hardening that makes recovery private to this unit.

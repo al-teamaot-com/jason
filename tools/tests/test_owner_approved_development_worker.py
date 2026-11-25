@@ -1134,7 +1134,7 @@ def test_shared_anchor_preflight_queues_fresh_edit_plan_without_mutation(monkeyp
 
 def test_both_worker_branches_invoke_shared_anchor_preflight():
     import inspect
-    source = inspect.getsource(module.main)
+    source = inspect.getsource(module._run_main)
     assert source.count('if preflight_or_refresh_exact_anchors(') == 2
 
 
@@ -1204,6 +1204,14 @@ def test_real_implementing_worker_regenerates_full_patch_and_reaches_pr(monkeypa
     regression.parent.mkdir(parents=True)
     source.write_text('value = 1\n')
     regression.write_text('def test_value():\n    assert True\n')
+    import json
+    scope = {key: [] for key in module.dependency.DOMAINS}
+    scope['files'] = ['tools/worker.py', 'tools/tests/test_worker.py']
+    scope.update({'kind': 'repair', 'depends_on': []})
+    registry = tmp_path / 'config/development-concurrency-scopes.json'
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(json.dumps({'schema_version': '1.0',
+                                     'workstreams': {'DEV-42': scope}}))
     item = {'id': 'DEV-42', 'issue_number': 42, 'title': 'Canary',
             'approval_source': 'owner-approved', 'approved_by': 'owner',
             'body': 'Only edit `tools/worker.py` and `tools/tests/test_worker.py`.'}

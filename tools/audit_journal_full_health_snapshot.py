@@ -45,7 +45,7 @@ def full_pass(report: dict, code: int) -> bool:
         return False
     if os.getenv("JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE",""):
         try:
-            from orchestrator.journal_health import validate_full_evidence
+            from audit_journal_health_private_reader import validate_full_evidence
             validate_full_evidence(report)
         except (OSError,ValueError,KeyError,TypeError,RuntimeError):
             return False

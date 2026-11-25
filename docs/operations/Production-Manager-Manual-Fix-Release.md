@@ -50,3 +50,11 @@ If more than one merged PR appears, add a separate `--include-pr` for **every** 
 - Release freeze still active, circuit breaker open, drift present, root controller mismatch, storage insufficient or transaction already running.
 
 **Known design limitation:** This is a safe manually *selected release batch*, not yet a selective-release-branch/cherry-pick deployment facility. A standalone hotfix can ship alone only when protected main's baseline-to-candidate inventory contains only that fix (and its reviewed dependencies). Developing a separate signed hotfix-source lane must be a distinct governance decision, not a workaround that disables the current main ancestry safeguard.
+
+## Parallel release preparation — advisory comparison (November 24, 2026)
+
+An unrelated clean worktree registration changes the legacy `scope_sha256`, even when all candidate files and observed overlaps remain identical. This is deliberate under the existing inventory-bound review contract; it must not be silently treated as equivalent to a previously approved scope.
+
+The reviewer can expose a separate `scope_projection_sha256` after the full bounded worktree/PR scans and protected ancestry checks. It projects the exact repository, baseline, candidate, commit/file inventory and observed PR/worktree overlap records. It is explicitly advisory (`scope_projection_authoritative: false`). Unrelated clean or non-overlapping workspace changes and verified stale registrations may leave this projection unchanged, while a new candidate-path overlap changes it. A missing/ambiguous worktree or incomplete provider inventory still denies the review.
+
+Keep the original inventory-bound `scope_sha256` and all approval, re-review, freeze, lock, health and rollback behavior unchanged. Equality of the advisory projection is NOT sufficient to reuse approval, establish semantic dependency independence, prove the overlapping work's content unchanged, or authorize a release. A separately reviewed and accepted component-scope contract must define the exact dependencies, evidence freshness and signed scope for any future narrower approval. Do not reinterpret existing signed receipts or change the production gate under this diagnostic-only source update.

@@ -74,7 +74,8 @@ def test_native_revalidation_is_required_before_repaired_worker_queue(monkeypatc
  from types import SimpleNamespace
  from pathlib import Path
  from tools import audit_journal_release_scope as release_scope
- s=SimpleNamespace(STATE=Path("/fixture/state"),DESIRED=Path("/fixture/desired"),ROLLBACK=release_scope.ROLLBACK)
+ s=SimpleNamespace(STATE=Path("/fixture/state"),DESIRED=Path("/fixture/desired"),ROLLBACK=release_scope.ROLLBACK,
+  refresh_native_drift=lambda:None,native_revalidation_code=release_scope.native_revalidation_code)
  initial=b'{"stage":"initial"}';scope={"desired_state_initial_sha256":repair.digest(initial)}
  control={"circuit_breaker":{"state":"open" if fault=="still_open" else "closed"}}
  report={"status":"pass","problems":[],"observed_at":datetime.now(timezone.utc).isoformat()}
@@ -84,7 +85,7 @@ def test_native_revalidation_is_required_before_repaired_worker_queue(monkeypatc
  def invoke(argv,**kwargs):
   assert kwargs["user"]==kwargs["group"]==1000 and kwargs["extra_groups"]==()
   assert "request_root_control_transition" in argv[-1] and "action='revalidate'" in argv[-1]
-  return SimpleNamespace(returncode=1 if fault=="native_failure" else 0)
+  return SimpleNamespace(returncode=1 if fault=="native_failure" else 0,stdout='{}')
  monkeypatch.setattr(repair.subprocess,"run",invoke)
  def raw(path,mode):
   assert mode==0o600
@@ -95,5 +96,13 @@ def test_native_revalidation_is_required_before_repaired_worker_queue(monkeypatc
  if fault is None:repair.revalidate_before_queue(I,s,scope)
  else:
   with pytest.raises(PermissionError):repair.revalidate_before_queue(I,s,scope)
- assert len(seen)==2 and all(argv[1]=="start" for argv,_ in seen)
+ assert len(seen)==(0 if fault=="policy_changed" else 1) and all(argv[1]=="start" for argv,_ in seen)
  assert not any("reset-failed" in argv for argv,_ in seen)
+
+
+def test_only_attested_rolled_back_context_accepts_inactive_failed_worker():
+ report,control=drift();report["problems"].pop()
+ with pytest.raises(PermissionError):repair.validate_known_drift(report,control)
+ repair.validate_known_drift(report,control,rolled_back_context=True)
+ report["problems"].append({"kind":"failed_system_unit","unit":"jason-core.service","state":"failed"})
+ with pytest.raises(PermissionError):repair.validate_known_drift(report,control,rolled_back_context=True)

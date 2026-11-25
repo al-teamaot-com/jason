@@ -108,8 +108,15 @@ class InstallTransaction:
    need(digest(raw_file(path,mode))==expected,"NEW_FILE_CHANGED:"+path.name);return
   atomic(path,raw,mode);self.fault("file_published")
  def replace(self,path,raw,mode=0o600):
-  need(mode in (0o400,0o444,0o600),"REPLACEMENT_MODE")
-  path=Path(path);expected=digest(raw)
+  path=Path(path)
+  fixed_units={
+   Path("/etc/systemd/system/jason-audit-journal-release.service"),
+   Path("/etc/systemd/system/jason-audit-journal-maintenance.service"),
+   Path("/etc/systemd/system/jason-audit-journal-data-recovery.service"),
+  }
+  need(mode in (0o400,0o444,0o600) or (mode==0o644 and path in fixed_units),
+       "REPLACEMENT_MODE")
+  expected=digest(raw)
   prior=[r for r in self.state["entries"] if r["kind"]=="replace" and r["path"]==str(path)]
   item=prior[0] if prior else self.record("replace",path,before_hex=raw_file(path,mode).hex(),
                                          after_sha256=expected,mode=mode)
