@@ -12,6 +12,9 @@ Defines mission, policy, authority, and architectural compliance.
 ### Orchestration
 Coordinates work, routes requests, and enforces governance. It never embeds implementation-specific logic.
 
+### Intent and Outcome Reasoning
+Understands human and authorized workflow requests in terms of the outcome sought, authorized scope, evidence needed, and conditions for success. It identifies material ambiguity and asks for clarification. It does not require requesters to know internal capability names, provider APIs, record taxonomies, or playbook identifiers, and it does not grant execution authority.
+
 ### System Registry
 Maintains Jason's authoritative, machine-readable operational topology and system-state record. It relates declared, observed, and verified state for production components, capabilities, providers, dependencies, identity bindings, governance paths, credential references, deployments, and verification methods. It is authoritative for operational description but never self-authorizing and never silently remediates drift.
 
@@ -61,6 +64,14 @@ Once a durable resource identifier has been resolved, subsequent operations shou
 Approval of a provider mutation must bind both the canonical semantic intent and the concrete provider execution plan. The concrete plan must be finalized only after governed provider selection, symbolic resolution, normalization, defaulting, and exact target resolution, and it must be independently recomputed/verified immediately before invocation. Material changes in provider, provider operation, target, symbolic mapping, path, parameters, or normalized payload must fail closed before any provider write.
 
 Provider mutation authorization and diagnostic resource flexibility are separate concerns. A governed playbook may inspect different authorized resources or evidence sources within a verified client scope, but any mutation still requires an exact concrete provider/target/operation/payload binding. No connector or provider adapter may bypass the Central Orchestrator's final execution-plan verification.
+
+People and authorized workflows express the outcome they need. Jason owns interpreting that intent, gathering authorized evidence, selecting the required work, and composing governed steps to fulfill it. The human-facing request model is outcome-centered; internal capability names, provider operations, resource taxonomies, and playbook identifiers are implementation details, not vocabulary requesters must learn.
+
+The Central Orchestrator fulfills outcomes through shared, reusable operations and governed provider connectors. Do not create parallel one-off workflows for each resource type or playbook when a common governed operation model can safely perform the work. Resource-specific behavior is justified only where provider semantics or safety require it, and remains behind the shared orchestration boundary.
+
+Playbooks provide purpose, context, constraints, evidence requirements, sequencing, and success conditions. They reuse the same intent, policy, planning, execution, and verification path; they do not create separate provider mutation engines.
+
+Reusable execution is not unrestricted provider access. Every action remains subject to identity and client scope, ambiguity handling, policy and risk evaluation, approval routing, exact provider-plan binding, audit, and post-action verification. Unsupported or denied requests must receive a specific, truthful explanation.
 
 ## Definition of Completion
 
