@@ -69,7 +69,7 @@ def reviewed_claim_scope_path(repo: Path) -> Path:
 # this observation NEVER grants production authority. Root release checks read
 # the original protected files independently.
 NATIVE_HEALTH_GUARD = Path('/opt/jason/independent-component-release/trusted/tools/pmv4_host_release_guard.py')
-NATIVE_HEALTH_GUARD_SHA256 = '223cc0dca981461cb93782afad5804efa0740a06b3dd51becf20bbc856371bfc'
+NATIVE_HEALTH_GUARD_SHA256 = '378239512b4da241adb027e7c88f5067c68388904b4b936eed10b3883e95dc22'
 NATIVE_JOURNAL_STATUS = Path('/var/lib/jason-audit-journal/control/forward-release-status.json')
 FORWARD_SCOPE_SHA256 = '697210854d0a0140d3a672750ad84d043e5ac99db117abd6043469312d017fb7'
 FORWARD_ACTION = 'RECOVER-SEGMENTED-AUDIT-WITHOUT-LEGACY-REBUILD'
