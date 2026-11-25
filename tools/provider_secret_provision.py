@@ -98,6 +98,18 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/itglue-read-approle"
         ),
     },
+    "it_glue_write": {
+        "logical_name": "it_glue.readwrite",
+        "secret_path": "secret/data/connectors/it-glue/production/write",
+        "fields": ("api_key",),
+        "required_fields": ("api_key",),
+        "policy_name": "jason-itglue-write-secret-read",
+        "role_name": "jason-itglue-write-secret-read",
+        "connector_identity": "itglue-write",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/itglue-write-approle"
+        ),
+    },
     "microsoft_graph": {
         "logical_name": "microsoft_graph.directory_read",
         "secret_path": "secret/data/connectors/microsoft-graph/production/directory-read",

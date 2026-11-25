@@ -31,3 +31,10 @@ def test_it_glue_base_url_is_provider_configuration() -> None:
 
     assert ItGlueConnector.base_url == "https://api.itglue.com"
     assert "base_url" not in DEFAULT_FIELDS["it_glue.readonly"]
+
+
+def test_write_secret_does_not_alias_readonly_secret():
+    assert DEFAULT_MAPPINGS["it_glue.readwrite"] == (
+        "secret/data/connectors/it-glue/production/write")
+    assert DEFAULT_FIELDS["it_glue.readwrite"] == frozenset({"api_key"})
+    assert DEFAULT_MAPPINGS["it_glue.readwrite"] != DEFAULT_MAPPINGS["it_glue.readonly"]
