@@ -56,6 +56,11 @@ def test_production_manifest_loads_with_resolved_dependencies() -> None:
     assert "component.jason-prometheus" in ids
     assert "component.jason-grafana" in ids
     assert "deployment.jason-chatgpt-mcp-observability-pilot" in ids
+    assert "component.jason-kfs-postgres" in ids
+    assert all(
+        "jason-toner-exporter.service" not in str(entity.declared_state)
+        for entity in registry.list_all()
+    )
 
 
 def test_physical_configured_entities_have_bounded_host_checks_or_governed_verification() -> None:
