@@ -218,26 +218,29 @@ class SegmentedOrchestrationEventStore:
 
     def _archive(self,record):
         path=self.profile.artifact(record)
-        key=("db",record["id"])
-        if key in self._cache:
-            value=self._cache.pop(key);self._cache[key]=value;return value
         # Standalone closed DELETE-mode files are independently sealed before
         # publication. Never use immutable=1 for an active or merely pending DB.
+        # A read-only connection still pins a sealed archive inode, so it must
+        # never enter the long-lived segment/filter cache. The Root maintenance
+        # gate refuses to seal/rotate with any such connection left open.
         uri=path.as_uri()+"?mode=ro"+("&immutable=1" if record["state"]=="sealed" else "")
-        value=sqlite3.connect(uri,uri=True,timeout=5,check_same_thread=False)
-        value.row_factory=sqlite3.Row
-        value.execute("PRAGMA query_only=ON")
-        self._cache[key]=value;self._trim()
-        return value
+        db=sqlite3.connect(uri,uri=True,timeout=5,check_same_thread=False)
+        try:
+            db.row_factory=sqlite3.Row
+            db.execute("PRAGMA query_only=ON")
+            return db
+        except BaseException:
+            db.close()
+            raise
 
     @contextmanager
     def _archive_query(self,record,sql,arguments):
-        db=self._archive(record)
-        try:yield db.execute(sql,arguments)
-        finally:
-            if record["state"]=="pending":
-                self._cache.pop(("db",record["id"]),None)
-                db.close()
+        # sqlite3.Connection used as a context manager does NOT close on exit.
+        # Explicitly close the cursor and DB on success, exception or a
+        # caller abandoning a query after first result.
+        with closing(self._archive(record)) as db:
+            with closing(db.execute(sql,arguments)) as cursor:
+                yield cursor
 
     def _trim(self):
         while len(self._cache)>self.profile.cached_archives:

@@ -62,6 +62,14 @@ jobs:
           python -m json.tool config/operations/audit-journal-daily-archive-proposal-v1.json >/dev/null
           test ! -e /var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3
 
+      - name: Root-managed strict systemd private reader on synthetic readonly source
+        env:
+          PYTHONPATH: .:tools:implementation
+        run: |
+          fixture_base="$(mktemp -d /tmp/jason-private-reader-systemd-XXXXXXXX)"
+          python3 -B tools/tests/audit_journal_health_reader_systemd_fixture.py prepare "$fixture_base"
+          sudo systemd-run --system --wait --collect --pipe --unit=jason-private-reader-ci --property=User="$(id -un)" --property=WorkingDirectory="$GITHUB_WORKSPACE" --property=ProtectSystem=strict --property=ProtectHome=read-only --property=PrivateTmp=no --property=NoNewPrivileges=yes --property=ReadOnlyPaths="$fixture_base" --property=ReadWritePaths="$fixture_base/scratch" /usr/bin/python3 -I -B "$GITHUB_WORKSPACE/tools/tests/audit_journal_health_reader_systemd_fixture.py" verify "$fixture_base"
+
       - name: Root custody, UID 1000 writer and one-use crash recovery
         run: |
           docker build --network=none -f infrastructure/jason-audit-journal/tests.Dockerfile -t audit-journal-native-fixture .
@@ -85,3 +93,7 @@ jobs:
           docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=1g --entrypoint /usr/bin/python3 audit-journal-native-fixture -I -B /root-worker-fixture.py
           docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=1g --entrypoint /usr/bin/python3 audit-journal-native-fixture -I -B /root-bootstrap-fixture.py
           docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=1g --tmpfs /run:rw,nosuid,nodev,size=8m --entrypoint /usr/bin/python3 audit-journal-native-fixture -I -B /root-executor-retire-fixture.py
+
+      - name: Native health reader exact rollback after every file publication
+        run: |
+          docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=128m --entrypoint /usr/bin/python3 audit-journal-native-fixture -I -B /native-health-reader-fixture.py

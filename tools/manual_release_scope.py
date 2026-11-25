@@ -282,10 +282,23 @@ def review(repo, repository, baseline, candidate, allowed_prs=(),
     digest = hashlib.sha256(json.dumps(
         [baseline, candidate, commits, paths, prs, dirty, stale, registrations],
         sort_keys=True).encode()).hexdigest()
+    # A separate, advisory projection distinguishes candidate/overlap changes
+    # from verified non-overlapping worktree inventory churn. Do not use this
+    # projection as an approval or replace the legacy inventory-bound digest.
+    # The full scans and all existing fail-closed checks have already run.
+    projection = hashlib.sha256(json.dumps(
+        {"schema_version": "1.0", "repository": repository,
+         "baseline_sha": baseline, "candidate_sha": candidate,
+         "commits": commits, "changed_files": paths, "open_pr_overlaps": prs,
+         "dirty_worktree_overlaps": sorted(dirty, key=lambda row: row["path"])},
+        sort_keys=True).encode()).hexdigest()
     ready = valid and not missing and not unreviewed_prs and not unreviewed_worktrees
     return {"status": "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED" if ready else "BLOCKED_SCOPE",
             "candidate_sha": candidate, "baseline_sha": baseline,
             "scope_sha256": digest, "commits": commits, "changed_files": paths,
+            "scope_projection_sha256": projection,
+            "scope_projection_schema_version": "1.0",
+            "scope_projection_authoritative": False,
             "unreviewed_commit_shas": missing, "open_pr_overlaps": prs,
             "unreviewed_open_prs": unreviewed_prs, "dirty_worktree_overlaps": dirty,
             "unreviewed_worktrees": unreviewed_worktrees, "acknowledgments_valid": valid,

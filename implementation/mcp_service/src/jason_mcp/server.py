@@ -147,6 +147,11 @@ from jason_runtime.datto_component_scope import (
     DATTO_AD_HOC_POWERSHELL_UID,
     DATTO_AD_HOC_LINUX_SHELL_NAME,
     DATTO_AD_HOC_LINUX_SHELL_UID,
+    DATTO_JASON_ROOT_PROBE_DEVICE_UID,
+    DATTO_JASON_ROOT_PROBE_ALLOWLIST,
+    DATTO_JASON_ROOT_PROBE_DEVICE_CLASS,
+    jason_root_probe_enabled,
+    jason_root_probe_command_allowed,
     DATTO_EXECUTION_COMPONENTS_JSON_ENV,
     DATTO_APPROVAL_MODE_PER_RUN,
     DattoApprovedComponent,
@@ -3408,7 +3413,7 @@ def _active_datto_execution_components():
     worker_uid = os.environ.get(
         "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
     ).strip()
-    if worker_uid and not any(
+    if (worker_uid or jason_root_probe_enabled()) and not any(
         component.uid == DATTO_AD_HOC_LINUX_SHELL_UID
         or component.name.casefold() == DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
         for component in components
@@ -3692,7 +3697,9 @@ def _canonicalize_governed_action_arguments(
         "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
     ).strip()
 
-    if (not all(expected.values()) or not components) and not worker_uid:
+    if (not all(expected.values()) or not components) and not (
+        worker_uid or jason_root_probe_enabled()
+    ):
         raise ValueError(
             "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE"
         )
@@ -3813,13 +3820,21 @@ def _canonicalize_governed_action_arguments(
             != DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
         ):
             raise ValueError("DATTO_LINUX_SHELL_COMPONENT_IDENTITY_MISMATCH")
-        approved_worker = os.environ.get(
-            "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
-        ).strip()
-        if not approved_worker or requested_device != approved_worker:
-            raise ValueError("DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED")
-        effective_allowlist = "aot-approved-linux-worker"
-        effective_class = "Server"
+        if requested_device == DATTO_JASON_ROOT_PROBE_DEVICE_UID:
+            if not jason_root_probe_enabled():
+                raise ValueError("DATTO_JASON_ROOT_PROBE_NOT_ENROLLED")
+            if not jason_root_probe_command_allowed(variables):
+                raise ValueError("DATTO_JASON_ROOT_PROBE_COMMAND_NOT_APPROVED")
+            effective_allowlist = DATTO_JASON_ROOT_PROBE_ALLOWLIST
+            effective_class = DATTO_JASON_ROOT_PROBE_DEVICE_CLASS
+        else:
+            approved_worker = os.environ.get(
+                "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+            ).strip()
+            if not approved_worker or requested_device != approved_worker:
+                raise ValueError("DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED")
+            effective_allowlist = "aot-approved-linux-worker"
+            effective_class = "Server"
     else:
         if not all(expected.values()) or not configured_datto_components():
             raise ValueError("DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE")

@@ -112,34 +112,65 @@ def parse_todo_sections(text: str) -> list[TodoItem]:
     return items
 
 
-def open_todo_issue_map(repo: Path) -> dict[str, dict[str, Any]]:
+def open_todo_issue_map(
+    repo: Path, *,
+    identity_conflicts: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Read the full inventory without granting duplicate TODO authority.
+
+    Strict callers still fail closed on diverging issue identities. The
+    scheduled intake supplies an explicit quarantine ledger: collisions then
+    block only their own TODO ID, while other approved work can be evaluated.
+    Neither path selects a winner or edits/closes a GitHub issue.
+    """
     issues = gh_json(
         ["issue", "list", "--state", "open", "--limit", "5000",
          "--json", "number,title,body,url,updatedAt"],
         cwd=repo,
-    ) or []
-    # A short GitHub window hid canonical October TODO issues and admitted
-    # multiple duplicates. Saturated inventories are UNKNOWN, not empty.
-    if len(issues) >= 5000:
-        raise RuntimeError("TODO inventory at safe limit; do not admit new issue")
-    result: dict[str, dict[str, Any]] = {}
+    )
+    # An unavailable or saturated inventory is UNKNOWN, not empty.
+    if not isinstance(issues, list) or len(issues) >= 5000:
+        raise RuntimeError("TODO inventory unavailable or at safe limit; do not admit new issue")
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for issue in issues:
+        if not isinstance(issue, Mapping):
+            raise RuntimeError("Invalid TODO inventory row")
         body = str(issue.get("body") or "")
-        match = ISSUE_TODO.search(body)
-        if not match:
+        matches = {x.upper() for x in ISSUE_TODO.findall(body)}
+        if not matches:
             continue
-        item_id = match.group(1).upper()
-        prior = result.get(item_id)
-        if prior is not None:
-            # Identical duplicate issues do not create new work authority.
-            # Prefer the earliest canonical ID; mismatched scope is unsafe.
-            if (str(prior.get("body") or "") != body
-                    or str(prior.get("title") or "") != str(issue.get("title") or "")):
-                raise RuntimeError("Conflicting GitHub TODO identities: " + item_id)
-            if int(issue["number"]) >= int(prior["number"]):
-                continue
-        result[item_id] = dict(issue)
+        if len(matches) != 1 or type(issue.get("number")) is not int or issue["number"] < 1:
+            raise RuntimeError("Invalid GitHub TODO identity")
+        grouped.setdefault(next(iter(matches)), []).append(dict(issue))
+    result: dict[str, dict[str, Any]] = {}
+    for item_id, rows in grouped.items():
+        # The earliest issue is used solely for duplicate suppression.
+        # Group before comparing, so even identical duplicates seen before
+        # a divergent third issue remain in the conflict/capacity evidence.
+        result[item_id] = min(rows, key=lambda row: row["number"])
+        signatures = {(str(row.get("title") or ""), str(row.get("body") or "")) for row in rows}
+        if len(signatures) <= 1:
+            continue
+        if identity_conflicts is None:
+            raise RuntimeError("Conflicting GitHub TODO identities: " + item_id)
+        identity_conflicts[item_id] = {
+            "status": "quarantined",
+            "reason": "divergent_open_github_todo_identity",
+            "next_gate": "reconcile_exact_issue_scope_and_owner_authority",
+            "issue_numbers": sorted({row["number"] for row in rows}),
+            "issue_urls": sorted({str(row["url"]) for row in rows if row.get("url")}),
+            "new_work_authorized": False,
+        }
     return result
+
+
+def additional_conflict_capacity(identity_conflicts: Mapping[str, Any]) -> int:
+    """Count every quarantined open duplicate, not only the displayed first."""
+    return sum(
+        max(0, len(set(conflict.get("issue_numbers") or [])) - 1)
+        for conflict in identity_conflicts.values()
+        if isinstance(conflict, Mapping)
+    )
 
 
 def load_support_state(spool: Path) -> dict[str, Any]:
@@ -437,7 +468,8 @@ def main() -> int:
     support_text = run(["git", "show", f"origin/main:{SUPPORT_PATH.as_posix()}"], cwd=repo)
 
     todos = parse_todo_sections(todo_text)
-    issues = open_todo_issue_map(repo)
+    identity_conflicts: dict[str, dict[str, Any]] = {}
+    issues = open_todo_issue_map(repo, identity_conflicts=identity_conflicts)
     support_state = load_support_state(spool)
     support_limit = int(
         config.get("support_autonomy", {}).get("max_active_items", args.max_support_repairs)
@@ -449,9 +481,13 @@ def main() -> int:
         1,
         int(policy.get("max_active_items", 1)) + support_limit,
     )
+    occupied_todo_issues = (
+        capacity_consuming_todo_issue_count(issues, spool)
+        + additional_conflict_capacity(identity_conflicts)
+    )
     if active_support + active_development >= engineering_limit:
         candidate, reason = None, "Engineering capacity is already fully occupied"
-    elif capacity_consuming_todo_issue_count(issues, spool) >= int(
+    elif occupied_todo_issues >= int(
         policy.get("max_open_todo_issues", 1)
     ):
         candidate, reason = None, "Maximum capacity-consuming TODO engineering issues already reached"
@@ -477,7 +513,9 @@ def main() -> int:
         "existing_todo_issues": {
             item_id: int(issue["number"]) for item_id, issue in sorted(issues.items())
         },
-        "capacity_consuming_todo_issues": capacity_consuming_todo_issue_count(issues, spool),
+        "capacity_consuming_todo_issues": occupied_todo_issues,
+        "identity_conflicts": identity_conflicts,
+        "identity_conflict_count": len(identity_conflicts),
     }
 
     downstream = outstanding_commitment_snapshot(spool)
@@ -508,7 +546,23 @@ def main() -> int:
 
     # Recheck all open TODOs immediately before a new GitHub mutation.
     # A prior timer invocation can have admitted the same approved item.
-    already = open_todo_issue_map(repo).get(candidate.item_id)
+    fresh_conflicts: dict[str, dict[str, Any]] = {}
+    fresh_issues = open_todo_issue_map(repo, identity_conflicts=fresh_conflicts)
+    state["identity_conflicts"] = fresh_conflicts
+    state["identity_conflict_count"] = len(fresh_conflicts)
+    state["existing_todo_issues"] = {
+        item_id: int(issue["number"]) for item_id, issue in sorted(fresh_issues.items())
+    }
+    state["capacity_consuming_todo_issues"] = (
+        capacity_consuming_todo_issue_count(fresh_issues, spool)
+        + additional_conflict_capacity(fresh_conflicts)
+    )
+    if candidate.item_id in fresh_conflicts:
+        state["status"] = "identity_conflict_quarantined"
+        state["reason"] = "TODO issue identity diverged before admission"
+        atomic_json(state_path, state)
+        return 0
+    already = fresh_issues.get(candidate.item_id)
     if already is not None:
         state["status"] = "existing_issue_detected"
         state["issue"] = {
@@ -516,6 +570,15 @@ def main() -> int:
             "url": str(already.get("url") or ""),
             "todo_id": candidate.item_id,
         }
+        atomic_json(state_path, state)
+        return 0
+    if (
+        capacity_consuming_todo_issue_count(fresh_issues, spool)
+        + additional_conflict_capacity(fresh_conflicts)
+        >= int(policy.get("max_open_todo_issues", 1))
+    ):
+        state["status"] = "capacity_changed_before_issue_create"
+        state["reason"] = "Full GitHub issue inventory reached the governed issue limit"
         atomic_json(state_path, state)
         return 0
 

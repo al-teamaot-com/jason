@@ -1456,12 +1456,37 @@ def pmv4_e_scheduling_mode() -> str:
     return "replacement"
 
 
+def accepted_engineering_manager_routing():
+    receipt = Path("/etc/jason-owner-release/pmv4-e/engineering-manager-system-authorized.json")
+    guard = Path("/usr/local/lib/jason/pmv4-e-engineering-manager/manager_guard.py")
+    if not os.path.lexists(receipt) and not os.path.lexists(guard):
+        return None
+    try:
+        import pmv4_e_engineering_manager_client as client
+        result = client.read_routing()
+        if result is None:
+            raise PermissionError("successor receipt missing")
+        return result
+    except (ImportError, OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+        raise ReleaseManagerError("PMv4 engineering manager successor admission denied") from exc
+
+
 def scheduled_control_alignment() -> dict[str, str]:
     mode = pmv4_e_scheduling_mode()
     user_required = (PMV4_E_USER_TIMERS if mode == "replacement"
                      else USER_CONTROL_TIMERS)
     system_required = (SYSTEM_CONTROL_TIMERS + PMV4_E_ROOT_TRIGGERS
                        if mode == "replacement" else SYSTEM_CONTROL_TIMERS)
+    routing = accepted_engineering_manager_routing() if mode == "replacement" else None
+    if routing is not None:
+        moved = set(routing["system_timers"])
+        if not moved.issubset(user_required):
+            raise ReleaseManagerError("PMv4 successor scope differs from original schedule")
+        user_required = tuple(n for n in user_required if n not in moved)
+        system_required = tuple(system_required) + tuple(routing["system_timers"])
+        for unit in routing["system_timers"]:
+            if unit_active(unit, user=True):
+                raise ReleaseManagerError(f"retired user control still active: {unit}")
     states: dict[str, str] = {}
     for unit in user_required:
         active = unit_active(unit, user=True)
@@ -1587,17 +1612,28 @@ def controller_identity(repo: Path) -> dict[str, Any]:
         if not immutable.is_file():
             raise ReleaseManagerError("active Release Manager immutable source missing")
         if file_digest(immutable) != file_digest(installed):
-            recovery = _operator_recovery_identity(repo, installed, immutable)
-            return {
-                "executing_controller_path": str(CONTROLLER_SOURCE),
-                "executing_controller_immutable_path": str(installed),
-                "executing_controller_revision": recovery["controller_recovery_revision"],
-                "executing_controller_digest": recovery["controller_recovery_digest"],
-                "candidate_controller_digest": file_digest(candidate_path),
-                "policy_digest": file_digest(policy_path),
-                "captured_at": now(),
-                **recovery,
-            }
+            routing = accepted_engineering_manager_routing()
+            if routing is not None:
+                approved = routing["artifact_sources"]["release_manager_host_runner.py"]
+                successor = Path(approved["source"])
+                if (immutable.parent.parent.name != routing["rollback_sha"]
+                        or file_digest(installed) != "sha256:" + approved["sha256"]
+                        or file_digest(successor) != file_digest(installed)
+                        or successor.parents[1].name != routing["candidate_sha"]):
+                    raise ReleaseManagerError("PMv4 successor controller identity mismatch")
+                immutable = successor
+            else:
+                recovery = _operator_recovery_identity(repo, installed, immutable)
+                return {
+                    "executing_controller_path": str(CONTROLLER_SOURCE),
+                    "executing_controller_immutable_path": str(installed),
+                    "executing_controller_revision": recovery["controller_recovery_revision"],
+                    "executing_controller_digest": recovery["controller_recovery_digest"],
+                    "candidate_controller_digest": file_digest(candidate_path),
+                    "policy_digest": file_digest(policy_path),
+                    "captured_at": now(),
+                    **recovery,
+                }
 
     source_revision = immutable.parents[1].name.casefold()
     return {

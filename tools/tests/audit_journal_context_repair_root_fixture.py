@@ -20,6 +20,17 @@ for scenario in ("queued","failure-before-queue","power-loss","tamper","queued-r
  sentinel=original_bootstrap/"approval.json";sentinel.write_bytes(b"original immutable Owner approval");sentinel.chmod(0o400)
  original_approval=sha256(sentinel.read_bytes()).hexdigest()
  r.ROOT=owner/"context-repairs"
+ r.ROOT.mkdir(mode=0o700)
+ prior={}
+ for candidate_id,tag in ((r.FAILED_CONTEXT_CANDIDATE,"prior"),(r.EXHAUSTED_CONTEXT_CANDIDATE,"exhausted")):
+  directory=r.ledger(candidate_id);directory.mkdir(mode=0o700)
+  record={}
+  for filename,mode in (("authorization.json",0o400),("transaction.json",0o600),
+                        *((("retry.json",0o400),) if tag=="exhausted" else ())):
+   raw=r.canon({"fixture_predecessor":tag,"record":filename})
+   file=directory/filename;file.write_bytes(raw);file.chmod(mode)
+   record[filename]=r.digest(raw)
+  prior[tag]=record
  private=root/"private";private.mkdir(mode=0o700);base=root/"library";base.mkdir()
  lock=private/"maintenance.lock";lock.touch();lock.chmod(0o600)
  source=base/"trusted/tools/fixture.py";source.parent.mkdir(parents=True);source.write_bytes(b"old-code");source.chmod(0o444)
@@ -43,7 +54,9 @@ for scenario in ("queued","failure-before-queue","power-loss","tamper","queued-r
  scope={"action":"ADOPT-EXACT-DAILY-AUDIT-JOURNAL","policy":{"candidate_sha":candidate,"rollback_sha":"d"*40},
   "source_sha256":{"tools/fixture.py":r.digest(b"new-code")},"source_dataset_identity":{"device":identity[0],"inode":identity[1]},
   "protected_peer_before":{},"desired_state_initial_sha256":r.digest(b'{"limit":27,"timer":"allowed"}'),
-  "desired_state_after_sha256":r.digest(desired.read_bytes()),"desired_state_before_sha256":r.digest(desired.read_bytes()),"pre_cutover_context_repair":{"previous_scope_sha256":r.OLD_SCOPE,"catalog_before_sha256":r.digest(catalog.read_bytes())}}
+  "desired_state_after_sha256":r.digest(desired.read_bytes()),"desired_state_before_sha256":r.digest(desired.read_bytes()),"pre_cutover_context_repair":{"previous_scope_sha256":r.OLD_SCOPE,"catalog_before_sha256":r.digest(catalog.read_bytes()),"prior_context_attempt":{"candidate_sha":r.FAILED_CONTEXT_CANDIDATE,"scope_sha256":r.FAILED_CONTEXT_SCOPE,"authorization_sha256":prior["prior"]["authorization.json"],"transaction_sha256":prior["prior"]["transaction.json"],"outcome":"rolled_back","old_approval_retained":True,"old_execution_authority_reused":False},
+  "prior_exhausted_attempt":{"candidate_sha":r.EXHAUSTED_CONTEXT_CANDIDATE,"scope_sha256":r.EXHAUSTED_CONTEXT_SCOPE,
+   "authorization_sha256":prior["exhausted"]["authorization.json"],"transaction_sha256":prior["exhausted"]["transaction.json"],"retry_sha256":prior["exhausted"]["retry.json"],"outcome":"rolled_back","old_approval_retained":True,"old_execution_authority_reused":False}}}
  s=SimpleNamespace(BASE=base,PRIVATE=private,CONTROL=control,POLICY=policy,PROFILE=profile,DESIRED=desired,
   ACTIVE=active,PROTECTED={},digest=lambda value:r.digest(r.canon(value)),protected_peer_inventory=lambda:{},
   desired_initial=lambda value:{"limit":27,"timer":"allowed"},desired_after=lambda value:{"limit":27},
@@ -110,6 +123,27 @@ for scenario in ("queued","failure-before-queue","power-loss","tamper","queued-r
    except PermissionError:pass
    else:raise AssertionError("concurrently claimed old retry accepted")
    retry.unlink();r.FAILED_CONTEXT_CANDIDATE,r.FAILED_CONTEXT_SCOPE=previous_constants
+   exhausted_constants=(r.EXHAUSTED_CONTEXT_CANDIDATE,r.EXHAUSTED_CONTEXT_SCOPE)
+   r.EXHAUSTED_CONTEXT_CANDIDATE,r.EXHAUSTED_CONTEXT_SCOPE=candidate,row["scope_sha256"]
+   consumed=r.ledger(candidate)/"retry.json"
+   prior=row["scope"]["pre_cutover_context_repair"]["prior_context_attempt"]
+   consumed_raw=r.canon({"scope_sha256":row["scope_sha256"],"observed_at":row["claimed_at"]})
+   r.atomic(consumed,consumed_raw,0o400)
+   evidence=r.verify_rolled_back_context(s,originals,r.canon(old_policy),
+    candidate=candidate,scope_sha=row["scope_sha256"],exhausted=True,predecessor=prior)
+   assert evidence["outcome"]=="rolled_back" and evidence["retry_sha256"]==r.digest(consumed_raw)
+   for damage in ("wrong_scope","missing_retry","wrong_lineage"):
+    if damage=="wrong_scope":r.atomic(consumed,r.canon({"scope_sha256":"0"*64,"observed_at":row["claimed_at"]}),0o400)
+    elif damage=="missing_retry":consumed.unlink()
+    try:
+     r.verify_rolled_back_context(s,originals,r.canon(old_policy),
+      candidate=candidate,scope_sha=row["scope_sha256"],exhausted=True,
+      predecessor=({**prior,"scope_sha256":"e"*64} if damage=="wrong_lineage" else prior))
+    except (PermissionError,FileNotFoundError):pass
+    else:raise AssertionError("consumed predecessor tamper accepted: "+damage)
+    if damage!="wrong_lineage":r.atomic(consumed,consumed_raw,0o400)
+   consumed.unlink()
+   r.EXHAUSTED_CONTEXT_CANDIDATE,r.EXHAUSTED_CONTEXT_SCOPE=exhausted_constants
   r.execute(I,candidate,{}, modules,None,None,{},resume=True)
  except SystemExit:
   assert scenario in ("power-loss","tamper")
