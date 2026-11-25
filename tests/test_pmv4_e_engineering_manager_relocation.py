@@ -35,7 +35,7 @@ def test_candidate_is_exact_and_retains_sandbox_and_original_guards():
             assert line in new.splitlines()
     old_rw = next(x for x in old.splitlines() if x.startswith("ReadWritePaths="))
     new_rw = next(x for x in new.splitlines() if x.startswith("ReadWritePaths="))
-    assert new_rw == old_rw.replace("ReadWritePaths=", "ReadWritePaths=" + m.GIT_METADATA + " ", 1)
+    assert new_rw == old_rw.replace("ReadWritePaths=", "ReadWritePaths=" + " ".join(m.PIPELINE_WRITES) + " ", 1)
     assert files[str(m.TARGET / m.TIMER)] == (ROOT / m.SOURCE / m.TIMER).read_bytes()
     wd = files[str(m.TARGET / m.WATCHDOG_SERVICE)].decode()
     assert "User=al\nGroup=al\n" in wd

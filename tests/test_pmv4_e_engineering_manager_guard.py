@@ -97,3 +97,30 @@ def test_watchdog_does_not_gain_system_start_authority(monkeypatch):
     def denied(): raise PermissionError("invalid")
     monkeypatch.setattr(wd, "accepted_engineering_manager_routing", denied)
     assert wd.request_engineering_worker() == "deferred_engineering_manager_successor_invalid"
+
+
+def test_pipeline_successor_binds_complete_stage_inventory_and_predecessor():
+    r = receipt()
+    r.update(schema_version="1.1", action=g.PIPELINE_ACTION,
+             predecessor_candidate_sha="1"*40, predecessor_receipt_sha256="2"*64,
+             engineering_source_sha=g.PIPELINE_SOURCE_SHA,
+             pipeline_artifact_sha256={name:"3"*64 for name in g.PIPELINE_ARTIFACTS})
+    assert g.validate_receipt(r) == r
+    for key,value in (
+        ("action",g.ACTION), ("predecessor_candidate_sha",r["candidate_sha"]),
+        ("predecessor_receipt_sha256","not-a-digest"),
+        ("engineering_source_sha","0"*40), ("pipeline_artifact_sha256",{}),
+    ):
+        bad=deepcopy(r);bad[key]=value
+        with pytest.raises(g.Denied):g.validate_receipt(bad)
+
+
+def test_pipeline_unit_covers_exact_runtime_write_roots():
+    from tools import pmv4_e_engineering_manager_relocation as m
+    root=Path(__file__).resolve().parents[1]
+    unit=(root/m.TARGET/m.SERVICE).read_text()
+    line=next(x for x in unit.splitlines() if x.startswith("ReadWritePaths="))
+    assert set(line.split("=",1)[1].split()) == set(g.PIPELINE_WRITES)
+    assert "ProtectSystem=strict" in unit and "ProtectHome=read-only" in unit
+    assert "/var/lib/jason/openclaw" not in g.PIPELINE_WRITES
+    assert "/home/al/jason-worktrees" not in g.PIPELINE_WRITES
