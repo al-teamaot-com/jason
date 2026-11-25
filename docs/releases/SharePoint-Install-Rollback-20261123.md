@@ -126,3 +126,14 @@ python3 tools/sharepoint_install_package.py verify \
 Baseline fields are exactly `runtime_source`, `runtime_image`, `mcp_image` and
 `observed_at`. They record an observation and never substitute for fresh native
 root acceptance or the private before-images used for actual rollback.
+
+### Shared read-only boundary module closure
+
+The independent site-control image must include the exact reviewed shared
+SQLite boundary-store module rather than inheriting the older writer-only
+module from the runtime baseline. Its source and tests are included in the
+verified package closure, and the existing reader CI runs its regressions.
+This is a source/image custody correction, not an alternate release lane.
+The read-only store repair and this packaging change must both be accepted
+in the eventual native release. A package from either branch alone is
+not evidence that the corrected running sidecar is ready.

@@ -53,6 +53,8 @@ FIXED_FILES = (
     "tools/sharepoint_grafana_install.py",
     "tools/tests/test_sharepoint_install_package.py",
     "implementation/connectors/core/openbao_secrets.py",
+    "implementation/kernel/client_boundaries/sqlite.py",
+    "implementation/kernel/tests/test_client_boundaries_sqlite.py",
     "implementation/runtime_service/src/jason_runtime/microsoft_sharepoint.py",
     "implementation/runtime_service/src/jason_runtime/sharepoint_read_activation.py",
     "implementation/runtime_service/src/jason_runtime/sharepoint_reads.py",

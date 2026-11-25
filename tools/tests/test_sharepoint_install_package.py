@@ -276,3 +276,15 @@ def test_archive_symlink_metadata_is_denied_even_with_original_payload(source_re
             archive.writestr(info, blob)
     with pytest.raises(package.PackageDenied, match="ARCHIVE_MEMBER_TYPE"):
         package.verify(repo, sha, bad)
+
+
+def test_shared_boundary_store_is_pinned_in_sidecar_and_package():
+    # The read-only sidecar must not inherit a pre-repair SQLite module
+    # from the pinned Runtime base. Every copied shared source needs
+    # exact package custody as well.
+    root = Path(__file__).resolve().parents[2]
+    module = "implementation/kernel/client_boundaries/sqlite.py"
+    assert module in package.FIXED_FILES
+    assert "implementation/kernel/tests/test_client_boundaries_sqlite.py" in package.FIXED_FILES
+    recipe = (root / "infrastructure/sharepoint-site-control/Dockerfile").read_text()
+    assert f"COPY --chown=0:1000 {module} /app/{module}" in recipe
