@@ -31,6 +31,11 @@ POLICY=Path("/etc/jason-owner-release/audit-journal-v1.json")
 PRIVATE=Path("/var/lib/jason-audit-journal/private")
 OWNER="bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
 ACTION="ADOPT-EXACT-DAILY-AUDIT-JOURNAL"
+READER_REPAIR_ACTION="RELEASE-EXACT-AUDIT-READER-HANDLE-CLOSURE"
+READER_REPAIR_RECEIPT=Path("/var/lib/jason-owner-release/audit-reader-handle-closure-20261125/repair-authority.json")
+READER_REPAIR_BEFORE_POLICY=Path("/var/lib/jason-owner-release/audit-reader-handle-closure-20261125/before-policy.json")
+READER_REPAIR_FILES=frozenset(("tools/audit_journal_control.py",
+    "implementation/orchestrator/segmented_journal.py"))
 FIXTURE="bounded-audit-journal-native-fixture-v1"
 
 
@@ -718,6 +723,38 @@ class JournalController:
                 "off_host_backup_claimed":False}
 
 
+def verified_reader_repair_policy(policy,original_adoption):
+    """Only one Root-bound, independently authenticated reader safety repair.
+
+    Original adoption remains immutable. A new one-use Owner decision may
+    supersede two closed-reader source hashes only, with separately retained
+    policy before-image. No global exception to legacy adoption exists.
+    """
+    prior=read_control(READER_REPAIR_BEFORE_POLICY,0,0o400)
+    grant=read_control(READER_REPAIR_RECEIPT,0,0o400)
+    before=dict(prior.get('trusted_source_sha256') or {})
+    after=dict(policy.get('trusted_source_sha256') or {})
+    changed={k for k in after if before.get(k)!=after[k]}
+    need(grant.get('schema_version')=='1.0'
+         and grant.get('action')==READER_REPAIR_ACTION
+         and grant.get('owner_oid')==OWNER
+         and grant.get('independently_verified_entra_owner') is True
+         and grant.get('no_legacy_rebuild') is True
+         and grant.get('provider_calls')==0
+         and grant.get('root_release_finalized') is True
+         and grant.get('previous_adoption_sha256')==sha256(canonical(original_adoption)).hexdigest()
+         and grant.get('previous_policy_sha256')==sha256(canonical(prior)).hexdigest()
+         and grant.get('new_policy_sha256')==sha256(canonical(policy)).hexdigest()
+         and original_adoption.get('policy_sha256')==sha256(canonical(prior)).hexdigest()
+         and changed==READER_REPAIR_FILES
+         and set(after)==set(before)
+         and all(policy.get(k)==prior.get(k) for k in prior if k!='trusted_source_sha256')
+         and set(policy)==set(prior)
+         and grant.get('source_sha256')=={k:after[k] for k in sorted(READER_REPAIR_FILES)}
+         and all(len(v)==64 and set(v)<=set('0123456789abcdef') for v in after.values()),
+         'JOURNAL_READER_REPAIR_EXACT_OWNER_POLICY_REQUIRED')
+
+
 def root_controller(*,recover_profile=False):
     need(os.geteuid()==0 and sys.flags.isolated==1 and Path(__file__).resolve()==ENTRY,
          "JOURNAL_INSTALLED_ISOLATED_ROOT_REQUIRED")
@@ -725,8 +762,9 @@ def root_controller(*,recover_profile=False):
     receipt=read_control(PRIVATE/"adoption.json",0,0o400)
     need(receipt.get("action")==ACTION and receipt.get("owner_oid")==OWNER
          and receipt.get("independently_verified_entra_owner") is True
-         and receipt.get("policy_sha256")==sha256(canonical(policy)).hexdigest()
          and receipt.get("maintenance_policy_adopted") is True,"JOURNAL_ROOT_ADOPTION_REQUIRED")
+    if receipt.get("policy_sha256")!=sha256(canonical(policy)).hexdigest():
+        verified_reader_repair_policy(policy,receipt)
     need(policy.get("schema_version")=="1.0" and policy.get("enabled") is True
          and policy.get("maintenance_operations")==["rotate","seal","scrub","recover"],
          "JOURNAL_ROOT_MAINTENANCE_POLICY")

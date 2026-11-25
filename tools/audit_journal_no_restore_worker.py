@@ -26,6 +26,8 @@ from tools import audit_journal_control as old
 
 SOURCE = Path('/usr/local/lib/jason/audit-journal-forward-v1/audit_journal_no_restore_worker.py')
 GRANT = Path('/var/lib/jason-audit-journal/private/no-restore-grant.json')
+READER_REPAIR_RECEIPT = Path('/var/lib/jason-owner-release/audit-reader-handle-closure-20261125/repair-authority.json')
+READER_REPAIR_ACTION = 'RELEASE-EXACT-AUDIT-READER-HANDLE-CLOSURE'
 RECEIPTS = Path('/var/lib/jason-audit-journal/private')
 ADMISSION_RECEIPT = RECEIPTS / 'forward-admission-recovered.json'
 ROLLOVER_RECEIPT = RECEIPTS / 'forward-first-scheduled-rollover.json'
@@ -177,6 +179,21 @@ def validate_execution_window(grant,operation,*,now=None):
          'FORWARD_DAILY_MAINTENANCE_NOT_ACCEPTED')
 
 
+def verified_reader_repair_source(grant,current_sha):
+    """Verify a separate exact Owner successor without editing consumed grant."""
+    repair=read_control(READER_REPAIR_RECEIPT,0,0o400)
+    need(repair.get('schema_version')=='1.0'
+         and repair.get('action')==READER_REPAIR_ACTION
+         and repair.get('owner_oid')==old.OWNER
+         and repair.get('independently_verified_entra_owner') is True
+         and repair.get('root_release_finalized') is True
+         and repair.get('no_legacy_rebuild') is True
+         and repair.get('provider_calls')==0
+         and repair.get('previous_forward_grant_sha256')==sha256(old.canonical(grant)).hexdigest()
+         and repair.get('worker_sha256')==current_sha,
+         'FORWARD_NEW_SIGNED_READER_REPAIR_REQUIRED')
+
+
 def ensure_immutable_worker(grant,operation):
     need(os.geteuid()==0 and sys.flags.isolated==1 and Path(__file__).resolve()==SOURCE,
          'FORWARD_INSTALLED_ROOT_ONLY')
@@ -184,7 +201,11 @@ def ensure_immutable_worker(grant,operation):
     need(not SOURCE.is_symlink() and stat.S_ISREG(meta.st_mode) and
          meta.st_uid==meta.st_gid==0 and stat.S_IMODE(meta.st_mode)==0o444,
          'FORWARD_REVIEWED_SOURCE_CUSTODY')
-    need(file_digest(SOURCE)==grant['source_sha256'],'FORWARD_REVIEWED_SOURCE_CHANGED')
+    current_sha=file_digest(SOURCE)
+    if current_sha!=grant['source_sha256']:
+        # Existing no-rebuild grant and historical receipts remain immutable.
+        # Only the separate exact root-owner repair may supersede its code hash.
+        verified_reader_repair_source(grant,current_sha)
     need(grant['independently_verified_entra_owner'] is True and grant['owner_oid']==old.OWNER,
          'FORWARD_INDEPENDENT_OWNER_REQUIRED')
     need(grant['stage'] in APPROVED_PHASES,'FORWARD_APPROVED_STAGE_REQUIRED')
