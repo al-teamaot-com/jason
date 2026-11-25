@@ -57,7 +57,10 @@ CONTROLS = {
     MANAGER / 'auto-promotion-incident-hold': (1000, 0o664, '11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0'),
     SPOOL / 'pmv3-engineering-owner-pause.json': (1000, 0o600, '4a5de8286bf9d77842ca94dafe6f1d38c1a835e8f12bc0dfda46b7a3cf867747'),
 }
-AUDIT = Path('/var/lib/jason-audit-journal/control/release-status.json')
+AUDIT = Path('/var/lib/jason-audit-journal/control/forward-release-status.json')
+FORWARD_SCOPE_SHA256 = '697210854d0a0140d3a672750ad84d043e5ac99db117abd6043469312d017fb7'
+FORWARD_ACTION = 'RECOVER-SEGMENTED-AUDIT-WITHOUT-LEGACY-REBUILD'
+FORWARD_ARCHIVED_EVENTS = 34616410
 DESIRED = Path('/etc/jason/release-readback-recovery/production-desired-state.json')
 PEERS = ('jason-runtime', 'jason-mcp-pilot', 'jason-pmv4-ticket-core',
          'jason-pmv4-shadow-gateway', 'jason-teams-gateway', 'openbao')
@@ -245,16 +248,51 @@ def control_bytes():
     return values
 
 
+def forward_audit_accepted(row):
+    """Exact root-owned no-restore release acceptance, never legacy/provisional.
+
+    The owner-signed recovery's scope is pinned: a different/replayed scope,
+    queued action or self-reported healthy container cannot admit development.
+    Downstream independent native controls/fast/full/drift remain mandatory.
+    """
+    return (isinstance(row, dict)
+            and row.get('schema_version') == '1.0'
+            and row.get('action') == FORWARD_ACTION
+            and row.get('scope_sha256') == FORWARD_SCOPE_SHA256
+            and row.get('phase') == 'accepted'
+            and row.get('status') == 'accepted'
+            and row.get('no_legacy_rebuild') is True
+            and row.get('provider_calls') == 0 and type(row.get('provider_calls')) is int
+            and type(row.get('initial_archive_events')) is int
+            and row['initial_archive_events'] == FORWARD_ARCHIVED_EVENTS
+            and type(row.get('root_free_bytes')) is int
+            and row['root_free_bytes'] > 35_000_000_000
+            and type(row.get('sealed_segments')) is int
+            and row['sealed_segments'] >= 2
+            and all(row.get(k) == 'pass' for k in ('full_health','fast_health','drift'))
+            and row.get('breaker') == 'closed')
+
+
+def audit_recovery_service_complete():
+    old = unit('jason-audit-journal-release.service')
+    new = unit('jason-audit-journal-no-restore-release.service')
+    return (all(old.get(k) == v for k, v in (
+                ('ActiveState','inactive'),('MainPID','0'),('Result','success'),
+                ('ExecMainStatus','0')))
+            and all(new.get(k) == v for k, v in (
+                ('ActiveState','inactive'),('MainPID','0'),('Result','success'),
+                ('ExecMainStatus','0')))
+            and unit('jason-audit-journal-maintenance.timer').get('ActiveState') == 'active'
+            and all(unit('jason-audit-journal-maintenance.service').get(k) == v
+                    for k,v in (('ActiveState','inactive'),('Result','success'),('ExecMainStatus','0'))))
+
+
 def protected_health():
     # Authoritative root file, not the writable mirrored readback.
     audit = read(AUDIT, 0, 0o444)
     row = json.loads(audit)
-    release = unit('jason-audit-journal-release.service')
-    need(row.get('phase') == 'accepted' and row.get('whole_objective_verified') is True
-         and release.get('ActiveState') == 'inactive' and release.get('MainPID') == '0'
-         and release.get('Result') == 'success' and release.get('ExecMainStatus') == '0'
-         and unit('jason-audit-journal-maintenance.timer').get('ActiveState') == 'active',
-         'AUDIT_MIGRATION_NOT_ACCEPTED')
+    need(forward_audit_accepted(row) and audit_recovery_service_complete(),
+         'AUDIT_FORWARD_RECOVERY_NOT_ACCEPTED')
     controls = control_bytes()
     need(SOURCE.is_symlink() and os.readlink(SOURCE) == SOURCE_TARGET
          and git(SOURCE, 'rev-parse', 'HEAD').decode().strip() == ACCEPTED_SOURCE
@@ -612,8 +650,8 @@ def main():
     # Test the audit gate before any long scans or authentication prompts.
     if not args.recover:
         audit = json.loads(read(AUDIT, 0, 0o444))
-        need(audit.get('phase') == 'accepted' and audit.get('whole_objective_verified') is True,
-             'AUDIT_MIGRATION_NOT_ACCEPTED')
+        need(forward_audit_accepted(audit) and audit_recovery_service_complete(),
+             'AUDIT_FORWARD_RECOVERY_NOT_ACCEPTED')
     ns = native_code(REPO / 'tools/pmv4_e_dispatch_install.py', 'tools/pmv4_e_dispatch_install.py', 1000)
     with FileSet(BASE, 1000, 1000) as fs:
         if args.recover:

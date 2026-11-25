@@ -318,3 +318,81 @@ os.close(fd)
         p.stdin.close()
         p.stdout.close()
         p.stderr.close()
+
+
+def test_two_independent_claims_survive_simultaneous_processes_without_shared_source_mutation(tmp_path):
+    """Real OS workers contend for one lease and admit independent work safely.
+
+    This verifies *development-state* concurrency only. It does not simulate
+    healthy production or grant permission to run provider operations.
+    """
+    import subprocess
+    import sys
+    import os
+    from tools.isolated_service_common import load_json
+
+    repo = Path(__file__).resolve().parents[2]
+    spool = tmp_path / 'spool'
+    spool.mkdir()
+    immutable_desired = tmp_path / 'production-desired-state.json'
+    immutable_desired.write_bytes(b'{"production_policy":"unchanged"}\n')
+    approved_source = immutable_desired.read_bytes()
+    script = r'''
+import fcntl,json,os,sys,time
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from tools import owner_approved_development_worker as worker
+from tools import dependency_conflict_service as admission
+from tools.isolated_service_common import atomic_json,load_json
+spool=Path(sys.argv[2]); work_id=sys.argv[3]; registry=Path(sys.argv[4]); event=Path(sys.argv[5])
+fd=None
+for attempt in range(250):
+    fd=worker.acquire_development_claim_lease(spool)
+    if fd is not None:break
+    time.sleep(.01)
+if fd is None:raise SystemExit('LOCK_TIMEOUT')
+try:
+    state_path=spool/'development-state.json'
+    state=load_json(state_path)
+    state.setdefault('items',{})
+    eligible=[{'id':work_id,'issue_number':int(work_id[4:]),'approval_source':'isolated-owner-fixture','approved_by':'fixture-owner'}]
+    claimed=admission.plan_worker_claims(state,eligible,admission.load_claim_scopes(registry),capacity=2,production_healthy=True)
+    atomic_json(state_path,state)
+    print(json.dumps({'claimed':claimed,'production_authority':state['dependency_admission']['production_authority']}),flush=True)
+    time.sleep(.04)
+finally:
+    fcntl.flock(fd,fcntl.LOCK_UN);os.close(fd)
+'''
+    command = [sys.executable,'-B','-c',script,str(repo),str(spool),'',
+               str(repo/'config/development-concurrency-scopes.json'),str(immutable_desired)]
+    env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'}
+    processes=[]
+    try:
+        for name in ('DEV-1069','DEV-1545'):
+            cmd=command.copy();cmd[6]=name
+            processes.append(subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env))
+        outcomes=[]
+        for proc in processes:
+            out,err=proc.communicate(timeout=15)
+            assert proc.returncode==0,err
+            outcomes.append(json.loads(out.strip()))
+        assert {tuple(v['claimed']) for v in outcomes}=={('DEV-1069',),('DEV-1545',)}
+        assert all(v['production_authority'] is False for v in outcomes)
+        state=load_json(spool/'development-state.json')
+        assert set(state['items'])=={'DEV-1069','DEV-1545'}
+        assert all(row['dependency_claim_status']=='active' for row in state['items'].values())
+        assert state['dependency_admission']['active_claims']==['DEV-1069','DEV-1545']
+        # The third independent process requests a shared Teams approval
+        # domain: it is blocked, preserving the earlier durable claims.
+        cmd=command.copy();cmd[6]='DEV-759'
+        third=subprocess.run(cmd,capture_output=True,text=True,env=env,timeout=15)
+        assert third.returncode==0,third.stderr
+        assert json.loads(third.stdout)['claimed']==[]
+        final=load_json(spool/'development-state.json')
+        assert set(final['items'])=={'DEV-1069','DEV-1545'}
+        assert final['dependency_admission']['queue']['DEV-759']['state']=='blocked_by_dependency'
+        assert immutable_desired.read_bytes()==approved_source
+    finally:
+        for proc in processes:
+            if proc.poll() is None:
+                proc.kill();proc.communicate(timeout=5)

@@ -138,7 +138,13 @@ def test_no_authoritative_health_without_accepted_audit(monkeypatch):
 @pytest.fixture
 def health(monkeypatch):
     docs = {
-        'release-status.json': {'phase':'accepted','whole_objective_verified':True,'candidate_sha':CANDIDATE},
+        'forward-release-status.json': {
+          'schema_version':'1.0','action':install.FORWARD_ACTION,
+          'scope_sha256':install.FORWARD_SCOPE_SHA256,
+          'phase':'accepted','status':'accepted','no_legacy_rebuild':True,
+          'provider_calls':0,'initial_archive_events':install.FORWARD_ARCHIVED_EVENTS,
+          'root_free_bytes':52_000_000_000,'sealed_segments':2,
+          'full_health':'pass','fast_health':'pass','drift':'pass','breaker':'closed'},
         'production-control-state.json':{'schema_version':'1.0','last_known_good':{'manifest':
            {'revision':install.ROLLBACK,'runtime_image_id':'runtime','mcp_image_id':'mcp'}}},
         'production-drift.json':{'schema_version':'1.0','status':'pass','problems':[],'observed_at':'fresh'},
@@ -150,6 +156,8 @@ def health(monkeypatch):
           {'counts_match':True,'backup_integrity':'ok','restore_integrity':'ok'}},
     }
     units = {'jason-audit-journal-release.service':{'ActiveState':'inactive','MainPID':'0','Result':'success','ExecMainStatus':'0'},
+             'jason-audit-journal-no-restore-release.service':{'ActiveState':'inactive','MainPID':'0','Result':'success','ExecMainStatus':'0'},
+             'jason-audit-journal-maintenance.service':{'ActiveState':'inactive','MainPID':'0','Result':'success','ExecMainStatus':'0'},
              'jason-audit-journal-maintenance.timer':{'ActiveState':'active'}}
     guard = type('Guard',(),{})()
     guard.protected_release_status=lambda:{'ready':True}
@@ -170,7 +178,7 @@ def test_native_health_gate_accepts_complete_evidence_only(health):
 
 
 @pytest.mark.parametrize('file,key,value',[
-    ('release-status.json','whole_objective_verified',False),
+    ('forward-release-status.json','phase','awaiting_actual_no_restore_daily_rollover_and_native_health'),
     ('production-drift.json','problems',[{'kind':'drift'}]),
     ('operational-health.json','full_proof_status','missing_or_invalid'),
     ('operational-health.json','status','fail'),
@@ -294,3 +302,112 @@ def test_recovery_cleans_exact_interrupted_staging_but_preserves_foreign(tmp_pat
         with pytest.raises(PermissionError,match='FOREIGN_OR_UNAPPROVED_TEMPORARY_FILE'):
             fs.rollback(before,after)
         assert path.read_bytes()==b'foreign'
+
+
+def _accepted_forward_fixture():
+    return {'schema_version':'1.0','action':install.FORWARD_ACTION,
+        'scope_sha256':install.FORWARD_SCOPE_SHA256,
+        'phase':'accepted','status':'accepted','no_legacy_rebuild':True,
+        'provider_calls':0,'initial_archive_events':install.FORWARD_ARCHIVED_EVENTS,
+        'root_free_bytes':52_000_000_000,'sealed_segments':2,
+        'full_health':'pass','fast_health':'pass','drift':'pass','breaker':'closed'}
+
+
+@pytest.mark.parametrize('field,value',[
+    ('phase','awaiting_actual_no_restore_daily_rollover_and_native_health'),
+    ('status',None),('schema_version','2.0'),('action','ADOPT-EXACT-DAILY-AUDIT-JOURNAL'),
+    ('scope_sha256','0'*64),('no_legacy_rebuild',False),
+    ('provider_calls',1),('provider_calls',False),
+    ('initial_archive_events',34616409),('initial_archive_events',True),
+    ('root_free_bytes',10_000_000_000),('root_free_bytes',True),
+    ('sealed_segments',1),('sealed_segments',True),
+    ('full_health','failed'),('fast_health','missing'),('drift','drift_detected'),
+    ('breaker','open')])
+def test_both_parallel_admission_paths_reject_unaccepted_forward_receipt(field,value):
+    accepted=_accepted_forward_fixture()
+    assert install.forward_audit_accepted(accepted) is True
+    assert worker.accepted_forward_audit(accepted) is True
+    corrupt=dict(accepted);corrupt[field]=value
+    assert install.forward_audit_accepted(corrupt) is False
+    assert worker.accepted_forward_audit(corrupt) is False
+
+
+def test_legacy_acceptance_is_never_treated_as_no_restore_acceptance():
+    legacy={'phase':'accepted','whole_objective_verified':True,'candidate_sha':'a'*40}
+    assert install.forward_audit_accepted(legacy) is False
+    assert worker.accepted_forward_audit(legacy) is False
+
+
+def test_root_parallel_install_requires_completed_one_shot_and_maintenance(monkeypatch):
+    units={'jason-audit-journal-release.service':
+            {'ActiveState':'inactive','MainPID':'0','Result':'success','ExecMainStatus':'0'},
+           'jason-audit-journal-no-restore-release.service':
+            {'ActiveState':'inactive','MainPID':'0','Result':'success','ExecMainStatus':'0'},
+           'jason-audit-journal-maintenance.service':
+            {'ActiveState':'inactive','MainPID':'0','Result':'success','ExecMainStatus':'0'},
+           'jason-audit-journal-maintenance.timer':{'ActiveState':'active'}}
+    monkeypatch.setattr(install,'unit',lambda name,user=False:units[name])
+    assert install.audit_recovery_service_complete() is True
+    for name,field,value in (
+        ('jason-audit-journal-no-restore-release.service','ActiveState','activating'),
+        ('jason-audit-journal-release.service','ActiveState','activating'),
+        ('jason-audit-journal-maintenance.timer','ActiveState','inactive'),
+        ('jason-audit-journal-maintenance.service','Result','exit-code'),
+        ('jason-audit-journal-no-restore-release.service','MainPID','999'),
+    ):
+        original=units[name][field]
+        units[name][field]=value
+        assert install.audit_recovery_service_complete() is False, (name,field)
+        units[name][field]=original
+
+
+def test_worker_rejects_recovery_still_activating_even_with_accepted_receipt(health):
+    docs,units,_=health
+    assert worker.verified_development_health(worker.DEFAULT_SPOOL)['verified'] is True
+    units['jason-audit-journal-no-restore-release.service']['ActiveState']='activating'
+    result=worker.verified_development_health(worker.DEFAULT_SPOOL)
+    assert result['verified'] is False and result['reason']=='audit_release_not_quiescent'
+    units['jason-audit-journal-no-restore-release.service']['ActiveState']='inactive'
+    units['jason-audit-journal-maintenance.service']['Result']='exit-code'
+    result=worker.verified_development_health(worker.DEFAULT_SPOOL)
+    assert result['verified'] is False and result['reason']=='audit_maintenance_not_verified'
+
+
+def test_real_root_entrypoint_denies_incomplete_audit_before_owner_or_install(monkeypatch):
+    """Exercise actual `main()` audit gate, not a mocked preflight function.
+
+    We never execute Root or a provider. This recreates the exact isolated
+    root flag/CLI envelope and makes all subsequent privileges unreachable.
+    """
+    from types import SimpleNamespace
+    import sys as real_sys
+    monkeypatch.setattr(real_sys,'argv',['parallel_development_install.py','--candidate-sha',CANDIDATE,'--review-only'])
+    monkeypatch.setattr(install,'sys',SimpleNamespace(flags=SimpleNamespace(isolated=1)))
+    monkeypatch.setattr(install,'os',SimpleNamespace(geteuid=lambda:0))
+    monkeypatch.setattr(install,'read',lambda *a,**k:install.canon({
+        **_accepted_forward_fixture(),
+        'phase':'awaiting_actual_no_restore_daily_rollover_and_native_health'}))
+    monkeypatch.setattr(install,'native_code',lambda *a,**k:pytest.fail('must not load owner issuer'))
+    with pytest.raises(PermissionError,match='AUDIT_FORWARD_RECOVERY_NOT_ACCEPTED'):
+        install.main()
+
+
+def test_real_root_entrypoint_reaches_pinned_issuer_only_after_forward_acceptance(monkeypatch):
+    from types import SimpleNamespace
+    import sys as real_sys
+    monkeypatch.setattr(real_sys,'argv',['parallel_development_install.py','--candidate-sha',CANDIDATE,'--review-only'])
+    monkeypatch.setattr(install,'sys',SimpleNamespace(flags=SimpleNamespace(isolated=1)))
+    monkeypatch.setattr(install,'os',SimpleNamespace(geteuid=lambda:0))
+    monkeypatch.setattr(install,'read',lambda *a,**k:install.canon(_accepted_forward_fixture()))
+    units={'jason-audit-journal-release.service':
+            {'ActiveState':'inactive','MainPID':'0','Result':'success','ExecMainStatus':'0'},
+           'jason-audit-journal-no-restore-release.service':
+            {'ActiveState':'inactive','MainPID':'0','Result':'success','ExecMainStatus':'0'},
+           'jason-audit-journal-maintenance.service':
+            {'ActiveState':'inactive','MainPID':'0','Result':'success','ExecMainStatus':'0'},
+           'jason-audit-journal-maintenance.timer':{'ActiveState':'active'}}
+    monkeypatch.setattr(install,'unit',lambda name,user=False:units[name])
+    monkeypatch.setattr(install,'native_code',lambda *a,**k:(_ for _ in ()).throw(
+        RuntimeError('NEXT_TRUSTED_ISSUER_REACHED_WITH_NO_WRITES')))
+    with pytest.raises(RuntimeError,match='NEXT_TRUSTED_ISSUER_REACHED_WITH_NO_WRITES'):
+        install.main()

@@ -70,7 +70,10 @@ def reviewed_claim_scope_path(repo: Path) -> Path:
 # the original protected files independently.
 NATIVE_HEALTH_GUARD = Path('/opt/jason/independent-component-release/trusted/tools/pmv4_host_release_guard.py')
 NATIVE_HEALTH_GUARD_SHA256 = '223cc0dca981461cb93782afad5804efa0740a06b3dd51becf20bbc856371bfc'
-NATIVE_JOURNAL_STATUS = Path('/var/lib/jason-audit-journal/control/release-status.json')
+NATIVE_JOURNAL_STATUS = Path('/var/lib/jason-audit-journal/control/forward-release-status.json')
+FORWARD_SCOPE_SHA256 = '697210854d0a0140d3a672750ad84d043e5ac99db117abd6043469312d017fb7'
+FORWARD_ACTION = 'RECOVER-SEGMENTED-AUDIT-WITHOUT-LEGACY-REBUILD'
+FORWARD_ARCHIVED_EVENTS = 34616410
 
 
 def _health_json(path: Path, uid: int, mode: int, max_age: int | None = None):
@@ -119,6 +122,26 @@ def _native_health_guard():
     return ns['IndependentHostGuard']()
 
 
+def accepted_forward_audit(journal: Mapping[str, Any]) -> bool:
+    """Match the exact accepted no-rebuild Root receipt; never a legacy flag."""
+    return (isinstance(journal, Mapping)
+            and journal.get('schema_version') == '1.0'
+            and journal.get('action') == FORWARD_ACTION
+            and journal.get('scope_sha256') == FORWARD_SCOPE_SHA256
+            and journal.get('phase') == 'accepted'
+            and journal.get('status') == 'accepted'
+            and journal.get('no_legacy_rebuild') is True
+            and journal.get('provider_calls') == 0 and type(journal.get('provider_calls')) is int
+            and type(journal.get('initial_archive_events')) is int
+            and journal['initial_archive_events'] == FORWARD_ARCHIVED_EVENTS
+            and type(journal.get('root_free_bytes')) is int
+            and journal['root_free_bytes'] > 35_000_000_000
+            and type(journal.get('sealed_segments')) is int
+            and journal['sealed_segments'] >= 2
+            and all(journal.get(k) == 'pass' for k in ('full_health','fast_health','drift'))
+            and journal.get('breaker') == 'closed')
+
+
 def verified_development_health(spool: Path) -> dict[str, Any]:
     """Fresh native readback plus live core/authority evidence; no health writes.
 
@@ -133,14 +156,20 @@ def verified_development_health(spool: Path) -> dict[str, Any]:
         return result(False, 'noncanonical_engineering_spool')
     try:
         journal = _health_json(NATIVE_JOURNAL_STATUS, 0, 0o444)
-        if journal.get('phase') != 'accepted' or journal.get('whole_objective_verified') is not True:
+        if not accepted_forward_audit(journal):
             return result(False, 'audit_migration_not_accepted')
-        release = _health_unit('jason-audit-journal-release.service')
-        if (release.get('ActiveState') != 'inactive' or release.get('MainPID') != '0'
-                or release.get('Result') != 'success' or release.get('ExecMainStatus') != '0'):
-            return result(False, 'audit_release_not_quiescent')
+        for name in ('jason-audit-journal-release.service',
+                     'jason-audit-journal-no-restore-release.service'):
+            release = _health_unit(name)
+            if (release.get('ActiveState') != 'inactive' or release.get('MainPID') != '0'
+                    or release.get('Result') != 'success' or release.get('ExecMainStatus') != '0'):
+                return result(False, 'audit_release_not_quiescent')
         if _health_unit('jason-audit-journal-maintenance.timer').get('ActiveState') != 'active':
             return result(False, 'audit_maintenance_not_active')
+        maintenance = _health_unit('jason-audit-journal-maintenance.service')
+        if (maintenance.get('ActiveState') != 'inactive'
+                or maintenance.get('Result') != 'success' or maintenance.get('ExecMainStatus') != '0'):
+            return result(False, 'audit_maintenance_not_verified')
         manager = spool.parent / 'release-manager/protected-readback'
         control = _health_json(manager / 'production-control-state.json', 1000, 0o600, 180)
         drift = _health_json(manager / 'production-drift.json', 1000, 0o600, 180)
@@ -187,7 +216,7 @@ def verified_development_health(spool: Path) -> dict[str, Any]:
         return {**result(True, 'native_readback_live_core_and_authority_verified'),
                 'production_revision': core['source_sha'],
                 'drift_observed_at': drift['observed_at'],
-                'audit_candidate_sha': journal['candidate_sha']}
+                'audit_scope_sha256': journal['scope_sha256']}
     except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError,
             subprocess.SubprocessError):
         return result(False, 'native_health_evidence_unavailable')
