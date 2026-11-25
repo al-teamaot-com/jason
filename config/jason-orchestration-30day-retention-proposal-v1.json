@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "activation": "disabled_source_only_policy_proposal",
+  "action": "PURGE-EXACT-ORCHESTRATION-EVENTS-OLDER-THAN-30D",
+  "independent_of": "RELEASE-EXACT-AUDIT-READER-HANDLE-CLOSURE",
+  "retention_days": 30,
+  "timestamp_field": "orchestration_events.occurred_at",
+  "timestamp_semantics": "timezone-aware UTC at exact governed cutover",
+  "expiry_predicate": "occurred_at < cutoff_utc",
+  "targets": [
+    "canonical_active_orchestration_events",
+    "all_root_sealed_orchestration_history_segments",
+    "obsolete_orchestration_only_sqlite_copies_after_verified_acceptance"
+  ],
+  "excluded_from_scope": [
+    "Root_Owner_authorization_ledgers",
+    "signed_approval_evidence_and_provenance",
+    "other_service_and_client_databases",
+    "external_provider_data",
+    "unrelated_backup_and_security_records"
+  ],
+  "requires_governance_exception_to": [
+    "Jason_Canon_audit_permanent_record",
+    "architecture_orchestration_append_only"
+  ],
+  "permanent_deletion_authorized": false,
+  "release_source_only": true,
+  "allow_service_stops_without_current_exact_Root_release": false,
+  "allow_inplace_vacuum_on_root_drive": false,
+  "restore_expired_archive_after_accepted_purge": false,
+  "require_remaining_30day_events_preserved": true,
+  "require_zero_open_archive_handles": true,
+  "require_exact_signed_licensed_owner_and_one_use_Root_grant": true,
+  "require_actual_space_reclamation_and_next_daily_expiry": true,
+  "rollback_before_accepted_purge": "restore_current_original_archive_and_catalog_exact_before_image_without_resuming_old_provider_calls",
+  "rollback_after_accepted_purge": "preserve_approved_retained_events_and_immutable_approval_receipt_no_expired_restoration"
+}
