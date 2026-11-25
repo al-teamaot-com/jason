@@ -27,4 +27,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/al/.local/lib/jason/engineering-worker-source/.git /home/al/jason-worktrees/support-repair /home/al/jason-worktrees/owner-approved-development /home/al/jason-worktrees/todo-closure /var/lib/jason/openclaw/support-repair /var/lib/jason/openclaw/release-manager
+ReadWritePaths=/home/al/.local/lib/jason/engineering-worker-source/.git /var/lib/jason/openclaw/autonomous-repair/lifecycle-events /home/al/jason-worktrees/support-repair-closure /home/al/jason-worktrees/support-repair /home/al/jason-worktrees/owner-approved-development /home/al/jason-worktrees/todo-closure /var/lib/jason/openclaw/support-repair /var/lib/jason/openclaw/release-manager

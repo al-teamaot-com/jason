@@ -23,6 +23,12 @@ TARGET = Path("infrastructure/pmv4-e-engineering-manager/systemd")
 ROOT_RECEIPT = "/etc/jason-owner-release/pmv4-e/engineering-manager-system-authorized.json"
 SUCCESSOR_GUARD = "/usr/local/lib/jason/pmv4-e-engineering-manager/manager_guard.py"
 GIT_METADATA = "/home/al/.local/lib/jason/engineering-worker-source/.git"
+# The canonical support/development workers emit durable lifecycle events,
+# and support closure uses a dedicated worktree. Neither requires access to
+# the entire OpenClaw state tree or the parent of all worktrees.
+LIFECYCLE_EVENTS = "/var/lib/jason/openclaw/autonomous-repair/lifecycle-events"
+SUPPORT_CLOSURE = "/home/al/jason-worktrees/support-repair-closure"
+PIPELINE_WRITES = (GIT_METADATA, LIFECYCLE_EVENTS, SUPPORT_CLOSURE)
 PAUSE = "/var/lib/jason/openclaw/support-repair/pmv3-engineering-owner-pause.json"
 OLD_SERVICE_SHA256 = "e865a61a40b7dedb566b09759fab004325636f40e8179c028dc95a672bc59630"
 OLD_TIMER_SHA256 = "8103e5cc8bdfa0ec9e3d87f763534cb7266a93ff32e3f674f2fd786b0d5385f2"
@@ -65,7 +71,7 @@ def units(base: Path):
         "Environment=XDG_RUNTIME_DIR=/run/user/1000\n"
         "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus\n"
         "Environment=PYTHONDONTWRITEBYTECODE=1\n", 1)
-    service = service.replace("ReadWritePaths=", "ReadWritePaths=" + GIT_METADATA + " ", 1)
+    service = service.replace("ReadWritePaths=", "ReadWritePaths=" + " ".join(PIPELINE_WRITES) + " ", 1)
     wd = (base / WATCHDOG_SOURCE / WATCHDOG_SERVICE).read_bytes()
     wt = (base / WATCHDOG_SOURCE / WATCHDOG_TIMER).read_bytes()
     need(digest(wd) == WATCHDOG_SERVICE_SHA256 and digest(wt) == WATCHDOG_TIMER_SHA256,

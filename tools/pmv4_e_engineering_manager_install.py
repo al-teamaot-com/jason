@@ -249,7 +249,7 @@ def native():
     return out
 
 
-def source_review(candidate, p, *, recovery=False):
+def source_review(candidate, p, *, recovery=False, baseline=BASELINE, source_files=SOURCE_FILES):
     git = lambda *args: p["git"](REPO, *args)
     need(re.fullmatch("[0-9a-f]{40}", candidate) is not None and
          git("rev-parse", "HEAD").decode().strip() == candidate and
@@ -257,8 +257,8 @@ def source_review(candidate, p, *, recovery=False):
          git("remote", "get-url", "origin").decode().strip() == "https://github.com/al-teamaot-com/jason.git" and
          git("rev-parse", "--is-shallow-repository").decode().strip() == "false",
          "PROTECTED_CHECKOUT_NOT_EXACT")
-    changed = set(git("diff", "--name-only", BASELINE, candidate).decode().splitlines())
-    need(changed == SOURCE_FILES, "UNREVIEWED_SOURCE_CHANGE")
+    changed = set(git("diff", "--name-only", baseline, candidate).decode().splitlines())
+    need(changed == source_files, "UNREVIEWED_SOURCE_CHANGE")
     if not recovery:
         helper_path = p["NATIVE"] / "pmv4_e_ci_refresh.py"
         helper = p["native_code"](helper_path, str(helper_path), 0, 0o444)
@@ -271,7 +271,7 @@ def source_review(candidate, p, *, recovery=False):
                            "https://github.com/al-teamaot-com/jason.git", "refs/heads/main"]).decode().split()
              == [candidate, "refs/heads/main"], "CURRENT_MAIN_CI_NOT_EXACT")
     files = {}
-    for name in sorted(SOURCE_FILES):
+    for name in sorted(source_files):
         raw = git("show", candidate + ":" + name)
         need(raw == p["read"](REPO / name, 1000, source=True), "SOURCE_BYTES_CHANGED")
         files[name] = raw
@@ -850,9 +850,483 @@ class NativeAdapter:
 
 
 
+# Reuse the installed manager's native release/rollback primitives. This
+# successor has no independent authority, generic file write or service CLI.
+PIPELINE_BASELINE = "d46248cc20c5510d6686a7cb665f922f27268762"
+PIPELINE_SCOPE_FILES = {
+    "tools/engineering_pipeline.py",
+    "tools/install_support_repair_host_worker.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+    "tools/pmv4_e_engineering_manager_relocation.py",
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/tests/test_engineering_pipeline.py",
+    "tools/tests/test_pmv4_e_release_manager_convergence.py",
+    "tools/tests/test_pmv4_e_watchdog_retarget.py",
+    "tests/test_pmv4_e_engineering_manager_guard.py",
+    "tests/test_pmv4_e_engineering_manager_relocation.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "infrastructure/pmv4-e-engineering-manager/systemd/jason-pmv4-engineering.service",
+    ".github/workflows/pmv4-e-providerfree-scheduler-parity.yml",
+    "docs/operations/PMv4-Engineering-Manager-Sandbox-Recovery-20261125.md",
+}
+PIPELINE_UNIT = SYSTEM_UNITS / SERVICES[0]
+PIPELINE_PROGRAM = LIB / "engineering_pipeline.py"
+MANAGER_GUARD = ROOT / "manager_guard.py"
+
+
+def pipeline_scope_sha(plan):
+    need(plan.get("action") == "REPAIR-EXACT-PMV4-ENGINEERING-PIPELINE-CONTRACT"
+         and plan.get("policy", {}).get("rollback_sha") == LKG
+         and plan.get("predecessor_candidate_sha") == PIPELINE_BASELINE
+         and re.fullmatch("[0-9a-f]{40}", str(plan.get("policy", {}).get("candidate_sha", "")))
+         and plan["policy"]["candidate_sha"] not in (LKG, PIPELINE_BASELINE)
+         and plan.get("queue_cutover") is False
+         and plan.get("temporary_timer_stops") == list(TIMERS)
+         and plan.get("resume_after_verified_cutover") is True
+         and plan.get("restore_pause_on_completed_work_stage_failure") is True
+         and plan.get("restore_pause_on_failed_scheduled_acceptance") is True
+         and plan.get("provider_writes") is False
+         and plan.get("production_authority") is False
+         and plan.get("freeze_or_hold_change") is False
+         and plan.get("runtime_or_mcp_restart_allowed") is False
+         and plan.get("rollback_authorized") is True,
+         "PIPELINE_SCOPE_INVALID")
+    return digest(canon(plan))
+
+
+class PipelineSuccessor(NativeAdapter):
+    """Exact successor of the active manager receipt, with immutable ancestry."""
+
+    def __init__(self, candidate, n, p, code):
+        self.candidate, self.n, self.p, self.code = candidate, n, p, code
+        self.g = load(code["tools/pmv4_e_engineering_manager_guard.py"],
+                      REPO / "tools/pmv4_e_engineering_manager_guard.py")
+        self.m = load(code["tools/pmv4_e_engineering_manager_relocation.py"],
+                      REPO / "tools/pmv4_e_engineering_manager_relocation.py")
+        self.release = ROOT / "releases" / candidate / "tools"
+        self.directory = STATE / candidate
+        self.before = self.after = self.plan = self.actor = None
+        self.pause_image = self.receipt_bytes = None
+        self.lock = None
+
+    def approved_targets(self):
+        names = set(self.g["ARTIFACTS"]) | set(self.g["PIPELINE_ARTIFACTS"])
+        return {PIPELINE_UNIT, PIPELINE_PROGRAM, MANAGER_GUARD, RECEIPT, PAUSE,
+                self.release.parent / "predecessor.json",
+                *(self.release / name for name in names)}
+
+    def read_guard(self, candidate):
+        row = json.loads(self.command([*self.p["USER"], "/usr/bin/python3", "-I", "-B",
+                                       str(MANAGER_GUARD), "--status"], 130))
+        need(row.get("status") == "verified_system_manager"
+             and row.get("candidate_sha") == candidate
+             and row.get("production_authority") is False,
+             "PIPELINE_NATIVE_MANAGER_GUARD")
+        return row
+
+    def protected(self):
+        p = self.p
+        controls = {}
+        for path in (self.n["FREEZE"], self.n["HOLD"]):
+            uid, mode, pin = p["CONTROLS"][path]
+            need(digest(p["read"](path, uid, mode)) == pin, "PROTECTED_CONTROL_CHANGED")
+            controls[str(path)] = pin
+        control = json.loads(p["read"](MANAGER/"production-control-state.json",0,0o600))
+        manifest = control["last_known_good"]["manifest"]
+        need(manifest.get("complete") is True
+             and all(manifest.get(k) == LKG for k in
+                     ("revision", "runtime_revision", "mcp_revision", "host_revision"))
+             and control["circuit_breaker"]["state"] == "closed"
+             and control["circuit_breaker"]["revalidated_revision"] == LKG,
+             "PIPELINE_PROTECTED_LKG_OR_BREAKER")
+        guard = Path("/opt/jason/current/tools/production_drift_guard.py")
+        need(digest(p["read"](guard,0)) == p["PINNED"][str(guard)],
+             "NATIVE_DRIFT_CODE_CHANGED")
+        drift = json.loads(self.command(["/usr/bin/python3",str(guard),"--config",str(POLICY)],75))
+        need(drift.get("status") == "pass" and drift.get("problems") == [],
+             "PIPELINE_NATIVE_DRIFT")
+        probe = ("import sys,json;from pathlib import Path;"
+                 "sys.path[:0]=['/home/al/.local/lib/jason','/opt/jason/current/tools'];"
+                 "import owner_approved_development_worker as w;"
+                 "print(json.dumps(w.verified_development_health(Path('/var/lib/jason/openclaw/support-repair'))))")
+        health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",probe],130))
+        need(health.get("verified") is True and health.get("production_authority") is False
+             and health.get("production_revision") == LKG, "PIPELINE_NATIVE_CORE_HEALTH")
+        rows = json.loads(self.command(["/usr/bin/docker","inspect","--type","container",*p["PEERS"]]))
+        peers = {x["Name"].lstrip("/"):{"id":x["Id"],"image":x["Image"],
+                  "started_at":x["State"]["StartedAt"]} for x in rows}
+        need(set(peers) == set(p["PEERS"])
+             and peers["jason-runtime"]["image"] == manifest["runtime_image_id"]
+             and peers["jason-mcp-pilot"]["image"] == manifest["mcp_image_id"]
+             and all(x["State"]["Running"] is True and
+                 (x["State"].get("Health") or {}).get("Status") in ("healthy",None) for x in rows),
+             "PIPELINE_PROTECTED_PEERS_UNHEALTHY")
+        return {"controls":controls,"protected_peers":peers,"runtime_revision":LKG,
+                "effective_policy_sha256":digest(p["read"](POLICY,0,0o600))}
+
+    def inspect(self):
+        need(not os.path.lexists(self.directory) and not os.path.lexists(self.release.parent),
+             "PIPELINE_SUCCESSOR_ALREADY_PRESENT")
+        self.n["directory"](STATE,0o700)
+        prior = snapshot(RECEIPT)
+        need(prior is not None and prior[1:] == (0,0,0o444), "PIPELINE_PRIOR_RECEIPT_CUSTODY")
+        receipt = self.g["validate_receipt"](json.loads(prior[0]))
+        need(receipt["candidate_sha"] == PIPELINE_BASELINE, "PIPELINE_PRIOR_SOURCE_CHANGED")
+        history = STATE / PIPELINE_BASELINE
+        self.n["directory"](history,0o700)
+        old_approval = self.n["read"](history/"approval.json",0,0o400,8_000_000)
+        old = json.loads(old_approval)
+        need(digest(old_approval) == receipt["approval_sha256"]
+             and self.n["read"](history/"receipt-image.json",0,0o400) == prior[0]
+             and old["scope_sha256"] == receipt["scope_sha256"]
+             and digest(canon(old["scope"])) == receipt["scope_sha256"],
+             "PIPELINE_PRIOR_APPROVAL_CHANGED")
+        activated = json.loads(self.n["read"](history/"activation.json",0,0o400))
+        need(activated.get("scope_sha256") == receipt["scope_sha256"]
+             and activated.get("status") == "resumed_pending_scheduled_acceptance",
+             "PIPELINE_PRIOR_ACTIVATION_NOT_VERIFIED")
+        self.read_guard(PIPELINE_BASELINE)
+        protected = self.protected()
+        need(protected["effective_policy_sha256"] == receipt["effective_policy_sha256"],
+             "PIPELINE_EFFECTIVE_POLICY_CHANGED")
+        encoded = old["before_images"][str(PAUSE)]
+        pause = (base64.b64decode(encoded[0],validate=True),*encoded[1:])
+        need(pause[1:] == (1000,1000,0o600) and digest(pause[0]) == OLD[PAUSE][2],
+             "PIPELINE_PRIOR_PAUSE_CHANGED")
+        self.pause_image = pause
+        source = self.g["PIPELINE_SOURCE"]
+        need(source.is_symlink() and os.readlink(source) == self.p["SOURCE_TARGET"]
+             and self.p["git"](source,"rev-parse","HEAD").decode().strip()
+             == self.g["PIPELINE_SOURCE_SHA"]
+             and not self.p["git"](source,"status","--porcelain","--untracked-files=all").strip(),
+             "PIPELINE_PINNED_SOURCE_CHANGED")
+        for path in map(Path,self.g["PIPELINE_WRITES"]):
+            m = path.stat()
+            need(stat.S_ISDIR(m.st_mode) and m.st_uid == m.st_gid == 1000
+                 and not m.st_mode & 0o022, "PIPELINE_WRITE_DIRECTORY_CUSTODY")
+        before = {path:snapshot(path) for path in self.approved_targets()}
+        need(before[PAUSE] in (None,pause) and before[RECEIPT] == prior,
+             "PIPELINE_PAUSE_OR_RECEIPT_CHANGED")
+        need(all(before[path] is None for path in before if self.release.parent in path.parents),
+             "PIPELINE_IMMUTABLE_TARGET_EXISTS")
+        unit_rel = "infrastructure/pmv4-e-engineering-manager/systemd/" + SERVICES[0]
+        new_unit = self.code[unit_rel]
+        need(new_unit == self.m["units"](REPO)[unit_rel]
+             and digest(before[PIPELINE_UNIT][0]) == receipt["unit_sha256"][SERVICES[0]],
+             "PIPELINE_UNIT_SOURCE_CHANGED")
+        after = {PIPELINE_UNIT:image(new_unit,0,0o644),
+                 MANAGER_GUARD:image(self.code["tools/pmv4_e_engineering_manager_guard.py"],0,0o444),
+                 PAUSE:pause,self.release.parent/"predecessor.json":image(prior[0],0,0o444)}
+        pipeline_hashes = {}
+        for name in sorted(self.g["PIPELINE_ARTIFACTS"]):
+            live = snapshot(LIB/name)
+            accepted = self.p["git"](source,"show",self.g["PIPELINE_SOURCE_SHA"]+":tools/"+name)
+            need(live is not None and live[1] == live[2] == 1000 and live[0] == accepted,
+                 "PIPELINE_UNAPPROVED_WORKER_CHANGED:"+name)
+            raw = self.code["tools/engineering_pipeline.py"] if name == PIPELINE_PROGRAM.name else live[0]
+            if name == PIPELINE_PROGRAM.name:
+                after[PIPELINE_PROGRAM] = (raw,*live[1:])
+            after[self.release/name] = image(raw,0,0o444)
+            pipeline_hashes[name] = digest(raw)
+        for name,pin in receipt["artifact_sha256"].items():
+            raw = self.p["read"](LIB/name,1000)
+            need(digest(raw) == pin, "PIPELINE_PREVIOUS_ARTIFACT_CHANGED:"+name)
+            after[self.release/name] = image(raw,0,0o444)
+        recipe = {k:v for k,v in receipt.items() if k not in
+                  ("candidate_sha","scope_sha256","approval_sha256","accepted_at",
+                   "schema_version","action","guard_sha256","unit_sha256")}
+        recipe.update(schema_version="1.1",action=self.g["PIPELINE_ACTION"],
+                      predecessor_candidate_sha=PIPELINE_BASELINE,
+                      predecessor_receipt_sha256=digest(prior[0]),
+                      engineering_source_sha=self.g["PIPELINE_SOURCE_SHA"],
+                      pipeline_artifact_sha256=pipeline_hashes,
+                      guard_sha256=digest(after[MANAGER_GUARD][0]),
+                      unit_sha256={**receipt["unit_sha256"],SERVICES[0]:digest(new_unit)})
+        plan = {"action":self.g["PIPELINE_ACTION"],"policy":{"candidate_sha":self.candidate,
+                  "rollback_sha":LKG},"predecessor_candidate_sha":PIPELINE_BASELINE,
+                "queue_cutover":False,"production_authority":False,"provider_writes":False,
+                "runtime_or_mcp_restart_allowed":False,"freeze_or_hold_change":False,
+                "rollback_authorized":True,"restore_pause_on_failed_scheduled_acceptance":True,
+                "restore_pause_on_completed_work_stage_failure":True,
+                "resume_after_verified_cutover":True,"temporary_timer_stops":list(TIMERS),
+                "readonly_systemd_acceptance_probe":"jason-engineering-pipeline-contract-acceptance",
+                "temporary_probe_write_paths":[self.m["LIFECYCLE_EVENTS"],self.m["SUPPORT_CLOSURE"]],
+                "installation_targets":sorted(str(x) for x in before),
+                "before":{str(k):describe(v) for k,v in before.items()},
+                "after":{str(k):describe(v) for k,v in after.items()},
+                "root_receipt_recipe":recipe,"protected_health":protected,
+                "source_hashes":{k:digest(v) for k,v in self.code.items()},
+                "rollback":"restore exact predecessor receipt and files; retain verified engineering pause; native revalidation only"}
+        return plan,before,after
+
+    def persist(self):
+        self.directory.mkdir(mode=0o700); self.n["sync_dir"](STATE)
+        row = {"scope":self.plan,"scope_sha256":pipeline_scope_sha(self.plan),
+               "owner_oid":self.actor,"approved_at":stamp(),
+               "before_images":encode(self.before),"after_images":encode(self.after)}
+        raw = canon(row)
+        self.n["write"](self.directory/"approval.json",raw,0o400)
+        receipt = {**self.plan["root_receipt_recipe"],"candidate_sha":self.candidate,
+                   "scope_sha256":row["scope_sha256"],"approval_sha256":digest(raw),"accepted_at":stamp()}
+        self.g["validate_receipt"](receipt)
+        self.receipt_bytes = canon(receipt)
+        self.n["write"](self.directory/"receipt-image.json",self.receipt_bytes,0o400)
+        self.after[RECEIPT] = image(self.receipt_bytes,0,0o444)
+
+    def load_record(self, *, allow_unpublished=False):
+        self.n["directory"](STATE,0o700); self.n["directory"](self.directory,0o700)
+        raw = self.n["read"](self.directory/"approval.json",0,0o400,8_000_000)
+        row = json.loads(raw); self.plan = row["scope"]
+        sha = pipeline_scope_sha(self.plan)
+        need(row["scope_sha256"] == sha
+             and self.plan["policy"]["candidate_sha"] == self.candidate
+             and self.plan["source_hashes"] == {k:digest(v) for k,v in self.code.items()}
+             and set(self.plan["installation_targets"]) == {str(x) for x in self.approved_targets()}
+             and re.fullmatch("[0-9a-f-]{36}",str(row.get("owner_oid",""))) is not None,
+             "PIPELINE_APPROVAL_IDENTITY")
+        self.before = decode(row["before_images"],self.approved_targets())
+        self.after = decode(row["after_images"],self.approved_targets()-{RECEIPT})
+        need(self.plan["before"] == {str(k):describe(v) for k,v in self.before.items()}
+             and self.plan["after"] == {str(k):describe(v) for k,v in self.after.items()},
+             "PIPELINE_APPROVAL_IMAGES_CHANGED")
+        self.pause_image = self.after[PAUSE]
+        need(self.pause_image[1:] == (1000,1000,0o600)
+             and digest(self.pause_image[0]) == OLD[PAUSE][2],"PIPELINE_APPROVED_PAUSE_CHANGED")
+        if allow_unpublished and not os.path.lexists(self.directory/"receipt-image.json"):
+            need(all(snapshot(k) == v for k,v in self.before.items()),
+                 "PIPELINE_MUTATION_BEFORE_DURABLE_RECEIPT")
+            self.receipt_bytes = None
+            self.after[RECEIPT] = self.before[RECEIPT]
+            return sha
+        self.receipt_bytes = self.n["read"](self.directory/"receipt-image.json",0,0o400)
+        receipt = self.g["validate_receipt"](json.loads(self.receipt_bytes))
+        need(receipt["approval_sha256"] == digest(raw) and receipt["scope_sha256"] == sha
+             and receipt["candidate_sha"] == self.candidate
+             and all(receipt[k] == v for k,v in self.plan["root_receipt_recipe"].items()),
+             "PIPELINE_RECEIPT_SCOPE_CHANGED")
+        self.after[RECEIPT] = image(self.receipt_bytes,0,0o444)
+        return sha
+
+    def change(self,path,before,after):
+        if before != after:
+            replace_exact(path,before,after,self.p["rename_noreplace"])
+
+    def pause(self):
+        current = snapshot(PAUSE)
+        need(current in (None,self.pause_image),"PIPELINE_FOREIGN_PAUSE")
+        self.change(PAUSE,current,self.pause_image)
+
+    def quiesce(self,names,attempts=1200,*,rollback=False):
+        allowed = {"inactive","failed"} if rollback else {"inactive"}
+        for _ in range(attempts):
+            if all((r := self.properties(n,False)).get("ActiveState") in allowed and
+                   r.get("MainPID") in ("","0") for n in names):
+                return
+            time.sleep(2)
+        need(False,"PIPELINE_WORKER_NOT_QUIESCENT")
+
+    def verify_successor_topology_and_source(self,*,resumed=False):
+        self.read_guard(self.candidate)
+        for path,value in self.after.items():
+            need(snapshot(path) == (None if resumed and path == PAUSE else value),
+                 "PIPELINE_INSTALLED_FILE_CHANGED:"+path.name)
+        need(self.protected() == self.plan["protected_health"],"PIPELINE_PROTECTED_STATE_CHANGED")
+
+    def namespace_probe(self):
+        # No real work item is run. The exact system-manager sandbox is tested
+        # using only a provider-free readback and temporary atomic file operations.
+        code = """
+import os, runpy, tempfile
+from pathlib import Path
+g=runpy.run_path('/usr/local/lib/jason/pmv4-e-engineering-manager/manager_guard.py')
+g['status']()
+g['verify_pipeline_sandbox']()
+for directory in (
+    '/var/lib/jason/openclaw/autonomous-repair/lifecycle-events',
+    '/home/al/jason-worktrees/support-repair-closure',
+):
+    fd,name=tempfile.mkstemp(prefix='.jason-contract-probe-',suffix='.tmp',dir=directory)
+    p=Path(name); dest=p.with_suffix('.renamed.tmp')
+    try:
+        with os.fdopen(fd,'wb') as f:
+            f.write(b'provider-free pipeline filesystem probe')
+            f.flush();os.fsync(f.fileno())
+        os.rename(p,dest)
+        assert dest.read_bytes()==b'provider-free pipeline filesystem probe'
+    finally:
+        p.unlink(missing_ok=True);dest.unlink(missing_ok=True)
+print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
+"""
+        args = ["/usr/bin/systemd-run","--quiet","--wait","--pipe","--collect",
+                "--unit=jason-engineering-pipeline-contract-acceptance"]
+        for prop in ("User=al","Group=al","NoNewPrivileges=yes","PrivateTmp=yes",
+                     "ProtectSystem=strict","ProtectHome=read-only","Environment=HOME=/home/al",
+                     "Environment=XDG_RUNTIME_DIR=/run/user/1000",
+                     "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+                     "ReadWritePaths="+" ".join(self.g["PIPELINE_WRITES"])):
+            args.extend(["-p",prop])
+        need(self.command([*args,"/usr/bin/python3","-I","-B","-c",code],150).strip()
+             == b"PIPELINE_NAMESPACE_CONTRACT_VERIFIED","PIPELINE_NAMESPACE_PROBE_FAILED")
+
+    def restore(self):
+        with self.n["locks"]():
+            self.pause()
+        self.quiesce((SERVICES[0],),rollback=True)
+        with self.n["locks"]():
+            for path,old in self.before.items():
+                if path != PAUSE:
+                    need(snapshot(path) in (old,self.after[path]),
+                         "PIPELINE_FOREIGN_ROLLBACK_FILE:"+path.name)
+                    cleanup_staged(path,(old,self.after[path]))
+            self.systemctl(["stop",*TIMERS])
+            self.quiesce((SERVICES[1],),45,rollback=True)
+            for path in [x for x in reversed(sorted(self.after)) if x not in (PAUSE,RECEIPT)] + [RECEIPT]:
+                current=snapshot(path)
+                need(current in (self.before[path],self.after[path]),"PIPELINE_ROLLBACK_FILE_CHANGED")
+                self.change(path,current,self.before[path])
+            for d in (self.release,self.release.parent):
+                if d.exists(): d.rmdir(); self.n["sync_dir"](d.parent)
+            self.systemctl(["daemon-reload"])
+            for service in SERVICES:
+                if self.properties(service,False).get("ActiveState")=="failed":
+                    self.systemctl(["reset-failed",service])
+            self.systemctl(["start",*TIMERS])
+        self.native_revalidation()
+        self.read_guard(PIPELINE_BASELINE)
+        need(self.protected() == self.plan["protected_health"]
+             and all(snapshot(k) == (self.pause_image if k == PAUSE else v)
+                     for k,v in self.before.items()),"PIPELINE_ROLLBACK_READBACK_FAILED")
+        self.n["write"](self.directory/"rollback.json",canon({
+            "status":"predecessor_restored_engineering_paused",
+            "scope_sha256":pipeline_scope_sha(self.plan),"at":stamp(),
+            "production_authority":False}),0o400)
+
+    def apply(self,plan,sha):
+        need(sha == pipeline_scope_sha(plan),"PIPELINE_EXACT_SCOPE_REQUIRED")
+        self.actor = self.n["owner"](plan)
+        self.plan = plan
+        with self.n["locks"]():
+            need(source_review(self.candidate,self.p,baseline=PIPELINE_BASELINE,
+                               source_files=PIPELINE_SCOPE_FILES) == self.code,
+                 "PIPELINE_APPROVED_SOURCE_CHANGED")
+            again,self.before,self.after = self.inspect()
+            need(again == plan,"PIPELINE_APPROVED_SCOPE_CHANGED")
+            self.persist()
+        try:
+            with self.n["locks"](): self.pause()
+            self.quiesce((SERVICES[0],))
+            with self.n["locks"]():
+                need(self.protected() == plan["protected_health"],"PIPELINE_PRECUTOVER_HEALTH_CHANGED")
+                self.read_guard(PIPELINE_BASELINE)
+                for path,old in self.before.items():
+                    need(snapshot(path) == (self.pause_image if path == PAUSE else old),
+                         "PIPELINE_PRECUTOVER_FILE_CHANGED")
+                self.systemctl(["stop",*TIMERS])
+                self.quiesce((SERVICES[1],),45)
+                self.release.parent.mkdir(mode=0o755); self.n["sync_dir"](self.release.parent.parent)
+                self.release.mkdir(mode=0o755); self.n["sync_dir"](self.release.parent)
+                for path,value in self.after.items():
+                    if path not in (PAUSE,RECEIPT): self.change(path,self.before[path],value)
+                self.change(RECEIPT,self.before[RECEIPT],self.after[RECEIPT])
+                self.systemctl(["daemon-reload"])
+                self.systemctl(["start",*TIMERS])
+                self.read_guard(self.candidate)
+                self.namespace_probe()
+            self.native_revalidation()
+            with self.n["locks"]():
+                self.verify_successor_topology_and_source()
+                self.n["write"](self.directory/"result.json",canon({
+                    "status":"cutover_verified_paused","scope_sha256":sha,"at":stamp(),
+                    "production_authority":False}),0o400)
+                self.n["write"](self.directory/"activation-attempt.json",canon({
+                    "scope_sha256":sha,"pause_sha256":OLD[PAUSE][2],"rollback_authorized":True,
+                    "at":stamp()}),0o400)
+                self.change(PAUSE,self.pause_image,None)
+                self.n["write"](self.directory/"activation.json",canon({
+                    "status":"resumed_pending_scheduled_acceptance","scope_sha256":sha,
+                    "at":stamp(),"production_authority":False}),0o400)
+        except BaseException:
+            self.restore()
+            raise
+        print("ENGINEERING_PIPELINE_SUCCESSOR_RESUMED_PENDING_SCHEDULED_ACCEPTANCE")
+
+    def recover(self):
+        sha=self.load_record(allow_unpublished=True)
+        need(not os.path.lexists(self.directory/"scheduled-acceptance.json")
+             and not os.path.lexists(self.directory/"rollback.json")
+             and not os.path.lexists(self.directory/"activation.json"),
+             "PIPELINE_RECOVERY_NOT_INTERRUPTED")
+        if self.receipt_bytes is None:
+            self.n["write"](self.directory/"rollback.json",canon({
+                "status":"no_mutation_before_durable_receipt","scope_sha256":sha,
+                "at":stamp(),"production_authority":False}),0o400)
+            return
+        self.restore()
+
+    def verify_activation(self):
+        self.load_record()
+        act=json.loads(self.n["read"](self.directory/"activation.json",0,0o400))
+        pipeline=json.loads(self.p["read"](PAUSE.parent/"engineering-pipeline-state.json",1000,0o600))
+        required={"support_repair","todo_intake","development","integration","release_bridge",
+                  "engineering_supervisor","release_breaker_recovery"}
+        start=datetime.fromisoformat(act["at"])
+        finished=pipeline.get("finished_at")
+        if not (finished and datetime.fromisoformat(finished)>=start
+                and set(pipeline.get("stages",{}))==required
+                and all(x.get("status")=="succeeded" for x in pipeline["stages"].values())):
+            print("PIPELINE_FULL_STAGE_ACCEPTANCE_PENDING_OR_FAILED")
+            return False
+        watchdog=dict(x.split("=",1) for x in self.systemctl(
+            ["show",SERVICES[1],"-pResult","-pExecMainStatus","-pExecMainExitTimestamp"]
+        ).decode().splitlines() if "=" in x)
+        try:
+            watchdog_at=datetime.fromtimestamp(int(self.command([
+                "/usr/bin/date","-d",watchdog["ExecMainExitTimestamp"],"+%s"
+            ]).decode()),timezone.utc)
+        except (OSError,ValueError,KeyError,PermissionError,subprocess.SubprocessError):
+            watchdog_at=datetime.fromtimestamp(0,timezone.utc)
+        if not (watchdog_at>=start and watchdog.get("Result")=="success"
+                and watchdog.get("ExecMainStatus")=="0"):
+            print("PIPELINE_SCHEDULED_WATCHDOG_ACCEPTANCE_PENDING")
+            return False
+        # Preserve the original native timer/authority/conflict/peer checks.
+        return super().verify_activation()
+
+    def restore_failed_activation_pause(self):
+        sha=self.load_record()
+        need(not os.path.lexists(self.directory/"scheduled-acceptance.json")
+             and not os.path.lexists(self.directory/"rollback.json"),"PIPELINE_ACCEPTANCE_TERMINAL")
+        attempt=json.loads(self.n["read"](self.directory/"activation-attempt.json",0,0o400))
+        need(attempt.get("scope_sha256")==sha and attempt.get("rollback_authorized") is True,
+             "PIPELINE_ACTIVATION_ROLLBACK_NOT_APPROVED")
+        with self.n["locks"]():
+            props=self.properties(SERVICES[0],False)
+            c=json.loads(self.p["read"](MANAGER/"production-control-state.json",0,0o600))
+            failure=(props.get("ActiveState")=="failed" or c["circuit_breaker"]["state"]=="open")
+            if os.path.lexists(self.directory/"activation.json"):
+                a=json.loads(self.n["read"](self.directory/"activation.json",0,0o400))
+                j=json.loads(self.p["read"](PAUSE.parent/"engineering-pipeline-state.json",1000,0o600))
+                failure = failure or bool(j.get("finished_at") and
+                    datetime.fromisoformat(j["finished_at"])>=datetime.fromisoformat(a["at"])
+                    and (j.get("failed_work_stages") or j.get("failed_control_stages")))
+            else: failure=True
+            need(failure,"PIPELINE_FAILED_ACCEPTANCE_NOT_VERIFIED")
+            self.pause()
+            if props.get("ActiveState")=="failed" and props.get("MainPID")=="0":
+                self.systemctl(["reset-failed",SERVICES[0]])
+            if not os.path.lexists(self.directory/"activation-rollback.json"):
+                self.n["write"](self.directory/"activation-rollback.json",canon({
+                    "status":"engineering_paused_after_failed_acceptance",
+                    "scope_sha256":sha,"at":stamp(),"production_authority":False}),0o400)
+        self.native_revalidation()
+        need(snapshot(PAUSE)==self.pause_image,"PIPELINE_FAILED_ACCEPTANCE_PAUSE_NOT_RESTORED")
+        print("ENGINEERING_PIPELINE_FAILED_ACCEPTANCE_PAUSE_VERIFIED")
+
+
 def main():
     cli = argparse.ArgumentParser()
     cli.add_argument("--candidate", required=True)
+    cli.add_argument("--pipeline-successor",action="store_true")
     choice=cli.add_mutually_exclusive_group()
     choice.add_argument("--apply", action="store_true")
     choice.add_argument("--recover",action="store_true")
@@ -862,6 +1336,28 @@ def main():
     cli.add_argument("--scope-sha")
     a = cli.parse_args()
     n,p = native()
+    if a.pipeline_successor:
+        need(not a.resume,"PIPELINE_RESUME_REQUIRES_VERIFIED_TRANSACTION")
+        code = source_review(a.candidate,p,recovery=a.recover or a.verify_activation or a.restore_failed_activation,
+                             baseline=PIPELINE_BASELINE,source_files=PIPELINE_SCOPE_FILES)
+        adapter = PipelineSuccessor(a.candidate,n,p,code)
+        if a.verify_activation:
+            if not adapter.verify_activation(): raise SystemExit(2)
+            return
+        if a.restore_failed_activation:
+            adapter.restore_failed_activation_pause()
+            return
+        if a.recover:
+            adapter.recover()
+            return
+        with n["locks"](): plan,_,_=adapter.inspect()
+        sha=pipeline_scope_sha(plan)
+        if not a.apply:
+            print(json.dumps({"status":"exact_native_pipeline_successor_preflight_passed",
+                              "scope_sha256":sha,"scope":plan},sort_keys=True))
+            return
+        adapter.apply(plan,a.scope_sha)
+        return
     code = source_review(a.candidate,p,recovery=a.recover or a.resume or a.verify_activation or a.restore_failed_activation)
     adapter = NativeAdapter(a.candidate,n,p,code)
     if a.verify_activation:

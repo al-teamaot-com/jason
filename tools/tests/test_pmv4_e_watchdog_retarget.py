@@ -19,6 +19,12 @@ assert SPEC and SPEC.loader
 SPEC.loader.exec_module(m)
 
 
+@pytest.fixture(autouse=True)
+def isolate_stage_e_only_fixture(monkeypatch):
+    # Never let a real host receipt substitute for this synthetic topology.
+    monkeypatch.setattr(m,"accepted_engineering_manager_routing",lambda:None)
+
+
 @pytest.fixture
 def probe(tmp_path,monkeypatch):
     marker=tmp_path/"accepted.json"

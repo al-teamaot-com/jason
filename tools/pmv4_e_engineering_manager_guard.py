@@ -36,6 +36,29 @@ ARTIFACTS = {
     "isolated_service_common.py": "b13b333e8463b2e32011872f4c82f0698ae7db001aaee8b28c089cd4dd110992",
 }
 ACTION = "RELOCATE-EXACT-PMV4-ENGINEERING-AND-WATCHDOG-MANAGERS"
+PIPELINE_ACTION = "REPAIR-EXACT-PMV4-ENGINEERING-PIPELINE-CONTRACT"
+PIPELINE_ARTIFACTS = frozenset({
+    "pmv3_engineering_controller.py", "engineering_pipeline.py",
+    "support_repair_host_worker.py", "todo_engineering_intake.py",
+    "todo_release_bridge.py", "engineering_supervisor.py",
+    "release_breaker_recovery_manager.py", "pmv3_integration_queue.py",
+    "engineering_evidence_tools.py", "operational_acceptance_reader.py",
+    "release_manager_gate.py", "pmv3_worker_release_gate.py",
+    "change_integration_gate.py", "documentation_impact_gate.py",
+})
+PIPELINE_SOURCE = Path("/home/al/.local/lib/jason/engineering-worker-source")
+PIPELINE_SOURCE_SHA = "1a7e7c1b03fce7dffa3ac6aab26480d614327e69"
+PIPELINE_WRITES = (
+    str(PIPELINE_SOURCE / ".git"),
+    "/var/lib/jason/openclaw/autonomous-repair/lifecycle-events",
+    "/home/al/jason-worktrees/support-repair-closure",
+    "/home/al/jason-worktrees/support-repair",
+    "/home/al/jason-worktrees/owner-approved-development",
+    "/home/al/jason-worktrees/todo-closure",
+    "/var/lib/jason/openclaw/support-repair",
+    "/var/lib/jason/openclaw/release-manager",
+)
+
 
 
 class Denied(PermissionError):
@@ -78,8 +101,22 @@ def validate_receipt(row):
     fields = {"schema_version", "action", "status", "candidate_sha", "rollback_sha",
               "scope_sha256", "approval_sha256", "stage_e_sha256", "parallel_result_sha256",
               "effective_policy_sha256", "guard_sha256", "unit_sha256", "artifact_sha256", "accepted_at"}
-    need(isinstance(row, dict) and set(row) == fields and row["schema_version"] == "1.0"
-         and row["action"] == ACTION and row["status"] == "accepted"
+    need(isinstance(row, dict), "RECEIPT_TYPE")
+    successor = row.get("schema_version") == "1.1"
+    if successor:
+        fields |= {"predecessor_candidate_sha", "predecessor_receipt_sha256",
+                   "pipeline_artifact_sha256", "engineering_source_sha"}
+        need(row.get("action") == PIPELINE_ACTION
+             and exact(row.get("predecessor_candidate_sha"), 40)
+             and row.get("predecessor_candidate_sha") != row.get("candidate_sha")
+             and exact(row.get("predecessor_receipt_sha256"), 64)
+             and row.get("engineering_source_sha") == PIPELINE_SOURCE_SHA
+             and isinstance(row.get("pipeline_artifact_sha256"), dict)
+             and set(row["pipeline_artifact_sha256"]) == PIPELINE_ARTIFACTS
+             and all(exact(x, 64) for x in row["pipeline_artifact_sha256"].values()),
+             "PIPELINE_SUCCESSOR_RECEIPT_INVALID")
+    need(set(row) == fields and row["schema_version"] in ("1.0", "1.1")
+         and row["action"] == (PIPELINE_ACTION if successor else ACTION) and row["status"] == "accepted"
          and exact(row["candidate_sha"], 40) and row["rollback_sha"] == LKG
          and row["candidate_sha"] != LKG and row["stage_e_sha256"] == STAGE_E_SHA256
          and row["parallel_result_sha256"] == PARALLEL_RESULT
@@ -137,8 +174,23 @@ def verify_topology(query):
 def verify_service_context(raw):
     # A UID check alone is insufficient; require the actual system-manager unit.
     paths = [line.split(":", 2)[-1] for line in raw.splitlines() if ":" in line]
-    need(any(x == "/system.slice/" + service for x in paths for service in SERVICES),
-         "NOT_IN_REVIEWED_SYSTEM_SERVICE")
+    matches = [service for service in SERVICES if "/system.slice/" + service in paths]
+    need(len(matches) == 1, "NOT_IN_REVIEWED_SYSTEM_SERVICE")
+    return matches[0]
+
+
+def verify_pipeline_sandbox():
+    """Read-only checks in the actual system-manager mount namespace."""
+    for path in map(Path, PIPELINE_WRITES):
+        need(path.is_dir() and os.access(path, os.W_OK | os.X_OK)
+             and not os.statvfs(path).f_flag & os.ST_RDONLY,
+             "PIPELINE_REQUIRED_WRITE_PATH_UNAVAILABLE:" + str(path))
+    for path in (PIPELINE_SOURCE, Path("/opt/jason/current"), RECEIPT.parent):
+        need(bool(os.statvfs(path).f_flag & os.ST_RDONLY),
+             "PIPELINE_PROTECTED_PATH_NOT_READONLY:" + str(path))
+    need("NoNewPrivs:\t1" in Path("/proc/self/status").read_text(),
+         "PIPELINE_PRIVILEGE_BOUNDARY_CHANGED")
+
 
 
 def status(*, require_system=False):
@@ -160,12 +212,32 @@ def status(*, require_system=False):
         need(digest(read(saved, 0, 0o444)) == expected
              and digest(read(live, 1000)) == expected, "ARTIFACT_CHANGED:" + name)
         artifacts[name] = {"source": str(saved), "sha256": expected}
+    if row["schema_version"] == "1.1":
+        prior = read(release / "predecessor.json", 0, 0o444)
+        predecessor = validate_receipt(json.loads(prior))
+        need(digest(prior) == row["predecessor_receipt_sha256"]
+             and predecessor["candidate_sha"] == row["predecessor_candidate_sha"]
+             and predecessor["rollback_sha"] == row["rollback_sha"],
+             "PIPELINE_PREDECESSOR_CHANGED")
+        for name, expected in row["pipeline_artifact_sha256"].items():
+            need(digest(read(release / "tools" / name, 0, 0o444)) == expected
+                 and digest(read(Path("/home/al/.local/lib/jason") / name, 1000)) == expected,
+                 "PIPELINE_ARTIFACT_CHANGED:" + name)
+        source_head = subprocess.run(
+            ["/usr/bin/git", "-C", str(PIPELINE_SOURCE), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=False,
+            env={"PATH": "/usr/bin:/bin", "HOME": "/home/al", "GIT_OPTIONAL_LOCKS": "0"},
+        )
+        need(source_head.returncode == 0 and source_head.stdout.strip() == row["engineering_source_sha"],
+             "PIPELINE_SOURCE_REVISION_CHANGED")
     for name, expected in row["unit_sha256"].items():
         need(digest(read(Path("/etc/systemd/system") / name, 0, 0o644)) == expected,
              "UNIT_BYTES_CHANGED")
     verify_topology(properties)
     if require_system:
-        verify_service_context(Path("/proc/self/cgroup").read_text())
+        service = verify_service_context(Path("/proc/self/cgroup").read_text())
+        if row["schema_version"] == "1.1" and service == SERVICES[0]:
+            verify_pipeline_sandbox()
     return {"status": "verified_system_manager", "candidate_sha": row["candidate_sha"],
             "rollback_sha": row["rollback_sha"], "scope_sha256": row["scope_sha256"],
             "system_timers": list(TIMERS), "artifact_sources": artifacts,
