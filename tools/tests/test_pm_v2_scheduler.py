@@ -34,6 +34,10 @@ def dispatch_until_count(scheduler, expected_count, timeout_seconds=5.0):
     deadline = time.monotonic() + timeout_seconds
     total = 0
     while total < expected_count:
+        # The worker can persist retry_ready immediately before its Future is
+        # marked done. Reap completed Futures as the real scheduler cycle does
+        # so a finished first attempt cannot falsely occupy a worker slot.
+        scheduler.reap()
         total += scheduler.dispatch_available()
         if total >= expected_count:
             return total

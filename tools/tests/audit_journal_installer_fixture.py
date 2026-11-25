@@ -67,6 +67,9 @@ def exercise(base,trust):
    assert json.loads((record/"transaction.json").read_bytes())["outcome"]=="queued"
    assert archive.stat().st_uid==0 and stat.S_IMODE(archive.stat().st_mode)==0o755
    assert json.loads(desired.read_bytes())["max_stopped_rollback_containers"]==27
+   assert "jason-audit-journal-maintenance.timer" not in json.loads(desired.read_bytes())["required_system_units"]
+   assert "jason-audit-journal-maintenance.timer" in json.loads(desired.read_bytes())["allowed_system_units"]
+   assert "jason-audit-journal-maintenance.timer" in json.loads((s.PRIVATE/"desired-final.json").read_bytes())["required_system_units"]
   assert active.read_bytes()==b"untouched-canonical" and (active.stat().st_dev,active.stat().st_ino)==identity
   total+=1
  return total

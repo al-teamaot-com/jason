@@ -2,7 +2,7 @@ FROM python@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63
 USER 0:0
 RUN ln -s /usr/local/bin/python3 /usr/bin/python3 && groupadd -g 1000 al && useradd -u 1000 -g 1000 -M al
 COPY --chown=0:0 implementation/orchestrator/event_store.py implementation/orchestrator/segmented_journal.py implementation/orchestrator/journal_sql.py implementation/orchestrator/journal_health.py implementation/orchestrator/journal_recovery.py implementation/orchestrator/journal_mount.py implementation/orchestrator/journal_outcomes.py /usr/local/lib/jason/audit-journal/trusted/implementation/orchestrator/
-COPY --chown=0:0 tools/audit_journal_control.py tools/audit_journal_install_transaction.py tools/audit_journal_install.py tools/audit_journal_release_scope.py tools/pmv4_e_operational_closure.py /usr/local/lib/jason/audit-journal/trusted/tools/
+COPY --chown=0:0 tools/audit_journal_control.py tools/audit_journal_install_transaction.py tools/audit_journal_install.py tools/audit_journal_release_scope.py tools/pmv4_e_operational_closure.py tools/audit_journal_pre_cutover_repair.py /usr/local/lib/jason/audit-journal/trusted/tools/
 COPY --chown=0:0 tools/audit_journal_signed_owner_bridge.py /usr/local/lib/jason/audit-journal/trusted/tools/audit_journal_signed_owner_bridge.py
 RUN chmod -R a-w /usr/local/lib/jason/audit-journal/trusted
 COPY --chown=0:0 tools/tests/audit_journal_root_fixture.py /test.py
@@ -18,4 +18,13 @@ COPY --chown=0:0 tools/tests/audit_journal_owner_executor_root_bootstrap_fixture
 COPY --chown=0:0 tools/audit_executor_drift_recovery.py /test-source/audit_executor_drift_recovery.py
 COPY --chown=0:0 tools/tests/audit_executor_drift_recovery_root_fixture.py /root-executor-retire-fixture.py
 COPY --chown=0:0 tools/tests/audit_journal_owner_native_worker_root_fixture.py /root-worker-fixture.py
+COPY --chown=0:0 tools/tests/audit_journal_context_repair_root_fixture.py /context-repair-fixture.py
+COPY --chown=0:0 tools/tests/audit_journal_writer_context_root_fixture.py /writer-context-fixture.py
+COPY --chown=0:0 tools/tests/fixtures/audit_journal_writer_limits.conf /writer-limits.conf
+COPY --chown=0:0 tools/tests/fixtures/audit_journal_writer_pam.conf /writer-pam.conf
+COPY --chown=0:0 tools/release_control_transition_worker.py tools/release_manager_host_runner.py tools/production_drift_watchdog.py tools/production_drift_guard.py /test-source/
+COPY --chown=0:0 tools/tests/audit_journal_native_admission_root_fixture.py /native-admission-fixture.py
 ENTRYPOINT ["/usr/bin/python3","-I","-B","/test.py"]
+
+COPY --chown=0:0 --chmod=0444 tools/audit_journal_health_reader_install.py /usr/local/lib/jason/audit-journal/trusted/tools/audit_journal_health_reader_install.py
+COPY --chown=0:0 --chmod=0444 tools/tests/audit_journal_health_reader_root_fixture.py /native-health-reader-fixture.py
