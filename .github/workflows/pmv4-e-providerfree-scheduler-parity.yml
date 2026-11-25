@@ -37,6 +37,9 @@ on:
       - "tools/todo_engineering_intake.py"
       - "tools/engineering_supervisor.py"
       - "tools/pmv3_engineering_controller.py"
+      - "tools/pmv3_worker_release_gate.py"
+      - "tools/tests/test_pmv3_worker_release_gate.py"
+      - "tools/tests/test_pmv3_engineering_controller.py"
       - "tools/tests/test_todo_engineering_intake.py"
       - "tools/tests/test_engineering_supervisor.py"
       - "tools/tests/test_pmv3_autonomous_stall.py"
@@ -116,6 +119,8 @@ jobs:
             tools/tests/test_todo_engineering_intake.py \
             tools/tests/test_engineering_supervisor.py \
             tools/tests/test_pmv3_autonomous_stall.py \
+            tools/tests/test_pmv3_worker_release_gate.py \
+            tools/tests/test_pmv3_engineering_controller.py \
             tools/tests/test_install_support_repair_host_worker.py \
             tests/test_pmv4_e_engineering_manager_transaction.py \
             tests/test_pmv4_e_engineering_manager_install.py \

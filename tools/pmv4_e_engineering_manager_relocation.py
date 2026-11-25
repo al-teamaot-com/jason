@@ -72,6 +72,18 @@ def units(base: Path):
         "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus\n"
         "Environment=PYTHONDONTWRITEBYTECODE=1\n", 1)
     service = service.replace("ReadWritePaths=", "ReadWritePaths=" + " ".join(PIPELINE_WRITES) + " ", 1)
+    # Only the accepted system-manager engineering service opts in.
+    # The original user-manager and temporary release guards stay immediate.
+    old_gate = "ExecCondition=/usr/bin/python3 /home/al/.local/lib/jason/pmv3_worker_release_gate.py"
+    need(service.count(old_gate + "\n") == 1
+         and service.count(" --pipeline-timeout 3900\n") == 1,
+         "RELEASE_RETRY_SOURCE_CHANGED")
+    service = service.replace(
+        "# Skip (not fail) engineering activation while signed Release Manager owns its lock.",
+        "# Retry brief contention; still skip (not fail) if the bounded gate denies.")
+    service = service.replace(old_gate + "\n", old_gate + " --retry-contention\n")
+    service = service.replace(" --pipeline-timeout 3900\n",
+                              " --pipeline-timeout 3900 --retry-release-contention\n")
     wd = (base / WATCHDOG_SOURCE / WATCHDOG_SERVICE).read_bytes()
     wt = (base / WATCHDOG_SOURCE / WATCHDOG_TIMER).read_bytes()
     need(digest(wd) == WATCHDOG_SERVICE_SHA256 and digest(wt) == WATCHDOG_TIMER_SHA256,
