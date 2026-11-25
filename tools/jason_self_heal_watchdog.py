@@ -107,6 +107,18 @@ def run(args: list[str], *, timeout: int = 20, check: bool = False) -> subproces
     )
 
 
+def accepted_engineering_manager_routing():
+    receipt = Path("/etc/jason-owner-release/pmv4-e/engineering-manager-system-authorized.json")
+    guard = Path("/usr/local/lib/jason/pmv4-e-engineering-manager/manager_guard.py")
+    if not os.path.lexists(receipt) and not os.path.lexists(guard):
+        return None
+    import pmv4_e_engineering_manager_client as client
+    result = client.read_routing()
+    if result is None:
+        raise PermissionError("engineering successor receipt missing")
+    return result
+
+
 def pmv4_e_controlplane_mode() -> str:
     """Legacy until exact root acceptance; invalid acceptance DENIES repair.
 
@@ -291,6 +303,12 @@ def production_convergence_failures(
     evidence["pmv4_e_controlplane_mode"]=control_mode
     if control_mode=="denied":
         return ["production_convergence_pmv4_e_acceptance_invalid"], evidence
+    try:
+        routing = accepted_engineering_manager_routing() if control_mode == "replacement" else None
+    except (ImportError, OSError, ValueError, TypeError, subprocess.SubprocessError):
+        return ["production_convergence_engineering_manager_successor_invalid"], evidence
+    if routing:
+        evidence["engineering_manager_successor"] = routing["candidate_sha"]
     if control_mode=="replacement" and installed_timer==RELEASE_MANAGER_TIMER:
         installed_timer=PMV4_E_RELEASE_MANAGER_TIMER
     runtime_revision = _container_source_revision("jason-runtime")
@@ -342,8 +360,11 @@ def production_convergence_failures(
         if control_mode=="replacement"
         else "infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer"
     )
+    runner_source = release_dir / "tools/release_manager_host_runner.py"
+    if routing:
+        runner_source = Path(routing["artifact_sources"]["release_manager_host_runner.py"]["source"])
     pairs = (
-        ("runner", release_dir / "tools/release_manager_host_runner.py", installed_runner),
+        ("runner", runner_source, installed_runner),
         ("timer", release_dir / timer_relative, installed_timer),
     )
     artifact_evidence: dict[str, Any] = {}
@@ -405,6 +426,8 @@ def production_convergence_failures(
             desired = (release_dir if candidate_artifact else baseline_dir) / relative
             if control_mode=="replacement" and name=="root_host_reconciler":
                 installed = PMV4_E_ROOT_HOST_RECONCILER
+            if routing and Path(relative).name in routing["artifact_sources"]:
+                desired = Path(routing["artifact_sources"][Path(relative).name]["source"])
             desired_hash = _sha256(desired)
             installed_hash = _sha256(installed)
             scheduled_artifacts[name] = {
@@ -452,18 +475,13 @@ def production_convergence_failures(
     expected_timers=(PMV4_E_TIMERS
                      if control_mode=="replacement" else REQUIRED_USER_TIMERS)
     for timer_name in expected_timers:
-        timer_state = run(
-            [
-                "/usr/bin/env",
-                f"XDG_RUNTIME_DIR=/run/user/{uid}",
-                f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
-                "systemctl",
-                "--user",
-                "is-active",
-                timer_name,
-            ],
-            timeout=10,
-        )
+        if routing and timer_name in routing["system_timers"]:
+            timer_args = ["systemctl", "is-active", timer_name]
+        else:
+            timer_args = ["/usr/bin/env", f"XDG_RUNTIME_DIR=/run/user/{uid}",
+                          f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
+                          "systemctl", "--user", "is-active", timer_name]
+        timer_state = run(timer_args, timeout=10)
         active = timer_state.returncode == 0 and timer_state.stdout.strip() == "active"
         timer_evidence[timer_name] = active
         if not active:
@@ -979,6 +997,15 @@ def request_engineering_worker() -> str:
     control_mode=pmv4_e_controlplane_mode()
     if control_mode=="denied":
         return "deferred_pmv4_e_root_acceptance_invalid"
+    if control_mode == "replacement":
+        try:
+            routing = accepted_engineering_manager_routing()
+        except (ImportError, OSError, ValueError, TypeError, subprocess.SubprocessError):
+            return "deferred_engineering_manager_successor_invalid"
+        if routing:
+            # Durable incident intake already exists. The normal system timer
+            # consumes it without giving this unprivileged watchdog root start authority.
+            return "queued_for_verified_system_engineering_timer"
     target=(PMV4_E_ENGINEERING_SERVICE
             if control_mode=="replacement" else "jason-support-repair-worker.service")
     with non_disruptive_release_guard() as admitted:

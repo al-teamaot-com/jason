@@ -11,7 +11,7 @@ def policy():
     return {"schema_version": "1.0",
             "required_user_units": [m.TIMER, "jason-self-heal-watchdog.timer"],
             "required_system_units": ["jason-core.service"],
-            "allowed_user_units": [m.SERVICE, "jason-support-repair-worker.service"],
+            "allowed_user_units": [*m.MANAGER_SERVICES, "jason-support-repair-worker.service"],
             "allowed_system_units": ["jason-runtime.service"],
             "required_containers": ["jason-runtime", "jason-pmv4-ticket-core"],
             "forbidden_execution_prefixes": ["forbidden"]}
@@ -19,7 +19,7 @@ def policy():
 
 def test_candidate_is_exact_and_retains_sandbox_and_original_guards():
     files = m.units(ROOT)
-    assert len(files) == 2
+    assert len(files) == 4
     for name, data in files.items():
         assert (ROOT / name).read_bytes() == data
     old = (ROOT / m.SOURCE / m.SERVICE).read_text()
@@ -37,6 +37,14 @@ def test_candidate_is_exact_and_retains_sandbox_and_original_guards():
     new_rw = next(x for x in new.splitlines() if x.startswith("ReadWritePaths="))
     assert new_rw == old_rw.replace("ReadWritePaths=", "ReadWritePaths=" + m.GIT_METADATA + " ", 1)
     assert files[str(m.TARGET / m.TIMER)] == (ROOT / m.SOURCE / m.TIMER).read_bytes()
+    wd = files[str(m.TARGET / m.WATCHDOG_SERVICE)].decode()
+    assert "User=al\nGroup=al\n" in wd
+    assert "ExecCondition=/usr/bin/python3 -I -B " + m.SUCCESSOR_GUARD in wd
+    for line in ("NoNewPrivileges=true", "PrivateTmp=true", "ProtectSystem=strict",
+                 "ProtectHome=read-only", "ReadWritePaths=/var/lib/jason/openclaw/self-heal"):
+        assert line in wd.splitlines()
+    assert "ExecStart=/usr/bin/python3 -B /home/al/.local/lib/jason/jason_self_heal_watchdog.py " in wd
+    assert files[str(m.TARGET / m.WATCHDOG_TIMER)] == (ROOT / m.WATCHDOG_SOURCE / m.WATCHDOG_TIMER).read_bytes()
 
 
 def test_exact_policy_delta_is_nonmutating_and_preserves_other_controls():
@@ -44,10 +52,10 @@ def test_exact_policy_delta_is_nonmutating_and_preserves_other_controls():
     saved = deepcopy(before)
     out = m.desired_state_delta(before)
     assert before == saved
-    assert set(out["required_user_units"]) == set(before["required_user_units"]) - {m.TIMER}
-    assert set(out["required_system_units"]) == set(before["required_system_units"]) | {m.TIMER}
-    assert set(out["allowed_user_units"]) == set(before["allowed_user_units"]) - {m.SERVICE}
-    assert set(out["allowed_system_units"]) == set(before["allowed_system_units"]) | {m.SERVICE}
+    assert set(out["required_user_units"]) == set(before["required_user_units"]) - set(m.MANAGER_TIMERS)
+    assert set(out["required_system_units"]) == set(before["required_system_units"]) | set(m.MANAGER_TIMERS)
+    assert set(out["allowed_user_units"]) == set(before["allowed_user_units"]) - set(m.MANAGER_SERVICES)
+    assert set(out["allowed_system_units"]) == set(before["allowed_system_units"]) | set(m.MANAGER_SERVICES)
     assert out["required_containers"] == before["required_containers"]
     assert out["forbidden_execution_prefixes"] == before["forbidden_execution_prefixes"]
 
