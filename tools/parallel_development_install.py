@@ -213,18 +213,49 @@ def source_and_ci(candidate):
 # Use the current trusted exhaustive reviewer, but only over the exact
 # component closure; unrelated registry counts are observations, not consent.
 SCAN = """
-import json,sys
+import hashlib,json,re,stat,sys
 from pathlib import Path
 path, candidate, *repos = sys.argv[1:]
 ns={'__name__':'parallel_scope_scan','__file__':path}
 exec(compile(Path(path).read_bytes(),path,'exec'),ns)
 changed=set(json.load(sys.stdin))
-prs,_=ns['open_pr_overlaps']('al-teamaot-com/jason',changed)
-if prs: raise SystemExit('overlapping open PRs')
+prs,pr_count=ns['open_pr_overlaps']('al-teamaot-com/jason',changed)
+# These preexisting edits are held reservations, not permission to merge,
+# deploy, or admit another active editor. Bind their exact state to the
+# independently authenticated, one-use Owner decision.
+heads=json.loads(ns['command'](['gh','pr','list','--repo','al-teamaot-com/jason',
+    '--state','open','--limit','250','--json','number,headRefOid,isDraft']))
+if len(heads)!=pr_count or len({v['number'] for v in heads})!=len(heads):
+    raise ValueError('open PR inventory changed during review')
+heads={v['number']:v for v in heads}
+for row in prs:
+    head=heads.get(row['number'],{})
+    if not re.fullmatch('[0-9a-f]{40}',str(head.get('headRefOid',''))) or type(head.get('isDraft')) is not bool:
+        raise ValueError('overlapping PR head unverified')
+    row['head_sha']=head['headRefOid']
+    row['draft']=head['isDraft']
+dirty=[]
 for repo in repos:
     overlaps,_,_,_=ns['dirty_worktrees'](Path(repo),changed,candidate)
-    if overlaps: raise SystemExit('overlapping dirty worktrees')
-print('COMPONENT_SCOPE_COMPLETE_NO_OVERLAPS')
+    for row in overlaps:
+        root=Path(row['path'])
+        head=ns['command'](['git','rev-parse','HEAD'],root).strip()
+        if not re.fullmatch('[0-9a-f]{40}',head):
+            raise ValueError('dirty worktree HEAD unverified')
+        files={}
+        for name in row['changed_files']:
+            target=root/name
+            meta=target.lstat()
+            if not stat.S_ISREG(meta.st_mode) or meta.st_uid!=1000 or meta.st_nlink!=1:
+                raise ValueError('dirty source custody changed')
+            files[name]=hashlib.sha256(target.read_bytes()).hexdigest()
+        row['head_sha']=head
+        row['file_sha256']=files
+        dirty.append(row)
+print(json.dumps({'open_prs':sorted(prs,key=lambda x:x['number']),
+    'dirty_worktrees':sorted(dirty,key=lambda x:x['path']),
+    'disposition':'preexisting_sources_held_not_active_or_deployment_authorized'},
+    sort_keys=True))
 """
 
 
@@ -235,7 +266,17 @@ def recheck_overlaps(candidate):
     raw = command([*USER, '/usr/bin/python3', '-I', '-B', '-c', SCAN, str(path), candidate,
                    str(REPO), '/home/al/projects/jason', str(SOURCE)],
                   timeout=900, data=canon(sorted(paths)))
-    need(raw.strip() == b'COMPONENT_SCOPE_COMPLETE_NO_OVERLAPS', 'OVERLAP_SCAN_UNVERIFIED')
+    try:
+        result = json.loads(raw)
+    except (ValueError, TypeError):
+        need(False, 'OVERLAP_SCAN_UNVERIFIED')
+    need(isinstance(result, dict) and result.get('disposition') ==
+         'preexisting_sources_held_not_active_or_deployment_authorized'
+         and isinstance(result.get('open_prs'),list)
+         and isinstance(result.get('dirty_worktrees'),list)
+         and len(result['open_prs']) < 250 and len(result['dirty_worktrees']) < 2000,
+         'OVERLAP_SCAN_UNVERIFIED')
+    return result
 
 
 def unit(name, user=False):
@@ -494,7 +535,7 @@ def decoded(values):
             for name, value in values.items()}
 
 
-def scope(candidate, before, after, dependencies, protected, source_hashes):
+def scope(candidate, before, after, dependencies, protected, source_hashes, overlaps=None):
     need(exact_sha(candidate) and candidate != ROLLBACK, 'CANDIDATE_INVALID')
     need(set(before) == set(after) == set(FILES), 'COMPONENT_FILE_SET_INVALID')
     return {'schema_version': '1.0', 'action': ACTION, 'component': 'development-admission',
@@ -504,14 +545,17 @@ def scope(candidate, before, after, dependencies, protected, source_hashes):
             'reserved_temporary_files': sorted({str(BASE / ('.parallel-reviewed-' + n + '-' + digest(v[0]) + '.tmp'))
                 for n in FILES for v in (before[n], after[n]) if v is not None}),
             'existing_dependency_sha256': dependencies, 'reviewed_source_sha256': source_hashes,
-            'protected': protected, 'shared_source_revision': ACCEPTED_SOURCE, 'shared_source_target': SOURCE_TARGET,
+            'protected': protected, 'legacy_overlap_review': overlaps if overlaps is not None else {
+                'open_prs': [], 'dirty_worktrees': [],
+                'disposition': 'preexisting_sources_held_not_active_or_deployment_authorized'},
+            'shared_source_revision': ACCEPTED_SOURCE, 'shared_source_target': SOURCE_TARGET,
             'queue_cutover': False, 'standing_authority': False, 'provider_writes': False,
             'production_service_restart': False, 'freeze_or_pause_change': False}
 
 
 def inspect(candidate, fs):
     code, policies = source_and_ci(candidate)
-    recheck_overlaps(candidate)
+    overlaps = recheck_overlaps(candidate)
     need(SOURCE.is_symlink() and os.readlink(SOURCE) == SOURCE_TARGET
          and git(SOURCE, 'rev-parse', 'HEAD').decode().strip() == ACCEPTED_SOURCE
          and not git(SOURCE, 'status', '--porcelain', '--untracked-files=all').strip(), 'SHARED_SOURCE_CHANGED')
@@ -532,7 +576,7 @@ def inspect(candidate, fs):
          'PROTECTED_MAIN_RECHECK_UNAVAILABLE')
     check_newer_paths(git_paths(REPO, candidate, head[0]), policies)
     reviewed = scope(candidate, before, after, dependencies, protected,
-                     {name: digest(raw) for name, raw in code.items()})
+                     {name: digest(raw) for name, raw in code.items()}, overlaps)
     need(not os.path.lexists(RECORDS / candidate), 'ONE_USE_INSTALL_ALREADY_RECORDED')
     return reviewed, before, after
 
