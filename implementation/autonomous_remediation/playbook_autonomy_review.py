@@ -96,8 +96,9 @@ class PlaybookAutonomyReviewService:
                 ("Allowed capabilities", capabilities_text),
                 ("Source", scope.source or "not stated"),
                 ("Scope fingerprint", scope.entry_sha256),
+                ("Authority envelope", scope.authority_envelope_sha256),
                 ("Requested by", actor),
-                ("Authority effect", "Creates exact durable autonomy promotion only"),
+                ("Authority effect", "Approves this exact authority envelope; future version-only revisions may inherit"),
             ),
         )
         return ApprovalRequest(
@@ -120,6 +121,7 @@ class PlaybookAutonomyReviewService:
                 "policy_id": scope.policy_id,
                 "allowed_capabilities": capabilities_text,
                 "entry_sha256": scope.entry_sha256,
+                "authority_envelope_sha256": scope.authority_envelope_sha256,
                 "source": scope.source or "not-stated",
             },
         )
@@ -146,7 +148,8 @@ class PlaybookAutonomyReviewService:
         reviewed_version = request.metadata.get("playbook_version", "").strip()
         reviewed_policy = request.metadata.get("policy_id", "").strip()
         reviewed_fingerprint = request.metadata.get("entry_sha256", "").strip()
-        if not all((playbook_id, reviewed_version, reviewed_policy, reviewed_fingerprint)):
+        reviewed_envelope = request.metadata.get("authority_envelope_sha256", "").strip()
+        if not all((playbook_id, reviewed_version, reviewed_policy, reviewed_fingerprint, reviewed_envelope)):
             raise PlaybookAutonomyReviewError("PLAYBOOK_AUTONOMY_REVIEW_SCOPE_INCOMPLETE")
 
         current = registered_autonomy_scope(
@@ -159,6 +162,8 @@ class PlaybookAutonomyReviewService:
             raise PlaybookAutonomyReviewError("PLAYBOOK_AUTONOMY_POLICY_DRIFT")
         if current.entry_sha256 != reviewed_fingerprint:
             raise PlaybookAutonomyReviewError("PLAYBOOK_AUTONOMY_FINGERPRINT_DRIFT")
+        if current.authority_envelope_sha256 != reviewed_envelope:
+            raise PlaybookAutonomyReviewError("PLAYBOOK_AUTONOMY_ENVELOPE_DRIFT")
         if request.requested_mode != current.requested_mode():
             raise PlaybookAutonomyReviewError("PLAYBOOK_AUTONOMY_REQUEST_MODE_DRIFT")
 
@@ -190,6 +195,7 @@ class PlaybookAutonomyReviewService:
             allowed_capabilities=current.allowed_capabilities,
             approved_by=accepted.decided_by,
             expires_at=None,
+            authority_envelope_sha256=current.authority_envelope_sha256,
         )
         self.promotion_store.put(promotion)
         result = PlaybookAutonomyPromotionResult(promotion, True, current)
@@ -224,6 +230,33 @@ class PlaybookAutonomyReviewService:
             "policy_id": result.scope.policy_id,
             "allowed_capabilities": list(result.scope.allowed_capabilities),
             "entry_sha256": result.scope.entry_sha256,
+            "authority_envelope_sha256": result.scope.authority_envelope_sha256,
+            "inherited_from_approval_id": result.promotion.inherited_from_approval_id,
+        }
+        with self.audit_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n")
+
+    def audit_envelope_inheritance(
+        self,
+        *,
+        scope: RegisteredAutonomyScope,
+        root: PlaybookAutonomyApproval,
+        derived: PlaybookAutonomyApproval,
+    ) -> None:
+        if self.audit_path is None:
+            return
+        self.audit_path.parent.mkdir(parents=True, exist_ok=True)
+        event = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event": "playbook.autonomy.version_inherited_from_approved_envelope",
+            "playbook_id": scope.playbook_id,
+            "playbook_version": scope.playbook_version,
+            "policy_id": scope.policy_id,
+            "allowed_capabilities": list(scope.allowed_capabilities),
+            "authority_envelope_sha256": scope.authority_envelope_sha256,
+            "root_approval_id": root.approval_id,
+            "derived_approval_id": derived.approval_id,
+            "approved_by": root.approved_by,
         }
         with self.audit_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n")

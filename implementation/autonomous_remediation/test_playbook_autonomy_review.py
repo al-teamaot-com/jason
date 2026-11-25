@@ -13,6 +13,7 @@ from .playbook_autonomy_review import (
     PlaybookAutonomyReviewError,
     PlaybookAutonomyReviewService,
 )
+from .playbook_autonomy_scope import registered_autonomy_scope
 
 NOW = datetime(2026, 9, 26, 15, 0, tzinfo=timezone.utc)
 
@@ -78,7 +79,10 @@ def test_owner_approval_mechanically_promotes_exact_reviewed_scope(tmp_path):
     assert result.promotion.allowed_capabilities == (
         "service.ticket.note.create", "service.ticket.update"
     )
-    assert "Scope fingerprint" in dict(request.presentation.facts)
+    facts = dict(request.presentation.facts)
+    assert "Scope fingerprint" in facts
+    assert facts["Authority envelope"] == result.scope.authority_envelope_sha256
+    assert result.promotion.authority_envelope_sha256 == result.scope.authority_envelope_sha256
     assert store.find_scope_approved(
         playbook_id="demo", playbook_version="1.0.0",
         policy_id="playbook-autonomy:demo",
@@ -124,3 +128,83 @@ def test_request_changes_never_promotes(tmp_path):
             accepted=accepted(request, status="changes_requested"),
         )
     assert store.list_all() == ()
+
+
+def test_authority_envelope_is_stable_for_version_only_and_changes_for_scope_change(tmp_path):
+    path = registry(tmp_path, version="1.0.0")
+    first = registered_autonomy_scope(registry_path=path, playbook_id="demo")
+    registry(tmp_path, version="1.0.1")
+    second = registered_autonomy_scope(registry_path=path, playbook_id="demo")
+    assert first.entry_sha256 != second.entry_sha256
+    assert first.authority_envelope_sha256 == second.authority_envelope_sha256
+
+    registry(
+        tmp_path,
+        version="1.0.1",
+        capabilities=["service.ticket.note.create", "service.ticket.update", "automation.component.execute"],
+    )
+    expanded = registered_autonomy_scope(registry_path=path, playbook_id="demo")
+    assert expanded.authority_envelope_sha256 != first.authority_envelope_sha256
+
+
+def test_derived_exact_version_requires_active_matching_envelope_root(tmp_path):
+    path = registry(tmp_path, version="1.0.0")
+    scope = registered_autonomy_scope(registry_path=path, playbook_id="demo")
+    store = SQLitePlaybookAutonomyApprovalStore(tmp_path / "promotions.sqlite3")
+    root = store.new(
+        playbook_id=scope.playbook_id,
+        playbook_version=scope.playbook_version,
+        policy_id=scope.policy_id,
+        allowed_capabilities=scope.allowed_capabilities,
+        approved_by="person-owner",
+        authority_envelope_sha256=scope.authority_envelope_sha256,
+    )
+    store.put(root)
+    derived = store.derive_exact_version_from_envelope(
+        root=root,
+        playbook_version="1.0.1",
+        required_capabilities=scope.allowed_capabilities,
+        authority_envelope_sha256=scope.authority_envelope_sha256,
+        now=NOW,
+    )
+    assert derived.playbook_version == "1.0.1"
+    assert derived.inherited_from_approval_id == root.approval_id
+    assert store.find_scope_approved(
+        playbook_id="demo",
+        playbook_version="1.0.1",
+        policy_id=scope.policy_id,
+        required_capabilities=scope.allowed_capabilities,
+        now=NOW,
+    ) == derived
+
+    store.revoke(root.approval_id, revoked_by="person-owner", reason="test revoke")
+    assert store.find_scope_approved(
+        playbook_id="demo",
+        playbook_version="1.0.1",
+        policy_id=scope.policy_id,
+        required_capabilities=scope.allowed_capabilities,
+        now=NOW,
+    ) is None
+
+
+def test_envelope_cannot_derive_expanded_capabilities(tmp_path):
+    path = registry(tmp_path, version="1.0.0", capabilities=["service.ticket.note.create"])
+    scope = registered_autonomy_scope(registry_path=path, playbook_id="demo")
+    store = SQLitePlaybookAutonomyApprovalStore(tmp_path / "promotions.sqlite3")
+    root = store.new(
+        playbook_id=scope.playbook_id,
+        playbook_version=scope.playbook_version,
+        policy_id=scope.policy_id,
+        allowed_capabilities=scope.allowed_capabilities,
+        approved_by="person-owner",
+        authority_envelope_sha256=scope.authority_envelope_sha256,
+    )
+    store.put(root)
+    with pytest.raises(ValueError, match="does not authorize"):
+        store.derive_exact_version_from_envelope(
+            root=root,
+            playbook_version="1.0.1",
+            required_capabilities=("service.ticket.note.create", "service.ticket.update"),
+            authority_envelope_sha256=scope.authority_envelope_sha256,
+            now=NOW,
+        )

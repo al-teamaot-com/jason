@@ -31,6 +31,8 @@ class PlaybookAutonomyApproval:
     revoked_by: str | None = None
     revoked_at: datetime | None = None
     revoke_reason: str | None = None
+    authority_envelope_sha256: str | None = None
+    inherited_from_approval_id: str | None = None
 
     def __post_init__(self) -> None:
         for name, value in {
@@ -49,6 +51,12 @@ class PlaybookAutonomyApproval:
             raise ValueError("expires_at must be timezone-aware")
         if self.revoked_at is not None and self.revoked_at.tzinfo is None:
             raise ValueError("revoked_at must be timezone-aware")
+        if self.authority_envelope_sha256 is not None:
+            value = str(self.authority_envelope_sha256)
+            if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                raise ValueError("authority_envelope_sha256 must be lowercase sha256")
+        if self.inherited_from_approval_id is not None and not str(self.inherited_from_approval_id).strip():
+            raise ValueError("inherited_from_approval_id must be non-empty when present")
         if not self.allowed_capabilities:
             raise ValueError("allowed_capabilities must not be empty")
         if len(set(self.allowed_capabilities)) != len(self.allowed_capabilities):
@@ -172,14 +180,102 @@ class SQLitePlaybookAutonomyApprovalStore:
         for row in rows:
             record = self._decode(str(row["payload"]))
             if (
-                record.status == "approved"
-                and (record.expires_at is None or now < record.expires_at)
+                self._record_active(record, now=now)
                 and required.issubset(set(record.allowed_capabilities))
             ):
                 valid.append(record)
         if len(valid) > 1:
             raise ValueError("multiple active playbook autonomy approvals match the same scope")
         return valid[0] if valid else None
+
+    def _record_active(self, record: PlaybookAutonomyApproval, *, now: datetime) -> bool:
+        if record.status != "approved" or (record.expires_at is not None and now >= record.expires_at):
+            return False
+        if record.inherited_from_approval_id is None:
+            return True
+        root = self.get(record.inherited_from_approval_id)
+        return (
+            root is not None
+            and root.inherited_from_approval_id is None
+            and root.status == "approved"
+            and (root.expires_at is None or now < root.expires_at)
+            and root.playbook_id == record.playbook_id
+            and root.policy_id == record.policy_id
+            and root.authority_envelope_sha256 is not None
+            and root.authority_envelope_sha256 == record.authority_envelope_sha256
+            and set(record.allowed_capabilities).issubset(set(root.allowed_capabilities))
+        )
+
+    def find_envelope_approved(
+        self,
+        *,
+        playbook_id: str,
+        policy_id: str,
+        required_capabilities: Iterable[str],
+        authority_envelope_sha256: str,
+        now: datetime | None = None,
+    ) -> PlaybookAutonomyApproval | None:
+        required = set(required_capabilities)
+        if not required or len(authority_envelope_sha256) != 64:
+            return None
+        rows = self._connection.execute(
+            "SELECT payload FROM playbook_autonomy_approvals WHERE playbook_id=? AND policy_id=? ORDER BY approval_id",
+            (playbook_id, policy_id),
+        ).fetchall()
+        now = now or datetime.now(timezone.utc)
+        roots = []
+        for row in rows:
+            record = self._decode(str(row["payload"]))
+            if (
+                record.inherited_from_approval_id is None
+                and record.authority_envelope_sha256 == authority_envelope_sha256
+                and self._record_active(record, now=now)
+                and required.issubset(set(record.allowed_capabilities))
+            ):
+                roots.append(record)
+        if len(roots) > 1:
+            raise ValueError("multiple active playbook autonomy envelope approvals match the same scope")
+        return roots[0] if roots else None
+
+    def derive_exact_version_from_envelope(
+        self,
+        *,
+        root: PlaybookAutonomyApproval,
+        playbook_version: str,
+        required_capabilities: Iterable[str],
+        authority_envelope_sha256: str,
+        now: datetime | None = None,
+    ) -> PlaybookAutonomyApproval:
+        current = now or datetime.now(timezone.utc)
+        required = tuple(required_capabilities)
+        if (
+            root.inherited_from_approval_id is not None
+            or not self._record_active(root, now=current)
+            or root.authority_envelope_sha256 != authority_envelope_sha256
+            or not set(required).issubset(set(root.allowed_capabilities))
+        ):
+            raise ValueError("playbook autonomy envelope root does not authorize derived version")
+        existing = self.find_scope_approved(
+            playbook_id=root.playbook_id,
+            playbook_version=playbook_version,
+            policy_id=root.policy_id,
+            required_capabilities=required,
+            now=current,
+        )
+        if existing is not None:
+            return existing
+        derived = self.new(
+            playbook_id=root.playbook_id,
+            playbook_version=playbook_version,
+            policy_id=root.policy_id,
+            allowed_capabilities=required,
+            approved_by=root.approved_by,
+            expires_at=root.expires_at,
+            authority_envelope_sha256=authority_envelope_sha256,
+            inherited_from_approval_id=root.approval_id,
+        )
+        self.put(derived)
+        return derived
 
     def list_all(self) -> tuple[PlaybookAutonomyApproval, ...]:
         rows = self._connection.execute(
@@ -211,6 +307,8 @@ class SQLitePlaybookAutonomyApprovalStore:
             revoked_by=revoked_by,
             revoked_at=datetime.now(timezone.utc),
             revoke_reason=reason,
+            authority_envelope_sha256=current.authority_envelope_sha256,
+            inherited_from_approval_id=current.inherited_from_approval_id,
         )
         payload = self._encode(changed)
         with self._connection:
@@ -232,6 +330,8 @@ class SQLitePlaybookAutonomyApprovalStore:
         allowed_capabilities: Iterable[str],
         approved_by: str,
         expires_at: datetime | None = None,
+        authority_envelope_sha256: str | None = None,
+        inherited_from_approval_id: str | None = None,
     ) -> PlaybookAutonomyApproval:
         return PlaybookAutonomyApproval(
             approval_id=f"pbauto_{uuid4().hex}",
@@ -242,6 +342,8 @@ class SQLitePlaybookAutonomyApprovalStore:
             approved_by=approved_by,
             approved_at=datetime.now(timezone.utc),
             expires_at=expires_at,
+            authority_envelope_sha256=authority_envelope_sha256,
+            inherited_from_approval_id=inherited_from_approval_id,
         )
 
     @staticmethod

@@ -86,12 +86,22 @@ def registered_autonomy_scope(
     if len(set(normalized)) != len(normalized):
         raise AutonomyPromotionAdminError("PLAYBOOK_AUTONOMY_CAPABILITIES_DUPLICATE")
 
+    envelope_entry = dict(entry)
+    envelope_entry.pop("version", None)
+    authority_envelope_sha256 = hashlib.sha256(json.dumps(
+        envelope_entry,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")).hexdigest()
+
     return {
         "playbook_id": playbook_id,
         "playbook_version": version,
         "policy_id": policy_id,
         "allowed_capabilities": normalized,
         "registry_sha256": registry_fingerprint,
+        "authority_envelope_sha256": authority_envelope_sha256,
     }
 
 
@@ -126,6 +136,7 @@ def promote_registered_playbook(
         allowed_capabilities=scope["allowed_capabilities"],
         approved_by=actor,
         expires_at=None,
+        authority_envelope_sha256=scope["authority_envelope_sha256"],
     )
     store.put(record)
     return record, True, scope
@@ -149,6 +160,8 @@ def append_admin_audit(
         "playbook_version": record.playbook_version,
         "policy_id": record.policy_id,
         "allowed_capabilities": list(record.allowed_capabilities),
+        "authority_envelope_sha256": record.authority_envelope_sha256,
+        "inherited_from_approval_id": record.inherited_from_approval_id,
         "registry_sha256": scope["registry_sha256"],
         "status": record.status,
     }
