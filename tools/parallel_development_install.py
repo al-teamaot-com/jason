@@ -39,6 +39,14 @@ FILES = {
     'owner_approved_development_worker.py': ('tools/owner_approved_development_worker.py', 0o700),
 }
 WORKER = 'owner_approved_development_worker.py'
+# Stage C migrated the canonical ticket ledger after this immutable independent
+# Root guard was installed. The source-reviewed, dual-path guard is included in
+# this exact native transaction; no old database alias or fake heartbeat.
+GUARD_DIR = Path('/opt/jason/independent-component-release/trusted/tools')
+GUARD_NAME = 'pmv4_host_release_guard.py'
+GUARD_PATH = GUARD_DIR / GUARD_NAME
+GUARD_BEFORE_SHA = '223cc0dca981461cb93782afad5804efa0740a06b3dd51becf20bbc856371bfc'
+GUARD_AFTER_SHA = '378239512b4da241adb027e7c88f5067c68388904b4b936eed10b3883e95dc22'
 DEPS = ('support_repair_host_worker.py', 'engineering_evidence_tools.py',
         'todo_release_bridge.py', 'change_integration_gate.py', 'documentation_impact_gate.py',
         'operational_acceptance_reader.py', 'release_manager_gate.py',
@@ -207,6 +215,8 @@ def source_and_ci(candidate):
     need(code['tools/parallel_development_install.py'] == Path(__file__).read_bytes()
          and digest(code['tools/pmv4_e_dispatch_install.py']) == PINNED['tools/pmv4_e_dispatch_install.py'],
          'EXECUTED_INSTALLER_OR_PRIMITIVES_CHANGED')
+    need(digest(code['tools/pmv4_host_release_guard.py']) == GUARD_AFTER_SHA,
+         'STAGE_C_NATIVE_GUARD_SOURCE_CHANGED')
     return code, policies
 
 
@@ -333,7 +343,7 @@ def audit_recovery_service_complete():
                     for k,v in (('ActiveState','inactive'),('Result','success'),('ExecMainStatus','0'))))
 
 
-def protected_health():
+def protected_health(guard_candidate=None, *, expected_guard_sha=GUARD_BEFORE_SHA):
     # Authoritative root file, not the writable mirrored readback.
     audit = read(AUDIT, 0, 0o444)
     row = json.loads(audit)
@@ -373,15 +383,30 @@ def protected_health():
         peers[name] = {'id': d['Id'], 'image': d['Image'], 'started_at': state['StartedAt']}
     need(peers['jason-runtime']['image'] == manifest.get('runtime_image_id')
          and peers['jason-mcp-pilot']['image'] == manifest.get('mcp_image_id'), 'LKG_IMAGE_MISMATCH')
-    # Same existing native guard, invoked as the service account; no provider
-    # action and no full audit-database scan.
-    guard = Path('/opt/jason/independent-component-release/trusted/tools/pmv4_host_release_guard.py')
-    need(digest(read(guard, 0, 0o444)) == PINNED[str(guard)], 'CORE_HEALTH_GUARD_CHANGED')
-    probe = ("import json,sys; from pathlib import Path; p=Path(sys.argv[1]); "
-             "n={'__name__':'native_core_probe','__file__':str(p)}; "
-             "exec(compile(p.read_bytes(),str(p),'exec'),n); "
-             "print(json.dumps(n['IndependentHostGuard']().core_health_evidence()))")
-    core = json.loads(command([*USER, '/usr/bin/python3', '-I', '-B', '-c', probe, str(guard)], timeout=60))
+    # The installed immutable guard is still the pre-Stage-C version. Never
+    # accept an alias, copied ledger, unapproved file, or missing trusted guard.
+    # Execute only the exact CI-attested new guard bytes as the unprivileged
+    # production service user to verify the real migrated Ticket Core ledger.
+    guard = GUARD_PATH
+    need(digest(read(guard, 0, 0o444)) == expected_guard_sha,
+         'CORE_HEALTH_GUARD_CHANGED')
+    if guard_candidate is None:
+        probe = ("import json,sys; from pathlib import Path; p=Path(sys.argv[1]); "
+                 "n={'__name__':'native_core_probe','__file__':str(p)}; "
+                 "exec(compile(p.read_bytes(),str(p),'exec'),n); "
+                 "print(json.dumps(n['IndependentHostGuard']().core_health_evidence()))")
+        core = json.loads(command([*USER, '/usr/bin/python3', '-I', '-B', '-c', probe, str(guard)], timeout=60))
+    else:
+        need(type(guard_candidate) is bytes and digest(guard_candidate) == GUARD_AFTER_SHA,
+             'CANDIDATE_NATIVE_GUARD_HASH_UNVERIFIED')
+        probe = ("import hashlib,json,sys; from pathlib import Path; p=Path(sys.argv[1]); "
+                 "b=sys.stdin.buffer.read(2000001); "
+                 "assert hashlib.sha256(b).hexdigest()=='" + GUARD_AFTER_SHA + "'; "
+                 "n={'__name__':'native_core_probe','__file__':str(p)}; "
+                 "exec(compile(b,str(p),'exec'),n); "
+                 "print(json.dumps(n['IndependentHostGuard']().core_health_evidence()))")
+        core = json.loads(command([*USER, '/usr/bin/python3', '-I', '-B', '-c',
+                                   probe, str(guard)], timeout=60, data=guard_candidate))
     need(core.get('status') == 'verified' and core.get('source_sha') == ROLLBACK
          and core.get('worker_scan_fresh') is True, 'LIVE_CORE_HEALTH_UNVERIFIED')
     for name, max_age in (('operational-health.json', 600), ('operational-full-health.json', 30*3600)):
@@ -417,8 +442,12 @@ def rename_noreplace(directory_fd, source, target):
 
 class FileSet:
     """Only the fixed allowlist; no following aliases, no broad host installer."""
-    def __init__(self, base, uid, gid):
+    def __init__(self, base, uid, gid, names=None):
         self.base, self.uid, self.gid = Path(base), uid, gid
+        self.names = tuple(FILES) if names is None else tuple(names)
+        need(bool(self.names) and len(self.names) == len(set(self.names)) and
+             all(re.fullmatch('[A-Za-z0-9_.-]+', name) for name in self.names),
+             'DESTINATION_ALLOWLIST_INVALID')
         need(self.base.resolve(strict=True) == self.base, 'DESTINATION_ALIAS')
         self.fd = os.open(self.base, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         m = os.fstat(self.fd)
@@ -437,7 +466,7 @@ class FileSet:
              'DESTINATION_DIRECTORY_CHANGED')
 
     def snapshot(self, name):
-        need(name in FILES, 'DESTINATION_NOT_ALLOWLISTED')
+        need(name in self.names, 'DESTINATION_NOT_ALLOWLISTED')
         self.verify_dir()
         try:
             fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=self.fd)
@@ -453,14 +482,14 @@ class FileSet:
         return raw, stat.S_IMODE(m.st_mode)
 
     def temp_name(self, name, value):
-        need(name in FILES and value is not None, 'TEMPORARY_TARGET_INVALID')
+        need(name in self.names and value is not None, 'TEMPORARY_TARGET_INVALID')
         return '.parallel-reviewed-' + name + '-' + digest(value[0]) + '.tmp'
 
     def check_temps(self, before, after, *, cleanup=False):
         # Deterministic names are reserved by the exact recorded transaction.
         # Recover only an exact complete staged image, or a Root-owned partial
         # prefix left before ownership transfer. Never delete a foreign file.
-        for name in FILES:
+        for name in self.names:
             for value in (before[name], after[name]):
                 if value is None:
                     continue
@@ -506,14 +535,14 @@ class FileSet:
         need(self.snapshot(name) == desired, 'DESTINATION_READBACK_CHANGED:' + name)
 
     def all(self):
-        return {name: self.snapshot(name) for name in FILES}
+        return {name: self.snapshot(name) for name in self.names}
 
     def rollback(self, before, after):
         # Refuse foreign bytes; restore only this exact reviewed transaction.
         current = self.all()
-        need(all(current[name] in (before[name], after[name]) for name in FILES), 'FOREIGN_ROLLBACK_TARGET')
+        need(all(current[name] in (before[name], after[name]) for name in self.names), 'FOREIGN_ROLLBACK_TARGET')
         self.check_temps(before, after, cleanup=True)
-        for name in reversed(tuple(FILES)):
+        for name in reversed(self.names):
             if current[name] != before[name]:
                 self.write(name, after[name], before[name])
         need(self.all() == before, 'ROLLBACK_READBACK_FAILED')
@@ -529,23 +558,33 @@ def encoded(values):
             for name, value in values.items()}
 
 
-def decoded(values):
-    need(set(values) == set(FILES), 'ROLLBACK_FILE_SET_INVALID')
+def decoded(values, allowed=None):
+    need(set(values) == (set(FILES) if allowed is None else set(allowed)),
+         'ROLLBACK_FILE_SET_INVALID')
     return {name: None if value is None else (base64.b64decode(value[0], validate=True), value[1])
             for name, value in values.items()}
 
 
-def scope(candidate, before, after, dependencies, protected, source_hashes, overlaps=None):
+def scope(candidate, before, after, dependencies, protected, source_hashes, overlaps=None,
+          guard_before=None, guard_after=None):
     need(exact_sha(candidate) and candidate != ROLLBACK, 'CANDIDATE_INVALID')
     need(set(before) == set(after) == set(FILES), 'COMPONENT_FILE_SET_INVALID')
+    need((guard_before is None) == (guard_after is None), 'NATIVE_GUARD_SCOPE_INCOMPLETE')
+    native_guard = None if guard_before is None else {
+        'target': str(GUARD_PATH), 'before': image(guard_before),
+        'after': image(guard_after), 'root_owned': True, 'service_restarts': 0}
     return {'schema_version': '1.0', 'action': ACTION, 'component': 'development-admission',
             'policy': {'candidate_sha': candidate, 'rollback_sha': ROLLBACK},
-            'installation_targets': [str(BASE / n) for n in FILES] + [str(RECORDS / candidate)],
+            'installation_targets': [str(BASE / n) for n in FILES] +
+                ([str(GUARD_PATH)] if native_guard is not None else []) + [str(RECORDS / candidate)],
             'before': {n: image(before[n]) for n in FILES}, 'after': {n: image(after[n]) for n in FILES},
             'reserved_temporary_files': sorted({str(BASE / ('.parallel-reviewed-' + n + '-' + digest(v[0]) + '.tmp'))
-                for n in FILES for v in (before[n], after[n]) if v is not None}),
+                for n in FILES for v in (before[n], after[n]) if v is not None} |
+                ({str(GUARD_DIR / ('.parallel-reviewed-' + GUARD_NAME + '-' + digest(v[0]) + '.tmp'))
+                  for v in (guard_before, guard_after) if v is not None} if native_guard else set())),
             'existing_dependency_sha256': dependencies, 'reviewed_source_sha256': source_hashes,
-            'protected': protected, 'legacy_overlap_review': overlaps if overlaps is not None else {
+            'protected': protected, 'native_guard_repair': native_guard,
+            'legacy_overlap_review': overlaps if overlaps is not None else {
                 'open_prs': [], 'dirty_worktrees': [],
                 'disposition': 'preexisting_sources_held_not_active_or_deployment_authorized'},
             'shared_source_revision': ACCEPTED_SOURCE, 'shared_source_target': SOURCE_TARGET,
@@ -553,7 +592,7 @@ def scope(candidate, before, after, dependencies, protected, source_hashes, over
             'production_service_restart': False, 'freeze_or_pause_change': False}
 
 
-def inspect(candidate, fs):
+def inspect(candidate, fs, guardfs=None):
     code, policies = source_and_ci(candidate)
     overlaps = recheck_overlaps(candidate)
     need(SOURCE.is_symlink() and os.readlink(SOURCE) == SOURCE_TARGET
@@ -570,13 +609,24 @@ def inspect(candidate, fs):
          and all(before[n] is None for n in FILES if n != WORKER), 'INSTALL_BASELINE_CHANGED')
     after = {n: (code[path], mode) for n, (path, mode) in FILES.items()}
     fs.check_temps(before, after)
-    protected = protected_health()
+    guard_before = guardfs.all() if guardfs is not None else None
+    guard_after = ({GUARD_NAME: (code['tools/pmv4_host_release_guard.py'], 0o444)}
+                   if guardfs is not None else None)
+    if guardfs is not None:
+        need(guard_before[GUARD_NAME] is not None and
+             image(guard_before[GUARD_NAME])['sha256'] == GUARD_BEFORE_SHA and
+             guard_before[GUARD_NAME][1] == 0o444,
+             'NATIVE_GUARD_BASELINE_CHANGED')
+        guardfs.check_temps(guard_before, guard_after)
+    protected = protected_health(code['tools/pmv4_host_release_guard.py'] if guardfs is not None else None)
     head = command([*USER, '/usr/bin/git', 'ls-remote', REMOTE, 'refs/heads/main']).decode().split()
     need(len(head) == 2 and exact_sha(head[0]) and head[1] == 'refs/heads/main',
          'PROTECTED_MAIN_RECHECK_UNAVAILABLE')
     check_newer_paths(git_paths(REPO, candidate, head[0]), policies)
     reviewed = scope(candidate, before, after, dependencies, protected,
-                     {name: digest(raw) for name, raw in code.items()}, overlaps)
+                     {name: digest(raw) for name, raw in code.items()}, overlaps,
+                     guard_before[GUARD_NAME] if guard_before is not None else None,
+                     guard_after[GUARD_NAME] if guard_after is not None else None)
     need(not os.path.lexists(RECORDS / candidate), 'ONE_USE_INSTALL_ALREADY_RECORDED')
     return reviewed, before, after
 
@@ -631,29 +681,53 @@ def verify_installed():
     need(result.strip() == b'INSTALLED_COMPONENT_ISOLATED_CLAIM_ACCEPTANCE=PASS', 'INSTALLED_CANARY_FAILED')
 
 
-def apply(candidate, ns, fs, expected):
-    # Approval is requested only after full preflight. Release lock is then
-    # reacquired and the exact material scope is independently recomputed.
+def apply(candidate, ns, fs, expected, guardfs=None):
+    # One exact Owner decision covers all five immutable files and rollback.
+    # All changes occur under the existing production release locks.
     actor = ns['owner'](expected)
     with ns['locks']():
-        again, before, after = inspect(candidate, fs)
+        again, before, after = inspect(candidate, fs, guardfs)
         need(again == expected, 'APPROVED_MATERIAL_SCOPE_CHANGED')
+        guard_before = guardfs.all() if guardfs is not None else None
+        guard_after = ({GUARD_NAME: (git(REPO, 'show', candidate + ':tools/pmv4_host_release_guard.py'), 0o444)}
+                       if guardfs is not None else None)
+        if guardfs is not None:
+            need(again['native_guard_repair'] == {
+                'target': str(GUARD_PATH), 'before': image(guard_before[GUARD_NAME]),
+                'after': image(guard_after[GUARD_NAME]), 'root_owned': True, 'service_restarts': 0}
+                 and digest(guard_after[GUARD_NAME][0]) == GUARD_AFTER_SHA,
+                 'APPROVED_NATIVE_GUARD_SCOPE_CHANGED')
         root_dir(RECORDS.parent); root_dir(RECORDS, create=True)
         directory = RECORDS / candidate
         directory.mkdir(mode=0o700)
         sync_directory(RECORDS)
-        record(directory, 'approval.json', {'scope': again, 'scope_sha256': digest(canon(again)),
-               'owner_oid': actor, 'approved_at': stamp(), 'before_bytes': encoded(before),
-               'after_bytes': encoded(after), 'rollback_authorized': True})
+        approval = {'scope': again, 'scope_sha256': digest(canon(again)),
+                    'owner_oid': actor, 'approved_at': stamp(), 'before_bytes': encoded(before),
+                    'after_bytes': encoded(after), 'rollback_authorized': True}
+        if guardfs is not None:
+            approval['guard_before_bytes'] = encoded(guard_before)
+            approval['guard_after_bytes'] = encoded(guard_after)
+        record(directory, 'approval.json', approval)
         try:
+            if guardfs is not None:
+                guardfs.write(GUARD_NAME, guard_before[GUARD_NAME], guard_after[GUARD_NAME])
             for name in FILES:
                 fs.write(name, before[name], after[name])
             verify_installed()
-            need(fs.all() == after and protected_health() == again['protected']
-                 and {n: digest(read(BASE / n, 1000)) for n in DEPS} == again['existing_dependency_sha256'],
+            protected_after = (protected_health(guard_after[GUARD_NAME][0],
+                               expected_guard_sha=GUARD_AFTER_SHA)
+                               if guardfs is not None else protected_health())
+            need(fs.all() == after and
+                 (guardfs is None or guardfs.all() == guard_after) and
+                 protected_after == again['protected'] and
+                 {n: digest(read(BASE / n, 1000)) for n in DEPS} == again['existing_dependency_sha256'],
                  'ISOLATED_COMPONENT_POSTFLIGHT_FAILED')
         except BaseException:
+            # Restore the four ordinary worker modules first, then the exact
+            # original Root guard. Foreign bytes refuse rollback, never clobber.
             fs.rollback(before, after)
+            if guardfs is not None:
+                guardfs.rollback(guard_before, guard_after)
             record(directory, 'result.json', {'status': 'rolled_back', 'at': stamp(),
                    'scope_sha256': digest(canon(again))})
             raise
@@ -662,7 +736,7 @@ def apply(candidate, ns, fs, expected):
     print('PARALLEL_COMPONENT_INSTALL_AND_ISOLATED_ACCEPTANCE=PASS')
 
 
-def recover(candidate, ns, fs):
+def recover(candidate, ns, fs, guardfs=None):
     # A crash after the durable Owner decision can restore the exact approved
     # before images, but can never replay installation or overwrite foreign state.
     with ns['locks']():
@@ -679,7 +753,19 @@ def recover(candidate, ns, fs):
         before, after = decoded(receipt['before_bytes']), decoded(receipt['after_bytes'])
         need({n: image(before[n]) for n in FILES} == reviewed['before']
              and {n: image(after[n]) for n in FILES} == reviewed['after'], 'RECOVERY_IMAGE_MISMATCH')
+        guard_before = guard_after = None
+        if guardfs is not None:
+            guard_before = decoded(receipt['guard_before_bytes'], (GUARD_NAME,))
+            guard_after = decoded(receipt['guard_after_bytes'], (GUARD_NAME,))
+            need(reviewed['native_guard_repair'] == {
+                'target': str(GUARD_PATH), 'before': image(guard_before[GUARD_NAME]),
+                'after': image(guard_after[GUARD_NAME]), 'root_owned': True, 'service_restarts': 0}
+                and digest(guard_before[GUARD_NAME][0]) == GUARD_BEFORE_SHA
+                and digest(guard_after[GUARD_NAME][0]) == GUARD_AFTER_SHA,
+                'RECOVERY_NATIVE_GUARD_IMAGE_MISMATCH')
         fs.rollback(before, after)
+        if guardfs is not None:
+            guardfs.rollback(guard_before, guard_after)
         record(directory, 'result.json', {'status': 'rolled_back_interrupted', 'at': stamp(),
                'scope_sha256': receipt['scope_sha256']})
     print('PARALLEL_COMPONENT_APPROVED_ROLLBACK=PASS')
@@ -702,16 +788,16 @@ def main():
         need(forward_audit_accepted(audit) and audit_recovery_service_complete(),
              'AUDIT_FORWARD_RECOVERY_NOT_ACCEPTED')
     ns = native_code(REPO / 'tools/pmv4_e_dispatch_install.py', 'tools/pmv4_e_dispatch_install.py', 1000)
-    with FileSet(BASE, 1000, 1000) as fs:
+    with FileSet(BASE, 1000, 1000) as fs, FileSet(GUARD_DIR, 0, 0, (GUARD_NAME,)) as guardfs:
         if args.recover:
-            recover(args.candidate_sha, ns, fs)
+            recover(args.candidate_sha, ns, fs, guardfs)
             return
         with ns['locks']():
-            reviewed, _, _ = inspect(args.candidate_sha, fs)
+            reviewed, _, _ = inspect(args.candidate_sha, fs, guardfs)
         print(json.dumps({'status': 'scope_reviewed_not_deployment_approved', 'scope': reviewed,
                           'scope_sha256': digest(canon(reviewed)), 'deployment_authorized': False}, sort_keys=True))
         if args.apply:
-            apply(args.candidate_sha, ns, fs, reviewed)
+            apply(args.candidate_sha, ns, fs, reviewed, guardfs)
 
 
 if __name__ == '__main__':

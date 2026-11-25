@@ -327,6 +327,154 @@ def test_owner_transaction_durable_receipt_and_exact_recovery(tmp_path, images, 
     assert (tmp_path/'unrelated.py').read_bytes()==b'untouched'
 
 
+def test_canonical_stage_c_guard_scope_is_owner_bound(images):
+    before, after = images
+    root_before = (b'original-trusted-native-guard', 0o444)
+    root_after = (b'stage-c-trusted-native-guard', 0o444)
+    facts = {'controls': {}, 'protected_peers': {}}
+    checked = install.scope(CANDIDATE, before, after, {}, facts, {},
+                            guard_before=root_before, guard_after=root_after)
+    native = checked['native_guard_repair']
+    assert native['target'] == str(install.GUARD_PATH)
+    assert native['root_owned'] is True and native['service_restarts'] == 0
+    assert native['before'] == install.image(root_before)
+    assert native['after'] == install.image(root_after)
+    assert str(install.GUARD_PATH) in checked['installation_targets']
+    assert any(str(install.GUARD_DIR) in name and install.GUARD_NAME in name
+               for name in checked['reserved_temporary_files'])
+    changed = install.scope(CANDIDATE, before, after, {}, facts, {},
+                            guard_before=root_before, guard_after=(b'foreign', 0o444))
+    assert install.digest(install.canon(checked)) != install.digest(install.canon(changed))
+    with pytest.raises(PermissionError, match='NATIVE_GUARD_SCOPE_INCOMPLETE'):
+        install.scope(CANDIDATE, before, after, {}, facts, {}, guard_before=root_before)
+
+
+def test_native_root_guard_fileset_rollback_and_allowlist(tmp_path):
+    root = tmp_path / 'root-trusted'
+    root.mkdir()
+    root.chmod(0o700)
+    name = install.GUARD_NAME
+    other = root / 'foreign-no-touch'
+    other.write_bytes(b'unchanged')
+    original = (b'original-root-owned-read-only-guard', 0o444)
+    candidate = (b'reviewed-stage-c-guard', 0o444)
+    path = root / name
+    path.write_bytes(original[0])
+    path.chmod(original[1])
+    with install.FileSet(root, os.getuid(), os.getgid(), (name,)) as fs:
+        assert fs.all() == {name: original}
+        with pytest.raises(PermissionError, match='NOT_ALLOWLISTED'):
+            fs.snapshot('foreign-no-touch')
+        fs.write(name, original, candidate)
+        assert fs.all() == {name: candidate}
+        fs.rollback({name: original}, {name: candidate})
+        assert fs.all() == {name: original}
+    assert other.read_bytes() == b'unchanged'
+    assert path.stat().st_mode & 0o777 == 0o444
+
+
+@pytest.mark.parametrize('fail_acceptance', [False, True])
+def test_one_owner_worker_and_native_guard_atomic_rollback(tmp_path, images, monkeypatch, fail_acceptance):
+    before, after = images
+    native_dir = tmp_path / 'trusted-root-files'
+    native_dir.mkdir()
+    native_dir.chmod(0o700)
+    old = b'original-native-guard'
+    new = b'stage-c-native-guard'
+    native_file = native_dir / install.GUARD_NAME
+    native_file.write_bytes(old)
+    native_file.chmod(0o444)
+    monkeypatch.setattr(install, 'GUARD_DIR', native_dir)
+    monkeypatch.setattr(install, 'GUARD_PATH', native_file)
+    monkeypatch.setattr(install, 'GUARD_BEFORE_SHA', install.digest(old))
+    monkeypatch.setattr(install, 'GUARD_AFTER_SHA', install.digest(new))
+    records = tmp_path.parent / (tmp_path.name + '-records')
+    records.mkdir(mode=0o700)
+    monkeypatch.setattr(install, 'RECORDS', records)
+    monkeypatch.setattr(install, 'root_dir', lambda path, create=False: None)
+    monkeypatch.setattr(install, 'DEPS', ())
+    monkeypatch.setattr(install, 'git', lambda *_: new)
+    facts = {'controls': {}, 'protected_peers': {'runtime': {'id': 'unchanged'}}}
+    checked = install.scope(CANDIDATE, before, after, {}, facts, {},
+                            guard_before=(old, 0o444), guard_after=(new, 0o444))
+    monkeypatch.setattr(install, 'inspect', lambda *_: (checked, before, after))
+    monkeypatch.setattr(install, 'protected_health', lambda *args, **kwargs: facts)
+    def acceptance():
+        if fail_acceptance:
+            raise PermissionError('injected five-file acceptance failure')
+    monkeypatch.setattr(install, 'verify_installed', acceptance)
+    ns = {'owner': lambda scope: 'test-owner', 'locks': nullcontext}
+    with install.FileSet(tmp_path, os.getuid(), os.getgid()) as fs, \
+         install.FileSet(native_dir, os.getuid(), os.getgid(), (install.GUARD_NAME,)) as guardfs:
+        if fail_acceptance:
+            with pytest.raises(PermissionError, match='injected five-file'):
+                install.apply(CANDIDATE, ns, fs, checked, guardfs)
+            assert fs.all() == before and guardfs.all() == {install.GUARD_NAME: (old, 0o444)}
+        else:
+            install.apply(CANDIDATE, ns, fs, checked, guardfs)
+            assert fs.all() == after and guardfs.all() == {install.GUARD_NAME: (new, 0o444)}
+    receipt = json.loads((records / CANDIDATE / 'approval.json').read_text())
+    assert receipt['guard_before_bytes'] and receipt['guard_after_bytes']
+    assert receipt['scope']['native_guard_repair'] == checked['native_guard_repair']
+    result = json.loads((records / CANDIDATE / 'result.json').read_text())
+    assert result['status'] == ('rolled_back' if fail_acceptance else 'installed_isolated_verified')
+
+
+def test_interrupted_five_file_receipt_recovers_only_exact_approved_images(
+    tmp_path, images, monkeypatch
+):
+    before, after = images
+    native_dir = tmp_path / 'trusted-root'
+    native_dir.mkdir()
+    native_dir.chmod(0o700)
+    old, new = b'trusted-previous-guard', b'canonical-stage-c-guard'
+    native = native_dir / install.GUARD_NAME
+    native.write_bytes(old)
+    native.chmod(0o444)
+    monkeypatch.setattr(install, 'GUARD_DIR', native_dir)
+    monkeypatch.setattr(install, 'GUARD_PATH', native)
+    monkeypatch.setattr(install, 'GUARD_BEFORE_SHA', install.digest(old))
+    monkeypatch.setattr(install, 'GUARD_AFTER_SHA', install.digest(new))
+    monkeypatch.setattr(install, 'DEPS', ())
+    records = tmp_path.parent / (tmp_path.name + '-receipts')
+    records.mkdir(mode=0o700)
+    monkeypatch.setattr(install, 'RECORDS', records)
+    monkeypatch.setattr(install, 'root_dir', lambda path, create=False: None)
+    monkeypatch.setattr(install, 'git', lambda *_: new)
+    monkeypatch.setattr(install, 'protected_health', lambda *args, **kwargs: {'controls': {}})
+    monkeypatch.setattr(install, 'verify_installed', lambda: None)
+    source_hashes = {'tools/parallel_development_install.py':
+                     install.digest(Path(install.__file__).read_bytes())}
+    reviewed = install.scope(CANDIDATE, before, after, {}, {'controls': {}},
+                             source_hashes, guard_before=(old, 0o444),
+                             guard_after=(new, 0o444))
+    monkeypatch.setattr(install, 'inspect', lambda *_: (reviewed, before, after))
+    ns = {'owner': lambda _: 'test-owner', 'locks': nullcontext}
+    with install.FileSet(tmp_path, os.getuid(), os.getgid()) as fs, \
+         install.FileSet(native_dir, os.getuid(), os.getgid(), (install.GUARD_NAME,)) as guardfs:
+        install.apply(CANDIDATE, ns, fs, reviewed, guardfs)
+        assert fs.all() == after
+        assert guardfs.all() == {install.GUARD_NAME: (new, 0o444)}
+        (records / CANDIDATE / 'result.json').unlink()
+        # A real crash before result publication leaves a durable root receipt
+        # and exact installed images. This simulates that window, not new consent.
+        monkeypatch.setattr(install, 'control_bytes', lambda: {})
+        monkeypatch.setattr(install, 'unit',
+                            lambda name, user=False: {'ActiveState': 'inactive'})
+        original_read = install.read
+        def local_approval(path, uid, mode=None, **kwargs):
+            if Path(path) == records / CANDIDATE / 'approval.json':
+                return Path(path).read_bytes()
+            return original_read(path, uid, mode, **kwargs)
+        monkeypatch.setattr(install, 'read', local_approval)
+        install.recover(CANDIDATE, {'locks': nullcontext}, fs, guardfs)
+        assert fs.all() == before
+        assert guardfs.all() == {install.GUARD_NAME: (old, 0o444)}
+    result = json.loads((records / CANDIDATE / 'result.json').read_text())
+    assert result['status'] == 'rolled_back_interrupted'
+    assert (tmp_path / 'unrelated.py').read_bytes() == b'untouched'
+
+
 def test_recovery_cleans_exact_interrupted_staging_but_preserves_foreign(tmp_path, images):
     before,after=images
     name=next(iter(install.FILES))
