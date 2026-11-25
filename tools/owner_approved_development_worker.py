@@ -50,6 +50,178 @@ TERMINAL_PHASES = {
 APPROVED_BODY_LIMIT = 30000
 
 
+def reviewed_claim_scope_path(repo: Path) -> Path:
+    """Keep host-worker policy with its installed code, not the shared source link.
+
+    A scoped engineering-worker release must not advance the accepted Stage E
+    checkout or adopt unrelated changes from main. A missing installed registry
+    remains a closed admission gate; never fall back to another revision.
+    """
+    worker_dir = Path(__file__).resolve().parent
+    installed_dir = (Path.home() / '.local/lib/jason').resolve()
+    if worker_dir == installed_dir:
+        return installed_dir / 'development-concurrency-scopes.json'
+    return repo / 'config' / 'development-concurrency-scopes.json'
+
+
+# The installed native guard is the existing independent core-health verifier.
+# Its root-owned readback is mirrored for the unprivileged engineering worker;
+# this observation NEVER grants production authority. Root release checks read
+# the original protected files independently.
+NATIVE_HEALTH_GUARD = Path('/opt/jason/independent-component-release/trusted/tools/pmv4_host_release_guard.py')
+NATIVE_HEALTH_GUARD_SHA256 = '223cc0dca981461cb93782afad5804efa0740a06b3dd51becf20bbc856371bfc'
+NATIVE_JOURNAL_STATUS = Path('/var/lib/jason-audit-journal/control/forward-release-status.json')
+FORWARD_SCOPE_SHA256 = '697210854d0a0140d3a672750ad84d043e5ac99db117abd6043469312d017fb7'
+FORWARD_ACTION = 'RECOVER-SEGMENTED-AUDIT-WITHOUT-LEGACY-REBUILD'
+FORWARD_ARCHIVED_EVENTS = 34616410
+
+
+def _health_json(path: Path, uid: int, mode: int, max_age: int | None = None):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as f:
+        meta = os.fstat(f.fileno())
+        if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != uid
+                or meta.st_gid != uid or meta.st_nlink != 1
+                or stat.S_IMODE(meta.st_mode) != mode
+                or not 0 < meta.st_size <= 2000000):
+            raise ValueError('untrusted health evidence')
+        if max_age is not None and not 0 <= datetime.now(timezone.utc).timestamp() - meta.st_mtime <= max_age:
+            raise ValueError('stale health evidence')
+        raw = f.read(2000001)
+        if len(raw) != meta.st_size:
+            raise ValueError('health evidence changed')
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError('invalid health evidence')
+    return value
+
+
+def _health_unit(unit: str):
+    result = subprocess.run(
+        ['/usr/bin/systemctl', 'show', unit, '-p', 'ActiveState', '-p', 'Result',
+         '-p', 'MainPID', '-p', 'ExecMainStatus'],
+        cwd='/', capture_output=True, text=True, timeout=10, check=True)
+    return dict(row.split('=', 1) for row in result.stdout.splitlines() if '=' in row)
+
+
+def _native_health_guard():
+    import hashlib
+    path = NATIVE_HEALTH_GUARD
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as f:
+        meta = os.fstat(f.fileno())
+        if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0 or meta.st_gid != 0
+                or meta.st_nlink != 1 or stat.S_IMODE(meta.st_mode) != 0o444
+                or path.resolve() != path or not 0 < meta.st_size < 1000000):
+            raise ValueError('untrusted installed native guard')
+        raw = f.read(1000000)
+    if len(raw) != meta.st_size or hashlib.sha256(raw).hexdigest() != NATIVE_HEALTH_GUARD_SHA256:
+        raise ValueError('native health guard changed')
+    ns = {'__name__': 'reviewed_native_development_health', '__file__': str(path)}
+    exec(compile(raw, str(path), 'exec'), ns)
+    return ns['IndependentHostGuard']()
+
+
+def accepted_forward_audit(journal: Mapping[str, Any]) -> bool:
+    """Match the exact accepted no-rebuild Root receipt; never a legacy flag."""
+    return (isinstance(journal, Mapping)
+            and journal.get('schema_version') == '1.0'
+            and journal.get('action') == FORWARD_ACTION
+            and journal.get('scope_sha256') == FORWARD_SCOPE_SHA256
+            and journal.get('phase') == 'accepted'
+            and journal.get('status') == 'accepted'
+            and journal.get('no_legacy_rebuild') is True
+            and journal.get('provider_calls') == 0 and type(journal.get('provider_calls')) is int
+            and type(journal.get('initial_archive_events')) is int
+            and journal['initial_archive_events'] == FORWARD_ARCHIVED_EVENTS
+            and type(journal.get('root_free_bytes')) is int
+            and journal['root_free_bytes'] > 35_000_000_000
+            and type(journal.get('sealed_segments')) is int
+            and journal['sealed_segments'] >= 2
+            and all(journal.get(k) == 'pass' for k in ('full_health','fast_health','drift'))
+            and journal.get('breaker') == 'closed')
+
+
+def verified_development_health(spool: Path) -> dict[str, Any]:
+    """Fresh native readback plus live core/authority evidence; no health writes.
+
+    The scheduled worker cannot assert its own production health from GitHub,
+    a cached PASS, a CLI switch, or an unrelated test spool. Missing evidence
+    holds new features; the root release manager remains the mutation authority.
+    """
+    def result(ok, reason):
+        return {'verified': ok, 'reason': reason, 'observed_at': now(),
+                'production_authority': False}
+    if spool != DEFAULT_SPOOL:
+        return result(False, 'noncanonical_engineering_spool')
+    try:
+        journal = _health_json(NATIVE_JOURNAL_STATUS, 0, 0o444)
+        if not accepted_forward_audit(journal):
+            return result(False, 'audit_migration_not_accepted')
+        for name in ('jason-audit-journal-release.service',
+                     'jason-audit-journal-no-restore-release.service'):
+            release = _health_unit(name)
+            if (release.get('ActiveState') != 'inactive' or release.get('MainPID') != '0'
+                    or release.get('Result') != 'success' or release.get('ExecMainStatus') != '0'):
+                return result(False, 'audit_release_not_quiescent')
+        if _health_unit('jason-audit-journal-maintenance.timer').get('ActiveState') != 'active':
+            return result(False, 'audit_maintenance_not_active')
+        maintenance = _health_unit('jason-audit-journal-maintenance.service')
+        if (maintenance.get('ActiveState') != 'inactive'
+                or maintenance.get('Result') != 'success' or maintenance.get('ExecMainStatus') != '0'):
+            return result(False, 'audit_maintenance_not_verified')
+        manager = spool.parent / 'release-manager/protected-readback'
+        control = _health_json(manager / 'production-control-state.json', 1000, 0o600, 180)
+        drift = _health_json(manager / 'production-drift.json', 1000, 0o600, 180)
+        if control.get('schema_version') != '1.0' or drift.get('schema_version') != '1.0':
+            return result(False, 'native_readback_schema_invalid')
+        guard = _native_health_guard()
+        if guard.protected_release_status().get('ready') is not True:
+            return result(False, 'native_release_health_unverified')
+        core = guard.core_health_evidence()
+        manifest = control['last_known_good']['manifest']
+        if (core.get('status') != 'verified' or core.get('source_sha') != manifest.get('revision')
+                or core.get('runtime_healthy') is not True or core.get('mcp_running') is not True
+                or core.get('worker_scan_fresh') is not True
+                or drift.get('status') != 'pass' or drift.get('problems') != []):
+            return result(False, 'live_core_health_unverified')
+        for name, field in (('jason-runtime', 'runtime_image_id'), ('jason-mcp-pilot', 'mcp_image_id')):
+            if guard._container(name).get('Image') != manifest.get(field):
+                return result(False, 'live_core_image_mismatch')
+        for unit in ('jason-production-drift-watchdog.service',
+                     'jason-pmv4-component-readback.service',
+                     'jason-openclaw-authority-health.service'):
+            row = _health_unit(unit)
+            if row.get('Result') != 'success' or row.get('ExecMainStatus') != '0' or row.get('ActiveState') == 'failed':
+                return result(False, 'native_health_unit_not_successful:' + unit)
+        fast = _health_json(spool.parent / 'operational-health.json', 1000, 0o600, 600)
+        full = _health_json(spool.parent / 'operational-full-health.json', 1000, 0o600, 30*3600)
+        if any(row.get('status') != 'pass' or row.get('failures') != []
+               or row.get('snapshot_source_exit_code') != 0
+               or row.get('provider_contacted') is not False
+               or row.get('provider_credentials_used') is not False for row in (fast, full)):
+            return result(False, 'authority_health_unverified')
+        if (fast.get('check_mode') != 'frequent_read_only_plus_recent_full_integrity'
+                or fast.get('full_proof_status') != 'pass'
+                or type(fast.get('full_proof_age_seconds')) is not int
+                or not 0 <= fast['full_proof_age_seconds'] <= 30*3600
+                or full.get('backup_restore_proof', {}).get('counts_match') is not True
+                or full.get('backup_restore_proof', {}).get('backup_integrity') != 'ok'
+                or full.get('backup_restore_proof', {}).get('restore_integrity') != 'ok'):
+            return result(False, 'full_restore_proof_unverified')
+        # The native gate also verifies root-source alignment, breaker, drift age,
+        # and live ticket heartbeat. Recheck after the probes to catch movement.
+        if guard.protected_release_status().get('ready') is not True:
+            return result(False, 'native_health_changed_during_probe')
+        return {**result(True, 'native_readback_live_core_and_authority_verified'),
+                'production_revision': core['source_sha'],
+                'drift_observed_at': drift['observed_at'],
+                'audit_scope_sha256': journal['scope_sha256']}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError,
+            subprocess.SubprocessError):
+        return result(False, 'native_health_evidence_unavailable')
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -2243,16 +2415,19 @@ def _run_main() -> int:
     # The actual admission transaction: use reviewed semantic scope declarations
     # and the *current* worker state. An unknown active scope blocks only new
     # claims; existing work may reconcile without another Owner approval.
-    scope_path = repo / 'config' / 'development-concurrency-scopes.json'
+    scope_path = reviewed_claim_scope_path(repo)
     scopes = dependency.load_claim_scopes(scope_path) if scope_path.is_file() else {}
     verified_merged = verified_merged_claim_work(state, repo, prs, scopes=scopes)
+    health = verified_development_health(spool)
     selected = dependency.plan_worker_claims(
-        state, admitted, scopes, capacity=capacity, production_healthy=False,
+        state, admitted, scopes, capacity=capacity,
+        production_healthy=health['verified'] is True,
         verified_merged_ids=verified_merged,
         resumed_from_blocked={work_id for work_id in prior_blocked
                               if (state['items'].get(work_id) or {}).get('phase')
                               in dependency.WORKER_ACTIVE_PHASES},
     )
+    state['dependency_admission']['production_health_evidence'] = health
     # Owner-selected PR adoption previously created an unexamined development
     # record before the admission gate. It can now adopt/monitor *only* claims
     # already accepted by the same locked claim transaction.

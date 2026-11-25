@@ -29,6 +29,9 @@ def environment(tmp_path):
         src = repo / "tools" / (name + ".py")
         src.parent.mkdir(parents=True, exist_ok=True)
         src.write_text(name, encoding="utf-8")
+    scope_file = repo / 'config/development-concurrency-scopes.json'
+    scope_file.parent.mkdir(parents=True, exist_ok=True)
+    scope_file.write_text('{"schema_version":"1.0","workstreams":{}}', encoding='utf-8')
     for name in BASE_UNITS + RECOVERY_UNITS:
         src = repo / "infrastructure/openclaw-operations/systemd/user" / name
         src.parent.mkdir(parents=True, exist_ok=True)
@@ -61,6 +64,22 @@ def test_normal_release_does_not_stage_or_start_recovery(environment):
     assert all(not (unit_root / u).exists() for u in RECOVERY_UNITS)
     assert not any("jason-release-breaker-recovery.timer" in a
                    for a, _ in calls)
+
+
+def test_installed_scope_registry_copied_with_worker(environment):
+    repo, home, _ = environment
+    invoke(environment, [])
+    path = home / '.local/lib/jason/development-concurrency-scopes.json'
+    assert path.read_bytes() == (repo / 'config/development-concurrency-scopes.json').read_bytes()
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_missing_scope_registry_denies_before_any_install(environment):
+    repo, home, _ = environment
+    (repo / 'config/development-concurrency-scopes.json').unlink()
+    with pytest.raises(SystemExit):
+        invoke(environment, [])
+    assert not home.exists()
 
 
 def test_recovery_requires_explicit_active_install(environment):
