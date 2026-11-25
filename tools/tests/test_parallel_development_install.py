@@ -120,6 +120,30 @@ def test_independent_review_scope_not_global_workspace_fingerprint(images):
     assert scope['freeze_or_pause_change'] is False
 
 
+def test_legacy_overlap_holds_are_exact_owner_bound_without_activation(images):
+    before, after = images
+    held = {'disposition': 'preexisting_sources_held_not_active_or_deployment_authorized',
+            'open_prs': [{'number': 692, 'head_sha': '1'*40, 'draft': True,
+                          'changed_files': ['tools/owner_approved_development_worker.py']}],
+            'dirty_worktrees': [{'path': '/home/al/held-editor',
+                                 'head_sha': '2'*40,
+                                 'file_sha256': {'tools/owner_approved_development_worker.py': '3'*64},
+                                 'changed_files': ['tools/owner_approved_development_worker.py']}]}
+    scope = install.scope(CANDIDATE, before, after, {}, {'controls': {}}, {}, held)
+    baseline = install.digest(install.canon(scope))
+    assert scope['legacy_overlap_review'] == held
+    assert scope['standing_authority'] is False
+    assert scope['freeze_or_pause_change'] is False
+    for segment, key, value in [('open_prs','head_sha','4'*40),
+                                ('dirty_worktrees','head_sha','5'*40),
+                                ('dirty_worktrees','file_sha256',
+                                 {'tools/owner_approved_development_worker.py':'6'*64})]:
+        changed = deepcopy(held)
+        changed[segment][0][key] = value
+        assert install.digest(install.canon(install.scope(
+            CANDIDATE,before,after,{}, {'controls':{}},{},changed))) != baseline
+
+
 @pytest.mark.parametrize('path', ['tools/owner_approved_development_worker.py',
     'config/development-concurrency-scopes.json','tools/support_repair_host_worker.py',
     'tools/manual_release_scope.py','tools/release_manager_new_control.py'])
