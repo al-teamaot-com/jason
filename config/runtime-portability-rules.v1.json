@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "scan_globs": [
+    "infrastructure/jason-runtime/compose.yaml",
+    "infrastructure/kfs-collector/compose.yaml",
+    "infrastructure/kfs-collector/systemd/*.service",
+    "infrastructure/ccc/systemd/*.service",
+    "infrastructure/openclaw-operations/systemd/*.service",
+    "infrastructure/openclaw-operations/systemd/user/*.service"
+  ],
+  "rules": [
+    {
+      "id": "operator-home-path",
+      "severity": "blocker",
+      "pattern": "/home/[A-Za-z0-9._-]+/",
+      "description": "Runtime artifact depends on an operator home directory."
+    },
+    {
+      "id": "aot-email-domain",
+      "severity": "blocker",
+      "pattern": "@teamaot\\.com",
+      "description": "Runtime artifact contains an AOT-specific email domain."
+    },
+    {
+      "id": "aot-component-label",
+      "severity": "blocker",
+      "pattern": "AOT Ver [0-9]",
+      "description": "Runtime artifact contains an AOT-specific component label."
+    },
+    {
+      "id": "aot-profile-name",
+      "severity": "blocker",
+      "pattern": "\\baot-[A-Za-z0-9._-]+",
+      "description": "Runtime artifact contains an AOT-specific runtime/profile identifier."
+    }
+  ]
+}
