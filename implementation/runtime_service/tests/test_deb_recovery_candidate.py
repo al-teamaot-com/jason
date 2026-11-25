@@ -40,8 +40,12 @@ def test_live_schema_semantic_graph_and_activation_invariants():
 
 
 def test_exact_native_canary_manifest_binds_files_and_grants_no_authority():
+    from connectors.datto_rmm.component_execution import DattoRmmComponentExecutionPolicy
     m=json.loads((ROOT/'components/deb-recovery/canary-manifest.json').read_text())
-    assert m['component_uid'] is None
+    assert m['component_uid']=='6efeedfb-fc41-4cee-a499-3641efe056f4'
+    assert m['component_uid']==DattoRmmComponentExecutionPolicy._DEB_NATIVE_READONLY_CANARY_UID
+    assert m['name']==DattoRmmComponentExecutionPolicy._DEB_NATIVE_READONLY_CANARY_NAME
+    assert m['status']=='published_readonly_candidate_not_executed'
     assert m['global_or_site_variables']=='none'
     assert not any(m['side_effect_ceiling'].values())
     assert not m['standing_approval_created'] and not m['playbook_activation_authorized']

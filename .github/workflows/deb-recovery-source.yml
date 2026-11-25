@@ -6,7 +6,12 @@ on:
       - "components/deb-recovery/**"
       - "docs/playbooks/json/candidates/backupiq_endpoint_backup.1.4.0-rc.2.json"
       - "implementation/runtime_service/src/jason_runtime/deb_recovery_verification.py"
+      - "implementation/runtime_service/src/jason_runtime/deb_canary_evidence.py"
+      - "implementation/runtime_service/tests/test_deb_canary_evidence.py"
       - "implementation/runtime_service/tests/test_deb_recovery_*.py"
+      - "implementation/connectors/datto_rmm/component_execution.py"
+      - "implementation/connectors/tests/test_deb_canary_variable_contract.py"
+      - "implementation/connectors/tests/test_datto_rmm_component_execution.py"
       - ".github/workflows/deb-recovery-source.yml"
   workflow_dispatch:
 
@@ -28,6 +33,9 @@ jobs:
           PYTHONPATH: .:implementation:implementation/runtime_service/src:implementation/cap-007/src:implementation/connectors/openclaw/src
         run: |
           python -m pytest -q \
+            implementation/connectors/tests/test_deb_canary_variable_contract.py \
+            implementation/connectors/tests/test_datto_rmm_component_execution.py \
+            implementation/runtime_service/tests/test_deb_canary_evidence.py \
             implementation/runtime_service/tests/test_deb_recovery_verification.py \
             implementation/runtime_service/tests/test_deb_recovery_candidate.py \
             implementation/runtime_service/tests/test_json_backupiq_classifier.py \

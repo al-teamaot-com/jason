@@ -59,7 +59,8 @@ body is deliberately **not** included in this repository. No live copy was edite
 ## Read-only native canary package
 
 `NativeReadOnlyCanary.ps1` plus the exact attached helper hashes in
-`canary-manifest.json` form an **unpublished** RMM candidate. The input profile
+`canary-manifest.json` form a published, **not yet executed** RMM candidate
+(`6efeedfb-fc41-4cee-a499-3641efe056f4`). The input profile
 contains exact nonsecret device, signed MSI and original pairing evidence only.
 All global/site variables must be excluded. Unknown profile keys are rejected.
 The script checks the helper hash before importing it, pins exact MSI bytes,
@@ -68,9 +69,24 @@ starts/restarts services, requests backups, deletes files, changes settings or
 reboots. The canary's inspection of the pinned MSI's public signer is not a
 standing signer policy for future modifying components.
 
-Publishing this new component and executing new code on a production endpoint
-remain separate governed production actions. No component UID or approval is
-invented. Even a successful read-only canary will not prove modifying behavior.
+The component was created for one approved site only, with no selected global/site
+variables, an empty per-run profile default and the reviewed helper attachment.
+The stored script matches the reviewed source after CRLF normalization; the
+local uploaded helper hash matches the manifest. RMM reports one 7.6 KB file.
+The governed component catalog independently returned this exact UID/name and
+input variable. No standing approval or endpoint job was created.
+
+The follow-up exact UID/name variable contract remains source-only. It permits
+one required profile of at most 4096 characters and does not grant execution
+authority. Native execution remains blocked until an authorized release installs
+that contract. Do not fill the component default or bypass the governed path.
+Even a successful read-only canary will not prove modifying behavior.
+
+`deb_canary_evidence.py` reduces independently read exact job/output receipts
+to narrow observations. It rejects wrong identities, incomplete/truncated reads,
+ambiguous output and modifying flags. It neither calls a provider nor connects
+the production JSON action runner. The existing shared JSON migration acceptance
+is tracked in issue #2637; do not create a parallel dispatcher or approval store.
 
 ## Verified engineering evidence
 
@@ -95,9 +111,12 @@ created by the tests. Production evidence is kept out of public test fixtures.
 
 ## Activation gates still failing
 
-1. Publish an exact reviewed component candidate and run native Windows 5.1
+1. Install the exact reviewed canary input contract and run native Windows 5.1
    acceptance through existing governed execution. No native MSI COM,
    Authenticode, SCM or GUI-status-process proof is inferred from mocks.
+   Source tests do not install this contract. Existing protected production
+   health, freeze, exact release and rollback controls must permit its release;
+   a canary component in the provider catalog does not satisfy those controls.
 2. Integrate the helpers into a reviewed maintained RMM component without
    redistributing the vendor source, preserving normal install and original
    registration/encryption behavior; then test the exact modifying branch under
