@@ -103,3 +103,26 @@ The acceptance maintenance invocation uses only its existing adopted policy.
 
 Release class: High-Risk (native production health/release infrastructure).
 All unrelated production and dependent feature activation remain held.
+
+
+## Owner preflight and display correction
+
+Owner ran the read-only Root preflight on source
+4200faa982925bc01b158a012bf75146847b9b67: PASS, reported exact scope
+68ca25062b2d13dfa42259d3adf8e2655c30ac60da3e215f64974d819aac0e6f.
+No production approval, installation or old-grant consumption occurred.
+
+Review then found a compatibility bug: the existing shared Owner renderer
+reads installation_targets, while this new scope supplied only
+exact_native_targets. The old renderer would print unrelated default PMv4
+paths even though native enforcement remained restricted to four health files.
+Provide both fields from the same native target list. Do not modify the shared
+Owner verifier, its pins, actual install targets, native payloads or rollback.
+A regression exercises the real shared renderer with synthetic authentication
+and checks the four displayed paths, exact scope digest and one decision.
+This display metadata changes the scope digest, so the previous preflight is
+historical evidence and never new production authority.
+
+An interactive apply command must use Python -c (or a trusted file entry),
+not feed its program over stdin: the shared Owner input() must retain the
+operator terminal for its one exact confirmation after Entra authentication.
