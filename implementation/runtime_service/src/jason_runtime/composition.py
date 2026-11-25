@@ -23,10 +23,18 @@ from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.datto_edr.connector import DattoEdrConnector
 from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
+from connectors.microsoft_graph.sharepoint_manifest import build_sharepoint_read_manifest
 from connectors.dnsfilter.connector import DnsFilterConnector
 from connectors.dnsfilter.mcp_connector import DnsFilterMcpConnector
 from connectors.darkwebid.connector import DarkWebIdConnector
 from connectors.dnsfilter.mcp_oauth import DnsFilterMcpOAuthStore
+from jason_runtime.microsoft_group_admin_activation import (
+    register_group_admin_from_env, ensure_group_admin_owner_authority,
+)
+from jason_runtime.microsoft_group_admin import (
+    build_microsoft_group_admin_openbao_invoker,
+    register_microsoft_group_admin_invoker,
+)
 from jason_runtime.dnsfilter_mcp_mutation import (
     build_dnsfilter_mcp_mutation_invoker,
     register_dnsfilter_mcp_mutation_invokers,
@@ -173,6 +181,8 @@ from orchestrator.print_capability_catalog import (
     PRINT_METER_READ,
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
+    PRINT_METER_USAGE_SEARCH,
+    PRINT_FLEET_USAGE_RANK,
     PRINT_SUPPLIES_READ,
     register_print_resource_foundation,
 )
@@ -185,6 +195,10 @@ from .aot_operational_read_authority import ensure_aot_technician_read_authority
 from .aot_routine_write_authority import (
     configured_aot_routine_autotask_write,
     ensure_aot_routine_autotask_write_authority,
+)
+from .aot_staff_internal_note_authority import (
+    configured_aot_staff_internal_note_write,
+    ensure_aot_staff_internal_note_authority,
 )
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
@@ -265,6 +279,16 @@ from .autotask_procurement import (
     build_autotask_procurement_invoker,
     register_autotask_procurement_invoker,
     register_autotask_procurement_runtime_foundation,
+)
+from .autotask_company_outbound_opt_in_update import (
+    register_autotask_company_outbound_opt_in_foundation,
+    build_autotask_company_outbound_opt_in_invoker,
+    register_autotask_company_outbound_opt_in_invoker,
+)
+from .autotask_company_udf_admin import (
+    register_autotask_company_udf_admin_foundation,
+    build_autotask_company_udf_admin_invoker,
+    register_autotask_company_udf_admin_invoker,
 )
 from .autotask_ticket_attachment import (
     build_autotask_ticket_attachment_invoker,
@@ -399,6 +423,20 @@ from .reflection_runtime import (
     register_reflection_runtime_foundation,
 )
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
+from .constant_contact_reads import (
+    build_read_invoker as build_constant_contact_read_invoker,
+    register_read_invokers as register_constant_contact_read_invokers,
+    register_runtime_foundation as register_constant_contact_runtime_foundation,
+)
+from .constant_contact_activation import apply_import_from_env as activate_constant_contact_import
+from .constant_contact_import_runtime import (
+    build_import_invoker as build_constant_contact_import_invoker,
+    register_import_invoker as register_constant_contact_import_invoker,
+)
+from .sharepoint_read_activation import register_sharepoint_runtime_foundation
+from .sharepoint_reads import build_sharepoint_read_invoker, register_sharepoint_read_invokers
+from .microsoft_sharepoint import require_validated_sharepoint_service_boundary
+
 from .quickbooks_reads import (
     build_quickbooks_read_invoker,
     register_quickbooks_read_invokers,
@@ -498,6 +536,24 @@ class RuntimeSettings:
     dnsfilter_mcp_oauth_db: Path = Path(
         "/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3"
     )
+    constant_contact_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/constant-contact/role_id"
+    )
+    constant_contact_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/constant-contact/secret_id"
+    )
+    constant_contact_oauth_db: Path = Path(
+        "/var/lib/jason/openclaw/constant-contact/oauth.sqlite3"
+    )
+    constant_contact_import_work_db: Path = Path(
+        "/var/lib/jason/openclaw/constant-contact/import-work.sqlite3"
+    )
+    constant_contact_import_claims_db: Path = Path(
+        "/var/lib/jason/openclaw/constant-contact/import-claims.sqlite3"
+    )
+    constant_contact_account_binding_path: Path = Path(
+        "/run/jason-secrets/constant-contact/approved-account.json"
+    )
     quickbooks_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/quickbooks/role_id"
     )
@@ -548,6 +604,9 @@ class RuntimeSettings:
     autonomy_shadow_failure_retry_seconds: int = 300
     autonomy_targeted_wake_retry_seconds: int = 300
     autonomy_worker_enabled: bool = False
+    # Source-only migration seam. Historical installations default to the
+    # embedded owner until a separately governed external worker is ready.
+    ticket_worker_hosting: str = "embedded"
     autonomy_worker_db: Path = Path(
         "/var/lib/jason/openclaw/autonomy-operational-work.sqlite3"
     )
@@ -858,6 +917,42 @@ class RuntimeSettings:
                     "/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3",
                 )
             ),
+            constant_contact_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/constant-contact/role_id",
+                )
+            ),
+            constant_contact_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/constant-contact/secret_id",
+                )
+            ),
+            constant_contact_oauth_db=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_OAUTH_DB",
+                    "/var/lib/jason/openclaw/constant-contact/oauth.sqlite3",
+                )
+            ),
+            constant_contact_import_work_db=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_IMPORT_WORK_DB",
+                    "/var/lib/jason/openclaw/constant-contact/import-work.sqlite3",
+                )
+            ),
+            constant_contact_import_claims_db=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_IMPORT_CLAIMS_DB",
+                    "/var/lib/jason/openclaw/constant-contact/import-claims.sqlite3",
+                )
+            ),
+            constant_contact_account_binding_path=Path(
+                os.getenv(
+                    "JASON_CONSTANT_CONTACT_ACCOUNT_BINDING_PATH",
+                    "/run/jason-secrets/constant-contact/approved-account.json",
+                )
+            ),
             quickbooks_openbao_role_id_path=Path(
                 os.getenv(
                     "JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH",
@@ -980,6 +1075,9 @@ class RuntimeSettings:
             autonomy_worker_enabled=os.getenv(
                 "JASON_AUTONOMY_WORKER_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
+            ticket_worker_hosting=os.getenv(
+                "JASON_TICKET_WORKER_HOSTING", "embedded"
+            ).strip().casefold(),
             autonomy_worker_db=Path(
                 os.getenv(
                     "JASON_AUTONOMY_WORKER_DB",
@@ -1120,8 +1218,10 @@ class RuntimeSettings:
     def validate(self) -> None:
         if self.universal_approval_mode not in {"off", "enforced"}:
             raise ValueError("JASON_UNIVERSAL_APPROVAL_MODE must be off or enforced")
-        if self.release_mobile_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
-            raise ValueError("JASON_RELEASE_MOBILE_APPROVAL_MODE must be off, owner_only_pilot or owner_reviewed")
+        if self.release_mobile_approval_mode not in {
+            "off", "owner_only_pilot", "owner_reviewed", "admin_approver_separated"
+        }:
+            raise ValueError("unsupported JASON_RELEASE_MOBILE_APPROVAL_MODE")
         if self.release_mobile_interval_seconds < 60:
             raise ValueError("mobile release approval scans require at least a 60-second interval")
         if self.owner_uat_mode not in {"off", "nonexecuting_test_only"}:
@@ -1157,6 +1257,8 @@ class RuntimeSettings:
             raise ValueError(
                 "JASON_AUTONOMY_TARGETED_WAKE_RETRY_SECONDS must be at least 60"
             )
+        if self.ticket_worker_hosting not in {"embedded", "external"}:
+            raise ValueError("JASON_TICKET_WORKER_HOSTING must be embedded or external")
         if self.autonomy_worker_interval_seconds < 30:
             raise ValueError(
                 "JASON_AUTONOMY_WORKER_INTERVAL_SECONDS must be at least 30"
@@ -1365,9 +1467,28 @@ def _deterministic_resource_contracts(
     return tuple(contracts)
 
 
+@dataclass(frozen=True, slots=True)
+class TicketWorkerComponentRuntime:
+    """No HTTP, Teams ingress, approval listener or PM auxiliary lifecycle.
+
+    This bounded component is only the ticket worker and its governed ports.
+    It is NOT itself an installation/authorization/credential projection.
+    """
+    maintenance: Any
+
+
+def _shadow_processes_targeted_wakes(settings: RuntimeSettings) -> bool:
+    """Only historical embedded hosting may leave targeted wakes to shadow."""
+    return (
+        settings.ticket_worker_hosting == "embedded"
+        and not settings.autonomy_worker_enabled
+    )
+
+
 def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile: str = "all",
                               health_probe=None, universal_approval_handler=None,
-        teams_workflow_approval_handlers: Mapping[str, Any] | None = None) -> RuntimeHttpApplication:
+        teams_workflow_approval_handlers: Mapping[str, Any] | None = None
+        ) -> RuntimeHttpApplication | TicketWorkerComponentRuntime:
     settings.validate()
     if maintenance_profile not in {"all", "ticket_worker", "auxiliary"}:
         raise ValueError("unknown maintenance profile")
@@ -1461,11 +1582,61 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             now=now,
         )
     )
+    group_admin_activation = register_group_admin_from_env(
+        capabilities=capabilities, providers=providers, now=now,
+    )
     register_email_send(capabilities=capabilities, providers=providers)
+    constant_contact_activation = register_constant_contact_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
+    constant_contact_import_activation = activate_constant_contact_import(
+        capabilities=capabilities, providers=providers,
+        read_enabled=constant_contact_activation.enabled,
+    )
+    if constant_contact_import_activation.enabled and settings.universal_approval_mode != "enforced":
+        raise RuntimeError("Constant Contact imports require the trusted universal approval service")
     quickbooks_activation = register_quickbooks_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
         now=now,
+    )
+
+    # Separately governed SharePoint foundation is strictly opt-in.
+    # Unset profile performs no registry, provider or filesystem changes.
+    sharepoint_profile = os.getenv("JASON_SHAREPOINT_READER_PROFILE", "").strip()
+    sharepoint_boundary_db = Path(os.getenv(
+        "JASON_SHAREPOINT_BOUNDARY_DB", str(microsoft_boundary_db)))
+    sharepoint_state_db = Path(os.getenv(
+        "JASON_SHAREPOINT_SITE_ACCESS_DB",
+        "/var/lib/jason/sharepoint/sites.sqlite3"))
+    sharepoint_role_id = Path(os.getenv(
+        "JASON_SHAREPOINT_OPENBAO_ROLE_ID_PATH",
+        "/run/jason-secrets/openbao/sharepoint/role-id"))
+    sharepoint_secret_id = Path(os.getenv(
+        "JASON_SHAREPOINT_OPENBAO_SECRET_ID_PATH",
+        "/run/jason-secrets/openbao/sharepoint/secret-id"))
+    sharepoint_tenant = os.getenv("JASON_SHAREPOINT_AOT_TENANT_ID", "").strip()
+    sharepoint_boundary_approved = False
+    if sharepoint_profile and sharepoint_boundary_db.is_file() and sharepoint_tenant:
+        sharepoint_boundaries = SQLiteClientBoundaryRepository(
+            SQLiteClientBoundaryStore(sharepoint_boundary_db))
+        try:
+            require_validated_sharepoint_service_boundary(
+                boundaries=sharepoint_boundaries, tenant_id=sharepoint_tenant,
+                expected_client_id="client-aot-internal",
+                expected_domain="teamaot.com",
+            )
+            sharepoint_boundary_approved = True
+        except (PermissionError, ValueError):
+            sharepoint_boundary_approved = False
+    sharepoint_active = register_sharepoint_runtime_foundation(
+        capabilities=capabilities, providers=providers, now=now,
+        app_boundary_approved=sharepoint_boundary_approved,
+        app_credential_present=(sharepoint_role_id.is_file() and
+                                sharepoint_secret_id.is_file()),
+        site_registry_present=sharepoint_state_db.is_file(),
     )
 
     integration_broker = IntegrationBroker(
@@ -1481,6 +1652,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     integration_broker.register(
         build_reflection_manifest()
     )
+    if sharepoint_active:
+        integration_broker.register(build_sharepoint_read_manifest())
+
     register_provider_read_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1529,6 +1703,16 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         providers=providers,
         now=now,
     )
+    register_autotask_company_outbound_opt_in_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
+    register_autotask_company_udf_admin_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     register_autotask_ticket_attachment_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1571,6 +1755,25 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
 
     identity_repository = SQLiteIdentityRepository(authority_store)
     routine_autotask_write_enabled = configured_aot_routine_autotask_write()
+    staff_internal_note_enabled = configured_aot_staff_internal_note_write()
+    privileged_admin_principals = frozenset()
+    if settings.release_mobile_approval_mode == "admin_approver_separated":
+        from uuid import UUID
+        from .mobile_release_approval import read_mobile_release_policy
+        privileged_policy = read_mobile_release_policy(
+            settings.release_mobile_approval_policy
+        )
+        if (
+            privileged_policy.schema_version not in {"4.0", "4.1"}
+            or privileged_policy.admin_approver_binding is None
+            or privileged_policy.regular_requester_binding is None
+        ):
+            raise PermissionError("privileged admin separation requires V4 approval policy")
+        privileged_admin_principals = frozenset({
+            "person-entra-" + UUID(
+                privileged_policy.admin_approver_binding[1]
+            ).hex,
+        })
     identity_authority = IdentityAuthorityService(
         identities=identity_repository,
         grants=SQLiteAuthorityGrantRepository(authority_store),
@@ -1581,6 +1784,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             capabilities=capabilities, providers=providers,
             identities=identity_repository,
             routine_write_enabled=routine_autotask_write_enabled,
+            internal_note_write_enabled=staff_internal_note_enabled,
+            privileged_admin_principal_ids=privileged_admin_principals,
         ),
     )
     # Mandatory standing observe policy. Authenticated AOT human staff receive
@@ -1589,6 +1794,12 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     ensure_aot_technician_read_authority(identity_authority)
     ensure_aot_routine_autotask_write_authority(
         identity_authority, enabled=routine_autotask_write_enabled,
+    )
+    ensure_aot_staff_internal_note_authority(
+        identity_authority, enabled=staff_internal_note_enabled,
+    )
+    ensure_group_admin_owner_authority(
+        identity_authority, enabled=group_admin_activation.enabled,
     )
     ensure_teams_message_send_authority(
         identity_authority, enabled=configured_teams_message_send(),
@@ -1789,6 +2000,35 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         # and turn all Autotask reads into service-only denials.
         bindings=source_authorization_bindings,
     )
+    constant_contact_read_invoker = (
+        build_constant_contact_read_invoker(
+            openbao_url=settings.openbao_url,
+            role_id_path=settings.constant_contact_openbao_role_id_path,
+            secret_id_path=settings.constant_contact_openbao_secret_id_path,
+            oauth_db=settings.constant_contact_oauth_db,
+            transport=http_transport,
+            audit=ConnectorEventAudit(orchestration_events),
+            bindings=source_authorization_bindings,
+        )
+        if constant_contact_activation.enabled
+        else None
+    )
+    constant_contact_import_invoker = (
+        build_constant_contact_import_invoker(
+            openbao_url=settings.openbao_url,
+            role_id_path=settings.constant_contact_openbao_role_id_path,
+            secret_id_path=settings.constant_contact_openbao_secret_id_path,
+            oauth_db=settings.constant_contact_oauth_db,
+            work_db=settings.constant_contact_import_work_db,
+            claims_db=settings.constant_contact_import_claims_db,
+            account_binding_path=settings.constant_contact_account_binding_path,
+            transport=http_transport,
+            bindings=source_authorization_bindings,
+            universal_handler=lambda: universal_approval_handler,
+        )
+        if constant_contact_import_activation.enabled
+        else None
+    )
     quickbooks_read_invoker = (
         build_quickbooks_read_invoker(
             openbao_url=settings.openbao_url,
@@ -1802,6 +2042,38 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         )
         if quickbooks_activation.enabled
         else None
+    )
+    # Dormant unless the separately authorized exact AOT pilot profile is active.
+    # Existing Microsoft directory identity and ticket/core composition stay intact.
+    microsoft_group_admin_invoker = (
+        build_microsoft_group_admin_openbao_invoker(
+            boundaries=SQLiteClientBoundaryRepository(microsoft_directory.store),
+            openbao_url=settings.openbao_url,
+            read_role_id_path=Path("/run/jason-secrets/openbao/microsoft-group-read/role_id"),
+            read_secret_id_path=Path("/run/jason-secrets/openbao/microsoft-group-read/secret_id"),
+            write_role_id_path=Path("/run/jason-secrets/openbao/microsoft-group-write/role_id"),
+            write_secret_id_path=Path("/run/jason-secrets/openbao/microsoft-group-write/secret_id"),
+            transport=http_transport,
+            entitlement=None,  # exact active Owner/AOT pilot policy, never broad default
+            audit=ConnectorEventAudit(orchestration_events),
+        )
+        if group_admin_activation.enabled
+        else None
+    )
+    sharepoint_read_invoker = (
+        build_sharepoint_read_invoker(
+            boundary_db=sharepoint_boundary_db,
+            state_db=sharepoint_state_db,
+            openbao_url=settings.openbao_url,
+            role_id_path=sharepoint_role_id,
+            secret_id_path=sharepoint_secret_id,
+            tenant_id=sharepoint_tenant,
+            transport=http_transport,
+            audit=ConnectorEventAudit(orchestration_events),
+            approved_owner_ids=frozenset(approval_owner_identities()),
+            original_identity_bindings=source_authorization_bindings,
+        )
+        if sharepoint_active else None
     )
     ticket_create_invoker = build_autotask_ticket_create_invoker(
         openbao_url=settings.openbao_url,
@@ -1846,6 +2118,22 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         ticket_attention=ticket_attention_relay.notify,
     )
     procurement_invoker = build_autotask_procurement_invoker(
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.autotask_write_openbao_role_id_path,
+        secret_id_path=settings.autotask_write_openbao_secret_id_path,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+        bindings=source_authorization_bindings,
+    )
+    company_outbound_optin_invoker = build_autotask_company_outbound_opt_in_invoker(
+        openbao_url=settings.openbao_url,
+        role_id_path=settings.autotask_write_openbao_role_id_path,
+        secret_id_path=settings.autotask_write_openbao_secret_id_path,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+        bindings=source_authorization_bindings,
+    )
+    company_udf_admin_invoker = build_autotask_company_udf_admin_invoker(
         openbao_url=settings.openbao_url,
         role_id_path=settings.autotask_write_openbao_role_id_path,
         secret_id_path=settings.autotask_write_openbao_secret_id_path,
@@ -2098,10 +2386,29 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         invokers=invokers,
         invoker=provider_read_invoker,
     )
+    if constant_contact_read_invoker is not None:
+        register_constant_contact_read_invokers(
+            invokers=invokers,
+            invoker=constant_contact_read_invoker,
+        )
+    if constant_contact_import_invoker is not None:
+        register_constant_contact_import_invoker(
+            invokers=invokers, invoker=constant_contact_import_invoker,
+        )
     if quickbooks_read_invoker is not None:
         register_quickbooks_read_invokers(
             invokers=invokers,
             invoker=quickbooks_read_invoker,
+        )
+    if microsoft_group_admin_invoker is not None:
+        register_microsoft_group_admin_invoker(
+            invokers=invokers,
+            invoker=microsoft_group_admin_invoker,
+        )
+    if sharepoint_read_invoker is not None:
+        register_sharepoint_read_invokers(
+            invokers=invokers,
+            invoker=sharepoint_read_invoker,
         )
     register_autotask_ticket_create_invoker(
         invokers=invokers,
@@ -2126,6 +2433,14 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     register_autotask_procurement_invoker(
         invokers=invokers,
         invoker=procurement_invoker,
+    )
+    register_autotask_company_outbound_opt_in_invoker(
+        invokers=invokers,
+        invoker=company_outbound_optin_invoker,
+    )
+    register_autotask_company_udf_admin_invoker(
+        invokers=invokers,
+        invoker=company_udf_admin_invoker,
     )
     register_autotask_ticket_attachment_invoker(
         invokers=invokers,
@@ -2175,6 +2490,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     invokers.register(PRINT_METER_READ, kfs_invoker)
     invokers.register(PRINT_METER_HISTORY_SEARCH, kfs_history_invoker)
     invokers.register(PRINT_METER_USAGE_READ, kfs_history_invoker)
+    invokers.register(PRINT_METER_USAGE_SEARCH, kfs_history_invoker)
+    invokers.register(PRINT_FLEET_USAGE_RANK, kfs_history_invoker)
     invokers.register(PRINT_SUPPLIES_READ, kfs_invoker)
     invokers.register(PRINT_ALERT_SEARCH, kfs_invoker)
     invokers.register(BACKUP_ENDPOINT_ASSET_SEARCH, backup_net_invoker)
@@ -2238,6 +2555,44 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         governed_execution_ledger=governed_execution_ledger,
     )
 
+    if maintenance_profile == "ticket_worker":
+        # Stage C component seam: build only the existing governed Ticket Core
+        # worker. Do NOT create the HTTP ingress/replay/continuation, Teams
+        # approval services, client-question HTTP flow, PM release watchers,
+        # procurement mailboxes, or auxiliary processes in this worker child.
+        # Its provider/orchestrator dependencies above remain governed and
+        # must be isolated separately before any production C cutover.
+        if not settings.autonomy_worker_enabled:
+            raise RuntimeError("TICKET_CORE_WORKER_PROFILE_DISABLED")
+        worker_completion_notifier = build_autonomous_completion_notifier(
+            enabled=autonomous_completion_notifications_enabled,
+            identity_authority=identity_authority,
+            capabilities=capabilities,
+            approvals=approval_repository,
+            execution_ledger=governed_execution_ledger,
+            orchestrator=orchestrator,
+            promotion_db=settings.autonomy_promotion_db,
+        )
+        worker_maintenance = build_autonomy_worker_maintenance(
+            enabled=True,
+            identity_authority=identity_authority,
+            capabilities=capabilities,
+            approvals=approval_repository,
+            execution_ledger=governed_execution_ledger,
+            orchestrator=orchestrator,
+            work_db=settings.autonomy_worker_db,
+            promotion_db=settings.autonomy_promotion_db,
+            targeted_wake_db=settings.autonomy_targeted_wake_db,
+            owned_autotask_resource_ids=settings.autonomy_owned_autotask_resource_ids,
+            max_active_work_items=settings.autonomy_max_active_work_items,
+            interval_seconds=settings.autonomy_worker_interval_seconds,
+            targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
+            audit=reflection_audit,
+            completion_notifier=worker_completion_notifier,
+        )
+        ticket_attention_relay.bind(worker_maintenance)
+        return TicketWorkerComponentRuntime(maintenance=worker_maintenance)
+
     resource_response_renderer = GovernedTeamsResourceResponseRenderer(
         interpreter=GovernedResourceEvidenceInterpreter(
             reasoner=OllamaResourceEvidenceReasoner(
@@ -2290,6 +2645,28 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                     bindings=durable_bindings,
                 ),
             ),
+        )
+    constant_contact_import_workflow = None
+    if constant_contact_import_invoker is not None:
+        from .constant_contact_import_workflow import ConstantContactImportWorkflow
+        if universal_approval_handler is None or universal_approval_handler.issuer is None:
+            raise RuntimeError("Constant Contact pilot requires canonical plan issuance")
+        source_import_connector = constant_contact_import_invoker.connector
+        if source_import_connector is None:
+            raise RuntimeError("Constant Contact pilot provider adapter unavailable")
+        constant_contact_import_workflow = ConstantContactImportWorkflow(
+            connector=source_import_connector,
+            work_store=source_import_connector.work_store,
+            issuer=universal_approval_handler.issuer,
+        )
+    constant_contact_reconciliation_worker = None
+    if constant_contact_import_invoker is not None:
+        from connectors.constant_contact.import_reconcile import ConstantContactReadbackWorker
+        source_import_connector = constant_contact_import_invoker.connector
+        constant_contact_reconciliation_worker = ConstantContactReadbackWorker(
+            work_store=source_import_connector.work_store,
+            claims=source_import_connector.claims,
+            connector=source_import_connector,
         )
     request_factory = GovernedTeamsOrchestrationRequestFactory(
         authority=identity_authority,
@@ -2555,7 +2932,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
 
     release_mobile_flow = None
     release_mobile_maintenance = None
-    if settings.release_mobile_approval_mode in {"owner_only_pilot", "owner_reviewed"}:
+    if settings.release_mobile_approval_mode in {
+        "owner_only_pilot", "owner_reviewed", "admin_approver_separated"
+    }:
         from .mobile_release_approval import (
             MobileReleaseApprovalFlow, MobileReleaseApprovalMaintenance,
             MobileReleaseOwnerAuthority, MobileReleaseSignedEvidenceStore,
@@ -2563,10 +2942,30 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         )
         from .universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
         owner_policy = read_mobile_release_policy(settings.release_mobile_approval_policy)
-        expected_version = ("1.0" if settings.release_mobile_approval_mode == "owner_only_pilot"
-                            else "2.0")
-        if owner_policy.schema_version != expected_version:
+        if settings.release_mobile_approval_mode == "owner_only_pilot":
+            if owner_policy.schema_version != "1.0":
+                raise PermissionError("active release approval mode and reviewed policy version do not match")
+        elif settings.release_mobile_approval_mode == "admin_approver_separated":
+            if owner_policy.schema_version not in {"4.0", "4.1"}:
+                raise PermissionError("admin-separated release mode requires reviewed V4 policy")
+        elif owner_policy.schema_version not in {"2.0", "3.0", "3.1"}:
             raise PermissionError("active release approval mode and reviewed policy version do not match")
+        expected_version = owner_policy.schema_version
+        # V4/V4.1 never use mutable email or a symbolic Owner alias for
+        # release decisions. Card delivery and the signed callback both bind
+        # to the precise Entra object selected by the versioned policy.
+        exact_owner_binding = expected_version in {"4.0", "4.1"}
+        owner_fallback = {} if exact_owner_binding else {"person-al": "al@teamaot.com"}
+        # V4.1 delivers to the licensed Owner Teams account. The admin
+        # remains independently privileged for administrative capabilities.
+        target_binding = (
+            owner_policy.regular_requester_binding if expected_version == "4.1"
+            else owner_policy.admin_approver_binding
+        )
+        owner_entra_bindings = (
+            {owner_policy.owner_identity_ids[0]: target_binding}
+            if exact_owner_binding else {}
+        )
         release_repo = SQLiteApprovalRequestRepository(settings.release_mobile_approval_db)
         release_approval_service = ApprovalRequestService(
             release_repo, MobileReleaseOwnerAuthority(settings.release_mobile_approval_policy),
@@ -2582,16 +2981,17 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                 authenticator=teams_authenticator,
                 allowed_machine_identities=settings.allowed_machine_identities,
                 allowed_approval_prefixes=("relapproval-",),
-                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version == "2.0"
+                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0", "4.0", "4.1"}
                                         else frozenset()),
             ),
             signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),
             required_policy_version=expected_version,
-            owner_identity_email_fallbacks={
-                "person-al": "al@teamaot.com",
-            },
+            owner_identity_email_fallbacks=owner_fallback,
         )
-        if settings.release_mobile_approval_worker_enabled:
+        # V3.1 uses independently authenticated, signed MCP Owner decisions.
+        # Keep the legacy Teams callback flow for compatibility, but do not
+        # emit new mandatory Teams release cards or run its approval scanner.
+        if settings.release_mobile_approval_worker_enabled and expected_version != "3.1":
             release_mobile_maintenance = MobileReleaseApprovalMaintenance(
                 enabled=True,
                 policy_path=settings.release_mobile_approval_policy,
@@ -2603,9 +3003,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                     token_file=settings.teams_proactive_token_file,
                     bindings=durable_bindings,
                     owner_identity_ids=owner_policy.owner_identity_ids,
-                    owner_identity_email_fallbacks={
-                        "person-al": "al@teamaot.com",
-                    },
+                    owner_identity_email_fallbacks=owner_fallback,
+                    owner_identity_entra_bindings=owner_entra_bindings,
                 ),
                 interval_seconds=settings.release_mobile_interval_seconds,
                 required_policy_version=expected_version,
@@ -2724,7 +3123,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         interval_seconds=settings.autonomy_shadow_interval_seconds,
         failure_retry_seconds=settings.autonomy_shadow_failure_retry_seconds,
         targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
-        process_targeted_wakes=not settings.autonomy_worker_enabled,
+        process_targeted_wakes=_shadow_processes_targeted_wakes(settings),
     )
     autonomous_completion_notifier = build_autonomous_completion_notifier(
         enabled=autonomous_completion_notifications_enabled,
@@ -2902,6 +3301,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         conversation_reasoning_client=hosted_conversation_client or ollama_client,
         governed_orchestrator=orchestrator,
         universal_approval_handler=universal_approval_handler,
+        constant_contact_import_workflow=constant_contact_import_workflow,
+        constant_contact_reconciliation_worker=constant_contact_reconciliation_worker,
         identity_authority=identity_authority,
         capabilities=capabilities,
         microsoft_identity_bindings=bindings,

@@ -14,7 +14,20 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config" / "production-desired-state.json"
 FORBIDDEN_FIELD_NAMES = ("ExecStart", "WorkingDirectory")
-
+# Only specifically reviewed, declared NON-REQUIRED observer/reporting units
+# are advisory. An absent/undeclared unit, required unit, forbidden path,
+# unexpected container, or independent safety/authority service stays HARD drift.
+# No broad "all allowed services" exception and no additional retry machinery.
+INDEPENDENT_OPTIONAL_OBSERVERS = frozenset({
+    "jason-documentation-reconciliation.service",
+    "jason-openclaw-authority-full-integrity.service",
+    "jason-grafana-assurance.service",
+    "jason-grafana-assurance-exporter.service",
+    "jason-grafana-assurance.timer",
+    "jason-isolated-provider-health.service",
+    "jason-isolated-provider-health.timer",
+    "jason-provider-health-canary.service",
+})
 
 def run(args: list[str], *, env: dict[str, str] | None = None) -> str:
     completed = subprocess.run(
@@ -111,6 +124,7 @@ def stopped_rollback_containers(prefixes: list[str]) -> list[str]:
 
 def evaluate(config: dict[str, Any]) -> dict[str, Any]:
     problems: list[dict[str, Any]] = []
+    advisories: list[dict[str, Any]] = []
     forbidden = tuple(str(value) for value in config.get("forbidden_execution_prefixes") or [])
 
     system_seen = unit_names(user=False)
@@ -134,7 +148,15 @@ def evaluate(config: dict[str, Any]) -> dict[str, Any]:
 
     for unit, state in sorted(system_states.items()):
         if state == "failed":
-            problems.append({"kind": "failed_system_unit", "unit": unit, "state": state})
+            if (unit in INDEPENDENT_OPTIONAL_OBSERVERS
+                    and unit in allowed_system and unit not in required_system):
+                advisories.append({
+                    "kind": "independent_optional_system_unit_failed",
+                    "unit": unit,
+                    "state": state,
+                })
+            else:
+                problems.append({"kind": "failed_system_unit", "unit": unit, "state": state})
     for unit, state in sorted(user_states.items()):
         if state == "failed":
             problems.append({"kind": "failed_user_unit", "unit": unit, "state": state})
@@ -188,6 +210,7 @@ def evaluate(config: dict[str, Any]) -> dict[str, Any]:
         "status": "pass" if not problems else "drift_detected",
         "observed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "problems": problems,
+        "advisories": advisories,
         "evidence": {
             "system_units_seen": sorted(system_seen),
             "user_units_seen": sorted(user_seen),

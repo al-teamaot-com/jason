@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodic independent Jason shadow worker (%i)
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=15min
+AccuracySec=30s
+RandomizedDelaySec=60s
+Persistent=true
+Unit=jason-isolated-shadow@%i.service
+
+[Install]
+WantedBy=timers.target

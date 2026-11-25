@@ -915,6 +915,25 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / MSP Operations
 - **Review trigger:** Before relying on Jason to autonomously remediate recurring monitor-policy false positives.
 
+### TODO-CONN-020 — Reusable governed SharePoint document search and read
+
+- **Priority:** P1
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-12; draft source pending acceptance
+- **Autonomous engineering readiness:** Approved
+- **Risk level:** High (sensitive client/accounting document data)
+- **Development issue:** #1117
+- **Current draft:** PR #1330, read-only implementation and CI verified; production activation prohibited until acceptance
+- **Approval boundary:** Owner-approved autonomous source development and test/CI repair, not OpenBao secret import, privileged provider mutation, unreviewed merge, production deploy, or bypass of Jason governed release gates.
+- **Purpose:** One reusable Microsoft SharePoint reader for Jason operations rather than a different Graph connector per business workflow.
+- **Capabilities:** Authorized document library browsing; bounded folder/document search; verified metadata; bounded exact document content reading through approved read-only Microsoft Graph application identity.
+- **Security requirements:** Validated tenant/client boundary and principal identity; per-caller site, library, item and sensitivity/release checks; no arbitrary caller Graph URL/token; no Graph mutation; strict readback, provenance, and denial auditing.
+- **Credential requirement:** Dedicated Entra SharePoint reader application (certificate public key and Sites.Read.All already verified), canonical isolated OpenBao AppRole and secret class; never print, export or commit the private key.
+- **Initial test:** Approved AOT SharePoint test site and nonsensitive controlled document; prove allowed reads and denied unauthorized user/site/client requests before broader use.
+- **Acceptance:** Reviewed integrated source, CI pass, secure credential import by approved provisioning ceremony, governed capability registry/routing, validated scope/identity/sensitivity boundaries, live positive and negative tests, and separately approved Jason production release.
+- **Integration coordination:** Reconcile older pilot PR #1120 security constraints into draft PR #1330; no duplicate live connectors.
+- **Decision owner:** Jason Governance Authority / AOT Technology Steward
+- **Review trigger:** When all required runtime authorization and production rollout acceptance evidence is available.
+
 ### TODO-OPS-008 — Governed Autotask ticket billing/charge workflow
 
 - **Priority:** P1

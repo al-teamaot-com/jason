@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 
 from connectors.autotask.impersonating_connector import (
     AUTOTASK_AUTH_MODE_IMPERSONATED,
@@ -99,6 +99,12 @@ _AUTONOMOUS_CLIENT_QUESTION_READS = frozenset({
 })
 _AUTONOMOUS_CLIENT_QUESTION_POLICY = "autonomous-client-question-read-v1"
 _AUTONOMOUS_CLIENT_QUESTION_PROFILE_ENV = "JASON_CLIENT_INFORMATION_REQUEST_PROFILE"
+# A distinct, purpose-bound read for the existing Owner-promoted Gromelski
+# VulScan client-disposition workflow. Never add notification history to the
+# general autonomous-worker or client-question read allowlists.
+_AUTONOMOUS_VULSCAN_NOTIFICATION_POLICY = "autonomous-vulscan-notification-read-v1"
+_AUTONOMOUS_VULSCAN_NOTIFICATION_COMPANY_ID = 597  # Existing client policy.
+
 
 # Retained only for the provider-native impersonation compatibility path. The
 # temporary Jason-managed path derives its eligible reads from the registered
@@ -235,6 +241,67 @@ def _autonomous_worker_requester_authorization_proven(
         and _AUTONOMOUS_WORKER_POLICY in request.policy_ids
         and request.orchestration_mode is OrchestrationMode.EXECUTE
     )
+
+
+def _autonomous_vulscan_notification_read_authorized(
+    *, request: OrchestrationRequest, capability_name: str,
+    output: Mapping[str, Any],
+) -> bool:
+    """Permit only ticket-scoped receipt evidence for the promoted client policy.
+
+    The internal request must carry a dedicated policy, an exact positive ticket,
+    Gromelski's existing approved company scope and a bounded page. A service
+    account cannot use this policy to enumerate notification history by company,
+    search other clients, or read through the general worker grant.
+    """
+    arguments = request.arguments
+    if (
+        capability_name != SERVICE_NOTIFICATION_HISTORY_SEARCH
+        or not request.authority_allowed
+        or not request.authority_context_id
+        or request.organization_id != "aot"
+        or request.permission_mode != "observe"
+        or request.requester_kind != "service"
+        or request.principal_id != _AUTONOMOUS_SHADOW_PRINCIPAL
+        or _AUTONOMOUS_VULSCAN_NOTIFICATION_POLICY not in request.policy_ids
+        or request.orchestration_mode is not OrchestrationMode.EXECUTE
+        or request.client_id is not None
+        or set(arguments) != {"company_id", "ticket_id", "page_size"}
+        or type(arguments.get("company_id")) is not int
+        or arguments["company_id"] != _AUTONOMOUS_VULSCAN_NOTIFICATION_COMPANY_ID
+        or type(arguments.get("ticket_id")) is not int
+        or arguments["ticket_id"] <= 0
+        or type(arguments.get("page_size")) is not int
+        or not 1 <= arguments["page_size"] <= 100
+    ):
+        return False
+    payload = output.get("data")
+    if not isinstance(payload, Mapping):
+        return False
+    items = payload.get("items")
+    if not isinstance(items, list) or len(items) > arguments["page_size"]:
+        return False
+    for item in items:
+        if not isinstance(item, Mapping):
+            return False
+        ticket_id = item.get("ticketID")
+        if isinstance(ticket_id, bool):
+            return False
+        try:
+            if int(ticket_id) != arguments["ticket_id"]:
+                return False
+        except (TypeError, ValueError):
+            return False
+        company_id = item.get("companyID")
+        if company_id is not None:
+            if isinstance(company_id, bool):
+                return False
+            try:
+                if int(company_id) != arguments["company_id"]:
+                    return False
+            except (TypeError, ValueError):
+                return False
+    return True
 
 
 def _autonomous_ticket_contact_read_authorized(
@@ -386,6 +453,19 @@ class AutotaskImpersonationInformationAuthorizer:
                     "jkd001_authority_context",
                     "central_orchestrator_governed_read",
                     _AUTONOMOUS_WORKER_POLICY,
+                )
+            elif _autonomous_vulscan_notification_read_authorized(
+                request=request,
+                capability_name=resolution.capability_name,
+                output=invocation.output,
+            ):
+                basis = (
+                    "jason_managed",
+                    "internal_owner_promoted_vulscan_client_disposition",
+                    "gromelski_ticket_scoped_notification_evidence",
+                    "jkd001_authority_context",
+                    "central_orchestrator_governed_read",
+                    _AUTONOMOUS_VULSCAN_NOTIFICATION_POLICY,
                 )
             elif _autonomous_ticket_contact_read_authorized(
                 request=request,

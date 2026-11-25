@@ -74,10 +74,12 @@ def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_
     atomic_json(evidence, result, owner_from=evidence if evidence.exists() else None)
     status = str(result.get("status") or "unknown")
     problems = list(result.get("problems") or [])
+    advisories = list(result.get("advisories") or [])
     watchdog = {
         "schema_version": "1.0",
         "status": status,
         "problem_count": len(problems),
+        "advisory_count": len(advisories),
         "evidence_path": str(evidence),
         "observed_at": str(result.get("observed_at") or now()),
         "updated_at": now(),
@@ -98,6 +100,15 @@ def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_
         },
     )
     control["schema_version"] = "1.0"
+    existing_breaker = control.get("circuit_breaker")
+    existing_opened_at = (
+        existing_breaker.get("opened_at")
+        if isinstance(existing_breaker, dict)
+        and existing_breaker.get("state") == "open"
+        and isinstance(existing_breaker.get("opened_at"), str)
+        and existing_breaker.get("opened_at")
+        else None
+    )
     control["circuit_breaker"] = {
         "state": "open",
         "reason": "continuous_production_drift_detected",
@@ -105,7 +116,7 @@ def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_
         "problem_count": len(problems),
         "problem_kinds": sorted({str(item.get("kind") or "unknown") for item in problems if isinstance(item, dict)}),
         "evidence_path": str(evidence),
-        "opened_at": now(),
+        "opened_at": existing_opened_at or now(),
         "updated_at": now(),
     }
     control["updated_at"] = now()

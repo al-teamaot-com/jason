@@ -1,0 +1,395 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "endpoint.device.read",
+      "endpoint.patch.search",
+      "endpoint.software.search",
+      "service.notification.history.search",
+      "service.ticket.client.notification.create",
+      "service.ticket.note.create",
+      "service.ticket.notes.search",
+      "service.ticket.read",
+      "service.ticket.update"
+    ],
+    "approval_bound_branches": [
+      "create_note",
+      "client_note",
+      "complete_ticket"
+    ],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "verified installed/superseded or pending approval/window or human review; no direct patch install"
+  },
+  "expected_state": {
+    "exact_KB_installed_or_superseded": true,
+    "no_install_error": true,
+    "normal_patch_window_honored": true,
+    "ten_day_unapproved_patch_human_review": true,
+    "client_outbound_only_if_exactly_promoted_policy_requires": true
+  },
+  "migration": {
+    "source_conversion": "exact_KB_and_nonKB_source_analysis_and_guarded_psa_only_not_accepted",
+    "legacy_source_blob_sha": "c44b06dabd07b5c6755c16fe8ebd91974cc8f5d6",
+    "legacy_registry_version": "1.1.0",
+    "source_map": "docs/playbooks/json/migration/source_maps/vulscan_missing_patch.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "The authored Windows Update repair and patch install require automation.component.execute, which original registry does NOT authorize; cannot make that JSON action executable without separately governed authority",
+      "Exact KB supersedence and update install-error data parse, Patch Window policy and 10-day persisted state must be integrated with JSON interpreter",
+      "Normal user session, safe reboot timing and protected servers require separately approved action and source",
+      "Multi-device VulScan source must use existing ticket split primitive and verified child creation instead of direct JSON fanout",
+      "Owner-promoted exact note/optional client notification/terminal ticket readback and real isolated preproduction acceptance remain incomplete"
+    ],
+    "accepted_for_execution": false,
+    "production_activation_authorized": false
+  },
+  "playbook": {
+    "id": "vulscan_missing_patch",
+    "lifecycle": "pilot",
+    "name": "Jason - Windows Update VulScan Missing Patch",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-Windows-Update-VulScan-Missing-Patch.md",
+    "target_type": "ticket",
+    "version": "1.1.0-migration.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "no_patch_approval_or_install": true,
+    "no_patch_policy_mutation": true,
+    "no_unapproved_reboot": true,
+    "no_bypass_normal_patch_window": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "company_id",
+      "device_uid",
+      "KB",
+      "source_finding",
+      "patch_id",
+      "approval_state",
+      "patch_window",
+      "first_unapproved_seen_at",
+      "last_patch_status",
+      "source_lineage",
+      "client_policy",
+      "source_version",
+      "last_note_sha",
+      "next_due_at"
+    ],
+    "approval_recheck_days": 10,
+    "no_duplicate_client_notification": true
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_gate"
+    },
+    {
+      "id": "ticket_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_client_single_device_source_and_patch_identity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_endpoint"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_endpoint",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "device_gate"
+    },
+    {
+      "id": "device_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_device_uid_and_no_user_disruption",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_patches"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_patches",
+      "type": "diagnostic",
+      "capability": "endpoint.patch.search",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "read_software"
+    },
+    {
+      "id": "read_software",
+      "type": "diagnostic",
+      "capability": "endpoint.software.search",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "classification_gate"
+    },
+    {
+      "id": "classification_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "verified_vulscan_disposition",
+            "operator": "eq",
+            "value": "verified_installed_or_superseded"
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "verified_vulscan_disposition",
+            "operator": "eq",
+            "value": "waiting_patch_approval"
+          },
+          "next": "wait_approval"
+        },
+        {
+          "when": {
+            "fact": "verified_vulscan_disposition",
+            "operator": "eq",
+            "value": "waiting_approved_patch_window"
+          },
+          "next": "wait_patch_window"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "note_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_source_policy_and_approved_internal_note",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "create_note"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "create_note",
+      "type": "remediation",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "$fact": "trusted_exact_update_evidence_note_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_note"
+    },
+    {
+      "id": "verify_note",
+      "type": "verification",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "note_readback_gate"
+    },
+    {
+      "id": "note_readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_jason_internal_note_provider_readback",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "policy_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "policy_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "client_disposition_required_exactly_promoted",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "client_note"
+        },
+        {
+          "when": {
+            "fact": "default_policy_no_external_notification",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "complete_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "client_note",
+      "type": "remediation",
+      "capability": "service.ticket.client.notification.create",
+      "arguments": {
+        "$fact": "trusted_exact_approved_vulscan_client_template_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_client_note"
+    },
+    {
+      "id": "verify_client_note",
+      "type": "verification",
+      "capability": "service.notification.history.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "client_readback_gate"
+    },
+    {
+      "id": "client_readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_contact_template_and_delivery_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "complete_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "complete_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_KB_build_current_and_approved_ticket_disposition",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "complete_ticket"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "complete_ticket",
+      "type": "remediation",
+      "capability": "service.ticket.update",
+      "arguments": {
+        "$fact": "trusted_exact_source_policy_ticket_status_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_ticket"
+    },
+    {
+      "id": "verify_ticket",
+      "type": "verification",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_readback_gate"
+    },
+    {
+      "id": "ticket_readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_ticket_status_provider_readback",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "complete"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "wait_approval",
+      "type": "wait",
+      "seconds": 3600,
+      "resume": "human_review"
+    },
+    {
+      "id": "wait_patch_window",
+      "type": "wait",
+      "seconds": 3600,
+      "resume": "human_review"
+    },
+    {
+      "id": "complete",
+      "type": "complete"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Autotask/DRMM/VulScan",
+    "exact_KB_or_nonKB_source_alert": true,
+    "multi_device_requires_existing_vulscan_split": true
+  },
+  "verification": {
+    "authoritative_source": "current DRMM exact patch/software inventory and approved window, existing VulScan policy, Autotask note/notification/ticket readback",
+    "success_condition": "exact KB installed/superseded with no install error, approved policy and ticket status verified"
+  }
+}

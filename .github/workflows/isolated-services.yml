@@ -1,0 +1,123 @@
+name: Validate Isolated Jason Services
+
+on:
+  pull_request:
+    paths:
+      - "tools/isolated_service_*.py"
+      - "tools/*_service.py"
+      - "tools/tests/test_isolated_service*.py"
+      - "tools/tests/test_isolated_services.py"
+      # Run independent two-cycle shadow acceptance when this docs isolation slice changes.
+      - "tools/production_drift_guard.py"
+      - "tools/production_drift_watchdog.py"
+      - "tools/documentation_source_reconciler.py"
+      - "infrastructure/openclaw-operations/systemd/jason-documentation-reconciliation.service"
+      - "config/isolated-services.json"
+      - "infrastructure/isolated-services/**"
+      - "tools/ci/isolated_service_preproduction_lab.py"
+      - "tools/ticket_continuity_evidence_review.py"
+      - "tools/stage_isolated_provider_shadow_units.py"
+      - "tools/independent_governed_lane.py"
+      - "tools/tests/test_independent_governed_lane.py"
+      - "tools/tests/test_stage_isolated_provider_shadow_units.py"
+      - "infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.service"
+      - "infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.timer"
+      - "config/production-desired-state.json"
+      - "tools/reconcile_production_host_services.sh"
+      - "tools/tests/test_ticket_continuity_evidence_review.py"
+      - ".github/workflows/isolated-services.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jason-isolated-services-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-only-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout proposed source without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Install test-only dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv .isolated-ci-venv
+          .isolated-ci-venv/bin/python -m pip install pytest pytest-subtests cryptography
+
+      - name: Validate isolated services and adjacent contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Native worker tests spawn python3 from disposable worktrees.
+          export PATH="$PWD/.isolated-ci-venv/bin:$PATH"
+          .isolated-ci-venv/bin/python -m pytest -q \
+            tools/tests/test_isolated_service_live_sources.py \
+            tools/tests/test_isolated_service_github_sources.py \
+            tools/tests/test_isolated_service_units.py \
+            tools/tests/test_isolated_services.py \
+            tools/tests/test_documentation_source_reconciler.py \
+            tools/tests/test_documentation_success_reconciler.py \
+            tools/tests/test_todo_engineering_intake.py \
+            tools/tests/test_todo_release_bridge.py \
+            tools/tests/test_pmv3_work_engine.py \
+            tools/tests/test_pmv3_integration_queue.py \
+            tools/tests/test_engineering_supervisor.py \
+            tools/tests/test_owner_approved_development_worker.py \
+            tools/tests/test_support_repair_host_worker.py \
+            tools/tests/test_install_support_repair_host_worker.py \
+            tools/tests/test_ticket_continuity_evidence_review.py \
+            tools/tests/test_stage_isolated_provider_shadow_units.py \
+            tools/tests/test_independent_governed_lane.py \
+            tools/tests/test_reconcile_managed_unit_delta.py \
+            tools/tests/test_reconcile_production_host_services.py \
+            tools/tests/test_release_host_reconciler_contract.py
+
+      - name: Two-cycle disposable isolated-services preproduction proof
+        shell: bash
+        env:
+          JASON_ISOLATED_LAB_RECEIPT: isolated-services-preproduction-receipt.json
+        run: |
+          set -euo pipefail
+          python3 tools/ci/isolated_service_preproduction_lab.py
+
+      - name: Verify source-only systemd units
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e /opt/jason/current
+          test ! -e /var/lib/jason/openclaw
+          systemd-analyze verify \
+            infrastructure/isolated-services/*.service \
+            infrastructure/isolated-services/*.timer \
+            infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.service \
+            infrastructure/openclaw-operations/systemd/jason-isolated-provider-health.timer
+
+      - name: Compile and validate source hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q tools/independent_governed_lane.py \
+            tools/stage_isolated_provider_shadow_units.py \
+            tools/isolated_service_live_sources.py \
+            tools/isolated_service_shadow.py \
+            tools/isolated_service_ledger.py \
+            tools/isolated_service_supervisor.py
+          git diff --check HEAD^ HEAD
+
+      - name: Preserve isolated-service preproduction receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-service-preproduction-proof
+          path: isolated-services-preproduction-receipt.json
+          if-no-files-found: warn
+          retention-days: 30

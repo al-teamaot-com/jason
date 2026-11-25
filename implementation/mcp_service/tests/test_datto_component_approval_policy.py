@@ -372,3 +372,96 @@ def test_exact_technician_approved_reboot_with_failed_narrower_remedy_has_bound_
     assert not any(key == "jason_remediation_review" for key in calls[0].arguments)
     assert any(value.startswith("least-disruptive-remediation-v1:")
                for value in calls[0].policy_ids)
+
+# Exact production Jason root identity probe (not a worker enrollment).
+JASON_ROOT_UID = "85fc3097-ac2f-18b2-afc4-6cf07131275d"
+JASON_PROBE_ENV = "JASON_DATTO_JASON_ROOT_PROBE_DEVICE_UID"
+JASON_PROBE_ALLOWLIST = "aot-jason-root-identity-readonly"
+
+
+def root_probe_arguments(**overrides):
+    row = {"device_uid": JASON_ROOT_UID, "component_name": LINUX_SHELL_NAME,
+           "variables": {"usrInput": "id -u"}}
+    row.update(overrides)
+    return row
+
+
+def test_jason_root_probe_requires_exact_release_gate(monkeypatch):
+    import pytest
+    set_linux_worker_scope(monkeypatch)
+    monkeypatch.delenv(JASON_PROBE_ENV, raising=False)
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", JASON_ROOT_UID)
+    with pytest.raises(ValueError, match="DATTO_JASON_ROOT_PROBE_NOT_ENROLLED"):
+        server._canonicalize_governed_action_arguments(
+            "automation.component.execute", root_probe_arguments()
+        )
+
+
+def test_jason_root_probe_is_exact_device_command_and_no_extra_variables(monkeypatch):
+    import pytest
+    set_linux_worker_scope(monkeypatch)
+    monkeypatch.setenv(JASON_PROBE_ENV, JASON_ROOT_UID)
+    monkeypatch.delenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", raising=False)
+    approved = server._canonicalize_governed_action_arguments(
+        "automation.component.execute", root_probe_arguments()
+    )
+    assert approved["device_uid"] == JASON_ROOT_UID
+    assert approved["allowlist_name"] == JASON_PROBE_ALLOWLIST
+    assert approved["device_class"] == "Desktop"
+    assert approved["component_uid"] == LINUX_SHELL_UID
+    assert approved["variables"] == {"usrInput": "id -u"}
+    mode = server.resolve_datto_component(
+        server._active_datto_execution_components(),
+        component_uid=LINUX_SHELL_UID, component_name=LINUX_SHELL_NAME,
+    )
+    assert mode.requires_explicit_approval is True
+    for variables in ({}, {"usrInput": "id"}, {"usrInput": "id -u; id"},
+                      {"usrInput": "id -u\n"}, {"usrInput": "id -u", "extra": "x"}):
+        with pytest.raises(ValueError, match="DATTO_JASON_ROOT_PROBE_COMMAND_NOT_APPROVED"):
+            server._canonicalize_governed_action_arguments(
+                "automation.component.execute", root_probe_arguments(variables=variables)
+            )
+    with pytest.raises(ValueError, match="DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED"):
+        server._canonicalize_governed_action_arguments(
+            "automation.component.execute", root_probe_arguments(device_uid="other")
+        )
+
+
+def test_jason_root_probe_requires_separate_per_run_approval(monkeypatch):
+    set_linux_worker_scope(monkeypatch)
+    monkeypatch.setenv(JASON_PROBE_ENV, JASON_ROOT_UID)
+    monkeypatch.delenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", raising=False)
+    approvals, calls = install_runtime(monkeypatch)
+    result = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments=root_probe_arguments()
+    )
+    assert result["status"] == "rejected"
+    assert calls == [] and approvals == []
+
+def test_jason_root_probe_positive_approval_is_exact_per_run(monkeypatch, tmp_path):
+    ledger = server.SQLiteGovernedExecutionLedger(str(tmp_path / "probe-approvals.sqlite3"))
+    ledger.initialize()
+    monkeypatch.setattr(server, "_governed_execution_ledger", lambda: ledger)
+    set_linux_worker_scope(monkeypatch)
+    monkeypatch.setenv(JASON_PROBE_ENV, JASON_ROOT_UID)
+    monkeypatch.delenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", raising=False)
+    approvals, calls = install_runtime(monkeypatch)
+    review = {
+        "decision": "recommend",
+        "target_id": JASON_ROOT_UID,
+        "problem": "Confirm DRMM shell execution identity without privileged host changes.",
+        "evidence_refs": ["corr_mcp_jason_device_read"],
+        "expected_improvement": "Read-only confirmation of root UID for the exact DRMM job.",
+        "verification": "Read terminal Datto job stdout showing UID 0 and exit 0.",
+        "narrower_options": [],
+    }
+    result = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments={**root_probe_arguments(), "jason_remediation_review": review},
+        explicit_approval=True,
+    )
+    assert result["status"] == "succeeded"
+    assert len(calls) == 1 and len(approvals) == 1
+    assert approvals[0].decided_by == "person-al"
+    assert calls[0].arguments["variables"] == {"usrInput": "id -u"}

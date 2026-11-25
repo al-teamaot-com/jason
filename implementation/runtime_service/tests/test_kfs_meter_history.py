@@ -12,6 +12,8 @@ from orchestrator.print_capability_catalog import (
     KYOCERA_KFS_PROVIDER,
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
+    PRINT_METER_USAGE_SEARCH,
+    PRINT_FLEET_USAGE_RANK,
 )
 
 
@@ -46,6 +48,14 @@ class FakeStore:
             "period_start": start.isoformat(),
             "period_end": end.isoformat(),
             "usage": {"total_impressions": 1234},
+            "warnings": [],
+        }
+
+    def usage_search(self, *, arguments, start, end):
+        return {
+            "period_start": start.isoformat(),
+            "period_end": end.isoformat(),
+            "records": [{"device_id": "dev-1", "total_impressions": 1234}],
             "warnings": [],
         }
 
@@ -86,11 +96,15 @@ def test_meter_history_authority_seeds_exact_aot_observe_grants():
     assert created == (
         "production-kfs-read-print-meter-history-search",
         "production-kfs-read-print-meter-usage-read",
+        "production-kfs-read-print-meter-usage-search",
+        "production-kfs-read-print-fleet-usage-rank",
     )
     grants = list(authority.grants.values.values())
     assert {grant.capability for grant in grants} == {
         PRINT_METER_HISTORY_SEARCH,
         PRINT_METER_USAGE_READ,
+        PRINT_METER_USAGE_SEARCH,
+        PRINT_FLEET_USAGE_RANK,
     }
     assert all(grant.subject_id == "organization:aot" for grant in grants)
     assert all(grant.organization_id == "aot" for grant in grants)
@@ -106,7 +120,7 @@ def test_meter_history_authority_is_idempotent_and_disabled_by_default():
 
     first = ensure_meter_history_read_authority(authority, enabled=True)
     second = ensure_meter_history_read_authority(authority, enabled=True)
-    assert len(first) == 2
+    assert len(first) == 4
     assert second == ()
 
 

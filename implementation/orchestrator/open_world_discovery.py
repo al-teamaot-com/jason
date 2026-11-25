@@ -141,6 +141,22 @@ class OpenWorldResourceDiscovery:
                     )
                 )
 
+            raw_filter_bindings = metadata.get(
+                "query_filter_bindings",
+                {},
+            )
+            query_filter_bindings = []
+            if isinstance(raw_filter_bindings, Mapping):
+                for field_path, operators in raw_filter_bindings.items():
+                    if not isinstance(operators, Mapping):
+                        continue
+                    for operator, argument_name in operators.items():
+                        field = str(field_path).strip()
+                        op = str(operator).strip().casefold()
+                        argument = str(argument_name).strip()
+                        if field and op and argument:
+                            query_filter_bindings.append((field, op, argument))
+
             collection_supported = (
                 operation == "search"
                 and not _truthy(
@@ -180,6 +196,9 @@ class OpenWorldResourceDiscovery:
                             fields=declared_fields,
                             selector_source_policy=(
                                 selector_source_policy
+                            ),
+                            query_filter_bindings=tuple(
+                                query_filter_bindings
                             ),
                         )
                     )
@@ -269,12 +288,21 @@ class OpenWorldResourceDiscovery:
                 )
             )
 
+        descriptions = metadata.get("field_descriptions", {})
+        if not isinstance(descriptions, Mapping):
+            descriptions = {}
+
         unique = {}
 
         for field in fields:
-            unique.setdefault(
-                field.path,
-                field,
+            if field.path in unique:
+                continue
+            description = str(descriptions.get(field.path) or field.description or "").strip() or None
+            unique[field.path] = DiscoveredField(
+                name=field.name,
+                path=field.path,
+                value_type=field.value_type,
+                description=description,
             )
 
         return tuple(

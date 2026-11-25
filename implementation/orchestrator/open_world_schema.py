@@ -48,6 +48,10 @@ class DiscoveredResourceSchema:
         tuple[str, str],
         ...
     ] = ()
+    query_filter_bindings: tuple[
+        tuple[str, str, str],
+        ...
+    ] = ()
 
     @property
     def resource_handle(self) -> str:
@@ -116,6 +120,10 @@ class OpenWorldResourceCatalog:
                         for key, policy
                         in item.selector_source_policy
                     },
+                    "lookup_fields": sorted({
+                        field for field, operator, _ in item.query_filter_bindings
+                        if operator == "eq"
+                    }),
                     "fields": [
                         {
                             "name": field.name,

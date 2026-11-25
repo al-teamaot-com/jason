@@ -1,0 +1,89 @@
+{
+  "authority_granted": false,
+  "facts_sha256": "f29b924cac470c6839ac296c4c01793530ae400d4fc0629ce871ad686ce6556c",
+  "fingerprint": "d0b54b17155b7126226242d462ccb8db3180654a244a5ce92ab8e1bb219f7ad7",
+  "instructions": [
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "page_size": 2,
+        "resource_id": 143305
+      },
+      "capability": "service.ticket.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_readonly_triage_note",
+      "step_id": "read_ticket",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "ticket_id": 143305
+      },
+      "capability": "service.ticket.notes.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_readonly_triage_note",
+      "step_id": "read_notes",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "arguments": {
+        "payload": {
+          "description": "JASON READ-ONLY INVESTIGATION - synthetic evidence only",
+          "noteType": 3,
+          "publish": 2,
+          "ticketID": 143305,
+          "title": "Jason - Governed Read-Only Investigation"
+        }
+      },
+      "capability": "service.ticket.note.create",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_readonly_triage_note",
+      "step_id": "note_create",
+      "step_type": "remediation",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "ticket_id": 143305
+      },
+      "capability": "service.ticket.notes.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_readonly_triage_note",
+      "step_id": "readback_notes",
+      "step_type": "verification",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {},
+      "capability": null,
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_readonly_triage_note",
+      "step_id": "documented",
+      "step_type": "complete",
+      "terminal": true,
+      "version": "1.0.0-migration.1"
+    }
+  ],
+  "mode": "synthetic_shadow_trace",
+  "operational_acceptance": false,
+  "playbook_id": "unsupported_readonly_triage_note",
+  "provider_calls": 0,
+  "provider_mutations": 0,
+  "terminal_step": "documented",
+  "version": "1.0.0-migration.1"
+}

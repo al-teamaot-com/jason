@@ -1,0 +1,407 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "drmm_recent_alert_reconciliation",
+    "name": "Jason - DRMM Recent Alert Reconciliation",
+    "version": "1.0.0-migration.1",
+    "lifecycle": "pilot",
+    "target_type": "provider_object",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-DRMM-Recent-Alert-Reconciliation.md"
+  },
+  "trigger": {
+    "provider": "Datto RMM",
+    "status": "open",
+    "rolling_lookback_hours": 24,
+    "cadence_hours": 24
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "historical_backlog_cleanup": false,
+    "endpoint_remediation": false,
+    "supported_alert_class": [
+      "endpoint_security_threat_ctx"
+    ],
+    "requires_exact_ticket_number": true
+  },
+  "expected_state": {
+    "alert_exactly_resolved": true,
+    "linked_ticket_completed_only_after_provider_readback": true
+  },
+  "state_model": {
+    "entry_step": "read_open_alerts",
+    "persist": [
+      "last_started_at",
+      "last_completed_at",
+      "last_summary_json",
+      "current_alert_uid",
+      "device_uid",
+      "ticket_number"
+    ],
+    "cadence_hours": 24,
+    "resume": "existing_scheduler_contract"
+  },
+  "steps": [
+    {
+      "id": "read_open_alerts",
+      "type": "diagnostic",
+      "capability": "management.alert.search",
+      "arguments": {
+        "status": "open"
+      },
+      "next": "recent_gate"
+    },
+    {
+      "id": "recent_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "alert_in_24_hour_window",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "exact_uid_gate"
+        }
+      ],
+      "default": "skip_no_mutation"
+    },
+    {
+      "id": "exact_uid_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_alert_device_identity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "verifier_gate"
+        }
+      ],
+      "default": "skip_no_mutation"
+    },
+    {
+      "id": "verifier_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "registered_alert_class",
+            "operator": "eq",
+            "value": "endpoint_security_threat_ctx"
+          },
+          "next": "read_device"
+        }
+      ],
+      "default": "skip_no_mutation"
+    },
+    {
+      "id": "read_device",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "online_gate"
+    },
+    {
+      "id": "online_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_endpoint_online",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_security_status"
+        }
+      ],
+      "default": "skip_no_mutation"
+    },
+    {
+      "id": "read_security_status",
+      "type": "diagnostic",
+      "capability": "endpoint.security.status.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "engine_gate"
+    },
+    {
+      "id": "engine_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_agent_and_av_engine_healthy",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_active_detections"
+        }
+      ],
+      "default": "skip_no_mutation"
+    },
+    {
+      "id": "read_active_detections",
+      "type": "diagnostic",
+      "capability": "endpoint.security.detection.search",
+      "arguments": {
+        "agent_id": {
+          "$fact": "agent_id"
+        },
+        "archived": false,
+        "limit": 50
+      },
+      "next": "detections_gate"
+    },
+    {
+      "id": "detections_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "current_nonarchived_detection_count",
+            "operator": "eq",
+            "value": 0
+          },
+          "next": "approval_gate"
+        }
+      ],
+      "default": "skip_no_mutation"
+    },
+    {
+      "id": "approval_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_reconciliation_owner_promotion_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "resolve_alert"
+        }
+      ],
+      "default": "skip_no_mutation"
+    },
+    {
+      "id": "resolve_alert",
+      "type": "remediation",
+      "capability": "endpoint.alert.resolve",
+      "arguments": {
+        "alert_uid": {
+          "$fact": "alert_uid"
+        },
+        "device_uid": {
+          "$fact": "device_uid"
+        }
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "verification_step": "read_resolved_history",
+      "retry": {
+        "max_attempts": 1
+      }
+    },
+    {
+      "id": "read_resolved_history",
+      "type": "verification",
+      "capability": "endpoint.alert.history.search",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "resolved_gate"
+    },
+    {
+      "id": "resolved_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_alert_resolution_readback_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "ticket_link_gate"
+        }
+      ],
+      "default": "failed_readback"
+    },
+    {
+      "id": "ticket_link_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_alert_ticket_number_present",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_linked_ticket"
+        }
+      ],
+      "default": "alert_resolved"
+    },
+    {
+      "id": "read_linked_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.search",
+      "arguments": {
+        "ticket_number": {
+          "$fact": "ticket_number"
+        },
+        "page_size": 5
+      },
+      "next": "ticket_open_gate"
+    },
+    {
+      "id": "ticket_open_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "unique_exact_linked_ticket_open",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "document_resolution"
+        }
+      ],
+      "default": "alert_resolved"
+    },
+    {
+      "id": "document_resolution",
+      "type": "remediation",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "payload": {
+          "ticketID": {
+            "$fact": "ticket_id"
+          },
+          "title": "Jason - Scheduled DRMM Reconciliation - Resolution",
+          "description": {
+            "$fact": "resolution_note"
+          },
+          "noteType": 3,
+          "publish": 2
+        }
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "verification_step": "complete_ticket",
+      "retry": {
+        "max_attempts": 1
+      }
+    },
+    {
+      "id": "complete_ticket",
+      "type": "remediation",
+      "capability": "service.ticket.update",
+      "arguments": {
+        "payload": {
+          "id": {
+            "$fact": "ticket_id"
+          },
+          "status": "Complete"
+        }
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "verification_step": "read_completed_ticket",
+      "retry": {
+        "max_attempts": 1
+      }
+    },
+    {
+      "id": "read_completed_ticket",
+      "type": "verification",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "ticket_id"
+        }
+      },
+      "next": "ticket_complete_gate"
+    },
+    {
+      "id": "ticket_complete_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_ticket_complete_readback_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "ticket_reconciled"
+        }
+      ],
+      "default": "failed_readback"
+    },
+    {
+      "id": "ticket_reconciled",
+      "type": "complete"
+    },
+    {
+      "id": "alert_resolved",
+      "type": "complete"
+    },
+    {
+      "id": "skip_no_mutation",
+      "type": "complete"
+    },
+    {
+      "id": "failed_readback",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Datto RMM endpoint.alert.history.search and Autotask service.ticket.read",
+    "success_condition": "exact alertUid resolved readback and, for linked open exact ticket, status 5 readback"
+  },
+  "completion": {
+    "terminal_disposition": "exact recovered security alert resolved and optional exact linked ticket reconciled; otherwise no mutation"
+  },
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "endpoint.alert.history.search",
+      "endpoint.alert.resolve",
+      "endpoint.device.read",
+      "endpoint.security.detection.search",
+      "endpoint.security.status.read",
+      "management.alert.search",
+      "service.ticket.note.create",
+      "service.ticket.read",
+      "service.ticket.search",
+      "service.ticket.update"
+    ],
+    "approval_bound_branches": [
+      "resolve_alert",
+      "document_resolution",
+      "complete_ticket"
+    ],
+    "disruptive_branches": []
+  },
+  "migration": {
+    "status": "candidate_not_accepted",
+    "legacy_source_blob_sha": "076872fae94f49d3daa3dc1b8740bd99fee75ee2",
+    "known_gaps": [
+      "Single registered endpoint_security_threat_ctx verifier relies on existing Python verifier and trusted normalized facts from Datto provider; no JSON-bound governed verifier capability proven.",
+      "The current JSON interpreter cannot provide durable 24-hour sweep scheduling, alert-item iteration, provider result-to-fact mapping or multi-alert fanout.",
+      "After creating an internal resolution note the legacy worker immediately updates the ticket without independent note readback; broader new readback requirement must be defined and parity-tested before acceptance.",
+      "The existing worker does not expose general exact-owner promotion as an explicit internal gate; the JSON candidate adds a conservative gate and requires existing Central Orchestrator enforcement.",
+      "No actual isolated end-to-end shadow, provider write, nor unattended ticket completion acceptance has been performed."
+    ],
+    "production_activation_authorized": false
+  }
+}

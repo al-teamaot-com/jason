@@ -32,17 +32,13 @@ def _deployment_harness(tmp_path: Path, *, actual_image_rev: str) -> tuple[Path,
     script.write_text(DEPLOY.read_text(encoding="utf-8"), encoding="utf-8")
     script.chmod(0o755)
 
-    # The real immutable runtime deploy now checks both provider-read and
-    # release-approval policies BEFORE it reaches the rollback image proof.
-    # Preserve those checks in the disposable harness; never change the
-    # production deploy script just to make a stale mock pass.
-    config = root / "config"
-    config.mkdir()
-    for name in (
-        "autotask-entity-read-profile.json",
-        "mobile-release-approval-policy.json",
-    ):
-        shutil.copy2(REPO / "config" / name, config / name)
+    profile = root / "config/autotask-entity-read-profile.json"
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    profile.write_bytes((REPO / "config/autotask-entity-read-profile.json").read_bytes())
+    policy = root / "config/mobile-release-approval-policy.json"
+    policy.write_bytes((REPO / "config/mobile-release-approval-policy.json").read_bytes())
+    universal = root / "config/universal-query-activation.json"
+    universal.write_bytes((REPO / "config/universal-query-activation.json").read_bytes())
 
     tools = root / "tools"
     tools.mkdir()
@@ -64,11 +60,9 @@ exit 99
     env.update({
         "PATH": str(b) + os.pathsep + env["PATH"],
         "FAKE_IMAGE_REVISION": actual_image_rev,
+        "JASON_PM_V2_CONTROL_PROFILE": "",
         # Prevent touching installed QuickBooks/profile state in the fake deploy.
         "JASON_QUICKBOOKS_READ_PROFILE": "",
-        # Keep inherited live-service reads out of the isolated harness.
-        # Empty is the already-reviewed rollback preflight mode.
-        "JASON_PM_V2_CONTROL_PROFILE": "",
         "JASON_SOURCE_REVISION_OVERRIDE": LKG,
         "JASON_RUNTIME_PRODUCTION_IMAGE": "jason-runtime:rollback-current",
     })
@@ -112,6 +106,28 @@ def test_rollback_refuses_other_image_revision_and_never_invokes_deploy(tmp_path
     assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
 
 
+def test_regular_deployment_cannot_use_rollback_manifest_exception(tmp_path):
+    script, env = _deployment_harness(tmp_path, actual_image_rev=LKG)
+    env["JASON_RUNTIME_PRODUCTION_IMAGE"] = "jason-runtime:production"
+    completed = subprocess.run(
+        ["bash", str(script), "--preflight"],
+        env=env, capture_output=True, text=True,
+    )
+    # The fake source does not have the ordinary strict UAT source-verifier;
+    # it must fail rather than silently taking the rollback-only OFF shortcut.
+    assert completed.returncode != 0
+    assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
+
+
+def test_grafana_diagnostics_are_independent_of_production_release():
+    script = RECONCILE.read_text(encoding="utf-8")
+    assert 'JASON_OBSERVABILITY_RELEASE_GATE=NOT_REQUIRED' in script
+    assert 'step_start production_drift_guard' in script
+    assert 'step_start post_exporter_grafana_assurance' not in script
+    assert 'systemctl start jason-grafana-assurance.service' not in script
+    assert (REPO / 'tools/grafana_assurance.py').is_file()
+
+
 def test_rollback_denies_missing_immutable_provider_read_policy(tmp_path):
     script, env = _deployment_harness(tmp_path, actual_image_rev=LKG)
     (script.parents[2] / "config" / "autotask-entity-read-profile.json").unlink()
@@ -136,88 +152,14 @@ def test_rollback_denies_missing_immutable_release_approval_policy(tmp_path):
     assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
 
 
-def test_regular_deployment_cannot_use_rollback_manifest_exception(tmp_path):
+
+def test_rollback_denies_missing_immutable_universal_query_profile(tmp_path):
     script, env = _deployment_harness(tmp_path, actual_image_rev=LKG)
-    env["JASON_RUNTIME_PRODUCTION_IMAGE"] = "jason-runtime:production"
+    (script.parents[2] / "config" / "universal-query-activation.json").unlink()
     completed = subprocess.run(
         ["bash", str(script), "--preflight"],
         env=env, capture_output=True, text=True,
     )
-    # The fake source does not have the ordinary strict UAT source-verifier;
-    # it must fail rather than silently taking the rollback-only OFF shortcut.
-    assert completed.returncode != 0
+    assert completed.returncode == 2
+    assert "immutable universal-query activation profile absent" in completed.stderr
     assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
-
-
-def _grafana_harness(tmp_path: Path, *, succeed_after: int = 1, installed: bool = True):
-    script = RECONCILE.read_text(encoding="utf-8")
-    start = script.index("step_start post_exporter_grafana_assurance")
-    end_text = "step_pass post_exporter_grafana_assurance"
-    end = script.index(end_text, start) + len(end_text)
-    snippet = script[start:end]
-    assert script.index("step_pass exporter_verification") < start
-    assert end < script.index("step_start production_drift_guard")
-    assert "systemctl start jason-grafana-assurance.service" in snippet
-    assert "systemctl show jason-grafana-assurance.service -p Result --value" in snippet
-
-    b = tmp_path / "bin"
-    b.mkdir()
-    counter = tmp_path / "starts"
-    _bin(b, "systemctl", """#!/usr/bin/env bash
-case "$1" in
-  cat)
-    [ "$TEST_ASSURANCE_INSTALLED" = "yes" ]
-    exit ;;
-  start)
-    count=0
-    if [ -f "$TEST_ASSURANCE_COUNTER" ]; then count="$(cat "$TEST_ASSURANCE_COUNTER")"; fi
-    count=$((count + 1))
-    echo "$count" > "$TEST_ASSURANCE_COUNTER"
-    [ "$count" -ge "$TEST_ASSURANCE_SUCCEED_AFTER" ] ;;
-  show)
-    count=0
-    if [ -f "$TEST_ASSURANCE_COUNTER" ]; then count="$(cat "$TEST_ASSURANCE_COUNTER")"; fi
-    if [ "$count" -ge "$TEST_ASSURANCE_SUCCEED_AFTER" ]; then echo success; else echo exit-code; fi ;;
-  status)
-    echo "mock assurance failed" ;;
-  *) exit 97 ;;
-esac
-""")
-    _bin(b, "timeout", """#!/usr/bin/env bash
-shift 3
-exec "$@"
-""")
-    _bin(b, "sleep", "#!/usr/bin/env bash\nexit 0\n")
-    env = os.environ.copy()
-    env.update({
-        "PATH": str(b) + os.pathsep + env["PATH"],
-        "TEST_ASSURANCE_INSTALLED": "yes" if installed else "no",
-        "TEST_ASSURANCE_COUNTER": str(counter),
-        "TEST_ASSURANCE_SUCCEED_AFTER": str(succeed_after),
-    })
-    command = "step_start() { :; }\nstep_pass() { :; }\n" + snippet
-    return subprocess.run(["bash", "-c", command], env=env, capture_output=True, text=True), counter
-
-
-def test_real_assurance_success_is_required_before_drift_guard(tmp_path):
-    result, counter = _grafana_harness(tmp_path, succeed_after=2)
-    assert result.returncode == 0, result.stderr
-    assert "GRAFANA_POST_EXPORTER_ASSURANCE=PASS attempt=2" in result.stdout
-    assert counter.read_text().strip() == "2"
-
-
-def test_missing_prometheus_gauges_still_fail_closed_after_bounded_rechecks(tmp_path):
-    result, counter = _grafana_harness(tmp_path, succeed_after=99)
-    assert result.returncode == 9
-    assert "real Grafana assurance remains failed" in result.stderr
-    # The reviewed scrape-interval recovery now permits up to 12 real
-    # rechecks inside the bounded 150-second window, not the historical 3.
-    # Our mocked sleep makes all 12 attempts complete immediately.
-    assert counter.read_text().strip() == "12"
-
-
-def test_optional_assurance_not_installed_is_identified(tmp_path):
-    result, counter = _grafana_harness(tmp_path, installed=False)
-    assert result.returncode == 0
-    assert "GRAFANA_POST_EXPORTER_ASSURANCE=NOT_INSTALLED" in result.stdout
-    assert not counter.exists()

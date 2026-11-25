@@ -214,6 +214,9 @@ def _read_capability(
     collection_fact: str = "",
     canonical_facts: str = "",
     client_isolation_required: bool = False,
+    resource_schema: dict | None = None,
+    query_filter_bindings: dict | None = None,
+    field_descriptions: dict | None = None,
 ) -> CapabilityDefinition:
     """Build a provider-neutral, read-only capability awaiting live acceptance.
 
@@ -240,6 +243,12 @@ def _read_capability(
         metadata["collection_fact"] = collection_fact
     if canonical_facts:
         metadata["canonical_facts"] = canonical_facts
+    if resource_schema:
+        metadata["resource_schema"] = resource_schema
+    if query_filter_bindings:
+        metadata["query_filter_bindings"] = query_filter_bindings
+    if field_descriptions:
+        metadata["field_descriptions"] = field_descriptions
 
     return CapabilityDefinition(
         capability_name=capability_name,
@@ -537,6 +546,12 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             fact_hints="company,client,organization,account,status,phone,address",
             authoritative_change_sources=at,
             collection_fact="companies",
+            resource_schema={"id": 0, "companyName": "", "isActive": True},
+            query_filter_bindings={"id": {"eq": "resource_id"}},
+            field_descriptions={
+                "id": "Autotask company identifier",
+                "companyName": "service company/client display name",
+            },
         ),
         _read_capability(
             now=now,
@@ -766,7 +781,7 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             resource_types="service_configuration,configuration",
             operation="search",
             selector_keys=(
-                "company_id,name,resource_id,filters,page_size,after_resource_id"
+                "company_id,name,serial_number,resource_id,filters,page_size,after_resource_id"
             ),
             fact_hints=(
                 "configuration item,configuration items,device,asset,serial number,"
@@ -774,6 +789,21 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             ),
             authoritative_change_sources=at,
             collection_fact="configuration items",
+            resource_schema={
+                "id": 0, "companyID": 0, "serialNumber": "",
+                "referenceNumber": "", "referenceTitle": "", "isActive": True,
+            },
+            query_filter_bindings={
+                "id": {"eq": "resource_id"},
+                "companyID": {"eq": "company_id"},
+                "serialNumber": {"eq": "serial_number"},
+            },
+            field_descriptions={
+                "serialNumber": "configuration item serial number; safe for exact unique lookup",
+                "companyID": "Autotask company identifier owning this configuration item",
+                "referenceNumber": "service configuration reference/device identifier",
+                "referenceTitle": "service configuration display title/model",
+            },
         ),
         _read_capability(
             now=now,

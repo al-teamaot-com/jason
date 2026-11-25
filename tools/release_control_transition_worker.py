@@ -167,6 +167,70 @@ def verify_drift() -> None:
             raise ValueError('root-owned drift evidence is stale after independent refresh')
 
 
+def restore_previous_verified_lkg(req: dict, state: dict) -> dict:
+    """Recover the root-attested prior LKG after an incomplete later rollback.
+
+    Do not clear the breaker or waive drift. The prior immutable manifest must
+    match the actual live host/runtime/MCP and a closed, approved historic
+    release record. Only the specific failed obsolete CCC oneshot is accepted
+    as the live drift reason. The original LKG is retained as previous.
+    """
+    revision = req['revision']
+    breaker = state.get('circuit_breaker') or {}
+    if (breaker.get('state') != 'open'
+            or breaker.get('source') != 'production_drift_watchdog'
+            or breaker.get('reason') != 'continuous_production_drift_detected'):
+        raise ValueError('root prior-LKG recovery requires an open CCC drift breaker')
+    drift = protected_read(DRIFT)
+    # Following approved CCC retirement, the independent evaluator may have
+    # already cleared the exact obsolete-unit failure. Retain the previously
+    # reviewed CCC-only incident case, but also accept a real root-owned PASS.
+    # Never accept any other failed, stale, or caller-provided drift report.
+    clean = drift.get('status') == 'pass' and drift.get('problems') == []
+    historical_ccc = (drift.get('status') == 'drift_detected'
+        and drift.get('problems') == [
+            {'kind':'failed_system_unit','state':'failed','unit':'jason-ccc.service'}
+        ])
+    if not (clean or historical_ccc):
+        raise ValueError('root prior-LKG recovery requires independent PASS or exact legacy CCC-only failure')
+    previous = state.get('previous_last_known_good') or {}
+    current = state.get('last_known_good') or {}
+    prior_manifest = previous.get('manifest') or {}
+    newer_manifest = current.get('manifest') or {}
+    if (prior_manifest.get('revision') != revision
+            or prior_manifest.get('complete') is not True
+            or newer_manifest.get('complete') is not True
+            or newer_manifest.get('revision') == revision):
+        raise ValueError('root prior-LKG recovery requires two distinct complete protected LKGs')
+    release_id = 'release-' + revision[:16]
+    if (req.get('release_id') != release_id
+            or previous.get('release_id') != release_id):
+        raise ValueError('root prior-LKG recovery historical release identity mismatch')
+    path = ROOT / 'records' / (release_id + '.json')
+    info = path.lstat()
+    if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != pwd.getpwnam('al').pw_uid
+            or info.st_mode & 0o077):
+        raise PermissionError('root prior-LKG recovery record ownership invalid')
+    record = json.loads(path.read_text(encoding='utf-8'))
+    production = record.get('production') or {}
+    approval = record.get('owner_approval') or {}
+    if (record.get('state') != 'closed'
+            or (record.get('release_candidate') or {}).get('candidate_sha') != revision
+            or approval.get('approved') is not True
+            or approval.get('candidate_sha') != revision
+            or production.get('live_sha') != revision
+            or not production.get('verified_at')):
+        raise ValueError('root prior-LKG recovery previous release lacks verified approval')
+    observed = verify_health(revision)
+    verify_immutable_lkg_fingerprint(prior_manifest, observed)
+    # Preserve the existing open breaker and original root-evidenced LKG.
+    state['last_known_good'] = previous
+    state['previous_last_known_good'] = current
+    state['last_revalidation'] = observed
+    return state
+
+
 def apply_transition(req: dict, state: dict) -> dict:
     action=req['action'];revision=req['revision']
     if action=='open':

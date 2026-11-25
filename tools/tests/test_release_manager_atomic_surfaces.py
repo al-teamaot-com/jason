@@ -89,6 +89,7 @@ def record():
                 "JASON_MCP_PRODUCTION_IMAGE": "jason-mcp:test-a",
                 "JASON_SOURCE_REVISION_OVERRIDE": SHA_A,
                 "JASON_RELEASE_MOBILE_APPROVAL_MODE": "owner_reviewed",
+                "JASON_AOT_ADMIN_APPROVER_PROFILE": "",
             }),
         },
         "history": [],
@@ -168,6 +169,9 @@ def atomic_release_sandbox(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr(runner, "verify_candidate_on_main", lambda *a: None)
+    # Fault-injection tests use synthetic SHAs and must never fetch Git.
+    # Exact root-source fail-closed behavior is covered in the host runner suite.
+    monkeypatch.setattr(runner, "ensure_managed_host_source_revision", lambda *a: None)
     monkeypatch.setattr(runner, "require_current_protected_release_source", lambda *a: None)
     monkeypatch.setattr(runner, "require_current_manual_scope_review", lambda *a: None)
     monkeypatch.setattr(runner, "run_release_ccc_gate",
@@ -198,7 +202,7 @@ def atomic_release_sandbox(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "run_functional_smoke_tests",
                         lambda sha: {"passed": True, "verified_at": "2026-10-18T13:50:00+00:00"})
     monkeypatch.setattr(runner, "production_drift_evidence",
-                        lambda *a: {"problems": [], "observed_at": "2026-10-18T13:50:00+00:00"})
+                        lambda *a: {"status": "pass", "problems": [], "observed_at": "2026-10-18T13:50:00+00:00"})
     monkeypatch.setattr(runner, "declared_quickbooks_read_profile", lambda *a: None)
     monkeypatch.setattr(runner, "live_quickbooks_read_profile",
                         lambda *a: sorted(runner.QUICKBOOKS_READ_PROFILES)[0])
@@ -503,7 +507,9 @@ def test_mcp_candidate_uses_established_governed_base_not_production():
     source = (ROOT / "tools" / "release_manager_host_runner.py").read_text(
         encoding="utf-8"
     )
-    assert 'base = "jason-mcp:generic-governed-8f1e864947a2"' in source
+    assert 'canonical = "jason-mcp:generic-governed-8f1e864947a2"' in source
+    assert "verified_mcp_preproduction_base(state_root)" in source
+    assert "root-attested V2 recovery base" in source
     assert 'base = "jason-mcp:production"' not in source
 
 

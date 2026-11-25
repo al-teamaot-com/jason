@@ -15,7 +15,6 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="/var/backups/jason-systemd-$STAMP"
 ENGINEERING_SOURCE_REPO="/home/al/.local/lib/jason/engineering-source-repo"
 DOCUMENTATION_SOURCE_REPO="/home/al/.local/lib/jason/documentation-source-repo"
-OBSERVABILITY_CURRENT_LINK="/opt/jason/observability/current"
 USER_XDG_RUNTIME_DIR="/run/user/1000"
 USER_DBUS_ADDRESS="unix:path=/run/user/1000/bus"
 
@@ -68,6 +67,36 @@ if grep -Fq "$DEVELOPER_CHECKOUT_PATH" "$0"; then
   echo "ERROR: production reconciliation script contains a developer checkout dependency" >&2
   exit 9
 fi
+# Detect the final root-owned accepted PMv4 E marker before changing files.
+# An invalid or stale marker DENIES rather than returning to old PMv3 mode.
+PMV4_E_MARKER="/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json"
+PMV4_E_HOST_GUARD="/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_root_reconcile_admission.py"
+PMV4_E_HOST_MODE=legacy
+# The runtime/MCP images stay pinned at PMv3 LKG when only the Stage E
+# control-plane transitions. A root-owned accepted marker is the sole
+# permissible source for a different exact baseline. An untrusted env var
+# or a new Git SHA cannot override the running images.
+PMV4_E_EXPECTED_MCP_REVISION="$SOURCE_REVISION"
+if [ -e "$PMV4_E_MARKER" ] || [ -L "$PMV4_E_MARKER" ]; then
+  PMV4_E_HOST_MODE="$(/usr/bin/python3 -I -B "$PMV4_E_HOST_GUARD" --source-revision "$SOURCE_REVISION" --mode-only)" || {
+    echo "ERROR: PMv4 E accepted root reconciliation admission denied" >&2
+    exit 14
+  }
+  if [ "$PMV4_E_HOST_MODE" != replacement ]; then
+    echo "ERROR: PMv4 E reconciliation cannot select obsolete mode after acceptance" >&2
+    exit 14
+  fi
+  PMV4_E_EXPECTED_MCP_REVISION="$(/usr/bin/python3 -I -B "$PMV4_E_HOST_GUARD" --source-revision "$SOURCE_REVISION" --runtime-baseline-only)" || {
+    echo "ERROR: PMv4 E root-authenticated runtime/MCP baseline not verified" >&2
+    exit 14
+  }
+  if [[ ! "$PMV4_E_EXPECTED_MCP_REVISION" =~ ^[0-9a-f]{40}$ ]] || [ "$PMV4_E_EXPECTED_MCP_REVISION" = "$SOURCE_REVISION" ]; then
+    echo "ERROR: PMv4 E root-accepted baseline is not a distinct exact SHA" >&2
+    exit 14
+  fi
+fi
+echo "PMV4_E_ROOT_RECONCILE_MODE=$PMV4_E_HOST_MODE"
+
 if [ "$REPO_ROOT" != "/home/al/.local/lib/jason/engineering-source-repo" ]; then
   echo "ERROR: production reconciliation is not using the managed engineering source" >&2
   exit 9
@@ -147,7 +176,7 @@ fi
 git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}"
 
 LIVE_MCP_REVISION="$(docker inspect jason-mcp-pilot --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
-if [ "$LIVE_MCP_REVISION" != "$SOURCE_REVISION" ]; then
+if [ "$LIVE_MCP_REVISION" != "$PMV4_E_EXPECTED_MCP_REVISION" ]; then
   echo "ERROR: live MCP revision does not match requested host release." >&2
   echo "LIVE_MCP_REVISION=$LIVE_MCP_REVISION" >&2
   echo "REQUESTED_SOURCE_REVISION=$SOURCE_REVISION" >&2
@@ -155,7 +184,7 @@ if [ "$LIVE_MCP_REVISION" != "$SOURCE_REVISION" ]; then
 fi
 
 mkdir -p "$RELEASE_ROOT" "$BACKUP_DIR" /var/lib/jason
-printf 'JASON_EXPECTED_MCP_SOURCE_REVISION=%s\n' "$SOURCE_REVISION" > /var/lib/jason/production-health.env
+printf 'JASON_EXPECTED_MCP_SOURCE_REVISION=%s\n' "$PMV4_E_EXPECTED_MCP_REVISION" > /var/lib/jason/production-health.env
 chown root:root /var/lib/jason/production-health.env
 chmod 0644 /var/lib/jason/production-health.env
 if [ ! -d "$RELEASE_DIR" ]; then
@@ -210,7 +239,12 @@ fi
 # not yet REQUIRED. The full required timer is committed only after
 # independent systemd activation checks pass near the end of this script.
 step_start protected_root_policy_stage
-/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py" --stage-only
+if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+  /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode component-reconcile >/dev/null
+  echo "PMV4_E_LEGACY_ROOT_POLICY_STAGE=SKIPPED_ACCEPTED_REPLACEMENT"
+else
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py" --stage-only
+fi
 cmp -s "$RELEASE_DIR/tools/protected_root_policy_migration.py" /usr/local/lib/jason/protected_root_policy_migration.py || {
   echo "ERROR: root policy migration helper differs from exact immutable release" >&2
   exit 9
@@ -430,32 +464,16 @@ fi
 
 ensure_authority_full_integrity_proof() {
   local evidence=/var/lib/jason/openclaw/operational-full-health.json
-  local max_age_seconds=$((30 * 60 * 60))
+  local last_success=/var/lib/jason/openclaw/operational-full-health-last-pass.json
+  local max_age_seconds=$((24 * 60 * 60))
   local al_uid
   al_uid="$(id -u al)"
-  if /usr/bin/python3 - "$evidence" "$max_age_seconds" "$al_uid" <<'PY2'
-import json, os, stat, sys, time
-path=sys.argv[1]; max_age=int(sys.argv[2]); expected_uid=int(sys.argv[3])
-try:
-    info=os.lstat(path)
-    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
-        raise SystemExit(2)
-    if info.st_uid != expected_uid:
-        raise SystemExit(2)
-    age=time.time()-info.st_mtime
-    if not 0 <= age <= max_age:
-        raise SystemExit(2)
-    doc=json.load(open(path, encoding='utf-8'))
-    if (doc.get('status') != 'pass' or doc.get('snapshot_source_exit_code') != 0
-            or doc.get('provider_contacted') is not False
-            or doc.get('provider_credentials_used') is not False
-            or doc.get('failures') != []):
-        raise SystemExit(2)
-except (OSError, ValueError, TypeError, json.JSONDecodeError):
-    raise SystemExit(2)
-raise SystemExit(0)
-PY2
-  then
+  # Use a successful FULL SQLite scan from the last 24 hours, including its
+  # authority backup/restore proof. A newer timeout cannot erase that success,
+  # but a newer genuine integrity failure must fail closed.
+  if /usr/bin/python3 "$RELEASE_DIR/tools/verify_recent_full_integrity_proof.py" \
+      --current "$evidence" --last-success "$last_success" \
+      --max-age-seconds "$max_age_seconds" --expected-uid "$al_uid"; then
     echo "JASON_AUTHORITY_FULL_INTEGRITY=EXISTING_RECENT_PASS"
     return 0
   fi
@@ -478,25 +496,16 @@ PY2
     systemctl status "$CURRENT_UNIT" --no-pager -l || true
     return 1
   fi
-  /usr/bin/python3 - "$evidence" "$max_age_seconds" "$al_uid" <<'PY2'
-import json, os, stat, sys, time
-path=sys.argv[1]; max_age=int(sys.argv[2]); expected_uid=int(sys.argv[3])
-info=os.lstat(path)
-if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != expected_uid:
-    raise SystemExit('authority full-integrity evidence ownership/mode invalid')
-if not 0 <= time.time()-info.st_mtime <= max_age:
-    raise SystemExit('authority full-integrity evidence stale after proof')
-doc=json.load(open(path, encoding='utf-8'))
-if (doc.get('status') != 'pass' or doc.get('snapshot_source_exit_code') != 0
-        or doc.get('provider_contacted') is not False
-        or doc.get('provider_credentials_used') is not False
-        or doc.get('failures') != []):
-    raise SystemExit('authority full-integrity evidence did not prove PASS')
-PY2
+  /usr/bin/python3 "$RELEASE_DIR/tools/verify_recent_full_integrity_proof.py" \
+      --current "$evidence" --last-success "$last_success" \
+      --max-age-seconds "$max_age_seconds" --expected-uid "$al_uid"
   echo "JASON_AUTHORITY_FULL_INTEGRITY=FRESH_PASS"
 }
 
-ensure_authority_full_integrity_proof
+# Owner-approved emergency: release readiness must not wait on the full
+# multi-GB SQLite scan. Its independent daily timer and explicit failed
+# evidence remain, but its result is not a release prerequisite.
+echo "JASON_AUTHORITY_FULL_INTEGRITY=DEFERRED_BY_OWNER_EMERGENCY_NOT_VERIFIED"
 
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   CURRENT_UNIT="$unit"
@@ -583,10 +592,21 @@ done
 step_start user_worker_reconciliation
 wait_user_unit_inactive jason-support-repair-worker.service
 wait_user_unit_inactive jason-self-heal-watchdog.service
-run_as_al /usr/bin/python3 "$ENGINEERING_SOURCE_REPO/tools/install_support_repair_host_worker.py" \
-  --repo "$ENGINEERING_SOURCE_REPO" \
-  --spool /var/lib/jason/openclaw/support-repair \
-  --activate
+if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+  # Never invoke a PMv3 worker installer after accepted Stage E retirement.
+  if [ "$(run_as_al systemctl --user is-active jason-support-repair-worker.timer 2>/dev/null || true)" = active ]; then
+    echo "ERROR: retired PMv3 engineering timer reactivated" >&2
+    exit 14
+  fi
+  run_as_al /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode engineering >/dev/null
+  PMV4_E_ENGINEERING_TIMER=jason-pmv4-engineering.timer
+else
+  run_as_al /usr/bin/python3 "$ENGINEERING_SOURCE_REPO/tools/install_support_repair_host_worker.py" \
+    --repo "$ENGINEERING_SOURCE_REPO" \
+    --spool /var/lib/jason/openclaw/support-repair \
+    --activate
+  PMV4_E_ENGINEERING_TIMER=jason-support-repair-worker.timer
+fi
 run_as_al /usr/bin/python3 "$ENGINEERING_SOURCE_REPO/tools/install_self_heal_watchdog.py" \
   --repo "$ENGINEERING_SOURCE_REPO" \
   --root /var/lib/jason/openclaw/self-heal \
@@ -629,7 +649,7 @@ cmp -s "$ENGINEERING_SOURCE_REPO/tools/issue_resolution_engine.py" /home/al/.loc
   echo "ERROR: installed issue-resolution engine differs from production source" >&2
   exit 9
 }
-for timer in jason-support-repair-worker.timer jason-self-heal-watchdog.timer; do
+for timer in "$PMV4_E_ENGINEERING_TIMER" jason-self-heal-watchdog.timer; do
   if [ "$(run_as_al systemctl --user is-active "$timer" 2>/dev/null || true)" != "active" ]; then
     echo "ERROR: required user timer is not active after production install: $timer" >&2
     exit 9
@@ -696,14 +716,26 @@ echo "DOCUMENTATION_SOURCE_REPO=$DOCUMENTATION_SOURCE_REPO"
 # any subsequent protected-policy migration is reversible even if the
 # root transition install fails before the release can be certified.
 step_start root_reconciler_install
-/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py"
-cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
-  echo "ERROR: installed root host reconciler differs from production source" >&2
-  exit 9
-}
-if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || true)" != "active" ]; then
-  echo "ERROR: root host-reconcile path is not active after production install" >&2
-  exit 9
+if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+  /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode component-reconcile >/dev/null
+  if [ "$(systemctl is-active jason-pmv4-component-reconcile.path 2>/dev/null || true)" != active ]; then
+    echo "ERROR: PMv4 root reconcile path inactive" >&2
+    exit 14
+  fi
+  if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || true)" = active ]; then
+    echo "ERROR: retired root reconcile path reactivated" >&2
+    exit 14
+  fi
+else
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py"
+  cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
+    echo "ERROR: installed root host reconciler differs from production source" >&2
+    exit 9
+  }
+  if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || true)" != "active" ]; then
+    echo "ERROR: root host-reconcile path is not active after production install" >&2
+    exit 9
+  fi
 fi
 step_pass root_reconciler_install
 echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
@@ -714,9 +746,29 @@ echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
 # Install the newly staged user units BEFORE committing them as REQUIRED and
 # before the final drift guard. Do not replace the running release controller.
 step_start held_approval_user_unit_install
-run_as_al /usr/bin/python3 "$RELEASE_DIR/tools/install_release_manager.py" \
-  --approval-units-only --activate
+if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+  run_as_al /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode release-approval >/dev/null
+  for timer in jason-pmv4-release-approval.timer jason-pmv4-component-release.timer; do
+    if [ "$(run_as_al systemctl --user is-active "$timer" 2>/dev/null || true)" != active ]; then
+      echo "ERROR: accepted PMv4 user release timer inactive: $timer" >&2
+      exit 14
+    fi
+  done
+else
+  run_as_al /usr/bin/python3 "$RELEASE_DIR/tools/install_release_manager.py" \
+    --approval-units-only --activate
+fi
 step_pass held_approval_user_unit_install
+
+# Stage one isolated read-only provider-health worker and its timer as
+# release-owned, DISABLED system units. They are allowed (not required) by the
+# exact candidate desired state. Never activate, restart, or replace ticket
+# processing here. The existing LKG unit-delta planner can remove the exact
+# two candidate-only unit files on rollback.
+step_start isolated_provider_shadow_disabled_stage
+/usr/bin/python3 "$RELEASE_DIR/tools/stage_isolated_provider_shadow_units.py" \
+  --release-dir "$RELEASE_DIR" --expected-sha "$SOURCE_REVISION"
+step_pass isolated_provider_shadow_disabled_stage
 
 # PM V2 shadow is release-owned and may only be activated when the exact
 # candidate desired-state policy declares it. The first protected-core
@@ -787,40 +839,100 @@ step_pass boot_recovery_install
 echo "JASON_BOOT_RECOVERY_INSTALL=PASS"
 
 step_start root_release_transition_install
-/usr/bin/python3 "$RELEASE_DIR/tools/install_release_control_transition.py"
-cmp -s "$RELEASE_DIR/tools/release_control_transition_worker.py" /usr/local/lib/jason/release_control_transition_worker.py || {
-  echo "ERROR: installed root release-transition worker differs from production source" >&2
-  exit 9
-}
-if [ "$(systemctl is-active jason-release-control-transition.timer 2>/dev/null || true)" != "active" ]; then
-  echo "ERROR: root release-transition timer is not active after production install" >&2
-  exit 9
+if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+  /usr/bin/python3 -I -B "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py" --mode component-transition >/dev/null
+  if [ "$(systemctl is-active jason-pmv4-component-transition.timer 2>/dev/null || true)" != active ]; then
+    echo "ERROR: accepted PMv4 root transition timer inactive" >&2
+    exit 14
+  fi
+else
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_release_control_transition.py"
+  cmp -s "$RELEASE_DIR/tools/release_control_transition_worker.py" /usr/local/lib/jason/release_control_transition_worker.py || {
+    echo "ERROR: installed root release-transition worker differs from production source" >&2
+    exit 9
+  }
+  if [ "$(systemctl is-active jason-release-control-transition.timer 2>/dev/null || true)" != "active" ]; then
+    echo "ERROR: root release-transition timer is not active after production install" >&2
+    exit 9
+  fi
 fi
 step_pass root_release_transition_install
 echo "JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS"
 
 step_start openbao_identity_lifecycle_install
-/usr/bin/python3 "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py"
-cmp -s "$RELEASE_DIR/tools/provider_secret_provision.py" /usr/local/lib/jason/provider_secret_provision.py || {
-  echo "ERROR: installed provider secret provisioning library differs from production source" >&2
-  exit 9
-}
-cmp -s "$RELEASE_DIR/tools/openbao_identity_lifecycle.py" /usr/local/lib/jason/openbao_identity_lifecycle.py || {
-  echo "ERROR: installed OpenBao identity lifecycle library differs from production source" >&2
-  exit 9
-}
-cmp -s "$RELEASE_DIR/tools/openbao_identity_lifecycle_worker.py" /usr/local/lib/jason/openbao_identity_lifecycle_worker.py || {
-  echo "ERROR: installed OpenBao identity lifecycle worker differs from production source" >&2
-  exit 9
-}
-if [ "$(systemctl is-active jason-openbao-identity-lifecycle.timer 2>/dev/null || true)" != "active" ]; then
-  echo "ERROR: OpenBao identity lifecycle timer is not active after production install" >&2
-  exit 9
+# The exact release may intentionally retire the lifecycle service. Never
+# invoke an installer absent from that release or silently strand an old unit.
+if [ -f "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py" ]; then
+  for required in provider_secret_provision.py openbao_identity_lifecycle.py openbao_identity_lifecycle_worker.py; do
+    if [ ! -f "$RELEASE_DIR/tools/$required" ]; then
+      echo "ERROR: OpenBao identity lifecycle source is incomplete" >&2
+      exit 9
+    fi
+  done
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py"
+  for required in provider_secret_provision.py openbao_identity_lifecycle.py openbao_identity_lifecycle_worker.py; do
+    cmp -s "$RELEASE_DIR/tools/$required" "/usr/local/lib/jason/$required" || {
+      echo "ERROR: installed OpenBao lifecycle source differs from release" >&2
+      exit 9
+    }
+  done
+  if [ "$(systemctl is-active jason-openbao-identity-lifecycle.timer 2>/dev/null || true)" != "active" ]; then
+    echo "ERROR: declared OpenBao lifecycle timer is not active" >&2
+    exit 9
+  fi
+  echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS"
+else
+  for removed in openbao_identity_lifecycle.py openbao_identity_lifecycle_worker.py; do
+    if [ -e "$RELEASE_DIR/tools/$removed" ]; then
+      echo "ERROR: partially retired OpenBao lifecycle release source" >&2
+      exit 9
+    fi
+  done
+  if systemctl list-unit-files jason-openbao-identity-lifecycle.timer --no-legend --no-pager 2>/dev/null | grep -q 'jason-openbao-identity-lifecycle.timer'; then
+    echo "ERROR: obsolete OpenBao lifecycle unit requires governed retirement" >&2
+    exit 9
+  fi
+  if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+    echo "ERROR: provider identity recovery requires a declared OpenBao lifecycle" >&2
+    exit 9
+  fi
+  echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=NOT_DECLARED"
 fi
 step_pass openbao_identity_lifecycle_install
-echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS"
+
+# Exact-SHA native release installation only. This installs two inert,
+# root-owned, reviewed files; it never changes provider credentials or
+# invokes the recovered identity. Local Owner action is a separate boundary.
+step_start itglue_read_owner_helper_install
+if [ -f "$RELEASE_DIR/tools/install_it_glue_approle_recovery.py" ]; then
+  for required in it_glue_approle_recovery.py provider_secret_provision.py; do
+    [ -f "$RELEASE_DIR/tools/$required" ] || {
+      echo "ERROR: IT Glue read recovery source incomplete" >&2
+      exit 9
+    }
+  done
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_it_glue_approle_recovery.py" --source-revision "$SOURCE_REVISION"
+  for required in it_glue_approle_recovery.py provider_secret_provision.py; do
+    cmp -s "$RELEASE_DIR/tools/$required" "/usr/local/lib/jason/$required" || {
+      echo "ERROR: installed IT Glue helper differs from reviewed release" >&2
+      exit 9
+    }
+  done
+  echo "JASON_ITGLUE_READ_OWNER_HELPER_INSTALL=PASS"
+else
+  [ ! -e "$RELEASE_DIR/tools/it_glue_approle_recovery.py" ] || {
+    echo "ERROR: orphaned IT Glue helper requires root installer" >&2
+    exit 9
+  }
+  echo "JASON_ITGLUE_READ_OWNER_HELPER_INSTALL=NOT_DECLARED"
+fi
+step_pass itglue_read_owner_helper_install
 
 if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+  if [ "$PMV4_E_HOST_MODE" = replacement ]; then
+    echo "ERROR: Stage E controlplane-only release cannot restart protected runtime/MCP" >&2
+    exit 14
+  fi
   step_start provider_identity_release_recovery
   /usr/bin/python3 /usr/local/lib/jason/openbao_identity_lifecycle.py \
     recover-release --source-revision "$SOURCE_REVISION"
@@ -873,31 +985,9 @@ PY2
     exit 9
   fi
 
-  CCC_REVIEW="/var/lib/jason/ccc/material-review-${SOURCE_REVISION:0:16}.json"
-  if [ ! -f "$CCC_REVIEW" ]; then
-    echo "ERROR: candidate Teams CCC material review is missing" >&2
-    exit 9
-  fi
-  CCC_STARTED_AT="$(date +%s)"
-  /usr/bin/bash "$RELEASE_DIR/tools/install_ccc_scheduler.sh" "$SOURCE_REVISION" "$CCC_REVIEW"
-  /usr/bin/python3 - "$SOURCE_REVISION" "$CCC_STARTED_AT" <<'PY2'
-import json, sys, time
-from pathlib import Path
-sha=sys.argv[1]; started=float(sys.argv[2])
-p=Path('/var/lib/jason/ccc/latest.json')
-d=json.loads(p.read_text(encoding='utf-8'))
-finished=str(d.get('finished_at') or '')
-try:
-    epoch=__import__('datetime').datetime.fromisoformat(finished.replace('Z','+00:00')).timestamp()
-except Exception:
-    raise SystemExit('CCC latest evidence has invalid finished_at')
-if (epoch < started - 1 or epoch > time.time()+10
-        or d.get('status') != 'PASS'
-        or d.get('source_revision') != sha
-        or d.get('runtime_revision') != sha):
-    raise SystemExit('CCC did not freshly prove exact candidate/runtime PASS after recovery')
-PY2
-  echo "JASON_CCC_POST_RECOVERY=PASS"
+  # Native provider canary and runtime/MCP health above remain mandatory.
+  # CCC is not a second release certification step.
+  echo "JASON_RECOVERY_NATIVE_HEALTH=PASS"
   step_pass provider_identity_release_recovery
   echo "JASON_PROVIDER_IDENTITY_RELEASE_RECOVERY=PASS"
 else
@@ -913,75 +1003,9 @@ echo "SOURCE_REVISION=$SOURCE_REVISION"
 echo "RELEASE_DIR=$RELEASE_DIR"
 echo "BACKUP_DIR=$BACKUP_DIR"
 
-OBSERVABILITY_INSTALLER="$RELEASE_DIR/tools/install_observability_assurance.sh"
-OBSERVABILITY_PREVIOUS_REVISION=""
-if [ -f "$OBSERVABILITY_CURRENT_LINK/SOURCE_REVISION" ]; then
-  OBSERVABILITY_PREVIOUS_REVISION="$(tr -d '\r\n' < "$OBSERVABILITY_CURRENT_LINK/SOURCE_REVISION")"
-fi
-OBSERVABILITY_CHANGED=1
-if [ -n "$OBSERVABILITY_PREVIOUS_REVISION" ] \
-  && git -C "$REPO_ROOT" cat-file -e "$OBSERVABILITY_PREVIOUS_REVISION^{commit}" 2>/dev/null; then
-  if git -C "$REPO_ROOT" diff --quiet \
-    "$OBSERVABILITY_PREVIOUS_REVISION" "$SOURCE_REVISION" -- \
-    config/observability/grafana-dashboard-manifest.json \
-    infrastructure/showcase \
-    tools/grafana_assurance.py \
-    tools/update_grafana_manifest.py \
-    tools/install_observability_assurance.sh; then
-    OBSERVABILITY_CHANGED=0
-  fi
-fi
-step_start observability_reconciliation
-if [ "$OBSERVABILITY_CHANGED" -eq 1 ]; then
-  test -f "$OBSERVABILITY_INSTALLER" || { echo "ERROR: observability installer is missing" >&2; exit 9; }
-  timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT="$ENGINEERING_SOURCE_REPO" /usr/bin/bash "$OBSERVABILITY_INSTALLER" "$SOURCE_REVISION"
-  if [ "$(readlink -f "$OBSERVABILITY_CURRENT_LINK")" != "/opt/jason/observability/releases/$SOURCE_REVISION" ]; then
-    echo "ERROR: observability release did not converge to production revision" >&2
-    exit 9
-  fi
-  echo "JASON_OBSERVABILITY_RECONCILIATION=PASS"
-else
-  echo "JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED"
-fi
-step_pass observability_reconciliation
-
-# The scheduled Grafana assurance can run while the production reconciler is
-# restarting the usage-attribution exporter. A genuine transient missing
-# Prometheus series leaves the assurance oneshot in systemd's failed state.
-# Re-execute the REAL checker only after exporters are verified and service
-# activation has completed; never reset-failed, mask, or ignore its result.
-step_start post_exporter_grafana_assurance
-if systemctl cat jason-grafana-assurance.service >/dev/null 2>&1; then
-  GRAFANA_REVALIDATION_PASS=0
-  # The existing usage-attribution scrape interval is 120s. A healthy exporter
-  # restart must be followed by a real scrape, not only three 10s pauses.
-  # Bound the whole observation window; no check is skipped or forced PASS.
-  GRAFANA_REVALIDATION_DEADLINE=$((SECONDS + 150))
-  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    remaining=$((GRAFANA_REVALIDATION_DEADLINE - SECONDS))
-    if [ "$remaining" -le 0 ]; then break; fi
-    check_timeout=$((remaining < 20 ? remaining : 20))
-    if timeout --signal=TERM --kill-after=5s "${check_timeout}s" \
-        systemctl start jason-grafana-assurance.service \
-        && [ "$(systemctl show jason-grafana-assurance.service -p Result --value)" = "success" ]; then
-      echo "GRAFANA_POST_EXPORTER_ASSURANCE=PASS attempt=$attempt"
-      GRAFANA_REVALIDATION_PASS=1
-      break
-    fi
-    remaining=$((GRAFANA_REVALIDATION_DEADLINE - SECONDS))
-    if [ "$attempt" -lt 12 ] && [ "$remaining" -gt 0 ]; then
-      sleep "$((remaining < 15 ? remaining : 15))"
-    fi
-  done
-  if [ "$GRAFANA_REVALIDATION_PASS" -ne 1 ]; then
-    echo "ERROR: real Grafana assurance remains failed after exporter readiness" >&2
-    systemctl status jason-grafana-assurance.service --no-pager -l || true
-    exit 9
-  fi
-else
-  echo "GRAFANA_POST_EXPORTER_ASSURANCE=NOT_INSTALLED"
-fi
-step_pass post_exporter_grafana_assurance
+# Grafana dashboards and scrape assurance are separate scheduled observability.
+# They never control host release admission or trigger production rollback.
+echo "JASON_OBSERVABILITY_RELEASE_GATE=NOT_REQUIRED"
 
 # Prove declared production desired-state convergence before host reconciliation
 # can report success. This catches unknown active units/containers, forbidden

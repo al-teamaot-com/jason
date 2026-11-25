@@ -1,0 +1,28 @@
+[Unit]
+Description=Jason governed audit data recovery before consumer startup
+After=local-fs.target
+Before=docker.service jason-openclaw-authority-health.service jason-openclaw-authority-full-integrity.service
+RequiresMountsFor=/srv/jason/archive /var/lib/jason/governed-ticket-shared
+ConditionPathExists=/var/lib/jason-audit-journal/private/adoption.json
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+Group=root
+WorkingDirectory=/usr/local/lib/jason/audit-journal/trusted
+RuntimeDirectory=jason/audit-journal
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/python3 -I -B -c "import runpy,sys;sys.path.insert(0,'/usr/local/lib/jason/audit-journal/trusted/implementation');runpy.run_path('/usr/local/lib/jason/audit-journal/trusted/tools/audit_journal_control.py',run_name='__main__')" --operation boot-recover
+TimeoutStartSec=120
+NoNewPrivileges=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_KILL CAP_AUDIT_WRITE
+AmbientCapabilities=CAP_SETUID
+UMask=0077
+# Host mount namespace is required: consumers must see the recorded file bind.
+# Do not add mount-namespace hardening that makes recovery private to this unit.
+
+[Install]
+WantedBy=multi-user.target

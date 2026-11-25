@@ -61,6 +61,8 @@ If a package README contains a material architecture, authority, security, or op
 | `implementation/client_bootstrap/README.md` | Client bootstrap implementation mechanics | Canonical organizational/client models, identity/authority, and applicable operational runbooks |
 | `implementation/autonomous_remediation/README.md` | Governed autonomous-remediation implementation framework, execution stages, and promotion safeguards | `docs/governance/`; `docs/architecture/`; `docs/components/`; `docs/operations/`; identity-first authorization and Central Orchestrator governance |
 
+| `infrastructure/jason-owner-objective/README.md` | Isolated canonical approval hosting, Root enrollment and governed installation mechanics; activation pending | `docs/engineering/Teams-Objective-Completion-Restoration.md`; `docs/engineering/Owner-Objective-Approval-Policy-v1.md` (proposed adoption); existing identity/authority and release governance |
+
 ## Policy, intelligence, memory, and accounting documentation
 
 | Implementation-local record | Supporting purpose | Governed human-facing owner / related records |
@@ -89,9 +91,12 @@ If a package README contains a material architecture, authority, security, or op
 | Implementation-local record | Supporting purpose | Governed human-facing owner / related records |
 |---|---|---|
 | `infrastructure/jason-runtime/README.md` | Docker/runtime deployment-package mechanics and required deployment inputs | System Registry, `docs/operations/`, runtime/component architecture; never use this README alone to assert current production state |
+| `infrastructure/constant-contact-readback/README.md` | Independently supervised, disabled-by-default GET-only import readback package and safe activation mechanics | `docs/operations/Constant-Contact-V3-Governed-Integration.md`; `docs/operations/Constant-Contact-Source-Integration-Review-20261112.md`; PMV3 release governance and System Registry for deployed state |
 | `infrastructure/kfs-collector/README.md` | Kyocera Fleet Services collector deployment-package mechanics | `docs/components/infrastructure/INF-016-Kyocera-KFS-Provider-Foundation.md`; KFS operational runbooks and System Registry for current deployment state |
 | `infrastructure/openclaw-jason-bridge/README.md` | OpenClaw Jason bridge deployment/plugin mechanics | ADR-005/ADR-006, INF-014, OpenClaw operational runbooks, System Registry for deployed bridge state |
 | `infrastructure/showcase/README.md` | Command Center/showcase deployment mechanics, observability components, local-model visibility, and bounded dashboard security notes | `docs/architecture/`; `docs/components/`; `docs/operations/`; governed roadmap and System Registry for authoritative current deployment/readiness state |
+
+| `infrastructure/isolated-services/README.md` | Independent read-only shadow service/timer deployment-package mechanics; no installation or authority by itself | `docs/engineering/PMV3-Isolated-Service-Separation-Plan.md`; PMV3 release governance and System Registry for any later deployed state |
 
 ## How future sessions maintain this index
 

@@ -1,0 +1,32 @@
+name: Jason licensed Owner authorization source (no production)
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  licensed-owner-source:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-001/src:implementation/cap-003/src:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src:implementation/mcp_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated source regression dependencies
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service ./implementation/mcp_service
+      - name: Exact licensed Owner and release-source negative tests (no service / provider calls)
+        run: |
+          python -m pytest -q \
+            tools/tests/test_jason_owner_auth_profile.py \
+            tools/tests/test_release_manager_atomic_surfaces.py \
+            tools/tests/test_admin_separated_deploy_contract.py \
+            implementation/mcp_service/tests/test_jason_licensed_owner_profile.py \
+            implementation/mcp_service/tests/test_preprod_owner_readonly_status.py \
+            implementation/mcp_service/tests/test_authority_grant_admin.py \
+            implementation/mcp_service/tests/test_autonomy_acceptance_admin.py \
+            implementation/mcp_service/tests/test_autotask_catalog_grant_admin.py \
+            implementation/mcp_service/tests/test_release_owner_identity.py

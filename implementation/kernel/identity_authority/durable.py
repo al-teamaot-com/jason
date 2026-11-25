@@ -85,8 +85,18 @@ def _dt(value: str | None) -> datetime | None:
 class SQLiteIdentityAuthorityStore:
     """Durable local pilot store for JKD-001 state and authority audit."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, read_only: bool = False) -> None:
         self.path = Path(path)
+        if type(read_only) is not bool:
+            raise TypeError("read_only must be a boolean")
+        if read_only:
+            self.connection = sqlite3.connect(
+                self.path.absolute().as_uri() + "?mode=ro", uri=True,
+                check_same_thread=False,
+            )
+            self.connection.row_factory = sqlite3.Row
+            self.connection.execute("PRAGMA query_only=ON")
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # Runtime composition is cached process-wide while MCP synchronous tools may
         # execute in worker threads. Keep the same governed durable store available

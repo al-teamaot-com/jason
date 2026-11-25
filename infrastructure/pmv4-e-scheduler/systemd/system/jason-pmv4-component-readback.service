@@ -1,0 +1,15 @@
+[Unit]
+Description=Jason protected release-control readback (root-only)
+After=jason-production-drift-watchdog.service
+
+[Service]
+ExecCondition=/usr/bin/python3 -I -B /usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py --mode component-readback
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /usr/local/lib/jason/release_control_bridge_worker.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/jason/openclaw/release-manager/protected-readback
+ReadOnlyPaths=/var/lib/jason/openclaw/release-manager

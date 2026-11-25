@@ -680,6 +680,106 @@ def test_current_lkg_recovery_time_budget_is_bounded_below_root_worker_ceiling()
     assert worker._host_reconcile_timeout(worker.LEGACY_LKG_SHA) == 410
 
 
+def test_distinct_exact_owner_unfreeze_receipt_allows_only_locked_lkg_rollback(
+    tmp_path, monkeypatch
+):
+    import fcntl
+    import hashlib
+    import importlib.util
+    import json
+    import os
+
+    src = ROOT / "tools/release_host_reconcile_worker.py"
+    spec = importlib.util.spec_from_file_location("jason_owner_unfreeze_lkg_test", src)
+    worker = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(worker)
+    old = worker.CURRENT_LKG_RECOVERY_SHA
+    candidate = "a" * 40
+    approval_source = "authenticated_mobile_teams_owner:relapproval-" + "9" * 32
+    state = tmp_path / "release-state"
+    (state / "records").mkdir(parents=True)
+    receipts = state / "owner-explicit-unfreeze-receipts"
+    receipts.mkdir()
+    lock = state / "production-transaction.lock"
+    lock.touch(mode=0o600)
+    backup = state / "production-deployment-freeze.pmv3-one-release-backup"
+    backup.write_bytes(b"frozen-exact-owner-marker")
+    backup.chmod(0o600)
+    scope = "b" * 64
+    record = {
+        "state": "production",
+        "risk_profile": "production_control_core",
+        "release_candidate": {"candidate_sha": candidate},
+        "rollback_sha": old,
+        "release_manifest": {"candidate_sha": candidate, "rollback_sha": old},
+        "owner_approval": {"approved": True, "candidate_sha": candidate,
+                           "source": approval_source},
+        "manual_scope_review": {"scope_sha256": scope},
+        "last_known_good_manifest": {"revision": old, "complete": True},
+        "pre_mutation_health": {"revision": old, "passed": True},
+    }
+    record_path = state / "records" / ("release-" + candidate[:16] + ".json")
+    record_path.write_text(json.dumps(record))
+    record_path.chmod(0o600)
+    receipt = {
+        "schema_version": "1.0",
+        "authorization": "explicit_exact_sha_owner_unfreeze",
+        "status": "authorized_pending",
+        "release_id": "release-" + candidate[:16],
+        "candidate_sha": candidate, "rollback_sha": old,
+        "scope_sha256": scope,
+        "prior_release_approval_source": approval_source,
+        "owner_approval_source": "explicit_owner_instruction",
+        "separate_exact_owner_unfreeze": True,
+        "freeze_remains_active": True,
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False, "automatic_publish_authority": False,
+        "freeze_sha256_before": hashlib.sha256(backup.read_bytes()).hexdigest(),
+    }
+    receipt_path = receipts / ("release-" + candidate[:16] + ".json")
+    receipt_path.write_text(json.dumps(receipt))
+    receipt_path.chmod(0o600)
+    hosts = tmp_path / "hosts"
+    hosts.mkdir()
+    (hosts / candidate).mkdir()
+    current = tmp_path / "current"
+    current.symlink_to(hosts / candidate)
+    monkeypatch.setattr(worker, "RELEASE_STATE", state)
+    monkeypatch.setattr(worker, "CURRENT", current)
+    monkeypatch.setattr(worker, "_host_operator_uid", lambda: os.getuid())
+    monkeypatch.setattr(worker.subprocess, "check_output", lambda *a, **k: candidate)
+    monkeypatch.setattr(worker, "_authenticated_rollback_evidence", lambda *a: True)
+    lkg = {"complete": True, "revision": old}
+    breaker = {"state": "closed"}
+    assert not worker._exact_signed_inflight_lkg_rollback_authorized(old, lkg, breaker)
+    with lock.open("rb") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            assert worker._exact_signed_inflight_lkg_rollback_authorized(old, lkg, breaker)
+            for field, tampered in [
+                ("status", "consumed"), ("rollback_sha", "c" * 40),
+                ("scope_sha256", "d" * 64),
+                ("prior_release_approval_source", "forged"),
+                ("freeze_sha256_before", "0" * 64),
+                ("standing_authority", True),
+                ("restore_freeze_after_transaction", False),
+            ]:
+                changed = dict(receipt, **{field: tampered})
+                receipt_path.write_text(json.dumps(changed))
+                assert not worker._exact_signed_inflight_lkg_rollback_authorized(
+                    old, lkg, breaker
+                ), field
+            receipt_path.write_text(json.dumps(receipt))
+            receipt_path.chmod(0o644)
+            assert not worker._exact_signed_inflight_lkg_rollback_authorized(old, lkg, breaker)
+            receipt_path.chmod(0o600)
+            (state / "production-deployment-freeze").write_text("active")
+            assert not worker._exact_signed_inflight_lkg_rollback_authorized(old, lkg, breaker)
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def test_current_lkg_rollback_during_signed_inflight_release_is_exact_and_bounded(
     tmp_path, monkeypatch
 ):
@@ -734,6 +834,14 @@ def test_current_lkg_rollback_during_signed_inflight_release_is_exact_and_bounde
         'owner_approval': {
             'approved': True, 'candidate_sha': candidate,
             'source': 'authenticated_mobile_teams_owner:' + approval_id,
+        },
+        'manual_scope_review': {
+            'schema_version': '1.0',
+            'candidate_sha': candidate,
+            'baseline_sha': old,
+            'scope_sha256': '1' * 64,
+            'included_prs': [],
+            'included_commits': [],
         },
         'last_known_good_manifest': {'revision': old, 'complete': True},
         'pre_mutation_health': {'revision': old, 'passed': True},
@@ -794,19 +902,14 @@ def test_current_lkg_rollback_during_signed_inflight_release_is_exact_and_bounde
             release.write_text(json.dumps(altered))
             assert not w._exact_signed_inflight_lkg_rollback_authorized(old,lkg,breaker)
             release.write_text(json.dumps(record))
-            # Receipt or CCC drift cannot be explained away by a mutable
-            # release record: both are required to match the exact manifest.
-            review.write_text(json.dumps({
-                'status':'approved', 'source_revision':candidate,
-                'mobile_approval_id':approval_id,
-                'release_manifest_sha256':'0' * 64,
-            }))
+            # Native scope drift cannot impersonate the signed Teams approval.
+            altered = dict(record)
+            altered['manual_scope_review'] = dict(
+                record['manual_scope_review'], candidate_sha='b' * 40
+            )
+            release.write_text(json.dumps(altered))
             assert not w._exact_signed_inflight_lkg_rollback_authorized(old,lkg,breaker)
-            review.write_text(json.dumps({
-                'status':'approved', 'source_revision':candidate,
-                'mobile_approval_id':approval_id,
-                'release_manifest_sha256':digest,
-            }))
+            release.write_text(json.dumps(record))
             con = sqlite3.connect(approval_db)
             con.execute('UPDATE approval_requests SET payload=? WHERE approval_id=?',
                         (json.dumps(dict(approved_receipt, status='denied')), approval_id))

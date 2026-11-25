@@ -1,0 +1,36 @@
+name: PMv4 E Retirement Admission Source-only
+on:
+  pull_request:
+    paths:
+      - "tools/pmv4_e_retirement_readiness.py"
+      - "tools/pmv4_e_canary_acceptance_readback.py"
+      - "tests/test_pmv4_e_canary_acceptance_readback.py"
+      - "tools/pmv4_e_controlplane_dependencies.py"
+      - "tests/test_pmv4_e_controlplane_dependencies.py"
+      - "tools/pmv4_e_root_receipt_readback.py"
+      - "tests/test_pmv4_e_retirement_readiness.py"
+      - "tests/test_pmv4_e_root_receipt_readback.py"
+      - ".github/workflows/pmv4-e-retirement-readiness.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safe-retirement-negative-gates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify all retirement gates deny before PMv4 production parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q pytest
+          python -m pip install --disable-pip-version-check -q cryptography PyYAML
+          PYTHONPATH=implementation:. python -B -m pytest -q tests/test_pmv4_e_retirement_readiness.py tests/test_pmv4_e_root_receipt_readback.py tests/test_pmv4_e_controlplane_dependencies.py tests/test_pmv4_e_canary_acceptance_readback.py
+          test ! -e /var/lib/jason/openclaw/autonomy-operational-work.sqlite3
+          test ! -e /etc/jason/release-readback-recovery/production-desired-state.json

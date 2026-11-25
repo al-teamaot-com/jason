@@ -70,7 +70,7 @@ def test_distinct_rollback_and_toner_support_identities_in_canonical_source():
     rows = worker.parse_support(source)
     rollback = [row for row in rows if row['id'] == 'SUPPORT-OPS-058']
     assert len(rollback) == 1
-    assert 'issue #1101' in rollback[0]['status']
+    assert 'Issue #1101' in rollback[0]['evidence']
     assert 'rollback' in rollback[0]['title'].lower()
     assert not any(row['id'] == 'SUPPORT-OPS-051' for row in rows)
     assert 'Closed 2026-10-07 — issue #1091' in source

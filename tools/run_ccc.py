@@ -75,7 +75,18 @@ def _scheduled_source_change_pending(result, config: CCCConfig, *, force: bool, 
             return False
         pending = {key for key, status in statuses.items() if status != "PASS"}
         if "runtime-source-alignment" not in pending:
-            return False
+            # Host/documentation-only changes can be material without changing
+            # the *runtime-sensitive* paths. A scheduled CCC still needs an
+            # Owner material review to certify that newer Git revision, but
+            # its completed observer run is not a failed production SERVICE.
+            # Accept only that one known pending check with all controls PASS.
+            changed = report.get("material_changes")
+            if (pending != {"material-change-owner-review"}
+                    or statuses.get("checker-currentness") != "PASS"
+                    or statuses.get("runtime-source-alignment") != "PASS"
+                    or not isinstance(changed, list) or not changed
+                    or not all(isinstance(path, str) and path.strip() for path in changed)):
+                return False
         if (report.get("material_changes") and
                 statuses.get("material-change-owner-review") not in {"PASS", "NOT_PROVEN"}):
             return False
