@@ -25,7 +25,8 @@ def canonical(data):
 
 
 def cutoff(now):
-    need(isinstance(now,datetime) and now.tzinfo is not None,"AWARE_CUTOFF_REQUIRED")
+    need(isinstance(now,datetime) and now.tzinfo is not None
+         and now.utcoffset() is not None,"AWARE_CUTOFF_REQUIRED")
     return (now.astimezone(timezone.utc)-timedelta(days=30)).isoformat()
 
 
@@ -44,6 +45,7 @@ def draft_segment_plan(*,catalog,statistics,now,source_main_sha,prior_catalog_sh
     need(isinstance(statistics,dict) and len(statistics)==len(segments),
          "EXACT_SEGMENT_STATS_REQUIRED")
     rows=[]
+    seen=set()
     for rec in segments:
         name=rec.get("id")
         proof=rec.get("proof",{})
@@ -53,6 +55,8 @@ def draft_segment_plan(*,catalog,statistics,now,source_main_sha,prior_catalog_sh
              and type(expected) is int and expected>=0
              and isinstance(digest,str) and re.fullmatch("[0-9a-f]{64}",digest),
              "SEALED_SEGMENT_PROOF")
+        need(name not in seen,"DUPLICATE_SEGMENT_ID")
+        seen.add(name)
         actual=statistics.get(name)
         need(isinstance(actual,dict) and
              set(actual)=={"retained","expired","file_sha256"}
@@ -73,6 +77,7 @@ def draft_segment_plan(*,catalog,statistics,now,source_main_sha,prior_catalog_sh
                 else "retain_original_unchanged"
             ),
         })
+    need(seen==set(statistics),"EXACT_SEGMENT_STATS_REQUIRED")
     proposal={
         "stage":"engineering_proposal_not_authorized",
         "schema_version":"1.0",

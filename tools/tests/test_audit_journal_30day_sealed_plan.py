@@ -71,3 +71,21 @@ def test_plan_module_exposes_no_mutating_production_operations():
     for token in ("os.unlink","os.remove","os.replace","shutil.rmtree",
                   "DELETE FROM","DROP TABLE","docker stop","systemctl restart"):
         assert token not in src
+
+
+def test_duplicate_catalog_identity_cannot_mask_unrelated_statistics():
+    a=inputs()
+    a["catalog"]["segments"][1]=dict(a["catalog"]["segments"][0])
+    with pytest.raises(ValueError,match="DUPLICATE_SEGMENT_ID"):
+        plan.draft_segment_plan(**a)
+
+
+def test_cutoff_rejects_tzinfo_without_utc_offset():
+    from datetime import tzinfo
+    class NotAware(tzinfo):
+        def utcoffset(self, dt):
+            return None
+    a=inputs()
+    a["now"]=a["now"].replace(tzinfo=NotAware())
+    with pytest.raises(ValueError,match="AWARE_CUTOFF_REQUIRED"):
+        plan.draft_segment_plan(**a)

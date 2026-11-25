@@ -40,3 +40,17 @@ Authorize a separate guarded daily 30-day maintenance policy which checks each a
 Source-only prepare code tools/audit_journal_30day_sealed_plan.py accepts an inventory of verified or estimated sealed-segment event partitions and produces a non-activating SHA-bound release proposal. It neither opens nor writes the actual production database. Ten isolated tests prove exact mixed-history handling, older-only behavior, protected outside scope, strict UTC, wrong hash/count denial, and no self-authority.
 
 **Completion condition:** Independent Owner-signed production policy release, genuine 30-day archival + live event parity, actual purged expired records (not just moved), continuing daily cleanup, root/secondary disk blocks reclaimed, stable service and maintenance health. None of those production deletion actions are reported as done by this engineering proposal.
+
+### Source-only input validation follow-up
+
+Require unique catalog segment identities and an exact one-to-one statistics
+inventory. A duplicate segment must never mask an unrelated statistics entry.
+Require a genuine timezone offset, not merely a non-null tzinfo object.
+Regression fixtures reproduce both prior planner defects; these checks do not
+make caller-supplied statistics authoritative.
+
+The currently installed no-restore archive maintenance is healthy. The root
+disk has recovered from its earlier critical pressure. Permanent expiry remains
+disabled pending the explicit governance exception, independently verified
+segment data, and separate destructive release approval. Do not scan or rewrite
+the entire historical database solely to prepare a policy proposal.
