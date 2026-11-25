@@ -53,6 +53,8 @@ def load_aliases(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, Mapping):
+        raise ReconciliationError("DNSFilter alias file must contain an aliases object.")
     aliases = raw.get("aliases", {})
     if not isinstance(aliases, Mapping):
         raise ReconciliationError("DNSFilter alias file must contain an aliases object.")
@@ -183,12 +185,12 @@ def fetch_dnsfilter_sites(
                 arguments={"company_id": 0, "page_number": 1, "page_size": 500},
             )
         ).data
+        items = result.get("data", [])
+        if not isinstance(items, list):
+            raise ReconciliationError("DNSFilter site search returned an invalid shape.")
+        return organization_id, [item for item in items if isinstance(item, Mapping)]
     finally:
         store.close()
-    items = result.get("data", [])
-    if not isinstance(items, list):
-        raise ReconciliationError("DNSFilter site search returned an invalid shape.")
-    return organization_id, [item for item in items if isinstance(item, Mapping)]
 
 
 def apply_scope(
