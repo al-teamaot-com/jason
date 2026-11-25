@@ -29,7 +29,7 @@ def database(path):
             db.execute('INSERT INTO audit_journal_inflight VALUES (?,?,?)',(key,started,20000000))
             event='orchestration.capability.invoking' if started else 'orchestration.capability.resolved'
             db.execute('INSERT INTO orchestration_events VALUES (?,?,?,?)',
-                (key,event,cap,(datetime.now(timezone.utc)-timedelta(hours=1)).isoformat()))
+                (key,event,cap,'2026-11-24T18:25:00+00:00'))
         db.execute('CREATE TRIGGER audit_journal_maintenance_admission BEFORE INSERT ON orchestration_events '
                    "BEGIN SELECT RAISE(ABORT,'MAINTENANCE'); END")
 
@@ -134,3 +134,24 @@ def test_no_rebuild_route_is_explicitly_one_of_installer_choices():
     assert 'NO_RESTORE_PROTECTED_CI' in text
     assert 'audit_journal_no_restore_install' in text
     assert 'ONE_EXACT_INSTALLER_OPERATION' in text
+
+
+def test_immutable_incident_window_allows_delayed_verified_reservations(tmp_path,monkeypatch):
+    # The unresolved operations are immutable historical facts. Advancing the
+    # wall clock beyond 24 hours must not destroy the exact recovery path.
+    db=tmp_path/'past-cutover.sqlite3';database(db)
+    class FutureClock(datetime):
+        @classmethod
+        def now(cls,tz=None):return datetime(2026,11,30,12,0,tzinfo=timezone.utc)
+    monkeypatch.setattr(mod,'datetime',FutureClock)
+    rows=mod.live_reservations(db)
+    assert len(rows)==3 and all(r['result']=='unknown_not_retried' for r in rows)
+
+
+def test_reservation_timestamp_outside_exact_cutover_denied(tmp_path):
+    db=tmp_path/'wrong-cutover.sqlite3';database(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE orchestration_events SET occurred_at='2026-11-25T03:00:00+00:00' "
+                  "WHERE capability_name='endpoint.device.read'")
+    with pytest.raises(PermissionError,match='READ_ONLY_RESERVATION_TIMESTAMP'):
+        mod.live_reservations(db)
