@@ -121,6 +121,16 @@ def test_production_composition_builds_and_serves_internal_health(tmp_path):
     application = build_runtime_application(settings)
     response = application.dispatch(method="GET", path="/healthz", headers={}, body=b"")
 
+    # Constant Contact import is a separately activated capability and must
+    # remain absent from the default runtime, especially the ticket worker.
+    assert application.constant_contact_import_workflow is None
+    assert application.capabilities.get(
+        capability_name="marketing.contact.import", version="1.0",
+    ).lifecycle_status.value == "building"
+    assert "marketing.contact.import" not in set(
+        application.governed_orchestrator._invoker.registered_capabilities()
+    )
+
     assert response.status_code == 200
     assert response.body["authority"] == "central-orchestrator"
     assert (tmp_path / "authority.sqlite3").stat().st_mode & 0o777 == 0o600
@@ -823,6 +833,83 @@ def test_owner_reviewed_teams_release_mode_requires_exact_v2_policy(tmp_path):
     }
 
 
+def test_v3_production_repair_is_a_separately_opted_in_reviewed_runtime(tmp_path):
+    import pytest
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        reviewed_policy_file,
+    )
+    from jason_runtime.mobile_release_approval import MobileReleaseApprovalMaintenance
+
+    v3 = reviewed_policy_file(
+        tmp_path, schema_version="3.0",
+        allowed_risk_profiles=[
+            "normal", "production_control_core", "production_repair",
+        ],
+    )
+    cfg = replace(
+        _settings(tmp_path),
+        release_mobile_approval_mode="owner_reviewed",
+        release_mobile_approval_policy=v3,
+        release_mobile_approval_db=tmp_path / "v3-approval.sqlite3",
+        release_mobile_state_root=tmp_path / "v3-release-root",
+    )
+    cfg.validate()
+    app = build_runtime_application(cfg)
+    services = [
+        m for m in app.maintenance.services
+        if isinstance(m, MobileReleaseApprovalMaintenance)
+    ]
+    assert len(services) == 1
+    assert services[0].required_policy_version == "3.0"
+    assert services[0].sender.owner_identity_ids == ("person-al",)
+    assert cfg.universal_approval_mode == "off"
+    assert not (cfg.release_mobile_state_root / "mobile-release-offers").exists()
+
+    # Even the newly implemented V3 cannot be silently used by a V1 worker.
+    with pytest.raises(PermissionError, match="mode and reviewed policy version"):
+        build_runtime_application(replace(cfg, release_mobile_approval_mode="owner_only_pilot"))
+
+
+def test_v31_signed_owner_release_runtime_starts_without_teams_card_worker(tmp_path):
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        reviewed_policy_file,
+    )
+    from jason_runtime.mobile_release_approval import MobileReleaseApprovalMaintenance
+
+    v31 = reviewed_policy_file(
+        tmp_path,
+        schema_version="3.1",
+        high_impact_review={
+            "owner_exact_sha_required": True,
+            "authenticated_entra_owner_decision_required": True,
+            "independent_native_release_health_required": True,
+            "protected_release_gates_unchanged": True,
+        },
+    )
+    cfg = replace(
+        _settings(tmp_path),
+        release_mobile_approval_mode="owner_reviewed",
+        release_mobile_approval_worker_enabled=True,
+        release_mobile_approval_policy=v31,
+        release_mobile_approval_db=tmp_path / "v31-approvals.sqlite3",
+        release_mobile_state_root=tmp_path / "v31-release-root",
+    )
+    cfg.validate()
+    app = build_runtime_application(cfg)
+    assert app is not None
+    assert cfg.universal_approval_mode == "off"
+    assert not any(
+        isinstance(service, MobileReleaseApprovalMaintenance)
+        for service in app.maintenance.services
+    )
+    assert not (cfg.release_mobile_state_root / "mobile-release-offers").exists()
+    import pytest
+    with pytest.raises(PermissionError, match="mode and reviewed policy version"):
+        build_runtime_application(replace(cfg, release_mobile_approval_mode="owner_only_pilot"))
+    with pytest.raises(PermissionError, match="privileged admin separation requires V4 approval policy"):
+        build_runtime_application(replace(cfg, release_mobile_approval_mode="admin_approver_separated"))
+
+
 def test_legacy_owner_pilot_refuses_silent_v2_risk_policy_upgrade(tmp_path):
     import pytest
     from implementation.runtime_service.tests.test_mobile_release_approval import (
@@ -925,4 +1012,108 @@ def test_auxiliary_process_sends_queued_ticket_owner_notifications_even_when_adm
     assert not any(
         isinstance(m, TicketOwnerNotificationMaintenance)
         for m in http.maintenance.services
+    )
+
+
+def test_group_admin_composition_disabled_without_exact_source_profile(tmp_path, monkeypatch):
+    monkeypatch.delenv("JASON_M365_GROUP_ADMIN_PROFILE", raising=False)
+    app = build_runtime_application(_settings(tmp_path))
+    for name in ("identity.group.create", "identity.group.member.add"):
+        assert app.capabilities.get(capability_name=name, version="1.0").lifecycle_status.value == "building"
+        assert name not in app.governed_orchestrator._invoker.registered_capabilities()
+
+
+def test_group_admin_composition_exact_activation_only_two_scoped_invokers(tmp_path, monkeypatch):
+    from jason_runtime.microsoft_group_admin_activation import PROFILE
+    monkeypatch.setenv("JASON_M365_GROUP_ADMIN_PROFILE", PROFILE)
+    app = build_runtime_application(_settings(tmp_path))
+    for name in ("identity.group.create", "identity.group.member.add"):
+        capability=app.capabilities.get_current(capability_name=name)
+        assert capability.lifecycle_status.value == "active"
+        assert capability.metadata["conversation_authenticated_imperative_is_approval"] == "false"
+        assert capability.metadata["mcp_action_enabled"] == "true"
+        assert name in app.governed_orchestrator._invoker.registered_capabilities()
+    assert app.capabilities.get(
+        capability_name="service.ticket.create", version="1.0"
+    ).capability_name == "service.ticket.create"
+    # Building the dormant executor cannot contact OpenBao/Graph, create
+    # tenant groups or modify ticket processing.
+
+
+def test_group_admin_only_owner_exact_aot_approval_grants(tmp_path, monkeypatch):
+    """Real JKD-001 store: active pilot needs a new distinct exact action approval."""
+    from kernel.identity_authority import (
+        AuthorityOutcome, AuthorityRequest, IdentityRecord, PermissionMode,
+        ApprovalRecord,
+    )
+    from jason_runtime.microsoft_group_admin_activation import (
+        PROFILE, GRANT_PREFIX, GRANT_EXPIRES,
+    )
+    from orchestrator.microsoft_group_admin_catalog import (
+        AOT_PILOT_CLIENT_ID, AOT_PILOT_OWNER_PRINCIPAL_ID,
+    )
+    from datetime import datetime, timezone, timedelta
+
+    monkeypatch.setenv("JASON_M365_GROUP_ADMIN_PROFILE", PROFILE)
+    app=build_runtime_application(_settings(tmp_path))
+    own=AOT_PILOT_OWNER_PRINCIPAL_ID
+    other="person-entra-11111111111141118111111111111111"
+    for principal in (own,other):
+        app.identity_authority.identities.put(
+            IdentityRecord(identity_id=principal,identity_type="human",
+                           organization_id="aot",status="active"))
+    now=datetime.now(timezone.utc)
+    assert GRANT_EXPIRES > now
+    for index,capability in enumerate(("identity.group.create","identity.group.member.add")):
+        grant_id=GRANT_PREFIX+capability.replace(".","-")
+        grant=app.identity_authority.grants.get(grant_id)
+        assert grant is not None
+        assert grant.subject_id == own
+        assert grant.capability == capability
+        assert grant.client_id == AOT_PILOT_CLIENT_ID
+        assert grant.approval_required is True
+        assert grant.effective_until==GRANT_EXPIRES
+        common=dict(
+            request_id="req-grp-"+str(index),correlation_id="corr-grp-"+str(index),
+            principal_id=own,organization_id="aot",client_id=AOT_PILOT_CLIENT_ID,
+            capability=capability,requested_mode=PermissionMode.EXECUTE,
+            authentication_assurance="entra-oauth-bearer")
+        initial=app.identity_authority.evaluate(AuthorityRequest(**common))
+        assert initial.outcome is AuthorityOutcome.APPROVAL_REQUIRED
+        assert grant_id in initial.matched_grants
+        assert app.identity_authority.evaluate(AuthorityRequest(
+            **{**common,"principal_id":other}
+        )).outcome is AuthorityOutcome.DENIED
+        assert app.identity_authority.evaluate(AuthorityRequest(
+            **{**common,"client_id":"client-another"}
+        )).outcome is AuthorityOutcome.DENIED
+        assert app.identity_authority.evaluate(AuthorityRequest(
+            **{**common,"client_id":None}
+        )).outcome is AuthorityOutcome.DENIED
+        # A record for a different action or client cannot satisfy this grant.
+        approval_id="approval-test-grp-"+str(index)
+        app.identity_authority.approvals.put(ApprovalRecord(
+            approval_id=approval_id,request_id=common["request_id"],
+            capability=capability,organization_id="aot",
+            client_id=AOT_PILOT_CLIENT_ID,requested_by=own,
+            status="approved",decided_by=own,
+            decided_at=now,expires_at=now+timedelta(minutes=3),
+        ))
+        approved=app.identity_authority.evaluate(AuthorityRequest(
+            **common,approval_id=approval_id))
+        assert approved.outcome is AuthorityOutcome.ALLOWED
+        assert approved.execution_context.approval_required is True
+        assert app.identity_authority.evaluate(AuthorityRequest(
+            **{**common,"request_id":"other-request"},approval_id=approval_id
+        )).outcome is AuthorityOutcome.DENIED
+
+
+def test_group_admin_default_composition_has_no_owner_group_grants(tmp_path, monkeypatch):
+    from jason_runtime.microsoft_group_admin_activation import GRANT_PREFIX
+    monkeypatch.delenv("JASON_M365_GROUP_ADMIN_PROFILE", raising=False)
+    app=build_runtime_application(_settings(tmp_path))
+    assert all(
+        app.identity_authority.grants.get(
+            GRANT_PREFIX+name.replace(".","-")
+        ) is None for name in ("identity.group.create","identity.group.member.add")
     )

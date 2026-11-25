@@ -1,0 +1,31 @@
+[Unit]
+Description=Jason PMv4 independently supervised runbook read/hot-load service
+After=local-fs.target
+ConditionPathExists=/var/lib/jason/openclaw/json-playbooks.sqlite3
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=al
+Group=al
+WorkingDirectory=/usr/local/lib/jason/runbook-management/current
+Environment=PYTHONPATH=/usr/local/lib/jason/runbook-management/current
+ExecStart=/usr/bin/python3 -m autonomous_remediation.runbook_management_read_service --registry /var/lib/jason/openclaw/json-playbooks.sqlite3 --socket /run/jason-runbook-management/read.sock
+RuntimeDirectory=jason-runbook-management
+RuntimeDirectoryMode=0700
+Restart=on-failure
+RestartSec=10s
+NoNewPrivileges=true
+UMask=0077
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ReadOnlyPaths=/var/lib/jason/openclaw/json-playbooks.sqlite3
+ReadWritePaths=/run/jason-runbook-management
+
+[Install]
+WantedBy=multi-user.target

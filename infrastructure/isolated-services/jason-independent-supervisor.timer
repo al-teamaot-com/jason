@@ -1,0 +1,11 @@
+[Unit]
+Description=Independent governed engineering cadence (supervisor)
+
+[Timer]
+OnCalendar=*-*-* *:04/5:00 America/New_York
+AccuracySec=15s
+Persistent=true
+Unit=jason-independent-supervisor.service
+
+[Install]
+WantedBy=timers.target

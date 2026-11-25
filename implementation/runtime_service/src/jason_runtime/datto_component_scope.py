@@ -77,6 +77,26 @@ DATTO_AD_HOC_LINUX_SHELL_NAME = (
     "Run Ad Hoc Command (Shell) [MAC] [LIN]"
 )
 
+# Separate production-Jason diagnostic enrollment: this is NOT the
+# Claw2 development worker and never grants arbitrary production shell.
+DATTO_JASON_ROOT_PROBE_DEVICE_UID = "85fc3097-ac2f-18b2-afc4-6cf07131275d"
+DATTO_JASON_ROOT_PROBE_ENV = "JASON_DATTO_JASON_ROOT_PROBE_DEVICE_UID"
+DATTO_JASON_ROOT_PROBE_COMMAND = "id -u"
+DATTO_JASON_ROOT_PROBE_ALLOWLIST = "aot-jason-root-identity-readonly"
+DATTO_JASON_ROOT_PROBE_DEVICE_CLASS = "Desktop"
+
+
+def jason_root_probe_enabled() -> bool:
+    """Activation requires an independently reviewed exact release binding."""
+    return os.environ.get(DATTO_JASON_ROOT_PROBE_ENV, "").strip() == DATTO_JASON_ROOT_PROBE_DEVICE_UID
+
+
+def jason_root_probe_command_allowed(variables: Mapping[str, object]) -> bool:
+    """No caller-defined shell, additional flags, variables or whitespace."""
+    return isinstance(variables, Mapping) and dict(variables) == {
+        "usrInput": DATTO_JASON_ROOT_PROBE_COMMAND,
+    }
+
 _FORCED_PER_RUN_COMPONENT_UIDS = frozenset(
     {
         DATTO_AD_HOC_POWERSHELL_UID,

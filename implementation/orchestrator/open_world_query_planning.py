@@ -13,6 +13,7 @@ from typing import Any, Mapping, Protocol
 from .governed_query import (
     GovernedQueryPlan,
     QueryAggregate,
+    QueryArithmetic,
     QueryField,
     QueryJoin,
     QueryLiteral,
@@ -56,6 +57,21 @@ class OpenWorldQuerySource:
 
 
 @dataclass(frozen=True, slots=True)
+class OpenWorldLookupField:
+    name: str
+    field_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class OpenWorldLookup:
+    alias: str
+    resource_handle: str
+    input_output: str
+    match_field: str
+    fields: tuple[OpenWorldLookupField, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class OpenWorldQueryPlan:
     sources: tuple[
         OpenWorldQuerySource,
@@ -63,6 +79,7 @@ class OpenWorldQueryPlan:
     ]
     relational_plan: GovernedQueryPlan
     answer_mode: str
+    lookups: tuple[OpenWorldLookup, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +259,9 @@ def _minimize_query_sources(
             used_aliases.add(
                 str(source)
             )
+        if isinstance(expression, QueryArithmetic):
+            observe_expression(expression.left)
+            observe_expression(expression.right)
 
     for join in relational.joins:
         left_source = getattr(
@@ -586,6 +606,18 @@ def _lower(
                 ]
             )
 
+        if kind == "arithmetic":
+            left = raw.get("left")
+            right = raw.get("right")
+            operator = str(raw.get("operator") or "").strip()
+            if not isinstance(left, Mapping) or not isinstance(right, Mapping):
+                raise OpenWorldQueryPlanningError("arithmetic expression requires two operands")
+            return QueryArithmetic(
+                left=expression(left),
+                operator=operator,
+                right=expression(right),
+            )
+
         raise OpenWorldQueryPlanningError(
             "unsupported expression kind"
         )
@@ -653,7 +685,7 @@ def _lower(
     aggregates = tuple(
         QueryAggregate(
             name=item["name"],
-            function=item[
+            operation=item[
                 "function"
             ],
             expression=(
@@ -705,6 +737,50 @@ def _lower(
         ),
     )
 
+    available_outputs = {
+        item.name for item in projections
+    } | {item.name for item in groups} | {item.name for item in aggregates}
+    lookup_aliases = set()
+    lookups = []
+    for item in proposal.get("lookups", []):
+        alias = str(item["alias"]).strip()
+        handle = str(item["resource_handle"]).strip()
+        input_output = str(item["input_output"]).strip()
+        match_field = str(item["match_field"]).strip()
+        resource = known.get(handle)
+        if not alias or alias in lookup_aliases:
+            raise OpenWorldQueryPlanningError("lookup aliases must be unique and non-empty")
+        if resource is None or not resource.collection_supported:
+            raise OpenWorldQueryPlanningError("lookup requires a governed collection resource")
+        safe_lookup_fields = {
+            field for field, operator, _ in resource.query_filter_bindings
+            if operator == "eq"
+        }
+        if match_field not in safe_lookup_fields:
+            raise OpenWorldQueryPlanningError("lookup match field is not declared lookup-safe")
+        if input_output not in available_outputs:
+            raise OpenWorldQueryPlanningError("lookup input must reference an existing query/lookup output")
+        fields = []
+        resource_fields = {field.path for field in resource.fields}
+        for raw_field in item["fields"]:
+            name = str(raw_field["name"]).strip()
+            field_path = str(raw_field["field_path"]).strip()
+            if not name or name in available_outputs:
+                raise OpenWorldQueryPlanningError("lookup output names must be unique")
+            if field_path not in resource_fields:
+                raise OpenWorldQueryPlanningError("lookup selected field outside discovered schema")
+            fields.append(OpenWorldLookupField(name=name, field_path=field_path))
+            available_outputs.add(name)
+        if not fields:
+            raise OpenWorldQueryPlanningError("lookup requires at least one output field")
+        lookup_aliases.add(alias)
+        lookups.append(OpenWorldLookup(
+            alias=alias, resource_handle=handle, input_output=input_output,
+            match_field=match_field, fields=tuple(fields),
+        ))
+    if len(lookups) > 3:
+        raise OpenWorldQueryPlanningError("query exceeds bounded lookup depth")
+
     return OpenWorldQueryPlan(
         sources=tuple(
             sources
@@ -713,6 +789,7 @@ def _lower(
         answer_mode=proposal[
             "answer_mode"
         ],
+        lookups=tuple(lookups),
     )
 
 
@@ -742,6 +819,22 @@ def _expression_schema(
             ],
         }
 
+    operand = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["kind", "source", "field_path", "value", "amount", "unit", "direction", "output"],
+        "properties": {
+            "kind": {"type": "string", "enum": ["field", "literal", "relative_time", "output"]},
+            "source": {"type": ["string", "null"]},
+            "field_path": field_path_schema,
+            "value": {"type": ["string", "number", "boolean", "null"]},
+            "amount": {"type": ["integer", "null"]},
+            "unit": {"type": ["string", "null"]},
+            "direction": {"type": ["string", "null"]},
+            "output": {"type": ["string", "null"]},
+        },
+    }
+
     return {
         "type": "object",
         "additionalProperties": False,
@@ -754,6 +847,9 @@ def _expression_schema(
             "unit",
             "direction",
             "output",
+            "operator",
+            "left",
+            "right",
         ],
         "properties": {
             "kind": {
@@ -763,6 +859,7 @@ def _expression_schema(
                     "literal",
                     "relative_time",
                     "output",
+                    "arithmetic",
                 ],
             },
             "source": {
@@ -806,6 +903,12 @@ def _expression_schema(
                     "null",
                 ],
             },
+            "operator": {
+                "type": ["string", "null"],
+                "enum": ["add", "subtract", "multiply", "divide", None],
+            },
+            "left": {"anyOf": [operand, {"type": "null"}]},
+            "right": {"anyOf": [operand, {"type": "null"}]},
         },
     }
 
@@ -911,6 +1014,38 @@ def _schema(
             "no executable query sources"
         )
 
+    lookup_variants = []
+    for resource in catalog.resources:
+        lookup_fields = sorted({
+            field for field, operator, _ in resource.query_filter_bindings
+            if operator == "eq"
+        })
+        fields = tuple(field.path for field in resource.fields if field.path.strip())
+        if not resource.collection_supported or not lookup_fields or not fields:
+            continue
+        lookup_variants.append({
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["alias", "resource_handle", "input_output", "match_field", "fields"],
+            "properties": {
+                "alias": {"type": "string"},
+                "resource_handle": {"type": "string", "enum": [resource.resource_handle]},
+                "input_output": {"type": "string"},
+                "match_field": {"type": "string", "enum": lookup_fields},
+                "fields": {
+                    "type": "array", "minItems": 1, "maxItems": 8,
+                    "items": {
+                        "type": "object", "additionalProperties": False,
+                        "required": ["name", "field_path"],
+                        "properties": {
+                            "name": {"type": "string"},
+                            "field_path": {"type": "string", "enum": list(fields)},
+                        },
+                    },
+                },
+            },
+        })
+
     return {
         "type": "object",
         "additionalProperties": False,
@@ -924,6 +1059,7 @@ def _schema(
             "order_by",
             "limit",
             "answer_mode",
+            "lookups",
         ],
         "properties": {
             "sources": {
@@ -1064,6 +1200,11 @@ def _schema(
                     "null",
                 ],
             },
+            "lookups": {
+                "type": "array",
+                "maxItems": 3,
+                "items": ({"anyOf": lookup_variants} if lookup_variants else {"type": "object", "maxProperties": 0}),
+            },
             "answer_mode": {
                 "type": "string",
                 "enum": [
@@ -1118,12 +1259,21 @@ Rules:
   justify an explicit field-to-field relationship.
 - Provider-local entity identifiers are not globally equivalent.
 - Use generic relational operators rather than question-specific procedures.
+- Use arithmetic expressions for deterministic differences, sums, products, or ratios
+  between governed numeric fields/outputs when the question requires calculation.
+- Never calculate operational values in the model; propose the arithmetic expression
+  and let deterministic execution compute it from governed evidence.
 - Every source alias must be declared exactly once in sources.
 - Every field expression source must reference one of those declared aliases.
 - Join source identity comes only from the left and right field expressions.
 - Never invent an undeclared alias from a resource type, label, or field name.
 - Always set selector_reference to null. Resource selectors are grounded and
   authorized outside the language-model planning stage.
+- Use lookups only after the relational result is bounded when a requested field
+  depends on an exact relationship discovered from an output value.
+- Lookup match_field must be one of the resource's declared lookup_fields.
+- Lookups are exact-unique enrichments: never choose the first of multiple matches.
+- Chained lookups may use an output from an earlier lookup as input_output.
 
 Return only the structured query object.
 """.strip()

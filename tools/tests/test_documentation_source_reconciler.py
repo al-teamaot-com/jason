@@ -340,3 +340,48 @@ def test_merge_provider_error_still_fails_closed(monkeypatch):
         pass
     else:
         raise AssertionError("provider/authentication merge failures must remain fatal")
+
+def test_documentation_reconciliation_uses_existing_bounded_systemd_retry():
+    from pathlib import Path
+    unit = (Path(__file__).resolve().parents[2]
+            / "infrastructure/openclaw-operations/systemd"
+            / "jason-documentation-reconciliation.service").read_text()
+    assert "Type=oneshot" in unit
+    assert "Restart=on-failure" in unit
+    assert "RestartSec=120s" in unit
+    assert "StartLimitBurst=3" in unit
+    assert "StartLimitIntervalSec=15min" in unit
+    assert "SuccessExitStatus=" not in unit
+
+
+def test_failed_publisher_exposes_only_fixed_gate_codes(monkeypatch, capsys):
+    import subprocess
+    from types import SimpleNamespace
+    from tools.documentation_source_reconciler import run
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.subprocess.run",
+        lambda *a, **k: SimpleNamespace(
+            returncode=1, stdout="arbitrary private provider output",
+            stderr="DOCUMENTATION_PUBLICATION=BLOCKED_DIRTY_WORKTREE\ncredential=do-not-print",
+        ),
+    )
+    import pytest
+    with pytest.raises(subprocess.CalledProcessError):
+        run("bash", "publisher")
+    assert capsys.readouterr().out == "DOCUMENTATION_PUBLICATION=BLOCKED_DIRTY_WORKTREE\n"
+
+
+def test_unrecognized_failure_remains_fatal_without_printing_raw_diagnostics(monkeypatch, capsys):
+    import subprocess
+    from types import SimpleNamespace
+    from tools.documentation_source_reconciler import run
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.subprocess.run",
+        lambda *a, **k: SimpleNamespace(
+            returncode=2, stdout="", stderr="DOCUMENTATION_PUBLICATION=unsafe private text",
+        ),
+    )
+    import pytest
+    with pytest.raises(subprocess.CalledProcessError):
+        run("bash", "publisher")
+    assert capsys.readouterr().out == ""

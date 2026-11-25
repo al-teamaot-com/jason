@@ -93,3 +93,26 @@ def test_live_fields_are_merged_even_when_declared_hints_exist():
         not in executor.intents[0]
         .arguments
     )
+
+
+def test_enrichment_preserves_declared_query_filter_bindings():
+    resource = DiscoveredResourceSchema(
+        provider_id="autotask", capability_name="service.configuration.search",
+        resource_type="service_configuration", operation="search", collection_supported=True,
+        selector_keys=("serial_number",),
+        fields=(DiscoveredField(name="serialNumber", path="serialNumber"),),
+        query_filter_bindings=(("serialNumber", "eq", "serial_number"),),
+    )
+
+    class Probe:
+        def probe(self, **kwargs):
+            return type("ProbeResult", (), {
+                "fields": (DiscoveredField(name="companyID", path="companyID"),)
+            })()
+
+    enriched = OpenWorldCatalogEnricher(probe=Probe()).enrich(
+        catalog=OpenWorldResourceCatalog(resources=(resource,)), executor=object(),
+    )
+    item = enriched.resources[0]
+    assert item.query_filter_bindings == (("serialNumber", "eq", "serial_number"),)
+    assert {field.path for field in item.fields} == {"serialNumber", "companyID"}

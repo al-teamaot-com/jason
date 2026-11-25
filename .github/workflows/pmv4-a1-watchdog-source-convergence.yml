@@ -1,0 +1,31 @@
+name: PMv4 A1 source convergence with installed single optional shadow watchdog admission
+on:
+  pull_request:
+    paths:
+      - "config/production-desired-state.json"
+      - "tests/test_pmv4_a1_watchdog_source_convergence.py"
+      - ".github/workflows/pmv4-a1-watchdog-source-convergence.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  only-optional-shadow-source:
+    name: One optional shadow only, all other drift controls unchanged
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Confirm one exact config key addition vs protected original source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q pytest
+          PYTHONPATH=tools:. python -B -m pytest -q \
+            tests/test_pmv4_a1_watchdog_source_convergence.py
+          test ! -e /etc/jason/release-readback-recovery/production-desired-state.json

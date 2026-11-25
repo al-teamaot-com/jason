@@ -146,9 +146,12 @@ def test_actual_immutable_release_without_dotgit_uses_exact_managed_git_object(
     monkeypatch.setattr(activation, "IMMUTABLE_RELEASES_ROOT", release_root)
     monkeypatch.setattr(activation, "MANAGED_SOURCE_GIT", root)
     activation.verify_source_pinned_manifest(installed, sha)
+    # Validate the immutable release's committed campaign, not an old UAT window.
+    campaign = json.loads(installed.read_text(encoding="utf-8"))
+    expires = datetime.fromisoformat(campaign["expires_at"].replace("Z", "+00:00"))
     assert activation.activate_from_manifest(
-        installed, now=datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
-    ) == "nonexecuting_test_only|true|OwnerUAT20261023PhaseBound02"
+        installed, now=expires - timedelta(hours=12)
+    ) == "nonexecuting_test_only|true|" + campaign["session_id"]
 
     changed = json.loads(installed.read_text())
     changed["session_id"] = "ForgedOwnerUAT01"

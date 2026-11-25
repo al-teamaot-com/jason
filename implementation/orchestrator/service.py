@@ -115,6 +115,11 @@ class InvocationTelemetry:
                 raise ValueError("reflection telemetry sequence value exceeds bounded length")
 
 
+class ProviderOutcomeIndeterminate(RuntimeError):
+    """An effect may have occurred; retain its consumed claim for native readback."""
+    error_code = "PROVIDER_OUTCOME_INDETERMINATE"
+
+
 @dataclass(frozen=True, slots=True)
 class InvocationResult:
     output: Mapping[str, Any] = field(default_factory=dict)
@@ -643,7 +648,9 @@ class CentralOrchestrator:
             else:
                 invocation = self._invoker.invoke(request=request, resolution=resolution)
         except Exception as exc:
-            if request.approval_id is not None and self._governed_execution_ledger is not None:
+            indeterminate = isinstance(exc, ProviderOutcomeIndeterminate)
+            if (not indeterminate and request.approval_id is not None
+                    and self._governed_execution_ledger is not None):
                 self._governed_execution_ledger.fail(request, reason="provider_invocation_failed")
             duration_ms = round((monotonic() - invocation_started) * 1000, 3)
             safe_error_code = getattr(exc, "error_code", None)
@@ -659,7 +666,8 @@ class CentralOrchestrator:
                 capability_name=resolution.capability_name,
                 status=OrchestrationStatus.FAILED,
                 stage=ExecutionStage.FAILED,
-                reason_codes=("capability_invocation_failed",),
+                reason_codes=(("provider_outcome_indeterminate",) if indeterminate
+                              else ("capability_invocation_failed",)),
                 resolution=resolution,
                 artifact_references=request.artifact_references,
                 attempts=1,

@@ -308,3 +308,56 @@ def test_isolated_host_reconcile_does_not_mutate_if_user_plan_fails(tmp_path):
     assert (system / system_unit).exists()
     assert (user / user_unit).exists()
     assert not log.exists()
+
+
+def test_exact_legacy_ccc_timer_and_service_can_be_retired_as_bounded_unit_delta(tmp_path):
+    """CCC retirement stops only the two byte-identical legacy units."""
+    root, previous, target, installed, user = setup_releases(tmp_path)
+    legacy = ("jason-ccc.service", "jason-ccc.timer")
+    unaffected = ("jason-openclaw-authority-health.service",
+                  "jason-production-drift-watchdog.timer")
+    manifest(previous, system=legacy + unaffected)
+    manifest(target, system=unaffected)
+    source = previous / "infrastructure/ccc/systemd"
+    source.mkdir(parents=True)
+    for unit in legacy:
+        body = "[Unit]\nDescription=Historical CCC service/timer\n"
+        (source / unit).write_text(body)
+        (installed / unit).write_text(body)
+    for unit in unaffected:
+        (installed / unit).write_text("do not alter")
+    assert mod.plan_unit_removals(previous, target, installed, scope="system") == [
+        "jason-ccc.timer", "jason-ccc.service",
+    ]
+    assert all((installed / unit).exists() for unit in legacy + unaffected)
+
+
+@pytest.mark.parametrize("unit", ("jason-ccc.timer", "jason-ccc.service"))
+def test_modified_legacy_ccc_unit_cannot_be_deleted_from_host(tmp_path, unit):
+    root, previous, target, installed, user = setup_releases(tmp_path)
+    manifest(previous, system=(unit,))
+    manifest(target)
+    source = previous / "infrastructure/ccc/systemd"
+    source.mkdir(parents=True)
+    (source / unit).write_text("source approved")
+    (installed / unit).write_text("unknown local modification")
+    with pytest.raises(mod.UnitDeltaError, match="differs"):
+        mod.plan_unit_removals(previous, target, installed, scope="system")
+
+
+def test_unrelated_legacy_file_is_not_retired(tmp_path):
+    root, previous, target, installed, user = setup_releases(tmp_path)
+    manifest(previous, system=("jason-ccc.timer", "jason-ccc.service",
+                               "jason-openclaw-authority-health.timer"))
+    manifest(target, system=("jason-openclaw-authority-health.timer",))
+    source = previous / "infrastructure/ccc/systemd"
+    source.mkdir(parents=True)
+    for unit in ("jason-ccc.timer", "jason-ccc.service"):
+        (source / unit).write_text("reviewed unit")
+        (installed / unit).write_text("reviewed unit")
+    protected = installed / "jason-openclaw-authority-health.timer"
+    protected.write_text("critical independent health")
+    assert mod.plan_unit_removals(previous, target, installed, scope="system") == [
+        "jason-ccc.timer", "jason-ccc.service",
+    ]
+    assert protected.read_text() == "critical independent health"

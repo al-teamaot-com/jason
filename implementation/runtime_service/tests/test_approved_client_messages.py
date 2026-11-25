@@ -106,3 +106,38 @@ def test_rejects_non_ticket_contact_recipient_policy(tmp_path):
             template_id="example-v1",
             path=path,
         )
+
+@pytest.mark.parametrize(
+    ("workflow", "template", "title", "body"),
+    [
+        ("ticket_progress", "approved-progress-v1", "Service Update",
+         "Our team is investigating this request."),
+        ("ticket_resolution", "approved-resolution-v1", "Resolution Update",
+         "The reported issue has been resolved and verified."),
+        ("maintenance_coordination", "approved-schedule-v1", "Maintenance Update",
+         "We have scheduled the approved maintenance window."),
+    ],
+)
+def test_non_question_approved_messages_use_same_generic_registry(
+    tmp_path, workflow, template, title, body,
+):
+    """Non-question notices are ordinary, exact source-owned templates."""
+    path = _write_registry(
+        tmp_path,
+        [_template(
+            workflow_id=workflow, template_id=template, title=title, body=body,
+        )],
+    )
+    resolved = resolve_approved_client_message(
+        workflow_id=workflow, template_id=template, path=path,
+    )
+    assert (resolved.title, resolved.body) == (title, body)
+    assert resolved.workflow_id == workflow
+    with pytest.raises(
+        ApprovedClientMessageRegistryError, match="exact workflow/template pair"
+    ):
+        resolve_approved_client_message(
+            workflow_id="unapproved_workflow",
+            template_id=template,
+            path=path,
+        )

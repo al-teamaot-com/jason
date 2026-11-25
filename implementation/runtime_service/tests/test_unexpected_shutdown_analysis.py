@@ -1,5 +1,6 @@
 from jason_runtime.unexpected_shutdown_analysis import (
     classify_site_scope,
+    correlate_shutdown_ticket_to_endpoint,
     shutdown_character,
     site_event_id,
     storage_health_risk,
@@ -73,3 +74,62 @@ def test_shutdown_character_prefers_unclean_evidence():
     assert shutdown_character([{"Id": 6008}, {"Id": 6006}]) == "ABRUPT_OR_UNCLEAN"
     assert shutdown_character([{"Id": 1074}]) == "CLEAN_OR_PLANNED"
     assert shutdown_character([]) == "UNDETERMINED"
+
+
+def test_correlate_shutdown_ticket_to_endpoint_accepts_exact_uid_unique_ci_and_same_client():
+    result = correlate_shutdown_ticket_to_endpoint(
+        ticket={"companyID": 0, "configurationItemID": 0},
+        ticket_evidence={"datto_uid": "SOSServer2024"},
+        endpoint_readback={"resource_id": "SOSServer2024", "companyID": 1158},
+        candidate_cis=[
+            {"id": 2001, "referenceNumber": "SOSServer2024", "companyID": 1158, "isActive": True},
+        ],
+    )
+
+    assert result["status"] == "correlated"
+    assert result["configurationItemID"] == 2001
+    assert result["companyID"] == 1158
+
+
+def test_correlate_shutdown_ticket_to_endpoint_blocks_uid_mismatch():
+    result = correlate_shutdown_ticket_to_endpoint(
+        ticket={"companyID": 0, "configurationItemID": 0},
+        ticket_evidence={"datto_uid": "SOSServer2024"},
+        endpoint_readback={"resource_id": "ADSRV", "companyID": 1158},
+        candidate_cis=[
+            {"id": 2001, "referenceNumber": "SOSServer2024", "companyID": 1158, "isActive": True},
+        ],
+    )
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "endpoint_readback_uid_mismatch"
+
+
+def test_correlate_shutdown_ticket_to_endpoint_blocks_ambiguous_active_ci_matches():
+    result = correlate_shutdown_ticket_to_endpoint(
+        ticket={"companyID": 0, "configurationItemID": 0},
+        ticket_evidence={"datto_uid": "SOSServer2024"},
+        endpoint_readback={"resource_id": "SOSServer2024", "companyID": 1158},
+        candidate_cis=[
+            {"id": 2001, "referenceNumber": "SOSServer2024", "companyID": 1158, "isActive": True},
+            {"id": 2002, "referenceNumber": "SOSServer2024", "companyID": 1158, "isActive": True},
+        ],
+    )
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "ci_not_unique_or_not_active"
+    assert result["match_count"] == 2
+
+
+def test_correlate_shutdown_ticket_to_endpoint_blocks_cross_client_binding():
+    result = correlate_shutdown_ticket_to_endpoint(
+        ticket={"companyID": 0, "configurationItemID": 0},
+        ticket_evidence={"datto_uid": "SOSServer2024"},
+        endpoint_readback={"resource_id": "SOSServer2024", "companyID": 1158},
+        candidate_cis=[
+            {"id": 2001, "referenceNumber": "SOSServer2024", "companyID": 9999, "isActive": True},
+        ],
+    )
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "cross_client_binding_failed"

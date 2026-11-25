@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+  "drive_id": "REQUIRES_VERIFIED_DRIVE_ID",
+  "root_path": "Bank Checking Accounts Register",
+  "timezone": "America/New_York",
+  "run_hour": 5,
+  "boundary_snapshot": "/etc/jason/financial-statements/boundary.sqlite3",
+  "openbao_url": "http://openbao:8200",
+  "role_id_path": "/run/jason-financial-secrets/role_id",
+  "secret_id_path": "/run/jason-financial-secrets/secret_id"
+}

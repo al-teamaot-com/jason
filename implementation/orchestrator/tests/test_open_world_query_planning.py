@@ -1184,3 +1184,87 @@ def test_join_schema_has_single_source_of_truth_for_aliases():
         "left",
         "right",
     }
+
+
+def test_planner_lowers_bounded_exact_lookup_chain():
+    from orchestrator.open_world_query_planning import _lower
+    from orchestrator.open_world_schema import DiscoveredField, DiscoveredResourceSchema, OpenWorldResourceCatalog
+
+    usage = DiscoveredResourceSchema(
+        provider_id="kfs", capability_name="usage.search", resource_type="usage",
+        operation="search", collection_supported=True, selector_keys=(),
+        fields=(DiscoveredField("serial_number", "serial_number"),),
+    )
+    config = DiscoveredResourceSchema(
+        provider_id="autotask", capability_name="configuration.search", resource_type="configuration",
+        operation="search", collection_supported=True, selector_keys=("serial_number",),
+        fields=(DiscoveredField("companyID", "companyID"),),
+        query_filter_bindings=(("serialNumber", "eq", "serial_number"),),
+    )
+    company = DiscoveredResourceSchema(
+        provider_id="autotask", capability_name="company.search", resource_type="company",
+        operation="search", collection_supported=True, selector_keys=("resource_id",),
+        fields=(DiscoveredField("companyName", "companyName"),),
+        query_filter_bindings=(("id", "eq", "resource_id"),),
+    )
+    catalog = OpenWorldResourceCatalog(resources=(usage, config, company))
+    proposal = {
+        "sources": [{
+            "alias": "u", "resource_handle": usage.resource_handle,
+            "field_paths": ["serial_number"], "selector_reference": None,
+        }],
+        "joins": [], "filters": [],
+        "projections": [{
+            "name": "serial", "expression": {
+                "kind": "field", "source": "u", "field_path": "serial_number",
+                "value": None, "amount": None, "unit": None, "direction": None,
+                "output": None, "operator": None, "left": None, "right": None,
+            }
+        }],
+        "group_by": [], "aggregates": [], "order_by": [], "limit": 10,
+        "answer_mode": "table",
+        "lookups": [
+            {
+                "alias": "cfg", "resource_handle": config.resource_handle,
+                "input_output": "serial", "match_field": "serialNumber",
+                "fields": [{"name": "company_id", "field_path": "companyID"}],
+            },
+            {
+                "alias": "co", "resource_handle": company.resource_handle,
+                "input_output": "company_id", "match_field": "id",
+                "fields": [{"name": "company", "field_path": "companyName"}],
+            },
+        ],
+    }
+    plan = _lower(proposal=proposal, catalog=catalog)
+    assert len(plan.lookups) == 2
+    assert plan.lookups[0].match_field == "serialNumber"
+    assert plan.lookups[1].input_output == "company_id"
+
+
+def test_planner_rejects_lookup_on_field_not_declared_exact_match_safe():
+    import pytest
+    from orchestrator.open_world_query_planning import _lower, OpenWorldQueryPlanningError
+    from orchestrator.open_world_schema import DiscoveredField, DiscoveredResourceSchema, OpenWorldResourceCatalog
+
+    source = DiscoveredResourceSchema(
+        provider_id="p", capability_name="source.search", resource_type="source",
+        operation="search", collection_supported=True, selector_keys=(),
+        fields=(DiscoveredField("id", "id"),),
+    )
+    target = DiscoveredResourceSchema(
+        provider_id="p", capability_name="target.search", resource_type="target",
+        operation="search", collection_supported=True, selector_keys=("name",),
+        fields=(DiscoveredField("name", "name"),),
+        query_filter_bindings=(),
+    )
+    proposal = {
+        "sources": [{"alias":"s","resource_handle":source.resource_handle,"field_paths":["id"],"selector_reference":None}],
+        "joins": [], "filters": [],
+        "projections": [{"name":"id","expression":{"kind":"field","source":"s","field_path":"id","value":None,"amount":None,"unit":None,"direction":None,"output":None,"operator":None,"left":None,"right":None}}],
+        "group_by": [], "aggregates": [], "order_by": [], "limit": 10,
+        "answer_mode": "table",
+        "lookups": [{"alias":"t","resource_handle":target.resource_handle,"input_output":"id","match_field":"name","fields":[{"name":"name","field_path":"name"}]}],
+    }
+    with pytest.raises(OpenWorldQueryPlanningError, match="lookup-safe"):
+        _lower(proposal=proposal, catalog=OpenWorldResourceCatalog(resources=(source,target)))

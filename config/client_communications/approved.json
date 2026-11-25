@@ -9,6 +9,15 @@
       "body": "The identified vulnerability mentioned in this ticket has been reviewed. The required update has either already been installed or has been approved for implementation and is scheduled to be applied during the device’s next regular patching window in accordance with our maintenance policy.\n\nNo further action is required at this time. Monitoring will continue to confirm successful deployment and remediation. Please reopen the ticket if you experience any issues following the update.",
       "recipient_policy": "ticket_contact",
       "require_email_notifications": true
+    },
+    {
+      "template_id": "xyz-controlled-client-notification-acceptance-v1",
+      "workflow_id": "xyz_client_notification_acceptance",
+      "enabled": true,
+      "title": "JASON TEST ONLY - Client Notification Verification",
+      "body": "This is an authorized Project Jason notification test for XYZ Test Company. No service request, security incident, vulnerability, or device change is being reported. No action is required. This message is intended only to verify that a governed Autotask client notification reaches the designated test contact.",
+      "recipient_policy": "ticket_contact",
+      "require_email_notifications": true
     }
   ]
 }

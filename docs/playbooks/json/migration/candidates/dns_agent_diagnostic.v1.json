@@ -1,0 +1,435 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "automation.component.execute",
+      "automation.job.output.read",
+      "automation.job.read",
+      "endpoint.device.read",
+      "endpoint.software.search",
+      "service.ticket.note.create",
+      "service.ticket.notes.search",
+      "service.ticket.read"
+    ],
+    "approval_bound_branches": [
+      "run_diagnostic",
+      "install_agent",
+      "uninstall_agent",
+      "write_note"
+    ],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "Verified DNS Agent health documented and transferred to Human Review until original alert resolution authority is separately governed; no auto ticket completion"
+  },
+  "expected_state": {
+    "filter_service_running": true,
+    "service_manager_running_when_applicable": true,
+    "DNS_resolution_success": true,
+    "current_exact_monitor_cleared": true,
+    "no_mismatch_between_client_scoped_provider_and_local_device": true
+  },
+  "migration": {
+    "source_conversion": "dnsfilter_diagnostic_normalization_and_exact_install_reinstall_source_candidate_not_accepted",
+    "legacy_source_blob_sha": "fa1dbb6375a0cb58a01c7948edc168bf55131e14",
+    "legacy_registry_version": "1.0.0",
+    "source_map": "docs/playbooks/json/migration/source_maps/dns_agent_diagnostic.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "Dedicated diagnostic component stdout and both service states exact parser, native client-safe DNSFilter site/agent/policy posture integration incomplete",
+      "Existing standing-approved diagnostic component UID is bound in persisted state but provider job execution/orchestrator/authorization must be independently validated",
+      "Exact registered install/reinstall component versions, customer-scoped OpenBao keys, one uninstall/install cycle and no network changes need side-effect readback and explicit promotion",
+      "Full post install/reinstall service-manager DNS health check, DRMM exact alert resolution and ticket readback not yet independently accepted",
+      "Failure/retry/reboot denial, restart and cross-tenant scenario tests need isolated real provider preproduction",
+      "Original legacy registry does not authorize endpoint.alert.resolve; healthy state cannot complete the original alert/ticket until separate exact-scope authorization and source amendment. The JSON healthy branch currently goes to Human Review."
+    ],
+    "accepted_for_execution": false,
+    "production_activation_authorized": false
+  },
+  "playbook": {
+    "id": "dns_agent_diagnostic",
+    "lifecycle": "pilot",
+    "name": "Jason - DNSFilter DNS Agent Diagnostic",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-DNSFilter-DNS-Agent-Diagnostic.md",
+    "target_type": "endpoint",
+    "version": "1.0.0-migration.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "no_DNS_NIC_change": true,
+    "no_service_restart": true,
+    "no_reboot": true,
+    "one_uninstall_install_cycle_max": true,
+    "no_cross_client_dnsfilter_tenant_use": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "client_id",
+      "device_uid",
+      "alert_uid",
+      "component_uid",
+      "diagnostic_job_id",
+      "install_job_id",
+      "uninstall_job_id",
+      "reinstall_attempted",
+      "source_version",
+      "last_health_sha",
+      "next_recheck_at"
+    ],
+    "diagnostic_component_uid": "c3340a58-48d5-457b-bc30-5fd79e5ad8b1",
+    "no_unapproved_component_reboot_or_DNS_action": true
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_gate"
+    },
+    {
+      "id": "ticket_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "same_client_ticket_CI_alert_and_policy_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_endpoint"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_endpoint",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "online_gate"
+    },
+    {
+      "id": "online_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_device_online",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_software"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_software",
+      "type": "diagnostic",
+      "capability": "endpoint.software.search",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "diagnostic_gate"
+    },
+    {
+      "id": "diagnostic_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_standing_safe_diagnostic_component_and_grant",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "run_diagnostic"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "run_diagnostic",
+      "type": "remediation",
+      "capability": "automation.component.execute",
+      "arguments": {
+        "$fact": "trusted_exact_readonly_dnsfilter_diagnostic_args"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "read_job"
+    },
+    {
+      "id": "read_job",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_existing_job_read_args"
+      },
+      "next": "job_gate"
+    },
+    {
+      "id": "job_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "diagnostic_job_completed_same_device_no_duplicate",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_output"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_output",
+      "type": "verification",
+      "capability": "automation.job.output.read",
+      "arguments": {
+        "$fact": "trusted_exact_job_stdout_read_args"
+      },
+      "next": "classification_gate"
+    },
+    {
+      "id": "classification_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "verified_dns_agent_disposition",
+            "operator": "eq",
+            "value": "local_healthy_alert_readback_required"
+          },
+          "next": "healthy_gate"
+        },
+        {
+          "when": {
+            "fact": "verified_dns_agent_disposition",
+            "operator": "eq",
+            "value": "agent_absent_install_candidate"
+          },
+          "next": "install_gate"
+        },
+        {
+          "when": {
+            "fact": "verified_dns_agent_disposition",
+            "operator": "eq",
+            "value": "agent_partial_service_reinstall_candidate"
+          },
+          "next": "reinstall_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "install_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_client_install_key_component_and_owner_promotion",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "install_agent"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "install_agent",
+      "type": "remediation",
+      "capability": "automation.component.execute",
+      "arguments": {
+        "$fact": "trusted_exact_dnsfilter_install_args"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_installer"
+    },
+    {
+      "id": "reinstall_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_one_uninstall_install_lifecycle_and_approval",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "uninstall_agent"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "uninstall_agent",
+      "type": "remediation",
+      "capability": "automation.component.execute",
+      "arguments": {
+        "$fact": "trusted_exact_dnsfilter_uninstall_args"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_installer"
+    },
+    {
+      "id": "verify_installer",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_installer_job_read_args"
+      },
+      "next": "installer_gate"
+    },
+    {
+      "id": "installer_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_installer_job_terminal_and_output_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "verify_dns"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "verify_dns",
+      "type": "verification",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "verify_health_gate"
+    },
+    {
+      "id": "verify_health_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "service_filter_manager_dns_and_endpoint_uid_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "healthy_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "healthy_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_current_alert_cleared_and_no_security_conflict",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "note_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_jason_internal_note_owner_promotion",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "write_note"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "write_note",
+      "type": "remediation",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "$fact": "trusted_exact_session_note_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_note"
+    },
+    {
+      "id": "verify_note",
+      "type": "verification",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "note_readback_gate"
+    },
+    {
+      "id": "note_readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "same_ticket_jason_note_readback",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "human_review"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Autotask/DRMM DNS Agent",
+    "exact_alert_UID_required": true,
+    "client_requires_dnsfilter": true,
+    "client_site_variable_boundary": true
+  },
+  "verification": {
+    "authoritative_source": "exact DRMM endpoint and DNS diagnostic component job stdout/Service Manager state, allowed DNSFilter client policy, exact alert readback and Autotask note/ticket",
+    "success_condition": "filter service and manager healthy, DNS resolution works, exact alert resolved, internal note and ticket readback"
+  }
+}

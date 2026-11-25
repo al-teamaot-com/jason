@@ -1,0 +1,9 @@
+[Unit]
+Description=Jason watched exact scoped-backport root request queue
+
+[Path]
+PathChanged=/var/lib/jason/authority/scoped-backport-release/requests
+Unit=jason-scoped-backport-requests.service
+
+[Install]
+WantedBy=multi-user.target

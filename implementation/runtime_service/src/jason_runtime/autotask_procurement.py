@@ -48,6 +48,23 @@ from orchestrator.provider_mutation_capability_catalog import (
 )
 from orchestrator.service import CapabilityInvoker
 
+# Catalog execution identity is deployment configuration, never caller input.
+AUTOTASK_CATALOG_AUTH_MODE_ENV = "JASON_AUTOTASK_CATALOG_AUTH_MODE"
+CATALOG_MUTATION_OPERATIONS = frozenset({
+    "autotask.service.create", "autotask.service.update",
+    "autotask.service.bundle.create", "autotask.service.bundle.update",
+})
+
+
+def catalog_authorization_mode(operation: str) -> str:
+    if operation not in CATALOG_MUTATION_OPERATIONS:
+        return "impersonated"
+    mode = os.getenv(AUTOTASK_CATALOG_AUTH_MODE_ENV, "impersonated").strip().casefold()
+    if mode not in {"impersonated", "jason_managed"}:
+        raise PermissionError("AUTOTASK_CATALOG_AUTH_MODE_INVALID")
+    return mode
+
+
 AUTOTASK_PROCUREMENT_PROVIDER = "autotask_procurement"
 AUTOTASK_PROCUREMENT_PROFILE_ENV = "JASON_AUTOTASK_PROCUREMENT_MCP_PROFILE"
 AUTOTASK_PROCUREMENT_PROFILE = "owner-procurement-v1"
@@ -185,7 +202,8 @@ def _provider(now: datetime) -> ExecutionProvider:
         metadata={
             "connector_id": "autotask",
             "write_capability": "true",
-            "provider_native_impersonation_required": "true",
+            "provider_native_impersonation_required": "operation_specific",
+            "catalog_execution_auth_mode_env": AUTOTASK_CATALOG_AUTH_MODE_ENV,
             "activation_state": "procurement_mcp_source_only_not_activated",
         },
     )
@@ -199,6 +217,33 @@ class _PreparedAutotaskProcurement:
 
 class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnector):
     logical_secret = "autotask.write"
+
+    def _prepare_execution_identity(
+        self, request: ConnectorRequest, credentials: Mapping[str, str], *, mode: str,
+    ) -> PreparedRequest:
+        if mode == "jason_managed":
+            if request.context.capability not in CATALOG_MUTATION_OPERATIONS:
+                raise PermissionError("AUTOTASK_CATALOG_OPERATION_REQUIRED")
+            # Jason authority and exact-action approval remain upstream. Provider
+            # preflight now checks the dedicated API account's own permissions.
+            prepared = AutotaskConnector.prepare_request(self, request, credentials)
+            self._preflight_requester_access(
+                prepared=prepared, headers=prepared.headers,
+                operation=request.context.capability,
+            )
+            return prepared
+        return AutotaskMutationConnector.prepare_request(self, request, credentials)
+
+    @staticmethod
+    def _catalog_identity_parameters(operation: str, prepared: PreparedRequest) -> dict[str, str]:
+        if operation not in CATALOG_MUTATION_OPERATIONS:
+            return {}
+        resource_id = prepared.headers.get("ImpersonationResourceId", "")
+        return {
+            "execution_auth_mode": "impersonated" if resource_id else "jason_managed",
+            "execution_account": prepared.headers["UserName"],
+            "impersonation_resource_id": resource_id,
+        }
 
     def _trusted_email(self, request: ConnectorRequest) -> str | None:
         if request.context.principal_id != PROCUREMENT_WORKER_ID:
@@ -354,8 +399,9 @@ class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnecto
         if not autotask_mutation_execution_enabled():
             raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
 
+        mode = catalog_authorization_mode(normalized.context.capability)
         credentials = self._secrets.resolve(self.logical_secret, normalized.context)
-        prepared = AutotaskMutationConnector.prepare_request(self, normalized, credentials)
+        prepared = self._prepare_execution_identity(normalized, credentials, mode=mode)
         operation = normalized.context.capability
         if operation == "autotask.vendor.create":
             trusted_email = self._trusted_email(normalized)
@@ -397,6 +443,7 @@ class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnecto
             parameters={
                 "entity": entity,
                 "operation": operation,
+                **self._catalog_identity_parameters(operation, prepared),
                 **route_parameters,
                 **dict(prepared.params or {}),
             },
@@ -443,9 +490,14 @@ class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnecto
                 expected_parameters["ticketID"] = int(raw_ticket)
         if operation == "autotask.quote.item.create":
             expected_parameters["quoteID"] = int(request.arguments["quoteID"])
+        identity_parameters = self._catalog_identity_parameters(operation, prepared)
+        expected_parameters.update(identity_parameters)
         expected_parameters.update(dict(prepared.params or {}))
         if expected_parameters != dict(prepared_execution.parameters):
             raise PermissionError("prepared Autotask procurement parameters changed")
+
+        if identity_parameters and identity_parameters["execution_auth_mode"] != catalog_authorization_mode(operation):
+            raise PermissionError("AUTOTASK_CATALOG_AUTH_MODE_CHANGED")
 
         self._audit_mutation_event("connector.mutation.requested", request)
         try:

@@ -1,0 +1,326 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "unsupported_readonly_triage_note",
+    "name": "Jason - Unsupported Read-Only Triage Note Pilot",
+    "version": "1.0.0-migration.1",
+    "lifecycle": "pilot",
+    "target_type": "ticket",
+    "owner": "AOT Service Manager",
+    "source": "docs/playbooks/Jason-Unsupported-ReadOnly-Triage-Note-Pilot.md"
+  },
+  "trigger": {
+    "provider": "autotask",
+    "exact_ticket_ids": [
+      143305,
+      143272
+    ],
+    "requires_note_draft": true
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "no_client_communication": true,
+    "no_ticket_status_update": true,
+    "no_endpoint_remediation": true
+  },
+  "expected_state": {
+    "note_title": "Jason - Governed Read-Only Investigation",
+    "note_type": 3,
+    "publish": 2,
+    "ticket_unresolved": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "source_version",
+      "note_fingerprint",
+      "publication_attempts",
+      "next_due_at",
+      "last_error",
+      "last_provider_readback"
+    ],
+    "retry": "managed_by_existing_worker_contract"
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.search",
+      "arguments": {
+        "resource_id": {
+          "$fact": "ticket_id"
+        },
+        "page_size": 2
+      },
+      "next": "read_notes"
+    },
+    {
+      "id": "read_notes",
+      "type": "diagnostic",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "ticket_id"
+        }
+      },
+      "next": "pilot_gate"
+    },
+    {
+      "id": "pilot_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "ticket_id",
+            "operator": "in",
+            "value": [
+              143305,
+              143272
+            ]
+          },
+          "next": "source_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "source_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "source_version_current",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "company_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "company_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "company_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "assignment_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "assignment_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "assigned_elsewhere",
+            "operator": "eq",
+            "value": false
+          },
+          "next": "draft_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "draft_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "valid_nontransient_note_draft",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "promotion_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "promotion_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_note_promotion_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "already_verified_gate"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "already_verified_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "note_fingerprint_already_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "documented"
+        }
+      ],
+      "default": "note_exists_gate"
+    },
+    {
+      "id": "note_exists_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "existing_managed_note",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "update_ownership_gate"
+        }
+      ],
+      "default": "note_create"
+    },
+    {
+      "id": "update_ownership_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "existing_note_content_matches_last_owned_fingerprint",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_update"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "note_create",
+      "type": "remediation",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "payload": {
+          "ticketID": {
+            "$fact": "ticket_id"
+          },
+          "title": "Jason - Governed Read-Only Investigation",
+          "description": {
+            "$fact": "note_body"
+          },
+          "noteType": 3,
+          "publish": 2
+        }
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "verification_step": "readback_notes",
+      "retry": {
+        "max_attempts": 2
+      }
+    },
+    {
+      "id": "note_update",
+      "type": "remediation",
+      "capability": "service.ticket.note.update",
+      "arguments": {
+        "payload": {
+          "id": {
+            "$fact": "managed_note_id"
+          },
+          "ticketID": {
+            "$fact": "ticket_id"
+          },
+          "title": "Jason - Governed Read-Only Investigation",
+          "description": {
+            "$fact": "note_body"
+          },
+          "noteType": 3,
+          "publish": 2
+        }
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "verification_step": "readback_notes",
+      "retry": {
+        "max_attempts": 2
+      }
+    },
+    {
+      "id": "readback_notes",
+      "type": "verification",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "ticket_id"
+        }
+      },
+      "next": "note_readback_gate"
+    },
+    {
+      "id": "note_readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_note_body_readback_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "documented"
+        }
+      ],
+      "default": "blocked"
+    },
+    {
+      "id": "documented",
+      "type": "complete"
+    },
+    {
+      "id": "blocked",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Autotask service.ticket.notes.search",
+    "success_condition": "exact internal managed title and full body readback; unchanged ticket lifecycle"
+  },
+  "completion": {
+    "terminal_disposition": "internal note documented, ticket remains unresolved"
+  },
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "service.ticket.search",
+      "service.ticket.notes.search",
+      "service.ticket.note.create",
+      "service.ticket.note.update"
+    ],
+    "approval_bound_branches": [
+      "note_create",
+      "note_update"
+    ],
+    "disruptive_branches": []
+  },
+  "migration": {
+    "status": "candidate_not_accepted",
+    "legacy_source_blob_sha": "edce573413941881154dd13cbc1b1e08a7c70727",
+    "first_readonly_shadow_candidate": true,
+    "known_gaps": [
+      "Legacy gather_unsupported_triage classification and note rendering remain Python worker logic and have not yet been migrated as reusable registered capabilities.",
+      "Existing interpreter has no durable next_due_at/throttled retry/recheck scheduler, so blocked step does not implement legacy waiting state.",
+      "Trusted adapter must derive source-version, company identity, fingerprint ownership, note history and promotion from governed results; externally supplied facts are not authority.",
+      "Current candidate covers note publication/update path only; no claim of complete legacy-vs-JSON behavioral parity or live shadow acceptance."
+    ],
+    "production_activation_authorized": false
+  }
+}

@@ -7,6 +7,12 @@ on:
       - "tools/delegation_maintenance.py"
       - "tools/openclaw_authority_operational_health.py"
       - "tools/openclaw_authority_health_snapshot.py"
+      - "tools/production_drift_guard.py"
+      - "tools/production_drift_watchdog.py"
+      - "tools/documentation_source_reconciler.py"
+      - "tools/tests/test_production_drift_guard.py"
+      - "tools/tests/test_production_drift_watchdog.py"
+      - "tools/tests/test_documentation_source_reconciler.py"
       - "tools/tests/test_openclaw_authority_health_snapshot.py"
       - "tools/openclaw_ed25519_rotation_proof.py"
       - "tools/tests/test_openclaw_ed25519_rotation_proof.py"
@@ -22,6 +28,12 @@ on:
       - "tools/delegation_maintenance.py"
       - "tools/openclaw_authority_operational_health.py"
       - "tools/openclaw_authority_health_snapshot.py"
+      - "tools/production_drift_guard.py"
+      - "tools/production_drift_watchdog.py"
+      - "tools/documentation_source_reconciler.py"
+      - "tools/tests/test_production_drift_guard.py"
+      - "tools/tests/test_production_drift_watchdog.py"
+      - "tools/tests/test_documentation_source_reconciler.py"
       - "tools/tests/test_openclaw_authority_health_snapshot.py"
       - "tools/openclaw_ed25519_rotation_proof.py"
       - "tools/tests/test_openclaw_ed25519_rotation_proof.py"
@@ -67,5 +79,11 @@ jobs:
         run: python -m pytest tools/tests/test_openclaw_ed25519_rotation_proof.py -q
       - name: Test authority health snapshot timeout contract
         run: python -m pytest tools/tests/test_openclaw_authority_health_snapshot.py -q
+      - name: Test production drift and independent documentation failure contracts
+        run: |
+          python -m pytest -q \
+            tools/tests/test_production_drift_guard.py \
+            tools/tests/test_production_drift_watchdog.py \
+            tools/tests/test_documentation_source_reconciler.py
       - name: Verify CatchMeUp renders without protected state
         run: python tools/catch_me_up.py --stdout-only > /tmp/catchmeup.md

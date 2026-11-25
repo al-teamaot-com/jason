@@ -1,0 +1,42 @@
+name: PMv4 JSON read-only isolated source acceptance
+
+on:
+  pull_request:
+    paths:
+      - "implementation/autonomous_remediation/json_shadow_*.py"
+      - "implementation/runtime_service/src/jason_runtime/json_playbook_readonly_preprod.py"
+      - "implementation/runtime_service/tests/test_json_*preprod.py"
+      - "implementation/runtime_service/tests/test_json_governed_action_reuse.py"
+      - "implementation/runtime_service/tests/test_json_readonly_shadow_pilot_legacy_parity.py"
+      - "tests/test_json_governed_shadow_integration.py"
+      - "tests/test_json_readonly_shadow_pilot_acceptance.py"
+      - "docs/playbooks/json/migration/**"
+      - ".github/workflows/json-readonly-preprod-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-source-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install isolated test dependencies
+        run: python -m pip install --disable-pip-version-check pytest jsonschema
+      - name: Exact read-only pilot and governed action boundary tests
+        env:
+          PYTHONPATH: .:implementation:implementation/runtime_service/src
+        run: |
+          python -m pytest -q \
+            tests/test_json_governed_shadow_integration.py \
+            tests/test_json_readonly_shadow_pilot_acceptance.py \
+            implementation/runtime_service/tests/test_json_playbook_readonly_preprod.py \
+            implementation/runtime_service/tests/test_json_readonly_shadow_pilot_legacy_parity.py \
+            implementation/runtime_service/tests/test_json_governed_action_reuse.py \
+            implementation/autonomous_remediation/test_json_playbook_document.py \
+            implementation/autonomous_remediation/test_json_playbook_store.py

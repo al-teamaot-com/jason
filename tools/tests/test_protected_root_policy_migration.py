@@ -214,6 +214,10 @@ def test_exact_owner_approval_and_ccc_reviewer_are_checked(monkeypatch, tmp_path
         "circuit_breaker": {"state": "closed"}}
     monkeypatch.setattr(m, "ROOT", root)
     monkeypatch.setattr(m, "CCC_REVIEW", ccc)
+    monkeypatch.setattr(
+        m.subprocess, "check_output",
+        lambda *args, **kwargs: b'{"schema_version":"2.0"}',
+    )
     monkeypatch.setattr(m, "_root_only", lambda p: Path(p).read_bytes())
     def write():
         release.write_text(json.dumps(record))
@@ -714,3 +718,436 @@ def test_pm_v2_shadow_policy_plan_rejects_any_extra_unit(monkeypatch, tmp_path):
     configure(monkeypatch, tmp_path, policy=prior, old=prior, candidate=candidate)
     with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
         m.preview_exact_migration(CANDIDATE, BASE)
+
+
+def test_pmv31_exact_provider_health_units_staged_and_rollback_is_byte_exact(monkeypatch, tmp_path):
+    old = source()
+    candidate = source()
+    delta = m.APPROVED_PM_V31_PROVIDER_HEALTH_DELTA
+    for key, units in delta.items():
+        candidate[key].extend(sorted(units))
+    policy, before, _ = configure(monkeypatch, tmp_path, policy=old,
+                                  candidate=candidate, old=old)
+    assert m.preview_exact_migration(CANDIDATE, BASE) == "OWNER_CCC_REVIEWED_DELTA_ONLY"
+    assert policy.read_bytes() == before
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    staged = json.loads(policy.read_text())
+    assert set(staged["allowed_system_units"]) == (
+        set(old["allowed_system_units"]) | delta["allowed_system_units"])
+    assert set(staged["required_system_units"]) == set(old["required_system_units"])
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    receipt = json.loads(m.ACTIVE.read_text())
+    assert receipt["reviewed_delta"] == {k: sorted(v) for k, v in delta.items()}
+    assert m.restore_for_baseline(BASE) == "RESTORED"
+    assert policy.read_bytes() == before
+    assert not m.ACTIVE.exists()
+
+
+@pytest.mark.parametrize("unexpected", [
+    "jason-unknown.service", "jason-isolated-provider-health-extra.timer",
+])
+def test_pmv31_extra_system_unit_denied_before_root_write(monkeypatch, tmp_path, unexpected):
+    old = source()
+    candidate = source()
+    for key, units in m.APPROVED_PM_V31_PROVIDER_HEALTH_DELTA.items():
+        candidate[key].extend(sorted(units))
+    candidate["allowed_system_units"].append(unexpected)
+    policy, before, _ = configure(monkeypatch, tmp_path, policy=old,
+                                  candidate=candidate, old=old)
+    with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
+        m.preview_exact_migration(CANDIDATE, BASE)
+    with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
+        m.stage_for_candidate(CANDIDATE, BASE)
+    assert policy.read_bytes() == before
+    assert not m.ACTIVE.exists()
+
+
+def test_pmv31_combined_with_historical_plan_denied(monkeypatch, tmp_path):
+    old = source()
+    candidate = source(new=True)
+    for key, units in m.APPROVED_PM_V31_PROVIDER_HEALTH_DELTA.items():
+        candidate[key].extend(sorted(units))
+    policy, before, _ = configure(monkeypatch, tmp_path, policy=old,
+                                  candidate=candidate, old=old)
+    with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
+        m.stage_for_candidate(CANDIDATE, BASE)
+    assert policy.read_bytes() == before
+    assert not m.ACTIVE.exists()
+
+
+def test_pmv31_missing_one_unit_denied(monkeypatch, tmp_path):
+    old = source()
+    candidate = source()
+    candidate["allowed_system_units"].append("jason-isolated-provider-health.service")
+    policy, before, _ = configure(monkeypatch, tmp_path, policy=old,
+                                  candidate=candidate, old=old)
+    with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
+        m.preview_exact_migration(CANDIDATE, BASE)
+    assert policy.read_bytes() == before
+    assert not m.ACTIVE.exists()
+
+
+def _three_level_pmv31_chain(monkeypatch, tmp_path):
+    """Set up the exact prior plans: #1974, held Teams pair, PMv3.1 pair."""
+    import base64
+    from types import SimpleNamespace
+
+    baseline = source()
+    authority = source(new=True)
+    held = {
+        **authority,
+        "required_user_units": authority["required_user_units"] +
+        ["jason-release-approval-only.timer"],
+        "allowed_user_units": authority["allowed_user_units"] +
+        ["jason-release-approval-only.service"],
+    }
+    pmv31 = {
+        **held,
+        "allowed_system_units": held["allowed_system_units"] +
+        sorted(m.APPROVED_PM_V31_PROVIDER_HEALTH_DELTA["allowed_system_units"]),
+    }
+    first = "b" * 40
+    second = "c" * 40
+    third = "d" * 40
+    sources = {BASE: baseline, first: authority, second: held, third: pmv31}
+    policy, original, _ = configure(
+        monkeypatch, tmp_path, policy=baseline, old=baseline, candidate=authority,
+    )
+    monkeypatch.setattr(m, "_source_policy", lambda sha: sources[sha])
+    monkeypatch.setattr(m, "_reviewed_git_policy", lambda sha: sources[sha])
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *args, **kw: SimpleNamespace(returncode=0),
+    )
+
+    def set_lkg(sha):
+        (tmp_path / "production-control-state.json").write_text(json.dumps({
+            "schema_version": "1.0",
+            "last_known_good": {"manifest": {"revision": sha}},
+        }))
+
+    set_lkg(BASE)
+    assert m.stage_for_candidate(first, BASE) == "STAGED_ALLOWED_ONLY"
+    assert m.apply_for_candidate(first, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    first_bytes = m.ACTIVE.read_bytes()
+    first_policy = policy.read_bytes()
+    set_lkg(first)
+    assert m.stage_for_candidate(second, first) == "STAGED_ALLOWED_ONLY"
+    assert m.apply_for_candidate(second, first) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    second_bytes = m.ACTIVE.read_bytes()
+    second_policy = policy.read_bytes()
+    parent = json.loads(second_bytes)
+    assert base64.b64decode(parent["prior_active_receipt_base64"]) == first_bytes
+    set_lkg(second)
+    return policy, original, first_policy, second_policy, first_bytes, second_bytes, (first,second,third), set_lkg
+
+
+def test_pmv31_reviewed_third_migration_preserves_every_parent_ledger_byte(monkeypatch,tmp_path):
+    import base64
+    policy,original,first_policy,second_policy,first_bytes,second_bytes,shas,lkg = (
+        _three_level_pmv31_chain(monkeypatch,tmp_path))
+    first,second,third=shas
+    assert m.preview_exact_migration(third, second) == "OWNER_CCC_REVIEWED_DELTA_ONLY"
+    assert m.stage_for_candidate(third, second) == "STAGED_ALLOWED_ONLY"
+    receipt = json.loads(m.ACTIVE.read_text())
+    assert receipt["prior_active_receipt_sha256"] == hashlib.sha256(second_bytes).hexdigest()
+    assert base64.b64decode(receipt["prior_active_receipt_base64"]) == second_bytes
+    assert m.apply_for_candidate(third, second) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    assert m.restore_for_baseline(second) == "RESTORED"
+    assert policy.read_bytes() == second_policy
+    assert m.ACTIVE.read_bytes() == second_bytes
+    lkg(first)
+    assert m.restore_for_baseline(first) == "RESTORED"
+    assert policy.read_bytes() == first_policy
+    assert m.ACTIVE.read_bytes() == first_bytes
+    lkg(BASE)
+    assert m.restore_for_baseline(BASE) == "RESTORED"
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
+    for sha in (first, second, third):
+        archived = m.LEDGER_DIR / ("restored-" + sha + ".json")
+        assert archived.is_file() and json.loads(archived.read_text())["phase"]=="restored"
+
+
+@pytest.mark.parametrize("fault",[
+    "parent_digest", "grandparent_digest", "grandparent_phase",
+    "grandparent_reviewed_delta", "partial_parent", "unexpected_depth",
+])
+def test_pmv31_rejects_tampered_three_level_ancestors_before_policy_write(
+    monkeypatch, tmp_path, fault
+):
+    import base64
+    policy,_,_,second_policy,_,_,shas,_ = (
+        _three_level_pmv31_chain(monkeypatch,tmp_path))
+    first,second,third = shas
+    receipt = json.loads(m.ACTIVE.read_text())
+    if fault == "parent_digest":
+        receipt["applied_sha256"] = "0" * 64
+    elif fault == "partial_parent":
+        del receipt["prior_active_receipt_sha256"]
+    elif fault == "unexpected_depth":
+        # A third predecessor is outside the bounded review.
+        inner = json.loads(base64.b64decode(receipt["prior_active_receipt_base64"]))
+        inner["prior_active_receipt_base64"] = base64.b64encode(b"{}").decode("ascii")
+        inner["prior_active_receipt_sha256"] = hashlib.sha256(b"{}").hexdigest()
+        raw = (json.dumps(inner, sort_keys=True, indent=2)+"\n").encode()
+        receipt["prior_active_receipt_base64"] = base64.b64encode(raw).decode("ascii")
+        receipt["prior_active_receipt_sha256"] = hashlib.sha256(raw).hexdigest()
+    else:
+        inner = json.loads(base64.b64decode(receipt["prior_active_receipt_base64"]))
+        if fault == "grandparent_digest":
+            inner["original_sha256"] = "0"*64
+        elif fault == "grandparent_phase":
+            inner["phase"] = "staged"
+        elif fault == "grandparent_reviewed_delta":
+            inner["reviewed_delta"]["allowed_system_units"] = ["jason-unknown.service"]
+        raw=(json.dumps(inner,sort_keys=True,indent=2)+"\n").encode()
+        receipt["prior_active_receipt_base64"]=base64.b64encode(raw).decode("ascii")
+        receipt["prior_active_receipt_sha256"]=hashlib.sha256(raw).hexdigest()
+    m.ACTIVE.write_text(json.dumps(receipt))
+    before = policy.read_bytes()
+    with pytest.raises(m.MigrationRefused):
+        m.preview_exact_migration(third, second)
+    with pytest.raises(m.MigrationRefused):
+        m.stage_for_candidate(third, second)
+    assert policy.read_bytes() == before == second_policy
+
+
+@pytest.mark.parametrize("fault", ["parent_digest","grandparent_digest","grandparent_phase"])
+def test_pmv31_third_migration_rejects_tamper_on_rollback_without_policy_write(
+    monkeypatch, tmp_path, fault,
+):
+    import base64
+    policy,_,_,_,_,_,shas,_=_three_level_pmv31_chain(monkeypatch,tmp_path)
+    _,second,third=shas
+    assert m.stage_for_candidate(third,second)=="STAGED_ALLOWED_ONLY"
+    assert m.apply_for_candidate(third,second)=="APPLIED_REQUIRED_AFTER_HEALTH"
+    receipt=json.loads(m.ACTIVE.read_text())
+    if fault=="parent_digest":
+        receipt["prior_active_receipt_sha256"]="0"*64
+    else:
+        parent=json.loads(base64.b64decode(receipt["prior_active_receipt_base64"]))
+        inner=json.loads(base64.b64decode(parent["prior_active_receipt_base64"]))
+        if fault=="grandparent_digest":
+            inner["original_sha256"]="0"*64
+        else:
+            inner["phase"]="staged"
+        inner_bytes=(json.dumps(inner,sort_keys=True,indent=2)+"\n").encode()
+        parent["prior_active_receipt_base64"]=base64.b64encode(inner_bytes).decode("ascii")
+        parent["prior_active_receipt_sha256"]=hashlib.sha256(inner_bytes).hexdigest()
+        parent_bytes=(json.dumps(parent,sort_keys=True,indent=2)+"\n").encode()
+        receipt["prior_active_receipt_base64"]=base64.b64encode(parent_bytes).decode("ascii")
+        receipt["prior_active_receipt_sha256"]=hashlib.sha256(parent_bytes).hexdigest()
+    m.ACTIVE.write_text(json.dumps(receipt))
+    applied=policy.read_bytes()
+    with pytest.raises(m.MigrationRefused):
+        m.restore_for_baseline(second)
+    assert policy.read_bytes()==applied
+    assert not (m.LEDGER_DIR / ("restored-"+third+".json")).exists()
+
+
+
+def test_ccc_retirement_stages_old_allowances_then_removes_exact_pair(monkeypatch, tmp_path):
+    old = source()
+    old["allowed_system_units"].extend(["jason-ccc.timer", "jason-ccc.service"])
+    candidate = source()
+    policy, original, _ = configure(
+        monkeypatch, tmp_path, policy=old, old=old, candidate=candidate,
+    )
+    assert m.preview_exact_migration(CANDIDATE, BASE) == (
+        "OWNER_EXACT_RELEASE_REVIEWED_CCC_RETIREMENT"
+    )
+    assert policy.read_bytes() == original
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    assert policy.read_bytes() == original
+    receipt = json.loads(m.ACTIVE.read_text())
+    assert receipt["authorized_by"] == "exact_owner_bound_native_release_ccc_retirement"
+    assert receipt["reviewed_delta"] == {
+        name: sorted(values) for name, values in m.APPROVED_CCC_RETIREMENT_DELTA.items()
+    }
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    applied = json.loads(policy.read_text())
+    assert not set(("jason-ccc.timer", "jason-ccc.service")).intersection(
+        applied["allowed_system_units"]
+    )
+    assert set(applied["allowed_system_units"]) == set(candidate["allowed_system_units"])
+    # Native rollback re-admits OLD units before the host reinstalls them.
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    assert policy.read_bytes() == original
+    assert m.complete_rollback(BASE) == "RESTORED"
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
+
+
+@pytest.mark.parametrize("removed", [
+    ["jason-ccc.service"], ["jason-ccc.timer"],
+    ["jason-ccc.timer", "jason-ccc.service", "jason-openclaw-authority-health.service"],
+])
+def test_unreviewed_or_partial_ccc_removal_fails_closed(monkeypatch, tmp_path, removed):
+    old = source()
+    old["allowed_system_units"].extend([
+        "jason-ccc.timer", "jason-ccc.service",
+    ])
+    candidate = source()
+    for value in set(old["allowed_system_units"]) - set(removed):
+        if value not in candidate["allowed_system_units"]:
+            candidate["allowed_system_units"].append(value)
+    candidate["allowed_system_units"] = [
+        v for v in candidate["allowed_system_units"] if v not in removed
+    ]
+    policy, before, _ = configure(monkeypatch, tmp_path, policy=old, old=old,
+                                  candidate=candidate)
+    with pytest.raises(m.MigrationRefused, match="unapproved desired-state unit removal"):
+        m.stage_for_candidate(CANDIDATE, BASE)
+    assert policy.read_bytes() == before
+    assert not m.ACTIVE.exists()
+
+
+def test_v31_root_migration_uses_exact_owner_transaction_without_ccc(monkeypatch, tmp_path):
+    root = tmp_path / "root"
+    (root / "records").mkdir(parents=True)
+    path = root / "records" / ("release-" + CANDIDATE[:16] + ".json")
+    policy = {
+        "schema_version": "3.1", "policy_mode": "owner_reviewed",
+        "organization_id": "aot", "capability": "release.production.approve",
+        "high_impact_review": {
+            "owner_exact_sha_required": True,
+            "protected_release_gates_unchanged": True,
+            "authenticated_entra_owner_decision_required": True,
+            "independent_native_release_health_required": True,
+        },
+    }
+    raw = (json.dumps(policy, sort_keys=True) + "\n").encode()
+    manifest = {
+        "candidate_sha": CANDIDATE,
+        "rollback_sha": BASE,
+        "mobile_release_approval_policy_digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
+    }
+    digest_manifest = hashlib.sha256(json.dumps(
+        manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode()).hexdigest()
+    scope = "c" * 64
+    record = {
+        "state": "production", "risk_profile": "production_control_core",
+        "owner_approval": {
+            "approved": True, "candidate_sha": CANDIDATE,
+            "source": "explicit_owner_instruction",
+            "transaction_binding": {
+                "candidate_sha": CANDIDATE, "rollback_sha": BASE,
+                "scope_sha256": scope, "manifest_sha256": digest_manifest,
+            },
+        },
+        "manual_scope_review": {
+            "candidate_sha": CANDIDATE, "baseline_sha": BASE,
+            "scope_sha256": scope,
+        },
+        "release_manifest": manifest,
+    }
+    control = {
+        "schema_version": "1.0",
+        "last_known_good": {"manifest": {"revision": BASE, "complete": True}},
+        "circuit_breaker": {"state": "closed"},
+    }
+    monkeypatch.setattr(m, "ROOT", root)
+    monkeypatch.setattr(m, "_root_only", lambda path: Path(path).read_bytes())
+    monkeypatch.setattr(m.subprocess, "check_output", lambda *a, **kw: raw)
+    def write():
+        path.write_text(json.dumps(record))
+        (root / "production-control-state.json").write_text(json.dumps(control))
+    write()
+    # No historical CCC file is present or required.
+    m._approval(CANDIDATE, BASE)
+    for field, value in (
+        ("scope_sha256", "f" * 64),
+        ("manifest_sha256", "f" * 64),
+        ("rollback_sha", "d" * 40),
+    ):
+        good = record["owner_approval"]["transaction_binding"][field]
+        record["owner_approval"]["transaction_binding"][field] = value
+        write()
+        with pytest.raises(m.MigrationRefused, match="Owner-bound"):
+            m._approval(CANDIDATE, BASE)
+        record["owner_approval"]["transaction_binding"][field] = good
+    record["owner_approval"]["approved"] = False
+    write()
+    with pytest.raises(m.MigrationRefused, match="exact owner-approved"):
+        m._approval(CANDIDATE, BASE)
+    record["owner_approval"]["approved"] = True
+    wrong = dict(policy)
+    wrong["high_impact_review"] = dict(policy["high_impact_review"])
+    wrong["high_impact_review"]["authenticated_entra_owner_decision_required"] = False
+    monkeypatch.setattr(
+        m.subprocess, "check_output",
+        lambda *a, **kw: (json.dumps(wrong, sort_keys=True) + "\n").encode(),
+    )
+    write()
+    with pytest.raises(m.MigrationRefused, match="Owner-bound"):
+        m._approval(CANDIDATE, BASE)
+    monkeypatch.setattr(m.subprocess, "check_output", lambda *a, **kw: raw)
+    control["circuit_breaker"]["state"] = "open"
+    write()
+    with pytest.raises(m.MigrationRefused, match="breaker"):
+        m._approval(CANDIDATE, BASE)
+
+
+@pytest.mark.parametrize("candidate_phase", ["staged", "applied"])
+def test_ccc_rollback_prepared_receipt_restores_for_next_exact_release(
+        monkeypatch, tmp_path, candidate_phase):
+    """Regression: interrupted native rollback followed by audited Owner repair.
+
+    The new attempt uses a different SHA, preventing collision with the
+    archived original transaction; the old root-policy bytes are restored.
+    """
+    old = source()
+    old["allowed_system_units"] += ["jason-ccc.service", "jason-ccc.timer"]
+    candidate = source()
+    policy, original, ledger = configure(
+        monkeypatch, tmp_path, policy=old, old=old, candidate=candidate,
+    )
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    if candidate_phase == "applied":
+        assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    receipt = json.loads(m.ACTIVE.read_text())
+    assert receipt["phase"] == "rollback_prepared"
+    assert receipt["reviewed_delta"] == {
+        name: sorted(values)
+        for name, values in m.APPROVED_CCC_RETIREMENT_DELTA.items()
+    }
+
+    assert m.restore_for_baseline(BASE) == "RESTORED"
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
+    archived = ledger / ("restored-" + CANDIDATE + ".json")
+    assert json.loads(archived.read_text())["phase"] == "restored"
+
+    # A *new exact source SHA* may stage the same reviewed CCC-removal delta.
+    new_sha = "d" * 40
+    monkeypatch.setattr(
+        m, "_source_policy",
+        lambda sha: old if sha == BASE else candidate if sha == new_sha
+        else (_ for _ in ()).throw(KeyError(sha)),
+    )
+    assert m.stage_for_candidate(new_sha, BASE) == "STAGED_ALLOWED_ONLY"
+    assert policy.read_bytes() == original
+    assert m.ACTIVE.is_file()
+    assert json.loads(m.ACTIVE.read_text())["candidate_sha"] == new_sha
+    assert json.loads(archived.read_text())["candidate_sha"] == CANDIDATE
+
+
+def test_unreviewed_prepared_ccc_receipt_cannot_be_restored(monkeypatch, tmp_path):
+    old = source()
+    old["allowed_system_units"] += ["jason-ccc.service", "jason-ccc.timer"]
+    candidate = source()
+    policy, original, _ = configure(
+        monkeypatch, tmp_path, policy=old, old=old, candidate=candidate,
+    )
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    receipt = json.loads(m.ACTIVE.read_text())
+    receipt["reviewed_delta"]["allowed_system_units"] = ["jason-unknown.service"]
+    m.ACTIVE.write_text(json.dumps(receipt))
+    with pytest.raises(m.MigrationRefused, match="unreviewed unit delta"):
+        m.restore_for_baseline(BASE)
+    assert policy.read_bytes() == original
+    assert m.ACTIVE.exists()

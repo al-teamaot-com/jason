@@ -2,9 +2,14 @@
 Description=Jason post-success documentation reconciliation
 After=network-online.target
 Wants=network-online.target
+# One initial attempt plus two bounded retries; no extra controller/timer.
+StartLimitIntervalSec=15min
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
+Restart=on-failure
+RestartSec=120s
 User=al
 Group=al
 WorkingDirectory=/opt/jason/current

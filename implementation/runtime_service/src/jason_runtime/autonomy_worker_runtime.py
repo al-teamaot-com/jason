@@ -585,6 +585,7 @@ class SQLiteOperationalWorkStore:
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=FULL")
         self._connection.executescript(self._SCHEMA)
+        self._migrate_ticket_worker_heartbeat()
         columns = {
             str(row["name"])
             for row in self._connection.execute(
@@ -804,6 +805,60 @@ class SQLiteOperationalWorkStore:
                 (int(ticket_id),),
             )
 
+    def _migrate_ticket_worker_heartbeat(self) -> None:
+        """Upgrade the pre-supervisor heartbeat without losing old evidence.
+
+        Older databases have (singleton_id, heartbeat_at, phase, cycle_id).
+        CREATE TABLE IF NOT EXISTS does not change that layout, and new worker
+        writes then fail indefinitely. Rename that table once, preserving its
+        entire row, and create the new scan-specific heartbeat shape. Do not
+        pretend an old reconciliation heartbeat is a completed ticket scan.
+        """
+        connection = self._connection
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    "PRAGMA table_info(autonomy_ticket_worker_heartbeat)"
+                ).fetchall()
+            }
+            expected = {
+                "singleton_id", "last_started_at", "last_completed_at", "state"
+            }
+            legacy = {"singleton_id", "heartbeat_at", "phase", "cycle_id"}
+            if columns == expected:
+                connection.execute("COMMIT")
+                return
+            if columns != legacy:
+                raise OperationalAutonomyError(
+                    "ticket worker heartbeat schema is unrecognized; "
+                    "migration requires technician review"
+                )
+            archived = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='autonomy_ticket_worker_heartbeat_legacy_v1'"
+            ).fetchone()
+            if archived is not None:
+                raise OperationalAutonomyError(
+                    "legacy ticket heartbeat archive exists; refusing overwrite"
+                )
+            connection.execute(
+                "ALTER TABLE autonomy_ticket_worker_heartbeat "
+                "RENAME TO autonomy_ticket_worker_heartbeat_legacy_v1"
+            )
+            connection.execute(
+                "CREATE TABLE autonomy_ticket_worker_heartbeat ("
+                "singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1),"
+                "last_started_at TEXT,"
+                "last_completed_at TEXT,"
+                "state TEXT NOT NULL)"
+            )
+            connection.execute("COMMIT")
+        except BaseException:
+            connection.execute("ROLLBACK")
+            raise
+
     def mark_scan_started(self, *, started_at: str) -> None:
         with self._connection:
             self._connection.execute(
@@ -947,6 +1002,37 @@ class SQLiteOperationalWorkStore:
             (int(ticket_id), str(playbook_id), str(note_title)),
         ).fetchone()
         return None if row is None else str(row["fingerprint"])
+
+    def claim_client_notification_send(
+        self, ticket_id: int, playbook_id: str, note_key: str,
+        baseline_key: str, fingerprint: str, baseline_id: int,
+    ) -> bool:
+        """Atomically record a non-idempotent provider dispatch intent.
+
+        Once this intent exists, even an unknown/crashed provider outcome must
+        never cause a blind resend. Baseline and intent commit together.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connection:
+            result = self._connection.execute(
+                "INSERT OR IGNORE INTO autonomy_ticket_note_state("
+                "ticket_id,playbook_id,note_title,fingerprint,documented_at)"
+                "VALUES(?,?,?,?,?)",
+                (int(ticket_id), str(playbook_id), str(note_key),
+                 f"dispatch-pending:{fingerprint}", now),
+            )
+            if result.rowcount != 1:
+                return False
+            self._connection.execute(
+                "INSERT INTO autonomy_ticket_note_state("
+                "ticket_id,playbook_id,note_title,fingerprint,documented_at)"
+                "VALUES(?,?,?,?,?) "
+                "ON CONFLICT(ticket_id,playbook_id,note_title) DO UPDATE SET "
+                "fingerprint=excluded.fingerprint,documented_at=excluded.documented_at",
+                (int(ticket_id), str(playbook_id), str(baseline_key),
+                 str(int(baseline_id)), now),
+            )
+            return True
 
     def remember_note_fingerprint(
         self,
@@ -1397,6 +1483,7 @@ class OperationalAutonomyMaintenance:
         ticket_splitter=None,
         client_questions=None,
         contact_reads=None,
+        vulscan_notification_reads=None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
@@ -1430,6 +1517,7 @@ class OperationalAutonomyMaintenance:
         self.ticket_splitter = ticket_splitter
         self.client_questions = client_questions
         self.contact_reads = contact_reads
+        self.vulscan_notification_reads = vulscan_notification_reads
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
         self._ticket_status_cache: dict[int, str] = {}
@@ -4952,11 +5040,53 @@ class OperationalAutonomyMaintenance:
             if work.phase in {"vulscan_investigate", "vulscan_monitoring"}:
                 self._investigate_vulscan(work, ticket)
                 return
-            if work.phase == "vulscan_client_notification_verify_complete":
-                self._verify_vulscan_client_notification(work, continue_monitoring=False)
-                return
-            if work.phase == "vulscan_client_notification_verify_monitoring":
-                self._verify_vulscan_client_notification(work, continue_monitoring=True)
+            if work.phase in {
+                "vulscan_client_notification_verify_complete",
+                "vulscan_client_notification_verify_monitoring",
+            }:
+                # A removed client disposition must not strand an old durable
+                # notification-verification phase. Preserve the original
+                # dispatch-pending fingerprint and baseline for audit, without
+                # claiming delivery or retrying a non-idempotent message.
+                policy = resolve_vulscan_policy(
+                    client_id=work.company_id,
+                    site_id=ticket.get("companyLocationID"),
+                    device_id=work.device_uid,
+                    user_id=ticket.get("contactID"),
+                    ticket_id=work.ticket_id,
+                )
+                if not policy.client_notification_required:
+                    # The old notification phase replaced the prior patch
+                    # wait reason. Keep its first-NOT_APPROVED timestamp so a
+                    # migration cannot silently reset the ten-day escalation.
+                    approval_age = ""
+                    for event in reversed(self.store.ticket_activity(work.ticket_id)):
+                        match = re.search(
+                            r"first_not_approved_at=[^;]+",
+                            str(event.get("reason") or ""),
+                        )
+                        if match:
+                            approval_age = "; " + match.group(0)
+                            break
+                    reconsider = self._replace(
+                        work,
+                        phase="vulscan_investigate",
+                        last_reason=(
+                            "Legacy client-notification requirement retired; "
+                            "prior dispatch intent retained without resend or "
+                            "delivery claim. Rechecking exact patches under "
+                            "standard VulScan policy." + approval_age
+                        ),
+                    )
+                    self.store.put(reconsider)
+                    self._investigate_vulscan(reconsider, ticket)
+                    return
+                self._verify_vulscan_client_notification(
+                    work,
+                    continue_monitoring=(
+                        work.phase == "vulscan_client_notification_verify_monitoring"
+                    ),
+                )
                 return
 
         if work.playbook_id == DISK_BAD_BLOCK_SCOPE.playbook_id:
@@ -5666,10 +5796,34 @@ class OperationalAutonomyMaintenance:
             return []
         return [item for item in items if isinstance(item, Mapping)]
 
-    def _notification_history_max_id(self, ticket_id: int) -> int:
-        data = self._read_data(
+    def _vulscan_notification_history_data(
+        self, *, ticket_id: int, company_id: int,
+    ) -> dict[str, Any]:
+        """Read a single ticket's notification receipts under its promoted scope."""
+        if not self._scope_is_promoted(VULSCAN_CLIENT_DISPOSITION_SCOPE):
+            raise OperationalAutonomyError(
+                "VULSCAN_CLIENT_DISPOSITION_SCOPE_NOT_PROMOTED"
+            )
+        if self.vulscan_notification_reads is None:
+            raise OperationalAutonomyError(
+                "VULSCAN_NOTIFICATION_READ_AUTHORITY_NOT_CONFIGURED"
+            )
+        policy = resolve_vulscan_policy(
+            client_id=company_id, ticket_id=ticket_id,
+        )
+        if not policy.client_notification_required:
+            raise OperationalAutonomyError(
+                "VULSCAN_NOTIFICATION_READ_CLIENT_SCOPE_NOT_APPROVED"
+            )
+        result = self.vulscan_notification_reads.execute(
             "service.notification.history.search",
-            {"ticket_id": int(ticket_id), "page_size": 100},
+            {"company_id": int(company_id), "ticket_id": int(ticket_id), "page_size": 100},
+        )
+        return self._validated_read_data(result)
+
+    def _notification_history_max_id(self, *, ticket_id: int, company_id: int) -> int:
+        data = self._vulscan_notification_history_data(
+            ticket_id=ticket_id, company_id=company_id,
         )
         ids: list[int] = []
         for item in self._notification_history_items(data):
@@ -5683,11 +5837,11 @@ class OperationalAutonomyMaintenance:
         self,
         *,
         ticket_id: int,
+        company_id: int,
         baseline_id: int,
     ) -> bool:
-        data = self._read_data(
-            "service.notification.history.search",
-            {"ticket_id": int(ticket_id), "page_size": 100},
+        data = self._vulscan_notification_history_data(
+            ticket_id=ticket_id, company_id=company_id,
         )
         for item in self._notification_history_items(data):
             try:
@@ -5704,14 +5858,74 @@ class OperationalAutonomyMaintenance:
                 return True
         return False
 
+    def _set_vulscan_terminal_status(
+        self, work: OperationalWork, *, contact_id: int, status: str,
+    ) -> None:
+        """Change terminal ticket state only after verified notification receipt."""
+        scope = VULSCAN_CLIENT_DISPOSITION_SCOPE
+        desired_contact = int(contact_id)
+        status_update = self.actions.execute(
+            scope,
+            "service.ticket.update",
+            {
+                "payload": {
+                    "id": work.ticket_id,
+                    "contactID": desired_contact,
+                    "status": status,
+                }
+            },
+        )
+        status_data = self._action_data(status_update)
+        verification = status_data.get("jasonVerification")
+        verified_fields = (
+            verification.get("verifiedFields")
+            if isinstance(verification, Mapping)
+            else None
+        )
+        if (
+            not isinstance(verification, Mapping)
+            or verification.get("readbackVerified") is not True
+            or not isinstance(verified_fields, Sequence)
+            or isinstance(verified_fields, (str, bytes))
+            or not {"contactID", "status"}.issubset(
+                {str(value) for value in verified_fields}
+            )
+        ):
+            raise OperationalAutonomyError(
+                "VulScan Close Pending/contact readback verification failed"
+            )
+
+
     @staticmethod
     def _notification_baseline_from_reason(reason: str) -> int:
-        match = re.search(r"notification_baseline_id=(\\d+)", str(reason or ""))
+        match = re.search(r"notification_baseline_id=(\d+)", str(reason or ""))
         if match is None:
             raise OperationalAutonomyError(
                 "client-notification verification has no durable baseline"
             )
         return int(match.group(1))
+
+    def _acknowledge_vulscan_notification_intent(
+        self, work: OperationalWork, policy: Any,
+    ) -> None:
+        """Mark a pending intent acknowledged only after matching history."""
+        template = resolve_approved_client_message(
+            workflow_id=work.playbook_id,
+            template_id=str(policy.client_notification_template_id or ""),
+        )
+        note_key = f"Client - Approved Communication - {template.template_id}"
+        prior = self.store.last_note_fingerprint(
+            work.ticket_id, work.playbook_id, note_key,
+        )
+        if prior == f"dispatch-pending:{template.fingerprint}":
+            self.store.remember_note_fingerprint(
+                work.ticket_id, work.playbook_id, note_key,
+                template.fingerprint,
+            )
+        elif prior not in (None, template.fingerprint):
+            raise OperationalAutonomyError(
+                "verified notification history conflicts with durable send intent"
+            )
 
     def _verify_vulscan_client_notification(
         self,
@@ -5722,9 +5936,22 @@ class OperationalAutonomyMaintenance:
         baseline_id = self._notification_baseline_from_reason(work.last_reason)
         if not self._gromelski_notification_copy_observed(
             ticket_id=work.ticket_id,
+            company_id=work.company_id,
             baseline_id=baseline_id,
         ):
             return
+        policy = resolve_vulscan_policy(
+            client_id=work.company_id, ticket_id=work.ticket_id,
+        )
+        if not policy.client_notification_required or policy.primary_contact_id is None:
+            raise OperationalAutonomyError(
+                "VulScan verified notification has no active client disposition policy"
+            )
+        self._acknowledge_vulscan_notification_intent(work, policy)
+        self._set_vulscan_terminal_status(
+            work, contact_id=int(policy.primary_contact_id),
+            status=policy.terminal_status,
+        )
         self.store.put(
             self._replace(
                 work,
@@ -5821,77 +6048,79 @@ class OperationalAutonomyMaintenance:
         )
         note_key = f"Client - Approved Communication - {template.template_id}"
         note_fingerprint = template.fingerprint
+        baseline_key = f"{note_key} :: notification receipt baseline"
+        pending_fingerprint = f"dispatch-pending:{note_fingerprint}"
         prior = self.store.last_note_fingerprint(
-            work.ticket_id,
-            work.playbook_id,
-            note_key,
+            work.ticket_id, work.playbook_id, note_key,
         )
-
-        baseline_id = self._notification_history_max_id(work.ticket_id)
-        if prior != note_fingerprint:
-            self.actions.execute(
-                scope,
-                "service.ticket.client.notification.create",
-                {
-                    "workflow_id": template.workflow_id,
-                    "template_id": template.template_id,
-                    "payload": {
-                        "ticketID": int(work.ticket_id),
-                    },
-                },
-            )
-            self.store.remember_note_fingerprint(
-                work.ticket_id,
-                work.playbook_id,
-                note_key,
-                note_fingerprint,
-            )
-
-        status_update = self.actions.execute(
-            scope,
-            "service.ticket.update",
-            {
-                "payload": {
-                    "id": work.ticket_id,
-                    "contactID": desired_contact,
-                    "status": policy.terminal_status,
-                }
-            },
-        )
-        status_data = self._action_data(status_update)
-        verification = status_data.get("jasonVerification")
-        verified_fields = (
-            verification.get("verifiedFields")
-            if isinstance(verification, Mapping)
-            else None
-        )
-        if (
-            not isinstance(verification, Mapping)
-            or verification.get("readbackVerified") is not True
-            or not isinstance(verified_fields, Sequence)
-            or isinstance(verified_fields, (str, bytes))
-            or not {"contactID", "status"}.issubset(
-                {str(value) for value in verified_fields}
-            )
-        ):
+        if prior is not None and prior not in (note_fingerprint, pending_fingerprint):
             raise OperationalAutonomyError(
-                "VulScan Close Pending/contact readback verification failed"
+                "client-notification fingerprint changed with a prior send "
+                "or pending dispatch; manual review required before another send"
             )
 
-        if prior == note_fingerprint:
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="vulscan_monitoring" if continue_monitoring else "complete",
-                    last_reason="Approved client VulScan communication already present.",
+        if prior is None:
+            baseline_id = self._notification_history_max_id(
+                ticket_id=work.ticket_id, company_id=work.company_id,
+            )
+            # The atomic, durable claim is committed BEFORE provider dispatch.
+            # If the worker dies after Autotask accepted the non-idempotent
+            # request but before the acknowledgement, a successor observes
+            # pending intent and reconciles history without sending again.
+            claimed = self.store.claim_client_notification_send(
+                work.ticket_id, work.playbook_id, note_key,
+                baseline_key, note_fingerprint, baseline_id,
+            )
+            prior = self.store.last_note_fingerprint(
+                work.ticket_id, work.playbook_id, note_key,
+            )
+            if claimed:
+                self.actions.execute(
+                    scope, "service.ticket.client.notification.create",
+                    {
+                        "workflow_id": template.workflow_id,
+                        "template_id": template.template_id,
+                        "payload": {"ticketID": int(work.ticket_id)},
+                    },
                 )
-            )
-            return True
+                self.store.remember_note_fingerprint(
+                    work.ticket_id, work.playbook_id, note_key,
+                    note_fingerprint,
+                )
+                prior = note_fingerprint
+            elif prior not in (note_fingerprint, pending_fingerprint):
+                raise OperationalAutonomyError(
+                    "client-notification dispatch claim changed concurrently"
+                )
 
+        prior_baseline = self.store.last_note_fingerprint(
+            work.ticket_id, work.playbook_id, baseline_key,
+        )
+        if prior_baseline is not None:
+            if not prior_baseline.isdecimal():
+                raise OperationalAutonomyError(
+                    "client-notification durable baseline is invalid"
+                )
+            baseline_id = int(prior_baseline)
+        elif prior == note_fingerprint:
+            # Compatibility for a historical accepted send before the durable
+            # baseline key was introduced. Missing evidence fails closed.
+            baseline_id = self._notification_baseline_from_reason(work.last_reason)
+        else:
+            raise OperationalAutonomyError(
+                "client-notification pending dispatch has no durable baseline"
+            )
+        # Even when an earlier send fingerprint matches, a real, post-baseline
+        # Autotask Notification History entry is required for completion.
         if self._gromelski_notification_copy_observed(
             ticket_id=work.ticket_id,
+            company_id=work.company_id,
             baseline_id=baseline_id,
         ):
+            self._acknowledge_vulscan_notification_intent(work, policy)
+            self._set_vulscan_terminal_status(
+                work, contact_id=desired_contact, status=policy.terminal_status,
+            )
             self.store.put(
                 self._replace(
                     work,

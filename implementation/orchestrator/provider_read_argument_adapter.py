@@ -176,6 +176,7 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "resource_id": "id",
         "company_id": "companyID",
         "name": "referenceTitle",
+        "serial_number": "serialNumber",
     },
     SERVICE_CONTRACT_SEARCH: {
         "resource_id": "id",

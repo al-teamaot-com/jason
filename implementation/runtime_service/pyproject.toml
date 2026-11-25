@@ -8,10 +8,10 @@ version = "0.1.0"
 description = "Internal Project Jason governed runtime HTTP boundary"
 requires-python = ">=3.12"
 dependencies = [
-  "jason-connectors==0.1.0",
+  "jason-connectors[constant_contact]==0.1.0",
   "jason-openclaw-connector==0.1.0",
   "psycopg[binary]==3.1.17",
-  "cryptography>=43,<47",
+  "cryptography>=50,<51",
 ]
 
 [project.scripts]

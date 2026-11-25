@@ -64,7 +64,16 @@ CURRENT_LKG_FULL_EVIDENCE = Path("/var/lib/jason/openclaw/operational-full-healt
 # execution directory. Never grant group access to the candidate script spool.
 CURRENT_LKG_EXEC_ROOT = Path("/usr/local/lib/jason/lkg-health-" + CURRENT_LKG_RECOVERY_SHA)
 MOBILE_APPROVAL_LEDGER = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
+ROOT_OWNER_PROOF_VERIFIER = Path("/usr/local/lib/jason/owner_signed_release.py")
+ROOT_OWNER_TRUST_POLICY = Path("/etc/jason-owner-release/verified-owner-public-key.json")
+ROOT_OWNER_BINDINGS = Path("/var/lib/jason/governed-ticket-shared/teams-identity-bindings.sqlite3")
+ROOT_OWNER_AUTHORITY = Path("/var/lib/jason/authority/authority.sqlite3")
 CCC_MATERIAL_REVIEW_ROOT = Path("/var/lib/jason/ccc")
+STAGE_E_TRUST = Path("/usr/local/lib/jason/pmv4-e-bootstrap/trusted")
+STAGE_E_ENTRY = STAGE_E_TRUST / "tools/pmv4_e_root_bootstrap_once.py"
+STAGE_E_POLICY = Path("/etc/jason/independent-component-release/pmv4-e-dispatch.json")
+STAGE_E_RECORDS = Path("/var/lib/jason-owner-release/pmv4-e-dispatch")
+STAGE_E_SIGNER_SHA256 = "f50eea90102d9a1de82b3753ec8d0cd225280d385ac7a658ae2c2a303934a0e3"
 
 
 class HostReconcileError(RuntimeError):
@@ -85,10 +94,26 @@ def _read_request(path: Path) -> dict[str, str]:
             raise HostReconcileError("request is not a regular file")
         if meta.st_uid != expected_uid:
             raise HostReconcileError("request owner is not the Jason host operator")
-        with os.fdopen(fd, "r", encoding="utf-8", closefd=False) as handle:
-            payload = json.load(handle)
+        if not 0 < meta.st_size <= 1048576:
+            raise HostReconcileError("request size is invalid")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            raw = handle.read(1048577)
+        if len(raw) != meta.st_size:
+            raise HostReconcileError("request changed while reading")
+
+        def unique_object(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise HostReconcileError("duplicate request field")
+                result[key] = value
+            return result
+
+        payload = json.loads(raw, object_pairs_hook=unique_object)
     finally:
         os.close(fd)
+    if type(payload) is not dict:
+        raise HostReconcileError("request is not an object")
 
     request_id = str(payload.get("request_id") or "")
     source_revision = str(payload.get("source_revision") or "").casefold()
@@ -96,6 +121,86 @@ def _read_request(path: Path) -> dict[str, str]:
         raise HostReconcileError("request id is invalid")
     if not SHA.fullmatch(source_revision):
         raise HostReconcileError("source revision must be an exact SHA")
+    action = payload.get("action", "host_reconcile")
+    if action == "pmv4_e_cutover":
+        # The request itself is untrusted. The root policy, original Owner
+        # signature and native Stage E bootstrap must independently agree.
+        owner = payload.get("owner_request")
+        signed = owner.get("signed_owner_proof") if isinstance(owner, dict) else None
+        proof = signed.get("payload") if isinstance(signed, dict) else None
+        approval_id = proof.get("approval_id") if isinstance(proof, dict) else None
+        expected = {"request_id", "source_revision", "action", "owner_request"}
+        owner_fields = {
+            "schema_version", "request_id", "action", "candidate_sha",
+            "rollback_sha", "scope_sha256", "manifest_sha256",
+            "freeze_sha256", "signed_owner_proof",
+        }
+        if (set(payload) != expected
+                or stat.S_IMODE(meta.st_mode) != 0o600
+                or meta.st_nlink != 1 or not 0 < meta.st_size <= 32768
+                or not isinstance(owner, dict) or set(owner) != owner_fields
+                or owner.get("schema_version") != "1.0"
+                or owner.get("action") != "pmv4_e_stage_exact_signed_inert_root_v1"
+                or owner.get("candidate_sha") != source_revision
+                or owner.get("request_id") != "release-" + source_revision[:16]
+                or not isinstance(owner.get("rollback_sha"), str)
+                or SHA.fullmatch(owner["rollback_sha"]) is None
+                or owner["rollback_sha"] == source_revision
+                or any(not isinstance(owner.get(k), str)
+                       or re.fullmatch(r"[0-9a-f]{64}", owner[k]) is None
+                       for k in ("scope_sha256", "manifest_sha256", "freeze_sha256"))
+                or not isinstance(approval_id, str)
+                or re.fullmatch(r"owner-mcp-[0-9a-f]{32}", approval_id) is None
+                or request_id !=
+                    "pmv4-e-" + source_revision[:16] + "-" + approval_id[10:]):
+            raise HostReconcileError("PMV4_E_ROOT_REQUEST_INVALID")
+        return dict(payload)
+    if action == "pmv4_stage_a0_install":
+        # This is a separate, exact Owner-signed transaction, not a generic
+        # extension to routine host release reconciliation. Untrusted al-owned
+        # requests are never proof of Owner authority by themselves.
+        expected = {
+            "request_id", "source_revision", "action",
+            "scope_sha256", "manifest_sha256", "freeze_sha256",
+            "signed_owner_proof",
+        }
+        if (set(payload) != expected
+                or stat.S_IMODE(meta.st_mode) != 0o600
+                or meta.st_nlink != 1 or meta.st_size > 16384
+                or any(not isinstance(payload.get(k), str)
+                       or re.fullmatch(r"[0-9a-f]{64}", payload[k]) is None
+                       for k in ("scope_sha256", "manifest_sha256",
+                                 "freeze_sha256"))
+                or not isinstance(payload.get("signed_owner_proof"), dict)):
+            raise HostReconcileError("PMV4_STAGE_A0_REQUEST_INVALID")
+        return dict(payload)
+    if action in {"catalog_scope_stage", "catalog_scope_promote", "catalog_scope_recover"}:
+        # This is a typed exact-release request, not release authorization.
+        # An al-owned JSON request must never expand the trusted root action.
+        fields = {
+            "schema_version", "request_id", "source_revision", "action",
+            "release_id", "admission_receipt_sha256",
+        }
+        if action != "catalog_scope_stage":
+            fields.add("offer_sha256")
+        if (set(payload) != fields or stat.S_IMODE(meta.st_mode) != 0o600
+                or meta.st_nlink != 1 or meta.st_size > 4096
+                or payload.get("schema_version") != "1.0"
+                or not re.fullmatch(r"[0-9a-f]{32}", request_id)
+                or not re.fullmatch(r"release-[0-9a-f]{16}",
+                                    str(payload.get("release_id") or ""))
+                or payload.get("admission_receipt_sha256") !=
+                    "12c8fdeec4b3ffd361d06b40e51a94c8199dfb8f7b0bb30a6d7e6920defe9d31"
+                or (action != "catalog_scope_stage"
+                    and not re.fullmatch(r"[0-9a-f]{64}",
+                                         str(payload.get("offer_sha256") or "")))):
+            raise HostReconcileError("CATALOG_SCOPED_ROOT_REQUEST_INVALID")
+        return dict(payload)
+    if action != "host_reconcile":
+        raise HostReconcileError("UNSUPPORTED_ROOT_RECONCILE_REQUEST")
+    # Do not accidentally narrow the historical ordinary host-reconcile
+    # payload contract while introducing this separately governed action.
+    # Only the new A0 route requires the strict bounded exact field set.
     return {"request_id": request_id, "source_revision": source_revision}
 
 
@@ -228,7 +333,7 @@ def _verify_root_policy_covers_candidate(source_revision: str) -> None:
 
 def _trusted_root_policy_helper():
     """Load only the installed root-owned helper, never mutable source."""
-    helper = Path(__file__).with_name("protected_root_policy_migration.py")
+    helper = Path("/usr/local/lib/jason/protected_root_policy_migration.py")
     meta = helper.lstat()
     if (not stat.S_ISREG(meta.st_mode) or helper.is_symlink()
             or meta.st_uid != 0 or meta.st_mode & 0o022):
@@ -292,6 +397,19 @@ def _forward_recovery_release_authorized(
     owner = record.get("owner_approval") or {}
     manifest = record.get("release_manifest") or {}
     exception = record.get("one_transaction_freeze_exception") or {}
+    source = str(owner.get("source") or "")
+    signed_mcp = source.startswith("authenticated_signed_mcp_owner:")
+    owner_is_verified = (
+        _signed_mcp_owner_release_authorized(
+            source_revision, lkg_revision, record,
+        ) if signed_mcp else
+        source.startswith("authenticated_mobile_teams_owner:relapproval-")
+    )
+    permission_is_reviewed = (
+        exception.get("authenticated_owner_release_required") is True
+        if signed_mcp else
+        exception.get("signed_teams_release_approval_required") is True
+    )
     if (
         record.get("state") != "production"
         or record.get("risk_profile") != "production_control_core"
@@ -302,18 +420,29 @@ def _forward_recovery_release_authorized(
         or manifest.get("rollback_sha") != lkg_revision
         or owner.get("approved") is not True
         or owner.get("candidate_sha") != source_revision
-        or not str(owner.get("source") or "").startswith(
-            "authenticated_mobile_teams_owner:relapproval-"
-        )
+        or not owner_is_verified
         or exception.get("required_recovery_profile_id")
             != "provider_identity_and_authority_recovery"
         or exception.get("rollback_sha") != lkg_revision
         or exception.get("standing_authority") is not False
-        or exception.get("signed_teams_release_approval_required") is not True
+        or not permission_is_reviewed
         or exception.get("restore_freeze_after_transaction") is not True
     ):
         return False
 
+    if signed_mcp:
+        receipt = (RELEASE_STATE / "owner-unfreeze-receipts"
+                   / ("release-" + source_revision[:16] + ".json"))
+        try:
+            native = json.loads(receipt.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return False
+        if (not _release_transaction_held()
+                or (RELEASE_STATE / "production-deployment-freeze").exists()
+                or native.get("authorization") !=
+                   "authenticated_signed_mcp_owner_one_transaction_unfreeze"
+                or native.get("status") != "unfrozen_active"):
+            return False
     try:
         raw = subprocess.check_output(
             _git("show", f"{source_revision}:{SOURCE_DRIFT_POLICY}"),
@@ -449,6 +578,172 @@ def _release_transaction_held() -> bool:
         os.close(fd)
 
 
+def _trusted_owner_proof_module():
+    """Import only the root-installed, immutable source-reviewed verifier."""
+    path = ROOT_OWNER_PROOF_VERIFIER
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise HostReconcileError("root owner verifier not installed") from exc
+    if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != 0 or info.st_mode & 0o022):
+        raise HostReconcileError("root owner verifier is not independently trusted")
+    spec = importlib.util.spec_from_file_location(
+        "jason_root_verified_owner_release", path,
+    )
+    if spec is None or spec.loader is None:
+        raise HostReconcileError("root owner verifier cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _root_owner_identity_is_active(oid: str, subject: str) -> bool:
+    """Recheck exact licensed/privileged Entra OAuth Owner subject binding."""
+    tenant = "f7054323-d52b-4863-8c2f-1898f0b6077c"
+    allowed = {
+        "bee80bdc-ffb0-4c50-b453-c09d4d411f5f":
+            "person-entra-bee80bdcffb04c50b453c09d4d411f5f",
+        "c848022d-e13b-4457-84b0-e2f5c00dcaf6":
+            "person-entra-c848022de13b445784b0e2f5c00dcaf6",
+    }
+    if oid not in allowed or subject != allowed[oid]:
+        return False
+    try:
+        con = sqlite3.connect(
+            "file:" + ROOT_OWNER_BINDINGS.as_posix() + "?mode=ro",
+            uri=True, timeout=2,
+        )
+        try:
+            row = con.execute(
+                """SELECT jason_identity_id,client_id,status FROM
+                   microsoft_identity_bindings WHERE
+                   microsoft_tenant_id=? AND microsoft_object_id=?""",
+                (tenant, oid),
+            ).fetchone()
+        finally:
+            con.close()
+        if row != (subject, None, "active"):
+            return False
+        con = sqlite3.connect(
+            "file:" + ROOT_OWNER_AUTHORITY.as_posix() + "?mode=ro",
+            uri=True, timeout=2,
+        )
+        try:
+            raw = con.execute(
+                "SELECT payload FROM identities WHERE identity_id=?",
+                (subject,),
+            ).fetchone()
+        finally:
+            con.close()
+        if raw is None:
+            return False
+        identity = json.loads(raw[0])
+        return (identity.get("identity_id") == subject
+                and identity.get("organization_id") == "aot"
+                and identity.get("status") == "active"
+                and identity.get("identity_type") in {"human", "person"})
+    except (OSError, TypeError, ValueError, sqlite3.Error):
+        return False
+
+
+def _signed_mcp_owner_release_authorized(
+    candidate: str, rollback: str, record: dict[str, object],
+) -> bool:
+    """Root verification of an exact one-use OAuth Owner decision, sans Teams.
+
+    A mutable owner_approval boolean is insufficient. The real signed
+    attestation must exist in the original MCP request, be pinned to a
+    separately root-protected public key, match current release/freeze/manifest,
+    and agree with the independently active Entra/Jason Owner identity.
+    """
+    owner = record.get("owner_approval") or {}
+    source = str(owner.get("source") or "")
+    if (not re.fullmatch(
+            r"authenticated_signed_mcp_owner:owner-mcp-[0-9a-f]{32}", source)
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate
+            or record.get("rollback_sha") != rollback
+            or (record.get("release_candidate") or {}).get("candidate_sha") != candidate
+            or not SHA.fullmatch(candidate) or not SHA.fullmatch(rollback)):
+        return False
+    release_id = "release-" + candidate[:16]
+    path = (RELEASE_STATE / "owner-approval-requests-processed"
+            / (release_id + ".json"))
+    backup = RELEASE_STATE / "production-deployment-freeze.pmv3-one-release-backup"
+    freeze = RELEASE_STATE / "production-deployment-freeze"
+    try:
+        al = _host_operator_uid()
+        info = path.lstat()
+        raw = path.read_bytes()
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != al or stat.S_IMODE(info.st_mode) != 0o600
+                or len(raw) > 16384):
+            return False
+        request = json.loads(raw)
+        freeze_path = backup if not freeze.exists() else freeze
+        freeze_info = freeze_path.lstat()
+        if (freeze_path.is_symlink()
+                or not stat.S_ISREG(freeze_info.st_mode)
+                or freeze_info.st_uid != al
+                or stat.S_IMODE(freeze_info.st_mode) != 0o600):
+            return False
+        manifest = record.get("release_manifest") or {}
+        review = record.get("manual_scope_review") or {}
+        scope = str(review.get("scope_sha256") or "")
+        manifest_digest = hashlib.sha256(json.dumps(
+            manifest, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")).hexdigest()
+        if (not re.fullmatch(r"[0-9a-f]{64}", scope)
+                or review.get("baseline_sha") != rollback
+                or review.get("candidate_sha") != candidate
+                or manifest.get("candidate_sha") != candidate
+                or manifest.get("rollback_sha") != rollback
+                or request.get("release_id") != release_id
+                or request.get("candidate_sha") != candidate
+                or request.get("approved_by") not in {
+                    "person-entra-bee80bdcffb04c50b453c09d4d411f5f",
+                    "person-entra-c848022de13b445784b0e2f5c00dcaf6",
+                }
+                or request.get("organization_id") != "aot"):
+            return False
+        module = _trusted_owner_proof_module()
+        public = module.read_pinned_root_owner_public_key(
+            ROOT_OWNER_TRUST_POLICY,
+        )
+        proof = module.verify_exact_owner_release(
+            request.get("signed_owner_proof"),
+            public_key=public,
+            expected_candidate_sha=candidate,
+            expected_rollback_sha=rollback,
+            expected_release_id=release_id,
+            expected_scope_sha256=scope,
+            expected_manifest_sha256=manifest_digest,
+            expected_freeze_sha256=hashlib.sha256(
+                freeze_path.read_bytes()
+            ).hexdigest(),
+            at=datetime.now(timezone.utc),
+        )
+        if (source != "authenticated_signed_mcp_owner:" + proof["approval_id"]
+                or request.get("source") !=
+                    "authenticated_jason_mcp_owner:" + proof["approval_id"]
+                or request.get("approved_by") != proof["owner_principal"]):
+            return False
+        tx = owner.get("transaction_binding") or {}
+        if (tx.get("candidate_sha") != candidate
+                or tx.get("rollback_sha") != rollback
+                or tx.get("scope_sha256") != scope
+                or tx.get("manifest_sha256") != manifest_digest):
+            return False
+        return _root_owner_identity_is_active(
+            proof["owner_oid"], proof["owner_principal"],
+        )
+    except (OSError, TypeError, ValueError, KeyError, PermissionError,
+            sqlite3.Error, HostReconcileError):
+        return False
+
+
 def _authenticated_rollback_evidence(
     candidate: str, rollback: str, record: dict[str, object]
 ) -> bool:
@@ -460,6 +755,10 @@ def _authenticated_rollback_evidence(
     """
     owner = record.get("owner_approval") or {}
     source = str(owner.get("source") or "")
+    if source.startswith("authenticated_signed_mcp_owner:"):
+        return _signed_mcp_owner_release_authorized(
+            candidate, rollback, record,
+        )
     prefix = "authenticated_mobile_teams_owner:"
     if not source.startswith(prefix):
         return False
@@ -499,23 +798,74 @@ def _authenticated_rollback_evidence(
                 or meta.get("release_id") != "release-" + candidate[:16]
                 or meta.get("manifest_sha256") != manifest_digest):
             return False
-        path = CCC_MATERIAL_REVIEW_ROOT / (
-            'material-review-' + candidate[:16] + '.json'
-        )
-        info = path.lstat()
-        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
-                or info.st_uid not in {0, _host_operator_uid()}
-                or info.st_mode & 0o002):
-            return False
-        review = json.loads(path.read_text(encoding='utf-8'))
+        # The separately signed Teams approval above is authoritative.
+        # The governed native scope review replaces a second CCC human
+        # material-review artifact. The production transaction independently
+        # requires the exact scope digest and protected freeze receipt.
+        scope = record.get("manual_scope_review") or {}
         return (
-            review.get('status') == 'approved'
-            and review.get('source_revision') == candidate
-            and review.get('mobile_approval_id') == receipt_id
-            and review.get('release_manifest_sha256') == manifest_digest
+            isinstance(scope, dict)
+            and scope.get("schema_version") == "1.0"
+            and scope.get("candidate_sha") == candidate
+            and scope.get("baseline_sha") == rollback
+            and re.fullmatch(r"[0-9a-f]{64}", str(scope.get("scope_sha256") or ""))
+                is not None
+            and isinstance(scope.get("included_prs"), list)
+            and isinstance(scope.get("included_commits"), list)
         )
     except (OSError, ValueError, TypeError, sqlite3.Error):
         return False
+
+
+def _distinct_owner_unfreeze_rollback_authorized(
+    candidate: str, rollback: str, record: dict[str, object]
+) -> bool:
+    """Accept only the exact bounded unfreeze receipt for the active release.
+
+    This is a rollback *only* admission; caller additionally requires a
+    verified signed Teams approval, CCC receipt, protected LKG, a held
+    production transaction, and the freeze removed inside that transaction.
+    """
+    scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
+    owner_source = (record.get("owner_approval") or {}).get("source")
+    if not isinstance(scope, str) or not re.fullmatch(r"[0-9a-f]{64}", scope):
+        return False
+    path = (RELEASE_STATE / "owner-explicit-unfreeze-receipts"
+            / ("release-" + candidate[:16] + ".json"))
+    backup = RELEASE_STATE / "production-deployment-freeze.pmv3-one-release-backup"
+    try:
+        info = path.lstat()
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != _host_operator_uid()
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or not 1 <= info.st_size <= 8192):
+            return False
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        backup_info = backup.lstat()
+        if (backup.is_symlink() or not stat.S_ISREG(backup_info.st_mode)
+                or backup_info.st_uid != _host_operator_uid()
+                or backup_info.st_mode & 0o022):
+            return False
+        freeze_digest = hashlib.sha256(backup.read_bytes()).hexdigest()
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+    return (
+        receipt.get("schema_version") == "1.0"
+        and receipt.get("authorization") == "explicit_exact_sha_owner_unfreeze"
+        and receipt.get("status") == "authorized_pending"
+        and receipt.get("release_id") == "release-" + candidate[:16]
+        and receipt.get("candidate_sha") == candidate
+        and receipt.get("rollback_sha") == rollback
+        and receipt.get("scope_sha256") == scope
+        and receipt.get("prior_release_approval_source") == owner_source
+        and receipt.get("owner_approval_source") == "explicit_owner_instruction"
+        and receipt.get("separate_exact_owner_unfreeze") is True
+        and receipt.get("freeze_remains_active") is True
+        and receipt.get("restore_freeze_after_transaction") is True
+        and receipt.get("standing_authority") is False
+        and receipt.get("automatic_publish_authority") is False
+        and receipt.get("freeze_sha256_before") == freeze_digest
+    )
 
 
 def _exact_signed_inflight_lkg_rollback_authorized(
@@ -564,29 +914,46 @@ def _exact_signed_inflight_lkg_rollback_authorized(
             or record.get("rollback_sha") != source_revision
             or manifest.get("candidate_sha") != candidate
             or manifest.get("rollback_sha") != source_revision
-            or manifest.get("one_transaction_freeze_exception") != exception
             or owner.get("approved") is not True
             or owner.get("candidate_sha") != candidate
-            or not str(owner.get("source") or "").startswith(
+            or not (str(owner.get("source") or "").startswith(
                 "authenticated_mobile_teams_owner:relapproval-"
-            )
+            ) or str(owner.get("source") or "").startswith(
+                "authenticated_signed_mcp_owner:owner-mcp-"
+            ))
             or previous.get("complete") is not True
             or previous.get("revision") != source_revision
             or pre_mutation.get("passed") is not True
             or pre_mutation.get("revision") != source_revision
-            or exception.get("rollback_sha") != source_revision
-            or exception.get("required_recovery_profile_id")
-                != "provider_identity_and_authority_recovery"
-            or exception.get("standing_authority") is not False
-            or exception.get("signed_teams_release_approval_required") is not True
-            or exception.get("restore_freeze_after_transaction") is not True
             or not _authenticated_rollback_evidence(
                 candidate, source_revision, record
             )
         ):
             return False
-        # The auto-restored one-transaction freeze exception must actually be
-        # active, rather than just advertised in an unprivileged release record.
+        # Two independent Owner paths exist: the older source-declared
+        # one-transaction exception, or a later distinct exact-scope unfreeze
+        # receipt issued after signed Teams deployment approval. Neither a
+        # mutable release boolean nor an expired approval alone is sufficient.
+        legacy_exception = (
+            manifest.get("one_transaction_freeze_exception") == exception
+            and exception.get("rollback_sha") == source_revision
+            and exception.get("required_recovery_profile_id")
+                == "provider_identity_and_authority_recovery"
+            and exception.get("standing_authority") is False
+            and (
+                exception.get("signed_teams_release_approval_required") is True
+                or exception.get("authenticated_owner_release_required") is True
+            )
+            and exception.get("restore_freeze_after_transaction") is True
+        )
+        explicit_unfreeze = _distinct_owner_unfreeze_rollback_authorized(
+            candidate, source_revision, record
+        )
+        if not (legacy_exception or explicit_unfreeze):
+            return False
+        # The one-time freeze backup must actually be present, with the freeze
+        # removed by the native locked transaction, not merely claimed in a
+        # mutable release record.
         backup = RELEASE_STATE / "production-deployment-freeze.pmv3-one-release-backup"
         meta = backup.lstat()
         if (backup.is_symlink() or not stat.S_ISREG(meta.st_mode)
@@ -834,6 +1201,481 @@ def _write_result(
     os.replace(temp, target)
 
 
+
+
+def _trusted_native_stage_a0_module(source_revision: str):
+    """Reuse the root-installed host boundary, not caller-provided code.
+
+    A different source revision or untrusted managed Git worktree must not
+    execute from the privileged worker. Staging this helper is itself a
+    separately governed production root-worker upgrade.
+    """
+    module_path = Path("/usr/local/lib/jason/pmv4_stage_a_native_install.py")
+    try:
+        info = module_path.lstat()
+        if (module_path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != 0 or info.st_mode & 0o022
+                or info.st_nlink != 1 or info.st_size > 131072):
+            raise HostReconcileError("PMV4_NATIVE_INSTALLER_UNTRUSTED")
+        actual = hashlib.sha256(module_path.read_bytes()).hexdigest()
+        expected = hashlib.sha256(subprocess.check_output(
+            _git("show", source_revision + ":tools/pmv4_stage_a_native_install.py"),
+            timeout=15,
+        )).hexdigest()
+        if actual != expected:
+            raise HostReconcileError("PMV4_NATIVE_INSTALLER_SOURCE_DRIFT")
+        # Root code dependencies MUST resolve only to the root-owned
+        # immutable candidate source. The managed engineering Git clone is
+        # writable by al, even when status is momentarily clean, and is
+        # therefore NEVER an import path for privileged Python execution.
+        root_release = Path("/opt/jason/releases") / source_revision
+        root_dirs = (
+            Path("/opt/jason/releases"), root_release,
+            root_release / "tools",
+            root_release / "implementation",
+            root_release / "implementation/kernel",
+        )
+        for directory in root_dirs:
+            info = directory.lstat()
+            if (directory.is_symlink() or not stat.S_ISDIR(info.st_mode)
+                    or (info.st_uid, info.st_gid) != (0, 0)
+                    or info.st_mode & 0o002):
+                raise HostReconcileError("PMV4_NATIVE_ROOT_SOURCE_DIR_UNTRUSTED")
+        required_modules = (
+            "tools/pmv4_stage_a_native_install.py",
+            "tools/pmv4_stage_a_packet.py",
+            "tools/pmv4_stage_a_admission.py",
+            "tools/pmv4_host_install_contract.py",
+            "tools/pmv4_host_release_guard.py",
+            "tools/pmv4_shadow_release.py",
+            "tools/pmv4_shadow_ci.py",
+            "implementation/kernel/signed_owner_release.py",
+            "implementation/kernel/__init__.py",
+        )
+        for relative in required_modules:
+            source_file = root_release / relative
+            info = source_file.lstat()
+            if (source_file.is_symlink()
+                    or not stat.S_ISREG(info.st_mode)
+                    or (info.st_uid, info.st_gid) != (0, 0)
+                    or info.st_mode & 0o002 or info.st_nlink != 1):
+                raise HostReconcileError("PMV4_NATIVE_ROOT_DEPENDENCY_UNTRUSTED")
+            committed = subprocess.check_output(
+                _git("show", source_revision + ":" + relative),
+                timeout=15,
+            )
+            if hashlib.sha256(source_file.read_bytes()).digest() != hashlib.sha256(committed).digest():
+                raise HostReconcileError("PMV4_NATIVE_ROOT_DEPENDENCY_SOURCE_DRIFT")
+        import sys
+        import types
+        # A loaded tools/implementation namespace may already reference a
+        # mutable checkout. Never inherit it for root execution. Each root
+        # worker invocation processes only ONE request, so refusal is safe.
+        if any(name in sys.modules for name in (
+            "tools", "implementation", "implementation.kernel",
+        )):
+            raise HostReconcileError("PMV4_NATIVE_IMPORT_NAMESPACE_ALREADY_IN_USE")
+        for name, relative in (
+            ("tools", "tools"),
+            ("implementation", "implementation"),
+            ("implementation.kernel", "implementation/kernel"),
+        ):
+            pkg = types.ModuleType(name)
+            pkg.__path__ = [str(root_release / relative)]
+            pkg.__package__ = name
+            sys.modules[name] = pkg
+        spec = importlib.util.spec_from_file_location(
+            "jason_root_pmv4_stage_a_native", module_path,
+        )
+        if spec is None or spec.loader is None:
+            raise HostReconcileError("PMV4_NATIVE_INSTALLER_NOT_LOADABLE")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            ImportError) as exc:
+        raise HostReconcileError("PMV4_NATIVE_INSTALLER_NOT_TRUSTED") from exc
+
+
+def _process_stage_a0_request(request: dict[str, object]) -> str:
+    candidate = str(request["source_revision"])
+    _verify_main(candidate)
+    module = _trusted_native_stage_a0_module(candidate)
+    # The helper reads only the root-owned immutable release tree.
+    receipt = module.execute_native_stage_a0_request(
+        request, repo=Path("/opt/jason/releases") / candidate,
+    )
+    if (not isinstance(receipt, dict)
+            or receipt.get("status") not in {
+                "installed", "empty_baseline_restored"
+            }
+            or receipt.get("source_sha") != candidate
+            or receipt.get("rollback_sha") != "0" * 40
+            or receipt.get("scope_sha256") not in {
+                request["scope_sha256"], None
+            }):
+        raise HostReconcileError("PMV4_NATIVE_INSTALLER_READBACK_FAILED")
+    return {
+        key: receipt.get(key) for key in (
+            "status", "source_sha", "scope_sha256",
+            "rollback_sha", "audit_chain_sha256",
+            "receipt_chain_sha256", "owner_approval_id"
+        )
+    }
+
+
+
+def _catalog_scoped_installed_source_path(trusted: Path, relative: str) -> Path:
+    """Map a reviewed catalog blob to its actual installed root-owned path.
+
+    The 17-file root installation places systemd units in /etc/systemd/system
+    and replaces the existing root worker in /usr/local/lib/jason.  It never
+    copies those files into the immutable catalog source bundle. Checking the
+    nonexistent bundle/infrastructure directory is a false deployment failure.
+    Preserve exact Git blob and root ownership/digest checks at the *actual*
+    installed destination. No fallback or mutable operator path is allowed.
+    """
+    if (not isinstance(relative, str) or not relative
+            or Path(relative).is_absolute() or ".." in Path(relative).parts):
+        raise HostReconcileError("CATALOG_SCOPED_INSTALLED_SOURCE_PATH_INVALID")
+    fixed = {
+        "tools/release_host_reconcile_worker.py": Path(
+            "/usr/local/lib/jason/release_host_reconcile_worker.py"),
+        "infrastructure/openclaw-operations/systemd/jason-catalog-scoped-recovery.service": Path(
+            "/etc/systemd/system/jason-catalog-scoped-recovery.service"),
+        "infrastructure/openclaw-operations/systemd/jason-catalog-scoped-recovery.timer": Path(
+            "/etc/systemd/system/jason-catalog-scoped-recovery.timer"),
+    }
+    return fixed.get(relative, trusted / relative)
+
+
+CATALOG_SCOPED_ORIGINAL_ROOT_SOURCE = "01ba71c54d9dd0391734b16a92d0b292fc457ae9"
+CATALOG_SCOPED_PINNED_RUNNER_SHA256 = "b194084a9a54fe024ae89784e2e75d54a26e1369ed65d824abed4ce958f58edf"
+
+
+def _catalog_scoped_trusted_source_ref(relative: str, requested_main_sha: str) -> str:
+    """Use independently approved original root source for its unchanged native runner."""
+    original = relative == "tools/release_manager_host_runner.py"
+    sha = CATALOG_SCOPED_ORIGINAL_ROOT_SOURCE if original else requested_main_sha
+    return sha + ":" + relative
+
+
+def _catalog_scoped_trusted_file_size_limit(relative: str) -> int:
+    """Only the immutable native release-runner blob exceeds the default guard."""
+    if relative == "tools/release_manager_host_runner.py":
+        return 524288
+    return 262144
+
+
+def _trusted_catalog_scoped_promotion_module(source_revision: str):
+    """Never execute root privilege from a mutable checkout or unpinned bundle."""
+    trusted = Path("/usr/local/lib/jason/catalog-scoped-promotion")
+    entrypoint = trusted / "tools/catalog_scoped_promotion_root.py"
+    source_revision = str(source_revision or "")
+    if not SHA.fullmatch(source_revision):
+        raise HostReconcileError("CATALOG_SCOPED_TRUSTED_SOURCE_INVALID")
+    paths = (
+        "tools/catalog_scoped_promotion_root.py",
+        "tools/catalog_scoped_promotion_host.py",
+        "tools/catalog_scoped_promotion.py",
+        "tools/catalog_scoped_release_admission.py",
+        "tools/catalog_scoped_control_readback.py",
+        "tools/release_manager_host_runner.py",
+        "tools/deploy_live_container.py",
+        "tools/catalog_scoped_protected_ci.py",
+        "tools/catalog_scoped_promotion_recovery.py",
+        # The pinned native deploy helper imports this module before even
+        # entering --preflight. A verified root-only copy is mandatory; do
+        # not fall back to /opt/jason/current or a mutable PYTHONPATH.
+        "tools/pmv4_mcp_projection.py",
+        "implementation/kernel/catalog_scoped_promotion_contract.py",
+        "implementation/kernel/signed_owner_release.py",
+        "docs/engineering/evidence/catalog-scope-admission-20261117.json",
+        "docs/engineering/evidence/catalog-scope-original-manifest-20261117.json",
+        "config/catalog-scoped-release-admission.json",
+        "infrastructure/openclaw-operations/systemd/jason-catalog-scoped-recovery.service",
+        "infrastructure/openclaw-operations/systemd/jason-catalog-scoped-recovery.timer",
+    )
+    for directory in (
+        trusted, trusted / "tools", trusted / "implementation",
+        trusted / "implementation/kernel", trusted / "docs",
+        trusted / "docs/engineering", trusted / "docs/engineering/evidence",
+        trusted / "config",
+    ):
+        meta = directory.lstat()
+        if (directory.is_symlink() or not stat.S_ISDIR(meta.st_mode)
+                or meta.st_uid != 0 or (meta.st_mode & 0o022)):
+            raise HostReconcileError("CATALOG_SCOPED_ROOT_DIRECTORY_UNTRUSTED")
+    for relative in paths:
+        path = _catalog_scoped_installed_source_path(trusted, relative)
+        meta = path.lstat()
+        if (path.is_symlink() or not stat.S_ISREG(meta.st_mode)
+                or meta.st_uid != 0 or (meta.st_mode & 0o022)
+                or meta.st_nlink != 1 or
+                meta.st_size > _catalog_scoped_trusted_file_size_limit(relative)):
+            raise HostReconcileError("CATALOG_SCOPED_TRUSTED_FILE_INVALID")
+        expected = subprocess.check_output(
+            _git("show", _catalog_scoped_trusted_source_ref(relative, source_revision)),
+            timeout=15,
+        )
+        if relative == "tools/release_manager_host_runner.py":
+            if hashlib.sha256(expected).hexdigest() != CATALOG_SCOPED_PINNED_RUNNER_SHA256:
+                raise HostReconcileError("CATALOG_SCOPED_ORIGINAL_RUNNER_SOURCE_DRIFT")
+        if hashlib.sha256(path.read_bytes()).digest() != hashlib.sha256(expected).digest():
+            raise HostReconcileError("CATALOG_SCOPED_TRUSTED_SOURCE_DRIFT")
+    # The root worker processes one request per process. Never inherit an
+    # imported mutable developer tools/implementation namespace.
+    import sys
+    import types
+    if any(name in sys.modules for name in (
+        "tools", "implementation", "implementation.kernel",
+    )):
+        raise HostReconcileError("CATALOG_SCOPED_ROOT_IMPORT_NAMESPACE_UNTRUSTED")
+    for package, source in (
+        ("tools", trusted / "tools"),
+        ("implementation", trusted / "implementation"),
+        ("implementation.kernel", trusted / "implementation/kernel"),
+    ):
+        module = types.ModuleType(package)
+        module.__path__ = [str(source)]
+        module.__package__ = package
+        sys.modules[package] = module
+    spec = importlib.util.spec_from_file_location(
+        "jason_trusted_catalog_scoped_promotion", entrypoint,
+    )
+    if spec is None or spec.loader is None:
+        raise HostReconcileError("CATALOG_SCOPED_ROOT_ENTRYPOINT_UNAVAILABLE")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _stage_e_root_directory(path: Path, *, mode: int | None = None) -> None:
+    """A root-controlled path cannot be replaced through a writable ancestor."""
+    for directory in (path, *path.parents):
+        meta = directory.lstat()
+        if (directory.is_symlink() or not stat.S_ISDIR(meta.st_mode)
+                or (meta.st_uid, meta.st_gid) != (0, 0)
+                or meta.st_mode & 0o022):
+            raise HostReconcileError("PMV4_E_ROOT_DIRECTORY_UNTRUSTED")
+    if mode is not None and stat.S_IMODE(path.lstat().st_mode) != mode:
+        raise HostReconcileError("PMV4_E_ROOT_DIRECTORY_MODE_CHANGED")
+
+
+def _stage_e_root_file(path: Path, *, modes: frozenset[int],
+                       maximum: int = 32768) -> bytes:
+    _stage_e_root_directory(path.parent)
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        meta = os.fstat(fd)
+        if (not stat.S_ISREG(meta.st_mode) or (meta.st_uid, meta.st_gid) != (0, 0)
+                or meta.st_nlink != 1 or stat.S_IMODE(meta.st_mode) not in modes
+                or not 0 < meta.st_size <= maximum):
+            raise HostReconcileError("PMV4_E_ROOT_FILE_UNTRUSTED")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            raw = stream.read(maximum + 1)
+        if len(raw) != meta.st_size:
+            raise HostReconcileError("PMV4_E_ROOT_FILE_CHANGED")
+        return raw
+    finally:
+        os.close(fd)
+
+
+def _stage_e_dispatch_policy() -> dict[str, object]:
+    try:
+        policy = json.loads(_stage_e_root_file(
+            STAGE_E_POLICY, modes=frozenset({0o400, 0o444})))
+    except (OSError, ValueError, TypeError) as exc:
+        raise HostReconcileError("PMV4_E_DISPATCH_POLICY_UNAVAILABLE") from exc
+    fields = {
+        "schema_version", "action", "candidate_sha", "rollback_sha",
+        "scope_sha256", "manifest_sha256", "freeze_sha256",
+        "bootstrap_sha256", "scope_guard_sha256", "ci_refresh_sha256",
+    }
+    if (type(policy) is not dict or set(policy) != fields
+            or policy["schema_version"] != "1.0"
+            or policy["action"] != "pmv4_e_cutover"
+            or any(not isinstance(policy[k], str) or SHA.fullmatch(policy[k]) is None
+                   for k in ("candidate_sha", "rollback_sha"))
+            or policy["candidate_sha"] == policy["rollback_sha"]
+            or any(not isinstance(policy[k], str)
+                   or re.fullmatch(r"[0-9a-f]{64}", policy[k]) is None
+                   for k in ("scope_sha256", "manifest_sha256", "freeze_sha256",
+                             "bootstrap_sha256", "scope_guard_sha256",
+                             "ci_refresh_sha256"))):
+        raise HostReconcileError("PMV4_E_DISPATCH_POLICY_INVALID")
+    return policy
+
+
+def _stage_e_record_verified_request(owner: dict, approval_id: str) -> None:
+    """Preserve the verified decision in a root-only, no-replace journal."""
+    _stage_e_root_directory(STAGE_E_RECORDS, mode=0o700)
+    if re.fullmatch(r"owner-mcp-[0-9a-f]{32}", approval_id) is None:
+        raise HostReconcileError("PMV4_E_APPROVAL_ID_INVALID")
+    raw = json.dumps(owner, sort_keys=True, separators=(",", ":"),
+                     ensure_ascii=False, allow_nan=False).encode("utf-8")
+    if not 0 < len(raw) <= 32768:
+        raise HostReconcileError("PMV4_E_OWNER_RECORD_INVALID")
+    final = STAGE_E_RECORDS / (approval_id + ".json")
+    if final.exists() or final.is_symlink():
+        if _stage_e_root_file(final, modes=frozenset({0o600})) != raw:
+            raise HostReconcileError("PMV4_E_OWNER_RECORD_CONFLICT")
+        return
+    temp = STAGE_E_RECORDS / (".owner-" + os.urandom(16).hex() + ".tmp")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                 | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temp, final, follow_symlinks=False)
+        except FileExistsError:
+            if _stage_e_root_file(final, modes=frozenset({0o600})) != raw:
+                raise HostReconcileError("PMV4_E_OWNER_RECORD_CONFLICT")
+        temp.unlink()
+        directory_fd = os.open(STAGE_E_RECORDS, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        temp.unlink(missing_ok=True)
+    if _stage_e_root_file(final, modes=frozenset({0o600})) != raw:
+        raise HostReconcileError("PMV4_E_OWNER_RECORD_READBACK_FAILED")
+
+
+def _process_stage_e_request(request: dict[str, object]) -> dict[str, object]:
+    """Dispatch only the exact root-pinned Stage E bootstrap and Owner proof."""
+    if os.geteuid() != 0:
+        raise HostReconcileError("PMV4_E_ROOT_IDENTITY_REQUIRED")
+    policy = _stage_e_dispatch_policy()
+    owner = request["owner_request"]
+    if not isinstance(owner, dict):
+        raise HostReconcileError("PMV4_E_ROOT_REQUEST_INVALID")
+    for field in ("candidate_sha", "rollback_sha", "scope_sha256",
+                  "manifest_sha256", "freeze_sha256"):
+        if owner.get(field) != policy[field]:
+            raise HostReconcileError("PMV4_E_ROOT_POLICY_BINDING_MISMATCH")
+    if request.get("source_revision") != policy["candidate_sha"]:
+        raise HostReconcileError("PMV4_E_ROOT_POLICY_BINDING_MISMATCH")
+
+    _stage_e_root_directory(STAGE_E_TRUST, mode=0o555)
+    _stage_e_root_directory(STAGE_E_TRUST / "tools", mode=0o555)
+    entry = _stage_e_root_file(STAGE_E_ENTRY, modes=frozenset({0o444}),
+                               maximum=1000000)
+    guard = _stage_e_root_file(
+        STAGE_E_TRUST / "tools/pmv4_e_source_scope_guard.py",
+        modes=frozenset({0o444}), maximum=1000000)
+    ci_entry = STAGE_E_TRUST / "tools/pmv4_e_ci_refresh.py"
+    ci_script = _stage_e_root_file(
+        ci_entry, modes=frozenset({0o444}), maximum=1000000)
+    if (hashlib.sha256(entry).hexdigest() != policy["bootstrap_sha256"]
+            or hashlib.sha256(guard).hexdigest() != policy["scope_guard_sha256"]
+            or hashlib.sha256(ci_script).hexdigest() != policy["ci_refresh_sha256"]):
+        raise HostReconcileError("PMV4_E_TRUSTED_SOURCE_DIGEST_CHANGED")
+    verifier_raw = _stage_e_root_file(
+        ROOT_OWNER_PROOF_VERIFIER, modes=frozenset({0o444, 0o644, 0o755}),
+        maximum=1000000)
+    if hashlib.sha256(verifier_raw).hexdigest() != STAGE_E_SIGNER_SHA256:
+        raise HostReconcileError("PMV4_E_OWNER_VERIFIER_DIGEST_CHANGED")
+    verifier = _trusted_owner_proof_module()
+    key = verifier.read_pinned_root_owner_public_key(ROOT_OWNER_TRUST_POLICY)
+    proof = verifier.verify_exact_owner_release(
+        owner.get("signed_owner_proof"), public_key=key,
+        expected_candidate_sha=policy["candidate_sha"],
+        expected_rollback_sha=policy["rollback_sha"],
+        expected_release_id="release-" + str(policy["candidate_sha"])[:16],
+        expected_scope_sha256=policy["scope_sha256"],
+        expected_manifest_sha256=policy["manifest_sha256"],
+        expected_freeze_sha256=policy["freeze_sha256"],
+        at=datetime.now(timezone.utc),
+    )
+    if not _root_owner_identity_is_active(
+            proof["owner_oid"], proof["owner_principal"]):
+        raise HostReconcileError("PMV4_E_OWNER_IDENTITY_NOT_ACTIVE")
+    _stage_e_record_verified_request(owner, proof["approval_id"])
+    _verify_main(str(policy["candidate_sha"]))
+    ci_command = ["/usr/bin/python3", "-I", "-B", str(ci_entry),
+                  "--candidate-sha", str(policy["candidate_sha"])]
+    for timeout in (480, 240):
+        try:
+            ci = subprocess.run(
+                ci_command, cwd="/", env={"PATH": "/usr/bin:/bin"}, text=True,
+                capture_output=True, timeout=timeout, check=False,
+            )
+        except subprocess.TimeoutExpired:
+            continue
+        if (ci.returncode == 0
+                or "GITHUB_ATTESTATION_UNAVAILABLE" not in (ci.stderr or "")):
+            break
+    else:
+        raise HostReconcileError("PMV4_E_CI_REFRESH_UNAVAILABLE")
+    try:
+        evidence = json.loads(ci.stdout)
+    except (ValueError, TypeError) as exc:
+        raise HostReconcileError("PMV4_E_CI_REFRESH_FAILED") from exc
+    if (ci.returncode != 0 or type(evidence) is not dict
+            or evidence.get("status") != "fresh_protected_ci_verified"
+            or evidence.get("candidate_sha") != policy["candidate_sha"]):
+        raise HostReconcileError("PMV4_E_CI_REFRESH_FAILED")
+    completed = subprocess.run(
+        ["/usr/bin/python3", "-I", "-B", str(STAGE_E_ENTRY),
+         "--candidate-sha", str(policy["candidate_sha"]),
+         "--stage-and-promote", "--owner-request-stdin"],
+        input=json.dumps(owner, sort_keys=True, separators=(",", ":")),
+        cwd="/", env={"PATH": "/usr/bin:/bin"},
+        # Allow the inner native promotion and journaled rollback to finish.
+        text=True, capture_output=True, timeout=1050, check=False,
+    )
+    if completed.returncode != 0:
+        # Cleanup is limited to signed inert staging. The bootstrap refuses
+        # this path if any native Stage E receipt exists, so a started native
+        # transaction remains governed by the original native rollback ledger.
+        recovered = subprocess.run(
+            ["/usr/bin/python3", "-I", "-B", str(STAGE_E_ENTRY),
+             "--candidate-sha", str(policy["candidate_sha"]),
+             "--recover-inert", "--owner-request-stdin"],
+            input=json.dumps(owner, sort_keys=True, separators=(",", ":")),
+            cwd="/", env={"PATH": "/usr/bin:/bin"},
+            text=True, capture_output=True, timeout=300, check=False,
+        )
+        try:
+            recovery = json.loads(recovered.stdout)
+        except (ValueError, TypeError):
+            recovery = {}
+        if (recovered.returncode == 0 and type(recovery) is dict
+                and recovery.get("status") == "signed_inert_bootstrap_recovered"
+                and recovery.get("candidate_sha") == policy["candidate_sha"]
+                and recovery.get("legacy_six_unchanged") is True):
+            raise HostReconcileError("PMV4_E_BOOTSTRAP_DENIED_INERT_RECOVERED")
+        raise HostReconcileError("PMV4_E_BOOTSTRAP_DENIED_CHECK_ROOT_JOURNAL")
+    try:
+        result = json.loads(completed.stdout)
+        native = result["original_native_receipt"]
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HostReconcileError("PMV4_E_BOOTSTRAP_RESULT_INVALID") from exc
+    if (type(result) is not dict
+            or result.get("candidate_sha") != policy["candidate_sha"]
+            or type(native) is not dict
+            or native.get("status") != result.get("status")
+            or native.get("candidate_sha") != policy["candidate_sha"]
+            or native.get("rollback_sha") != policy["rollback_sha"]
+            or native.get("approval_id") != proof["approval_id"]
+            or native.get("protected_services_changed") is not False):
+        raise HostReconcileError("PMV4_E_BOOTSTRAP_RECEIPT_MISMATCH")
+    if result.get("status") == "native_stage_e_six_unit_rollback_verified":
+        raise HostReconcileError("PMV4_E_INTERRUPTED_CUTOVER_ROLLBACK_VERIFIED")
+    if result.get("status") != "native_stage_e_six_unit_accepted":
+        raise HostReconcileError("PMV4_E_BOOTSTRAP_RECEIPT_MISMATCH")
+    return {
+        "status": result["status"], "candidate_sha": policy["candidate_sha"],
+        "rollback_sha": policy["rollback_sha"], "approval_id": proof["approval_id"],
+        "protected_services_changed": False,
+    }
+
+
 def _process(path: Path) -> None:
     request_id = path.stem
     source_revision = ""
@@ -841,6 +1683,43 @@ def _process(path: Path) -> None:
         request = _read_request(path)
         request_id = request["request_id"]
         source_revision = request["source_revision"]
+        if request.get("action") == "pmv4_e_cutover":
+            receipt = _process_stage_e_request(request)
+            _write_result(
+                request_id, source_revision, success=True,
+                detail="PMV4_E=" + json.dumps(receipt, sort_keys=True),
+            )
+            return
+        if request.get("action") == "pmv4_stage_a0_install":
+            # This path never calls ordinary host reconciliation, deploys
+            # containers, updates the PM runtime or mutates the freeze.
+            receipt = _process_stage_a0_request(request)
+            _write_result(
+                request_id, source_revision,
+                success=receipt["status"] == "installed",
+                detail="PMV4_STAGE_A0=" + json.dumps(receipt, sort_keys=True),
+            )
+            return
+        if request.get("action") in {
+            "catalog_scope_stage", "catalog_scope_promote", "catalog_scope_recover",
+        }:
+            _verify_main(source_revision)
+            # The trusted root module also requires its own root-owned policy,
+            # exact source and signed Owner proof; no root action from a chat
+            # or this ordinary operator-owned request alone.
+            trusted = _trusted_catalog_scoped_promotion_module(source_revision)
+            receipt = trusted.execute_native_catalog_scoped_request(request)
+            if (not isinstance(receipt, dict)
+                    or receipt.get("release_id") != request.get("release_id")
+                    or receipt.get("status") not in {
+                        "catalog_offer_staged_without_mutation",
+                        "production_pair_verified",
+                        "interrupted_recovered_rollback_verified",
+                    }):
+                raise HostReconcileError("CATALOG_SCOPED_ROOT_RECEIPT_INVALID")
+            _write_result(request_id, source_revision, success=True,
+                          detail="CATALOG_SCOPE=" + json.dumps(receipt, sort_keys=True))
+            return
         _verify_main(source_revision)
 
         live_mcp = _mcp_revision()

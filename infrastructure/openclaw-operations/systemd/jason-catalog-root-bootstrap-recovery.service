@@ -1,0 +1,21 @@
+[Unit]
+Description=Jason catalog exact root-install interruption recovery (Owner-approved, scoped)
+After=local-fs.target docker.service
+Requires=docker.service
+ConditionPathExists=/etc/jason-owner-release/catalog-scoped-root-bootstrap-trust.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 -I /usr/local/lib/jason/catalog-root-bootstrap/tools/catalog_scoped_root_install_native.py --recover
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/jason-catalog-scoped-promotion /var/lib/jason/openclaw/release-manager /etc/jason-owner-release /etc/systemd/system /usr/local/lib/jason /run/docker.sock
+ReadOnlyPaths=/srv/jason/archive/engineering-evidence /opt/jason
+TimeoutStartSec=240
+
+[Install]
+WantedBy=multi-user.target

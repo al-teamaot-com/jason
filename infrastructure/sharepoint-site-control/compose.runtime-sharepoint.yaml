@@ -1,0 +1,19 @@
+# Optional overlay for a separately approved exact-main Release Manager transaction.
+# Only applies after standalone site state, dedicated app credentials and validated
+# boundary have passed preproduction; NEVER apply to production directly.
+services:
+  jason-runtime:
+    environment:
+      JASON_SHAREPOINT_READER_PROFILE: ${JASON_SHAREPOINT_READER_PROFILE:-}
+      JASON_SHAREPOINT_AOT_TENANT_ID: ${JASON_SHAREPOINT_AOT_TENANT_ID:?tenant required}
+      JASON_SHAREPOINT_BOUNDARY_DB: /var/lib/jason/authority/client-boundaries.sqlite3
+      JASON_SHAREPOINT_SITE_ACCESS_DB: /var/lib/jason/sharepoint/sites.sqlite3
+      JASON_SHAREPOINT_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/sharepoint/role-id
+      JASON_SHAREPOINT_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/sharepoint/secret-id
+    volumes:
+      - jason-sharepoint-site-state:/var/lib/jason/sharepoint
+      - ${JASON_SHAREPOINT_APPROLE_HOST_DIR:?dedicated sharepoint app credential dir required}:/run/jason-secrets/openbao/sharepoint:ro
+volumes:
+  jason-sharepoint-site-state:
+    external: true
+    name: jason-sharepoint-site-state

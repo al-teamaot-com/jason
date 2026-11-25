@@ -24,7 +24,7 @@ class BindingStore:
         self.binding = binding
 
     def find_active_by_jason_identity(self, *, jason_identity_id: str):
-        if jason_identity_id != "person-al":
+        if jason_identity_id != "person-entra-bee80bdcffb04c50b453c09d4d411f5f":
             raise AssertionError("recipient substitution attempted")
         return self.binding
 
@@ -33,17 +33,13 @@ class EntraOwnerBindingStore:
     """Use the actual runtime binding-store interface, not an invented identity."""
     def __init__(self, *bindings):
         self.bindings = bindings
-        self.email_reads = []
+        self.identity_reads = []
 
     def find_active_by_jason_identity(self, *, jason_identity_id):
-        assert jason_identity_id == "person-al"
-        return None
-
-    def find_active_by_email(self, *, email_address):
-        self.email_reads.append(email_address)
+        self.identity_reads.append(jason_identity_id)
         matches = [
             x for x in self.bindings
-            if x.status == "active" and x.email_address.casefold() == email_address
+            if x.status == "active" and x.jason_identity_id == jason_identity_id
         ]
         return matches[0] if len(matches) == 1 else None
 
@@ -65,13 +61,14 @@ class TestEntraOwnerBinding:
 
     @staticmethod
     def owner(*, email="al@teamaot.com", client_id=None, status="active",
-              object_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"):
+              object_id="bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+              tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c"):
         return SimpleNamespace(
             status=status,
             email_address=email,
             client_id=client_id,
             jason_identity_id="person-entra-" + object_id.replace("-", "").lower(),
-            microsoft_tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c",
+            microsoft_tenant_id=tenant_id,
             microsoft_object_id=object_id,
         )
 
@@ -90,14 +87,14 @@ class TestEntraOwnerBinding:
     def test_current_enta_owner_binding_resolves_exact_recipient(self, tmp_path):
         store = EntraOwnerBindingStore(self.owner())
         plan = self.prepare(store, tmp_path).plan
-        assert store.email_reads == ["al@teamaot.com"]
+        assert store.identity_reads == ["person-entra-bee80bdcffb04c50b453c09d4d411f5f"]
         assert plan.symbolic_resolutions["recipient_jason_identity"] == (
-            "person-entra-aaaaaaaabbbb4ccc8dddeeeeeeeeeeee"
+            "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
         )
-        assert plan.symbolic_resolutions["recipient_owner_alias"] == "person-al"
+        assert plan.symbolic_resolutions["recipient_owner_email"] == "al@teamaot.com"
         assert plan.resource_identifier == (
             "f7054323-d52b-4863-8c2f-1898f0b6077c:"
-            "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+            "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
         )
 
     def test_owner_binding_absent_ambiguous_revoked_or_wrong_account_denied(self, tmp_path):
@@ -106,11 +103,31 @@ class TestEntraOwnerBinding:
             (self.owner(status="revoked"),),
             (self.owner(email="someone-else@teamaot.com"),),
             (self.owner(client_id="a-customer"),),
-            (self.owner(), self.owner(object_id="bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee")),
+            (self.owner(tenant_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),),
+            (self.owner(object_id="bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee"),),
+            (self.owner(), self.owner()),
         )
         for idx, records in enumerate(cases):
             with pytest.raises(PermissionError):
                 self.prepare(EntraOwnerBindingStore(*records), tmp_path)
+
+    def test_admin_legacy_binding_never_preempts_licensed_owner(self, tmp_path):
+        admin = SimpleNamespace(
+            status="active", email_address="al_admin@teamaot.com",
+            client_id=None, jason_identity_id="person-al",
+            microsoft_tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c",
+            microsoft_object_id="c848022d-e13b-4457-84b0-e2f5c00dcaf6",
+        )
+        store = EntraOwnerBindingStore(admin, self.owner())
+        plan = self.prepare(store, tmp_path).plan
+        assert plan.normalized_payload["aadObjectId"] == (
+            "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+        )
+        assert store.identity_reads == [
+            "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
+        ]
+        with pytest.raises(PermissionError):
+            self.prepare(EntraOwnerBindingStore(admin), tmp_path)
 
     def test_owner_binding_wrong_jason_identity_denied(self, tmp_path):
         owner = self.owner()
@@ -162,7 +179,7 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
                 }
             )
 
-    def test_invoker_requires_person_al_active_binding(self):
+    def test_invoker_requires_licensed_owner_active_binding(self):
         invoker = AutonomousCompletionTeamsInvoker(
             gateway_url="http://example.invalid",
             token_file=Path("/does/not/matter"),
@@ -194,9 +211,10 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
             token_path = Path(td) / "token"
             token_path.write_text("synthetic-token", encoding="utf-8")
             binding = SimpleNamespace(
-                status="active", jason_identity_id="person-al",
+                status="active", jason_identity_id="person-entra-bee80bdcffb04c50b453c09d4d411f5f",
+                email_address="al@teamaot.com", client_id=None,
                 microsoft_tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c",
-                microsoft_object_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+                microsoft_object_id="bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
             )
             invoker = AutonomousCompletionTeamsInvoker(
                 gateway_url="http://gateway.internal:3979",
@@ -232,6 +250,14 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
                     request=request, resolution=resolution, prepared=prepared,
                 )
             send.assert_called_once()
+            self.assertEqual(
+                send.call_args.kwargs["payload"]["aadObjectId"],
+                "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+            )
+            self.assertEqual(
+                result.output["recipient_identity"],
+                "person-entra-bee80bdcffb04c50b453c09d4d411f5f",
+            )
             self.assertEqual(send.call_args.kwargs["payload"]["card"]["type"], "AdaptiveCard")
             self.assertTrue(result.output["message_id_synthetic"])
             self.assertEqual(

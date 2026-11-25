@@ -28,7 +28,7 @@ from contextlib import contextmanager, closing
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Mapping
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import release_manager_gate as gate
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -49,6 +49,8 @@ MUTATION_ENV_OVERRIDES = {
     "JASON_AUTOTASK_MUTATION_ENABLED": "false",
     "JASON_AUTOTASK_TICKET_UPDATE_MCP_PROFILE": "",
     "JASON_AUTOTASK_INTERNAL_NOTE_MCP_PROFILE": "",
+    "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE": "",
+    "JASON_AOT_ADMIN_APPROVER_PROFILE": "",
     "JASON_AUTOTASK_CLIENT_NOTIFICATION_PROFILE": "",
     "JASON_AUTOTASK_PROCUREMENT_MCP_PROFILE": "",
     "JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE": "",
@@ -56,6 +58,9 @@ MUTATION_ENV_OVERRIDES = {
     "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID": "",
     "JASON_AUTONOMY_WORKER_ENABLED": "false",
     "JASON_AUTONOMY_SHADOW_ENABLED": "false",
+    # Review maintenance is a separate child process; leaving it enabled
+    # races isolated SQLite startup and can perform preprod background work.
+    "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED": "false",
     "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED": "false",
     "JASON_UNIVERSAL_APPROVAL_MODE": "off",
     "JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED": "false",
@@ -212,6 +217,26 @@ def declared_autotask_read_profiles(candidate_worktree: Path) -> tuple[str, str]
     return str(payload["read_profile"]), str(payload["rollback_read_profile"])
 
 
+def declared_aot_staff_note_profile(candidate_worktree: Path) -> str:
+    """Source-pin human note authority and its default-off rollback behavior."""
+    path = candidate_worktree / "config" / "aot-staff-internal-note-profile.json"
+    if path.is_symlink():
+        raise ReleaseManagerError("staff-note activation declaration cannot be symlinked")
+    if not path.exists():
+        # Historical rollbacks have no declared staff-note authority.
+        return ""
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ReleaseManagerError("staff-note activation declaration unreadable") from error
+    if (not isinstance(obj, dict)
+            or set(obj) != {"schema_version", "profile"}
+            or obj.get("schema_version") != "1.0"
+            or obj.get("profile") not in {"off", "internal-note-v1"}):
+        raise ReleaseManagerError("staff-note activation declaration invalid")
+    return "" if obj["profile"] == "off" else "internal-note-v1"
+
+
 def declared_autotask_read_profile(candidate_worktree: Path) -> str | None:
     pair = declared_autotask_read_profiles(candidate_worktree)
     return pair[0] if pair is not None else None
@@ -335,9 +360,15 @@ def declared_one_transaction_freeze_exception(
     required = {
         "schema_version", "status", "purpose", "required_recovery_profile_id",
         "rollback_sha", "expires_at", "standing_authority",
-        "restore_freeze_after_transaction", "signed_teams_release_approval_required",
+        "restore_freeze_after_transaction",
     }
-    if not isinstance(doc, dict) or set(doc) != required:
+    allowed_authority = {
+        "signed_teams_release_approval_required",
+        "authenticated_owner_release_required",
+    }
+    if (not isinstance(doc, dict)
+            or len(set(doc) & allowed_authority) != 1
+            or set(doc) != required | (set(doc) & allowed_authority)):
         raise ReleaseManagerError("production freeze exception declaration shape is invalid")
     purpose = str(doc.get("purpose") or "")
     profile = str(doc.get("required_recovery_profile_id") or "")
@@ -348,7 +379,8 @@ def declared_one_transaction_freeze_exception(
             or profile != "provider_identity_and_authority_recovery"
             or doc.get("standing_authority") is not False
             or doc.get("restore_freeze_after_transaction") is not True
-            or doc.get("signed_teams_release_approval_required") is not True):
+            or (doc.get("signed_teams_release_approval_required") is not True
+                and doc.get("authenticated_owner_release_required") is not True)):
         raise ReleaseManagerError("production freeze exception declaration exceeds reviewed authority")
     if expected_rollback_sha is not None and rollback != exact_sha(
         expected_rollback_sha, "expected rollback SHA"
@@ -404,8 +436,18 @@ def one_transaction_freeze_exception_context(
         return None
     owner = record.get("owner_approval") or {}
     source = str(owner.get("source") or "")
+    signed_source = (
+        re.fullmatch(r"authenticated_mobile_teams_owner:relapproval-[0-9a-f]{32}", source)
+        is not None and declared.get("signed_teams_release_approval_required") is True
+    )
+    mcp_source = (
+        re.fullmatch(r"authenticated_signed_mcp_owner:owner-mcp-[0-9a-f]{32}", source)
+        is not None and declared.get("authenticated_owner_release_required") is True
+        and signed_mcp_owner_one_transaction_freeze_context(state_root, record)
+        is not None
+    )
     if (owner.get("approved") is not True or owner.get("candidate_sha") != candidate
-            or re.fullmatch(r"authenticated_mobile_teams_owner:relapproval-[0-9a-f]{32}", source) is None):
+            or not (signed_source or mcp_source)):
         return None
     return {
         "schema_version": "1.0",
@@ -419,6 +461,64 @@ def one_transaction_freeze_exception_context(
         "owner_approval_source": source,
         "standing_authority": False,
         "restore_freeze_after_transaction": True,
+    }
+
+
+def one_transaction_release_id_matches_candidate(release_id: str, candidate_sha: str) -> bool:
+    """Accept normal and governed retry IDs, never arbitrary release names."""
+    if not SHA.fullmatch(candidate_sha):
+        return False
+    return re.fullmatch(
+        re.escape(record_id(candidate_sha)) + r"(?:-retry-[1-9][0-9]{0,2})?",
+        str(release_id or ""),
+    ) is not None
+
+
+def current_initial_freeze_binding(
+    state_root: Path, record: Mapping[str, Any],
+) -> dict[str, str]:
+    """Read current bounded normal-release freeze intent; NO approval or mutation.
+
+    The signed card is reconstructed against this exact scope/freeze fingerprint
+    by the independent owner-evidence consumer. An expired or changed freeze
+    fails closed rather than authorizing an unrelated release.
+    """
+    marker = _freeze_marker_snapshot(state_root)
+    try:
+        policy = json.loads(marker["raw"].decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, TypeError) as exc:
+        raise ReleaseManagerError("frozen-release marker is not valid JSON") from exc
+    if (not isinstance(policy, dict) or policy.get("status") != "active"
+            or policy.get("scope") != "manual-and-automatic-production-promotions"
+            or "exact-SHA owner unfreeze decision" not in str(
+                policy.get("remove_only_after") or "")):
+        raise ReleaseManagerError("frozen-release marker policy is not eligible")
+    candidate = exact_sha(str(
+        (record.get("release_candidate") or {}).get("candidate_sha") or ""
+    ), "candidate_sha")
+    rollback = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+    scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
+    release_id = str(record.get("release_id") or "")
+    if (record.get("state") != "production_eligible"
+            or not one_transaction_release_id_matches_candidate(release_id, candidate)
+            or not isinstance(scope, str)
+            or re.fullmatch(r"[0-9a-f]{64}", scope) is None):
+        raise ReleaseManagerError("frozen-release exact scope not reviewed")
+    manifest = record.get("release_manifest")
+    if not isinstance(manifest, Mapping):
+        raise ReleaseManagerError("frozen-release manifest missing")
+    manifest_hash = hashlib.sha256(json.dumps(
+        manifest, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+    if (manifest.get("candidate_sha") != candidate
+            or manifest.get("rollback_sha") != rollback):
+        raise ReleaseManagerError("frozen-release manifest identity changed")
+    return {
+        "schema_version": "1.0",
+        "release_id": release_id, "candidate_sha": candidate,
+        "rollback_sha": rollback, "manifest_sha256": manifest_hash,
+        "scope_sha256": scope, "freeze_sha256": marker["sha256"],
     }
 
 
@@ -440,8 +540,15 @@ def _freeze_marker_snapshot(state_root: Path) -> dict[str, Any]:
     }
 
 
-def _freeze_receipt_path(state_root: Path, release_id: str) -> Path:
-    return state_root / "owner-unfreeze-receipts" / (release_id + ".json")
+def _freeze_receipt_path(
+    state_root: Path, release_id: str, *, replacement_approval_id: str | None = None,
+) -> Path:
+    suffix = ""
+    if replacement_approval_id is not None:
+        if re.fullmatch(r"relapproval-[0-9a-f]{32}", replacement_approval_id) is None:
+            raise ReleaseManagerError("replacement transaction approval identity invalid")
+        suffix = "--" + replacement_approval_id
+    return state_root / "owner-unfreeze-receipts" / (release_id + suffix + ".json")
 
 
 def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None:
@@ -457,7 +564,14 @@ def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             continue
         if (doc.get("schema_version") == "2.0"
-                and doc.get("authorization") == "signed_teams_one_transaction_unfreeze"
+                and doc.get("authorization") in {
+                    "signed_teams_one_transaction_unfreeze",
+                    "explicit_owner_one_transaction_unfreeze",
+                    "signed_teams_replacement_unfreeze",
+                    "signed_teams_initial_unfreeze",
+                    "signed_teams_initial_unfreeze_renewal",
+                    "authenticated_signed_mcp_owner_one_transaction_unfreeze",
+                }
                 and doc.get("freeze_restored") is False
                 and doc.get("status") in {"authorized_pending", "unfrozen_active"}):
             active.append((path, doc))
@@ -490,6 +604,32 @@ def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None
     receipt["status"] = "stranded_transaction_restored"
     receipt["completed_at"] = now()
     atomic_json(receipt_path, receipt)
+    if receipt.get("authorization") in {
+        "signed_teams_replacement_unfreeze", "signed_teams_initial_unfreeze",
+    }:
+        is_initial = receipt.get("authorization") == "signed_teams_initial_unfreeze"
+        approval_id = str(receipt.get("approval_id") or "")
+        if re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None:
+            raise ReleaseManagerError("replacement crash recovery approval identity invalid")
+        source_path = (
+            state_root / "owner-signed-unfreeze-receipts" / (
+                str(receipt["release_id"]) + ".json")
+            if is_initial else
+            state_root / "owner-replacement-unfreeze-receipts" / (
+                str(receipt["release_id"]) + "--" + approval_id + ".json")
+        )
+        raw_source = source_path.read_bytes()
+        if ("sha256:" + hashlib.sha256(raw_source).hexdigest()
+                != receipt.get("explicit_unfreeze_receipt_sha256")):
+            raise ReleaseManagerError("replacement crash recovery source receipt changed")
+        source = json.loads(raw_source)
+        if source.get("status") != "authorized_pending":
+            raise ReleaseManagerError("replacement crash recovery receipt already consumed")
+        source["status"] = "consumed"
+        source["completed_at"] = now()
+        source["freeze_restored"] = True
+        source["freeze_sha256_after"] = restored["sha256"]
+        atomic_json(source_path, source)
     raise ReleaseManagerError(
         "restored production freeze left open by an interrupted one-release transaction; retry promotion"
     )
@@ -499,6 +639,82 @@ def begin_one_transaction_freeze_exception(
     state_root: Path, context: Mapping[str, Any],
 ) -> dict[str, Any]:
     snapshot = _freeze_marker_snapshot(state_root)
+    is_replacement = context.get("authorization") == "signed_teams_replacement_unfreeze"
+    is_initial = context.get("authorization") == "signed_teams_initial_unfreeze"
+    is_initial_renewal = context.get("authorization") == "signed_teams_initial_unfreeze_renewal"
+    is_mcp = context.get("authorization") == "authenticated_signed_mcp_owner_one_transaction_unfreeze"
+    if (context.get("authorization") == "explicit_owner_one_transaction_unfreeze"
+            or is_replacement or is_initial or is_initial_renewal or is_mcp):
+        # Revalidate the precise preauthorized receipt while the native
+        # production transaction lock is held; do not permit a changed source
+        # or freeze marker between context construction and marker removal.
+        if is_mcp:
+            proof = state_root / "owner-approval-requests-processed" / (
+                str(context["release_id"]) + ".json"
+            )
+        elif is_replacement:
+            replacement_id = str(context.get("replacement_approval_id") or "")
+            if re.fullmatch(r"relapproval-[0-9a-f]{32}", replacement_id) is None:
+                raise ReleaseManagerError("replacement approval identity invalid")
+            proof = state_root / "owner-replacement-unfreeze-receipts" / (
+                str(context["release_id"]) + "--" + replacement_id + ".json")
+        elif is_initial:
+            proof = state_root / "owner-signed-unfreeze-receipts" / (
+                str(context["release_id"]) + ".json")
+        elif is_initial_renewal:
+            renewal_id = str(context.get("renewal_approval_id") or "")
+            if re.fullmatch(r"relapproval-[0-9a-f]{32}", renewal_id) is None:
+                raise ReleaseManagerError("signed initial renewal approval identity invalid")
+            proof = state_root / "owner-signed-initial-unfreeze-renewals" / (
+                str(context["release_id"]) + "--" + renewal_id + ".json")
+        else:
+            proof = state_root / "owner-explicit-unfreeze-receipts" / (
+                str(context["release_id"]) + ".json")
+        info = proof.lstat()
+        raw = proof.read_bytes()
+        if (proof.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.geteuid() or info.st_gid != os.getegid()
+                or len(raw) > 8192
+                or "sha256:" + hashlib.sha256(raw).hexdigest()
+                    != context.get("explicit_unfreeze_receipt_sha256")):
+            raise ReleaseManagerError("explicit Owner unfreeze receipt changed before transaction")
+        source = json.loads(raw)
+        if is_mcp:
+            latest_record = load_record(state_root, str(context["release_id"]))
+            fresh = signed_mcp_owner_one_transaction_freeze_context(
+                state_root, latest_record,
+            )
+            if (fresh is None or fresh != dict(context)
+                    or source.get("source") != "authenticated_jason_mcp_owner:"
+                       + str(context.get("authenticated_owner_approval_id"))
+                    or source.get("signed_owner_proof", {}).get("payload", {})
+                       .get("freeze_sha256") != snapshot["sha256"]):
+                raise ReleaseManagerError("signed MCP Owner unfreeze changed before transaction")
+        elif (source.get("status") != "authorized_pending"
+                or source.get("freeze_sha256_before") != snapshot["sha256"]
+                or source.get("candidate_sha") != context.get("candidate_sha")
+                or source.get("rollback_sha") != context.get("rollback_sha")
+                or source.get("scope_sha256") != context.get("scope_sha256")):
+            raise ReleaseManagerError("explicit Owner unfreeze authorization mismatch")
+        if is_replacement or is_initial or is_initial_renewal:
+            try:
+                expires = datetime.fromisoformat(str(source.get("expires_at")))
+            except (ValueError, TypeError) as exc:
+                raise ReleaseManagerError("replacement approval has no valid expiry") from exc
+            expected_id = (
+                replacement_id if is_replacement else
+                renewal_id if is_initial_renewal else
+                str(context["owner_approval_source"]).split(":", 1)[-1]
+            )
+            expected_kind = ("signed_teams_replacement_unfreeze" if is_replacement
+                             else "signed_teams_initial_unfreeze_renewal"
+                             if is_initial_renewal else "signed_teams_initial_unfreeze")
+            if (source.get("authorization") != expected_kind
+                    or source.get("approval_id") != expected_id
+                    or expires.tzinfo is None
+                    or datetime.now(timezone.utc) >= expires):
+                raise ReleaseManagerError("replacement signed Owner decision invalid or expired")
     marker = state_root / PRODUCTION_FREEZE_MARKER
     backup = state_root / PRODUCTION_FREEZE_BACKUP
     if backup.exists() or backup.is_symlink():
@@ -512,13 +728,35 @@ def begin_one_transaction_freeze_exception(
     else:
         _atomic_private_bytes(backup, snapshot["raw"])
         os.chmod(backup, snapshot["mode"])
-    receipt_path = _freeze_receipt_path(state_root, str(context["release_id"]))
+    receipt_path = _freeze_receipt_path(
+        state_root, str(context["release_id"]),
+        replacement_approval_id=(str(context["replacement_approval_id"])
+                                 if is_replacement else
+                                 str(context["renewal_approval_id"])
+                                 if is_initial_renewal else None),
+    )
     if receipt_path.exists() or receipt_path.is_symlink():
         raise ReleaseManagerError("one-release freeze exception receipt already exists")
-    approval_id = str(context["owner_approval_source"]).split(":", 1)[1]
+    approval_id = (str(context["replacement_approval_id"]) if is_replacement else
+                   str(context["renewal_approval_id"]) if is_initial_renewal else
+                   str(context["owner_approval_source"]).split(":", 1)[-1])
+    authorization = str(context.get("authorization") or "signed_teams_one_transaction_unfreeze")
+    if authorization not in {"signed_teams_one_transaction_unfreeze",
+                             "explicit_owner_one_transaction_unfreeze",
+                             "signed_teams_replacement_unfreeze",
+                             "signed_teams_initial_unfreeze",
+                             "signed_teams_initial_unfreeze_renewal",
+                             "authenticated_signed_mcp_owner_one_transaction_unfreeze"}:
+        raise ReleaseManagerError("unsupported one-transaction freeze authorization")
     receipt = {
         "schema_version": "2.0",
-        "authorization": "signed_teams_one_transaction_unfreeze",
+        "authorization": authorization,
+        **({"explicit_unfreeze_receipt_sha256": context["explicit_unfreeze_receipt_sha256"]}
+           if authorization in {"explicit_owner_one_transaction_unfreeze",
+                                "signed_teams_replacement_unfreeze",
+                                "signed_teams_initial_unfreeze",
+                                "signed_teams_initial_unfreeze_renewal",
+                                "authenticated_signed_mcp_owner_one_transaction_unfreeze"} else {}),
         "approval_id": approval_id,
         "release_id": str(context["release_id"]),
         "candidate_sha": str(context["candidate_sha"]),
@@ -550,6 +788,62 @@ def begin_one_transaction_freeze_exception(
         receipt["completed_at"] = now()
         atomic_json(receipt_path, receipt)
         raise
+    return {"receipt_path": receipt_path, "receipt": receipt, "raw": snapshot["raw"]}
+
+
+
+def begin_postacceptance_rollback_freeze_exception(
+    state_root: Path,
+    receipt_path: Path,
+) -> dict[str, Any]:
+    """Open one exact rollback transaction using an already-bound rollback receipt."""
+    snapshot = _freeze_marker_snapshot(state_root)
+    backup = state_root / PRODUCTION_FREEZE_BACKUP
+    if not backup.is_file() or backup.is_symlink():
+        raise ReleaseManagerError("post-acceptance rollback requires the original freeze backup")
+    backup_info = backup.lstat()
+    backup_raw = backup.read_bytes()
+    if (
+        not stat.S_ISREG(backup_info.st_mode)
+        or stat.S_IMODE(backup_info.st_mode) != snapshot["mode"]
+        or backup_info.st_uid != snapshot["uid"]
+        or backup_info.st_gid != snapshot["gid"]
+        or backup_raw != snapshot["raw"]
+    ):
+        raise ReleaseManagerError("post-acceptance rollback freeze backup differs from active marker")
+    if not receipt_path.is_file() or receipt_path.is_symlink():
+        raise ReleaseManagerError("post-acceptance rollback authorization receipt is unavailable")
+    info = receipt_path.lstat()
+    raw = receipt_path.read_bytes()
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_uid != os.geteuid()
+        or info.st_gid != os.getegid()
+        or len(raw) > 8192
+    ):
+        raise ReleaseManagerError("post-acceptance rollback receipt metadata is unsafe")
+    receipt = json.loads(raw)
+    if (
+        receipt.get("schema_version") != "1.0"
+        or receipt.get("authorization")
+            != "explicit_exact_sha_owner_postacceptance_rollback"
+        or receipt.get("status") != "authorized_pending"
+        or receipt.get("standing_authority") is not False
+        or receipt.get("freeze_sha256_before") != snapshot["sha256"]
+    ):
+        raise ReleaseManagerError("post-acceptance rollback authorization changed before transaction")
+    receipt.update({
+        "freeze_mode_before": snapshot["mode"],
+        "freeze_uid_before": snapshot["uid"],
+        "freeze_gid_before": snapshot["gid"],
+        "freeze_restored": False,
+        "status": "unfrozen_active",
+        "unfrozen_at": now(),
+    })
+    atomic_json(receipt_path, receipt)
+    marker = state_root / PRODUCTION_FREEZE_MARKER
+    marker.unlink()
     return {"receipt_path": receipt_path, "receipt": receipt, "raw": snapshot["raw"]}
 
 
@@ -648,6 +942,45 @@ def restore_one_transaction_freeze_exception(
     receipt["status"] = "deployment_returned"
     receipt["completed_at"] = now()
     atomic_json(receipt_path, receipt)
+    if receipt.get("authorization") == "authenticated_signed_mcp_owner_one_transaction_unfreeze":
+        # Signed request evidence is immutable, unlike the legacy local
+        # unfreeze receipt: do not relabel or rewrite its signature envelope.
+        signed_path = state_root / "owner-approval-requests-processed" / (
+            str(receipt["release_id"]) + ".json"
+        )
+        signed_raw = signed_path.read_bytes()
+        if ("sha256:" + hashlib.sha256(signed_raw).hexdigest()
+                != receipt.get("explicit_unfreeze_receipt_sha256")):
+            raise ReleaseManagerError("authenticated MCP Owner proof changed after freeze restore")
+    if receipt.get("authorization") in {
+        "explicit_owner_one_transaction_unfreeze", "signed_teams_replacement_unfreeze",
+        "signed_teams_initial_unfreeze",
+        "signed_teams_initial_unfreeze_renewal",
+    }:
+        if receipt.get("authorization") == "signed_teams_replacement_unfreeze":
+            source_receipt = state_root / "owner-replacement-unfreeze-receipts" / (
+                str(receipt["release_id"]) + "--" + str(receipt["approval_id"]) + ".json")
+        elif receipt.get("authorization") == "signed_teams_initial_unfreeze":
+            source_receipt = state_root / "owner-signed-unfreeze-receipts" / (
+                str(receipt["release_id"]) + ".json")
+        elif receipt.get("authorization") == "signed_teams_initial_unfreeze_renewal":
+            source_receipt = state_root / "owner-signed-initial-unfreeze-renewals" / (
+                str(receipt["release_id"]) + "--" + str(receipt["approval_id"]) + ".json")
+        else:
+            source_receipt = state_root / "owner-explicit-unfreeze-receipts" / (
+                str(receipt["release_id"]) + ".json")
+        raw_source = source_receipt.read_bytes()
+        if ("sha256:" + hashlib.sha256(raw_source).hexdigest()
+                != receipt.get("explicit_unfreeze_receipt_sha256")):
+            raise ReleaseManagerError("explicit Owner unfreeze receipt drift after freeze restoration")
+        original = json.loads(raw_source)
+        if original.get("status") != "authorized_pending":
+            raise ReleaseManagerError("explicit Owner unfreeze receipt was already consumed")
+        original["status"] = "consumed"
+        original["completed_at"] = now()
+        original["freeze_restored"] = True
+        original["freeze_sha256_after"] = restored["sha256"]
+        atomic_json(source_receipt, original)
 
 
 def write_owner_notification_event(
@@ -795,13 +1128,19 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
     if version == "1.0":
         expected = shared
         mode = "owner_only_pilot"
-    elif version == "2.0":
+    elif version in {"2.0", "3.0", "3.1"}:
         expected = shared | {"high_impact_review"}
         mode = "owner_reviewed"
+    elif version in {"4.0", "4.1"}:
+        expected = shared | {
+            "high_impact_review", "admin_approver_binding",
+            "regular_requester_binding",
+        }
+        mode = "admin_approver_separated"
     else:
         raise ReleaseManagerError("mobile release approval policy version is unsupported")
-    if source_v2_required and version != "2.0":
-        raise ReleaseManagerError("candidate source must declare owner-reviewed release policy V2")
+    if source_v2_required and version not in {"2.0", "3.0", "3.1", "4.0", "4.1"}:
+        raise ReleaseManagerError("candidate source must declare an owner-reviewed release policy")
     risks = doc.get("allowed_risk_profiles")
     ttl = doc.get("ttl_seconds")
     if (set(doc) != expected or doc.get("organization_id") != "aot"
@@ -815,15 +1154,43 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
         if set(risks) != {"normal"} or not 300 <= ttl <= 1800:
             raise ReleaseManagerError("V1 release approval policy must remain normal-risk only")
     else:
-        if (set(risks) != {"normal", "production_control_core"}
+        exact_risks = (
+            {"normal", "production_control_core"} if version in {"2.0", "3.1", "4.0", "4.1"}
+            else {"normal", "production_control_core", "production_repair"}
+        )
+        if (set(risks) != exact_risks
                 or not 300 <= ttl <= 900
                 or doc.get("high_impact_review") != {
                     "owner_exact_sha_required": True,
-                    "signed_teams_identity_required": True,
-                    "independent_ccc_required": True,
+                    **({"authenticated_entra_owner_decision_required": True}
+                       if version == "3.1"
+                       else {"signed_teams_identity_required": True}),
+                    **({"independent_native_release_health_required": True}
+                       if version == "3.1"
+                       else {"independent_ccc_required": True}),
                     "protected_release_gates_unchanged": True,
                 }):
-            raise ReleaseManagerError("V2 high-impact release approval policy is not the reviewed contract")
+            raise ReleaseManagerError("reviewed high-impact release policy is invalid")
+    if version in {"4.0", "4.1"}:
+        def exact_enrolled_user(field):
+            role = doc.get(field)
+            if not isinstance(role, dict) or set(role) != {
+                "microsoft_tenant_id", "microsoft_object_id"
+            }:
+                raise ReleaseManagerError("versioned administrative role binding invalid")
+            values = (role["microsoft_tenant_id"], role["microsoft_object_id"])
+            if not all(
+                isinstance(value, str)
+                and re.fullmatch(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", value)
+                and str(UUID(value)) == value
+                for value in values
+            ):
+                raise ReleaseManagerError("versioned administrative role identity invalid")
+            return values
+        admin = exact_enrolled_user("admin_approver_binding")
+        regular = exact_enrolled_user("regular_requester_binding")
+        if admin[0] != regular[0] or admin[1] == regular[1]:
+            raise ReleaseManagerError("administrative approver cannot be normal requester")
     return {
         "schema_version": version, "mode": mode, "risks": sorted(risks),
         "ttl_seconds": ttl, "raw": raw,
@@ -1018,18 +1385,129 @@ def unit_active(unit: str, *, user: bool) -> bool:
     return completed.returncode == 0 and completed.stdout.strip() == "active"
 
 
+# PMv4 Stage E replacement admission is a read-only, root-trusted contract.
+# A missing cutover marker retains the current PMv3 behavior. Once any
+# marker exists, invalid proof must DENY rather than reinstall PMv3.
+PMV4_E_ACCEPTED_MARKER = Path(
+    "/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json"
+)
+PMV4_E_UNIT_GUARD = Path(
+    "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py"
+)
+PMV4_E_USER_TIMERS = (
+    "jason-pmv4-engineering.timer",
+    "jason-pmv4-release-approval.timer",
+    "jason-pmv4-component-release.timer",
+    "jason-self-heal-watchdog.timer",
+)
+PMV4_E_ROOT_TRIGGERS = (
+    "jason-pmv4-component-transition.timer",
+    "jason-pmv4-component-readback.timer",
+    "jason-pmv4-component-reconcile.path",
+)
+PMV4_E_RETIRED_USER = (
+    "jason-support-repair-worker.timer",
+    "jason-release-manager.timer",
+    "jason-release-approval-only.timer",
+)
+PMV4_E_RETIRED_ROOT = (
+    "jason-release-control-transition.timer",
+    "jason-release-control-readback.timer",
+    "jason-release-host-reconcile.path",
+)
+
+
+def pmv4_e_scheduling_mode() -> str:
+    try:
+        PMV4_E_ACCEPTED_MARKER.lstat()
+    except FileNotFoundError:
+        return "legacy"
+    except OSError as exc:
+        raise ReleaseManagerError("PMv4 E acceptance marker unreadable") from exc
+    # Only an independently installed root-owned entrypoint may attest.
+    try:
+        trusted = PMV4_E_UNIT_GUARD.lstat()
+    except OSError as exc:
+        raise ReleaseManagerError("PMv4 E root unit guard missing") from exc
+    if (not PMV4_E_UNIT_GUARD.is_file()
+            or PMV4_E_UNIT_GUARD.is_symlink()
+            or trusted.st_uid != 0 or trusted.st_gid != 0
+            or trusted.st_mode & 0o022):
+        raise ReleaseManagerError("PMv4 E root unit guard untrusted")
+    checked = subprocess.run(
+        ["/usr/bin/python3", "-I", "-B", str(PMV4_E_UNIT_GUARD),
+         "--mode", "component-release"],
+        env=user_systemd_env(), text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if checked.returncode != 0:
+        raise ReleaseManagerError("PMv4 E root accepted scheduling proof denied")
+    try:
+        proof = json.loads(checked.stdout)
+    except (TypeError, ValueError) as exc:
+        raise ReleaseManagerError("PMv4 E unit guard returned invalid proof") from exc
+    if (not isinstance(proof, dict)
+            or proof.get("status") != "accepted_for_one_configured_service"
+            or proof.get("role") != "component-release"
+            or proof.get("unit") != "jason-pmv4-component-release.timer"
+            or proof.get("owner_authority_issued") is not False
+            or proof.get("production_changes_performed") is not False):
+        raise ReleaseManagerError("PMv4 E unit guard proof mismatch")
+    return "replacement"
+
+
+def accepted_engineering_manager_routing():
+    receipt = Path("/etc/jason-owner-release/pmv4-e/engineering-manager-system-authorized.json")
+    guard = Path("/usr/local/lib/jason/pmv4-e-engineering-manager/manager_guard.py")
+    if not os.path.lexists(receipt) and not os.path.lexists(guard):
+        return None
+    try:
+        import pmv4_e_engineering_manager_client as client
+        result = client.read_routing()
+        if result is None:
+            raise PermissionError("successor receipt missing")
+        return result
+    except (ImportError, OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+        raise ReleaseManagerError("PMv4 engineering manager successor admission denied") from exc
+
+
 def scheduled_control_alignment() -> dict[str, str]:
+    mode = pmv4_e_scheduling_mode()
+    user_required = (PMV4_E_USER_TIMERS if mode == "replacement"
+                     else USER_CONTROL_TIMERS)
+    system_required = (SYSTEM_CONTROL_TIMERS + PMV4_E_ROOT_TRIGGERS
+                       if mode == "replacement" else SYSTEM_CONTROL_TIMERS)
+    routing = accepted_engineering_manager_routing() if mode == "replacement" else None
+    if routing is not None:
+        moved = set(routing["system_timers"])
+        if not moved.issubset(user_required):
+            raise ReleaseManagerError("PMv4 successor scope differs from original schedule")
+        user_required = tuple(n for n in user_required if n not in moved)
+        system_required = tuple(system_required) + tuple(routing["system_timers"])
+        for unit in routing["system_timers"]:
+            if unit_active(unit, user=True):
+                raise ReleaseManagerError(f"retired user control still active: {unit}")
     states: dict[str, str] = {}
-    for unit in USER_CONTROL_TIMERS:
+    for unit in user_required:
         active = unit_active(unit, user=True)
         states[unit] = "active" if active else "inactive"
         if not active:
             raise ReleaseManagerError(f"required user control timer is not active: {unit}")
-    for unit in SYSTEM_CONTROL_TIMERS:
+    for unit in system_required:
         active = unit_active(unit, user=False)
         states[unit] = "active" if active else "inactive"
         if not active:
             raise ReleaseManagerError(f"required system control timer is not active: {unit}")
+    if mode == "replacement":
+        # Both old and new triggers active would duplicate engineering claims.
+        for unit in PMV4_E_RETIRED_USER:
+            if unit_active(unit, user=True):
+                raise ReleaseManagerError(f"retired user control still active: {unit}")
+            states[unit] = "inactive"
+        for unit in PMV4_E_RETIRED_ROOT:
+            if unit_active(unit, user=False):
+                raise ReleaseManagerError(f"retired root control still active: {unit}")
+            states[unit] = "inactive"
     return states
 
 
@@ -1134,17 +1612,28 @@ def controller_identity(repo: Path) -> dict[str, Any]:
         if not immutable.is_file():
             raise ReleaseManagerError("active Release Manager immutable source missing")
         if file_digest(immutable) != file_digest(installed):
-            recovery = _operator_recovery_identity(repo, installed, immutable)
-            return {
-                "executing_controller_path": str(CONTROLLER_SOURCE),
-                "executing_controller_immutable_path": str(installed),
-                "executing_controller_revision": recovery["controller_recovery_revision"],
-                "executing_controller_digest": recovery["controller_recovery_digest"],
-                "candidate_controller_digest": file_digest(candidate_path),
-                "policy_digest": file_digest(policy_path),
-                "captured_at": now(),
-                **recovery,
-            }
+            routing = accepted_engineering_manager_routing()
+            if routing is not None:
+                approved = routing["artifact_sources"]["release_manager_host_runner.py"]
+                successor = Path(approved["source"])
+                if (immutable.parent.parent.name != routing["rollback_sha"]
+                        or file_digest(installed) != "sha256:" + approved["sha256"]
+                        or file_digest(successor) != file_digest(installed)
+                        or successor.parents[1].name != routing["candidate_sha"]):
+                    raise ReleaseManagerError("PMv4 successor controller identity mismatch")
+                immutable = successor
+            else:
+                recovery = _operator_recovery_identity(repo, installed, immutable)
+                return {
+                    "executing_controller_path": str(CONTROLLER_SOURCE),
+                    "executing_controller_immutable_path": str(installed),
+                    "executing_controller_revision": recovery["controller_recovery_revision"],
+                    "executing_controller_digest": recovery["controller_recovery_digest"],
+                    "candidate_controller_digest": file_digest(candidate_path),
+                    "policy_digest": file_digest(policy_path),
+                    "captured_at": now(),
+                    **recovery,
+                }
 
     source_revision = immutable.parents[1].name.casefold()
     return {
@@ -1243,6 +1732,7 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
         path.startswith("tools/release_manager")
         or path in {
             "config/release-manager-policy.json",
+            "tools/manual_release_scope.py",
             "config/production-desired-state.json",
             "config/mobile-release-approval-policy.json",
             "config/open-breaker-recovery-policy.json",
@@ -1257,6 +1747,7 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
             "tools/reconcile_managed_unit_delta.py",
             "tools/release_exporter_port_guard.py",
             "tools/release_mobile_approval_consumer.py",
+            "tools/pmv3_integration_queue.py",
             "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
             "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
             "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
@@ -1973,7 +2464,8 @@ def remove_worktree(repo: Path, path: Path) -> None:
 
 def build_candidate(repo: Path, state_root: Path, candidate_sha: str) -> tuple[str, str]:
     path = worktree(repo, state_root, candidate_sha)
-    tag = f"jason-runtime:release-{candidate_sha[:12]}"
+    # A concurrent retry must not retag an immutable recorded image.
+    tag = f"jason-runtime:release-{candidate_sha[:12]}-{secrets.token_hex(6)}"
     try:
         run(
             [
@@ -2004,17 +2496,117 @@ def build_candidate(repo: Path, state_root: Path, candidate_sha: str) -> tuple[s
         remove_worktree(repo, path)
 
 
+def verified_mcp_preproduction_base(state_root: Path) -> tuple[str, str]:
+    """Prefer pinned historical base; otherwise use root-attested current LKG.
+
+    The historical generic image was lost during incident cleanup. Retagging
+    any random or mutable 'rollback-current' image as that historical base
+    would counterfeit the production artifact digest. Instead, a first-cutover
+    build may *explicitly* use a different, immutable root-attested LKG image,
+    recorded as the distinct MCP base digest in its new release manifest.
+    The fallback cannot be used until the independent root breaker is closed.
+    """
+    canonical = "jason-mcp:generic-governed-8f1e864947a2"
+    canonical_expected = "sha256:d709ca54b66d41e22bd1f67782cd5f6d681c4337bffb359b632523762a27788a"
+    try:
+        canonical_observed = image_id(canonical)
+    except subprocess.CalledProcessError:
+        canonical_observed = ""
+    if canonical_observed:
+        if canonical_observed != canonical_expected:
+            raise ReleaseManagerError("historical MCP base tag differs from pinned immutable digest")
+        return canonical, canonical_observed
+    known_sha = "c43e88e072c0b35c5b342d5e712fe34565b3e0cd"
+    known_image = "sha256:013c3f6dc5ef566978960f026b475264c0e358fe3c8e86564986b017bcc3449d"
+    known_runtime = "sha256:66606ecec03a094ac9de2dc794a6c063698f2e6e6d088e890fabbb479e0b18d7"
+    control = _read_protected_snapshot(state_root, "production-control-state.json")
+    breaker = control.get("circuit_breaker") or {}
+    root_lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
+    if (breaker.get("state") != "closed"
+            or root_lkg.get("complete") is not True):
+        raise ReleaseManagerError("missing MCP builder base and no root-attested V2 recovery base")
+
+    # Normal releases after the Teams-free cutover no longer have V2 as the
+    # production LKG. Take the *exact digest* and source revision from root's
+    # independently validated, closed-breaker production manifest; never a
+    # mutable Docker 'production' tag or an arbitrary image offered by a user.
+    if root_lkg.get("revision") != known_sha:
+        revision = str(root_lkg.get("revision") or "")
+        mcp_digest = str(root_lkg.get("mcp_image_id") or "")
+        runtime_digest = str(root_lkg.get("runtime_image_id") or "")
+        if (not re.fullmatch(r"[0-9a-f]{40}", revision)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", mcp_digest)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", runtime_digest)
+                or breaker.get("revalidated_revision") != revision
+                or root_lkg.get("mobile_release_approval_mode") != "owner_reviewed"):
+            raise ReleaseManagerError(
+                "missing MCP builder base and no root-attested current production base"
+            )
+        alignment = live_production_alignment(revision)
+        mcp = live_mcp()
+        runtime = live_runtime()
+        if (alignment["mcp_revision"] != revision
+                or alignment["runtime_revision"] != revision
+                or mcp["image_id"] != mcp_digest
+                or runtime["image_id"] != runtime_digest
+                or image_id(mcp_digest) != mcp_digest
+                or image_id(runtime_digest) != runtime_digest):
+            raise ReleaseManagerError(
+                "root-attested current MCP base differs from live production"
+            )
+        exact_tag = f"jason-mcp:attested-lkg-{revision[:12]}-{mcp_digest[7:19]}"
+        try:
+            tagged = image_id(exact_tag)
+        except subprocess.CalledProcessError:
+            tagged = ""
+        if tagged and tagged != mcp_digest:
+            raise ReleaseManagerError("immutable current MCP base tag was replaced")
+        if not tagged:
+            # Adds one non-production label only. Does not stop services,
+            # retag the running image or write to root's protected LKG.
+            run(["docker", "tag", mcp_digest, exact_tag])
+        if image_id(exact_tag) != mcp_digest:
+            raise ReleaseManagerError("current MCP base image tag readback mismatch")
+        return exact_tag, mcp_digest
+
+    if (root_lkg.get("mcp_image_id") != known_image
+            or root_lkg.get("runtime_image_id") != known_runtime):
+        raise ReleaseManagerError("missing MCP builder base and no root-attested V2 recovery base")
+    alignment = live_production_alignment(known_sha)
+    live = live_mcp()
+    current_runtime = live_runtime()
+    if (alignment["mcp_revision"] != known_sha
+            or live["image_id"] != known_image
+            or current_runtime["image_id"] != known_runtime
+            or image_id(known_image) != known_image):
+        raise ReleaseManagerError("root-attested recovery base differs from live immutable V2 MCP")
+    recovery = "jason-mcp:attested-v2-c43e88e072c0-013c3f6dc5ef"
+    try:
+        existing = image_id(recovery)
+    except subprocess.CalledProcessError:
+        existing = ""
+    if existing and existing != known_image:
+        raise ReleaseManagerError("immutable MCP recovery base tag was replaced")
+    if not existing:
+        # Non-production Docker tag only, no container or provider mutation.
+        run(["docker", "tag", known_image, recovery])
+    if image_id(recovery) != known_image:
+        raise ReleaseManagerError("MCP recovery base tag readback mismatch")
+    return recovery, known_image
+
+
 def build_mcp_candidate(
     repo: Path,
     state_root: Path,
     candidate_sha: str,
 ) -> tuple[str, str, str]:
     path = worktree(repo, state_root, candidate_sha)
-    tag = f"jason-mcp:release-{candidate_sha[:12]}"
-    # Stable governed base prevents stale source files from inheriting from live production.
-    base = "jason-mcp:generic-governed-8f1e864947a2"
-    base_id = image_id(base)
+    # Match runtime build isolation so MCP retries cannot retag accepted evidence.
+    tag = f"jason-mcp:release-{candidate_sha[:12]}-{secrets.token_hex(6)}"
     try:
+        # The default historical base is immutable; an incident-specific
+        # attested V2 fallback carries its *real* distinct image ID in manifest.
+        base, base_id = verified_mcp_preproduction_base(state_root)
         run(
             [
                 "docker", "build",
@@ -2055,7 +2647,10 @@ def require_host_reconciler_ready(state_root: Path) -> None:
         raise ReleaseManagerError(
             "root host reconciliation spool permissions are unavailable"
         )
-    worker = Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
+    replacement = pmv4_e_scheduling_mode()=="replacement"
+    worker = (Path("/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/release_host_reconcile_worker.py")
+              if replacement else
+              Path("/usr/local/lib/jason/release_host_reconcile_worker.py"))
     if not worker.is_file():
         raise ReleaseManagerError("root host reconciliation worker is not installed")
     meta = worker.stat()
@@ -2064,7 +2659,8 @@ def require_host_reconciler_ready(state_root: Path) -> None:
             "root host reconciliation worker ownership/mode is unsafe"
         )
     completed = subprocess.run(
-        ["systemctl", "is-active", "jason-release-host-reconcile.path"],
+        ["systemctl", "is-active", "jason-pmv4-component-reconcile.path"
+         if replacement else "jason-release-host-reconcile.path"],
         env=user_systemd_env(),
         text=True,
         stdout=subprocess.PIPE,
@@ -2075,6 +2671,66 @@ def require_host_reconciler_ready(state_root: Path) -> None:
         raise ReleaseManagerError(
             "root host reconciliation path unit is not active"
         )
+
+
+
+def ensure_managed_host_source_revision(
+    source_revision: str,
+    *,
+    managed_repo: Path = Path("/home/al/.local/lib/jason/engineering-source-repo"),
+) -> None:
+    """Make the unprivileged Git mirror ready before the root reconcile request.
+
+    Root host reconciliation is deliberately offline. The managed mirror may
+    lag protected main even though this release has been built and approved.
+    Read first so LKG rollback never depends on network; fetch only when the
+    exact source commit and its origin/main ancestry are absent.
+    """
+    revision = exact_sha(source_revision, "source_revision")
+    if managed_repo.is_symlink() or not managed_repo.is_dir():
+        raise ReleaseManagerError("managed root host source repository is unavailable")
+    prefix = ["git", "-c", f"safe.directory={managed_repo}", "-C", str(managed_repo)]
+
+    def local_ready() -> bool:
+        for argv in (
+            ["cat-file", "-e", f"{revision}^{{commit}}"],
+            ["merge-base", "--is-ancestor", revision, "origin/main"],
+        ):
+            try:
+                check = subprocess.run(
+                    prefix + argv, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, check=False, timeout=20,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                return False
+            if check.returncode != 0:
+                return False
+        return True
+
+    if local_ready():
+        return
+    try:
+        remote = subprocess.run(
+            prefix + ["remote", "get-url", "origin"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=15,
+        )
+        if (remote.returncode != 0 or
+                remote.stdout.strip() != "https://github.com/al-teamaot-com/jason.git"):
+            raise ReleaseManagerError("managed host source remote is not authoritative")
+        refreshed = subprocess.run(
+            prefix + ["fetch", "--no-tags", "origin",
+                      "refs/heads/main:refs/remotes/origin/main"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseManagerError("managed host source mirror refresh unavailable") from exc
+    if refreshed.returncode != 0 or not local_ready():
+        raise ReleaseManagerError(
+            "managed host source mirror lacks the exact candidate after refresh"
+        )
+
 
 
 def request_host_reconcile(
@@ -2089,6 +2745,8 @@ def request_host_reconcile(
     # an unbounded wait; never count a late result as an accepted release.
     source_revision = exact_sha(source_revision, "source_revision")
     require_host_reconciler_ready(state_root)
+    # Never enqueue a root request until its immutable source is available.
+    ensure_managed_host_source_revision(source_revision)
     request_id = "release-" + source_revision[:12] + "-" + uuid4().hex[:12]
     root = state_root / "host-reconcile"
     request_path = root / "requests" / f"{request_id}.json"
@@ -2193,6 +2851,32 @@ def install_release_manager_from_current(expected_sha: str) -> dict[str, Any]:
         raise ReleaseManagerError(
             "immutable host release is not aligned before Release Manager install"
         )
+    if pmv4_e_scheduling_mode() == "replacement":
+        # After accepted retirement, never invoke an installer that can
+        # re-enable jason-release-manager.timer. The exact root transaction
+        # must already have staged an immutable replacement controller.
+        source_link = Path.home() / ".local" / "lib" / "jason" / "release-manager-source"
+        installed_runner = Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+        marker=json.loads(PMV4_E_ACCEPTED_MARKER.read_bytes())
+        control_sha=exact_sha(str(marker.get("source_sha") or ""), "PMv4 E source SHA")
+        if marker.get("source_rollback_sha") != expected_sha:
+            raise ReleaseManagerError("PMv4 E source rollback does not match production")
+        expected_runner = Path("/usr/local/lib/jason/pmv4-e-bootstrap/releases") / control_sha / "tools/release_manager_host_runner.py"
+        if (source_link.resolve().name.casefold() != expected_sha
+                or not installed_runner.is_file() or not expected_runner.is_file()
+                or hashlib.sha256(installed_runner.read_bytes()).digest()
+                   != hashlib.sha256(expected_runner.read_bytes()).digest()):
+            raise ReleaseManagerError(
+                "PMv4 E immutable release controller not aligned; no legacy installer fallback"
+            )
+        scheduled_control_alignment()
+        return {
+            "source_revision": expected_sha,
+            "timer_active": True,
+            "source_link": str(source_link.resolve()),
+            "pmv4_replacement_verified": True,
+            "legacy_installer_invoked": False,
+        }
     installer = current / "tools" / "install_release_manager.py"
     if not installer.is_file():
         raise ReleaseManagerError(
@@ -2795,10 +3479,30 @@ def native_deploy_environment(
         if os.environ.get("JASON_QUICKBOOKS_READ_PROFILE") not in (None, quickbooks):
             raise ReleaseManagerError("invoking QuickBooks profile override conflicts with immutable candidate")
         env["JASON_QUICKBOOKS_READ_PROFILE"] = quickbooks
+    staff_note_profile = declared_aot_staff_note_profile(candidate_tree)
+    if os.environ.get("JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE") not in (
+        None, staff_note_profile,
+    ):
+        raise ReleaseManagerError("host staff-note override differs from immutable source")
+    env["JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE"] = staff_note_profile
     mobile_policy = declared_mobile_release_approval_policy(candidate_tree)
     if os.environ.get("JASON_RELEASE_MOBILE_APPROVAL_MODE") not in (None, mobile_policy["mode"]):
         raise ReleaseManagerError("invoking release approval mode conflicts with immutable candidate")
     env["JASON_RELEASE_MOBILE_APPROVAL_MODE"] = str(mobile_policy["mode"])
+    from jason_owner_auth_profile import declared_jason_owner_profile
+    historical_admin = (
+        "admin-separated-v1"
+        if mobile_policy["mode"] == "admin_approver_separated" else ""
+    )
+    licensed_owner = declared_jason_owner_profile(candidate_tree)
+    if historical_admin and licensed_owner:
+        raise ReleaseManagerError("Jason Owner source policy conflicts with legacy admin profile")
+    expected_admin = licensed_owner or historical_admin
+    if os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE") not in (None, expected_admin):
+        raise ReleaseManagerError(
+            "admin approver profile cannot override exact source policy"
+        )
+    env["JASON_AOT_ADMIN_APPROVER_PROFILE"] = expected_admin
     return env
 
 
@@ -2810,6 +3514,8 @@ _NATIVE_DEPLOY_CONTRACT_KEYS = (
     "JASON_PROVIDER_READ_ROLLBACK_PROFILE",
     "JASON_QUICKBOOKS_READ_PROFILE",
     "JASON_RELEASE_MOBILE_APPROVAL_MODE",
+    "JASON_AOT_ADMIN_APPROVER_PROFILE",
+    "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE",
 )
 
 
@@ -3374,25 +4080,42 @@ def approve_release(
         approval_source = str(approval.get("source") or source or "explicit_owner_instruction")
     else:
         approval_source = str(source or "explicit_owner_instruction")
+        scope_review = record.get("manual_scope_review") or {}
+        release_manifest = record.get("release_manifest") or {}
+        transaction_binding = None
+        if (scope_review.get("candidate_sha") == candidate_sha
+                and scope_review.get("baseline_sha") == record.get("rollback_sha")
+                and re.fullmatch(r"[0-9a-f]{64}", str(scope_review.get("scope_sha256") or ""))
+                and isinstance(release_manifest, dict)
+                and release_manifest.get("candidate_sha") == candidate_sha
+                and release_manifest.get("rollback_sha") == record.get("rollback_sha")):
+            transaction_binding = {
+                "candidate_sha": candidate_sha,
+                "rollback_sha": str(record["rollback_sha"]),
+                "scope_sha256": str(scope_review["scope_sha256"]),
+                "manifest_sha256": hashlib.sha256(json.dumps(
+                    release_manifest, sort_keys=True, separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")).hexdigest(),
+            }
         record["owner_approval"] = {
             "approved": True,
             "candidate_sha": candidate_sha,
             "source": approval_source,
             "recorded_at": now(),
+            **({"transaction_binding": transaction_binding}
+               if transaction_binding is not None else {}),
         }
         record.setdefault("history", []).append(
             {"at": now(), "state": "production_eligible", "gate": "owner_approval_recorded"}
         )
         approval_changed = True
 
-    material_review_changed = _record_exact_owner_ccc_material_review(
-        repo,
-        state_root,
-        record,
-        release_id=release_id,
-        candidate_sha=candidate_sha,
-        source=approval_source,
-    )
+    # The authenticated exact-SHA approval and native scope review are the
+    # only human approvals. Do not create a second CCC material-review receipt.
+    if str(record.get("risk_profile") or "") == "production_control_core":
+        require_current_manual_scope_review(repo, state_root, record)
+    material_review_changed = False
 
     if waive_ccc_material_review:
         # This is a one-release Owner constitutional exception to the separate
@@ -3449,6 +4172,76 @@ def approve_release(
         save_record(state_root, record)
     return record
 
+def verify_signed_mcp_owner_request(
+    state_root: Path, record: Mapping[str, Any],
+    request: Mapping[str, Any], *,
+    public_key: Any,
+    at: datetime | None = None,
+) -> dict[str, Any]:
+    """Independently validate MCP Owner OAuth signature and exact release.
+
+    Returns only a validated proof. All callers must separately verify GitHub
+    protected main, current release eligibility, immutable artifacts and
+    active global/root production controls. The verifier never fabricates
+    authority, deploys, changes freeze or accepts an unsigned request.
+    """
+    root = Path(__file__).resolve().parents[1] / "implementation"
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from kernel.signed_owner_release import (
+        EXACT_OWNER_OAUTH_SUBJECTS, OwnerReleaseProofDenied,
+        verify_exact_owner_release,
+    )
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    rollback = str(record.get("rollback_sha") or "")
+    review = record.get("manual_scope_review") or {}
+    manifest = record.get("release_manifest") or {}
+    signed = request.get("signed_owner_proof")
+    src = str(request.get("source") or "")
+    if (record.get("state") != "production_eligible"
+            or not SHA.fullmatch(candidate) or not SHA.fullmatch(rollback)
+            or not isinstance(review, Mapping) or not isinstance(manifest, Mapping)
+            or review.get("candidate_sha") != candidate
+            or review.get("baseline_sha") != rollback
+            or manifest.get("candidate_sha") != candidate
+            or manifest.get("rollback_sha") != rollback
+            or request.get("release_id") != record_id(candidate)
+            or request.get("candidate_sha") != candidate
+            or request.get("approved_by") not in
+                frozenset(EXACT_OWNER_OAUTH_SUBJECTS.values())
+            or request.get("organization_id") != "aot"
+            or not src.startswith("authenticated_jason_mcp_owner:owner-mcp-")
+            or not isinstance(signed, Mapping)):
+        raise ReleaseManagerError("signed MCP Owner request binding incomplete")
+    try:
+        snapshot = _freeze_marker_snapshot(state_root)
+    except ReleaseManagerError as exc:
+        raise ReleaseManagerError("signed MCP Owner decision requires active freeze") from exc
+    manifest_sha = hashlib.sha256(json.dumps(
+        manifest, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+    try:
+        proof = verify_exact_owner_release(
+            signed, public_key=public_key,
+            expected_candidate_sha=candidate,
+            expected_rollback_sha=rollback,
+            expected_release_id=str(request["release_id"]),
+            expected_scope_sha256=str(review.get("scope_sha256") or ""),
+            expected_manifest_sha256=manifest_sha,
+            expected_freeze_sha256=snapshot["sha256"],
+            at=at or datetime.now(timezone.utc),
+        )
+    except OwnerReleaseProofDenied as exc:
+        raise ReleaseManagerError(
+            "signed MCP Owner approval rejected: " + str(exc)
+        ) from exc
+    if (src != "authenticated_jason_mcp_owner:" + proof["approval_id"]
+            or request.get("approved_by") != proof["owner_principal"]):
+        raise ReleaseManagerError("signed MCP Owner request identity/ID mismatched")
+    return proof
+
+
 def consume_owner_approval_requests(repo: Path, state_root: Path) -> int:
     request_root = state_root / "owner-approval-requests"
     if not request_root.exists():
@@ -3467,12 +4260,26 @@ def consume_owner_approval_requests(repo: Path, state_root: Path) -> int:
             raise ReleaseManagerError("owner approval request release ID does not match candidate SHA")
         if not approved_by or not organization_id:
             raise ReleaseManagerError("owner approval request identity metadata is incomplete")
+        # A mutable request with an approved_by text field is not identity
+        # evidence. Fail closed unless the live MCP issuer signed the entire
+        # exact-action decision using a separately root-pinned public key.
+        module_root = Path(__file__).resolve().parents[1] / "implementation"
+        if str(module_root) not in sys.path:
+            sys.path.insert(0, str(module_root))
+        from kernel.signed_owner_release import read_pinned_root_owner_public_key
+        key = read_pinned_root_owner_public_key(
+            Path("/etc/jason-owner-release/verified-owner-public-key.json")
+        )
+        record = load_record(state_root, release_id)
+        proof = verify_signed_mcp_owner_request(
+            state_root, record, payload, public_key=key,
+        )
         approve_release(
             repo,
             state_root,
             release_id=release_id,
             candidate_sha=candidate_sha,
-            source="governed_mcp_owner:" + approved_by,
+            source="authenticated_signed_mcp_owner:" + proof["approval_id"],
         )
         processed_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         destination = processed_root / path.name
@@ -4474,8 +5281,11 @@ def _deploy_production_locked(
         raise ReleaseManagerError("candidate MCP image changed after pre-production")
 
     # Do not begin a disruptive production transaction unless the privileged
-    # host boundary is already installed and the rollback baseline is aligned.
+    # host boundary is already installed and the exact candidate is present in
+    # the root-managed source mirror. This can fetch once while still fully
+    # frozen, BEFORE runtime/MCP or other live production modifications.
     require_host_reconciler_ready(state_root)
+    ensure_managed_host_source_revision(candidate_sha)
     rollback_sha = str(record["rollback_sha"])
     if recovery_context is None:
         live_production_alignment(rollback_sha)
@@ -4527,7 +5337,7 @@ def _deploy_production_locked(
     prior_release_approval_mode = live_release_mobile_approval_mode(
         live_runtime() if recovery_context is None else live_runtime_unchecked_health()
     )
-    if prior_release_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
+    if prior_release_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed", "admin_approver_separated"}:
         raise ReleaseManagerError("live release approval mode is not a supported rollback baseline")
     candidate_autotask_profile = declared_autotask_read_profile(deploy_worktree)
     prior_autotask_profile = (
@@ -4551,18 +5361,19 @@ def _deploy_production_locked(
         deploy_worktree, candidate_sha
     )
 
-    # The existing live runtime can differ from a valid new candidate. This
-    # narrowly scoped preflight is NOT a CCC PASS and requires full post CCC.
+    # Keep one release gate: exact approved source, verified artifact and
+    # rollback, native preproduction, baseline health and transaction lock.
+    # Do not run a separate CCC certification/approval pipeline.
     verify_candidate_on_main(repo, candidate_sha)
-    owner_material_review_waiver = verified_owner_material_review_waiver(
-        record, candidate_sha
-    )
-    ccc_preflight = run_release_ccc_gate(
-        candidate_sha, rollback_sha, before_mutation=True,
-        owner_material_review_waiver=owner_material_review_waiver,
-        recovery_context=recovery_context,
-    )
-    record["ccc_pre_mutation_gate"] = ccc_preflight
+    native_preflight = {
+        "status": "pass",
+        "mode": "native_release_checks",
+        "candidate_sha": candidate_sha,
+        "rollback_sha": rollback_sha,
+        "artifact_and_preproduction_contract_verified": True,
+        "verified_at": now(),
+    }
+    record["native_pre_mutation_gate"] = native_preflight
 
     controller_pin = controller_identity(deploy_worktree)
     if recovery_context is None:
@@ -4734,15 +5545,28 @@ def _deploy_production_locked(
             verified_owner_read_canary = owner_read_canary.require_authenticated_read_canary(
                 state_root, owner_read_canary_session,
             )
-        # Certification is mandatory BEFORE verified/closed or new LKG. A
-        # non-PASS or stale/wrong-SHA report raises inside the rollback block.
-        ccc_postflight = run_release_ccc_gate(
-            candidate_sha, candidate_sha, before_mutation=False,
-            owner_material_review_waiver=owner_material_review_waiver,
-        )
-        record["ccc_post_mutation_gate"] = ccc_postflight
+        # One native postflight: exact image/source alignment, functional smoke,
+        # protected drift and complete production manifest. Every failure
+        # still raises inside the same automatic rollback transaction.
         drift_evidence = production_drift_evidence(state_root)
         production_manifest = capture_production_manifest(candidate_sha)
+        native_postflight = {
+            "status": "pass",
+            "mode": "native_release_checks",
+            "candidate_sha": candidate_sha,
+            "runtime_and_mcp_image_digests_verified": True,
+            "functional_smoke_passed": smoke.get("passed") is True,
+            "drift_passed": drift_evidence.get("status") == "pass",
+            "production_manifest_complete": production_manifest.get("complete") is True,
+            "verified_at": now(),
+        }
+        if not all((
+            native_postflight["functional_smoke_passed"],
+            native_postflight["drift_passed"],
+            native_postflight["production_manifest_complete"],
+        )):
+            raise ReleaseManagerError("native release postflight is incomplete")
+        record["native_post_mutation_gate"] = native_postflight
 
         if isinstance(record.get("mobile_release_policy_transition"), dict):
             record["mobile_release_policy_transition"]["status"] = "verified_active"
@@ -4754,9 +5578,8 @@ def _deploy_production_locked(
             "mcp_artifact_digest": live_mcp_digest,
             "health_passed": True,
             "mobile_release_approval": approval_policy_activation,
-            "ccc_pre_mutation": ccc_preflight,
-            "ccc_post_mutation": ccc_postflight,
-            "owner_material_review_waiver": owner_material_review_waiver,
+            "native_pre_mutation": native_preflight,
+            "native_post_mutation": native_postflight,
             "functional_smoke_tests_passed": bool(smoke.get("passed")),
             "functional_smoke_tests": smoke,
             "authenticated_owner_read_canary": verified_owner_read_canary,
@@ -4797,9 +5620,8 @@ def _deploy_production_locked(
             "release_manifest": record["release_manifest"],
             "risk_profile": record["risk_profile"],
             "owner_approval": record.get("owner_approval"),
-            "owner_material_review_waiver": owner_material_review_waiver,
-            "ccc_pre_mutation": ccc_preflight,
-            "ccc_post_mutation": ccc_postflight,
+            "native_pre_mutation": native_preflight,
+            "native_post_mutation": native_postflight,
             "preproduction": record.get("preproduction"),
             "pre_mutation_health": record.get("pre_mutation_health"),
             "functional_smoke_tests": smoke,
@@ -5038,12 +5860,637 @@ def _deploy_production_locked(
 
 
 
+
+def attest_consumed_pre_mutation_unfreeze_for_replacement(
+    state_root: Path, record: Mapping[str, Any],
+) -> dict[str, str]:
+    """Attest a consumed old attempt WITHOUT granting replacement authority.
+
+    This may be used only by a separate signed, exact-bound Owner decision
+    consumer. It never creates or edits receipts, releases, or freeze markers.
+    A post-mutation failure/rollback needs a fresh release instead.
+    """
+    release_id = str(record.get("release_id") or "")
+    candidate = exact_sha(
+        str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
+        "candidate_sha",
+    )
+    if release_id != record_id(candidate):
+        raise ReleaseManagerError("replacement candidate/release identity mismatch")
+    rollback = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+    scope = str((record.get("manual_scope_review") or {}).get("scope_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", scope):
+        raise ReleaseManagerError("replacement scope review missing")
+    if (record.get("state") != "production_eligible"
+            or record.get("production") is not None
+            or record.get("native_pre_mutation_gate") is not None
+            or record.get("failure") is not None):
+        raise ReleaseManagerError("replacement requires proved pre-mutation failure")
+    marker = _freeze_marker_snapshot(state_root)
+    source_path = (state_root / "owner-explicit-unfreeze-receipts"
+                   / (release_id + ".json"))
+    transaction_path = _freeze_receipt_path(state_root, release_id)
+
+    def immutable_receipt(path: Path) -> tuple[dict[str, Any], str]:
+        try:
+            info = path.lstat()
+            if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_uid != os.geteuid()
+                    or info.st_gid != os.getegid()
+                    or not 1 <= info.st_size <= 8192):
+                raise ReleaseManagerError("replacement predecessor receipt is unsafe")
+            raw = path.read_bytes()
+            if len(raw) != info.st_size:
+                raise ReleaseManagerError("replacement predecessor receipt changed")
+            doc = json.loads(raw)
+            if not isinstance(doc, dict):
+                raise ReleaseManagerError("replacement predecessor receipt invalid")
+            return doc, "sha256:" + hashlib.sha256(raw).hexdigest()
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise ReleaseManagerError("replacement predecessor receipt inaccessible") from exc
+
+    source, source_digest = immutable_receipt(source_path)
+    transaction, transaction_digest = immutable_receipt(transaction_path)
+    owner = record.get("owner_approval") or {}
+    expected = {
+        "release_id": release_id,
+        "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": scope,
+    }
+    if (source.get("schema_version") != "1.0"
+            or source.get("authorization") != "explicit_exact_sha_owner_unfreeze"
+            or source.get("status") != "consumed"
+            or source.get("freeze_restored") is not True
+            or source.get("standing_authority") is not False
+            or source.get("automatic_publish_authority") is not False
+            or source.get("prior_release_approval_source") != owner.get("source")
+            or transaction.get("schema_version") != "2.0"
+            or transaction.get("authorization") != "explicit_owner_one_transaction_unfreeze"
+            or transaction.get("status") != "deployment_returned"
+            or transaction.get("freeze_restored") is not True
+            or transaction.get("release_state_after") != "production_eligible"
+            or transaction.get("explicit_unfreeze_receipt_sha256") is None
+            or any(source.get(key) != value or transaction.get(key) != value
+                   for key, value in expected.items())):
+        raise ReleaseManagerError("replacement predecessor is not a verified pre-mutation attempt")
+    if (source.get("freeze_sha256_before") != marker["sha256"]
+            or source.get("freeze_sha256_after") != marker["sha256"]
+            or transaction.get("freeze_sha256_before") != marker["sha256"]
+            or transaction.get("freeze_sha256_after") != marker["sha256"]):
+        raise ReleaseManagerError("replacement predecessor freeze was not exactly restored")
+    # Independent provider/runtime/host alignment; never infer no mutation from
+    # a receipt alone. A failed alignment check is a hard stop.
+    live_production_alignment(rollback)
+    return {
+        "candidate_sha": candidate,
+        "scope_sha256": scope,
+        "rollback_sha": rollback,
+        "predecessor_source_receipt_sha256": source_digest,
+        "predecessor_transaction_receipt_sha256": transaction_digest,
+        "freeze_sha256": marker["sha256"],
+    }
+
+
+
+def record_signed_replacement_unfreeze(
+    repo: Path, state_root: Path, *, release_id: str,
+    candidate_sha: str, approval_id: str, signed_evidence_sha256: str,
+    request_metadata: Mapping[str, Any], decided_at: datetime,
+    expires_at: datetime,
+) -> dict[str, Any]:
+    """Persist a once-only replacement grant ONLY after signed Teams validation.
+
+    Caller: the independent signed Teams evidence consumer under the native
+    release lock. No release, provider action or freeze mutation occurs here.
+    """
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    if (release_id != record_id(candidate_sha)
+            or re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", signed_evidence_sha256) is None
+            or decided_at.tzinfo is None or expires_at.tzinfo is None
+            or not decided_at < expires_at
+            or not 0 < (expires_at - decided_at).total_seconds() <= 900
+            or datetime.now(timezone.utc) >= expires_at):
+        raise ReleaseManagerError("replacement signed approval identity or TTL invalid")
+    record = load_record(state_root, release_id)
+    proof = attest_consumed_pre_mutation_unfreeze_for_replacement(state_root, record)
+    lineage = {
+        key: value.removeprefix("sha256:") if key.endswith("_receipt_sha256") else value
+        for key, value in proof.items()
+    }
+    if (request_metadata.get("replacement_unfreeze_only") is not True
+            or request_metadata.get("review_only") is True
+            or request_metadata.get("replacement_lineage") != lineage
+            or request_metadata.get("candidate_sha") != candidate_sha
+            or request_metadata.get("rollback_sha") != record["rollback_sha"]
+            or request_metadata.get("release_id") != release_id
+            or request_metadata.get("manifest_sha256") != hashlib.sha256(json.dumps(
+                record.get("release_manifest") or {}, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False).encode("utf-8")).hexdigest()):
+        raise ReleaseManagerError("replacement signed decision differs from exact release")
+    verify_candidate_on_main(repo, candidate_sha)
+    require_current_manual_scope_review(repo, state_root, record)
+    if record.get("replacement_unfreeze_authorization") is not None:
+        prior = record["replacement_unfreeze_authorization"]
+        if prior.get("approval_id") != approval_id:
+            raise ReleaseManagerError("replacement already authorized by another approval")
+    target = state_root / "owner-replacement-unfreeze-receipts" / (
+        release_id + "--" + approval_id + ".json")
+    doc = {
+        "schema_version": "1.0",
+        "authorization": "signed_teams_replacement_unfreeze",
+        "release_id": release_id,
+        "candidate_sha": candidate_sha,
+        "rollback_sha": record["rollback_sha"],
+        "scope_sha256": proof["scope_sha256"],
+        "freeze_sha256_before": proof["freeze_sha256"],
+        "predecessor_source_receipt_sha256": proof["predecessor_source_receipt_sha256"],
+        "predecessor_transaction_receipt_sha256": proof["predecessor_transaction_receipt_sha256"],
+        "approval_id": approval_id,
+        "signed_evidence_sha256": signed_evidence_sha256,
+        "prior_release_approval_source": (record.get("owner_approval") or {}).get("source"),
+        "decided_at": decided_at.isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "standing_authority": False,
+        "automatic_publish_authority": False,
+        "status": "authorized_pending",
+    }
+    if target.exists() or target.is_symlink():
+        if target.is_symlink() or json.loads(target.read_text(encoding="utf-8")) != doc:
+            raise ReleaseManagerError("replacement grant already exists with different evidence")
+    else:
+        atomic_json(target, doc)
+    record["replacement_unfreeze_authorization"] = {
+        "approval_id": approval_id,
+        "signed_evidence_sha256": signed_evidence_sha256,
+        "receipt_sha256": "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest(),
+    }
+    record.setdefault("history", []).append({
+        "at": now(), "state": "production_eligible",
+        "gate": "signed_teams_replacement_unfreeze_pending_transaction",
+        "approval_id": approval_id,
+    })
+    save_record(state_root, record)
+    return doc
+
+
+def record_signed_initial_unfreeze(
+    repo: Path, state_root: Path, *, release_id: str,
+    candidate_sha: str, approval_id: str, signed_evidence_sha256: str,
+    request_metadata: Mapping[str, Any], decided_at: datetime,
+    expires_at: datetime,
+) -> dict[str, Any]:
+    """Materialize a SECOND, separately bounded permission from ONE signed click.
+
+    Called only after independent Teams signature/owner verification and the
+    normal exact-SHA release grant. Never removes the freeze or deploys code.
+    """
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    if (not one_transaction_release_id_matches_candidate(release_id, candidate_sha)
+            or re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", signed_evidence_sha256) is None
+            or decided_at.tzinfo is None or expires_at.tzinfo is None
+            or not decided_at < expires_at
+            or not 0 < (expires_at - decided_at).total_seconds() <= 900
+            or datetime.now(timezone.utc) >= expires_at
+            or request_metadata.get("review_only") is True
+            or request_metadata.get("replacement_unfreeze_only") is True):
+        raise ReleaseManagerError("single-click signed freeze decision invalid or expired")
+    record = load_record(state_root, release_id)
+    owner = record.get("owner_approval") or {}
+    if (record.get("state") != "production_eligible"
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate_sha
+            or owner.get("source") != "authenticated_mobile_teams_owner:" + approval_id
+            or request_metadata.get("candidate_sha") != candidate_sha
+            or request_metadata.get("release_id") != release_id
+            or request_metadata.get("rollback_sha") != record.get("rollback_sha")):
+        raise ReleaseManagerError("single-click freeze has no exact matching signed release grant")
+    verify_candidate_on_main(repo, candidate_sha)
+    require_current_manual_scope_review(repo, state_root, record)
+    revalidate_circuit_breaker(state_root)
+    live_production_alignment(str(record["rollback_sha"]))
+    binding = current_initial_freeze_binding(state_root, record)
+    if request_metadata.get("initial_freeze_binding") != binding:
+        raise ReleaseManagerError("signed freeze consent differs from active exact release/freeze")
+    # The issuer's nonexecuting offer is independently checked; a stale or
+    # fabricated SQLite request cannot introduce the frozen transaction.
+    offer_path = state_root / "mobile-release-offers" / (release_id + ".json")
+    info = offer_path.lstat()
+    if (offer_path.is_symlink() or not stat.S_ISREG(info.st_mode)
+            or info.st_mode & 0o022 or info.st_size > 8192):
+        raise ReleaseManagerError("single-click freeze offer is not trusted")
+    offer = json.loads(offer_path.read_text(encoding="utf-8"))
+    if (not isinstance(offer, dict) or offer.get("initial_freeze_binding") != binding
+            or offer.get("candidate_sha") != candidate_sha
+            or offer.get("manifest_sha256") != binding["manifest_sha256"]
+            or request_metadata.get("manifest_sha256") != binding["manifest_sha256"]):
+        raise ReleaseManagerError("single-click host offer no longer matches signed card")
+    doc = {
+        "schema_version": "1.0",
+        "authorization": "signed_teams_initial_unfreeze",
+        "release_id": release_id, "candidate_sha": candidate_sha,
+        "rollback_sha": binding["rollback_sha"],
+        "scope_sha256": binding["scope_sha256"],
+        "freeze_sha256_before": binding["freeze_sha256"],
+        "manifest_sha256": binding["manifest_sha256"],
+        "approval_id": approval_id,
+        "signed_evidence_sha256": signed_evidence_sha256,
+        "prior_release_approval_source": owner["source"],
+        "recorded_at": decided_at.astimezone(timezone.utc).isoformat(),
+        "expires_at": expires_at.astimezone(timezone.utc).isoformat(),
+        "status": "authorized_pending", "freeze_remains_active": True,
+        "restore_freeze_after_transaction": True, "standing_authority": False,
+        "automatic_publish_authority": False,
+    }
+    directory = state_root / "owner-signed-unfreeze-receipts"
+    if directory.is_symlink():
+        raise ReleaseManagerError("signed frozen release receipt directory is a link")
+    target = directory / (release_id + ".json")
+    if target.exists() or target.is_symlink():
+        if (target.is_symlink() or json.loads(target.read_text(encoding="utf-8")) != doc):
+            raise ReleaseManagerError("signed frozen release receipt conflicts with owner decision")
+    else:
+        atomic_json(target, doc)
+    receipt_sha = "sha256:" + hashlib.sha256(target.read_bytes()).hexdigest()
+    pointer = {"approval_id": approval_id,
+               "signed_evidence_sha256": signed_evidence_sha256,
+               "receipt_sha256": receipt_sha}
+    if record.get("signed_initial_unfreeze_authorization") is not None:
+        if record["signed_initial_unfreeze_authorization"] != pointer:
+            raise ReleaseManagerError("single-click freeze authorization already belongs to another decision")
+        return doc  # crash-safe same signed decision; do not append duplicate history
+    record["signed_initial_unfreeze_authorization"] = pointer
+    record.setdefault("history", []).append({
+        "at": now(), "state": "production_eligible",
+        "gate": "single_signed_teams_approval_two_bound_receipts",
+        "approval_id": approval_id,
+    })
+    save_record(state_root, record)
+    return doc
+
+
+def record_signed_initial_unfreeze_renewal(
+    repo: Path, state_root: Path, *, release_id: str, candidate_sha: str,
+    approval_id: str, signed_evidence_sha256: str,
+    request_metadata: Mapping[str, Any], decided_at: datetime,
+    expires_at: datetime,
+) -> dict[str, Any]:
+    """Record a NEW signed frozen transaction, never a second release grant.
+
+    The old expired signed receipt and original exact Owner approval remain
+    untouched. An independent Teams challenge, identity and signature must
+    be verified by release_mobile_approval_consumer before calling here.
+    """
+    from jason_runtime.mobile_release_approval import (
+        read_expired_initial_unfreeze_predecessor,
+    )
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    if (not one_transaction_release_id_matches_candidate(release_id, candidate_sha)
+            or re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", signed_evidence_sha256) is None
+            or decided_at.tzinfo is None or expires_at.tzinfo is None
+            or not decided_at < expires_at
+            or not 0 < (expires_at - decided_at).total_seconds() <= 900
+            or datetime.now(timezone.utc) >= expires_at
+            or request_metadata.get("initial_unfreeze_renewal_only") is not True
+            or request_metadata.get("review_only") is True
+            or request_metadata.get("replacement_unfreeze_only") is True):
+        raise ReleaseManagerError("signed initial unfreeze renewal missing fresh exact owner decision")
+    record = load_record(state_root, release_id)
+    owner = record.get("owner_approval") or {}
+    if (record.get("state") != "production_eligible"
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate_sha
+            or not str(owner.get("source") or "").startswith(
+                "authenticated_mobile_teams_owner:relapproval-"
+            ) or (record.get("release_candidate") or {}).get("candidate_sha") != candidate_sha
+            or request_metadata.get("candidate_sha") != candidate_sha
+            or request_metadata.get("release_id") != release_id
+            or request_metadata.get("rollback_sha") != record.get("rollback_sha")):
+        raise ReleaseManagerError("signed renewal does not match approved exact release")
+    existing = record.get("renewed_initial_unfreeze_authorization")
+    if existing is not None:
+        if (not isinstance(existing, Mapping)
+                or existing.get("approval_id") != approval_id
+                or existing.get("signed_evidence_sha256") != signed_evidence_sha256):
+            raise ReleaseManagerError("another initial unfreeze renewal already exists")
+    verify_candidate_on_main(repo, candidate_sha)
+    require_current_manual_scope_review(repo, state_root, record)
+    revalidate_circuit_breaker(state_root)
+    live_production_alignment(str(record["rollback_sha"]))
+    baseline = dict(record)
+    baseline["renewed_initial_unfreeze_authorization"] = None
+    try:
+        lineage = read_expired_initial_unfreeze_predecessor(
+            state_root, release_id, baseline,
+        )
+    except PermissionError as exc:
+        raise ReleaseManagerError("prior signed initial unfreeze not safely expired") from exc
+    binding = current_initial_freeze_binding(state_root, record)
+    if (request_metadata.get("initial_unfreeze_renewal_lineage") != lineage
+            or request_metadata.get("initial_freeze_binding") != binding
+            or request_metadata.get("manifest_sha256") != binding["manifest_sha256"]):
+        raise ReleaseManagerError("signed initial renewal changed predecessor or freeze scope")
+    offer_path = state_root / "mobile-release-offers" / (release_id + ".json")
+    info = offer_path.lstat()
+    offer = json.loads(offer_path.read_text(encoding="utf-8"))
+    if (offer_path.is_symlink() or not stat.S_ISREG(info.st_mode)
+            or info.st_mode & 0o022 or info.st_size > 8192
+            or offer.get("initial_unfreeze_renewal_only") is not True
+            or offer.get("initial_unfreeze_renewal_lineage") != lineage
+            or offer.get("initial_freeze_binding") != binding
+            or offer.get("candidate_sha") != candidate_sha
+            or offer.get("manifest_sha256") != binding["manifest_sha256"]):
+        raise ReleaseManagerError("signed initial renewal lacks original host offer")
+    doc = {
+        "schema_version": "1.0",
+        "authorization": "signed_teams_initial_unfreeze_renewal",
+        "release_id": release_id, "candidate_sha": candidate_sha,
+        "rollback_sha": binding["rollback_sha"],
+        "scope_sha256": binding["scope_sha256"],
+        "freeze_sha256_before": binding["freeze_sha256"],
+        "manifest_sha256": binding["manifest_sha256"],
+        "approval_id": approval_id,
+        "signed_evidence_sha256": signed_evidence_sha256,
+        "prior_release_approval_source": owner["source"],
+        "original_initial_unfreeze_lineage": lineage,
+        "recorded_at": decided_at.astimezone(timezone.utc).isoformat(),
+        "expires_at": expires_at.astimezone(timezone.utc).isoformat(),
+        "status": "authorized_pending",
+        "freeze_remains_active": True,
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+        "automatic_publish_authority": False,
+        "additional_provider_or_endpoint_authority": False,
+    }
+    directory = state_root / "owner-signed-initial-unfreeze-renewals"
+    if directory.is_symlink():
+        raise ReleaseManagerError("signed renewal receipt directory is a symlink")
+    path = directory / (release_id + "--" + approval_id + ".json")
+    if path.exists() or path.is_symlink():
+        if path.is_symlink() or json.loads(path.read_text(encoding="utf-8")) != doc:
+            raise ReleaseManagerError("signed renewal receipt conflicts with prior decision")
+    else:
+        atomic_json(path, doc)
+    receipt_digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    pointer = {
+        "approval_id": approval_id,
+        "signed_evidence_sha256": signed_evidence_sha256,
+        "receipt_sha256": receipt_digest,
+    }
+    if existing is not None:
+        if existing != pointer:
+            raise ReleaseManagerError("signed renewal pointer differs from existing decision")
+        return doc
+    record["renewed_initial_unfreeze_authorization"] = pointer
+    record.setdefault("history", []).append({
+        "at": now(), "state": "production_eligible",
+        "gate": "separate_signed_initial_unfreeze_renewal_pending_transaction",
+        "approval_id": approval_id,
+    })
+    save_record(state_root, record)
+    return doc
+
+
+def signed_renewed_initial_one_transaction_freeze_context(
+    state_root: Path, record: Mapping[str, Any], *,
+    max_age_seconds: int = 900,
+) -> dict[str, Any] | None:
+    """Accept only a fresh NEW signed receipt bound to the expired predecessor."""
+    from jason_runtime.mobile_release_approval import (
+        read_expired_initial_unfreeze_predecessor,
+    )
+    pointer = record.get("renewed_initial_unfreeze_authorization")
+    owner = record.get("owner_approval") or {}
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    rollback = str(record.get("rollback_sha") or "")
+    release_id = str(record.get("release_id") or "")
+    if (not isinstance(pointer, Mapping)
+            or not re.fullmatch(r"relapproval-[0-9a-f]{32}", str(pointer.get("approval_id") or ""))
+            or not SHA.fullmatch(candidate) or not SHA.fullmatch(rollback)
+            or not one_transaction_release_id_matches_candidate(release_id, candidate)
+            or record.get("state") != "production_eligible"
+            or record.get("production") is not None or record.get("failure") is not None
+            or owner.get("approved") is not True or owner.get("candidate_sha") != candidate):
+        return None
+    approval_id = str(pointer["approval_id"])
+    path = state_root / "owner-signed-initial-unfreeze-renewals" / (
+        release_id + "--" + approval_id + ".json"
+    )
+    try:
+        info = path.lstat()
+        raw = path.read_bytes()
+        doc = json.loads(raw)
+        issued = datetime.fromisoformat(str(doc["recorded_at"]))
+        expiry = datetime.fromisoformat(str(doc["expires_at"]))
+        at = datetime.now(timezone.utc)
+        marker = _freeze_marker_snapshot(state_root)
+        original = dict(record)
+        original["renewed_initial_unfreeze_authorization"] = None
+        predecessor = read_expired_initial_unfreeze_predecessor(
+            state_root, release_id, original,
+        )
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError,
+            PermissionError, ReleaseManagerError):
+        return None
+    manifest_digest = hashlib.sha256(json.dumps(
+        record.get("release_manifest") or {}, sort_keys=True,
+        separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")).hexdigest()
+    digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+    if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != os.geteuid() or info.st_gid != os.getegid()
+            or len(raw) != info.st_size or not 1 <= len(raw) <= 8192
+            or digest != pointer.get("receipt_sha256")
+            or issued.tzinfo is None or expiry.tzinfo is None
+            or not issued <= at < expiry
+            or not 0 < (expiry - issued).total_seconds() <= max_age_seconds
+            or doc.get("schema_version") != "1.0"
+            or doc.get("authorization") != "signed_teams_initial_unfreeze_renewal"
+            or doc.get("approval_id") != approval_id
+            or doc.get("signed_evidence_sha256") != pointer.get("signed_evidence_sha256")
+            or doc.get("prior_release_approval_source") != owner.get("source")
+            or doc.get("release_id") != release_id
+            or doc.get("candidate_sha") != candidate
+            or doc.get("rollback_sha") != rollback
+            or doc.get("scope_sha256") != (
+                (record.get("manual_scope_review") or {}).get("scope_sha256"))
+            or doc.get("manifest_sha256") != manifest_digest
+            or doc.get("freeze_sha256_before") != marker["sha256"]
+            or doc.get("original_initial_unfreeze_lineage") != predecessor
+            or doc.get("status") != "authorized_pending"
+            or doc.get("freeze_remains_active") is not True
+            or doc.get("restore_freeze_after_transaction") is not True
+            or doc.get("standing_authority") is not False
+            or doc.get("automatic_publish_authority") is not False
+            or doc.get("additional_provider_or_endpoint_authority") is not False):
+        return None
+    return {
+        "authorization": "signed_teams_initial_unfreeze_renewal",
+        "renewal_approval_id": approval_id,
+        "release_id": release_id, "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": doc["scope_sha256"],
+        "recovery_profile_id": "one_new_signed_teams_initial_freeze_renewal",
+        "declaration_sha256": digest,
+        "explicit_unfreeze_receipt_sha256": digest,
+        "owner_approval_source": owner["source"],
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+    }
+
+
+def signed_initial_one_transaction_freeze_context(
+    state_root: Path, record: Mapping[str, Any], *, max_age_seconds: int = 900,
+) -> dict[str, Any] | None:
+    """Admit only a fresh, hash-pinned SECOND receipt from the same Teams click."""
+    pointer = record.get("signed_initial_unfreeze_authorization")
+    if not isinstance(pointer, Mapping) or record.get("state") != "production_eligible":
+        return None
+    release_id = str(record.get("release_id") or "")
+    approval_id = str(pointer.get("approval_id") or "")
+    owner = record.get("owner_approval") or {}
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    rollback = str(record.get("rollback_sha") or "")
+    if (re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None
+            or not SHA.fullmatch(candidate) or not SHA.fullmatch(rollback)
+            or not one_transaction_release_id_matches_candidate(release_id, candidate)
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate
+            or owner.get("source") != "authenticated_mobile_teams_owner:" + approval_id):
+        return None
+    path = state_root / "owner-signed-unfreeze-receipts" / (release_id + ".json")
+    try:
+        info = path.lstat()
+        raw = path.read_bytes()
+        receipt = json.loads(raw)
+        marker = _freeze_marker_snapshot(state_root)
+        at = datetime.now(timezone.utc)
+        issued = datetime.fromisoformat(str(receipt["recorded_at"]))
+        expires = datetime.fromisoformat(str(receipt["expires_at"]))
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError,
+            ReleaseManagerError):
+        return None
+    if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != os.geteuid() or info.st_gid != os.getegid()
+            or len(raw) != info.st_size or not 1 <= len(raw) <= 8192
+            or issued.tzinfo is None or expires.tzinfo is None
+            or not issued <= at < expires
+            or (expires - issued).total_seconds() > max_age_seconds
+            or "sha256:" + hashlib.sha256(raw).hexdigest() != pointer.get("receipt_sha256")
+            or receipt.get("schema_version") != "1.0"
+            or receipt.get("authorization") != "signed_teams_initial_unfreeze"
+            or receipt.get("approval_id") != approval_id
+            or receipt.get("signed_evidence_sha256") != pointer.get("signed_evidence_sha256")
+            or receipt.get("prior_release_approval_source") != owner.get("source")
+            or receipt.get("release_id") != release_id
+            or receipt.get("candidate_sha") != candidate
+            or receipt.get("rollback_sha") != rollback
+            or receipt.get("scope_sha256") != (
+                (record.get("manual_scope_review") or {}).get("scope_sha256"))
+            or receipt.get("freeze_sha256_before") != marker["sha256"]
+            or receipt.get("manifest_sha256") != hashlib.sha256(json.dumps(
+                record.get("release_manifest") or {}, sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+            or receipt.get("status") != "authorized_pending"
+            or receipt.get("freeze_remains_active") is not True
+            or receipt.get("restore_freeze_after_transaction") is not True
+            or receipt.get("standing_authority") is not False
+            or receipt.get("automatic_publish_authority") is not False):
+        return None
+    digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+    return {
+        "authorization": "signed_teams_initial_unfreeze",
+        "release_id": release_id, "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": receipt["scope_sha256"],
+        "recovery_profile_id": "one_signed_teams_ordinary_release",
+        "declaration_sha256": digest,
+        "explicit_unfreeze_receipt_sha256": digest,
+        "owner_approval_source": owner["source"],
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+    }
+
+
+def signed_replacement_unfreeze_context(
+    state_root: Path, record: Mapping[str, Any], *, max_age_seconds: int = 900,
+) -> dict[str, Any] | None:
+    pointer = record.get("replacement_unfreeze_authorization")
+    if not isinstance(pointer, Mapping):
+        return None
+    approval_id = str(pointer.get("approval_id") or "")
+    release_id = str(record.get("release_id") or "")
+    if (re.fullmatch(r"relapproval-[0-9a-f]{32}", approval_id) is None
+            or not release_id.startswith("release-")):
+        return None
+    path = state_root / "owner-replacement-unfreeze-receipts" / (
+        release_id + "--" + approval_id + ".json")
+    try:
+        info = path.lstat()
+        raw = path.read_bytes()
+        doc = json.loads(raw)
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.geteuid() or info.st_gid != os.getegid()
+                or len(raw) != info.st_size or not 1 <= len(raw) <= 8192
+                or not isinstance(doc, dict)
+                or "sha256:" + hashlib.sha256(raw).hexdigest() != pointer.get("receipt_sha256")
+                or doc.get("signed_evidence_sha256") != pointer.get("signed_evidence_sha256")):
+            return None
+        expiry = datetime.fromisoformat(str(doc.get("expires_at")))
+        decision = datetime.fromisoformat(str(doc.get("decided_at")))
+        if (expiry.tzinfo is None or decision.tzinfo is None
+                or not decision <= datetime.now(timezone.utc) < expiry
+                or (expiry - decision).total_seconds() > max_age_seconds):
+            return None
+        proof = attest_consumed_pre_mutation_unfreeze_for_replacement(state_root, record)
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError, ReleaseManagerError):
+        return None
+    if (doc.get("authorization") != "signed_teams_replacement_unfreeze"
+            or doc.get("schema_version") != "1.0"
+            or doc.get("status") != "authorized_pending"
+            or doc.get("approval_id") != approval_id
+            or doc.get("release_id") != release_id
+            or doc.get("candidate_sha") != proof["candidate_sha"]
+            or doc.get("rollback_sha") != proof["rollback_sha"]
+            or doc.get("scope_sha256") != proof["scope_sha256"]
+            or doc.get("freeze_sha256_before") != proof["freeze_sha256"]
+            or doc.get("predecessor_source_receipt_sha256") != proof["predecessor_source_receipt_sha256"]
+            or doc.get("predecessor_transaction_receipt_sha256") != proof["predecessor_transaction_receipt_sha256"]
+            or doc.get("prior_release_approval_source") != (record.get("owner_approval") or {}).get("source")
+            or doc.get("standing_authority") is not False
+            or doc.get("automatic_publish_authority") is not False):
+        return None
+    return {
+        "authorization": "signed_teams_replacement_unfreeze",
+        "release_id": release_id,
+        "candidate_sha": proof["candidate_sha"],
+        "rollback_sha": proof["rollback_sha"],
+        "scope_sha256": proof["scope_sha256"],
+        "owner_approval_source": (record.get("owner_approval") or {}).get("source"),
+        "recovery_profile_id": "explicit_exact_sha_owner_unfreeze_replacement",
+        "declaration_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        "explicit_unfreeze_receipt_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        "replacement_approval_id": approval_id,
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+    }
+
+
 def owner_unfreeze_release(
     repo: Path,
     state_root: Path,
     *,
     release_id: str,
     candidate_sha: str,
+    explicit_unfreeze_scope_sha256: str | None = None,
+    explicit_unfreeze_rollback_sha: str | None = None,
 ) -> dict[str, Any]:
     """Lift the blanket production freeze for one exact reviewed Owner-approved release."""
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
@@ -5057,12 +6504,31 @@ def owner_unfreeze_release(
         raise ReleaseManagerError("unfreeze candidate SHA does not match release record")
     verify_candidate_on_main(repo, candidate_sha)
     owner = record.get("owner_approval") or {}
+    owner_source = str(owner.get("source") or "")
     if (owner.get("approved") is not True
-            or owner.get("candidate_sha") != candidate_sha
-            or owner.get("source") != "explicit_owner_instruction"):
+            or owner.get("candidate_sha") != candidate_sha):
         raise ReleaseManagerError("exact-SHA explicit Owner approval is required to unfreeze")
+    # An existing signed Teams *deployment* approval remains immutable. A
+    # later exact-release *unfreeze* is a separate Owner decision, never a
+    # reason to relabel that signed approval as an explicit shell instruction.
+    explicit_source = owner_source == "explicit_owner_instruction"
+    signed_source = re.fullmatch(
+        r"authenticated_mobile_teams_owner:relapproval-[0-9a-f]{32}", owner_source,
+    ) is not None
+    if not explicit_source and not signed_source:
+        raise ReleaseManagerError("owner approval source is not trusted for exact unfreeze")
     require_current_manual_scope_review(repo, state_root, record)
     rollback_sha = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+    scope = record["manual_scope_review"]
+    if not explicit_source:
+        # The native CLI must be called only after a new explicit Owner
+        # instruction naming these *current* identities. A signed Teams card
+        # cannot double as the distinct global-unfreeze authorization.
+        if (explicit_unfreeze_scope_sha256 != scope.get("scope_sha256")
+                or explicit_unfreeze_rollback_sha != rollback_sha):
+            raise ReleaseManagerError(
+                "distinct exact-SHA Owner unfreeze instruction must bind current scope and rollback"
+            )
     live_production_alignment(rollback_sha)
     marker = state_root / PRODUCTION_FREEZE_MARKER
     if not marker.exists() or marker.is_symlink():
@@ -5076,7 +6542,6 @@ def owner_unfreeze_release(
             or marker_doc.get("scope") != "manual-and-automatic-production-promotions"
             or "exact-SHA owner unfreeze decision" not in str(marker_doc.get("remove_only_after") or "")):
         raise ReleaseManagerError("production deployment freeze marker policy does not permit exact-release unfreeze")
-    scope = record["manual_scope_review"]
     receipts = state_root / "owner-explicit-unfreeze-receipts"
     receipts.mkdir(mode=0o700, parents=True, exist_ok=True)
     if receipts.is_symlink() or stat.S_IMODE(receipts.stat().st_mode) != 0o700:
@@ -5090,6 +6555,8 @@ def owner_unfreeze_release(
         "rollback_sha": rollback_sha,
         "scope_sha256": str(scope["scope_sha256"]),
         "owner_approval_source": "explicit_owner_instruction",
+        "prior_release_approval_source": owner_source,
+        "separate_exact_owner_unfreeze": not explicit_source,
         "freeze_sha256_before": snapshot["sha256"],
         "standing_authority": False,
         "automatic_publish_authority": False,
@@ -5098,26 +6565,255 @@ def owner_unfreeze_release(
         existing = json.loads(receipt_path.read_text(encoding="utf-8"))
         if any(existing.get(k) != v for k, v in expected.items()):
             raise ReleaseManagerError("existing owner unfreeze receipt conflicts with exact release")
-        if not marker.exists():
+        if (marker.exists() and existing.get("status") == "authorized_pending"
+                and existing.get("freeze_remains_active") is True
+                and existing.get("restore_freeze_after_transaction") is True):
             return existing
-        raise ReleaseManagerError("owner unfreeze receipt exists while freeze marker remains active")
-    receipt = {**expected, "recorded_at": now(), "status": "authorized_pending"}
-    atomic_json(receipt_path, receipt)
-    try:
-        marker.unlink()
-    except BaseException:
-        receipt["status"] = "marker_removal_failed"
-        receipt["failed_at"] = now()
-        atomic_json(receipt_path, receipt)
-        raise
-    receipt["status"] = "unfrozen"
-    receipt["unfrozen_at"] = now()
+        raise ReleaseManagerError("owner unfreeze receipt is not a safely pending exact release")
+    # Recording the separate Owner decision does NOT unfreeze production.
+    # The release transaction will validate and consume this exact receipt,
+    # unfreeze under the production lock, and restore the original freeze in
+    # its finally block (or the existing stranded-transaction recovery path).
+    receipt = {**expected, "recorded_at": now(), "status": "authorized_pending",
+               "freeze_remains_active": True, "restore_freeze_after_transaction": True}
     atomic_json(receipt_path, receipt)
     record.setdefault("history", []).append(
-        {"at": now(), "state": "production_eligible", "gate": "owner_exact_sha_unfreeze_recorded"}
+        {"at": now(), "state": "production_eligible", "gate": "owner_exact_sha_unfreeze_pending_transaction"}
     )
     save_record(state_root, record)
     return receipt
+
+
+def owner_release_transaction_context(
+    state_root: Path, record: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Use the exact Owner release decision as the one production transaction authority.
+
+    This deliberately removes the former second human unfreeze decision. The
+    legacy freeze marker remains a compatibility/safety mechanism during the
+    transition, but the serialized Production Manager transaction may open it
+    only when the same exact candidate, rollback, reviewed scope and signed
+    Owner release approval still match. No standing authority is created.
+    """
+    if str(record.get("state") or "") != "production_eligible":
+        return None
+    owner_source = str((record.get("owner_approval") or {}).get("source") or "")
+    if owner_source.startswith("authenticated_signed_mcp_owner:"):
+        # All release and freeze scope is independently re-verified from the
+        # signed OAuth Owner proof. Never reclassify it as a Teams decision.
+        return signed_mcp_owner_one_transaction_freeze_context(
+            state_root, record,
+        )
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    rollback = str(record.get("rollback_sha") or "")
+    release_id = str(record.get("release_id") or "")
+    scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
+    owner = record.get("owner_approval") or {}
+    source = str(owner.get("source") or "")
+    manifest = record.get("release_manifest") or {}
+    manifest_sha256 = hashlib.sha256(json.dumps(
+        manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")).hexdigest() if isinstance(manifest, dict) else ""
+    transaction_binding = owner.get("transaction_binding") or {}
+    if (not SHA.fullmatch(candidate) or not SHA.fullmatch(rollback)
+            or not one_transaction_release_id_matches_candidate(release_id, candidate)
+            or not isinstance(scope, str) or re.fullmatch(r"[0-9a-f]{64}", scope) is None
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate
+            or transaction_binding.get("candidate_sha") != candidate
+            or transaction_binding.get("rollback_sha") != rollback
+            or transaction_binding.get("scope_sha256") != scope
+            or transaction_binding.get("manifest_sha256") != manifest_sha256
+            or not (source == "explicit_owner_instruction" or re.fullmatch(r"authenticated_mobile_teams_owner:relapproval-[0-9a-f]{32}", source))):
+        return None
+    try:
+        binding = current_initial_freeze_binding(state_root, record)
+    except (OSError, ValueError, TypeError, ReleaseManagerError):
+        return None
+    if (binding.get("candidate_sha") != candidate
+            or binding.get("rollback_sha") != rollback
+            or binding.get("scope_sha256") != scope):
+        return None
+    subject = {
+        "schema_version": "1.0",
+        "authorization": "owner_exact_release_transaction",
+        "release_id": release_id,
+        "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": scope,
+        "freeze_sha256": binding["freeze_sha256"],
+        "manifest_sha256": binding["manifest_sha256"],
+        "owner_approval_source": source,
+    }
+    digest = "sha256:" + hashlib.sha256(json.dumps(
+        subject, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")).hexdigest()
+    return {
+        "authorization": "signed_teams_one_transaction_unfreeze",
+        "release_id": release_id,
+        "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": scope,
+        "recovery_profile_id": "owner_exact_release_transaction",
+        "declaration_sha256": digest,
+        "owner_approval_source": source,
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+    }
+
+
+def signed_mcp_owner_one_transaction_freeze_context(
+    state_root: Path, record: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """One governed OAuth Owner decision permits one bounded native unfreeze.
+
+    No second approval card, SSH instruction, global unfreeze or inherited
+    standing release permission. The independent Ed25519 proof is rechecked
+    against the *current* production freeze and the exact source, manifest,
+    scope and rollback. The protected root consumer will verify it again.
+    """
+    owner = record.get("owner_approval") or {}
+    source = str(owner.get("source") or "")
+    if not re.fullmatch(
+        r"authenticated_signed_mcp_owner:owner-mcp-[0-9a-f]{32}", source,
+    ):
+        return None
+    if record.get("state") != "production_eligible":
+        return None
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    release_id = str(record.get("release_id") or "")
+    if (not SHA.fullmatch(candidate)
+            or release_id != record_id(candidate)
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate):
+        return None
+    proof_path = state_root / "owner-approval-requests-processed" / (release_id + ".json")
+    try:
+        meta = proof_path.lstat()
+        raw = proof_path.read_bytes()
+        if (proof_path.is_symlink() or not stat.S_ISREG(meta.st_mode)
+                or stat.S_IMODE(meta.st_mode) != 0o600
+                or meta.st_uid != os.geteuid() or len(raw) > 16384):
+            return None
+        request = json.loads(raw)
+        module_root = Path(__file__).resolve().parents[1] / "implementation"
+        if str(module_root) not in sys.path:
+            sys.path.insert(0, str(module_root))
+        from kernel.signed_owner_release import read_pinned_root_owner_public_key
+        key = read_pinned_root_owner_public_key(
+            Path("/etc/jason-owner-release/verified-owner-public-key.json")
+        )
+        proof = verify_signed_mcp_owner_request(
+            state_root, record, request, public_key=key,
+        )
+        if source != "authenticated_signed_mcp_owner:" + proof["approval_id"]:
+            return None
+        scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
+        rollback = str(record.get("rollback_sha") or "")
+        if scope != proof["scope_sha256"] or rollback != proof["rollback_sha"]:
+            return None
+        return {
+            "authorization": "authenticated_signed_mcp_owner_one_transaction_unfreeze",
+            "release_id": release_id,
+            "candidate_sha": candidate,
+            "rollback_sha": rollback,
+            "scope_sha256": scope,
+            "recovery_profile_id": "authenticated_owner_exact_sha_unfreeze",
+            "declaration_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+            "explicit_unfreeze_receipt_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+            "owner_approval_source": source,
+            "standing_authority": False,
+            "restore_freeze_after_transaction": True,
+            "authenticated_owner_approval_id": proof["approval_id"],
+        }
+    except (OSError, ValueError, TypeError, KeyError, ReleaseManagerError,
+            PermissionError, json.JSONDecodeError):
+        return None
+
+
+def explicit_owner_one_transaction_freeze_context(
+    state_root: Path, record: Mapping[str, Any], *, max_age_seconds: int = 900,
+) -> dict[str, Any] | None:
+    """Admit a recently recorded distinct Owner decision, never a standing waiver.
+
+    Called inside the native production transaction lock after source/health
+    checks. A pending authorization cannot remove the freeze on its own.
+    """
+    if str(record.get("state") or "") != "production_eligible":
+        return None
+    # Prefer one independent, signed Entra Owner transaction proof to the
+    # legacy Teams/unfreeze paths when that exact evidence is present.
+    signed_mcp = signed_mcp_owner_one_transaction_freeze_context(
+        state_root, record,
+    )
+    if signed_mcp is not None:
+        return signed_mcp
+    if record.get("replacement_unfreeze_authorization") is not None:
+        return signed_replacement_unfreeze_context(state_root, record)
+    if record.get("renewed_initial_unfreeze_authorization") is not None:
+        return signed_renewed_initial_one_transaction_freeze_context(state_root, record)
+    if record.get("signed_initial_unfreeze_authorization") is not None:
+        return signed_initial_one_transaction_freeze_context(state_root, record)
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    rollback = str(record.get("rollback_sha") or "")
+    scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
+    release_id = str(record.get("release_id") or "")
+    owner = record.get("owner_approval") or {}
+    source = str(owner.get("source") or "")
+    if (not SHA.fullmatch(candidate) or not SHA.fullmatch(rollback)
+            or not isinstance(scope, str) or not re.fullmatch(r"[0-9a-f]{64}", scope)
+            or release_id != record_id(candidate)
+            or owner.get("approved") is not True or owner.get("candidate_sha") != candidate
+            or not (source == "explicit_owner_instruction" or re.fullmatch(
+                r"authenticated_mobile_teams_owner:relapproval-[0-9a-f]{32}", source))):
+        return None
+    path = state_root / "owner-explicit-unfreeze-receipts" / (release_id + ".json")
+    try:
+        info = path.lstat()
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.geteuid() or info.st_gid != os.getegid()
+                or not 1 <= info.st_size <= 8192):
+            return None
+        raw = path.read_bytes()
+        receipt = json.loads(raw)
+        marker = _freeze_marker_snapshot(state_root)
+        recorded_at = datetime.fromisoformat(str(receipt.get("recorded_at") or "").replace("Z", "+00:00"))
+        at = datetime.now(timezone.utc)
+        if recorded_at.tzinfo is None:
+            return None
+        age = (at - recorded_at.astimezone(timezone.utc)).total_seconds()
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError, ReleaseManagerError):
+        return None
+    if (not 0 <= age <= max_age_seconds
+            or receipt.get("schema_version") != "1.0"
+            or receipt.get("authorization") != "explicit_exact_sha_owner_unfreeze"
+            or receipt.get("release_id") != release_id
+            or receipt.get("candidate_sha") != candidate
+            or receipt.get("rollback_sha") != rollback
+            or receipt.get("scope_sha256") != scope
+            or receipt.get("prior_release_approval_source") != source
+            or receipt.get("owner_approval_source") != "explicit_owner_instruction"
+            or receipt.get("status") != "authorized_pending"
+            or receipt.get("freeze_remains_active") is not True
+            or receipt.get("restore_freeze_after_transaction") is not True
+            or receipt.get("standing_authority") is not False
+            or receipt.get("automatic_publish_authority") is not False
+            or receipt.get("freeze_sha256_before") != marker["sha256"]):
+        return None
+    return {
+        "authorization": "explicit_owner_one_transaction_unfreeze",
+        "release_id": release_id,
+        "candidate_sha": candidate, "rollback_sha": rollback,
+        "scope_sha256": scope,
+        "recovery_profile_id": "explicit_exact_sha_owner_unfreeze",
+        "declaration_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        "explicit_unfreeze_receipt_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        "owner_approval_source": source,
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+    }
+
 
 
 def manual_release_scope_review(
@@ -5128,7 +6824,7 @@ def manual_release_scope_review(
     acknowledged_worktrees: tuple[str, ...] = (),
     record_review: bool = False,
 ) -> dict[str, Any]:
-    """Review a full exact-main release; no deployment or developer checkout edits.
+    """Review an exact protected-history release; no deployment or checkout edits.
 
     A scope acknowledgement is technical change-integration evidence, NOT
     owner deployment authorization. It is bound to the candidate and baseline
@@ -5382,6 +7078,21 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                             repo, state_root, record, recovery_context,
                         ) if recovery_context is not None else None
                     )
+                    if exception_context is None and recovery_context is None:
+                        # A separate direct Owner decision can admit only a
+                        # breaker-CLOSED normal deployment, not an open-breaker
+                        # recovery exception or an indefinite global unfreeze.
+                        revalidate_circuit_breaker(state_root)
+                        exception_context = owner_release_transaction_context(
+                            state_root, record,
+                        )
+                        if exception_context is None:
+                            # Compatibility only for approvals recorded before
+                            # transaction_binding existed. No new workflow
+                            # should mint a separate unfreeze receipt.
+                            exception_context = explicit_owner_one_transaction_freeze_context(
+                                state_root, record,
+                            )
                     if exception_context is None:
                         require_owner_production_deployment_unfrozen(state_root)
                         raise ReleaseManagerError("production freeze exception evidence is incomplete")
@@ -5432,6 +7143,238 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     finally:
         release_production_transaction_lock(lock)
 
+
+
+def rollback_closed_release(
+    repo: Path,
+    state_root: Path,
+    *,
+    release_id: str,
+    candidate_sha: str,
+    scope_sha256: str,
+    rollback_sha: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Rollback one closed release to its exact recorded pre-release LKG.
+
+    This is a bounded post-acceptance recovery path. It requires the original
+    exact-SHA Owner approval/unfreeze receipt, the same reviewed scope digest,
+    the exact recorded rollback SHA, an active production freeze, and a
+    complete prior LKG manifest. It grants no standing rollback authority.
+    """
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    rollback_sha = exact_sha(rollback_sha, "rollback_sha")
+    if re.fullmatch(r"[0-9a-f]{64}", scope_sha256 or "") is None:
+        raise ReleaseManagerError("exact reviewed scope SHA-256 is required")
+    if not reason.strip():
+        raise ReleaseManagerError("post-acceptance rollback reason is required")
+
+    record = load_record(state_root, release_id)
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    scope = record.get("manual_scope_review") or {}
+    owner = record.get("owner_approval") or {}
+    production = record.get("production") or {}
+    baseline = dict(record.get("last_known_good_manifest") or {})
+    if record.get("state") != "closed":
+        raise ReleaseManagerError("post-acceptance rollback requires a closed release")
+    if candidate != candidate_sha or record.get("rollback_sha") != rollback_sha:
+        raise ReleaseManagerError("rollback arguments differ from the closed release")
+    if scope.get("candidate_sha") != candidate_sha or scope.get("baseline_sha") != rollback_sha or scope.get("scope_sha256") != scope_sha256:
+        raise ReleaseManagerError("rollback scope differs from the reviewed release scope")
+    if owner.get("approved") is not True or owner.get("candidate_sha") != candidate_sha:
+        raise ReleaseManagerError("exact candidate Owner approval is missing")
+    if production.get("live_sha") != candidate_sha or not production.get("verified_at"):
+        raise ReleaseManagerError("closed release lacks verified production evidence")
+    if baseline.get("complete") is not True or baseline.get("revision") != rollback_sha:
+        raise ReleaseManagerError("recorded pre-release LKG is incomplete or mismatched")
+
+    explicit_path = state_root / "owner-explicit-unfreeze-receipts" / (release_id + ".json")
+    explicit = json.loads(explicit_path.read_text(encoding="utf-8")) if explicit_path.is_file() else {}
+    if (
+        explicit.get("authorization") != "explicit_exact_sha_owner_unfreeze"
+        or explicit.get("status") != "consumed"
+        or explicit.get("candidate_sha") != candidate_sha
+        or explicit.get("rollback_sha") != rollback_sha
+        or explicit.get("scope_sha256") != scope_sha256
+        or explicit.get("freeze_restored") is not True
+        or explicit.get("standing_authority") is not False
+    ):
+        raise ReleaseManagerError("consumed exact Owner unfreeze receipt does not authorize this rollback")
+    try:
+        freeze = _freeze_marker_snapshot(state_root)
+    except (OSError, ReleaseManagerError) as exc:
+        raise ReleaseManagerError(
+            "production freeze is not restored to the authorized bytes"
+        ) from exc
+    if freeze.get("sha256") != explicit.get("freeze_sha256_after"):
+        raise ReleaseManagerError("production freeze is not restored to the authorized bytes")
+
+    receipt_path = state_root / "owner-postacceptance-rollback-receipts" / (release_id + ".json")
+    receipt_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    receipt = {
+        "schema_version": "1.0",
+        "authorization": "explicit_exact_sha_owner_postacceptance_rollback",
+        "release_id": release_id,
+        "candidate_sha": candidate_sha,
+        "rollback_sha": rollback_sha,
+        "scope_sha256": scope_sha256,
+        "reason": reason.strip()[:700],
+        "source_unfreeze_receipt_sha256": (
+            "sha256:" + hashlib.sha256(explicit_path.read_bytes()).hexdigest()
+        ),
+        "freeze_sha256_before": freeze["sha256"],
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+        "authorized_at": now(),
+        "status": "authorized_pending",
+    }
+    atomic_json(receipt_path, receipt)
+
+    lock = acquire_production_transaction_lock(repo, state_root, record)
+    candidate_tree = None
+    rollback_tree = None
+    opened_freeze: dict[str, Any] | None = None
+    recovery_steps: dict[str, Any] = {}
+    result: dict[str, Any] | None = None
+    rollback_error: Exception | None = None
+    try:
+        with temporary_worker_admission_gate():
+            require_pmv3_engineering_quiescent()
+            live_production_alignment(candidate_sha)
+            opened_freeze = begin_postacceptance_rollback_freeze_exception(
+                state_root, receipt_path
+            )
+            require_owner_production_deployment_unfrozen(state_root)
+            candidate_tree = worktree(repo, state_root, candidate_sha)
+            rollback_tree = worktree(repo, state_root, rollback_sha)
+            runtime_script = candidate_tree / "infrastructure" / "jason-runtime" / "production-deploy.sh"
+            mcp_script = candidate_tree / "infrastructure" / "jason-mcp" / "production-deploy.sh"
+            if not runtime_script.is_file() or not mcp_script.is_file():
+                raise ReleaseManagerError("candidate rollback scripts are unavailable")
+
+            prior_qbo = declared_quickbooks_read_profile(rollback_tree)
+            prior_at = declared_autotask_read_profile(rollback_tree)
+            if prior_qbo is None:
+                raise ReleaseManagerError("rollback QuickBooks profile is unavailable")
+            previous_uid = worker_enrollment.approved_diagnostic_uid(rollback_tree)
+            prior_release_mode = str(baseline.get("mobile_release_approval_mode") or "")
+            if prior_release_mode not in {"off", "owner_only_pilot", "owner_reviewed", "admin_approver_separated"}:
+                raise ReleaseManagerError("rollback release approval mode is invalid")
+
+            rollback_env = quickbooks_rollback_environment(
+                os.environ, rollback_sha=rollback_sha, prior_profile=prior_qbo
+            )
+            if prior_at is not None:
+                rollback_env = autotask_rollback_environment(
+                    rollback_env, prior_autotask_profile=prior_at
+                )
+            rollback_env[worker_enrollment.ENV_NAME] = previous_uid
+            rollback_env["JASON_RELEASE_MOBILE_APPROVAL_ROLLBACK_MODE"] = prior_release_mode
+
+            # Open the breaker before host rollback. The root reconciler already
+            # recognizes only the exact previous_last_known_good while open.
+            open_circuit_breaker(
+                state_root, record,
+                reason="post_acceptance_rollback: " + reason.strip()[:600],
+                rollback_verified=False,
+            )
+
+            pin_exact_rollback_image("mcp", baseline)
+            run([str(mcp_script)], cwd=candidate_tree, env=rollback_env)
+            if not rollback_surface_is_verified("mcp", rollback_sha, baseline):
+                raise ReleaseManagerError("MCP post-acceptance rollback is not verified")
+            recovery_steps["mcp"] = "restored_and_verified"
+
+            host_result = request_host_reconcile(state_root, rollback_sha)
+            verify_host_reconciliation_evidence(host_result, rollback_sha)
+            recovery_steps["host"] = "restored_and_verified"
+
+            manager = install_release_manager_from_current(rollback_sha)
+            recovery_steps["release_manager"] = manager
+
+            restored_policy = restore_mobile_release_approval_policy(state_root, record)
+            recovery_steps["approval_policy"] = restored_policy
+
+            pin_exact_rollback_image("runtime", baseline)
+            run([str(runtime_script)], cwd=candidate_tree, env=rollback_env)
+            wait_live_runtime()
+            if not rollback_surface_is_verified("runtime", rollback_sha, baseline):
+                raise ReleaseManagerError("runtime post-acceptance rollback is not verified")
+            recovery_steps["runtime"] = "restored_and_verified"
+
+            alignment = live_production_alignment(rollback_sha)
+            verified = capture_production_manifest(rollback_sha)
+            if verified.get("complete") is not True:
+                raise ReleaseManagerError("post-acceptance rollback manifest is incomplete")
+            for surface in ("runtime", "mcp"):
+                if verified.get(surface + "_image_id") != baseline.get(surface + "_image_id"):
+                    raise ReleaseManagerError("post-acceptance rollback image differs from recorded LKG")
+
+            set_last_known_good(
+                state_root, verified, release_id="release-" + rollback_sha[:16]
+            )
+            record["failure"] = {
+                "at": now(),
+                "error": "PostDeploymentAcceptanceFailure",
+                "message": reason.strip()[:700],
+                "rollback_verified": True,
+                "rollback_errors": [],
+                "rollback_actions": recovery_steps,
+            }
+            record["state"] = "rolled_back"
+            record.setdefault("history", []).append({
+                "at": now(), "state": "rolled_back",
+                "gate": "post_deployment_acceptance_failure",
+            })
+            save_record(state_root, record)
+            open_circuit_breaker(
+                state_root, record,
+                reason="post_acceptance_failure_rolled_back: " + reason.strip()[:560],
+                rollback_verified=True,
+            )
+            result = {
+                "status": "rolled_back",
+                "release_id": release_id,
+                "candidate_sha": candidate_sha,
+                "rollback_sha": rollback_sha,
+                "rollback_verified": True,
+                "alignment": alignment,
+                "manifest": verified,
+                "recovery_steps": recovery_steps,
+            }
+    except Exception as exc:
+        rollback_error = exc
+    finally:
+        release_state = "rolled_back" if result is not None else "rollback_failed"
+        if opened_freeze is not None:
+            restore_one_transaction_freeze_exception(
+                state_root, opened_freeze, release_state=release_state
+            )
+        if candidate_tree is not None:
+            remove_worktree(repo, candidate_tree)
+        if rollback_tree is not None:
+            remove_worktree(repo, rollback_tree)
+        release_production_transaction_lock(lock)
+
+    current_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if rollback_error is not None:
+        current_receipt.update({
+            "status": "failed",
+            "failed_at": now(),
+            "error": type(rollback_error).__name__,
+            "message": str(rollback_error)[:700],
+        })
+        atomic_json(receipt_path, current_receipt)
+        raise rollback_error
+    if result is None:
+        raise ReleaseManagerError("post-acceptance rollback returned without a verified result")
+    current_receipt.update({
+        "status": "consumed",
+        "completed_at": now(),
+        "rollback_verified": True,
+    })
+    atomic_json(receipt_path, current_receipt)
+    return result
 
 def prepare_release(
     repo: Path,
@@ -5650,9 +7593,9 @@ def authoritative_auto_promotion_head(repo: Path) -> str:
 def require_current_protected_release_source(repo: Path, record: dict[str, Any]) -> None:
     """Reject a superseded/manual candidate before a production transaction.
 
-    Automatic selection already compares to main; manual promotion must obey the
-    same immutable source rule. Neither a past exact-SHA approval nor a successful
-    preproduction run authorizes replacing more recent protected-main work.
+    Automatic selection remains latest-main. JES-005 permits an exact reviewed
+    protected ancestor only after independent lineage and newer-path checks.
+    This source proof grants no approval, freeze exception or mutation authority.
     """
     candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
     baseline = str(record.get("rollback_sha") or "")
@@ -5660,10 +7603,24 @@ def require_current_protected_release_source(repo: Path, record: dict[str, Any])
         raise ReleaseManagerError("production candidate or baseline SHA is invalid")
     current_main = authoritative_auto_promotion_head(repo)
     if candidate != current_main:
-        raise ReleaseManagerError(
-            "production release candidate is behind protected main; "
-            "reprepare and revalidate the exact current main revision"
-        )
+        # The same exact-candidate verifier is used by scope review and both
+        # under-lock promotion checks. Automatic selection remains latest-main.
+        import importlib.util
+        source = repo / "tools/manual_release_scope.py"
+        if source.is_symlink() or not source.is_file():
+            raise ReleaseManagerError("canonical pinned release verifier unavailable")
+        spec = importlib.util.spec_from_file_location("jason_pinned_release_scope", source)
+        if spec is None or spec.loader is None:
+            raise ReleaseManagerError("canonical pinned release verifier unavailable")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        try:
+            module.verify_pinned_candidate_against_main(
+                repo, baseline, candidate, current_main=current_main)
+        except (module.ScopeBlocked, OSError, ValueError, AttributeError) as exc:
+            raise ReleaseManagerError("pinned release lineage or newer changes unverified: "
+                                      + str(exc)) from exc
+        return
     # A valid candidate on main must also include the installed production
     # history; otherwise promoting it would drop production changes.
     ancestry = subprocess.run(
@@ -5695,7 +7652,7 @@ def live_release_mobile_approval_mode(runtime: dict[str, Any]) -> str:
                 and value.startswith("JASON_RELEASE_MOBILE_APPROVAL_MODE=")]
     if len(selected) != 1:
         return "off"
-    return selected[0] if selected[0] in {"owner_only_pilot", "owner_reviewed"} else "off"
+    return selected[0] if selected[0] in {"owner_only_pilot", "owner_reviewed", "admin_approver_separated"} else "off"
 
 
 def _open_breaker_recovery_policy(repo: Path, candidate_sha: str) -> dict[str, Any]:
@@ -5991,10 +7948,17 @@ def governed_open_breaker_recovery_context(
     except ReleaseManagerError:
         return None
     owner = record.get("owner_approval") or {}
+    signed_source = str(owner.get("source") or "")
+    verified_owner = (
+        signed_source.startswith("authenticated_mobile_teams_owner:relapproval-")
+        or (signed_source.startswith("authenticated_signed_mcp_owner:owner-mcp-")
+            and signed_mcp_owner_one_transaction_freeze_context(state_root, record)
+            is not None)
+    )
     if require_owner_approval and (
         owner.get("approved") is not True
         or owner.get("candidate_sha") != candidate
-        or not str(owner.get("source") or "").startswith("authenticated_mobile_teams_owner:relapproval-")
+        or not verified_owner
     ):
         return None
     return {
@@ -6016,19 +7980,29 @@ def governed_open_breaker_recovery_context(
     }
 
 
+def _reviewed_mobile_release_mode(policy: Any) -> str:
+    if policy.schema_version == "1.0":
+        return "owner_only_pilot"
+    if policy.schema_version in {"4.0", "4.1"}:
+        return "admin_approver_separated"
+    if policy.schema_version in {"2.0", "3.0", "3.1"}:
+        return "owner_reviewed"
+    raise ReleaseManagerError("unreviewed Teams Owner release policy mode")
+
+
 def signed_owner_offer_purpose(
     record: dict[str, Any], candidate_sha: str, reviewed_policy: Any,
     live_mode: str, *, ccc_root: Path,
+    state_root: Path | None = None,
 ) -> str | None:
-    """Return narrow actionable Teams purpose or None. No authority mutation.
+    """Return the single actionable Owner release purpose, or None.
 
-    V1 remains normal-risk and can only offer a full unapproved release.
-    V2 can offer a CCC-only card for an ALREADY approved exact release whose
-    separately authenticated CCC material review is missing. A fully reviewed
-    release gets no redundant card. Neither case certifies CCC or deploys.
+    The exact Owner release decision is the only human release authorization.
+    CCC remains technical evidence only and the legacy production-freeze marker
+    is handled internally by the serialized transaction. No CCC-only, initial
+    unfreeze-renewal, or replacement-unfreeze card is generated.
     """
-    expected_mode = ("owner_only_pilot" if reviewed_policy.schema_version == "1.0"
-                     else "owner_reviewed")
+    expected_mode = _reviewed_mobile_release_mode(reviewed_policy)
     if live_mode != expected_mode:
         return None
     if str(record.get("risk_profile") or "unknown") not in reviewed_policy.allowed_risk_profiles:
@@ -6036,20 +8010,9 @@ def signed_owner_offer_purpose(
     owner = record.get("owner_approval") or {}
     if owner.get("approved") is not True:
         return "release_and_ccc"
-    if (reviewed_policy.schema_version != "2.0"
-            or owner.get("candidate_sha") != candidate_sha):
+    if owner.get("candidate_sha") != candidate_sha:
         return None
-    named = ccc_root / ("material-review-" + candidate_sha[:16] + ".json")
-    if named.is_file():
-        prior = json.loads(named.read_text(encoding="utf-8"))
-        if (prior.get("source_revision") == candidate_sha
-                and prior.get("recorded_by") == "person-al"
-                and prior.get("status") == "approved"):
-            return None
-        # A conflicting stored review is an authority problem, not an
-        # invitation to issue a new card that would overwrite audit evidence.
-        raise ReleaseManagerError("existing CCC material review conflicts with exact release")
-    return "ccc_material_review_only"
+    return None
 
 
 @contextmanager
@@ -6197,8 +8160,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         return False
     reviewed_policy = read_mobile_release_policy(policy_path)
     mode = live_release_mobile_approval_mode(live)
-    expected_mode = ("owner_only_pilot" if reviewed_policy.schema_version == "1.0"
-                     else "owner_reviewed")
+    expected_mode = _reviewed_mobile_release_mode(reviewed_policy)
     if mode != expected_mode:
         print("RELEASE_APPROVAL_ONLY=REVIEWED_MODE_NOT_ACTIVE", flush=True)
         return False
@@ -6241,6 +8203,9 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
     try:
         consume_mobile_release_decisions(
             repo=repo, state_root=state_root, approve_release=approve_release,
+            record_replacement_unfreeze=record_signed_replacement_unfreeze,
+            record_initial_unfreeze=record_signed_initial_unfreeze,
+            record_initial_unfreeze_renewal=record_signed_initial_unfreeze_renewal,
         )
     except MobileReleaseEvidenceBusy:
         print("RELEASE_APPROVAL_ONLY=SIGNED_OWNER_EVIDENCE_BUSY", flush=True)
@@ -6262,7 +8227,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
 
     purpose = signed_owner_offer_purpose(
         record, main_sha, reviewed_policy, mode,
-        ccc_root=Path("/var/lib/jason/ccc"),
+        ccc_root=Path("/var/lib/jason/ccc"), state_root=state_root,
     )
     if purpose is None:
         print("RELEASE_APPROVAL_ONLY=NO_OWNER_ACTION_REQUIRED", flush=True)
@@ -6283,6 +8248,35 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         ensure_ascii=False,
     ).encode("utf-8")).hexdigest()
     review_only_offer = purpose == "ccc_material_review_only"
+    replacement_offer = purpose == "replacement_unfreeze_only"
+    renewal_offer = purpose == "initial_unfreeze_renewal_only"
+    initial_freeze_binding = None
+    if (ordinary_safe and not review_only_offer and not replacement_offer
+            and (state_root / PRODUCTION_FREEZE_MARKER).exists()):
+        if reviewed_policy.schema_version not in {"2.0", "3.0", "4.0", "4.1"}:
+            print("RELEASE_APPROVAL_ONLY=FROZEN_RELEASE_REQUIRES_REVIEWED_OWNER_MODE", flush=True)
+            return False
+        try:
+            # The callback and host consumer reverify both independently.
+            require_current_manual_scope_review(repo, state_root, record)
+            initial_freeze_binding = current_initial_freeze_binding(state_root, record)
+        except ReleaseManagerError:
+            print("RELEASE_APPROVAL_ONLY=FROZEN_SCOPE_NOT_READY", flush=True)
+            return False
+    renewal_lineage = None
+    if renewal_offer:
+        from jason_runtime.mobile_release_approval import (
+            read_expired_initial_unfreeze_predecessor,
+        )
+        renewal_lineage = read_expired_initial_unfreeze_predecessor(
+            state_root, release_id, record,
+        )
+    replacement_lineage = (
+        {k: v.removeprefix("sha256:") if k.endswith("_receipt_sha256") else v
+         for k, v in attest_consumed_pre_mutation_unfreeze_for_replacement(
+             state_root, record).items()}
+        if replacement_offer else None
+    )
     replacing_stale_offer = False
     if offer.exists():
         existing = json.loads(offer.read_text(encoding="utf-8"))
@@ -6295,6 +8289,11 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         exact_subject = (
             existing.get("manifest_sha256") == manifest_digest
             and (existing.get("review_only") is True) == review_only_offer
+            and (existing.get("replacement_unfreeze_only") is True) == replacement_offer
+            and (existing.get("initial_unfreeze_renewal_only") is True) == renewal_offer
+            and existing.get("initial_unfreeze_renewal_lineage") == renewal_lineage
+            and existing.get("replacement_lineage") == replacement_lineage
+            and existing.get("initial_freeze_binding") == initial_freeze_binding
         )
         if exact_subject:
             print("RELEASE_APPROVAL_ONLY=EXISTING_OFFER_PRESERVED", flush=True)
@@ -6313,6 +8312,12 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         "protected_main_sha": main_sha,
         "live_rollback_sha": live_sha,
         **({"review_only": True} if review_only_offer else {}),
+        **({"replacement_unfreeze_only": True,
+            "replacement_lineage": replacement_lineage} if replacement_offer else {}),
+        **({"initial_unfreeze_renewal_only": True,
+            "initial_unfreeze_renewal_lineage": renewal_lineage} if renewal_offer else {}),
+        **({"initial_freeze_binding": initial_freeze_binding}
+           if initial_freeze_binding is not None else {}),
         **({
             "recovery_profile_id": recovery_context["profile_id"],
             "recovery_policy_sha256": recovery_context["policy_sha256"],
@@ -6373,8 +8378,7 @@ def request_expired_owner_card_renewal(
     if containment.active:
         raise ReleaseManagerError("owner Teams release approval is contained")
     policy = read_mobile_release_policy(policy_path)
-    expected_mode = ("owner_only_pilot" if policy.schema_version == "1.0"
-                     else "owner_reviewed")
+    expected_mode = _reviewed_mobile_release_mode(policy)
     if live_release_mobile_approval_mode(live) != expected_mode:
         raise ReleaseManagerError("reviewed Teams approval mode does not match live runtime")
     candidate = read_eligible_release(state_root, release_id, policy)
@@ -6495,6 +8499,9 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
         try:
             consume_mobile_release_decisions(
                 repo=repo, state_root=state_root, approve_release=approve_release,
+            record_replacement_unfreeze=record_signed_replacement_unfreeze,
+            record_initial_unfreeze=record_signed_initial_unfreeze,
+            record_initial_unfreeze_renewal=record_signed_initial_unfreeze_renewal,
             )
         except MobileReleaseEvidenceBusy:
             # Only an independently typed SQLITE_BUSY/LOCKED condition permits
@@ -6574,15 +8581,21 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
                 and reviewed_policy_path.is_file()):
             reviewed_policy = read_mobile_release_policy(reviewed_policy_path)
             live_mode = live_release_mobile_approval_mode(live_runtime())
-            expected_mode = ("owner_only_pilot" if reviewed_policy.schema_version == "1.0"
-                             else "owner_reviewed")
+            expected_mode = _reviewed_mobile_release_mode(reviewed_policy)
             requested_risk = str(record.get("risk_profile") or "unknown")
             purpose = signed_owner_offer_purpose(
                 record, candidate_sha, reviewed_policy, live_mode,
-                ccc_root=Path("/var/lib/jason/ccc"),
+                ccc_root=Path("/var/lib/jason/ccc"), state_root=state_root,
             )
             owner_teams_eligible = purpose is not None
             review_only = purpose == "ccc_material_review_only"
+            replacement_only = purpose == "replacement_unfreeze_only"
+            replacement_lineage = (
+                {k: v.removeprefix("sha256:") if k.endswith("_receipt_sha256") else v
+                 for k, v in attest_consumed_pre_mutation_unfreeze_for_replacement(
+                     state_root, record).items()}
+                if replacement_only else None
+            )
             if live_mode != expected_mode:
                 print("RELEASE_TEAMS_APPROVAL_UNAVAILABLE=runtime_mode_mismatch"
                       + f" expected={expected_mode} active={live_mode}", flush=True)
@@ -6601,6 +8614,9 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
                 ).encode("utf-8")).hexdigest(),
                 "protected_main_sha": main_sha, "live_rollback_sha": current_sha,
                 **({"review_only": True} if review_only else {}),
+                **({"replacement_unfreeze_only": True,
+                    "replacement_lineage": replacement_lineage}
+                   if replacement_only else {}),
                 "published_at": now(),
             })
         result = production_gate_result(repo, record)
@@ -6719,6 +8735,8 @@ def main() -> int:
     unfreeze = sub.add_parser("unfreeze-release")
     unfreeze.add_argument("--release-id", required=True)
     unfreeze.add_argument("--candidate-sha", required=True)
+    unfreeze.add_argument("--explicit-unfreeze-scope-sha256")
+    unfreeze.add_argument("--explicit-unfreeze-rollback-sha")
 
     approve = sub.add_parser("approve")
     approve.add_argument("--release-id", required=True)
@@ -6729,12 +8747,41 @@ def main() -> int:
 
     promote = sub.add_parser("promote")
     promote.add_argument("--release-id", required=True)
+    rollback_release = sub.add_parser("rollback-release")
+    rollback_release.add_argument("--release-id", required=True)
+    rollback_release.add_argument("--candidate-sha", required=True)
+    rollback_release.add_argument("--scope-sha256", required=True)
+    rollback_release.add_argument("--rollback-sha", required=True)
+    rollback_release.add_argument("--reason", required=True)
     closeout_retry = sub.add_parser("retry-closeout")
     closeout_retry.add_argument("--release-id", required=True)
 
     recovery = sub.add_parser("recover-baseline")
     recovery.add_argument("--revision", required=True)
     recovery.add_argument("--owner-approved", action="store_true")
+
+    # Generic exact-source backport admission; does NOT bypass main-only
+    # native production create/prepare/approve/promote or create a release.
+    backport = sub.add_parser("scoped-backport-admit")
+    backport.add_argument("--trusted-main-sha", required=True)
+
+    for name in ("scoped-backport-stage", "scoped-backport-promote",
+                 "scoped-backport-recover"):
+        typed = sub.add_parser(name)
+        typed.add_argument("--trusted-main-sha", required=True)
+        typed.add_argument("--release-id", required=True)
+        if name != "scoped-backport-stage":
+            typed.add_argument("--offer-sha256", required=True)
+
+    # Source-only scoped catalog admission. This subcommand is read-only:
+    # no release record, Owner decision, mutable state root or promotion.
+    sub.add_parser("catalog-scope-admit")
+    for name in ("catalog-scope-stage", "catalog-scope-promote", "catalog-scope-recover"):
+        scoped = sub.add_parser(name)
+        scoped.add_argument("--release-id", required=True)
+        scoped.add_argument("--protected-main-sha", required=True)
+        if name != "catalog-scope-stage":
+            scoped.add_argument("--offer-sha256", required=True)
 
     sub.add_parser("promote-eligible")
     sub.add_parser("approval-only-held")
@@ -6747,6 +8794,103 @@ def main() -> int:
     args = parser.parse_args()
     repo = args.repo.expanduser().resolve()
     state_root = args.state_root.expanduser().resolve()
+    if args.command == "scoped-backport-admit":
+        from tools.scoped_backport_release import (
+            source_admission, make_offer, validate_manifest, RELEASE_MANIFEST,
+            _git,
+        )
+        # This accepts ONLY protected-main manifest bytes and independently
+        # verifies an immutable LKG-descendant backport. No state-root write.
+        source = source_admission(repo, trusted_main_sha=args.trusted_main_sha)
+        pinned = validate_manifest(json.loads(
+            _git(repo, "show", args.trusted_main_sha + ":" + RELEASE_MANIFEST)))
+        offer = make_offer(pinned, main_sha=args.trusted_main_sha)
+        print(json.dumps({
+            "status": "source_admitted_not_production_eligible",
+            "source": source,
+            "offer": offer,
+            "native_release_record_created": False,
+            "owner_approval_recorded": False,
+            "production_mutations": False,
+            "provider_writes": False,
+            "root_installer_and_rollback_admission_required": True,
+        }, sort_keys=True, indent=2))
+        return 0
+    if args.command in {
+        "scoped-backport-stage", "scoped-backport-promote",
+        "scoped-backport-recover",
+    }:
+        from tools.scoped_backport_release import (
+            source_admission, make_offer, validate_manifest,
+            RELEASE_MANIFEST, _git,
+        )
+        from tools.scoped_backport_release_request import request, submit
+        source_admission(repo, trusted_main_sha=args.trusted_main_sha)
+        pinned = validate_manifest(json.loads(
+            _git(repo, "show", args.trusted_main_sha + ":" + RELEASE_MANIFEST)))
+        offer = make_offer(pinned, main_sha=args.trusted_main_sha)
+        if args.release_id != offer["release_id"]:
+            raise ReleaseManagerError("scoped backport release id is not exact")
+        action = "scoped_backport_" + args.command.rsplit("-", 1)[-1]
+        req = request(action, offer,
+                      offer_sha256=getattr(args, "offer_sha256", None))
+        # This is *not* native production approval. An independently
+        # installed, root-attested handler must validate each request.
+        # Currently absent: fail closed instead of creating an approval.
+        print(json.dumps(submit(req), sort_keys=True, indent=2))
+        return 0
+    if args.command == "catalog-scope-admit":
+        from catalog_scoped_release_admission import attest_source_scope
+        # All inputs come from immutable protected source, the published
+        # isolated snapshot, native CI and live Docker readbacks. Do not
+        # initialize state_root, use root authority or persist a release.
+        result = attest_source_scope(
+            repo, native_ci_checks=lambda sha: github_checks(
+                sha, list(dict.fromkeys(required_checks(repo) +
+                    ["governed-security-regressions"]))),
+        )
+        print(json.dumps(result, indent=2))
+        return 0
+    if args.command in {
+        "catalog-scope-stage", "catalog-scope-promote", "catalog-scope-recover",
+    }:
+        from catalog_scoped_promotion_request import (
+            exact_request, precheck_scoped_offer, root_worker_installed,
+            submit_to_native_worker,
+        )
+        action = "catalog_scope_" + args.command.rsplit("-", 1)[-1]
+        source_sha = exact_sha(args.protected_main_sha, "protected_main_sha")
+        if args.command == "catalog-scope-stage":
+            from catalog_scoped_release_admission import attest_source_scope
+            evidence = attest_source_scope(
+                repo, native_ci_checks=lambda sha: github_checks(
+                    sha, list(dict.fromkeys(required_checks(repo) +
+                        ["governed-security-regressions"]))),
+            )
+            if (evidence.get("protected_source", {}).get("verified_main_sha") != source_sha
+                    or "release-" + evidence["protected_source"]["snapshot_source_sha"][:16]
+                    != args.release_id):
+                raise ReleaseManagerError("catalog stage source identity changed")
+            offer_hash = None
+        else:
+            checked = precheck_scoped_offer(
+                Path('/var/lib/jason/authority/catalog-scoped-release'),
+                args.release_id, source_sha,
+                for_promotion=args.command == "catalog-scope-promote",
+            )
+            if checked["manifest_sha256"] != args.offer_sha256:
+                raise ReleaseManagerError("catalog exact offer changed")
+            offer_hash = args.offer_sha256
+        # Never create a production state root, alter the global freeze, or
+        # grant permissions from a CLI argument. Root worker and root-pinned
+        # exact one-use Owner evidence independently decide all mutations.
+        root_worker_installed()
+        request = exact_request(action,
+            release_id=args.release_id,source_revision=source_sha,
+            offer_sha256=offer_hash,
+        )
+        print(json.dumps(submit_to_native_worker(state_root, request), indent=2))
+        return 0
     state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     if args.command == "create":
@@ -6808,6 +8952,8 @@ def main() -> int:
         receipt = owner_unfreeze_release(
             repo=repo, state_root=state_root, release_id=args.release_id,
             candidate_sha=args.candidate_sha,
+            explicit_unfreeze_scope_sha256=args.explicit_unfreeze_scope_sha256,
+            explicit_unfreeze_rollback_sha=args.explicit_unfreeze_rollback_sha,
         )
         print(json.dumps(receipt, indent=2))
         return 0
@@ -6826,6 +8972,14 @@ def main() -> int:
     if args.command == "promote":
         record = deploy_production(repo, state_root, load_record(state_root, args.release_id))
         print(json.dumps(record, indent=2))
+        return 0
+    if args.command == "rollback-release":
+        result = rollback_closed_release(
+            repo, state_root, release_id=args.release_id,
+            candidate_sha=args.candidate_sha, scope_sha256=args.scope_sha256,
+            rollback_sha=args.rollback_sha, reason=args.reason,
+        )
+        print(json.dumps(result, indent=2))
         return 0
     if args.command == "retry-closeout":
         record = retry_administrative_closeout(repo, state_root, args.release_id)

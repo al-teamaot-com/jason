@@ -89,6 +89,17 @@ def test_native_worker_admission_guard_restores_on_deploy_exception(tmp_path, mo
 
 
 class ReleaseManagerHostRunnerTests(unittest.TestCase):
+    def test_manual_scope_reviewer_is_protected_production_control_core(self):
+        import fnmatch
+        import json
+        path = "tools/manual_release_scope.py"
+        policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
+        for change_class in ("feature", "support", "todo", "release_blocker"):
+            self.assertEqual(runner.classify_change_risk(change_class, [path]),
+                             "production_control_core")
+        self.assertTrue(any(fnmatch.fnmatch(path, pattern)
+                            for pattern in policy["protected_core_globs"]))
+
     def test_root_host_reconciliation_is_always_production_control_core(self):
         for path in (
             "tools/reconcile_production_host_services.sh",
@@ -100,6 +111,17 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     runner.classify_change_risk(change_class, [path]),
                     "production_control_core",
                 )
+
+    def test_integration_queue_controller_is_production_control_core(self):
+        import fnmatch
+        import json
+        policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
+        path = "tools/pmv3_integration_queue.py"
+        for change_class in ("feature", "support", "todo", "release_blocker"):
+            self.assertEqual(runner.classify_change_risk(change_class, [path]),
+                             "production_control_core")
+        self.assertTrue(any(fnmatch.fnmatch(path, pattern)
+                            for pattern in policy["protected_core_globs"]))
 
     def test_runtime_image_and_build_context_are_protected_core(self):
         import fnmatch
@@ -164,8 +186,9 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         repo = Path("/tmp/jason-source")
         state = Path("/tmp/jason-preproduction")
         checkout = state / "private-git-worktree"
-        tag = "jason-runtime:release-" + SHA_A[:12]
-        with (patch.object(runner, "worktree", return_value=checkout) as worktree,
+        tag = "jason-runtime:release-" + SHA_A[:12] + "-a1b2c3d4e5f6"
+        with (patch.object(runner.secrets, "token_hex", return_value="a1b2c3d4e5f6"),
+              patch.object(runner, "worktree", return_value=checkout) as worktree,
               patch.object(runner, "run") as invoke,
               patch.object(runner, "image_id", return_value="sha256:verified") as image,
               patch.object(runner, "remove_worktree") as cleanup):
@@ -192,6 +215,27 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertIn("import jason_runtime.main", smoke[-1])
         self.assertEqual(smoke[-2], "-c")
         self.assertEqual(smoke[-3], tag)
+
+    def test_separate_build_attempts_cannot_overwrite_prior_runtime_or_mcp_tags(self):
+        repo = Path("/tmp/jason-source")
+        state = Path("/tmp/jason-preproduction")
+        checkout = state / "private-git-worktree"
+        with (patch.object(runner.secrets, "token_hex", side_effect=[
+                  "111111111111", "222222222222", "333333333333", "444444444444"]),
+              patch.object(runner, "worktree", return_value=checkout),
+              patch.object(runner, "run"),
+              patch.object(runner, "image_id", side_effect=lambda ref: (
+                  "sha256:d709ca54b66d41e22bd1f67782cd5f6d681c4337bffb359b632523762a27788a"
+                  if ref == "jason-mcp:generic-governed-8f1e864947a2" else "sha256:verified")),
+              patch.object(runner, "remove_worktree")):
+            runtime1, _ = runner.build_candidate(repo, state, SHA_A)
+            runtime2, _ = runner.build_candidate(repo, state, SHA_A)
+            mcp1, _, _ = runner.build_mcp_candidate(repo, state, SHA_A)
+            mcp2, _, _ = runner.build_mcp_candidate(repo, state, SHA_A)
+        self.assertNotEqual(runtime1, runtime2)
+        self.assertNotEqual(mcp1, mcp2)
+        self.assertTrue(runtime1.startswith("jason-runtime:release-" + SHA_A[:12] + "-"))
+        self.assertTrue(mcp1.startswith("jason-mcp:release-" + SHA_A[:12] + "-"))
 
     def test_failed_runtime_import_smoke_cannot_admit_candidate(self):
         repo = Path("/tmp/jason-source")
@@ -232,6 +276,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
     def test_preprod_mutation_guards_disable_known_write_paths(self):
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTOTASK_MUTATION_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTONOMY_WORKER_ENABLED"], "false")
+        self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_UNIVERSAL_APPROVAL_MODE"], "off")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED"], "false")
@@ -594,26 +639,16 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     release_id=release_id,
                     candidate_sha=SHA_A,
                 )
-            review = json.loads(review_path.read_text(encoding="utf-8"))
-            named = json.loads(
-                (ccc_root / ("material-review-" + SHA_A[:16] + ".json")).read_text(
-                    encoding="utf-8"
-                )
+            # The single Owner approval remains bound to the native reviewed
+            # scope without minting a duplicate CCC human approval.
+            self.assertFalse(review_path.exists())
+            self.assertFalse(
+                (ccc_root / ("material-review-" + SHA_A[:16] + ".json")).exists()
             )
-            self.assertEqual(review["status"], "approved")
-            self.assertEqual(review["source_revision"], SHA_A)
-            self.assertEqual(review["recorded_by"], "person-al")
-            self.assertEqual(review["scope_sha256"], scope_sha)
-            self.assertEqual(review["release_id"], release_id)
-            self.assertEqual(named, review)
-            self.assertEqual(
-                approved["owner_material_review"]["scope_sha256"],
-                scope_sha,
-            )
-            self.assertEqual(
-                approved["history"][-1]["gate"],
-                "owner_approval_materialized_as_ccc_review",
-            )
+            self.assertTrue(approved["owner_approval"]["approved"])
+            self.assertEqual(approved["owner_approval"]["candidate_sha"], SHA_A)
+            self.assertEqual(approved["manual_scope_review"]["scope_sha256"], scope_sha)
+            self.assertEqual(approved["history"][-1]["gate"], "owner_approval_recorded")
             save_record.assert_called_once_with(state_root, record)
 
     def test_protected_core_approval_refuses_to_create_human_authority_without_scope(self):
@@ -644,7 +679,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(
                 runner.ReleaseManagerError,
-                "requires exact recorded scope review",
+                "manual release blocked: full change/parallel-work review is missing",
             ):
                 runner.approve_release(
                     ROOT,
@@ -748,23 +783,15 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             }
             request_path = request_root / f"{release_id}.json"
             request_path.write_text(json.dumps(request), encoding="utf-8")
+            # Historical unsigned owner-al JSON is deliberately no longer
+            # sufficient production authorization. Even if the claimed Owner
+            # is named, the root-pinned independent signed OAuth proof is
+            # mandatory and no untrusted approval may reach approve_release.
             with patch.object(runner, "approve_release") as approve:
-                count = runner.consume_owner_approval_requests(ROOT, state_root)
-            self.assertEqual(count, 1)
-            approve.assert_called_once_with(
-                ROOT,
-                state_root,
-                release_id=release_id,
-                candidate_sha=SHA_A,
-                source="governed_mcp_owner:owner-al",
-            )
-            self.assertFalse(request_path.exists())
-            archived = (
-                state_root
-                / "owner-approval-requests-processed"
-                / f"{release_id}.json"
-            )
-            self.assertEqual(json.loads(archived.read_text(encoding="utf-8")), request)
+                with self.assertRaises((PermissionError, runner.ReleaseManagerError)):
+                    runner.consume_owner_approval_requests(ROOT, state_root)
+            approve.assert_not_called()
+            self.assertTrue(request_path.exists())
 
     def test_consume_owner_approval_request_rejects_release_sha_mismatch(self):
         import json
@@ -1118,6 +1145,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 patch.object(runner, "require_current_manual_scope_review"),
                 patch.object(runner, "require_current_protected_release_source"),
                 patch.object(runner, "require_host_reconciler_ready"),
+                patch.object(runner, "ensure_managed_host_source_revision"),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(runner, "worktree", side_effect=runner.ReleaseManagerError("repo unavailable")),
                 patch.object(runner, "save_record") as save_record,
@@ -2410,6 +2438,139 @@ def test_governed_reissue_rejects_concurrent_pending_attempt():
                 runner.prepare_release(ROOT, root, SHA_A, 'release_blocker', reissue_rolled_back=True)
 
 
+
+class ManagedHostSourceMirrorContractTests(unittest.TestCase):
+    """A missing candidate is fetched BEFORE the root reconciliation spool."""
+
+    def _repo(self, root: Path) -> Path:
+        p = root / "managed-git-source"
+        p.mkdir()
+        return p
+
+    def test_lkg_local_source_uses_no_remote_network(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._repo(Path(td))
+            calls = []
+            def git(argv, **kwargs):
+                operation = argv[5:]
+                calls.append(operation)
+                if operation[:1] in (["remote"], ["fetch"]):
+                    self.fail("known local LKG must not depend on network")
+                return subprocess.CompletedProcess(argv, 0)
+            with patch.object(runner.subprocess, "run", side_effect=git):
+                runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
+            self.assertEqual(
+                [c[0] for c in calls], ["cat-file", "merge-base"]
+            )
+
+    def test_missing_exact_source_refreshes_only_managed_protected_main(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._repo(Path(td))
+            present = [False]
+            calls = []
+            def git(argv, **kwargs):
+                op = argv[5:]
+                calls.append(op)
+                if op[:2] == ["cat-file", "-e"]:
+                    return subprocess.CompletedProcess(argv, 0 if present[0] else 1)
+                if op[:1] == ["merge-base"]:
+                    return subprocess.CompletedProcess(argv, 0 if present[0] else 1)
+                if op[:3] == ["remote", "get-url", "origin"]:
+                    return subprocess.CompletedProcess(
+                        argv, 0, stdout="https://github.com/al-teamaot-com/jason.git\n"
+                    )
+                if op[:1] == ["fetch"]:
+                    present[0] = True
+                    return subprocess.CompletedProcess(argv, 0)
+                self.fail(f"unexpected git action: {op}")
+            with patch.object(runner.subprocess, "run", side_effect=git):
+                runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
+            fetches = [c for c in calls if c[0] == "fetch"]
+            self.assertEqual(fetches, [
+                ["fetch", "--no-tags", "origin",
+                 "refs/heads/main:refs/remotes/origin/main"]
+            ])
+            self.assertEqual(calls[-1][:1], ["merge-base"])
+
+    def test_unknown_remote_cannot_satisfy_release_root(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._repo(Path(td))
+            def git(argv, **kwargs):
+                op = argv[5:]
+                if op[:1] == ["fetch"]:
+                    self.fail("untrusted origin cannot be fetched")
+                if op[:1] == ["remote"]:
+                    return subprocess.CompletedProcess(
+                        argv, 0, stdout="https://example.invalid/not-authoritative.git\n"
+                    )
+                return subprocess.CompletedProcess(argv, 1)
+            with patch.object(runner.subprocess, "run", side_effect=git):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "not authoritative"
+                ):
+                    runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
+
+    def test_network_timeout_never_allows_root_source_request(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._repo(Path(td))
+            def git(argv, **kwargs):
+                op = argv[5:]
+                if op[:1] == ["remote"]:
+                    return subprocess.CompletedProcess(
+                        argv, 0, stdout="https://github.com/al-teamaot-com/jason.git"
+                    )
+                if op[:1] == ["fetch"]:
+                    raise subprocess.TimeoutExpired(argv, timeout=120)
+                return subprocess.CompletedProcess(argv, 1)
+            with patch.object(runner.subprocess, "run", side_effect=git):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "mirror refresh unavailable"
+                ):
+                    runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
+
+    def test_missing_after_fetch_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = self._repo(Path(td))
+            def git(argv, **kwargs):
+                op = argv[5:]
+                if op[:1] == ["remote"]:
+                    return subprocess.CompletedProcess(
+                        argv, 0, stdout="https://github.com/al-teamaot-com/jason.git\n"
+                    )
+                if op[:1] == ["fetch"]:
+                    return subprocess.CompletedProcess(argv, 0)
+                return subprocess.CompletedProcess(argv, 1)
+            with patch.object(runner.subprocess, "run", side_effect=git):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "lacks the exact candidate"
+                ):
+                    runner.ensure_managed_host_source_revision(SHA_A, managed_repo=repo)
+
+    def test_no_spool_request_when_source_preflight_fails(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "host-reconcile" / "requests").mkdir(parents=True)
+            (root / "host-reconcile" / "results").mkdir(parents=True)
+            with patch.object(runner, "require_host_reconciler_ready"), patch.object(
+                runner, "ensure_managed_host_source_revision",
+                side_effect=runner.ReleaseManagerError("source not synchronized"),
+            ):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "source not synchronized"):
+                    runner.request_host_reconcile(root, SHA_A)
+            self.assertFalse(list((root / "host-reconcile" / "requests").iterdir()))
+
+
+def test_root_source_sync_is_before_any_live_production_mutation():
+    import inspect
+    source = inspect.getsource(runner._deploy_production_locked)
+    preflight = source.index("ensure_managed_host_source_revision(candidate_sha)")
+    production = source.index('gate_transition(repo, state_root, record, "production")')
+    runtime = source.index("runtime_attempted = True")
+    mcp = source.index("mcp_attempted = True")
+    host = source.index("host_result = request_host_reconcile(")
+    assert preflight < production < runtime < mcp < host
+
+
 class HostReconciliationTimeoutContractTests(unittest.TestCase):
     def test_bound_covers_observed_service_activation_and_exporter(self):
         import inspect
@@ -2423,7 +2584,7 @@ class HostReconciliationTimeoutContractTests(unittest.TestCase):
             root = Path(td)
             (root / 'host-reconcile' / 'requests').mkdir(parents=True)
             (root / 'host-reconcile' / 'results').mkdir(parents=True)
-            with patch.object(runner, 'require_host_reconciler_ready'), patch.object(runner.time, 'monotonic', side_effect=[0.0, 2.0]):
+            with patch.object(runner, 'require_host_reconciler_ready'), patch.object(runner, 'ensure_managed_host_source_revision'), patch.object(runner.time, 'monotonic', side_effect=[0.0, 2.0]):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, 'host reconciliation result timed out'):
                     runner.request_host_reconcile(root, SHA_A, timeout_seconds=1.0)
 
@@ -2760,18 +2921,20 @@ def test_ccc_gate_execution_requires_fresh_report_and_matching_process_result(tm
             runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
 
 
-def test_ccc_precedes_mutation_and_postflight_precedes_closed_release():
+def test_single_native_release_checks_preserve_mutation_rollback_order():
     import inspect
     source = inspect.getsource(runner._deploy_production_locked)
-    assert source.index('ccc_preflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production")')
-    # The current controller marks the attempt *before* invoking the helper so
-    # rollback also covers a helper that partially mutates and then fails.
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('runtime_attempted = True')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('mcp_attempted = True')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('host_result = request_host_reconcile(')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('manager_result = install_release_manager_from_current(')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production_verified")')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
+    assert source.index('record["native_pre_mutation_gate"] = native_preflight') < source.index('gate_transition(repo, state_root, record, "production")')
+    # Native postflight retains the same rollback boundary and validates smoke,
+    # exact runtime/MCP images, protected drift and a complete host manifest.
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('runtime_attempted = True')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('mcp_attempted = True')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('host_result = request_host_reconcile(')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') > source.index('manager_result = install_release_manager_from_current(')
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') < source.index('gate_transition(repo, state_root, record, "production_verified")')
+    assert 'ccc_preflight = run_release_ccc_gate(' not in source
+    assert 'ccc_postflight = run_release_ccc_gate(' not in source
+    assert source.index('record["native_post_mutation_gate"] = native_postflight') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
 
 
 def test_post_verification_publication_is_not_a_rollback_gate():
@@ -3685,7 +3848,7 @@ def test_scheduled_promotion_defers_exact_material_owner_review_without_deployin
     assert saved["owner_approval"] == record["owner_approval"]
     assert saved["rollback_sha"] == SHA_B
 
-def test_reviewed_owner_offer_can_request_only_missing_ccc_review(tmp_path):
+def test_reviewed_owner_offer_needs_no_separate_ccc_review(tmp_path):
     from types import SimpleNamespace
     import json
     policy = SimpleNamespace(
@@ -3701,7 +3864,7 @@ def test_reviewed_owner_offer_can_request_only_missing_ccc_review(tmp_path):
     }
     assert runner.signed_owner_offer_purpose(
         approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
-    ) == "ccc_material_review_only"
+    ) is None
     # The exact already-approved release needs no second release grant.
     original_approval = dict(approved["owner_approval"])
     assert approved["owner_approval"] == original_approval
@@ -3748,7 +3911,7 @@ def test_reviewed_offer_policy_mode_risk_and_identity_do_not_widen(tmp_path):
     ) is None
 
 
-def test_reviewed_offer_rejects_conflicting_ccc_evidence_not_overwrite(tmp_path):
+def test_reviewed_offer_ignores_legacy_ccc_evidence_for_release_authority(tmp_path):
     from types import SimpleNamespace
     import json
     import pytest
@@ -3766,10 +3929,9 @@ def test_reviewed_offer_rejects_conflicting_ccc_evidence_not_overwrite(tmp_path)
         {"status": "approved", "source_revision": SHA_A, "recorded_by": "person-other"},
     ):
         named.write_text(json.dumps(bad))
-        with pytest.raises(runner.ReleaseManagerError, match="conflicts"):
-            runner.signed_owner_offer_purpose(
-                approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
-            )
+        assert runner.signed_owner_offer_purpose(
+            approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
+        ) is None
         assert json.loads(named.read_text()) == bad
 
 
@@ -4428,6 +4590,69 @@ def test_native_preflight_passes_same_bound_env_to_both_scripts(tmp_path):
     assert env["JASON_RUNTIME_PRODUCTION_IMAGE"] == "runtime"
     assert env["JASON_MCP_PRODUCTION_IMAGE"] == "mcp"
     assert env["JASON_SOURCE_REVISION_OVERRIDE"] == SHA_A
+
+
+def test_preprod_disables_inherited_playbook_review_child_and_rejects_reactivation(tmp_path):
+    import json
+
+    state_root = tmp_path / "openclaw" / "release-manager"
+    state_root.mkdir(parents=True)
+    live = {
+        "inspect": {
+            "Config": {
+                "Env": [
+                    "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=true",
+                    "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED=true",
+                ],
+                "Labels": {},
+            },
+            "HostConfig": {"NetworkMode": "bridge", "Tmpfs": {}},
+            "Mounts": [],
+            "NetworkSettings": {"Networks": {}},
+        },
+    }
+    with patch.object(runner.subprocess, "run"), patch.object(runner, "run") as docker:
+        name, scratch = runner.create_preprod_container(
+            live=live, candidate_image="jason-runtime:test",
+            candidate_sha=SHA_A, state_root=state_root,
+            release_id="release-" + SHA_A[:16],
+        )
+    try:
+        create_args = docker.call_args.args[0]
+        projected = [
+            create_args[i + 1] for i, arg in enumerate(create_args[:-1])
+            if arg == "--env"
+        ]
+        assert "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=false" in projected
+        assert "JASON_AUTONOMY_WORKER_ENABLED=false" in projected
+        assert "JASON_AUTONOMY_SHADOW_ENABLED=false" in projected
+        assert "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED=false" in projected
+
+        def inspected_env(review_enabled: bool) -> str:
+            values = [
+                item.replace("JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=false",
+                             "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=true")
+                if review_enabled else item
+                for item in projected
+            ]
+            return json.dumps([{
+                "Config": {
+                    "Labels": {"com.teamaot.jason.source_revision": SHA_A},
+                    "Env": values,
+                },
+            }])
+
+        with patch.object(runner, "output", return_value=inspected_env(False)):
+            runner.verify_preprod_env(name, SHA_A)
+        with patch.object(runner, "output", return_value=inspected_env(True)):
+            with unittest.TestCase().assertRaisesRegex(
+                runner.ReleaseManagerError,
+                "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED",
+            ):
+                runner.verify_preprod_env(name, SHA_A)
+    finally:
+        import shutil
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def test_transactional_sqlite_snapshot_includes_uncheckpointed_commits(tmp_path):
@@ -5161,8 +5386,10 @@ def test_owner_unfreeze_release_requires_exact_owner_scope_and_writes_audit(tmp_
     assert receipt["authorization"] == "explicit_exact_sha_owner_unfreeze"
     assert receipt["automatic_publish_authority"] is False
     assert receipt["standing_authority"] is False
-    assert receipt["status"] == "unfrozen"
-    assert not marker.exists()
+    assert receipt["status"] == "authorized_pending"
+    assert receipt["freeze_remains_active"] is True
+    assert receipt["restore_freeze_after_transaction"] is True
+    assert marker.exists()
     saved = __import__("json").loads(
         (tmp_path / "owner-explicit-unfreeze-receipts" / (release_id + ".json")).read_text()
     )
@@ -5645,3 +5872,736 @@ def test_pmv3_quiescence_accepts_inactive_and_rejects_activating():
     ):
         with pytest.raises(runner.ReleaseManagerBusy, match="deferred before mutation"):
             runner.require_pmv3_engineering_quiescent()
+
+
+def test_distinct_owner_unfreeze_preserves_existing_signed_teams_approval(tmp_path):
+    """An explicit later unfreeze must not rewrite authenticated Teams provenance."""
+    from unittest.mock import patch
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / "records").mkdir()
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    marker.write_text(
+        '{"reason":"owner freeze","remove_only_after":"new explicit exact-SHA owner unfreeze decision",'
+        '"schema_version":"1.0","scope":"manual-and-automatic-production-promotions",'
+        '"status":"active"}\n'
+    )
+    marker.chmod(0o600)
+    original_source = "authenticated_mobile_teams_owner:relapproval-" + "a" * 32
+    record = {
+        "release_id": release_id,
+        "state": "production_eligible",
+        "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "owner_approval": {
+            "approved": True, "candidate_sha": SHA_A,
+            "source": original_source, "recorded_at": "earlier-signed-decision",
+        },
+        "manual_scope_review": {
+            "schema_version": "1.0", "candidate_sha": SHA_A,
+            "baseline_sha": SHA_B, "scope_sha256": "d" * 64,
+        },
+        "history": [],
+    }
+    runner.atomic_json(tmp_path / "records" / (release_id + ".json"), record)
+    with patch.object(runner, "verify_candidate_on_main"), \
+         patch.object(runner, "require_current_manual_scope_review"), \
+         patch.object(runner, "live_production_alignment"):
+        with __import__("pytest").raises(runner.ReleaseManagerError, match="distinct exact-SHA Owner unfreeze"):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+            )
+        assert marker.exists()
+        with __import__("pytest").raises(runner.ReleaseManagerError, match="current scope and rollback"):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+                explicit_unfreeze_scope_sha256="e" * 64,
+                explicit_unfreeze_rollback_sha=SHA_B,
+            )
+        assert marker.exists()
+        with __import__("pytest").raises(runner.ReleaseManagerError, match="current scope and rollback"):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+                explicit_unfreeze_scope_sha256="d" * 64,
+                explicit_unfreeze_rollback_sha=SHA_A,
+            )
+        assert marker.exists()
+        receipt = runner.owner_unfreeze_release(
+            ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+            explicit_unfreeze_scope_sha256="d" * 64,
+            explicit_unfreeze_rollback_sha=SHA_B,
+        )
+    assert receipt["status"] == "authorized_pending"
+    assert receipt["freeze_remains_active"] is True
+    assert receipt["restore_freeze_after_transaction"] is True
+    assert receipt["owner_approval_source"] == "explicit_owner_instruction"
+    assert receipt["prior_release_approval_source"] == original_source
+    assert receipt["separate_exact_owner_unfreeze"] is True
+    assert receipt["scope_sha256"] == "d" * 64
+    assert marker.exists()
+    saved = __import__("json").loads((tmp_path / "records" / (release_id + ".json")).read_text())
+    assert saved["owner_approval"] == record["owner_approval"]
+    assert saved["owner_approval"]["source"] == original_source
+    assert saved["manual_scope_review"] == record["manual_scope_review"]
+
+
+def test_unfreeze_rejects_untrusted_approval_source_even_with_exact_explicit_decision(tmp_path):
+    from unittest.mock import patch
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / "records").mkdir()
+    record = {
+        "release_id": release_id, "state": "production_eligible", "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "owner_approval": {"approved": True, "candidate_sha": SHA_A, "source": "imported_untrusted"},
+        "manual_scope_review": {"schema_version": "1.0", "candidate_sha": SHA_A,
+                                "baseline_sha": SHA_B, "scope_sha256": "d" * 64},
+    }
+    runner.atomic_json(tmp_path / "records" / (release_id + ".json"), record)
+    with patch.object(runner, "verify_candidate_on_main"):
+        with __import__("pytest").raises(runner.ReleaseManagerError, match="source is not trusted"):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+                explicit_unfreeze_scope_sha256="d" * 64,
+                explicit_unfreeze_rollback_sha=SHA_B,
+            )
+    assert not (tmp_path / "owner-explicit-unfreeze-receipts").exists()
+
+
+def test_distinct_owner_unfreeze_one_transaction_restores_freeze_and_preserves_signed_approval(tmp_path):
+    import json
+    from unittest.mock import patch
+    release_id = runner.record_id(SHA_A)
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    original_raw = (
+        '{"schema_version":"1.0","status":"active",'
+        '"scope":"manual-and-automatic-production-promotions",'
+        '"remove_only_after":"new explicit exact-SHA owner unfreeze decision"}\n'
+    ).encode()
+    marker.write_bytes(original_raw);marker.chmod(0o600)
+    (tmp_path / "records").mkdir()
+    signed_source = "authenticated_mobile_teams_owner:relapproval-" + "a" * 32
+    record = {
+        'release_id': release_id, 'state':'production_eligible',
+        'rollback_sha': SHA_B, 'release_candidate':{'candidate_sha':SHA_A},
+        'owner_approval':{'approved':True,'candidate_sha':SHA_A,'source':signed_source},
+        'manual_scope_review':{'schema_version':'1.0','candidate_sha':SHA_A,
+                               'baseline_sha':SHA_B,'scope_sha256':'d'*64},'history':[]}
+    runner.atomic_json(tmp_path / 'records' / (release_id+'.json'), record)
+    with patch.object(runner,'verify_candidate_on_main'), \
+         patch.object(runner,'require_current_manual_scope_review'), \
+         patch.object(runner,'live_production_alignment'):
+        receipt = runner.owner_unfreeze_release(ROOT,tmp_path,release_id=release_id,
+           candidate_sha=SHA_A,explicit_unfreeze_scope_sha256='d'*64,
+           explicit_unfreeze_rollback_sha=SHA_B)
+    assert marker.read_bytes()==original_raw
+    assert receipt['status']=='authorized_pending'
+    loaded=json.loads((tmp_path/'records'/(release_id+'.json')).read_text())
+    context=runner.explicit_owner_one_transaction_freeze_context(tmp_path,loaded)
+    assert context is not None
+    assert context['authorization']=='explicit_owner_one_transaction_unfreeze'
+    assert context['restore_freeze_after_transaction'] is True
+    opened=runner.begin_one_transaction_freeze_exception(tmp_path,context)
+    assert not marker.exists()
+    assert runner.explicit_owner_one_transaction_freeze_context(tmp_path,loaded) is None
+    tx_receipt=json.loads(opened['receipt_path'].read_text())
+    assert tx_receipt['authorization']=='explicit_owner_one_transaction_unfreeze'
+    assert tx_receipt['explicit_unfreeze_receipt_sha256']==context['explicit_unfreeze_receipt_sha256']
+    runner.restore_one_transaction_freeze_exception(tmp_path,opened,release_state='closed')
+    assert marker.read_bytes()==original_raw
+    tx_receipt=json.loads(opened['receipt_path'].read_text())
+    assert tx_receipt['freeze_restored'] is True
+    assert tx_receipt['freeze_sha256_after']==tx_receipt['freeze_sha256_before']
+    source_receipt=json.loads((tmp_path/'owner-explicit-unfreeze-receipts'/(release_id+'.json')).read_text())
+    assert source_receipt['status']=='consumed'
+    assert source_receipt['freeze_restored'] is True
+    assert runner.explicit_owner_one_transaction_freeze_context(tmp_path,loaded) is None
+    assert json.loads((tmp_path/'records'/(release_id+'.json')).read_text())['owner_approval']==record['owner_approval']
+
+
+def test_explicit_unfreeze_rejects_stale_or_tampered_receipts_without_mutating_freeze(tmp_path):
+    import json
+    from unittest.mock import patch
+    release_id=runner.record_id(SHA_A)
+    (tmp_path/'records').mkdir()
+    marker=tmp_path/runner.PRODUCTION_FREEZE_MARKER
+    marker.write_text('{"scope":"manual-and-automatic-production-promotions","status":"active",'
+                      '"remove_only_after":"new explicit exact-SHA owner unfreeze decision"}\n')
+    marker.chmod(0o600)
+    record={
+      'release_id':release_id,'state':'production_eligible','rollback_sha':SHA_B,
+      'release_candidate':{'candidate_sha':SHA_A},
+      'owner_approval':{'approved':True,'candidate_sha':SHA_A,
+            'source':'authenticated_mobile_teams_owner:relapproval-'+'a'*32},
+      'manual_scope_review':{'scope_sha256':'d'*64,'candidate_sha':SHA_A,'baseline_sha':SHA_B},'history':[]}
+    runner.atomic_json(tmp_path/'records'/(release_id+'.json'),record)
+    with patch.object(runner,'verify_candidate_on_main'), \
+         patch.object(runner,'require_current_manual_scope_review'), \
+         patch.object(runner,'live_production_alignment'):
+      runner.owner_unfreeze_release(ROOT,tmp_path,release_id=release_id,candidate_sha=SHA_A,
+          explicit_unfreeze_scope_sha256='d'*64,explicit_unfreeze_rollback_sha=SHA_B)
+    receipt_path=tmp_path/'owner-explicit-unfreeze-receipts'/(release_id+'.json')
+    valid=receipt_path.read_bytes()
+    assert runner.explicit_owner_one_transaction_freeze_context(tmp_path,record) is not None
+    altered=json.loads(valid);altered['scope_sha256']='e'*64
+    runner.atomic_json(receipt_path,altered)
+    assert runner.explicit_owner_one_transaction_freeze_context(tmp_path,record) is None
+    altered=json.loads(valid);altered['recorded_at']='2020-01-01T00:00:00Z'
+    runner.atomic_json(receipt_path,altered)
+    assert runner.explicit_owner_one_transaction_freeze_context(tmp_path,record) is None
+    altered=json.loads(valid);altered['status']='consumed'
+    runner.atomic_json(receipt_path,altered)
+    assert runner.explicit_owner_one_transaction_freeze_context(tmp_path,record) is None
+    receipt_path.unlink()
+    receipt_path.symlink_to(marker)
+    assert runner.explicit_owner_one_transaction_freeze_context(tmp_path,record) is None
+    assert marker.exists()
+    assert not (tmp_path/'owner-unfreeze-receipts').exists()
+
+
+def test_stranded_explicit_owner_unfreeze_restores_original_freeze(tmp_path):
+    import json,hashlib
+    marker=tmp_path/runner.PRODUCTION_FREEZE_MARKER
+    raw=b'{"schema_version":"1.0","status":"active"}\n'
+    backup=tmp_path/runner.PRODUCTION_FREEZE_BACKUP
+    backup.write_bytes(raw);backup.chmod(0o600)
+    release_id=runner.record_id(SHA_A)
+    receipt_path=tmp_path/'owner-unfreeze-receipts'/(release_id+'.json')
+    runner.atomic_json(receipt_path,{
+     'schema_version':'2.0','authorization':'explicit_owner_one_transaction_unfreeze',
+     'release_id':release_id,'status':'unfrozen_active','freeze_restored':False,
+     'freeze_mode_before':0o600,'freeze_uid_before':backup.stat().st_uid,
+     'freeze_gid_before':backup.stat().st_gid,
+     'freeze_sha256_before':hashlib.sha256(raw).hexdigest()})
+    with __import__('pytest').raises(runner.ReleaseManagerError,match='restored production freeze'):
+       runner.restore_stranded_one_transaction_freeze_under_lock(tmp_path)
+    assert marker.read_bytes()==raw
+    assert json.loads(receipt_path.read_text())['freeze_restored'] is True
+
+
+def test_explicit_transaction_rechecks_owner_receipt_before_any_freeze_mutation(tmp_path):
+    import json,hashlib
+    marker=tmp_path/runner.PRODUCTION_FREEZE_MARKER
+    raw=b'{"status":"active","scope":"manual-and-automatic-production-promotions"}\n'
+    marker.write_bytes(raw);marker.chmod(0o600)
+    release_id=runner.record_id(SHA_A)
+    path=tmp_path/'owner-explicit-unfreeze-receipts'/(release_id+'.json')
+    original={'status':'authorized_pending','candidate_sha':SHA_A,'rollback_sha':SHA_B,
+        'scope_sha256':'d'*64,'freeze_sha256_before':hashlib.sha256(raw).hexdigest()}
+    runner.atomic_json(path,original)
+    digest='sha256:'+hashlib.sha256(path.read_bytes()).hexdigest()
+    context={'authorization':'explicit_owner_one_transaction_unfreeze',
+        'release_id':release_id,'candidate_sha':SHA_A,'rollback_sha':SHA_B,'scope_sha256':'d'*64,
+        'owner_approval_source':'authenticated_mobile_teams_owner:relapproval-'+'a'*32,
+        'recovery_profile_id':'explicit_exact_sha_owner_unfreeze','declaration_sha256':digest,
+        'explicit_unfreeze_receipt_sha256':digest}
+    original['scope_sha256']='e'*64
+    runner.atomic_json(path,original)
+    with __import__('pytest').raises(runner.ReleaseManagerError,match='receipt changed'):
+        runner.begin_one_transaction_freeze_exception(tmp_path,context)
+    assert marker.read_bytes()==raw
+    assert not (tmp_path/runner.PRODUCTION_FREEZE_BACKUP).exists()
+    assert not (tmp_path/'owner-unfreeze-receipts').exists()
+
+
+def test_staff_note_source_activation_profile_contract(tmp_path):
+    import json
+    import pytest
+    path = tmp_path / "config" / "aot-staff-internal-note-profile.json"
+    path.parent.mkdir()
+    assert runner.declared_aot_staff_note_profile(tmp_path) == ""
+    path.write_text(json.dumps({"schema_version":"1.0","profile":"off"}))
+    assert runner.declared_aot_staff_note_profile(tmp_path) == ""
+    path.write_text(json.dumps({"schema_version":"1.0","profile":"internal-note-v1"}))
+    assert runner.declared_aot_staff_note_profile(tmp_path) == "internal-note-v1"
+    for malformed in ({"schema_version":"1.0","profile":"all-writes"},
+                      {"schema_version":"1.0","profile":"internal-note-v1","extra":1}):
+        path.write_text(json.dumps(malformed))
+        with pytest.raises(runner.ReleaseManagerError, match="declaration invalid"):
+            runner.declared_aot_staff_note_profile(tmp_path)
+    path.unlink()
+    path.symlink_to(tmp_path / "outside")
+    with pytest.raises(runner.ReleaseManagerError, match="symlink"):
+        runner.declared_aot_staff_note_profile(tmp_path)
+
+
+def test_staff_note_profile_in_native_preprod_and_source_bound_release_contract(tmp_path,monkeypatch):
+    import json,pytest
+    from unittest.mock import patch
+    path=tmp_path / "config" / "aot-staff-internal-note-profile.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"schema_version":"1.0","profile":"internal-note-v1"}))
+    monkeypatch.delenv("JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE",raising=False)
+    with (patch.object(runner, "declared_autotask_read_profiles",return_value=None),
+          patch.object(runner,"declared_quickbooks_read_profile",return_value=None),
+          patch.object(runner,"declared_mobile_release_approval_policy",return_value={"mode":"owner_reviewed"})):
+        env=runner.native_deploy_environment(tmp_path,"runtime","mcp",SHA_A)
+        assert env["JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE"]=="internal-note-v1"
+        assert runner.MUTATION_ENV_OVERRIDES["JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE"]==""
+        assert runner.native_deploy_contract_digest({**env,"JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE":""})!=runner.native_deploy_contract_digest(env)
+        monkeypatch.setenv("JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE","admin-unreviewed")
+        with pytest.raises(runner.ReleaseManagerError,match="immutable source"):
+            runner.native_deploy_environment(tmp_path,"runtime","mcp",SHA_A)
+
+
+def test_issue_2339_consumed_unfreeze_cannot_be_silently_reused(tmp_path):
+    """Regression baseline: a failed pre-mutation attempt preserves receipts.
+
+    Future replacement authorization must be recorded as a new independent,
+    authenticated attempt. The old consumed receipt is never rewritten.
+    """
+    import json
+    import pytest
+    from unittest.mock import patch
+
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / "records").mkdir()
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    original = ('{"reason":"owner freeze",'
+                '"remove_only_after":"new explicit exact-SHA owner unfreeze decision",'
+                '"schema_version":"1.0",'
+                '"scope":"manual-and-automatic-production-promotions",'
+                '"status":"active"}\n').encode()
+    marker.write_bytes(original)
+    marker.chmod(0o600)
+    source = 'authenticated_mobile_teams_owner:relapproval-' + 'a' * 32
+    record = {
+        'release_id': release_id,
+        'state': 'production_eligible',
+        'rollback_sha': SHA_B,
+        'release_candidate': {'candidate_sha': SHA_A},
+        'owner_approval': {'approved': True, 'candidate_sha': SHA_A,
+                           'source': source},
+        'manual_scope_review': {'schema_version': '1.0',
+                                'candidate_sha': SHA_A,
+                                'baseline_sha': SHA_B,
+                                'scope_sha256': 'd' * 64},
+        'history': [],
+    }
+    runner.atomic_json(tmp_path / 'records' / (release_id + '.json'), record)
+    with patch.object(runner, 'verify_candidate_on_main'), \
+         patch.object(runner, 'require_current_manual_scope_review'), \
+         patch.object(runner, 'live_production_alignment'):
+        runner.owner_unfreeze_release(
+            ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+            explicit_unfreeze_scope_sha256='d' * 64,
+            explicit_unfreeze_rollback_sha=SHA_B)
+    loaded = json.loads((tmp_path / 'records' / (release_id + '.json')).read_text())
+    context = runner.explicit_owner_one_transaction_freeze_context(tmp_path, loaded)
+    assert context is not None
+    opened = runner.begin_one_transaction_freeze_exception(tmp_path, context)
+    # Reproduce the historical pre-mutation failure: release state unchanged.
+    runner.restore_one_transaction_freeze_exception(
+        tmp_path, opened, release_state='production_eligible')
+    assert marker.read_bytes() == original
+    previous = tmp_path / 'owner-explicit-unfreeze-receipts' / (release_id + '.json')
+    prior_bytes = previous.read_bytes()
+    assert json.loads(prior_bytes)['status'] == 'consumed'
+    # The new read-only predecessor attestation proves a fresh signed Owner
+    # decision could be evaluated later, but creates no executable grant.
+    with patch.object(runner, 'live_production_alignment') as verify_live:
+        proof = runner.attest_consumed_pre_mutation_unfreeze_for_replacement(
+            tmp_path, loaded)
+    verify_live.assert_called_once_with(SHA_B)
+    assert proof['candidate_sha'] == SHA_A
+    assert proof['rollback_sha'] == SHA_B
+    assert proof['scope_sha256'] == 'd' * 64
+    assert proof['freeze_sha256'] == __import__('hashlib').sha256(original).hexdigest()
+    assert proof['predecessor_source_receipt_sha256'].startswith('sha256:')
+    assert proof['predecessor_transaction_receipt_sha256'].startswith('sha256:')
+    assert previous.read_bytes() == prior_bytes
+    # A post-mutation record must never be eligible for same-SHA replacement.
+    mutating = dict(loaded, native_pre_mutation_gate={'status': 'pass'})
+    with pytest.raises(runner.ReleaseManagerError, match='pre-mutation'):
+        runner.attest_consumed_pre_mutation_unfreeze_for_replacement(
+            tmp_path, mutating)
+    # An altered historical receipt must fail independent predecessor proof.
+    tx_doc = json.loads(opened['receipt_path'].read_text())
+    tx_doc['freeze_sha256_after'] = '0' * 64
+    with patch.object(runner, 'live_production_alignment'):
+        runner.atomic_json(opened['receipt_path'], tx_doc)
+        with pytest.raises(runner.ReleaseManagerError, match='freeze was not exactly restored'):
+            runner.attest_consumed_pre_mutation_unfreeze_for_replacement(
+                tmp_path, loaded)
+    with patch.object(runner, 'verify_candidate_on_main'), \
+         patch.object(runner, 'require_current_manual_scope_review'), \
+         patch.object(runner, 'live_production_alignment'):
+        with pytest.raises(runner.ReleaseManagerError, match='not a safely pending'):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+                explicit_unfreeze_scope_sha256='d' * 64,
+                explicit_unfreeze_rollback_sha=SHA_B)
+    assert previous.read_bytes() == prior_bytes
+    assert marker.read_bytes() == original
+    assert runner.explicit_owner_one_transaction_freeze_context(tmp_path, loaded) is None
+
+
+def _fixture_issue_2339_consumed_release(tmp_path):
+    """Private simulated state containing one fully consumed pre-mutation attempt."""
+    from unittest.mock import patch
+    import json
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / 'records').mkdir()
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    original = ('{"reason":"owner freeze",'
+                '"remove_only_after":"new explicit exact-SHA owner unfreeze decision",'
+                '"schema_version":"1.0",'
+                '"scope":"manual-and-automatic-production-promotions",'
+                '"status":"active"}\n').encode()
+    marker.write_bytes(original)
+    marker.chmod(0o600)
+    manifest = {'candidate_sha': SHA_A, 'rollback_sha': SHA_B,
+                'changed_files': ['tools/release_manager_host_runner.py']}
+    record = {
+        'release_id': release_id, 'state': 'production_eligible',
+        'rollback_sha': SHA_B, 'release_candidate': {'candidate_sha': SHA_A},
+        'release_manifest': manifest,
+        'owner_approval': {'approved': True, 'candidate_sha': SHA_A,
+                           'source': 'authenticated_mobile_teams_owner:relapproval-' + 'a'*32},
+        'manual_scope_review': {'candidate_sha': SHA_A, 'baseline_sha': SHA_B,
+                                'scope_sha256': 'd'*64},
+        'preproduction': {'acceptance_passed': True, 'rollback_readiness_passed': True},
+        'history': [],
+    }
+    runner.atomic_json(tmp_path / 'records' / (release_id+'.json'), record)
+    with patch.object(runner, 'verify_candidate_on_main'), \
+         patch.object(runner, 'require_current_manual_scope_review'), \
+         patch.object(runner, 'live_production_alignment'):
+        runner.owner_unfreeze_release(ROOT,tmp_path,release_id=release_id,
+            candidate_sha=SHA_A,explicit_unfreeze_scope_sha256='d'*64,
+            explicit_unfreeze_rollback_sha=SHA_B)
+    ctx = runner.explicit_owner_one_transaction_freeze_context(tmp_path, record)
+    opened = runner.begin_one_transaction_freeze_exception(tmp_path, ctx)
+    runner.restore_one_transaction_freeze_exception(
+        tmp_path, opened, release_state='production_eligible')
+    source = tmp_path / 'owner-explicit-unfreeze-receipts' / (release_id+'.json')
+    transaction = tmp_path / 'owner-unfreeze-receipts' / (release_id+'.json')
+    assert json.loads(source.read_text())['status'] == 'consumed'
+    return record, marker, original, source, transaction
+
+
+def test_issue_2339_signed_replacement_has_distinct_one_shot_transaction(tmp_path):
+    import hashlib, json, pytest
+    from datetime import timedelta
+    from unittest.mock import patch
+    record, marker, original, source, prior_transaction = _fixture_issue_2339_consumed_release(tmp_path)
+    prior_source_bytes = source.read_bytes()
+    prior_tx_bytes = prior_transaction.read_bytes()
+    with patch.object(runner, 'live_production_alignment'):
+        lineage = runner.attest_consumed_pre_mutation_unfreeze_for_replacement(tmp_path, record)
+    lineage = {k:(v.removeprefix('sha256:') if k.endswith('_receipt_sha256') else v)
+               for k,v in lineage.items()}
+    metadata = {
+        'replacement_unfreeze_only':True, 'replacement_lineage':lineage,
+        'release_id':record['release_id'], 'candidate_sha':SHA_A, 'rollback_sha':SHA_B,
+        'manifest_sha256':hashlib.sha256(json.dumps(
+            record['release_manifest'], sort_keys=True, separators=(',',':'),
+            ensure_ascii=False).encode()).hexdigest(),
+    }
+    approval_id = 'relapproval-' + 'e'*32
+    instant = datetime.now(timezone.utc)
+    with patch.object(runner, 'live_production_alignment'), \
+         patch.object(runner, 'verify_candidate_on_main'), \
+         patch.object(runner, 'require_current_manual_scope_review'):
+        grant = runner.record_signed_replacement_unfreeze(
+            ROOT,tmp_path, release_id=record['release_id'],candidate_sha=SHA_A,
+            approval_id=approval_id,signed_evidence_sha256='f'*64,
+            request_metadata=metadata,decided_at=instant,
+            expires_at=instant+timedelta(minutes=5))
+    assert grant['authorization']=='signed_teams_replacement_unfreeze'
+    assert grant['status']=='authorized_pending'
+    assert source.read_bytes()==prior_source_bytes
+    assert prior_transaction.read_bytes()==prior_tx_bytes
+    loaded=runner.load_record(tmp_path,record['release_id'])
+    with patch.object(runner,'live_production_alignment'):
+        new_ctx=runner.explicit_owner_one_transaction_freeze_context(tmp_path,loaded)
+    assert new_ctx is not None
+    assert new_ctx['replacement_approval_id']==approval_id
+    opened=runner.begin_one_transaction_freeze_exception(tmp_path,new_ctx)
+    assert not marker.exists()
+    assert opened['receipt_path'] != prior_transaction
+    assert approval_id in opened['receipt_path'].name
+    assert json.loads(prior_transaction.read_text())['freeze_restored'] is True
+    runner.restore_one_transaction_freeze_exception(
+        tmp_path,opened,release_state='production_eligible')
+    assert marker.read_bytes()==original
+    assert source.read_bytes()==prior_source_bytes
+    assert prior_transaction.read_bytes()==prior_tx_bytes
+    new_grant=tmp_path/'owner-replacement-unfreeze-receipts'/(
+        record['release_id']+'--'+approval_id+'.json')
+    assert json.loads(new_grant.read_text())['status']=='consumed'
+    with patch.object(runner,'live_production_alignment'):
+        assert runner.explicit_owner_one_transaction_freeze_context(tmp_path,loaded) is None
+    with pytest.raises(runner.ReleaseManagerError,match='receipt changed before transaction'):
+        runner.begin_one_transaction_freeze_exception(tmp_path,new_ctx)
+
+
+def test_issue_2339_replacement_crash_restores_freeze_and_consumes_grant(tmp_path):
+    import json, hashlib, pytest
+    from datetime import timedelta
+    from unittest.mock import patch
+    record, marker, original, source, prior_transaction = _fixture_issue_2339_consumed_release(tmp_path)
+    old_bytes = (source.read_bytes(), prior_transaction.read_bytes())
+    with patch.object(runner,'live_production_alignment'):
+        proof=runner.attest_consumed_pre_mutation_unfreeze_for_replacement(tmp_path, record)
+    lineage={k:(v.removeprefix('sha256:') if k.endswith('_receipt_sha256') else v)
+             for k,v in proof.items()}
+    metadata={'replacement_unfreeze_only':True,'replacement_lineage':lineage,
+              'release_id':record['release_id'],'candidate_sha':SHA_A,'rollback_sha':SHA_B,
+              'manifest_sha256':hashlib.sha256(json.dumps(record['release_manifest'],
+                  sort_keys=True,separators=(',',':')).encode()).hexdigest()}
+    approval_id='relapproval-'+'f'*32
+    instant=datetime.now(timezone.utc)
+    with patch.object(runner,'live_production_alignment'), \
+         patch.object(runner,'verify_candidate_on_main'), \
+         patch.object(runner,'require_current_manual_scope_review'):
+        runner.record_signed_replacement_unfreeze(ROOT,tmp_path,release_id=record['release_id'],
+            candidate_sha=SHA_A,approval_id=approval_id,signed_evidence_sha256='1'*64,
+            request_metadata=metadata,decided_at=instant,
+            expires_at=instant+timedelta(minutes=5))
+    loaded=runner.load_record(tmp_path,record['release_id'])
+    with patch.object(runner,'live_production_alignment'):
+        ctx=runner.explicit_owner_one_transaction_freeze_context(tmp_path,loaded)
+    assert ctx
+    opened=runner.begin_one_transaction_freeze_exception(tmp_path,ctx)
+    assert not marker.exists()
+    with pytest.raises(runner.ReleaseManagerError,match='restored production freeze'):
+        runner.restore_stranded_one_transaction_freeze_under_lock(tmp_path)
+    assert marker.read_bytes()==original
+    assert source.read_bytes()==old_bytes[0]
+    assert prior_transaction.read_bytes()==old_bytes[1]
+    signed=tmp_path/'owner-replacement-unfreeze-receipts'/(
+        record['release_id']+'--'+approval_id+'.json')
+    assert json.loads(signed.read_text())['status']=='consumed'
+    assert json.loads(opened['receipt_path'].read_text())['status']=='stranded_transaction_restored'
+    with patch.object(runner,'live_production_alignment'):
+        assert runner.explicit_owner_one_transaction_freeze_context(tmp_path,loaded) is None
+
+
+def _closed_postacceptance_release_fixture(tmp_path):
+    import hashlib
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / 'records').mkdir(parents=True, exist_ok=True)
+    freeze_raw = b'{"schema_version":"1.0","status":"active","scope":"manual-and-automatic-production-promotions"}\n'
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    marker.write_bytes(freeze_raw)
+    marker.chmod(0o600)
+    backup = tmp_path / runner.PRODUCTION_FREEZE_BACKUP
+    backup.write_bytes(freeze_raw)
+    backup.chmod(0o600)
+    baseline = {
+        'complete': True,
+        'revision': SHA_B,
+        'runtime_image_id': 'sha256:' + '1' * 64,
+        'mcp_image_id': 'sha256:' + '2' * 64,
+        'mobile_release_approval_mode': 'owner_reviewed',
+    }
+    record = {
+        'release_id': release_id,
+        'state': 'closed',
+        'rollback_sha': SHA_B,
+        'release_candidate': {'candidate_sha': SHA_A},
+        'release_manifest': {'candidate_sha': SHA_A, 'rollback_sha': SHA_B},
+        'owner_approval': {
+            'approved': True,
+            'candidate_sha': SHA_A,
+            'source': 'authenticated_mobile_teams_owner:relapproval-' + 'a' * 32,
+        },
+        'manual_scope_review': {
+            'schema_version': '1.0',
+            'candidate_sha': SHA_A,
+            'baseline_sha': SHA_B,
+            'scope_sha256': 'd' * 64,
+        },
+        'last_known_good_manifest': baseline,
+        'production': {'live_sha': SHA_A, 'verified_at': '2026-11-05T21:35:46+00:00'},
+        'history': [],
+    }
+    runner.atomic_json(tmp_path / 'records' / (release_id + '.json'), record)
+    runner.atomic_json(
+        tmp_path / 'owner-explicit-unfreeze-receipts' / (release_id + '.json'),
+        {
+            'schema_version': '1.0',
+            'authorization': 'explicit_exact_sha_owner_unfreeze',
+            'status': 'consumed',
+            'release_id': release_id,
+            'candidate_sha': SHA_A,
+            'rollback_sha': SHA_B,
+            'scope_sha256': 'd' * 64,
+            'freeze_sha256_before': hashlib.sha256(freeze_raw).hexdigest(),
+            'freeze_sha256_after': hashlib.sha256(freeze_raw).hexdigest(),
+            'freeze_restored': True,
+            'standing_authority': False,
+        },
+    )
+    return release_id, record, baseline, marker
+
+
+def test_postacceptance_rollback_restores_exact_recorded_lkg_in_dependency_order(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    release_id, record, baseline, marker = _closed_postacceptance_release_fixture(tmp_path)
+    candidate_tree = tmp_path / 'candidate'
+    rollback_tree = tmp_path / 'rollback'
+    for tree in (candidate_tree, rollback_tree):
+        (tree / 'infrastructure/jason-runtime').mkdir(parents=True)
+        (tree / 'infrastructure/jason-mcp').mkdir(parents=True)
+    (candidate_tree / 'infrastructure/jason-runtime/production-deploy.sh').write_text('#!/bin/sh\n')
+    (candidate_tree / 'infrastructure/jason-mcp/production-deploy.sh').write_text('#!/bin/sh\n')
+
+    calls = []
+    lock = SimpleNamespace()
+    monkeypatch.setattr(runner, 'acquire_production_transaction_lock', lambda *a, **k: (calls.append('lock'), lock)[1])
+    monkeypatch.setattr(runner, 'release_production_transaction_lock', lambda value: calls.append('unlock'))
+    monkeypatch.setattr(runner, 'require_pmv3_engineering_quiescent', lambda: calls.append('quiescent'))
+    monkeypatch.setattr(runner, 'live_production_alignment', lambda sha: (calls.append('align:' + sha), {'runtime_revision': sha, 'mcp_revision': sha, 'host_revision': sha}))
+    monkeypatch.setattr(runner, 'worktree', lambda repo, state, sha: candidate_tree if sha == SHA_A else rollback_tree)
+    monkeypatch.setattr(runner, 'remove_worktree', lambda *a, **k: None)
+    monkeypatch.setattr(runner, 'declared_quickbooks_read_profile', lambda tree: 'quickbooks-production-read-v1')
+    monkeypatch.setattr(runner, 'declared_autotask_read_profile', lambda tree: 'itglue-autotask-entra-dynamic-schema-read-catalog-v13')
+    monkeypatch.setattr(runner.worker_enrollment, 'approved_diagnostic_uid', lambda tree: 'worker-uid')
+    monkeypatch.setattr(runner, 'open_circuit_breaker', lambda *a, **k: calls.append('breaker:' + str(k.get('rollback_verified'))))
+    monkeypatch.setattr(runner, 'pin_exact_rollback_image', lambda surface, manifest: calls.append('pin:' + surface))
+    monkeypatch.setattr(runner, 'run', lambda argv, **kw: (calls.append('run:' + Path(argv[0]).parts[-3]), 'DEPLOYMENT=PASS')[1])
+    monkeypatch.setattr(runner, 'rollback_surface_is_verified', lambda surface, sha, manifest: (calls.append('verify:' + surface), True)[1])
+    monkeypatch.setattr(runner, 'request_host_reconcile', lambda state, sha: (calls.append('host:' + sha), {'success': True})[1])
+    monkeypatch.setattr(runner, 'verify_host_reconciliation_evidence', lambda result, sha: calls.append('host-verified:' + sha))
+    monkeypatch.setattr(runner, 'install_release_manager_from_current', lambda sha: (calls.append('manager:' + sha), {'source_revision': sha, 'timer_active': True})[1])
+    monkeypatch.setattr(runner, 'restore_mobile_release_approval_policy', lambda state, rec: (calls.append('policy'), {'status': 'restored', 'mode': 'owner_reviewed'})[1])
+    monkeypatch.setattr(runner, 'wait_live_runtime', lambda: calls.append('runtime-health'))
+    verified = dict(baseline, observed_at='2026-11-05T21:40:00+00:00')
+    monkeypatch.setattr(runner, 'capture_production_manifest', lambda sha: (calls.append('manifest:' + sha), verified)[1])
+    monkeypatch.setattr(runner, 'set_last_known_good', lambda state, manifest, release_id: calls.append('lkg:' + manifest['revision']))
+
+    result = runner.rollback_closed_release(
+        ROOT, tmp_path,
+        release_id=release_id,
+        candidate_sha=SHA_A,
+        scope_sha256='d' * 64,
+        rollback_sha=SHA_B,
+        reason='fleet-wide acceptance exposed only 100 of 436 selected records',
+    )
+
+    assert result['status'] == 'rolled_back'
+    assert result['rollback_verified'] is True
+    assert result['rollback_sha'] == SHA_B
+    assert marker.is_file()
+    assert calls.index('breaker:False') < calls.index('pin:mcp')
+    assert calls.index('verify:mcp') < calls.index('host:' + SHA_B)
+    assert calls.index('host-verified:' + SHA_B) < calls.index('manager:' + SHA_B)
+    assert calls.index('manager:' + SHA_B) < calls.index('policy')
+    assert calls.index('policy') < calls.index('pin:runtime')
+    assert calls.index('verify:runtime') < calls.index('align:' + SHA_B)
+    assert calls.index('manifest:' + SHA_B) < calls.index('lkg:' + SHA_B)
+    assert calls[-2] == 'breaker:True'
+    assert calls[-1] == 'unlock'
+
+    saved = json.loads((tmp_path / 'records' / (release_id + '.json')).read_text())
+    assert saved['state'] == 'rolled_back'
+    assert saved['failure']['rollback_verified'] is True
+    receipt = json.loads((tmp_path / 'owner-postacceptance-rollback-receipts' / (release_id + '.json')).read_text())
+    assert receipt['status'] == 'consumed'
+    assert receipt['standing_authority'] is False
+    assert receipt['rollback_verified'] is True
+
+
+def test_postacceptance_rollback_rejects_wrong_candidate_scope_or_rollback_before_lock(tmp_path, monkeypatch):
+    import pytest
+    release_id, _record, _baseline, _marker = _closed_postacceptance_release_fixture(tmp_path)
+    touched = []
+    monkeypatch.setattr(runner, 'acquire_production_transaction_lock', lambda *a, **k: touched.append('lock'))
+
+    cases = (
+        (SHA_B, 'd' * 64, SHA_B, 'arguments differ'),
+        (SHA_A, 'e' * 64, SHA_B, 'scope differs'),
+        (SHA_A, 'd' * 64, SHA_A, 'arguments differ'),
+    )
+    for candidate, scope, rollback, message in cases:
+        with pytest.raises(runner.ReleaseManagerError, match=message):
+            runner.rollback_closed_release(
+                ROOT, tmp_path, release_id=release_id,
+                candidate_sha=candidate, scope_sha256=scope,
+                rollback_sha=rollback, reason='acceptance failed',
+            )
+    assert touched == []
+    assert not (tmp_path / 'owner-postacceptance-rollback-receipts').exists()
+
+
+def test_postacceptance_rollback_requires_consumed_exact_unfreeze_and_restored_freeze(tmp_path, monkeypatch):
+    import json, pytest
+    release_id, _record, _baseline, marker = _closed_postacceptance_release_fixture(tmp_path)
+    touched = []
+    monkeypatch.setattr(runner, 'acquire_production_transaction_lock', lambda *a, **k: touched.append('lock'))
+    receipt_path = tmp_path / 'owner-explicit-unfreeze-receipts' / (release_id + '.json')
+
+    receipt = json.loads(receipt_path.read_text())
+    receipt['status'] = 'authorized_pending'
+    runner.atomic_json(receipt_path, receipt)
+    with pytest.raises(runner.ReleaseManagerError, match='does not authorize'):
+        runner.rollback_closed_release(
+            ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+            scope_sha256='d' * 64, rollback_sha=SHA_B, reason='acceptance failed')
+
+    receipt['status'] = 'consumed'
+    runner.atomic_json(receipt_path, receipt)
+    marker.unlink()
+    with pytest.raises((runner.ReleaseManagerError, FileNotFoundError), match='freeze'):
+        runner.rollback_closed_release(
+            ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A,
+            scope_sha256='d' * 64, rollback_sha=SHA_B, reason='acceptance failed')
+    assert touched == []
+
+
+def test_postacceptance_rollback_failure_restores_freeze_and_fails_receipt(tmp_path, monkeypatch):
+    import json, pytest
+    from types import SimpleNamespace
+
+    release_id, _record, _baseline, marker = _closed_postacceptance_release_fixture(tmp_path)
+    original = marker.read_bytes()
+    candidate_tree = tmp_path / 'candidate-fail'
+    rollback_tree = tmp_path / 'rollback-fail'
+    for tree in (candidate_tree, rollback_tree):
+        (tree / 'infrastructure/jason-runtime').mkdir(parents=True)
+        (tree / 'infrastructure/jason-mcp').mkdir(parents=True)
+    (candidate_tree / 'infrastructure/jason-runtime/production-deploy.sh').write_text('#!/bin/sh\n')
+    (candidate_tree / 'infrastructure/jason-mcp/production-deploy.sh').write_text('#!/bin/sh\n')
+
+    monkeypatch.setattr(runner, 'acquire_production_transaction_lock', lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(runner, 'release_production_transaction_lock', lambda value: None)
+    monkeypatch.setattr(runner, 'require_pmv3_engineering_quiescent', lambda: None)
+    monkeypatch.setattr(runner, 'live_production_alignment', lambda sha: {'runtime_revision': sha})
+    monkeypatch.setattr(runner, 'worktree', lambda repo, state, sha: candidate_tree if sha == SHA_A else rollback_tree)
+    monkeypatch.setattr(runner, 'remove_worktree', lambda *a, **k: None)
+    monkeypatch.setattr(runner, 'declared_quickbooks_read_profile', lambda tree: 'quickbooks-production-read-v1')
+    monkeypatch.setattr(runner, 'declared_autotask_read_profile', lambda tree: 'itglue-autotask-entra-dynamic-schema-read-catalog-v13')
+    monkeypatch.setattr(runner.worker_enrollment, 'approved_diagnostic_uid', lambda tree: 'worker-uid')
+    monkeypatch.setattr(runner, 'open_circuit_breaker', lambda *a, **k: None)
+    monkeypatch.setattr(runner, 'pin_exact_rollback_image', lambda surface, manifest: None)
+    monkeypatch.setattr(runner, 'run', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('simulated rollback helper failure')))
+
+    with pytest.raises(RuntimeError, match='simulated rollback helper failure'):
+        runner.rollback_closed_release(
+            ROOT, tmp_path, release_id=release_id,
+            candidate_sha=SHA_A, scope_sha256='d' * 64,
+            rollback_sha=SHA_B, reason='acceptance failed',
+        )
+
+    assert marker.read_bytes() == original
+    receipt = json.loads((tmp_path / 'owner-postacceptance-rollback-receipts' / (release_id + '.json')).read_text())
+    assert receipt['status'] == 'failed'
+    assert receipt['freeze_restored'] is True
+    assert receipt['freeze_sha256_before'] == receipt['freeze_sha256_after']
+    assert receipt['standing_authority'] is False
+
+
+
+def test_v31_owner_release_mode_is_not_treated_as_legacy_teams_pilot():
+    import pytest
+    from types import SimpleNamespace
+    assert runner._reviewed_mobile_release_mode(
+        SimpleNamespace(schema_version="3.1")
+    ) == "owner_reviewed"
+    assert runner._reviewed_mobile_release_mode(
+        SimpleNamespace(schema_version="4.1")
+    ) == "admin_approver_separated"
+    with pytest.raises(runner.ReleaseManagerError):
+        runner._reviewed_mobile_release_mode(SimpleNamespace(schema_version="9.0"))

@@ -57,6 +57,13 @@ _ALLOWED_DIRECTIONS = frozenset({
     "desc",
 })
 
+_ALLOWED_ARITHMETIC = frozenset({
+    "add",
+    "subtract",
+    "multiply",
+    "divide",
+})
+
 _MAX_SOURCES = 16
 _MAX_RECORDS_PER_SOURCE = 100000
 _MAX_JOINS = 16
@@ -159,7 +166,20 @@ class QueryOutput:
             raise ValueError("query output name is required")
 
 
-QueryExpression = QueryField | QueryLiteral | QueryRelativeTime | QueryOutput
+@dataclass(frozen=True, slots=True)
+class QueryArithmetic:
+    """Deterministic arithmetic over already-governed query expressions."""
+
+    left: "QueryExpression"
+    operator: str
+    right: "QueryExpression"
+
+    def __post_init__(self) -> None:
+        if self.operator not in _ALLOWED_ARITHMETIC:
+            raise ValueError("query arithmetic operator is invalid")
+
+
+QueryExpression = QueryField | QueryLiteral | QueryRelativeTime | QueryOutput | QueryArithmetic
 
 
 @dataclass(frozen=True, slots=True)
@@ -640,6 +660,11 @@ def _resolve_expression(
             else now + delta
         )
 
+    if isinstance(expression, QueryArithmetic):
+        left = _resolve_expression(expression.left, row=row, now=now)
+        right = _resolve_expression(expression.right, row=row, now=now)
+        return _arithmetic_value(left, expression.operator, right)
+
     if not isinstance(
         expression,
         QueryField,
@@ -670,6 +695,28 @@ def _resolve_expression(
     return record.facts.get(
         expression.fact
     )
+
+
+def _arithmetic_value(left: Any, operator: str, right: Any) -> Any:
+    if left is None or right is None:
+        return None
+    pair = _numeric_pair(left, right)
+    if pair is None:
+        raise GovernedQueryError("query arithmetic requires numeric operands")
+    a, b = pair
+    if operator == "add":
+        result = a + b
+    elif operator == "subtract":
+        result = a - b
+    elif operator == "multiply":
+        result = a * b
+    elif operator == "divide":
+        if b == 0:
+            raise GovernedQueryError("query arithmetic division by zero")
+        result = a / b
+    else:
+        raise GovernedQueryError("unsupported arithmetic operator")
+    return int(result) if result == result.to_integral_value() else result
 
 
 def _relative_delta(
@@ -1058,18 +1105,21 @@ def _order_rows(
     for order in reversed(
         order_by
     ):
-        ordered.sort(
+        # Missing values are always kept last. Reversing a composite key would
+        # otherwise put None first for descending rankings, which can make an
+        # incomplete provider record outrank verified numeric evidence.
+        present = []
+        missing = []
+        for item in ordered:
+            value = _output_order_value(item, order.expression)
+            (missing if value is None else present).append(item)
+        present.sort(
             key=lambda item: _sortable_output_value(
-                _output_order_value(
-                    item,
-                    order.expression,
-                )
+                _output_order_value(item, order.expression)
             ),
-            reverse=(
-                order.direction
-                == "desc"
-            ),
+            reverse=(order.direction == "desc"),
         )
+        ordered = present + missing
 
     return tuple(ordered)
 
@@ -1116,47 +1166,30 @@ def _sortable_output_value(
         str(value).casefold(),
     )
 
+def _resolve_output_expression(row: Mapping[str, Any], expression: QueryExpression):
+    if isinstance(expression, QueryLiteral):
+        return expression.value
+    if isinstance(expression, QueryOutput):
+        if expression.name not in row:
+            raise GovernedQueryError("query output reference is not available in query output")
+        return row[expression.name]
+    if isinstance(expression, QueryArithmetic):
+        return _arithmetic_value(
+            _resolve_output_expression(row, expression.left),
+            expression.operator,
+            _resolve_output_expression(row, expression.right),
+        )
+    if isinstance(expression, QueryField):
+        direct = f"{expression.source}.{expression.fact}"
+        if direct in row:
+            return row[direct]
+        if expression.fact in row:
+            return row[expression.fact]
+    raise GovernedQueryError("output expression is not available in query output")
+
+
 def _output_order_value(
     row: Mapping[str, Any],
     expression: QueryExpression,
 ):
-    if isinstance(
-        expression,
-        QueryLiteral,
-    ):
-        return expression.value
-
-    if isinstance(
-        expression,
-        QueryOutput,
-    ):
-        if expression.name not in row:
-            raise GovernedQueryError(
-                "order output reference is not available "
-                "in query output"
-            )
-        return row[
-            expression.name
-        ]
-
-    if isinstance(
-        expression,
-        QueryField,
-    ):
-        direct = (
-            f"{expression.source}."
-            f"{expression.fact}"
-        )
-
-        if direct in row:
-            return row[direct]
-
-        if expression.fact in row:
-            return row[
-                expression.fact
-            ]
-
-    raise GovernedQueryError(
-        "order expression is not available "
-        "in query output"
-    )
+    return _resolve_output_expression(row, expression)

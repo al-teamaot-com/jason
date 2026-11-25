@@ -84,6 +84,7 @@ def build_autotask_manifest() -> IntegrationManifest:
         SelectorDefinition("name", "Human-readable discovery selector; never durable identity."),
         SelectorDefinition("title", "Human-readable opportunity title selector; never durable identity."),
         SelectorDefinition("company_id", "Authorized Autotask company scope selector."),
+        SelectorDefinition("serial_number", "Exact queryable Autotask configuration-item serial number selector."),
         SelectorDefinition("ticket_number", "Human-visible Autotask ticket number selector."),
         SelectorDefinition("first_name", "Contact first-name discovery selector."),
         SelectorDefinition("last_name", "Contact last-name discovery selector."),
@@ -346,6 +347,7 @@ def build_autotask_manifest() -> IntegrationManifest:
                         (
                             "company_id",
                             "name",
+                            "serial_number",
                             "filters",
                             "page_size",
                             "after_resource_id",

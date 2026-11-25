@@ -1,0 +1,11 @@
+[Unit]
+Description=Independent governed engineering cadence (development)
+
+[Timer]
+OnCalendar=*-*-* *:03/5:00 America/New_York
+AccuracySec=15s
+Persistent=true
+Unit=jason-independent-development.service
+
+[Install]
+WantedBy=timers.target

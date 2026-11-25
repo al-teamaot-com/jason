@@ -37,11 +37,10 @@ STAGES = (
     # progress when support has no active repair; the development worker
     # subtracts actual active support before claiming any slot.
     Stage("development", "owner_approved_development_worker.py", ("--max-active", "3"), ("support_repair",)),
-    # PR-ready work is a real pending engineering state, not completion. The
-    # existing host reconciler independently revalidates trusted opt-in PRs,
-    # updates stale branches, waits protected checks and merges source only.
-    # It never deploys production and therefore belongs in this work loop.
-    Stage("integration", "pr_integration_source_reconciler.py"),
+    # The controller already reconciles the governed PMV3 integration queue.
+    # Verify that same queue's current authority/revision state; do not revive
+    # the retired, independently merging legacy source reconciler.
+    Stage("integration", "pmv3_integration_queue.py", ("--status-only",)),
     # Read/reconciliation of durable work state must not be suppressed by earlier
     # GitHub or reasoning failures. This stage retains its own governed gates.
     Stage("release_bridge", "todo_release_bridge.py"),
@@ -192,17 +191,11 @@ def run_pipeline(
                 "checked_at": now(),
             }
         else:
-            if stage.name == "integration":
-                # The existing integration reconciler derives repository and
-                # policy from its managed source root and accepts no work-state
-                # arguments. Keep its authority boundary intact.
-                command = [sys.executable, str(scripts / stage.script)]
-            else:
-                command = [
-                    sys.executable, str(scripts / stage.script),
-                    "--repo", str(repo), "--spool", str(spool), *stage.args,
-                ]
-            if stage.name in {"release_bridge", "release_breaker_recovery"}:
+            command = [
+                sys.executable, str(scripts / stage.script),
+                "--repo", str(repo), "--spool", str(spool), *stage.args,
+            ]
+            if stage.name in {"integration", "release_bridge", "release_breaker_recovery"}:
                 command += ["--release-state", str(release_state)]
             print(f"ENGINEERING_STAGE_START name={stage.name}", flush=True)
             try:
