@@ -24,7 +24,8 @@ EXTRA=("tools/audit_journal_install.py","tools/audit_journal_install_transaction
  "tools/audit_journal_pre_cutover_repair.py","tools/audit_journal_fresh_owner_recovery.py",
  "tools/audit_journal_ticket_core_rescue.py","tools/audit_journal_legacy_admission_rescue.py",
  "tools/audit_journal_objective_recovery.py","tools/audit_journal_rollback_slot_reservation.py",
- "tools/audit_journal_no_restore_worker.py","tools/audit_journal_no_restore_install.py")
+ "tools/audit_journal_no_restore_worker.py","tools/audit_journal_no_restore_install.py",
+ "tools/audit_journal_health_private_reader.py","tools/audit_journal_health_reader_install.py")
 OVERRIDES=("93-jason-audit-data-recovery.conf","94-audit-data-compatible-release.conf")
 SYSTEMD=Path("/etc/systemd/system")
 RECORD=Path("/var/lib/jason-owner-release/audit-journal-install")
@@ -121,7 +122,8 @@ def staged_modules(candidate):
   "audit_journal_install_transaction","audit_journal_signed_owner_bridge","audit_journal_pre_cutover_repair",
   "audit_journal_fresh_owner_recovery","audit_journal_ticket_core_rescue",
   "audit_journal_legacy_admission_rescue","audit_journal_objective_recovery",
-  "audit_journal_no_restore_worker","audit_journal_no_restore_install")}
+  "audit_journal_no_restore_worker","audit_journal_no_restore_install",
+  "audit_journal_health_reader_install")}
  return temporary,payload,modules
 
 def ci(helper,candidate):
@@ -368,13 +370,16 @@ def main():
  parser.add_argument("--complete-bounded-audit-objective",action="store_true")
  parser.add_argument("--resume-bounded-audit-objective",action="store_true")
  parser.add_argument("--complete-no-legacy-restore",action="store_true")
+ parser.add_argument("--repair-native-health-private-reader",action="store_true")
+ parser.add_argument("--preflight-native-health-private-reader",action="store_true")
  args=parser.parse_args()
  need(sum(bool(flag) for flag in (
   args.preflight_only,args.resume_bootstrap,args.stage_signed_owner_offer,
   args.adopt_signed_chatgpt_owner,args.repair_before_cutover,args.resume_context_repair,
   args.fresh_owner_expired_recovery,args.rescue_exact_ticket_core,
   args.restore_exact_legacy_admission,args.complete_bounded_audit_objective,
-  args.resume_bounded_audit_objective,args.complete_no_legacy_restore))<=1,
+  args.resume_bounded_audit_objective,args.complete_no_legacy_restore,
+  args.repair_native_health_private_reader,args.preflight_native_health_private_reader))<=1,
   "ONE_EXACT_INSTALLER_OPERATION")
  if args.resume_bootstrap:
   need(args.candidate_sha is None and not args.preflight_only,"EXACT_RESUME_ARGUMENTS");return resume_bootstrap()
@@ -389,6 +394,12 @@ def main():
  c,auth=primitives(candidate);temporary,payload,modules=staged_modules(candidate)
  try:
   s=modules["audit_journal_release_scope"];engine=modules["audit_journal_container_release"]
+  if args.repair_native_health_private_reader or args.preflight_native_health_private_reader:
+   ci_proof=ci(modules["pmv4_e_ci_refresh"],candidate)
+   need(ci_proof.get("required_ci_passed") is True,"HEALTH_READER_PROTECTED_CI")
+   return modules["audit_journal_health_reader_install"].execute(
+    SimpleNamespace(**globals()),s,auth,candidate,payload,
+    check_only=args.preflight_native_health_private_reader)
   if args.complete_no_legacy_restore:
    ci_proof=ci(modules["pmv4_e_ci_refresh"],candidate)
    need(ci_proof.get("required_ci_passed") is True,"NO_RESTORE_PROTECTED_CI")

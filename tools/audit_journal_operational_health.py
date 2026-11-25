@@ -33,7 +33,7 @@ def sqlite_integrity(path: Path) -> str:
 
 def orchestration_integrity(path: Path, temp_root: Path | None):
     if os.getenv("JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE", ""):
-        from orchestrator.journal_health import full_integrity
+        from audit_journal_health_private_reader import full_integrity
         return full_integrity(path,temp_root=temp_root)
     return {"integrity":sqlite_integrity(path)}
 
