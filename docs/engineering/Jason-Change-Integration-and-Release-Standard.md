@@ -1,6 +1,6 @@
 # J-CHANGE-001 — Change Integration and Production Release Standard
 
-**Version:** 1.1  
+**Version:** 1.2
 **Status:** Active  
 **Owner:** Jason Architecture Authority  
 **Authority:** Jason Constitution; `CONTRIBUTING.md`; protected `main` branch validation  
@@ -8,7 +8,7 @@
 **Canonical source:** Yes  
 **Supersedes:** None  
 **Superseded by:** None  
-**Last reviewed:** 2026-09-28  
+**Last reviewed:** 2026-11-25
 **Review interval:** On material change to source-control, CI, deployment, or production reconciliation  
 **Evidence references:** GitHub protected-branch checks; `tools/change_integration_gate.py`; `.github/workflows/production-release-preflight.yml`  
 **Security / data handling:** No secrets or provider payloads are required by this control.
@@ -19,7 +19,9 @@ Jason frequently has multiple upgrades, fixes, documentation changes, and operat
 
 The controlling principle is:
 
-> Parallel development is allowed. Integration and production promotion are serialized against an exact authoritative source state.
+> Parallel development is allowed. Source integration is serialized against current protected main; production promotion is separately serialized against an exact immutable approved revision.
+
+The Owner-approved November 25 independent-source correction supersedes the legacy PMV3 rule that an undeployed main/LKG difference blocks ordinary source trains. Actual production transaction exclusion, protected current-main checks, dependency and overlap review, exact production candidate/approval identity, freeze, health and rollback remain mandatory. This source policy is effective in the native queue only after its separately governed exact installation; it grants no production or provider authority.
 
 ## Governing context
 
@@ -184,6 +186,8 @@ Retirement requires an equal or stronger mechanism that preserves exact-source r
 - `docs/control/AUTOMATED-CHANGE-STATE.json`
 
 ## Revision notes
+
+- 2026-11-25: Separate governed source integration from pending production convergence; retain native transaction exclusion and all exact production authority controls. Native policy activation remains separately gated.
 
 - 2026-09-28: Added J-CHANGE-002 autonomous repair release exception for previously approved behavior restorations.
 - 2026-09-28: Initial active standard created to prevent concurrent Project Jason workstreams from stepping on one another during merge and production promotion.

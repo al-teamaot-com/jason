@@ -259,3 +259,76 @@ def test_retry_successor_retains_two_cycle_quarantine_acceptance(tmp_path,monkey
     assert evidence["bounded_release_retry_policy_verified"] is True
     assert evidence["two_distinct_scheduled_cycles_verified"] is True
     assert evidence["todo_identity_quarantined"] is True
+
+
+def source_integration_plan():
+    p=todo_plan()
+    p.update(predecessor_candidate_sha=m.SOURCE_INTEGRATION_BASELINE,
+             worker_replacements=sorted(m.SOURCE_INTEGRATION_WORKERS),
+             source_integration_policy="independent_source_v1",
+             production_transaction_mutex_preserved=True,
+             exact_native_release_records_unchanged=True,
+             source_merges_not_rolled_back=True,
+             release_gate_retry_budget_seconds=20)
+    return p
+
+
+@pytest.mark.parametrize("key,value",[
+    ("worker_replacements",["pmv3_integration_queue.py","release_manager_host_runner.py"]),
+    ("source_integration_policy","unknown"),
+    ("production_transaction_mutex_preserved",False),
+    ("exact_native_release_records_unchanged",False),
+    ("source_merges_not_rolled_back",False),
+    ("required_scheduled_cycles",1),
+    ("release_gate_retry_budget_seconds",21),
+    ("production_authority",True),
+])
+def test_source_integration_scope_denies_authority_or_policy_expansion(key,value):
+    p=source_integration_plan()
+    assert m.pipeline_scope_sha(p)==m.digest(m.canon(p))
+    p[key]=value
+    with pytest.raises(PermissionError):m.pipeline_scope_sha(p)
+
+
+def test_source_integration_requires_completed_retry_predecessor(tmp_path):
+    a=object.__new__(m.PipelineSuccessor)
+    a.n={"read":lambda p,*args:p.read_bytes()}
+    activation={"at":"2026-11-25T20:19:00+00:00","scope_sha256":"1"*64}
+    with pytest.raises(PermissionError,match="PREDECESSOR_NOT_ACCEPTED"):
+        a.verify_source_integration_predecessor(tmp_path,activation)
+    accepted={"status":"scheduled_engineering_acceptance_verified","scope_sha256":"1"*64,
+        "evidence":{"two_distinct_scheduled_cycles_verified":True,
+                    "todo_identity_quarantined":True,"production_authority":False}}
+    (tmp_path/"scheduled-acceptance.json").write_bytes(m.canon(accepted))
+    with pytest.raises(PermissionError,match="PREDECESSOR_RETRY_NOT_VERIFIED"):
+        a.verify_source_integration_predecessor(tmp_path,activation)
+    accepted["evidence"]["bounded_release_retry_policy_verified"]=True
+    (tmp_path/"scheduled-acceptance.json").write_bytes(m.canon(accepted))
+    a.verify_source_integration_predecessor(tmp_path,activation)
+
+
+def test_source_integration_native_cycles_require_policy_and_unchanged_production(tmp_path,monkeypatch):
+    a,data,cycle=todo_cycle_fixture(tmp_path,monkeypatch)
+    a.predecessor=m.SOURCE_INTEGRATION_BASELINE
+    sha=m.pipeline_scope_sha(source_integration_plan())
+    def evidence(n):
+        c,p,at=cycle(n)
+        c["release_gate_status"]="allowed"
+        q={"integration_policy":"independent_source_v1","production_authority":False,
+           "release_lock":None,"status":"source_backlog","main_sha":"2"*40,
+           "updated_at":c["finished_at"],"source_backlog":{
+             "main_sha":"2"*40,"verified_production_sha":m.LKG,
+             "pending_production_review":True,"production_authority":False}}
+        data["pmv3-integration-queue-state.json"]=q
+        c["integration_queue"]={k:q[k] for k in ("status","integration_policy","production_authority")}
+        return c,p,at
+    first,pipeline,at=evidence(1)
+    data["pmv3-integration-queue-state.json"]["source_backlog"]["verified_production_sha"]="3"*40
+    with pytest.raises(PermissionError,match="SCHEDULED_POLICY_NOT_VERIFIED"):
+        a.record_scheduled_acceptance(sha,{},first,pipeline,at)
+    assert not a.record_scheduled_acceptance(sha,{},*evidence(1))
+    assert a.record_scheduled_acceptance(sha,{},*evidence(2))
+    result=json.loads((tmp_path/"scheduled-acceptance.json").read_text())["evidence"]
+    assert result["independent_source_policy_verified"] is True
+    assert result["native_production_unchanged"] is True
+    assert result["two_distinct_scheduled_cycles_verified"] is True
