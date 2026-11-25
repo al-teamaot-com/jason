@@ -13,6 +13,13 @@ import pytest
 from tools import release_manager_host_runner as runner
 
 
+@pytest.fixture(autouse=True)
+def isolate_stage_e_only_fixture(monkeypatch):
+    # These fixtures model the original Stage E topology, not a later live
+    # system-manager successor on the machine executing the test suite.
+    monkeypatch.setattr(runner,"accepted_engineering_manager_routing",lambda:None)
+
+
 def test_before_cutover_legacy_selection_is_nonmutating(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "PMV4_E_ACCEPTED_MARKER", tmp_path / "absent")
     monkeypatch.setattr(runner.subprocess, "run", lambda *a, **kw: pytest.fail("unexpected call"))

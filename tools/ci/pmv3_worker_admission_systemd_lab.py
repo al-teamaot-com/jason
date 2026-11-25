@@ -87,7 +87,8 @@ def acceptance() -> None:
             "spec=importlib.util.spec_from_file_location('pmv3_exact_gate',p)\n"
             "m=importlib.util.module_from_spec(spec)\n"
             "spec.loader.exec_module(m)\n"
-            "sys.exit(0 if m.admission_allowed(Path(sys.argv[1])) else 1)\n",
+            "budget=float(sys.argv[2]) if len(sys.argv)>2 else 0.0\n"
+            "sys.exit(0 if m.admission_allowed(Path(sys.argv[1]),retry_seconds=budget) else 1)\n",
             encoding="utf-8",
         )
         marker.write_text(
@@ -164,6 +165,30 @@ def acceptance() -> None:
             state, _ = unit_state()
             assert state == "inactive", (state, unit_state())
 
+            # Explicit bounded retry in the same disposable systemd service.
+            # Never use the operational lock path or change the legacy gate.
+            import threading
+            UNIT_PATH.write_text(unit.replace(str(lock)+"\n",str(lock)+" 2\n",1),
+                                 encoding="utf-8")
+            run("systemctl","daemon-reload")
+            with lock.open("rb") as owner:
+                fcntl.flock(owner.fileno(),fcntl.LOCK_EX)
+                release=threading.Timer(0.4,lambda:fcntl.flock(owner.fileno(),fcntl.LOCK_UN))
+                release.start()
+                try:
+                    run("systemctl","start",UNIT)
+                    assert count()==3,"retry did not admit after transient contention"
+                    assert unit_state()[0]=="inactive"
+                finally:
+                    release.join()
+                fcntl.flock(owner.fileno(),fcntl.LOCK_EX)
+                try:
+                    run("systemctl","start",UNIT,check=False)
+                    assert count()==3,"persistent lock was bypassed"
+                    assert unit_state()[0]!="failed"
+                finally:
+                    fcntl.flock(owner.fileno(),fcntl.LOCK_UN)
+
             receipt = {
                 "schema_version": "1.0",
                 "environment": "disposable GitHub-hosted Ubuntu real systemd",
@@ -175,6 +200,8 @@ def acceptance() -> None:
                     "selfheal_defers_worker_and_docker_under_mutex": "PASS",
                     "world_writable_fifo_and_symlink_lock_denied": "PASS",
                     "systemd_worker_resumes_after_lock_release": "PASS",
+                    "systemd_bounded_retry_admits_after_short_contention": "PASS",
+                    "systemd_bounded_retry_defers_sustained_contention": "PASS",
                 },
                 "limitations": [
                     "Test-only root systemd unit and lock, not production user unit.",

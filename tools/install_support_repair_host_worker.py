@@ -118,6 +118,8 @@ def main() -> int:
         _copy(unit_root / unit, user_units / unit, 0o600)
 
     for path in (
+        home / 'jason-worktrees' / 'support-repair-closure',
+        spool.parent / 'autonomous-repair' / 'lifecycle-events',
         spool,
         spool / 'reasoning',
         spool / 'reasoning' / 'requests',
