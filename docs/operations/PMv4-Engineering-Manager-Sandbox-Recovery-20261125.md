@@ -1,0 +1,31 @@
+# PMv4 engineering manager sandbox recovery
+
+**State: source-only preparation; no installation or activation authority.** Relates to #1069, #2300 and #2400.
+
+## Actual incident and recovery
+
+The authenticated exact engineering resume at 13:20:42 EST was rolled back following the first real 13:25 scheduled execution. The existing native admission guard correctly rejected its root-owned Stage E receipt as untrusted inside the user manager's implicit user namespace. On the host the receipt is UID/GID 0:0, mode 0444; in the exact hardened user-service sandbox it is 65534:65534, while the namespace maps only 1000 to 1000. The scheduled worker's independent production health reader also requires actual root custody. Do not accept UID 65534, relax ownership checks, or remove sandbox isolation.
+
+The native watchdog opened the release breaker because the engineering service failed. The exact authorized rollback restored the original pause bytes (SHA256 4a5de8286bf9d77842ca94dafe6f1d38c1a835e8f12bc0dfda46b7a3cf867747), retained immutable approval and failure evidence, and cleared the failed-state latch only after the pause was restored. Native drift evaluation passed and the existing root transition revalidated LKG d1b8c196dadd4b672ec8ba47075f27bb61c98d63 at 13:28. The production freeze and promotion hold remain unchanged. No application container restart or provider write occurred.
+
+## Verified isolated correction
+
+A disposable system-manager oneshot running **User=al, Group=al**, NoNewPrivileges=yes, PrivateTmp=yes, ProtectSystem=strict and ProtectHome=read-only retained actual root UID visibility. Its real installed worker health reader returned native_readback_live_core_and_authority_verified with production_authority=false. It did not execute a production engineering pipeline.
+
+A separate provider-free Git fixture under /srv/jason/archive/engineering-artifacts/engineering-manager-fixture-20261125-xb4mW3wT demonstrated that allowing only the pinned checkout's .git metadata and the existing worktree output path to be writable permits local fetch and worktree creation. The pinned checkout remained read-only, HEAD unchanged and worktree clean. No provider call occurred. The live source checkout's .git was previously read-only even in the system-manager sandbox; this narrow path is required.
+
+## Scoped native repair candidate
+
+Both hardened user-manager services (engineering and self-heal watchdog) exhibit the root-UID visibility defect. Their system-manager successors retain UID/GID 1000, NoNewPrivileges, PrivateTmp, strict filesystem protection, existing service commands and timer cadences. The engineering successor adds only the pinned checkout's .git metadata to the existing writable paths; the self-heal successor receives no system-manager start authority. Its existing durable incident intake is consumed by the normal engineering timer.
+
+The separate root-published successor receipt preserves the historical Stage E marker and exact parallel-install result. It binds immutable source snapshots and installed runner, watchdog, client and parallel-worker artifact digests. Release Manager and self-heal convergence use the same verified manager routing, with no legacy fallback on invalid successor proof. The old user unit and timer files must be retired before the system timers are enabled. The original runtime LKG, root policy boundary, freeze, promotion hold and protected application containers remain unchanged.
+
+The monitoring exporter was independently proven to have two stale expectations, not a newly authorized provider profile: its image-prefix default expects a tag rather than the exact root-LKG image ID, and its V10 provider-profile default differs from the V13 profile in the immutable approved release config. The native transaction derives the exact replacement monitoring environment from those pinned sources. Only the health-exporter service may be restarted, not Runtime, Ticket Core, MCP, Teams Gateway or OpenBao.
+
+The native installer uses the existing hash-pinned CI attestor, exact authenticated Owner verifier, production transaction locks and root revalidation worker. It requires protected-main candidate and exact reviewed changed-file scope; writes the immutable approval and file before-images before mutation; retires user timers and unit files; installs the bounded successor files and effective policy; validates the new topology, monitoring expectations and unchanged protected peers; and requests independent native drift/LKG revalidation. The same exact Owner action authorizes removing the original engineering pause only after cutover verification and a read-only real system-manager namespace health probe. Failure restores exact reviewed file images and original timers, with native revalidation; interrupted installations can recover from the root-owned approval record. No direct breaker write, arbitrary production release grant, provider mutation, or runtime/container restart is authorized.
+
+## Acceptance and release boundary
+
+This is a draft source candidate until protected-main CI, an exact root read-only review and independently authenticated Owner approval are complete. Never execute an unmerged or unverified root installer. The default installer mode is read-only review; apply requires the exact scope hash. The separate verification mode requires fresh real scheduled controller, pipeline and dependency admission evidence, unchanged protected peers, current native drift PASS and breaker CLOSED. A source-test pass, enabled timer or successful cutover alone is not operational completion.
+
+The original LKG is explicitly pinned for this isolated repair. A later runtime/host reconciliation must review and supersede this successor receipt and its artifact pins through the canonical release path; it must not silently reinstall the retired user timers or overwrite the reviewed artifacts. This candidate does not remove the production freeze or authorize another runtime revision.
