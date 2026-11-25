@@ -7,7 +7,7 @@ receipt is not a replacement for that grant or an approval system.
 """
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager, ExitStack, closing
 import fcntl
 from hashlib import sha256
 from pathlib import Path
@@ -101,7 +101,7 @@ def exact_sealed(p,record,*,initial=None):
 def record_reservations(active, expected):
     """Keep unknown results unknown; never erase or invent provider outcomes."""
     import sqlite3
-    with sqlite3.connect(active.as_uri()+'?mode=ro',uri=True,timeout=5) as db:
+    with closing(sqlite3.connect(active.as_uri()+'?mode=ro',uri=True,timeout=5)) as db:
         db.execute('PRAGMA query_only=ON')
         pending=db.execute('SELECT count(*) FROM audit_journal_pending_outcomes').fetchone()[0]
         need(pending==0,'FORWARD_PENDING_PROVIDER_OUTCOMES')
@@ -304,7 +304,7 @@ def recover_forward(c,grant):
         archive=exact_sealed(c.p,original,initial=grant['original_archive'])
         archive_readback(c,archive,original['proof']['events'])
         import sqlite3
-        with sqlite3.connect(c.p.active.as_uri()+'?mode=ro',uri=True,timeout=3) as db:
+        with closing(sqlite3.connect(c.p.active.as_uri()+'?mode=ro',uri=True,timeout=3)) as db:
             active_barriers=db.execute("SELECT name FROM sqlite_master WHERE type='trigger' "
                  "AND name LIKE 'audit_journal_maintenance_%'").fetchall()
         need(not active_barriers,'FORWARD_PREVIOUS_BARRIER_REAPPEARED')
@@ -321,7 +321,7 @@ def recover_forward(c,grant):
     record_reservations(c.p.active,grant['initial_reservations'])
     c._sql('barrier',{'path':str(c.p.active),'enabled':False},seconds=15)
     import sqlite3
-    with sqlite3.connect(c.p.active.as_uri()+'?mode=ro',uri=True,timeout=3) as db:
+    with closing(sqlite3.connect(c.p.active.as_uri()+'?mode=ro',uri=True,timeout=3)) as db:
         triggers=db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'audit_journal_maintenance_%'").fetchall()
         need(not triggers,'FORWARD_BARRIER_REMAINS')
     c._json(ADMISSION_RECEIPT,{'scope_sha256':grant['scope_sha256'],
@@ -394,7 +394,7 @@ def safe_native_acceptance(c,grant):
              'FORWARD_PENDING_ARCHIVE_SEGMENT')
     before=p.pending/(grant['original_archive']['segment_id']+'.sqlite3')
     need(not before.exists(),'FORWARD_BEFORE_IMAGE_RECLAIM_NOT_COMPLETE')
-    with sqlite3.connect(p.active.as_uri()+'?mode=ro',uri=True,timeout=2) as db:
+    with closing(sqlite3.connect(p.active.as_uri()+'?mode=ro',uri=True,timeout=2)) as db:
         present=db.execute("SELECT name FROM sqlite_master WHERE type='trigger' "
                            "AND name LIKE 'audit_journal_maintenance_%'").fetchall()
         admission=read_control(ADMISSION_RECEIPT,p.custody_uid,0o400)

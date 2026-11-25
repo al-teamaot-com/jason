@@ -375,3 +375,32 @@ def test_post_expiry_maintenance_requires_exact_accepted_health_and_rollover(mon
     native['scope_sha256']='0'*64
     with pytest.raises(JournalUnavailable,match='DAILY_MAINTENANCE_NOT_ACCEPTED'):
         fwd.validate_execution_window(grant,'maintain',now=now)
+
+
+def test_failed_acceptance_releases_active_sqlite_fd_before_retry(specimen):
+    """Avoid holding live SQLite across the five-second acceptance retry wait.
+
+    A Python sqlite3 Connection context manager commits but DOES NOT close.
+    A pending exception retains the function frame/connection while the
+    approval-bound release worker sleeps; that blocks the real scheduled
+    rotation through JOURNAL_LEGACY_HANDLE_STILL_OPEN.
+    """
+    c,grant,archive,source=specimen
+    fwd.recover_forward(c,grant)
+    active=c.p.active
+    stat=active.stat()
+    def holders():
+        found=[]
+        for candidate in Path('/proc/self/fd').iterdir():
+            try:metadata=candidate.stat()
+            except OSError:continue
+            if (metadata.st_dev,metadata.st_ino)==(stat.st_dev,stat.st_ino):
+                found.append(candidate.name)
+        return found
+    baseline=set(holders())
+    try:
+        fwd.safe_native_acceptance(c,grant)
+    except JournalUnavailable as e:
+        assert 'FORWARD_REAL_POST_BARRIER_REQUEST_NOT_OBSERVED' in str(e)
+        assert set(holders())-baseline==set(), 'Live acceptance kept additional SQLite FD open during retry'
+    else:raise AssertionError('expected genuine missing request safety gate')
