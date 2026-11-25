@@ -46,7 +46,7 @@ def test_usage_search_returns_unsorted_generic_records_and_exceptions(monkeypatc
         ):
             rows.append((
                 device, counter, 100, start, 100 + delta, end,
-                "Client " + device.upper(), equipment, serial, model,
+                "Client " + device.upper(), equipment, serial, model, 1,
                 "run-1", snapshot, 2, 0, 2, 2,
             ))
     store, cur = make_store(monkeypatch, rows)
@@ -71,7 +71,7 @@ def test_usage_search_preserves_missing_meter_as_exception(monkeypatch):
     for counter in ("total", "blackWhite", "color", "printerTotal", "copierTotal", "scanTotal"):
         rows.append((
             "x", counter, None, None, None, None,
-            "", "ID-X", "SERIALX1", "Model X",
+            "", "ID-X", "SERIALX1", "Model X", 1,
             "run-1", end, 1, 0, 1, 1,
         ))
     store, _ = make_store(monkeypatch, rows)

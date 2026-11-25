@@ -1085,3 +1085,96 @@ def test_linux_worker_rejects_autonomous_generic_shell(monkeypatch):
     with pytest.raises(PermissionError, match="DATTO_COMPONENT_AUTONOMY_REQUIRES_STANDING_SAFE"):
         value.prepare_governed_execution(request)
     assert transport.calls == []
+
+# A production-host identity-only probe must never reuse the worker enrollment.
+JASON_ROOT_PROBE_UID = "85fc3097-ac2f-18b2-afc4-6cf07131275d"
+JASON_ROOT_PROBE_ENV = "JASON_DATTO_JASON_ROOT_PROBE_DEVICE_UID"
+
+
+def jason_root_probe_request(**overrides):
+    row = {"device_uid": JASON_ROOT_PROBE_UID,
+           "allowlist_name": "aot-jason-root-identity-readonly",
+           "device_class": "Desktop",
+           "variables": {"usrInput": "id -u"}}
+    row.update(overrides)
+    return linux_worker_request(**row)
+
+
+def test_jason_root_probe_provider_gate_fail_closed_and_not_worker(monkeypatch):
+    monkeypatch.delenv(JASON_ROOT_PROBE_ENV, raising=False)
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", JASON_ROOT_PROBE_UID)
+    value, transport = linux_worker_connector()
+    with pytest.raises(PermissionError, match="DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED"):
+        value.prepare_governed_execution(jason_root_probe_request())
+    assert transport.calls == []
+
+
+def test_jason_root_probe_provider_binds_exact_readonly_command(monkeypatch):
+    monkeypatch.setenv(JASON_ROOT_PROBE_ENV, JASON_ROOT_PROBE_UID)
+    monkeypatch.delenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", raising=False)
+    mock_access_token(monkeypatch)
+    value, transport = linux_worker_connector()
+    prepared = value.prepare_governed_execution(jason_root_probe_request())
+    assert prepared.parameters["device_class"] == "Desktop"
+    assert prepared.parameters["allowlist_name"] == "aot-jason-root-identity-readonly"
+    assert prepared.payload["jobComponent"]["variables"] == [
+        {"name": "usrInput", "value": "id -u"}
+    ]
+    assert [call["method"] for call in transport.calls] == ["GET"]
+    for variables in ({}, {"usrInput": "whoami"}, {"usrInput": "id -u", "other": "x"}):
+        denied, transport2 = linux_worker_connector()
+        with pytest.raises(PermissionError, match="DATTO_JASON_ROOT_PROBE_COMMAND_NOT_APPROVED"):
+            denied.prepare_governed_execution(
+                jason_root_probe_request(variables=variables)
+            )
+        assert transport2.calls == []
+    monkeypatch.delenv(JASON_ROOT_PROBE_ENV)
+    with pytest.raises(PermissionError, match="DATTO_JASON_ROOT_PROBE_NOT_ENROLLED"):
+        value.execute_governed_execution(prepared)
+    assert [call["method"] for call in transport.calls] == ["GET"]
+
+
+def test_jason_root_probe_provider_cannot_target_other_device(monkeypatch):
+    monkeypatch.setenv(JASON_ROOT_PROBE_ENV, JASON_ROOT_PROBE_UID)
+    monkeypatch.delenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", raising=False)
+    value, transport = linux_worker_connector()
+    with pytest.raises(PermissionError, match="DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED"):
+        value.prepare_governed_execution(
+            linux_worker_request(device_uid="other", variables={"usrInput": "id -u"})
+        )
+    assert transport.calls == []
+
+def test_jason_root_probe_mock_execution_uses_one_exact_job(monkeypatch):
+    monkeypatch.setenv(JASON_ROOT_PROBE_ENV, JASON_ROOT_PROBE_UID)
+    monkeypatch.delenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", raising=False)
+    mock_access_token(monkeypatch)
+    value, transport = linux_worker_connector()
+    prepared = value.prepare_governed_execution(jason_root_probe_request())
+    outcome = value.execute_governed_execution(prepared)
+    assert outcome.data["job_uid"] == "job-uid-1"
+    assert outcome.data["readback_verified"] is True
+    assert [call["method"] for call in transport.calls] == ["GET", "PUT", "GET"]
+    assert transport.calls[1]["json"]["jobComponent"]["variables"] == [
+        {"name": "usrInput", "value": "id -u"}
+    ]
+
+
+def test_jason_root_probe_provider_rejects_autonomous_shell(monkeypatch):
+    monkeypatch.setenv(JASON_ROOT_PROBE_ENV, JASON_ROOT_PROBE_UID)
+    monkeypatch.delenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", raising=False)
+    value, transport = linux_worker_connector()
+    request = jason_root_probe_request()
+    request = ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id=request.context.correlation_id,
+            principal_id="jason-autonomy-worker",
+            organization_id=request.context.organization_id,
+            client_id=request.context.client_id,
+            capability=request.context.capability,
+            mode=request.context.mode,
+        ),
+        arguments=request.arguments,
+    )
+    with pytest.raises(PermissionError, match="DATTO_COMPONENT_AUTONOMY_REQUIRES_STANDING_SAFE"):
+        value.prepare_governed_execution(request)
+    assert transport.calls == []

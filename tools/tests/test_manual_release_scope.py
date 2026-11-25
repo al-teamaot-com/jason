@@ -91,6 +91,10 @@ def test_open_pull_request_overlap_requires_explicit_acknowledgement(repo):
                        allowed_prs=[101], pr_reader=reader(prs))
     assert blocked["unreviewed_open_prs"] == [209]
     assert blocked["status"] == "BLOCKED_SCOPE"
+    independent = m.review(root, "test/repo", base, candidate,
+                           allowed_prs=[101], pr_reader=reader([]))
+    assert blocked["scope_projection_sha256"] != independent["scope_projection_sha256"]
+    assert blocked["scope_projection_authoritative"] is False
     approved = m.review(root, "test/repo", base, candidate,
                         allowed_prs=[101], acknowledged_prs=[209],
                         pr_reader=reader(prs))
@@ -111,6 +115,7 @@ def test_protected_ancestor_remains_reviewable_without_bundling_newer_main(repo)
     assert after["status"] == "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED"
     assert after["deployment_authorized"] is False
     assert after["scope_sha256"] == before["scope_sha256"]
+    assert after["scope_projection_sha256"] == before["scope_projection_sha256"]
     assert after["changed_files"] == ["shared.py"]
     assert git(root, "rev-parse", "HEAD") == tip
     assert git(root, "status", "--porcelain") == ""
@@ -343,6 +348,8 @@ def test_scope_digest_includes_verified_missing_git_registry_evidence(tmp_path, 
         allowed_prs=[101], pr_reader=reader([]),
     )
     assert changed["scope_sha256"] != initial["scope_sha256"]
+    assert changed["scope_projection_sha256"] == initial["scope_projection_sha256"]
+    assert changed["scope_projection_authoritative"] is False
 
 
 def test_exact_clean_native_release_worktree_does_not_invalidate_manual_review(
@@ -421,6 +428,21 @@ def test_unrelated_clean_developer_worktree_still_changes_scope_digest(
     assert after["scope_sha256"] != prior["scope_sha256"]
     assert after["registered_worktrees"] == prior["registered_worktrees"] + 1
     assert after["worktrees_inspected"] == prior["worktrees_inspected"] + 1
+    assert after["scope_projection_sha256"] == prior["scope_projection_sha256"]
+    assert after["scope_projection_authoritative"] is False
+    assert after["deployment_authorized"] is False
+    (developer / "unrelated.py").write_text("independent local work\n")
+    unrelated = m.review(root, "test/repo", base, candidate, allowed_prs=[101],
+                         pr_reader=reader([]))
+    assert unrelated["scope_projection_sha256"] == prior["scope_projection_sha256"]
+    (developer / "shared.py").write_text("overlapping local work\n")
+    overlap = m.review(root, "test/repo", base, candidate, allowed_prs=[101],
+                       pr_reader=reader([]))
+    assert overlap["status"] == "BLOCKED_SCOPE"
+    assert overlap["scope_projection_sha256"] != prior["scope_projection_sha256"]
+    assert overlap["deployment_authorized"] is False
+    assert (developer / "unrelated.py").read_text() == "independent local work\n"
+    assert (developer / "shared.py").read_text() == "overlapping local work\n"
 
 
 def test_prunable_missing_native_exact_sha_worktree_does_not_invalidate_review(

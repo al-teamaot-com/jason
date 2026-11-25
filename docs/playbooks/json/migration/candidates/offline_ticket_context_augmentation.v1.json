@@ -1,0 +1,219 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "backup.endpoint.asset.search",
+      "endpoint.device.read",
+      "endpoint.device.search",
+      "service.configuration.read",
+      "service.ticket.read"
+    ],
+    "approval_bound_branches": [],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "read-only diagnostic only; leave original ticket, lifecycle, note, and client untouched"
+  },
+  "expected_state": {
+    "classification_states": [
+      "site_confirmed_up",
+      "site_likely_up",
+      "site_likely_down",
+      "partial_or_segment_outage_suspected",
+      "site_status_unknown"
+    ],
+    "cannot_infer_site_from_icmp": true,
+    "notes_not_implemented_in_this_read_only_projection": true
+  },
+  "migration": {
+    "source_conversion": "partial_readonly_classifier_candidate_not_accepted",
+    "legacy_source_blob_sha": "1af96e8b0cdd22fd24a60bf3841711cf1ab8b8c9",
+    "legacy_registry_version": "0.1.0",
+    "source_map": "docs/playbooks/json/migration/source_maps/offline_ticket_context_augmentation.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "10-minute source-version conditional recheck and durable augmentation state",
+      "same-site role refresh, active fixed-server read-only Get-NetIPConfiguration witness and complete evidence correlation",
+      "per-company exact DEB asset selection identity and all uncertainty branches",
+      "approved internal note creation, deterministic technical note renderer and no-duplicate provider note readback",
+      "full worker source-to-JSON isolation and live preproduction provider acceptance"
+    ],
+    "production_activation_authorized": false,
+    "accepted_for_execution": false
+  },
+  "playbook": {
+    "id": "offline_ticket_context_augmentation",
+    "lifecycle": "pilot",
+    "name": "Jason - Offline Ticket Context Augmentation",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-Offline-Ticket-Context-Augmentation.md",
+    "target_type": "ticket",
+    "version": "0.1.0-migration.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "read_only_shadow": true,
+    "no_provider_or_ticket_mutation": true,
+    "no_contact_assignment": true,
+    "no_ticket_owner_or_queue_change": true,
+    "cross_client_evidence_forbidden": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "client_id",
+      "ticket_id",
+      "configuration_item_id",
+      "device_uid",
+      "device_hostname",
+      "classification",
+      "assessment_fingerprint",
+      "last_checked_at"
+    ],
+    "cadence_seconds": 600,
+    "source_version_change_recheck": true
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_gate"
+    },
+    {
+      "id": "ticket_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_same_client_offline_ticket",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_ci"
+        }
+      ],
+      "default": "unrelated_ticket"
+    },
+    {
+      "id": "read_ci",
+      "type": "diagnostic",
+      "capability": "service.configuration.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "configuration_item_id"
+        }
+      },
+      "next": "ci_gate"
+    },
+    {
+      "id": "ci_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_active_same_company_ci",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_target"
+        }
+      ],
+      "default": "inconclusive"
+    },
+    {
+      "id": "read_target",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "target_gate"
+    },
+    {
+      "id": "target_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_device_identity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_backup"
+        }
+      ],
+      "default": "inconclusive"
+    },
+    {
+      "id": "read_backup",
+      "type": "diagnostic",
+      "capability": "backup.endpoint.asset.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "name": {
+          "$fact": "device_hostname"
+        },
+        "page_size": 100
+      },
+      "next": "read_peers"
+    },
+    {
+      "id": "read_peers",
+      "type": "diagnostic",
+      "capability": "endpoint.device.search",
+      "arguments": {
+        "site": {
+          "$fact": "site_name"
+        }
+      },
+      "next": "peer_gate"
+    },
+    {
+      "id": "peer_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "peer_inventory_scope_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "classified"
+        }
+      ],
+      "default": "inconclusive"
+    },
+    {
+      "id": "classified",
+      "type": "complete"
+    },
+    {
+      "id": "unrelated_ticket",
+      "type": "complete"
+    },
+    {
+      "id": "inconclusive",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Autotask",
+    "exact_ticket_only": true,
+    "offline_text_or_ci_required": true,
+    "cannot_claim_ticket": true
+  },
+  "verification": {
+    "authoritative_source": "current Autotask ticket/CI and exact DRMM endpoint/site witnesses; DEB availability when verified",
+    "success_condition": "read-only classification with immutable identity and evidence fingerprint, zero provider mutations"
+  }
+}

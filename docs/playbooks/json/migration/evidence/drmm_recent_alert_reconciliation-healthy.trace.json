@@ -1,0 +1,179 @@
+{
+  "authority_granted": false,
+  "facts_sha256": "f6eef59332c44d3f4b93b93922f1f4595124d9d5bbf34afb9b03730362b1d9ff",
+  "fingerprint": "53753e4f1d69f243f614c52b82de44384626a06e16d3686b0762c99127507055",
+  "instructions": [
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "status": "open"
+      },
+      "capability": "management.alert.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "read_open_alerts",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "resource_id": "synthetic-device-1"
+      },
+      "capability": "endpoint.device.read",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "read_device",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "resource_id": "synthetic-device-1"
+      },
+      "capability": "endpoint.security.status.read",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "read_security_status",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "agent_id": "synthetic-agent-1",
+        "archived": false,
+        "limit": 50
+      },
+      "capability": "endpoint.security.detection.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "read_active_detections",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "arguments": {
+        "alert_uid": "synthetic-alert-1",
+        "device_uid": "synthetic-device-1"
+      },
+      "capability": "endpoint.alert.resolve",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "resolve_alert",
+      "step_type": "remediation",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "resource_id": "synthetic-device-1"
+      },
+      "capability": "endpoint.alert.history.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "read_resolved_history",
+      "step_type": "verification",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "page_size": 5,
+        "ticket_number": "T-SYNTH-1"
+      },
+      "capability": "service.ticket.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "read_linked_ticket",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "arguments": {
+        "payload": {
+          "description": "Synthetic verified healthy alert, no live provider action",
+          "noteType": 3,
+          "publish": 2,
+          "ticketID": 1111,
+          "title": "Jason - Scheduled DRMM Reconciliation - Resolution"
+        }
+      },
+      "capability": "service.ticket.note.create",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "document_resolution",
+      "step_type": "remediation",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "arguments": {
+        "payload": {
+          "id": 1111,
+          "status": "Complete"
+        }
+      },
+      "capability": "service.ticket.update",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "complete_ticket",
+      "step_type": "remediation",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "ticket_id": 1111
+      },
+      "capability": "service.ticket.read",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "read_completed_ticket",
+      "step_type": "verification",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {},
+      "capability": null,
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "drmm_recent_alert_reconciliation",
+      "step_id": "ticket_reconciled",
+      "step_type": "complete",
+      "terminal": true,
+      "version": "1.0.0-migration.1"
+    }
+  ],
+  "mode": "synthetic_shadow_trace",
+  "operational_acceptance": false,
+  "playbook_id": "drmm_recent_alert_reconciliation",
+  "provider_calls": 0,
+  "provider_mutations": 0,
+  "terminal_step": "ticket_reconciled",
+  "version": "1.0.0-migration.1"
+}

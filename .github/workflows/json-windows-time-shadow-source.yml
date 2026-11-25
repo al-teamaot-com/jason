@@ -1,0 +1,38 @@
+name: Windows Time JSON shadow source-only acceptance
+
+on:
+  pull_request:
+    paths:
+      - "implementation/runtime_service/src/jason_runtime/json_playbook_readonly_preprod.py"
+      - "implementation/runtime_service/src/jason_runtime/json_windows_time_*.py"
+      - "implementation/runtime_service/tests/test_json_windows_time_*.py"
+      - "docs/playbooks/json/migration/candidates/windows_time_source.v1.json"
+      - "docs/playbooks/json/migration/WINDOWS-TIME-SOURCE-SHADOW-PARITY.md"
+      - ".github/workflows/json-windows-time-shadow-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-shadow-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check pytest jsonschema
+      - name: Independent current-shadow legacy parity and fail-closed tests
+        env:
+          PYTHONPATH: .:implementation:implementation/runtime_service/src
+        run: |
+          python -m pytest -q \
+            implementation/runtime_service/tests/test_json_windows_time_preprod.py \
+            implementation/runtime_service/tests/test_json_windows_time_source_migration.py \
+            implementation/runtime_service/tests/test_json_windows_time_sweep.py \
+            implementation/runtime_service/tests/test_windows_time_source_shadow.py \
+            implementation/runtime_service/tests/test_json_playbook_readonly_preprod.py \
+            implementation/autonomous_remediation/test_json_playbook_document.py \
+            implementation/autonomous_remediation/test_json_playbook_store.py

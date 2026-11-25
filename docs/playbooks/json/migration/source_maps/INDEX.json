@@ -1,0 +1,103 @@
+{
+  "count": 19,
+  "markdown": 18,
+  "python": 1,
+  "registry_blob_sha": "1071e1ab908169a281385825ad6c3fc6cb7708e0",
+  "source_maps": [
+    {
+      "id": "backupiq_endpoint_backup",
+      "source": "docs/playbooks/Jason-BackupIQ-Datto-Endpoint-Backup.md",
+      "source_blob_sha": "9dde241866ddca31f9640d3deb1e0b3ed5a19228"
+    },
+    {
+      "id": "datto_edr_av",
+      "source": "implementation/autonomous_remediation/datto_edr_av_playbook.py",
+      "source_blob_sha": "c3645b2c003e6f4079b62d32572e27b00cdd57b9"
+    },
+    {
+      "id": "disk_bad_block_event_7",
+      "source": "docs/playbooks/Jason-Windows-Disk-Bad-Block-Event-ID-7.md",
+      "source_blob_sha": "01c64d2118e39f8372808d9f6a83953cdbf8e147"
+    },
+    {
+      "id": "dns_agent_diagnostic",
+      "source": "docs/playbooks/Jason-DNSFilter-DNS-Agent-Diagnostic.md",
+      "source_blob_sha": "fa1dbb6375a0cb58a01c7948edc168bf55131e14"
+    },
+    {
+      "id": "drmm_recent_alert_reconciliation",
+      "source": "docs/playbooks/Jason-DRMM-Recent-Alert-Reconciliation.md",
+      "source_blob_sha": "076872fae94f49d3daa3dc1b8740bd99fee75ee2"
+    },
+    {
+      "id": "gpt_insights_tech_assist",
+      "source": "docs/playbooks/Jason-GPT-Insights-Tech-Assist.md",
+      "source_blob_sha": "12b770b6dc74546215c5196c1d72fb533e0dd243"
+    },
+    {
+      "id": "idle_log_off",
+      "source": "docs/playbooks/Jason-Windows-Idle-Log-Off-Compliance-Repair.md",
+      "source_blob_sha": "ef5b3e7b437a268a351370398f6417ff607d1c0b"
+    },
+    {
+      "id": "jason_activity_log",
+      "source": "docs/playbooks/Jason-Activity-Log.md",
+      "source_blob_sha": "727db8ae9808c3464e1f4eb348944ee4542c64c5"
+    },
+    {
+      "id": "low_disk_space",
+      "source": "docs/playbooks/Jason-Windows-Low-Disk-Space.md",
+      "source_blob_sha": "4702c9a6895ca552a2e70ee2a9bc1eeb5685daf4"
+    },
+    {
+      "id": "offline_ticket_context_augmentation",
+      "source": "docs/playbooks/Jason-Offline-Ticket-Context-Augmentation.md",
+      "source_blob_sha": "1af96e8b0cdd22fd24a60bf3841711cf1ab8b8c9"
+    },
+    {
+      "id": "post_error_investigation",
+      "source": "docs/playbooks/Jason-Windows-POST-Error-Investigation.md",
+      "source_blob_sha": "5596e879ceefb139cfc74e100a795b00683cbe4b"
+    },
+    {
+      "id": "security_log_self_heal",
+      "source": "docs/playbooks/Security-Log-Self-Heal-Playbook.md",
+      "source_blob_sha": "60fbcc32388d59f0dab029ca440d905a87a51c44"
+    },
+    {
+      "id": "unexpected_shutdown",
+      "source": "docs/playbooks/Jason-Windows-Unexpected-Shutdown-Site-Correlation.md",
+      "source_blob_sha": "238c644b741ef82a104318e92b99f42dd10dbea1"
+    },
+    {
+      "id": "vulscan_missing_patch",
+      "source": "docs/playbooks/Jason-Windows-Update-VulScan-Missing-Patch.md",
+      "source_blob_sha": "c44b06dabd07b5c6755c16fe8ebd91974cc8f5d6"
+    },
+    {
+      "id": "vulscan_multi_device_split",
+      "source": "docs/playbooks/Jason-VulScan-Multi-Device-Split.md",
+      "source_blob_sha": "72048d28a449e253715f46a69ddc35d65d196113"
+    },
+    {
+      "id": "windows_time_source",
+      "source": "docs/playbooks/Jason-Windows-Time-Source-Self-Heal.md",
+      "source_blob_sha": "5a6dd8624c30a5f90f3bc776141d1d2226a77e3b"
+    },
+    {
+      "id": "client_information_request",
+      "source": "docs/playbooks/Jason-Client-Information-Requests-Round1.md",
+      "source_blob_sha": "d073ca8a92f661f0a546e2ca6cc5c9433ea03b82"
+    },
+    {
+      "id": "unsupported_readonly_triage_note",
+      "source": "docs/playbooks/Jason-Unsupported-ReadOnly-Triage-Note-Pilot.md",
+      "source_blob_sha": "edce573413941881154dd13cbc1b1e08a7c70727"
+    },
+    {
+      "id": "unsupported_triage_human_review",
+      "source": "docs/playbooks/Jason-Unsupported-Triage-Human-Review-Handoff-Pilot.md",
+      "source_blob_sha": "5f28c92f9d44e7f2a58cec30258b7d8f4c08ab27"
+    }
+  ]
+}

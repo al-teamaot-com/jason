@@ -34,6 +34,7 @@ class UniversalPlanContinuationMaintenance:
     execution_ledger: Any
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     interval_seconds: int = 5
+    indeterminate_readback: Callable | None = None
     _next_due: datetime | None = field(default=None,init=False)
 
     def tick(self) -> bool:
@@ -190,6 +191,20 @@ class UniversalPlanContinuationMaintenance:
                 # A post-provider crash may have lost the plan's small receipt,
                 # while the canonical execution ledger still proves completion.
                 # Recover that exact result without invoking the provider again.
+                evidence = self.execution_ledger.evidence(child_id)
+                if evidence is not None and evidence.get("state") == "consumed":
+                    if self.indeterminate_readback is None:
+                        self._progress(approval_id, "indeterminate", completed=completed,
+                            execution_id=current_execution_id, reason="native_readback_required")
+                        return
+                    # The installed port reads native state first. It may do a
+                    # FIRST native execution only after independent Root proof
+                    # that no native claim/effect ever existed. Unknown effects
+                    # are never repeated and the consumed claim is never reset.
+                    # All original decision/live role/scope/expiry gates apply.
+                    stage = "native_readback"
+                    output = self.indeterminate_readback(resumed)
+                    self.execution_ledger.reconcile_consumed_success(resumed, output=output)
                 replay=self.execution_ledger.check_intent(resumed).replay_result
                 if replay is not None:
                     self.requests.record_step_result(approval_id,replay,now=self.clock())
@@ -201,6 +216,12 @@ class UniversalPlanContinuationMaintenance:
                 stage='step_execution'
                 result=self.continuation.execute(approval_id=child_id,approved_by=child.decided_by,
                     request=resumed,channel=child.channel,channel_reference_id=child.channel_response_id)
+                if "provider_outcome_indeterminate" in getattr(result, "reason_codes", ()):
+                    # Preserve the original canonical consumed claim. A native
+                    # readback can reconcile it; no second vote or blind retry.
+                    self._progress(approval_id, "indeterminate", completed=completed,
+                        execution_id=current_execution_id, reason="native_readback_required")
+                    return
                 self.requests.record_step_result(approval_id,result,now=self.clock())
                 if result.status.value != 'succeeded':
                     self._progress(approval_id,'blocked',completed=completed,
@@ -211,6 +232,6 @@ class UniversalPlanContinuationMaintenance:
         except Exception as exc:
             # Never restart a claimed provider step blindly after a crash or an
             # uncertain outcome. Keep its existing claim and report indeterminate.
-            state='indeterminate' if stage=='step_execution' else 'blocked'
+            state='indeterminate' if stage in ('step_execution', 'native_readback') else 'blocked'
             self._progress(approval_id,state,completed=completed,execution_id=current_execution_id,
                            reason=stage+'_'+type(exc).__name__)

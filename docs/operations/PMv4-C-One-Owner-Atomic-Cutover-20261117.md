@@ -41,3 +41,38 @@ Any failure during acceptance invokes the post-write embedded fallback above.
 ## Offline worker image construction
 
 The Ticket Core image does not resolve Python packages from the Internet during the release build. A multi-stage Dockerfile copies the already-reviewed `/usr/local` Python dependency layer from the exact current runtime LKG image into a fresh cached `python:3.12-slim` final stage, then copies the Stage C source. This retains the production-tested dependency set while deliberately not inheriting the HTTP runtime image's EXPOSE or CMD metadata. The final candidate build pins the dependency-stage image to the exact current runtime LKG tag/image and independently verifies the resulting image ID, source label, UID, command, absence of exposed ports, and exact Stage C lifecycle labels.
+
+## Postmigration, embedded-worker recovery (November 17, 2026)
+
+The original signed Stage C cutover moved approved SQLite inodes to canonical
+Ticket Core and shared state; its strict drift check triggered governed
+rollback to the **embedded** worker against those new canonical paths. Do
+**not** rerun the original migration or use its consumed Owner approval.
+
+The narrow successor `pmv4_c_canonical_resume_{builder,owner,root}.py`
+reuses the original exact worker image, Docker manifest, canonical database
+inodes, original watchdog baseline/candidate, existing native host locks,
+root signer, Owner Entra device authentication and postflight scan logic.
+The only allowed service replacement is `jason-runtime` (worker-hosting
+flag `embedded` to `external`). MCP, database files and other services
+remain untouched. On failure it restores embedded runtime against the
+**same** canonical data, never an obsolete database copy.
+
+Status: **SOURCE ONLY**. Do not deploy until current protected main and CI,
+immutable packet and privileged preflight, prior root fallback journal,
+new exact signed Owner proof, two genuine scans, strict drift, and rollback
+readbacks independently PASS. If any of those gates fails, preserve the
+working embedded Ticket Core.
+
+### Narrow rollback-retention correction
+
+The November 17 postflight failure was reproduced as a rollback-retention
+policy capacity error: before cutover, 20 stopped rollback containers already
+occupied the declared maximum of 20. The cutover adds exactly one stopped
+rollback container; the drift guard then reports count 21 against maximum 20.
+The source packet for the subsequent exact Owner-approved retry changes only
+`max_stopped_rollback_containers` from 20 to 21 in the Stage C candidate
+policy. All other drift restrictions and validation rules remain byte-for-byte
+equivalent after canonical JSON comparison. A new exact Owner approval is
+required; the previous signed approval is consumed. No database relocation
+or MCP restart is permitted.

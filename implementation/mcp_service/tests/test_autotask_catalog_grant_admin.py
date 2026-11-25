@@ -223,7 +223,9 @@ def test_disabled_profile_prevents_catalog_list_and_revoke(active, monkeypatch):
 def test_no_global_owner_or_unrelated_admin_rights(active):
     # New authority is never reflected in the shared global Owner allowlist.
     assert EXPECTED_PRINCIPAL not in server.approval_owner_identities()
-    assert server.provider_health_canary_status()["error_code"] == "AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED"
+    # Independently authenticated licensed Owner may view canary status,
+    # but still cannot administer its grants or execute it.
+    assert server.provider_health_canary_status()["status"] == "succeeded"
     assert server.grant_exact_authority(**action("service.ticket.update"))["status"] == "rejected"
     assert active.identity_authority.audit.events == []
 

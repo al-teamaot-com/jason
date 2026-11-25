@@ -40,6 +40,16 @@ Working code alone is not completion.
 | Approval / communication action | `docs/architecture/J-102-Governed-Approval-Architecture.md` plus capability-specific records | CAP-007 and approval-request patterns; `docs/operations/Governed-Mutation-Indeterminate-Recovery.md` for ambiguous provider outcomes | Business authority remains explicit; deterministic policy/approval state; provider action only after authorization; continuation/recovery retries retain dual execution-plan binding; recovery authorization is one-time and requires fresh JKD-001 authority; response/evidence retained; retries/duplicates handled safely |
 | Deployment / operational procedure | `docs/operations/README.md` and relevant INF/runbook | Existing runtime/OpenBao/provider deployment runbooks; `docs/operations/Jason-Runtime-Rebuild-and-Deploy.md`; `docs/operations/Runbook-Teams-Integration.md` | Prerequisites; authority; observation vs mutation; stop conditions; rollback; verification; evidence retention; no secret printing; no silent drift repair; deployment failure reports an error without unnecessarily terminating the operator's interactive session; rollback success must verify restored state/content rather than merely process restart |
 
+## Proposed audit-storage migration pattern
+
+For daily orchestration-journal archival, start with
+[the bounded migration preparation](../engineering/Audit-Journal-Daily-Archive-Migration-v1.md)
+and the existing ORCH event-store / JKD-010 reconstruction contracts. The
+preparation package is not an adopted runtime or health policy. It covers
+all-writer coordination, cross-segment history, protected custody, bounded
+verification and rollback preserving newer events; production integration
+and evidence remain required.
+
 ## Universal no-bypass checks
 
 Before implementation approval, verify:

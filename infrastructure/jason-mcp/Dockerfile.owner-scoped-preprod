@@ -1,0 +1,11 @@
+# Immutable, MCP-only scoped overlay. No runtime/core or provider data.
+# Source context MUST be exact reviewed LKG-descendant candidate ec891ae4.
+ARG BASE_IMAGE=jason-mcp-owner-lkg-base:b2f74bf1
+FROM ${BASE_IMAGE}
+ARG SOURCE_REV=ec891ae49428357ccae8fa3b990c021a124b41d9
+USER root
+COPY implementation/mcp_service/src/jason_mcp/server.py /usr/local/lib/python3.12/site-packages/jason_mcp/server.py
+RUN python -m py_compile /usr/local/lib/python3.12/site-packages/jason_mcp/server.py
+LABEL com.teamaot.jason.source_revision=${SOURCE_REV}
+LABEL org.opencontainers.image.revision=${SOURCE_REV}
+USER 1000:1000

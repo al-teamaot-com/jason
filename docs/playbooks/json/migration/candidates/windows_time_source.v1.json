@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "windows_time_source",
+    "name": "Jason - Windows Time Source Self-Heal",
+    "version": "0.1.0-migration.1",
+    "lifecycle": "pilot",
+    "target_type": "provider_object",
+    "owner": "AOT IT Operations",
+    "source": "docs/playbooks/Jason-Windows-Time-Source-Self-Heal.md"
+  },
+  "trigger": {
+    "provider": "Datto RMM",
+    "status": "open",
+    "alert_class": "comp_script_ctx",
+    "required_diagnostic_phrases": [
+      "Time source mismatch.",
+      "not in approved list:"
+    ],
+    "pilot_only": true
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "read_only_shadow": true,
+    "requires_exact_alert_uid": true,
+    "requires_site_client_binding": true,
+    "no_endpoint_remediation": true,
+    "no_service_restart": true,
+    "no_reboot": true,
+    "no_provider_write": true
+  },
+  "expected_state": {
+    "classification": [
+      "CURRENT_TIME_SOURCE_MISMATCH",
+      "RECURRING_FAILURE",
+      "WAITING_DEVICE_ACCESS"
+    ],
+    "match_window_days": 30,
+    "recurrence_threshold": 3,
+    "no_alert_or_ticket_mutation": true
+  },
+  "state_model": {
+    "entry_step": "read_open_alerts",
+    "persist": [
+      "alert_uid",
+      "device_uid",
+      "hostname",
+      "site",
+      "observed_source",
+      "approved_sources",
+      "recurrence_count",
+      "classification",
+      "reason",
+      "fingerprint",
+      "first_seen_at",
+      "last_seen_at"
+    ],
+    "cadence_minutes": 15,
+    "one_work_item_per_exact_alert": true,
+    "resume_from_read_only_state": true
+  },
+  "steps": [
+    {
+      "id": "read_open_alerts",
+      "type": "diagnostic",
+      "capability": "management.alert.search",
+      "arguments": {
+        "status": "open"
+      },
+      "next": "signature_gate"
+    },
+    {
+      "id": "signature_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "time_signature_match",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "identity_gate"
+        }
+      ],
+      "default": "unrelated_alert"
+    },
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "time_alert_identity_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "site_binding_gate"
+        }
+      ],
+      "default": "inconclusive"
+    },
+    {
+      "id": "site_binding_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "verified_site_client_binding",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_device"
+        }
+      ],
+      "default": "inconclusive"
+    },
+    {
+      "id": "read_device",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "device_identity_gate"
+    },
+    {
+      "id": "device_identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "endpoint_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "device_online_gate"
+        }
+      ],
+      "default": "inconclusive"
+    },
+    {
+      "id": "device_online_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "device_online",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_history"
+        }
+      ],
+      "default": "classified_waiting"
+    },
+    {
+      "id": "read_history",
+      "type": "diagnostic",
+      "capability": "endpoint.alert.history.search",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "history_gate"
+    },
+    {
+      "id": "history_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "history_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "recurrence_gate"
+        }
+      ],
+      "default": "inconclusive"
+    },
+    {
+      "id": "recurrence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "recurring_failure",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "classified_recurring"
+        }
+      ],
+      "default": "classified_current"
+    },
+    {
+      "id": "classified_recurring",
+      "type": "complete"
+    },
+    {
+      "id": "classified_current",
+      "type": "complete"
+    },
+    {
+      "id": "classified_waiting",
+      "type": "complete"
+    },
+    {
+      "id": "unrelated_alert",
+      "type": "complete"
+    },
+    {
+      "id": "inconclusive",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Datto RMM management.alert.search, endpoint.device.read and endpoint.alert.history.search",
+    "success_condition": "Exact current alert signature/identity and 30-day history independently classify source mismatch; no provider writes"
+  },
+  "completion": {
+    "terminal_disposition": "Persist and audit read-only time-source classification; no alert, ticket, or endpoint mutation"
+  },
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "management.alert.search",
+      "endpoint.device.read",
+      "endpoint.alert.history.search"
+    ],
+    "approval_bound_branches": [],
+    "disruptive_branches": []
+  },
+  "migration": {
+    "source_conversion": "current_legacy_shadow_readonly_candidate",
+    "accepted_legacy_replacement": false,
+    "legacy_source_blob_sha": "5a6dd8624c30a5f90f3bc776141d1d2226a77e3b",
+    "legacy_registry_version": "0.1.0",
+    "legacy_current_activation": "shadow",
+    "separate_future_remediation_requires_owner_authorization": true,
+    "production_activation_authorized": false,
+    "site_binding_note": "Trusted client-to-DRMM-site ownership is stricter than the legacy pilot and must be proven by the governed adapter."
+  }
+}

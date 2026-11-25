@@ -1,0 +1,215 @@
+{
+  "id": "dns_agent_diagnostic",
+  "implementation_mentions_unreviewed": [
+    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py"
+  ],
+  "json_source_conversion_accepted": false,
+  "legacy_enabled": true,
+  "legacy_registry_lifecycle": "production",
+  "legacy_registry_version": "1.0.0",
+  "legacy_source": "docs/playbooks/Jason-DNSFilter-DNS-Agent-Diagnostic.md",
+  "live_approval_granted_by_map": false,
+  "mapping_is_not_parity_or_authority": true,
+  "python_symbols": [],
+  "registry_allowed_mutations": [
+    "automation.component.execute",
+    "service.ticket.note.create",
+    "service.ticket.update"
+  ],
+  "section_map": [
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 3,
+      "heading": "Section Goal",
+      "last_line": 22,
+      "number": 1,
+      "section_sha256": "4640bbc9148e7ddbd628766cf2bf0da4172320083d373b5029b60f9a85e96ed3"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 23,
+      "heading": "Trigger",
+      "last_line": 34,
+      "number": 2,
+      "section_sha256": "40e51184682b729a092fd9dd78fd0e399e22aed143b9a3bb2f752ac5ab09a975"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 35,
+      "heading": "Scope and Boundaries",
+      "last_line": 75,
+      "number": 3,
+      "section_sha256": "f65fef72e0a157ec3dc5a020d83e9e1e422aa4f46f637489e9813b63952e456c"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 76,
+      "heading": "Initial Identification",
+      "last_line": 94,
+      "number": 4,
+      "section_sha256": "a749ad88bc3c3537d6fa7b2fec64b3468f911ac24abfa46fc41233f34c9521a4"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 95,
+      "heading": "Expected State",
+      "last_line": 115,
+      "number": 5,
+      "section_sha256": "a89ef391eefe49b31f6886f91be3b2dc79311aa5136268e9bd0a5a546f5162ba"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 116,
+      "heading": "State Model",
+      "last_line": 141,
+      "number": 6,
+      "section_sha256": "f099c06215859edf16992c662288fbf5cd9203de7a8c00eedee0ba11ce110b05"
+    },
+    {
+      "capability_mentions_unreviewed": [
+        "endpoint.alert.history.search",
+        "endpoint.alert.search",
+        "endpoint.device.read",
+        "endpoint.software.search"
+      ],
+      "first_line": 142,
+      "heading": "Diagnostic Workflow",
+      "last_line": 349,
+      "number": 7,
+      "section_sha256": "5aafb227355cebc1797269847b42b1971ee16d15290c18fe2f3fe64d03e33772"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 350,
+      "heading": "Decision Gates",
+      "last_line": 367,
+      "number": 8,
+      "section_sha256": "a7013dafaef3533dc3f90ca8d50983c199f000b10dc9056aee1bfc16972491ba"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 368,
+      "heading": "Remediation",
+      "last_line": 443,
+      "number": 9,
+      "section_sha256": "01d5e2b926861a1df7fd42a0fa0bb958b70fc14dd5d909e9087c3d836d57aca1"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 444,
+      "heading": "Retry Policy",
+      "last_line": 455,
+      "number": 10,
+      "section_sha256": "e1a4ddf50fc6f75a55b4cbf431df8e465c893d841bddab2ea4c3b2ea33caefe8"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 456,
+      "heading": "Periodic Rechecks",
+      "last_line": 467,
+      "number": 11,
+      "section_sha256": "22ff75e5c3d07b1439532bf79b07360df8de3ba7d3551ba00ab7a306662b70a8"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 468,
+      "heading": "Aging / Stale Condition",
+      "last_line": 480,
+      "number": 12,
+      "section_sha256": "4130ab3ccb87cd705814a08de4a1be649da28d3afe5d18553ea88bf014688fb5"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 481,
+      "heading": "Dependency Handling",
+      "last_line": 495,
+      "number": 13,
+      "section_sha256": "c3595478dd118f04e18ad86ec323ae8eb0d9e6c90cb0e9edeac56da6f4e1a9b6"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 496,
+      "heading": "Documentation Requirements",
+      "last_line": 534,
+      "number": 14,
+      "section_sha256": "b75a92c610ec5e9616caff400577023da0f850fa40e71f63857254d9a4f941f3"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 535,
+      "heading": "Failure Handling",
+      "last_line": 542,
+      "number": 15,
+      "section_sha256": "fca02090e8d6802c9ac1ad0dd2660f035d460ba4119cf0a8e1fe2868b5d86fed"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 543,
+      "heading": "Escalation Criteria",
+      "last_line": 557,
+      "number": 16,
+      "section_sha256": "ecc58ffd5b1d2cee55b1e161baf62b5b5248ce5a8b7e18f9755912db4631e134"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 558,
+      "heading": "Verification",
+      "last_line": 583,
+      "number": 17,
+      "section_sha256": "54f2746978ae171ad8f3d05cfe53232d7933793a7313c2d2126e10e426399591"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 584,
+      "heading": "Completion Criteria",
+      "last_line": 600,
+      "number": 18,
+      "section_sha256": "6d7127b7059603cf7b52c53304eb136400d6667c7b4d1981de9857d020078ecd"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 601,
+      "heading": "Final Resolution Note",
+      "last_line": 606,
+      "number": 19,
+      "section_sha256": "d9d7133749d2f91216a9d5964790e4765671ebd4e2fdc00a6325fe85971fb86b"
+    },
+    {
+      "capability_mentions_unreviewed": [
+        "automation.component.search",
+        "automation.job.output.read",
+        "automation.job.read",
+        "endpoint.alert.search",
+        "endpoint.device.search",
+        "endpoint.software.search",
+        "service.configuration.search",
+        "service.ticket.search"
+      ],
+      "first_line": 607,
+      "heading": "Required Capabilities",
+      "last_line": 642,
+      "number": 20,
+      "section_sha256": "9fdfea56369f83dc4b8a0ef7c3b552c6eace4a2672cc47d291ed3f569f398e99"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 643,
+      "heading": "Acceptance Test",
+      "last_line": 692,
+      "number": 21,
+      "section_sha256": "73d831087e9f0f4c34e85931527bc23e6dbe449b3791cdf7efc25c4bd30f479c"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 693,
+      "heading": "Section Goal Closure",
+      "last_line": 711,
+      "number": 22,
+      "section_sha256": "151c0cf599661b6cb728fc2103c53a45de8098f2a908545bfe7849a749a19959"
+    }
+  ],
+  "source_blob_sha": "fa1dbb6375a0cb58a01c7948edc168bf55131e14",
+  "source_format": "md",
+  "source_sha256": "1067c93ce79f235d77a42ad2aa5eaa1c0e744e6ff60f9766b6ee5c6ae1da0194",
+  "source_size_bytes": 35683
+}

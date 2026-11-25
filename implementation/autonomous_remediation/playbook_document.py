@@ -187,6 +187,29 @@ def validate_playbook_document(
         arguments = raw_step.get("arguments", {})
         if not isinstance(arguments, Mapping):
             errors.append(f"{step_id}:ARGUMENTS_OBJECT_REQUIRED")
+        else:
+            # Generated JSON can bind named facts but cannot execute expressions.
+            def inspect_argument(value: Any, depth: int = 0) -> None:
+                if depth > 8:
+                    errors.append(f"{step_id}:ARGUMENT_NESTING_EXCEEDED")
+                    return
+                if isinstance(value, Mapping):
+                    if "$fact" in value:
+                        fact = value["$fact"]
+                        if (set(value) != {"$fact"} or not isinstance(fact, str)
+                                or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.]{0,127}", fact)):
+                            errors.append(f"{step_id}:FACT_REFERENCE_INVALID")
+                        return
+                    if any(str(key).startswith("$") for key in value):
+                        errors.append(f"{step_id}:ARGUMENT_EXPRESSION_FORBIDDEN")
+                        return
+                    for item in value.values():
+                        inspect_argument(item, depth + 1)
+                elif isinstance(value, list):
+                    for item in value:
+                        inspect_argument(item, depth + 1)
+
+            inspect_argument(arguments)
 
         retry = raw_step.get("retry")
         if retry is not None:
@@ -229,6 +252,8 @@ def validate_playbook_document(
                             "eq", "ne", "in", "not_in", "exists", "truthy", "falsy"
                         }:
                             errors.append(f"{step_id}:BRANCH_CONDITION_INVALID:{branch_index}")
+                        if operator in {"in", "not_in"} and not isinstance(condition.get("value"), list):
+                            errors.append(f"{step_id}:BRANCH_MEMBERSHIP_ARRAY_REQUIRED:{branch_index}")
                     if not target:
                         errors.append(f"{step_id}:BRANCH_TARGET_REQUIRED:{branch_index}")
                     else:

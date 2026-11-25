@@ -1,0 +1,16 @@
+[Unit]
+Description=Jason independently attested scoped-backport interrupted transaction recovery
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 -I /usr/local/lib/jason/scoped-backport/tools/scoped_backport_native_recovery.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/jason-scoped-backport /var/lib/jason/openclaw/release-manager /run/docker.sock /var/run/docker.sock
+TimeoutStartSec=180
