@@ -159,6 +159,13 @@ class JournalController:
             "created_at":datetime.now(timezone.utc).isoformat()},0o400)
         return path
 
+    def writer_identity(self):
+        # A fixed background helper does not need a PAM login/session. Drop all
+        # supplementary groups and retain the service's existing NNP/cap bounds.
+        need(os.geteuid()==0 and self.p.writer_uid==1000,"JOURNAL_WRITER_IDENTITY")
+        return {"user":1000,"group":1000,"extra_groups":(),"env":{
+            "PATH":"/usr/bin:/bin","HOME":"/home/al","USER":"al","LOGNAME":"al","LANG":"C.UTF-8"}}
+
     def _sql(self,operation,args,*,seconds=10800):
         objective=getattr(self,"_objective_deadline",None)
         if objective is not None:
@@ -175,14 +182,14 @@ class JournalController:
         need(os.geteuid()==0 and self.p.writer_uid==1000,"JOURNAL_WRITER_IDENTITY")
         # Only fixed installed code and a finite operation execute as UID1000.
         loader='import runpy,sys;sys.path.insert(0,sys.argv[1]);p=sys.argv[2];sys.argv=[p,*sys.argv[3:]];runpy.run_path(p,run_name="__main__")'
-        argv=["/usr/sbin/runuser","-u","al","--","/usr/bin/python3","-I","-B",
+        argv=["/usr/bin/python3","-I","-B",
             "-c",loader,str(ENTRY.parent.parent/"implementation"),str(ENTRY),"--sql-operation",
             operation,"--sql-arguments",canonical(args).decode()]
         # This fresh process group contains only the fixed writer-UID SQL helper.
         # Terminate the whole tracked group on interruption, so an orphan query
         # cannot keep a handoff/file open after its Root coordinator has stopped.
         with subprocess.Popen(argv,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
-                              start_new_session=True) as child:
+                              start_new_session=True,**self.writer_identity()) as child:
             try:stdout,stderr=child.communicate(timeout=seconds)
             except BaseException:
                 try:os.killpg(child.pid,signal.SIGKILL)
@@ -696,8 +703,8 @@ class JournalController:
                   "import release_manager_host_runner as r;r.request_root_control_transition("
                   "Path('/var/lib/jason/openclaw/release-manager'),action='revalidate',"
                   "revision='d1b8c196dadd4b672ec8ba47075f27bb61c98d63')")
-            result=subprocess.run(["/usr/sbin/runuser","-u","al","--","/usr/bin/python3","-B","-c",code],
-                                  timeout=100,capture_output=True,check=False)
+            result=subprocess.run(["/usr/bin/python3","-B","-c",code],
+                                  timeout=100,capture_output=True,check=False,**self.writer_identity())
             need(result.returncode==0,"JOURNAL_SCHEDULED_NATIVE_REVALIDATION_FAILED")
             return {"status":"existing_native_full_fast_drift_and_revalidation_verified"}
         return {"status":"current_native_full_evidence_observed"}

@@ -77,3 +77,49 @@ def test_original_recreation_lost_response_does_not_consume_an_extra_replacement
  result=engine.restore_missing(ROLE,body,original_id="b"*64,original_backup=BACKUP)
  assert result["after_id"]=="d"*64 and engine.created==1
  assert engine.rows[ROLE]["State"]["Running"] and configuration_matches(engine.rows[ROLE],body)
+
+
+def test_docker_29_none_to_false_oom_default_does_not_strand_rollback():
+ from tools.audit_journal_container_release import exact_original_configuration
+ source=before();body=exact_original_configuration(source)
+ # Simulate the actual Docker 29 before-image key, which the minimal
+ # EngineFixture deliberately omits.
+ body["HostConfig"]["OomKillDisable"]=None
+ engine=EngineFixture(None)
+ engine.call("POST","/containers/create?fixture",body)
+ current=engine.rows[ROLE]
+ assert current["HostConfig"]["OomKillDisable"] is None
+ current["HostConfig"]["OomKillDisable"]=False
+ assert configuration_matches(current,body)
+ assert body["HostConfig"]["OomKillDisable"] is None
+ # The inverse transition is NOT normalization.
+ body["HostConfig"]["OomKillDisable"]=False
+ current["HostConfig"]["OomKillDisable"]=None
+ assert not configuration_matches(current,body)
+
+
+def test_docker_29_oom_normalization_never_waives_other_host_security_fields():
+ from tools.audit_journal_container_release import exact_original_configuration
+ body=exact_original_configuration(before())
+ body["HostConfig"].update({"OomKillDisable":None,"SecurityOpt":None,"CapAdd":None,"NetworkMode":"bridge"})
+ engine=EngineFixture(None)
+ engine.call("POST","/containers/create?fixture",body)
+ current=engine.rows[ROLE]
+ current["HostConfig"]["OomKillDisable"]=False
+ assert configuration_matches(current,body)
+ for key,changed in (
+     ("Privileged",True),
+     ("ReadonlyRootfs",not body["HostConfig"]["ReadonlyRootfs"]),
+     ("SecurityOpt",["apparmor=unconfined"]),
+     ("CapAdd",["SYS_ADMIN"]),
+     ("NetworkMode","host"),
+ ):
+  item=copy.deepcopy(current)
+  item["HostConfig"][key]=changed
+  assert not configuration_matches(item,body),key
+ item=copy.deepcopy(current)
+ item["Image"]="sha256:"+"0"*64
+ assert not configuration_matches(item,body)
+ item=copy.deepcopy(current)
+ item["Mounts"][0]["RW"]=not item["Mounts"][0]["RW"]
+ assert not configuration_matches(item,body)
