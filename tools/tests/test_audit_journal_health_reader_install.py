@@ -80,3 +80,42 @@ def test_new_canonical_installer_routes_keep_old_operations_exclusive():
     assert 'HEALTH_READER_PROTECTED_CI' in source
     assert 'ONE_EXACT_INSTALLER_OPERATION' in source
     assert 'check_only=args.preflight_native_health_private_reader' in source
+
+
+def test_shared_owner_prompt_displays_only_the_exact_native_health_targets(monkeypatch,capsys):
+    from tools import pmv4_e_dispatch_install as owner
+    raw=b'synthetic-reviewed-owner-auth-source'
+    monkeypatch.setattr(owner,'read',lambda *a:raw)
+    monkeypatch.setattr(owner,'OAUTH_HASH',owner.digest(raw))
+    calls=[]
+    def form(url,args):
+        calls.append(url)
+        if url.endswith('devicecode'):
+            return {'user_code':'SYNTHETIC','device_code':'synthetic-only',
+                    'verification_uri':'https://example.invalid/synthetic-auth',
+                    'expires_in':60,'interval':5}
+        return {'access_token':'synthetic-only-never-networked'}
+    monkeypatch.setattr(owner,'load_code',lambda *a:{
+        'TENANT':'synthetic-tenant','CLIENT_ID':'synthetic-client','SCOPE':'synthetic-scope',
+        '_form':form,'jwt_owner':lambda _: 'synthetic-verified-owner'})
+    monkeypatch.setattr(owner.time,'sleep',lambda _:None)
+    scope={'action':repair.ACTION,'policy':{'candidate_sha':'f'*40,'rollback_sha':'e'*40},
+           **repair.native_target_scope()}
+    prompts=[]
+    monkeypatch.setattr('builtins.input',lambda prompt:(prompts.append(prompt),repair.ACTION)[1])
+    assert owner.owner(scope)=='synthetic-verified-owner'
+    output=capsys.readouterr().out
+    targets=next(line.split('=',1)[1] for line in output.splitlines() if line.startswith('INSTALL_TARGETS='))
+    assert targets.split(',')==scope['exact_native_targets']
+    assert len(targets.split(','))==4
+    assert all(Path(x).parent==repair.NATIVE for x in targets.split(','))
+    assert 'INSTALL_SCOPE_SHA256='+owner.digest(owner.canonical(scope)) in output
+    assert len(prompts)==1 and len(calls)==2
+    assert '/pmv4-e-bootstrap/' not in targets
+
+
+def test_approval_target_alias_does_not_mutate_native_enforcement_targets():
+    scope=repair.native_target_scope()
+    assert scope['installation_targets']==scope['exact_native_targets']
+    scope['installation_targets'].append('/synthetic-renderer-change')
+    assert len(scope['exact_native_targets'])==4

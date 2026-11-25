@@ -46,6 +46,12 @@ def digest(raw):
     return sha256(raw).hexdigest()
 
 
+def native_target_scope():
+    """Use the legacy Owner renderer's target field with the exact native scope."""
+    targets = [str(NATIVE / name) for name in FILES.values()]
+    return {'exact_native_targets': targets, 'installation_targets': list(targets)}
+
+
 def props(I, unit):
     text = I.command(['/usr/bin/systemctl', 'show', unit, '-p', 'ActiveState',
                       '-p', 'MainPID', '-p', 'Result', '-p', 'ExecMainStatus'])
@@ -131,7 +137,7 @@ def preflight(I, s, candidate, payload):
     scope = {
         'schema_version': '1.0', 'action': ACTION,
         'policy': {'candidate_sha': candidate, 'rollback_sha': s.ROLLBACK},
-        'queue_cutover': False, 'exact_native_targets': [str(NATIVE / x) for x in FILES.values()],
+        'queue_cutover': False, **native_target_scope(),
         'source_sha256': {x: digest(payload[x]) for x in FILES},
         'before_sha256': dict(BEFORE), 'preserved_audit': original,
         'preserved_protected_sha256': dict(s.PROTECTED), 'protected_peers': peers,
