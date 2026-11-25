@@ -1,6 +1,6 @@
 # Jason Playbook: Datto EDR/AV Diagnose & Repair
 
-Version: 1.3.0
+Version: 1.3.1
 Playbook ID: `datto_edr_av`
 Status: v1.3 production-enabled under normal Jason governance. Governed endpoint-security reads and Datto AV scan execution are production-proven. The controlled AOT-50282 / T20260918.0005 threat acceptance proved completed Full and Quick scan evidence, post-scan detection review, recurrence handling, duplicate-scan suppression, ticket documentation, and terminal escalation when provider evidence remains `compromised=true` or a recurring source remains unresolved. Security escalation is terminal/sticky and cannot be downgraded by later healthy product state.
 
@@ -285,7 +285,8 @@ Escalate when:
 - disruptive isolation/containment is required;
 - detection remains ambiguous;
 - required API/scan evidence is unavailable;
-- material evidence conflicts.
+- material evidence conflicts;
+- the same exact SHA-256, filename/source pattern, or equivalent durable threat fingerprint recurs across separate detection periods and its source/classification remains unresolved. A currently clean detection list, healthy AV state, or completed scan does not by itself clear this recurrence condition.
 
 Endpoint/network isolation remains disruptive and requires explicit technician approval unless separately governed.
 
@@ -319,8 +320,10 @@ Complete only when:
 2. `SecurityStackHealthy=true`;
 3. `ThreatResolved=true`;
 4. the verification scan record is completed/read and the post-scan detection check is clear;
-5. recurrence check passed;
+5. recurrence check passed, including no unresolved repeated exact-hash/source pattern across prior detection periods;
 6. required ticket documentation succeeded.
+
+For threat tickets, historical recurrence is part of closure eligibility. If the same exact SHA-256 or durable threat fingerprint has repeatedly reappeared and the source/false-positive/security classification remains unresolved, set or retain `escalation_required` and do not close solely because the endpoint is currently healthy, scans complete successfully, or no active detection is returned.
 
 ## 19. Final Resolution Note
 
