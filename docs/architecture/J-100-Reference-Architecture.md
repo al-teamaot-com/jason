@@ -4,6 +4,8 @@
 
 This document defines the enduring architectural building blocks of Jason. It intentionally defines *what must exist*, not *how it is implemented*.
 
+The outcome-centered reasoning and governed execution requirements are recorded in [ADR-014](../decisions/ADR-014-Outcome-Centered-Reasoning-and-Governed-Execution.md).
+
 ## Authoritative Components
 
 ### Governance
