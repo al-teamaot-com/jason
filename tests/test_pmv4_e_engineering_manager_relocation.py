@@ -32,7 +32,12 @@ def test_candidate_is_exact_and_retains_sandbox_and_original_guards():
     for line in old.splitlines():
         if line.startswith(("ExecCondition=", "ExecStart=", "NoNewPrivileges=", "PrivateTmp=",
                             "ProtectSystem=", "ProtectHome=", "WorkingDirectory=", "TimeoutStartSec=")):
-            assert line in new.splitlines()
+            if line.endswith("/pmv3_worker_release_gate.py"):
+                assert line + " --retry-contention" in new.splitlines()
+            elif line.startswith("ExecStart="):
+                assert line + " --retry-release-contention" in new.splitlines()
+            else:
+                assert line in new.splitlines()
     old_rw = next(x for x in old.splitlines() if x.startswith("ReadWritePaths="))
     new_rw = next(x for x in new.splitlines() if x.startswith("ReadWritePaths="))
     assert new_rw == old_rw.replace("ReadWritePaths=", "ReadWritePaths=" + " ".join(m.PIPELINE_WRITES) + " ", 1)

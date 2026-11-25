@@ -251,3 +251,58 @@ def test_production_lock_acquired_during_pass_defers_second_queue_reconcile(tmp_
     assert state["passes"][0]["disposition"] == "deferred"
     assert calls["n"] == 1
     assert queue_calls["n"] == 1  # initial read; no post-pass queue mutation
+
+
+def test_opt_in_controller_recovers_short_contention_and_rechecks_all_boundaries(tmp_path,monkeypatch):
+    import threading
+    spool=tmp_path/'spool';spool.mkdir()
+    lock=tmp_path/'production-transaction.lock';lock.touch(mode=0o600)
+    gate=module.release_gate
+    monkeypatch.setattr(gate,'INITIAL_BACKOFF_SECONDS',0.01)
+    monkeypatch.setattr(gate,'MAX_BACKOFF_SECONDS',0.02)
+    monkeypatch.setattr(gate,'RETRY_SECONDS',0.5)
+    base_runner,calls=runner_for(spool,[{
+        "pipeline":{"status":"healthy","failed_work_stages":[],"failed_control_stages":[]},
+        "supervisor":{"status":"healthy","category_counts":{},"disposition_sha256":"ok",
+                      "approved_outstanding":0,"active":0},
+    }])
+    held=[];timers=[];queue_calls=[]
+    def brief_lock():
+        handle=lock.open('rb')
+        fcntl.flock(handle.fileno(),fcntl.LOCK_EX)
+        held.append(handle)
+        timer=threading.Timer(0.04,lambda:fcntl.flock(handle.fileno(),fcntl.LOCK_UN))
+        timers.append(timer);timer.start()
+    def reconcile(**kwargs):
+        queue_calls.append(1)
+        if len(queue_calls)==1:brief_lock()
+        return idle_integration_queue(**kwargs)
+    def runner(*args,**kwargs):
+        result=base_runner(*args,**kwargs)
+        brief_lock()
+        return result
+    brief_lock()
+    try:
+        state=module.controller_run(scripts=tmp_path,repo=tmp_path,spool=spool,
+            release_state=tmp_path,runner=runner,integration_reconciler=reconcile,
+            retry_release_contention=True)
+        assert state["status"]=="complete"
+        assert state["release_gate_status"]=="allowed"
+        assert calls["n"]==1 and len(queue_calls)==2
+    finally:
+        for timer in timers:timer.join()
+        for handle in held:handle.close()
+
+
+def test_opt_in_controller_fails_closed_on_missing_lock_and_pause(tmp_path):
+    spool=tmp_path/'spool';spool.mkdir()
+    def must_not_run(*args,**kwargs):raise AssertionError('unsafe engineering admission')
+    for expected in ('unavailable','paused'):
+        if expected=='paused':
+            (tmp_path/'production-transaction.lock').touch(mode=0o600)
+            (spool/'pmv3-engineering-owner-pause.json').touch(mode=0o600)
+        state=module.controller_run(scripts=tmp_path,repo=tmp_path,spool=spool,
+            release_state=tmp_path,runner=must_not_run,integration_reconciler=must_not_run,
+            retry_release_contention=True)
+        assert state["status"]=="deferred" and state["release_gate_status"]==expected
+        assert state["pass_count"]==0

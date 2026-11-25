@@ -189,3 +189,73 @@ def test_todo_native_acceptance_never_hides_intervening_failure(tmp_path,monkeyp
     with pytest.raises(PermissionError,match="INTERVENING_FAILURE"):
         a.record_scheduled_acceptance(sha,{},*cycle(2))
     assert not (tmp_path/"scheduled-acceptance.json").exists()
+
+
+def release_retry_plan():
+    p=todo_plan()
+    p.update(predecessor_candidate_sha=m.RELEASE_RETRY_BASELINE,
+             worker_replacements=sorted(m.RELEASE_RETRY_WORKERS),
+             release_gate_retry_budget_seconds=20,
+             retry_only_on_contention=True,legacy_release_guard_immediate=True,
+             preserve_predecessor_acceptance_requirements=True,
+             supersede_pending_only_before_first_worker_execution=True)
+    return p
+
+
+@pytest.mark.parametrize("key,value",[
+    ("release_gate_retry_budget_seconds",21),
+    ("retry_only_on_contention",False),
+    ("legacy_release_guard_immediate",False),
+    ("preserve_predecessor_acceptance_requirements",False),
+    ("supersede_pending_only_before_first_worker_execution",False),
+    ("required_scheduled_cycles",1),
+])
+def test_retry_scope_preserves_exact_predecessor_authority_and_bounds(key,value):
+    p=release_retry_plan()
+    assert m.pipeline_scope_sha(p)==m.digest(m.canon(p))
+    p[key]=value
+    with pytest.raises(PermissionError):m.pipeline_scope_sha(p)
+
+
+def test_retry_predecessor_requires_no_new_execution_or_verified_acceptance(tmp_path):
+    a=object.__new__(m.PipelineSuccessor)
+    a.n={"read":lambda p,*args:p.read_bytes()}
+    state={"started_at":"2026-11-25T19:35:00+00:00","finished_at":"2026-11-25T19:50:00+00:00"}
+    a.p={"read":lambda p,*args:m.canon(state)}
+    a.properties=lambda *args:{"ActiveState":"inactive","MainPID":"0"}
+    a.systemctl=lambda *args:(
+        b"Result=exec-condition\nExecMainStartTimestamp=\n"
+        b"ExecCondition={ path=/usr/bin/python3 ; argv[]=pmv4_e_unit_admission.py ; status=0 }\n"
+        b"ExecCondition={ path=/usr/bin/python3 ; argv[]=manager_guard.py ; status=0 }\n"
+        b"ExecCondition={ path=/usr/bin/python3 ; argv[]=pmv3_worker_release_gate.py ; status=1 }\n")
+    activation={"at":"2026-11-25T20:19:00+00:00","scope_sha256":"1"*64}
+    a.verify_retry_predecessor(tmp_path,activation,require_gate_skip=True)
+    state["started_at"]="2026-11-25T20:20:00+00:00"
+    with pytest.raises(PermissionError,match="ALREADY_EXECUTED"):
+        a.verify_retry_predecessor(tmp_path,activation,require_gate_skip=False)
+    accepted={"status":"scheduled_engineering_acceptance_verified","scope_sha256":"1"*64,
+              "evidence":{"two_distinct_scheduled_cycles_verified":True,
+                          "todo_identity_quarantined":True,"production_authority":False}}
+    (tmp_path/"scheduled-acceptance.json").write_bytes(m.canon(accepted))
+    a.verify_retry_predecessor(tmp_path,activation,require_gate_skip=True)
+    (tmp_path/"activation-rollback.json").touch()
+    with pytest.raises(PermissionError,match="ROLLED_BACK"):
+        a.verify_retry_predecessor(tmp_path,activation,require_gate_skip=True)
+
+
+def test_retry_successor_retains_two_cycle_quarantine_acceptance(tmp_path,monkeypatch):
+    a,data,cycle=todo_cycle_fixture(tmp_path,monkeypatch)
+    a.predecessor=m.RELEASE_RETRY_BASELINE
+    sha=m.pipeline_scope_sha(release_retry_plan())
+    first,pipeline,at=cycle(1)
+    with pytest.raises(PermissionError,match="CONTROLLER_ADMISSION_NOT_VERIFIED"):
+        a.record_scheduled_acceptance(sha,{},first,pipeline,at)
+    first["release_gate_status"]="allowed"
+    assert not a.record_scheduled_acceptance(sha,{},first,pipeline,at)
+    second,pipeline,at=cycle(2)
+    second["release_gate_status"]="allowed"
+    assert a.record_scheduled_acceptance(sha,{},second,pipeline,at)
+    evidence=json.loads((tmp_path/"scheduled-acceptance.json").read_text())["evidence"]
+    assert evidence["bounded_release_retry_policy_verified"] is True
+    assert evidence["two_distinct_scheduled_cycles_verified"] is True
+    assert evidence["todo_identity_quarantined"] is True

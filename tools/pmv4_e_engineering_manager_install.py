@@ -898,6 +898,26 @@ TODO_CONFLICT_SUPPORTING_FILES = {
     "tools/pmv4_e_engineering_manager_relocation.py",
     "infrastructure/pmv4-e-engineering-manager/systemd/" + SERVICES[0],
 }
+RELEASE_RETRY_BASELINE = "04c0bd881cbef69f7d1b4ef20f806533c353dadb"
+RELEASE_RETRY_WORKERS = frozenset({"pmv3_worker_release_gate.py", "pmv3_engineering_controller.py"})
+RELEASE_RETRY_SCOPE_FILES = {
+    "tools/pmv3_worker_release_gate.py",
+    "tools/pmv3_engineering_controller.py",
+    "tools/pmv4_e_engineering_manager_relocation.py",
+    "tools/pmv4_e_engineering_manager_install.py",
+    "infrastructure/pmv4-e-engineering-manager/systemd/" + SERVICES[0],
+    "tools/tests/test_pmv3_worker_release_gate.py",
+    "tools/tests/test_pmv3_engineering_controller.py",
+    "tests/test_pmv4_e_engineering_manager_relocation.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "tools/ci/pmv3_worker_admission_systemd_lab.py",
+    ".github/workflows/pmv4-e-providerfree-scheduler-parity.yml",
+    "docs/operations/PMV4-Engineering-Release-Lock-Retry-20261125.md",
+}
+RELEASE_RETRY_SUPPORTING_FILES = {
+    "tools/engineering_pipeline.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+}
 PIPELINE_UNIT = SYSTEM_UNITS / SERVICES[0]
 PIPELINE_PROGRAM = LIB / "engineering_pipeline.py"
 MANAGER_GUARD = ROOT / "manager_guard.py"
@@ -906,9 +926,9 @@ MANAGER_GUARD = ROOT / "manager_guard.py"
 def pipeline_scope_sha(plan):
     need(plan.get("action") == "REPAIR-EXACT-PMV4-ENGINEERING-PIPELINE-CONTRACT"
          and plan.get("policy", {}).get("rollback_sha") == LKG
-         and plan.get("predecessor_candidate_sha") in (PIPELINE_BASELINE, TODO_CONFLICT_BASELINE)
+         and plan.get("predecessor_candidate_sha") in (PIPELINE_BASELINE, TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE)
          and re.fullmatch("[0-9a-f]{40}", str(plan.get("policy", {}).get("candidate_sha", "")))
-         and plan["policy"]["candidate_sha"] not in (LKG, PIPELINE_BASELINE, TODO_CONFLICT_BASELINE)
+         and plan["policy"]["candidate_sha"] not in (LKG, PIPELINE_BASELINE, TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE)
          and plan.get("queue_cutover") is False
          and plan.get("temporary_timer_stops") == list(TIMERS)
          and plan.get("resume_after_verified_cutover") is True
@@ -920,13 +940,22 @@ def pipeline_scope_sha(plan):
          and plan.get("runtime_or_mcp_restart_allowed") is False
          and plan.get("rollback_authorized") is True,
          "PIPELINE_SCOPE_INVALID")
-    if plan["predecessor_candidate_sha"] == TODO_CONFLICT_BASELINE:
-        need(plan.get("worker_replacements") == sorted(TODO_CONFLICT_WORKERS)
+    if plan["predecessor_candidate_sha"] in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE):
+        workers = (RELEASE_RETRY_WORKERS if plan["predecessor_candidate_sha"] == RELEASE_RETRY_BASELINE
+                   else TODO_CONFLICT_WORKERS)
+        need(plan.get("worker_replacements") == sorted(workers)
              and plan.get("required_scheduled_cycles") == 2
              and plan.get("quarantine_existing_todo_identity") == "TODO-OPS-013"
              and plan.get("conflicted_issues") == [1459,1500]
              and plan.get("preserve_existing_issue_authority") is True,
              "TODO_CONFLICT_EXACT_SCOPE_INVALID")
+    if plan["predecessor_candidate_sha"] == RELEASE_RETRY_BASELINE:
+        need(plan.get("release_gate_retry_budget_seconds") == 20
+             and plan.get("retry_only_on_contention") is True
+             and plan.get("legacy_release_guard_immediate") is True
+             and plan.get("preserve_predecessor_acceptance_requirements") is True
+             and plan.get("supersede_pending_only_before_first_worker_execution") is True,
+             "RELEASE_RETRY_EXACT_SCOPE_INVALID")
     return digest(canon(plan))
 
 
@@ -939,12 +968,16 @@ class PipelineSuccessor(NativeAdapter):
     changed_workers = frozenset({"engineering_pipeline.py"})
 
     def __init__(self, candidate, n, p, code, *, predecessor=PIPELINE_BASELINE):
-        need(predecessor in (PIPELINE_BASELINE, TODO_CONFLICT_BASELINE), "PIPELINE_UNKNOWN_PREDECESSOR")
+        need(predecessor in (PIPELINE_BASELINE, TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE), "PIPELINE_UNKNOWN_PREDECESSOR")
         self.predecessor = predecessor
         if predecessor == TODO_CONFLICT_BASELINE:
             self.source_files = TODO_CONFLICT_SCOPE_FILES
             self.supporting_files = TODO_CONFLICT_SUPPORTING_FILES
             self.changed_workers = TODO_CONFLICT_WORKERS
+        elif predecessor == RELEASE_RETRY_BASELINE:
+            self.source_files = RELEASE_RETRY_SCOPE_FILES
+            self.supporting_files = RELEASE_RETRY_SUPPORTING_FILES
+            self.changed_workers = RELEASE_RETRY_WORKERS
         self.candidate, self.n, self.p, self.code = candidate, n, p, code
         self.g = load(code["tools/pmv4_e_engineering_manager_guard.py"],
                       REPO / "tools/pmv4_e_engineering_manager_guard.py")
@@ -1012,6 +1045,53 @@ class PipelineSuccessor(NativeAdapter):
         return {"controls":controls,"protected_peers":peers,"runtime_revision":LKG,
                 "effective_policy_sha256":digest(p["read"](POLICY,0,0o600))}
 
+    def verify_retry_predecessor(self, history, activation, *, require_gate_skip):
+        """Do not supersede an executing, failed or partly accepted predecessor."""
+        need(not any(os.path.lexists(history/name) for name in
+                     ("rollback.json","activation-rollback.json")),
+             "RELEASE_RETRY_PREDECESSOR_ROLLED_BACK")
+        accepted_path=history/"scheduled-acceptance.json"
+        if os.path.lexists(accepted_path):
+            accepted=json.loads(self.n["read"](accepted_path,0,0o400))
+            evidence=accepted.get("evidence") or {}
+            need(accepted.get("scope_sha256")==activation["scope_sha256"]
+                 and accepted.get("status")=="scheduled_engineering_acceptance_verified"
+                 and evidence.get("two_distinct_scheduled_cycles_verified") is True
+                 and evidence.get("todo_identity_quarantined") is True
+                 and evidence.get("production_authority") is False,
+                 "RELEASE_RETRY_PREDECESSOR_ACCEPTANCE_INVALID")
+            return
+        need(not any(os.path.lexists(history/name) for name in
+                     ("scheduled-cycle-1.json","scheduled-cycle-2.json")),
+             "RELEASE_RETRY_PREDECESSOR_PARTIAL_CYCLE_ACCEPTANCE")
+        start=datetime.fromisoformat(activation["at"])
+        for name in ("pmv3-engineering-controller-state.json","engineering-pipeline-state.json"):
+            state=json.loads(self.p["read"](PAUSE.parent/name,1000,0o600))
+            try:
+                no_execution=all(datetime.fromisoformat(state[key]) < start
+                                 for key in ("started_at","finished_at"))
+            except (TypeError,ValueError,KeyError):
+                no_execution=False
+            need(no_execution,"RELEASE_RETRY_PREDECESSOR_WORKER_ALREADY_EXECUTED")
+        props=self.properties(SERVICES[0],False)
+        need(props.get("ActiveState")=="inactive" and props.get("MainPID")=="0",
+             "RELEASE_RETRY_PREDECESSOR_NOT_QUIESCENT")
+        if require_gate_skip:
+            # The existing gate did not emit a reason. Do not mislabel every
+            # exit 1 as proven flock contention. Preserve both earlier guards.
+            raw=self.systemctl(["show",SERVICES[0],"-pResult","-pExecCondition",
+                                "-pExecMainStartTimestamp"]).decode()
+            need("Result=exec-condition" in raw.splitlines()
+                 and "ExecMainStartTimestamp=" in raw.splitlines(),
+                 "RELEASE_RETRY_PREDECESSOR_NOT_GATE_DEFERRED")
+            entries=re.findall(r"\{[^{}]+\}",raw)
+            need(len(entries)==3 and all("status=0 }" in x for x in entries[:2])
+                 and "pmv4_e_unit_admission.py" in entries[0]
+                 and "manager_guard.py" in entries[1]
+                 and "pmv3_worker_release_gate.py" in entries[2]
+                 and "status=1 }" in entries[2],
+                 "RELEASE_RETRY_PREDECESSOR_GATE_EVIDENCE_MISSING")
+
     def inspect(self):
         need(not os.path.lexists(self.directory) and not os.path.lexists(self.release.parent),
              "PIPELINE_SUCCESSOR_ALREADY_PRESENT")
@@ -1045,6 +1125,10 @@ class PipelineSuccessor(NativeAdapter):
                  and not os.path.lexists(history/"scheduled-acceptance.json")
                  and not os.path.lexists(history/"rollback.json"),
                  "TODO_CONFLICT_PREDECESSOR_FAILURE_NOT_ATTESTED")
+            encoded = old["after_images"][str(PAUSE)]
+        elif self.predecessor == RELEASE_RETRY_BASELINE:
+            need(snapshot(PAUSE) is None,"RELEASE_RETRY_PREDECESSOR_PAUSED")
+            self.verify_retry_predecessor(history,activated,require_gate_skip=True)
             encoded = old["after_images"][str(PAUSE)]
         else:
             encoded = old["before_images"][str(PAUSE)]
@@ -1122,10 +1206,15 @@ class PipelineSuccessor(NativeAdapter):
                 "root_receipt_recipe":recipe,"protected_health":protected,
                 "source_hashes":{k:digest(v) for k,v in self.code.items()},
                 "rollback":"restore exact predecessor receipt and files; retain verified engineering pause; native revalidation only"}
-        if self.predecessor == TODO_CONFLICT_BASELINE:
+        if self.predecessor in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE):
             plan.update(worker_replacements=sorted(self.changed_workers),
                         required_scheduled_cycles=2, quarantine_existing_todo_identity="TODO-OPS-013",
                         conflicted_issues=[1459,1500],preserve_existing_issue_authority=True)
+        if self.predecessor == RELEASE_RETRY_BASELINE:
+            plan.update(release_gate_retry_budget_seconds=20,
+                        retry_only_on_contention=True,legacy_release_guard_immediate=True,
+                        preserve_predecessor_acceptance_requirements=True,
+                        supersede_pending_only_before_first_worker_execution=True)
         return plan,before,after
 
     def persist(self):
@@ -1288,6 +1377,10 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
             with self.n["locks"]():
                 need(self.protected() == plan["protected_health"],"PIPELINE_PRECUTOVER_HEALTH_CHANGED")
                 self.read_guard(self.predecessor)
+                if self.predecessor == RELEASE_RETRY_BASELINE:
+                    history=STATE/self.predecessor
+                    activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
+                    self.verify_retry_predecessor(history,activated,require_gate_skip=False)
                 for path,old in self.before.items():
                     need(snapshot(path) == (self.pause_image if path == PAUSE else old),
                          "PIPELINE_PRECUTOVER_FILE_CHANGED")
@@ -1363,8 +1456,12 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
         return super().verify_activation()
 
     def record_scheduled_acceptance(self,sha,evidence,controller,pipeline,timer_at):
-        if self.predecessor != TODO_CONFLICT_BASELINE:
+        if self.predecessor not in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE):
             return super().record_scheduled_acceptance(sha,evidence,controller,pipeline,timer_at)
+        if self.predecessor == RELEASE_RETRY_BASELINE:
+            need(controller.get("release_gate_status")=="allowed",
+                 "RELEASE_RETRY_CONTROLLER_ADMISSION_NOT_VERIFIED")
+            evidence={**evidence,"bounded_release_retry_policy_verified":True}
         state_dir=PAUSE.parent
         intake=json.loads(self.p["read"](state_dir/"todo-intake-state.json",1000,0o600))
         supervisor=json.loads(self.p["read"](state_dir/"engineering-supervisor-state.json",1000,0o600))
@@ -1466,6 +1563,7 @@ def main():
     successor = cli.add_mutually_exclusive_group()
     successor.add_argument("--pipeline-successor",action="store_true")
     successor.add_argument("--todo-conflict-successor",action="store_true")
+    successor.add_argument("--release-retry-successor",action="store_true")
     choice=cli.add_mutually_exclusive_group()
     choice.add_argument("--apply", action="store_true")
     choice.add_argument("--recover",action="store_true")
@@ -1475,13 +1573,16 @@ def main():
     cli.add_argument("--scope-sha")
     a = cli.parse_args()
     n,p = native()
-    if a.pipeline_successor or a.todo_conflict_successor:
+    if a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor:
         need(not a.resume,"PIPELINE_RESUME_REQUIRES_VERIFIED_TRANSACTION")
-        predecessor = TODO_CONFLICT_BASELINE if a.todo_conflict_successor else PIPELINE_BASELINE
+        if a.release_retry_successor:
+            predecessor,files,supporting=RELEASE_RETRY_BASELINE,RELEASE_RETRY_SCOPE_FILES,RELEASE_RETRY_SUPPORTING_FILES
+        elif a.todo_conflict_successor:
+            predecessor,files,supporting=TODO_CONFLICT_BASELINE,TODO_CONFLICT_SCOPE_FILES,TODO_CONFLICT_SUPPORTING_FILES
+        else:
+            predecessor,files,supporting=PIPELINE_BASELINE,PIPELINE_SCOPE_FILES,frozenset()
         code = source_review(a.candidate,p,recovery=a.recover or a.verify_activation or a.restore_failed_activation,
-                             baseline=predecessor,
-                             source_files=TODO_CONFLICT_SCOPE_FILES if a.todo_conflict_successor else PIPELINE_SCOPE_FILES,
-                             supporting_files=TODO_CONFLICT_SUPPORTING_FILES if a.todo_conflict_successor else frozenset())
+                             baseline=predecessor,source_files=files,supporting_files=supporting)
         adapter = PipelineSuccessor(a.candidate,n,p,code,predecessor=predecessor)
         if a.verify_activation:
             if not adapter.verify_activation(): raise SystemExit(2)
