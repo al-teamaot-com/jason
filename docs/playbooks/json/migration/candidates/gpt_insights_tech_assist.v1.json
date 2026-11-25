@@ -1,0 +1,258 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "service.ticket.read",
+      "service.ticket.notes.search",
+      "service.ticket.note.create",
+      "service.ticket.note.update"
+    ],
+    "approval_bound_branches": [
+      "create_note",
+      "update_note"
+    ],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "source ticket unchanged; note current or independently verified after exact governed action"
+  },
+  "expected_state": {
+    "base_note_title": "GPT Insights",
+    "internal_note_type": 3,
+    "publish": 2,
+    "one_jason_owned_note": true,
+    "same_material_fingerprint_no_write": true
+  },
+  "migration": {
+    "source_conversion": "guarded_rendering_projection_only_not_accepted",
+    "legacy_registry_version": "0.2.1",
+    "legacy_source_blob_sha": "12b770b6dc74546215c5196c1d72fb533e0dd243",
+    "source_map": "docs/playbooks/json/migration/source_maps/gpt_insights_tech_assist.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "Exact same-company CI and endpoint optional governed read composition and network-specific PowerShell evidence collection",
+      "Full bounded same-company related-ticket correlation and source Recurring exclusion integration",
+      "Persisted augmentation state and no-duplicate source-version wake/recheck composition",
+      "Per-provider exact owner-promoted internal note update, creator guard and authoritative post-write readback",
+      "Full shadow end-to-end acceptance against live client-scoped provider connection"
+    ],
+    "accepted_for_execution": false,
+    "production_activation_authorized": false
+  },
+  "playbook": {
+    "id": "gpt_insights_tech_assist",
+    "lifecycle": "pilot",
+    "name": "GPT Insights - Help Desk Tech Assist",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-GPT-Insights-Tech-Assist.md",
+    "target_type": "ticket",
+    "version": "0.2.1-migration.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "internal_technical_note_only": true,
+    "no_ticket_state_change": true,
+    "no_external_communication": true,
+    "no_remediation": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "client_id",
+      "source_version",
+      "category",
+      "evidence_fingerprint",
+      "note_id",
+      "before_sha256",
+      "after_sha256"
+    ],
+    "source_worker_augmented_state": "existing GPT_INSIGHTS_AUGMENTATION_ID",
+    "no_replay_after_uncertain_action": true
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "eligibility_gate"
+    },
+    {
+      "id": "eligibility_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_nonrecurring_helpdesk_new_ticket",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_notes"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_notes",
+      "type": "diagnostic",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "classify"
+    },
+    {
+      "id": "classify",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "verified_material_disposition",
+            "operator": "eq",
+            "value": "current"
+          },
+          "next": "current"
+        },
+        {
+          "when": {
+            "fact": "verified_material_disposition",
+            "operator": "eq",
+            "value": "seed_existing"
+          },
+          "next": "current"
+        },
+        {
+          "when": {
+            "fact": "verified_material_disposition",
+            "operator": "eq",
+            "value": "create"
+          },
+          "next": "create_gate"
+        },
+        {
+          "when": {
+            "fact": "verified_material_disposition",
+            "operator": "eq",
+            "value": "update"
+          },
+          "next": "update_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "create_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_promoted_jason_internal_note_create",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "create_note"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "update_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_promoted_jason_owned_internal_note_update",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "update_note"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "create_note",
+      "type": "remediation",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "$fact": "trusted_exact_note_mutation_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_note"
+    },
+    {
+      "id": "update_note",
+      "type": "remediation",
+      "capability": "service.ticket.note.update",
+      "arguments": {
+        "$fact": "trusted_exact_note_mutation_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_note"
+    },
+    {
+      "id": "verify_note",
+      "type": "verification",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "readback_gate"
+    },
+    {
+      "id": "readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_note_creator_body_and_fingerprint_readback",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "verified"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "current",
+      "type": "complete"
+    },
+    {
+      "id": "verified",
+      "type": "complete"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Autotask",
+    "required_source_queue": "Help Desk I",
+    "required_status": "New",
+    "excluded_source_label": "Recurring",
+    "no_ticket_claim": true
+  },
+  "verification": {
+    "authoritative_source": "service.ticket.notes.search, same-client configuration/endpoint reads and existing persisted augmentation state",
+    "success_condition": "unique correct Jason-created internal note with matching body/fingerprint, no external communication"
+  }
+}

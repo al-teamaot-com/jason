@@ -77,6 +77,8 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertNotIn("WorkingDirectory=/home/al/projects/jason", service)
         self.assertIn("engineering-worker-source", installer)
         self.assertIn("_copy(pipeline_runner, install_root", installer)
+        self.assertIn("_copy(dependency_runner, install_root", installer)
+        self.assertIn("_copy(isolated_common, install_root", installer)
         self.assertIn("_copy(pmv3_controller, install_root", installer)
         self.assertIn("_copy(pmv3_integration_queue, install_root", installer)
         self.assertIn("_copy(supervisor_runner, install_root", installer)

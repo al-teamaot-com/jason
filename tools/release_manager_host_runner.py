@@ -1385,18 +1385,129 @@ def unit_active(unit: str, *, user: bool) -> bool:
     return completed.returncode == 0 and completed.stdout.strip() == "active"
 
 
+# PMv4 Stage E replacement admission is a read-only, root-trusted contract.
+# A missing cutover marker retains the current PMv3 behavior. Once any
+# marker exists, invalid proof must DENY rather than reinstall PMv3.
+PMV4_E_ACCEPTED_MARKER = Path(
+    "/etc/jason-owner-release/pmv4-e/replacement-retirement-accepted.json"
+)
+PMV4_E_UNIT_GUARD = Path(
+    "/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/pmv4_e_unit_admission.py"
+)
+PMV4_E_USER_TIMERS = (
+    "jason-pmv4-engineering.timer",
+    "jason-pmv4-release-approval.timer",
+    "jason-pmv4-component-release.timer",
+    "jason-self-heal-watchdog.timer",
+)
+PMV4_E_ROOT_TRIGGERS = (
+    "jason-pmv4-component-transition.timer",
+    "jason-pmv4-component-readback.timer",
+    "jason-pmv4-component-reconcile.path",
+)
+PMV4_E_RETIRED_USER = (
+    "jason-support-repair-worker.timer",
+    "jason-release-manager.timer",
+    "jason-release-approval-only.timer",
+)
+PMV4_E_RETIRED_ROOT = (
+    "jason-release-control-transition.timer",
+    "jason-release-control-readback.timer",
+    "jason-release-host-reconcile.path",
+)
+
+
+def pmv4_e_scheduling_mode() -> str:
+    try:
+        PMV4_E_ACCEPTED_MARKER.lstat()
+    except FileNotFoundError:
+        return "legacy"
+    except OSError as exc:
+        raise ReleaseManagerError("PMv4 E acceptance marker unreadable") from exc
+    # Only an independently installed root-owned entrypoint may attest.
+    try:
+        trusted = PMV4_E_UNIT_GUARD.lstat()
+    except OSError as exc:
+        raise ReleaseManagerError("PMv4 E root unit guard missing") from exc
+    if (not PMV4_E_UNIT_GUARD.is_file()
+            or PMV4_E_UNIT_GUARD.is_symlink()
+            or trusted.st_uid != 0 or trusted.st_gid != 0
+            or trusted.st_mode & 0o022):
+        raise ReleaseManagerError("PMv4 E root unit guard untrusted")
+    checked = subprocess.run(
+        ["/usr/bin/python3", "-I", "-B", str(PMV4_E_UNIT_GUARD),
+         "--mode", "component-release"],
+        env=user_systemd_env(), text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if checked.returncode != 0:
+        raise ReleaseManagerError("PMv4 E root accepted scheduling proof denied")
+    try:
+        proof = json.loads(checked.stdout)
+    except (TypeError, ValueError) as exc:
+        raise ReleaseManagerError("PMv4 E unit guard returned invalid proof") from exc
+    if (not isinstance(proof, dict)
+            or proof.get("status") != "accepted_for_one_configured_service"
+            or proof.get("role") != "component-release"
+            or proof.get("unit") != "jason-pmv4-component-release.timer"
+            or proof.get("owner_authority_issued") is not False
+            or proof.get("production_changes_performed") is not False):
+        raise ReleaseManagerError("PMv4 E unit guard proof mismatch")
+    return "replacement"
+
+
+def accepted_engineering_manager_routing():
+    receipt = Path("/etc/jason-owner-release/pmv4-e/engineering-manager-system-authorized.json")
+    guard = Path("/usr/local/lib/jason/pmv4-e-engineering-manager/manager_guard.py")
+    if not os.path.lexists(receipt) and not os.path.lexists(guard):
+        return None
+    try:
+        import pmv4_e_engineering_manager_client as client
+        result = client.read_routing()
+        if result is None:
+            raise PermissionError("successor receipt missing")
+        return result
+    except (ImportError, OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+        raise ReleaseManagerError("PMv4 engineering manager successor admission denied") from exc
+
+
 def scheduled_control_alignment() -> dict[str, str]:
+    mode = pmv4_e_scheduling_mode()
+    user_required = (PMV4_E_USER_TIMERS if mode == "replacement"
+                     else USER_CONTROL_TIMERS)
+    system_required = (SYSTEM_CONTROL_TIMERS + PMV4_E_ROOT_TRIGGERS
+                       if mode == "replacement" else SYSTEM_CONTROL_TIMERS)
+    routing = accepted_engineering_manager_routing() if mode == "replacement" else None
+    if routing is not None:
+        moved = set(routing["system_timers"])
+        if not moved.issubset(user_required):
+            raise ReleaseManagerError("PMv4 successor scope differs from original schedule")
+        user_required = tuple(n for n in user_required if n not in moved)
+        system_required = tuple(system_required) + tuple(routing["system_timers"])
+        for unit in routing["system_timers"]:
+            if unit_active(unit, user=True):
+                raise ReleaseManagerError(f"retired user control still active: {unit}")
     states: dict[str, str] = {}
-    for unit in USER_CONTROL_TIMERS:
+    for unit in user_required:
         active = unit_active(unit, user=True)
         states[unit] = "active" if active else "inactive"
         if not active:
             raise ReleaseManagerError(f"required user control timer is not active: {unit}")
-    for unit in SYSTEM_CONTROL_TIMERS:
+    for unit in system_required:
         active = unit_active(unit, user=False)
         states[unit] = "active" if active else "inactive"
         if not active:
             raise ReleaseManagerError(f"required system control timer is not active: {unit}")
+    if mode == "replacement":
+        # Both old and new triggers active would duplicate engineering claims.
+        for unit in PMV4_E_RETIRED_USER:
+            if unit_active(unit, user=True):
+                raise ReleaseManagerError(f"retired user control still active: {unit}")
+            states[unit] = "inactive"
+        for unit in PMV4_E_RETIRED_ROOT:
+            if unit_active(unit, user=False):
+                raise ReleaseManagerError(f"retired root control still active: {unit}")
+            states[unit] = "inactive"
     return states
 
 
@@ -1501,17 +1612,28 @@ def controller_identity(repo: Path) -> dict[str, Any]:
         if not immutable.is_file():
             raise ReleaseManagerError("active Release Manager immutable source missing")
         if file_digest(immutable) != file_digest(installed):
-            recovery = _operator_recovery_identity(repo, installed, immutable)
-            return {
-                "executing_controller_path": str(CONTROLLER_SOURCE),
-                "executing_controller_immutable_path": str(installed),
-                "executing_controller_revision": recovery["controller_recovery_revision"],
-                "executing_controller_digest": recovery["controller_recovery_digest"],
-                "candidate_controller_digest": file_digest(candidate_path),
-                "policy_digest": file_digest(policy_path),
-                "captured_at": now(),
-                **recovery,
-            }
+            routing = accepted_engineering_manager_routing()
+            if routing is not None:
+                approved = routing["artifact_sources"]["release_manager_host_runner.py"]
+                successor = Path(approved["source"])
+                if (immutable.parent.parent.name != routing["rollback_sha"]
+                        or file_digest(installed) != "sha256:" + approved["sha256"]
+                        or file_digest(successor) != file_digest(installed)
+                        or successor.parents[1].name != routing["candidate_sha"]):
+                    raise ReleaseManagerError("PMv4 successor controller identity mismatch")
+                immutable = successor
+            else:
+                recovery = _operator_recovery_identity(repo, installed, immutable)
+                return {
+                    "executing_controller_path": str(CONTROLLER_SOURCE),
+                    "executing_controller_immutable_path": str(installed),
+                    "executing_controller_revision": recovery["controller_recovery_revision"],
+                    "executing_controller_digest": recovery["controller_recovery_digest"],
+                    "candidate_controller_digest": file_digest(candidate_path),
+                    "policy_digest": file_digest(policy_path),
+                    "captured_at": now(),
+                    **recovery,
+                }
 
     source_revision = immutable.parents[1].name.casefold()
     return {
@@ -2525,7 +2647,10 @@ def require_host_reconciler_ready(state_root: Path) -> None:
         raise ReleaseManagerError(
             "root host reconciliation spool permissions are unavailable"
         )
-    worker = Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
+    replacement = pmv4_e_scheduling_mode()=="replacement"
+    worker = (Path("/usr/local/lib/jason/pmv4-e-bootstrap/native/tools/release_host_reconcile_worker.py")
+              if replacement else
+              Path("/usr/local/lib/jason/release_host_reconcile_worker.py"))
     if not worker.is_file():
         raise ReleaseManagerError("root host reconciliation worker is not installed")
     meta = worker.stat()
@@ -2534,7 +2659,8 @@ def require_host_reconciler_ready(state_root: Path) -> None:
             "root host reconciliation worker ownership/mode is unsafe"
         )
     completed = subprocess.run(
-        ["systemctl", "is-active", "jason-release-host-reconcile.path"],
+        ["systemctl", "is-active", "jason-pmv4-component-reconcile.path"
+         if replacement else "jason-release-host-reconcile.path"],
         env=user_systemd_env(),
         text=True,
         stdout=subprocess.PIPE,
@@ -2725,6 +2851,32 @@ def install_release_manager_from_current(expected_sha: str) -> dict[str, Any]:
         raise ReleaseManagerError(
             "immutable host release is not aligned before Release Manager install"
         )
+    if pmv4_e_scheduling_mode() == "replacement":
+        # After accepted retirement, never invoke an installer that can
+        # re-enable jason-release-manager.timer. The exact root transaction
+        # must already have staged an immutable replacement controller.
+        source_link = Path.home() / ".local" / "lib" / "jason" / "release-manager-source"
+        installed_runner = Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+        marker=json.loads(PMV4_E_ACCEPTED_MARKER.read_bytes())
+        control_sha=exact_sha(str(marker.get("source_sha") or ""), "PMv4 E source SHA")
+        if marker.get("source_rollback_sha") != expected_sha:
+            raise ReleaseManagerError("PMv4 E source rollback does not match production")
+        expected_runner = Path("/usr/local/lib/jason/pmv4-e-bootstrap/releases") / control_sha / "tools/release_manager_host_runner.py"
+        if (source_link.resolve().name.casefold() != expected_sha
+                or not installed_runner.is_file() or not expected_runner.is_file()
+                or hashlib.sha256(installed_runner.read_bytes()).digest()
+                   != hashlib.sha256(expected_runner.read_bytes()).digest()):
+            raise ReleaseManagerError(
+                "PMv4 E immutable release controller not aligned; no legacy installer fallback"
+            )
+        scheduled_control_alignment()
+        return {
+            "source_revision": expected_sha,
+            "timer_active": True,
+            "source_link": str(source_link.resolve()),
+            "pmv4_replacement_verified": True,
+            "legacy_installer_invoked": False,
+        }
     installer = current / "tools" / "install_release_manager.py"
     if not installer.is_file():
         raise ReleaseManagerError(
@@ -3337,10 +3489,15 @@ def native_deploy_environment(
     if os.environ.get("JASON_RELEASE_MOBILE_APPROVAL_MODE") not in (None, mobile_policy["mode"]):
         raise ReleaseManagerError("invoking release approval mode conflicts with immutable candidate")
     env["JASON_RELEASE_MOBILE_APPROVAL_MODE"] = str(mobile_policy["mode"])
-    expected_admin = (
+    from jason_owner_auth_profile import declared_jason_owner_profile
+    historical_admin = (
         "admin-separated-v1"
         if mobile_policy["mode"] == "admin_approver_separated" else ""
     )
+    licensed_owner = declared_jason_owner_profile(candidate_tree)
+    if historical_admin and licensed_owner:
+        raise ReleaseManagerError("Jason Owner source policy conflicts with legacy admin profile")
+    expected_admin = licensed_owner or historical_admin
     if os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE") not in (None, expected_admin):
         raise ReleaseManagerError(
             "admin approver profile cannot override exact source policy"
@@ -8603,6 +8760,19 @@ def main() -> int:
     recovery.add_argument("--revision", required=True)
     recovery.add_argument("--owner-approved", action="store_true")
 
+    # Generic exact-source backport admission; does NOT bypass main-only
+    # native production create/prepare/approve/promote or create a release.
+    backport = sub.add_parser("scoped-backport-admit")
+    backport.add_argument("--trusted-main-sha", required=True)
+
+    for name in ("scoped-backport-stage", "scoped-backport-promote",
+                 "scoped-backport-recover"):
+        typed = sub.add_parser(name)
+        typed.add_argument("--trusted-main-sha", required=True)
+        typed.add_argument("--release-id", required=True)
+        if name != "scoped-backport-stage":
+            typed.add_argument("--offer-sha256", required=True)
+
     # Source-only scoped catalog admission. This subcommand is read-only:
     # no release record, Owner decision, mutable state root or promotion.
     sub.add_parser("catalog-scope-admit")
@@ -8624,6 +8794,51 @@ def main() -> int:
     args = parser.parse_args()
     repo = args.repo.expanduser().resolve()
     state_root = args.state_root.expanduser().resolve()
+    if args.command == "scoped-backport-admit":
+        from tools.scoped_backport_release import (
+            source_admission, make_offer, validate_manifest, RELEASE_MANIFEST,
+            _git,
+        )
+        # This accepts ONLY protected-main manifest bytes and independently
+        # verifies an immutable LKG-descendant backport. No state-root write.
+        source = source_admission(repo, trusted_main_sha=args.trusted_main_sha)
+        pinned = validate_manifest(json.loads(
+            _git(repo, "show", args.trusted_main_sha + ":" + RELEASE_MANIFEST)))
+        offer = make_offer(pinned, main_sha=args.trusted_main_sha)
+        print(json.dumps({
+            "status": "source_admitted_not_production_eligible",
+            "source": source,
+            "offer": offer,
+            "native_release_record_created": False,
+            "owner_approval_recorded": False,
+            "production_mutations": False,
+            "provider_writes": False,
+            "root_installer_and_rollback_admission_required": True,
+        }, sort_keys=True, indent=2))
+        return 0
+    if args.command in {
+        "scoped-backport-stage", "scoped-backport-promote",
+        "scoped-backport-recover",
+    }:
+        from tools.scoped_backport_release import (
+            source_admission, make_offer, validate_manifest,
+            RELEASE_MANIFEST, _git,
+        )
+        from tools.scoped_backport_release_request import request, submit
+        source_admission(repo, trusted_main_sha=args.trusted_main_sha)
+        pinned = validate_manifest(json.loads(
+            _git(repo, "show", args.trusted_main_sha + ":" + RELEASE_MANIFEST)))
+        offer = make_offer(pinned, main_sha=args.trusted_main_sha)
+        if args.release_id != offer["release_id"]:
+            raise ReleaseManagerError("scoped backport release id is not exact")
+        action = "scoped_backport_" + args.command.rsplit("-", 1)[-1]
+        req = request(action, offer,
+                      offer_sha256=getattr(args, "offer_sha256", None))
+        # This is *not* native production approval. An independently
+        # installed, root-attested handler must validate each request.
+        # Currently absent: fail closed instead of creating an approval.
+        print(json.dumps(submit(req), sort_keys=True, indent=2))
+        return 0
     if args.command == "catalog-scope-admit":
         from catalog_scoped_release_admission import attest_source_scope
         # All inputs come from immutable protected source, the published

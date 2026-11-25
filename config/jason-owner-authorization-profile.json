@@ -1,0 +1,14 @@
+{
+  "approval_per_exact_action": true,
+  "enabled": true,
+  "jason_owner_identity": "person-entra-bee80bdcffb04c50b453c09d4d411f5f",
+  "jason_owner_object_id": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+  "microsoft_admin_jason_owner_authority": false,
+  "microsoft_admin_object_id": "c848022d-e13b-4457-84b0-e2f5c00dcaf6",
+  "microsoft_tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+  "organization_id": "aot",
+  "policy_id": "aot-jason-owner-exact-entra-v1",
+  "preserve_production_freeze": true,
+  "provider_execution_uses_jason_service_identity": true,
+  "schema_version": "1.0"
+}

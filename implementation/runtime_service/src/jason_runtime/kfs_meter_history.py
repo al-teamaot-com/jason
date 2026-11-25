@@ -14,7 +14,9 @@ from orchestrator.print_capability_catalog import (
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
     PRINT_METER_USAGE_SEARCH,
+    PRINT_FLEET_USAGE_RANK,
 )
+from .kfs_fleet_rank import rank_fleet_usage
 from orchestrator.service import InvocationResult
 
 
@@ -23,6 +25,7 @@ METER_HISTORY_AUTHORITY_GRANTS = (
     ("production-kfs-read-print-meter-history-search", PRINT_METER_HISTORY_SEARCH),
     ("production-kfs-read-print-meter-usage-read", PRINT_METER_USAGE_READ),
     ("production-kfs-read-print-meter-usage-search", PRINT_METER_USAGE_SEARCH),
+    ("production-kfs-read-print-fleet-usage-rank", PRINT_FLEET_USAGE_RANK),
 )
 
 
@@ -315,7 +318,7 @@ class KfsMeterHistoryStore:
                 ORDER BY ended_at DESC
                 LIMIT 1
             ), inventory_devices AS (
-                SELECT DISTINCT s.device_id,
+                SELECT DISTINCT s.device_id, s.management_status,
                        NULLIF(k.customer_name,'') AS inventory_customer,
                        NULLIF(k.equipment_id,'') AS inventory_equipment,
                        NULLIF(k.serial_number,'') AS inventory_serial,
@@ -335,7 +338,8 @@ class KfsMeterHistoryStore:
                        COALESCE(NULLIF(e.customer_name,''), NULLIF(b.customer_name,''), d.inventory_customer) AS customer_name,
                        COALESCE(NULLIF(e.equipment_id,''), NULLIF(b.equipment_id,''), d.inventory_equipment) AS equipment_id,
                        COALESCE(NULLIF(e.serial_number,''), NULLIF(b.serial_number,''), d.inventory_serial) AS serial_number,
-                       d.inventory_model AS model_name
+                       d.inventory_model AS model_name,
+                       d.management_status AS management_status
                 FROM devices d
                 CROSS JOIN (VALUES
                     ('total'),('blackWhite'),('color'),('printerTotal'),('copierTotal'),('scanTotal')
@@ -365,7 +369,7 @@ class KfsMeterHistoryStore:
             )
             SELECT b.device_id, b.counter_name, b.start_value, b.start_at,
                    b.end_value, b.end_at, b.customer_name, b.equipment_id,
-                   b.serial_number, b.model_name,
+                   b.serial_number, b.model_name, b.management_status,
                    r.id, r.ended_at, r.device_count, r.error_count,
                    (SELECT COUNT(*) FROM inventory_devices),
                    (SELECT COUNT(*) FROM devices)
@@ -395,7 +399,7 @@ class KfsMeterHistoryStore:
 
         for row in rows:
             (device_id, counter, before, before_at, after, after_at,
-             customer, equipment, serial, model, run_id, run_ended_at,
+             customer, equipment, serial, model, management_status, run_id, run_ended_at,
              run_count, run_errors, inventory_count, selected_count) = row
             snapshot_id = run_id
             snapshot_ended_at = run_ended_at
@@ -409,6 +413,7 @@ class KfsMeterHistoryStore:
                 "equipment_id": equipment or "",
                 "model_name": model or "",
                 "customer_name": customer or "",
+                "management_status": management_status,
                 "customer_mapping_status": "verified" if customer else "not_found",
                 "customer_mapping_source": "kfs" if customer else "none",
                 "counts": {},
@@ -566,7 +571,7 @@ class GovernedKfsMeterHistoryInvoker:
 
         period_arguments = dict(request.arguments)
         now = datetime.now(timezone.utc)
-        if resolution.capability_name == PRINT_METER_USAGE_SEARCH and not period_arguments.get("month"):
+        if resolution.capability_name in (PRINT_METER_USAGE_SEARCH, PRINT_FLEET_USAGE_RANK) and not period_arguments.get("month"):
             if not period_arguments.get("start") and not period_arguments.get("end"):
                 period_arguments["start"] = (now - timedelta(days=30)).isoformat()
                 period_arguments["end"] = now.isoformat()
@@ -582,14 +587,28 @@ class GovernedKfsMeterHistoryInvoker:
             data = self.store.search(arguments=request.arguments, start=start, end=end)
         elif resolution.capability_name == PRINT_METER_USAGE_READ:
             data = self.store.usage(arguments=request.arguments, start=start, end=end)
-        elif resolution.capability_name == PRINT_METER_USAGE_SEARCH:
+        elif resolution.capability_name in (PRINT_METER_USAGE_SEARCH, PRINT_FLEET_USAGE_RANK):
             now = datetime.now(timezone.utc)
             effective_end = min(end, now)
             if start >= effective_end:
                 raise ValueError("usage search period must have started")
+            source_arguments = dict(period_arguments)
+            if resolution.capability_name == PRINT_FLEET_USAGE_RANK:
+                # Never rely on caller-limited first-page data for fleet ranking.
+                source_arguments["limit"] = 1000
+                source_arguments.pop("device_id", None)
+                source_arguments.pop("serial_number", None)
             data = self.store.usage_search(
-                arguments=period_arguments, start=start, end=effective_end,
+                arguments=source_arguments, start=start, end=effective_end,
             )
+            if resolution.capability_name == PRINT_FLEET_USAGE_RANK:
+                data = rank_fleet_usage(
+                    data,
+                    metric=str(period_arguments.get("metric") or "total"),
+                    top_n=period_arguments.get("top_n", 5),
+                    report_mode=str(period_arguments.get("report_mode") or "rank"),
+                    managed_only=period_arguments.get("managed_only", True),
+                )
         else:
             raise LookupError(
                 f"unsupported KFS meter history capability: {resolution.capability_name}"

@@ -44,7 +44,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(state["status"], "healthy")
         self.assertEqual([c[0] for c in self.calls], [
             "support_repair_host_worker", "todo_engineering_intake",
-            "owner_approved_development_worker", "pr_integration_source_reconciler",
+            "owner_approved_development_worker", "pmv3_integration_queue",
             "todo_release_bridge", "engineering_supervisor",
             "release_breaker_recovery_manager",
         ])
@@ -210,7 +210,7 @@ class PipelineTests(unittest.TestCase):
     def test_support_failure_blocks_new_admission_but_reconciles_release(self):
         state = self.execute(failed={"support_repair_host_worker"})
         self.assertEqual([c[0] for c in self.calls], [
-            "support_repair_host_worker", "pr_integration_source_reconciler",
+            "support_repair_host_worker", "pmv3_integration_queue",
             "todo_release_bridge", "engineering_supervisor",
             "release_breaker_recovery_manager",
         ])
@@ -224,7 +224,7 @@ class PipelineTests(unittest.TestCase):
         state = self.execute(failed={"todo_engineering_intake"})
         self.assertEqual([c[0] for c in self.calls], [
             "support_repair_host_worker", "todo_engineering_intake",
-            "owner_approved_development_worker", "pr_integration_source_reconciler",
+            "owner_approved_development_worker", "pmv3_integration_queue",
             "todo_release_bridge", "engineering_supervisor",
             "release_breaker_recovery_manager",
         ])
@@ -255,16 +255,20 @@ class PipelineTests(unittest.TestCase):
         recovery = next(call[1] for call in self.calls if call[0] == "release_breaker_recovery_manager")
         self.assertEqual(recovery[recovery.index("--release-state")+1], str(self.base / "releases"))
 
-    def test_pr_integration_runs_without_repo_or_spool_arguments(self):
+    def test_integration_only_reads_the_canonical_queue(self):
         self.execute()
         integration = next(
             call[1] for call in self.calls
-            if call[0] == "pr_integration_source_reconciler"
+            if call[0] == "pmv3_integration_queue"
         )
-        self.assertEqual(len(integration), 2)
+        self.assertIn("--status-only", integration)
+        for option, expected in (("--repo", self.base / "repo"),
+                                 ("--spool", self.spool),
+                                 ("--release-state", self.base / "releases")):
+            self.assertEqual(integration[integration.index(option) + 1], str(expected))
 
     def test_integration_failure_is_durable_but_not_production_breaker(self):
-        state = self.execute(failed={"pr_integration_source_reconciler"})
+        state = self.execute(failed={"pmv3_integration_queue"})
         self.assertEqual(state["status"], "degraded")
         self.assertEqual(state["failure_domain"], "engineering_operations")
         self.assertIn("integration", state["failed_work_stages"])

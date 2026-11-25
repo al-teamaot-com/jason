@@ -1,0 +1,25 @@
+[Unit]
+ConditionPathExists=/etc/jason-owner-release/pmv4-e/engineering-manager-system-authorized.json
+Description=Jason native full-function self-heal watchdog
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=al
+Group=al
+ExecCondition=/usr/bin/python3 -I -B /usr/local/lib/jason/pmv4-e-engineering-manager/manager_guard.py --require-system
+Type=oneshot
+WorkingDirectory=/opt/jason/current
+ReadOnlyPaths=/opt/jason/current
+Environment=HOME=/home/al
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=PYTHONPATH=/opt/jason/current/tools
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 -B /home/al/.local/lib/jason/jason_self_heal_watchdog.py --root /var/lib/jason/openclaw/self-heal --max-attempts 2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/jason/openclaw/self-heal

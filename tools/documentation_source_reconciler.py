@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 from pathlib import Path
 import subprocess
@@ -13,7 +14,16 @@ REPO_ROOT = Path(os.environ.get("JASON_DOCUMENTATION_REPO_ROOT", "/home/al/proje
 
 
 def run(*args: str, check: bool = True) -> str:
-    result = subprocess.run(args, text=True, capture_output=True, check=check)
+    result = subprocess.run(args, text=True, capture_output=True, check=False)
+    if check and result.returncode:
+        # Expose only fixed publisher gate codes. Arbitrary provider output,
+        # command arguments and credential-bearing diagnostics stay private.
+        for line in (result.stdout + "\n" + result.stderr).splitlines():
+            if re.fullmatch(r"DOCUMENTATION_PUBLICATION=[A-Z_]{1,80}", line):
+                print(line, flush=True)
+        raise subprocess.CalledProcessError(
+            result.returncode, args, output=result.stdout, stderr=result.stderr,
+        )
     return result.stdout.strip()
 
 

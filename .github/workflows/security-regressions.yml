@@ -19,7 +19,7 @@ jobs:
           python-version: "3.12"
       - name: Install security regression dependencies
         run: |
-          python -m pip install --upgrade pip pytest
+          python -m pip install --upgrade pip pytest PyYAML
           python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service ./implementation/mcp_service
       - name: Compile security-critical modules and tests
         run: |
@@ -30,6 +30,24 @@ jobs:
             implementation/runtime_service/tests \
             implementation/mcp_service/src \
             implementation/mcp_service/tests
+      - name: Stage E authenticated Owner bridge and native bootstrap safety
+        run: |
+          python -m pytest -q \
+            tests/test_pmv4_e_mcp_owner_bridge.py \
+            tests/test_pmv4_e_mcp_issuer.py \
+            tests/test_pmv4_stage_a0_owner_issuer.py \
+            tools/tests/test_pmv4_e_exact_owner_offer.py \
+            tools/tests/test_pmv4_e_forwarded_owner_request.py \
+            tools/tests/test_pmv4_e_root_dispatch.py \
+            tools/tests/test_pmv4_e_dispatch_install.py \
+            tools/tests/test_release_root_signed_mcp_owner.py \
+            tools/tests/test_pmv4_e_ci_refresh.py \
+            tools/tests/test_pmv4_e_source_scope_guard.py \
+            tools/tests/test_manual_release_scope.py \
+            tools/tests/test_pmv4_e_root_bootstrap_once.py \
+            tools/tests/test_pmv4_e_signed_bootstrap_phase.py \
+            tools/tests/test_pmv4_e_signed_native_ledger.py \
+            tools/tests/test_pmv4_e_native_root_entry.py
       - name: Autotask catalog source-only Production Manager admission security
         run: |
           python -m pytest -q tools/tests/test_catalog_scoped_release_admission.py
@@ -43,7 +61,51 @@ jobs:
             implementation/mcp_service/tests/test_catalog_scoped_promotion_approval.py
       - name: Catalog scoped native root installation preflight cannot install or elevate
         run: |
-          python -m pytest -q tools/tests/test_catalog_scoped_root_install_plan.py
+          python -m pytest -q \
+            tools/tests/test_catalog_scoped_root_install_plan.py \
+            tools/tests/test_catalog_scoped_trusted_install_paths.py \
+            tools/tests/test_catalog_scoped_native_projection_closure.py \
+            tools/tests/test_catalog_scoped_projection_rebind_plan.py
+      - name: Owner-authenticated single-use catalog root bootstrap source security
+        run: |
+          python -m pytest -q \
+            tools/tests/test_catalog_scoped_root_install_transaction.py \
+            tools/tests/test_catalog_scoped_root_bootstrap_packet.py \
+            tools/tests/test_catalog_scoped_root_install_native.py
+      - name: Scoped Backport exact four-unit desired-state reconciliation security
+        run: |
+          python -m pytest -q tests/test_scoped_backport_drift_reconcile.py
+      - name: Catalog root fresh-process trust verification and exact rollback
+        run: |
+          python -m pytest -q tools/tests/test_catalog_root_consumption_ledger_repair_v2_once.py
+      - name: Catalog exact approved licensed-Owner test lineage and root admission trust repair
+        run: |
+          python -m pytest -q tools/tests/test_catalog_owner_canary_pinned_admission.py tools/tests/test_catalog_admission_owner_canary_root_repair_once.py
+      - name: Catalog Owner operator root-private transaction boundary and native one-use enforcement
+        run: |
+          python -m pytest -q tools/tests/test_catalog_owner_renewal_operator_v3.py
+      - name: Catalog root-bootstrap and MCP release consumption-ledger namespace safety
+        run: |
+          python -m pytest -q \
+            tools/tests/test_catalog_consumption_ledger_namespaces.py \
+            tools/tests/test_catalog_root_consumption_ledger_repair_once.py \
+            tools/tests/test_catalog_scoped_owner_approval_renewal.py \
+            tools/tests/test_catalog_unsigned_offer_safe_restage.py
+      - name: Catalog unsigned-offer source-only restage, PMv4 rollback and Owner-root install safety
+        run: |
+          python -m pytest -q \
+            tools/tests/test_catalog_unsigned_offer_safe_restage.py \
+            tools/tests/test_catalog_pmv4_transaction_rollback_gate.py \
+            tools/tests/test_catalog_root_unsigned_offer_restage_install_once.py
+      - name: Catalog historical pinned runner trust and one-use root repair rollback
+        run: |
+          python -m pytest -q tools/tests/test_catalog_scoped_trusted_original_runner.py tools/tests/test_catalog_root_trusted_runner_repair_once.py
+      - name: One-use catalog root worker rebind Owner boundary and rollback safety
+        run: |
+          python -m pytest -q tools/tests/test_catalog_root_worker_rebind_once.py tools/tests/test_catalog_root_worker_rebind_retired_timer.py
+      - name: PMv4 one-use completed catalog bootstrap timer recovery exact-scope safety
+        run: |
+          python -m pytest -q tools/tests/test_pmv4_bootstrap_timer_recovery_once.py
       - name: Prompt-injection evidence boundary regressions
         run: |
           python -m pytest -q \
@@ -83,6 +145,17 @@ jobs:
             implementation/connectors/tests/test_openbao_secrets.py \
             tools/tests/test_provider_secret_provision.py \
             tools/tests/test_microsoft_group_admin_identity_bootstrap.py
+      - name: Scoped source-pinned backport, exact Owner proof and paired rollback regressions
+        run: |
+          python -m pytest -q \
+            tools/tests/test_scoped_backport_release.py \
+            tools/tests/test_scoped_backport_release_request.py \
+            tools/tests/test_scoped_backport_native_host.py \
+            tools/tests/test_scoped_backport_native_worker.py \
+            tools/tests/test_scoped_backport_root_install.py \
+            tools/tests/test_scoped_backport_owner_local_approval.py \
+            tools/tests/test_scoped_backport_four_unit_drift_reconcile.py \
+            tools/tests/test_scoped_backport_projection_helper_repair.py
       - name: Microsoft group dormant and exact AOT activation composition
         run: |
           python -m pytest -q implementation/runtime_service/tests/test_composition.py -k group_admin

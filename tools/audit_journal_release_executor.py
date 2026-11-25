@@ -1,0 +1,362 @@
+"""Exact journal objective executor with Root custody and native verification.
+
+Production execution requires the fixed installed path, isolated Root
+interpreter, verified immutable bundle and authenticated exact Owner plan.
+"""
+from __future__ import annotations
+from contextlib import contextmanager,ExitStack
+from datetime import datetime,timezone
+import fcntl,stat
+from hashlib import sha256
+from http.client import HTTPException
+import json,os,signal,subprocess,sys,time
+from pathlib import Path
+from tools.audit_journal_release_scope import ACTION,PRIVATE,POLICY,BASE,OWNER,ROLLBACK,PROTECTED,STATE,digest,protected_peer_inventory,native_revalidation_code
+from tools.audit_journal_container_release import DockerEngine,ROLES,planned_configuration,exact_original_configuration,configuration_matches
+from orchestrator.segmented_journal import read_control,need
+ENTRY=BASE/"trusted/tools/audit_journal_release_executor.py"
+
+
+def native_refresh_delay(report):
+ need(report.get("status")=="pass" and report.get("problems")==[],"JOURNAL_INITIAL_NATIVE_DRIFT_PASS_REQUIRED")
+ observed=datetime.fromisoformat(report["observed_at"].replace("Z","+00:00"))
+ age=(datetime.now(timezone.utc)-observed).total_seconds()
+ need(age>=-10,"JOURNAL_NATIVE_DRIFT_FROM_FUTURE")
+ return max(0,181-age)
+
+class ExactRelease:
+ def __init__(self,controller):
+  need(os.geteuid()==0 and sys.flags.isolated==1 and Path(__file__).resolve()==ENTRY,
+       "JOURNAL_INSTALLED_EXACT_RELEASE_EXECUTOR_REQUIRED")
+  self.c=controller;self.engine=DockerEngine()
+  self.plan=read_control(PRIVATE/"release-plan.json",0,0o400)
+  self.policy=read_control(POLICY,0,0o600)
+  self.path=PRIVATE/"release-journal.json"
+  self.journal=read_control(self.path,0,0o400) if self.path.exists() else {"steps":{}}
+  need(self.plan["action"]==ACTION and self.plan["owner_oid"]==OWNER
+       and self.plan["independently_verified_entra_owner"] is True
+       and self.plan["scope_sha256"]==digest(self.plan["scope"])
+       and self.plan["candidate_sha"]==self.policy["candidate_sha"],"JOURNAL_EXACT_RELEASE_PLAN_BINDING")
+  self.before=read_control(PRIVATE/"producer-before.json",0,0o400)
+  need(set(self.before)==set(ROLES) and digest(self.before)==self.plan["producer_before_sha256"],
+       "JOURNAL_BEFORE_SPEC_BINDING")
+  adoption=read_control(PRIVATE/"adoption.json",0,0o400)
+  need(adoption["scope_sha256"]==self.plan["scope_sha256"]
+       and self.plan["scope"]["source_sha256"]==self.policy["trusted_source_sha256"],
+       "JOURNAL_ADOPTION_AND_EXECUTION_SCOPE_DIVERGED")
+  for role,before in self.before.items():
+   need(role in ROLES and before["Id"]==self.plan["scope"]["producer_before"][role]["id"]
+        and digest(exact_original_configuration(before))==
+        self.plan["scope"]["producer_before"][role]["configuration_sha256"]
+        and digest(planned_configuration(before,self.plan["candidate_sha"]))==
+        self.plan["scope"]["producer_after_configuration_sha256"][role],
+        "JOURNAL_REVIEWED_PRODUCER_CONFIGURATION_DIVERGED")
+
+ @contextmanager
+ def release_locks(self):
+  with ExitStack() as stack:
+   deadline=time.monotonic()+30
+   for path,uid,mode in ((STATE/"production-transaction.lock",1000,0o664),
+      (Path("/var/lib/jason/pmv4-shadow/control/host-mutation.lock"),0,0o600)):
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC);stack.callback(os.close,fd)
+    meta=os.fstat(fd)
+    need(stat.S_ISREG(meta.st_mode) and meta.st_uid==uid and meta.st_nlink==1
+         and stat.S_IMODE(meta.st_mode)==mode,"JOURNAL_NATIVE_RELEASE_LOCK_IDENTITY")
+    while True:
+     try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);break
+     except BlockingIOError:
+      need(time.monotonic()<deadline,"JOURNAL_OTHER_RELEASE_TRANSACTION_BUSY");time.sleep(0.1)
+   self.protected()
+   yield
+
+ def arm_budget(self,seconds):
+  need(seconds>0,"JOURNAL_EXACT_EXECUTION_TIME_BUDGET")
+  def expired(_signum,_frame):raise TimeoutError("JOURNAL_EXACT_EXECUTION_TIME_BUDGET")
+  signal.signal(signal.SIGALRM,expired);signal.setitimer(signal.ITIMER_REAL,seconds)
+
+ def save(self):self.c._json(self.path,self.journal,0o400)
+ def status(self,phase,**extra):
+  value={"schema_version":"1.0","candidate_sha":self.plan["candidate_sha"],"phase":phase,
+   "scope_sha256":self.plan["scope_sha256"],"observed_at":datetime.now(timezone.utc).isoformat(),**extra}
+  self.c._json(self.c.p.control/"release-status.json",value)
+  print(json.dumps(value,sort_keys=True),flush=True)
+ def protected(self):
+  for name,expected in PROTECTED.items():
+   fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW)
+   with os.fdopen(fd,"rb") as stream:
+    need(sha256(stream.read()).hexdigest()==expected,"JOURNAL_PROTECTED_BASELINE_CHANGED")
+ def claim(self):
+  if "started_at" not in self.journal:
+   issued=datetime.fromisoformat(self.plan["approved_at"]);claimed=datetime.fromisoformat(self.plan["claimed_at"])
+   need(0<=(claimed-issued).total_seconds()<=600,"JOURNAL_OWNER_PLAN_NOT_CLAIMED_WHILE_FRESH")
+   self.journal.update(started_at=claimed.isoformat(),scope_sha256=self.plan["scope_sha256"])
+   self.save()
+  need(self.journal["scope_sha256"]==self.plan["scope_sha256"],"JOURNAL_RELEASE_CLAIM_CHANGED")
+  need(0<=(datetime.now(timezone.utc)-datetime.fromisoformat(self.journal["started_at"])).total_seconds()<=28800,
+       "JOURNAL_EXACT_RELEASE_EXECUTION_BUDGET")
+  elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(self.journal["started_at"])).total_seconds()
+  self.arm_budget(28800-elapsed)
+  self.c._objective_deadline=time.monotonic()+28800-elapsed
+  self.c._exact_release_scope=self.plan["scope_sha256"]
+  self.c._exact_source_dataset=self.plan["scope"]["source_dataset_identity"]
+  self.protected()
+ def sql(self,operation,args,seconds=10800):return self.c._sql(operation,args,seconds=seconds)
+ def barrier(self,enabled,legacy=False):
+  self.sql("barrier",{"path":str(self.c.p.active),"enabled":enabled,"block_invoking":legacy},seconds=10)
+
+ def drain(self,segmented):
+  self.status("draining_admitted_work");deadline=time.monotonic()+300
+  while time.monotonic()<deadline:
+   if segmented:
+    state=self.sql("state",{"path":str(self.c.p.active)},seconds=10)
+    if state["pending_outcomes"]:
+     self.sql("reconcile_outcomes",{"profile":self.c.profile_arguments(),"maximum":100},seconds=30)
+    elif not state["reservations"]:return
+   else:
+    result=self.sql("live_claim_count",{"cutoff":self.plan["oldest_producer_started_at"]},seconds=10)
+    if result["consumed_since_cutoff"]==0:return
+   time.sleep(1)
+  raise RuntimeError("JOURNAL_ADMITTED_WORK_DRAIN_NOT_COMPLETE")
+
+ def matches(self,current,body):return current is not None and configuration_matches(current,body)
+
+ def replace(self,original=False):
+  candidate=self.plan["candidate_sha"]
+  for role in ("jason-pmv4-ticket-core","jason-runtime","jason-mcp-pilot"):
+   before=self.before[role]
+   body=exact_original_configuration(before) if original else planned_configuration(before,candidate)
+   current=self.engine.lookup(role)
+   key=("restore:" if original else "install:")+role
+   step=self.journal["steps"].get(key)
+   if original and (current is None or step is not None and step.get("restore_missing")):
+    if step is None:
+     installed=self.journal["steps"].get("install:"+role)
+     need(installed is not None,"JOURNAL_MISSING_PRODUCER_HAS_NO_RECORDED_INSTALL")
+     step={"restore_missing":True,"original_backup":installed["backup"],
+           "original_id":before["Id"],"configuration_sha256":digest(body)}
+     self.journal["steps"][key]=step;self.save()
+    kwargs={"original_id":step["original_id"],"original_backup":step["original_backup"]}
+    try:result=self.engine.restore_missing(role,body,**kwargs)
+    except (OSError,HTTPException):result=self.engine.restore_missing(role,body,**kwargs)
+    restored=self.engine.inspect(role)
+    need(self.matches(restored,body) and restored["State"]["Running"],"JOURNAL_RECREATED_ORIGINAL_NOT_VERIFIED")
+    step.update(result,verified=True);self.save();continue
+   if self.matches(current,body) and current["State"]["Running"]:
+    if step and step.get("after_id"):
+     need(current["Id"]==step["after_id"],"JOURNAL_RECORDED_REPLACEMENT_CHANGED")
+    continue
+   if step is None:
+    need(current is not None,"JOURNAL_UNRECORDED_PRODUCER_ABSENT")
+    if not original:need(current["Id"]==before["Id"],"JOURNAL_PRODUCER_CHANGED_BEFORE_REPLACEMENT")
+    phase="failed" if original else "before"
+    step={"before_id":current["Id"],"backup":role+"-rollback-audit-"+phase+"-"+candidate[:12],
+          "configuration_sha256":digest(body)}
+    self.journal["steps"][key]=step;self.save()
+   self.status("restoring_consumers" if original else "installing_dormant_consumers",role=role)
+   try:
+    result=self.engine.replace(role,body,expected_id=step["before_id"],backup_name=step["backup"])
+   except (OSError,HTTPException):
+    # Engine.replace begins with exact native readback, including any existing
+    # stopped before-image. This bounded retry reconciles a transport loss.
+    self.status("reconciling_container_transport_outcome",role=role)
+    result=self.engine.replace(role,body,expected_id=step["before_id"],backup_name=step["backup"])
+   step.update(result,verified=False);self.save()
+   deadline=time.monotonic()+120
+   while time.monotonic()<deadline:
+    observed=self.engine.inspect(role)
+    if observed["State"]["Running"] and self.matches(observed,body):break
+    time.sleep(1)
+   else:raise RuntimeError("JOURNAL_CONSUMER_CONFIGURATION_NOT_VERIFIED")
+   step["verified"]=True;self.save()
+
+ def verify_modules(self):
+  code=("import hashlib,json,pathlib,orchestrator.event_store as e,orchestrator.segmented_journal as s,"
+        "orchestrator.journal_outcomes as o;print(json.dumps({pathlib.Path(m.__file__).name:"
+        "hashlib.sha256(pathlib.Path(m.__file__).read_bytes()).hexdigest() for m in (e,s,o)}))")
+  wanted={Path(k).name:v for k,v in self.policy["trusted_source_sha256"].items()
+          if Path(k).name in ("event_store.py","segmented_journal.py","journal_outcomes.py")}
+  for role in ROLES:
+   result=subprocess.run(["/usr/bin/docker","exec","--user","1000:1000",role,"python","-B","-c",code],
+                        capture_output=True,text=True,timeout=30,check=False)
+   need(result.returncode==0 and json.loads(result.stdout)==wanted,"JOURNAL_LOADED_CONSUMER_SOURCE_MISMATCH")
+
+ def scheduled_cycle(self):
+  with self.c.p.gate():epoch=self.c.p.catalog()["epoch"]
+  request=self.c.private/"first-scheduled-rollover.json"
+  if not request.exists():self.c._json(request,{"before_epoch":epoch,"completed":False},0o400)
+  start=datetime.now(timezone.utc)
+  subprocess.run(["/usr/bin/systemctl","enable","--now","jason-audit-journal-maintenance.timer"],
+                 capture_output=True,timeout=30,check=True)
+  deadline=min(time.monotonic()+21600,getattr(self.c,"_objective_deadline",time.monotonic()+21600))
+  while time.monotonic()<deadline:
+   try:
+    row=read_control(self.c.p.control/"maintenance-status.json",0)
+    if datetime.fromisoformat(row["observed_at"])>=start:
+     need(row["status"]=="pass" and row["maintenance"]["initial_scheduled_rollover_verified"] is True
+          and (row["native_health"]["status"]=="existing_native_full_fast_drift_and_revalidation_verified"
+               or read_control(request,0,0o400).get("native_verified") is True),
+          "JOURNAL_SCHEDULED_ROLLOVER_NOT_SUCCESSFUL")
+     return
+   except (OSError,ValueError,KeyError):pass
+   time.sleep(1)
+  raise RuntimeError("JOURNAL_REAL_SCHEDULED_CYCLE_NOT_VERIFIED")
+
+ def verify_consumers(self):
+  paths=[str(self.c.p.active)]
+  with self.c.p.gate():
+   paths.extend(str(self.c.p.artifact(r)) for r in self.c.p.catalog()["segments"][:1])
+  deadline=time.monotonic()+300
+  while True:
+   probes=self.sql("reader_probes",{"paths":paths},seconds=30)
+   if probes["per_source_probe_counts"] and probes["per_source_probe_counts"][0]:break
+   self.status("awaiting_first_genuine_current_journal_event")
+   need(time.monotonic()<deadline,"JOURNAL_REAL_CURRENT_ACTIVITY_NOT_OBSERVED")
+   time.sleep(5)
+  need(probes["event_ids"] and len(probes["per_source_probe_counts"])==2
+       and all(probes["per_source_probe_counts"]),"JOURNAL_REAL_CURRENT_AND_HISTORICAL_EVENTS_REQUIRED")
+  code=("import json,sys;from orchestrator.event_store import SQLiteOrchestrationEventStore;"
+        "s=SQLiteOrchestrationEventStore(sys.argv[1]);ids=json.loads(sys.argv[2]);"
+        "assert all(s.get(v).event_id==v for v in ids);s.close();print(len(ids))")
+  for role in ROLES:
+   result=subprocess.run(["/usr/bin/docker","exec","--user","1000:1000",role,"python","-B","-c",
+      code,str(self.c.p.active),json.dumps(probes["event_ids"])],capture_output=True,text=True,timeout=60,check=False)
+   need(result.returncode==0 and result.stdout.strip()==str(len(probes["event_ids"])),
+        "JOURNAL_ACTUAL_CONSUMER_HISTORY_READ_FAILED")
+  # Reuse the exact admission contract: all actual production peers must
+  # run healthy; the fixed isolated preproduction shadow is observed as-is.
+  peers=protected_peer_inventory()
+  need(set(peers)==set(self.plan["scope"]["protected_peer_before"]),"JOURNAL_FIXED_PROTECTED_PEER")
+  for role,before in self.plan["scope"]["protected_peer_before"].items():
+   value=peers[role]
+   need(value["image"]==before["image"],"JOURNAL_PROTECTED_PEER_NOT_HEALTHY")
+   if role not in ROLES:
+    need(value["id"]==before["id"] and value["started_at"]==before["started_at"],
+         "JOURNAL_UNRELATED_PROTECTED_PEER_CHANGED")
+  self.status("actual_consumer_history_and_protected_health_verified",consumers=3)
+
+ def native(self):
+  self.status("verifying_native_operation")
+  for unit in ("jason-openclaw-authority-full-integrity.service","jason-openclaw-authority-health.service"):
+   result=subprocess.run(["/usr/bin/systemctl","start",unit],capture_output=True,timeout=5500,check=False)
+   need(result.returncode==0,"JOURNAL_NATIVE_SERVICE_DID_NOT_PASS")
+  self.revalidate()
+
+ def revalidate(self):
+  # Root's scheduled watchdog defers under our mutex. Its existing transition
+  # worker refreshes an expired PASS in its own service security context.
+  # Require that fresh native observation for this policy stage, including a
+  # real cache-expiry wait when the previous stage was just verified.
+  before=read_control(STATE/"production-drift.json",0,0o600)
+  delay=native_refresh_delay(before)
+  if delay:
+   self.status("waiting_for_independent_native_drift_refresh",maximum_wait_seconds=round(delay,3))
+   deadline=time.monotonic()+delay
+   while time.monotonic()<deadline:time.sleep(max(0,min(1,deadline-time.monotonic())))
+  result=subprocess.run(["/usr/bin/python3","-I","-B","-c",native_revalidation_code()],
+                       capture_output=True,text=True,timeout=110,check=False,**self.c.writer_identity())
+  if result.returncode:print(result.stdout[:800],flush=True)
+  need(result.returncode==0,"JOURNAL_GOVERNED_NATIVE_REVALIDATION_DID_NOT_PASS")
+  after=read_control(STATE/"production-drift.json",0,0o600)
+  need(native_refresh_delay(after)>0 and after["observed_at"]!=before["observed_at"],
+       "JOURNAL_FRESH_NATIVE_DRIFT_OBSERVATION_REQUIRED")
+
+ def finalize_desired(self):
+  from tools.audit_journal_release_scope import DESIRED
+  final=read_control(PRIVATE/"desired-final.json",0,0o400)
+  scope=self.plan["scope"]
+  need(digest(final)==scope["desired_state_after_sha256"],"JOURNAL_FINAL_DESIRED_SCOPE")
+  current=read_control(DESIRED,0,0o600)
+  need(digest(current) in (scope["desired_state_initial_sha256"],scope["desired_state_after_sha256"]),
+       "JOURNAL_UNEXPECTED_DESIRED_POLICY")
+  status=subprocess.run(["/usr/bin/systemctl","show","jason-audit-journal-maintenance.timer",
+   "--property=ActiveState,UnitFileState"],capture_output=True,text=True,timeout=15,check=True)
+  props=dict(line.split("=",1) for line in status.stdout.splitlines() if "=" in line)
+  need(props.get("ActiveState")=="active" and props.get("UnitFileState")=="enabled",
+       "JOURNAL_ACTUAL_MAINTENANCE_TIMER_REQUIRED")
+  self.c._json(DESIRED,final,0o600)
+  self.revalidate()
+
+ def complete(self):
+  if self.journal.get("outcome") in ("accepted","rolled_back"):return
+  if "recovery_started_at" in self.journal:
+   self.begin_recovery();self.protected();self.rollback()
+   self.journal["outcome"]="rolled_back";self.save()
+   self.status("rolled_back",all_history_retained=True);return
+  self.claim()
+  try:
+   self.status("verifying_writer_account_execution")
+   self.sql("state",{"path":str(self.c.p.active)},seconds=30)
+   self.c.recover()
+   self.c.cleanup_abandoned_work()
+   if self.c.p.catalog()["mode"]=="legacy" and not (PRIVATE/"initial-cutover-complete.json").exists():
+    self.barrier(True,legacy=True);self.drain(False);self.replace();self.verify_modules()
+    self.status("publishing_small_active_journal");self.c.transition(initial=True)
+   else:self.c.recover()
+   while self.c.status()["pending"]:
+    self.status("fully_verifying_and_archiving_closed_history");self.c.seal_one()
+   self.status("verifying_legacy_reconstruction_and_cold_restore")
+   if not (PRIVATE/"recovery-recipe.json").exists():
+    self.c.prepare_rollback();self.c.recovery().accept_recipe()
+   if self.c.rollback.exists():
+    recipe=read_control(PRIVATE/"recovery-recipe.json",0,0o400)
+    prepared=read_control(self.c.rollback,0,0o400)
+    if prepared["proof"]==recipe["initial_full_reconstruction"]:self.c.recovery().discard_prepared()
+   self.c.recovery().extend_recipe()
+   for row in self.c.p.catalog()["segments"]:
+    if (self.c.p.pending/row["proof"]["source_before_image"]).exists():
+     self.status("reclaiming_verified_redundant_local_copy");self.c.reclaim(row["id"])
+   self.scheduled_cycle();self.finalize_desired();self.verify_modules();self.verify_consumers();self.protected()
+   self.journal["outcome"]="accepted";self.save()
+   self.status("accepted",whole_objective_verified=True,off_host_backup_claimed=False)
+  except Exception as exc:
+   self.status("recovering_exact_approved_rollback",reason_code=type(exc).__name__)
+   self.begin_recovery();self.rollback()
+   self.journal.update(outcome="rolled_back",failure_type=type(exc).__name__);self.save()
+   self.status("rolled_back",whole_objective_verified=False,all_history_retained=True)
+   raise
+
+ def begin_recovery(self):
+  stamp=self.journal.setdefault("recovery_started_at",datetime.now(timezone.utc).isoformat());self.save()
+  elapsed=(datetime.now(timezone.utc)-datetime.fromisoformat(stamp)).total_seconds()
+  need(0<=elapsed<=28800,"JOURNAL_EXACT_RECOVERY_EXECUTION_BUDGET")
+  self.arm_budget(28800-elapsed)
+  self.c._objective_deadline=time.monotonic()+28800-elapsed
+  self.c._exact_release_scope=self.plan["scope_sha256"]
+
+ def rollback(self):
+  subprocess.run(["/usr/bin/systemctl","disable","--now","jason-audit-journal-maintenance.timer"],
+                 capture_output=True,timeout=30,check=True)
+  subprocess.run(["/usr/bin/systemctl","stop","jason-audit-journal-maintenance.service"],
+                 capture_output=True,timeout=150,check=True)
+  self.c.recover()
+  self.c.cleanup_abandoned_work()
+  if self.c.p.catalog()["mode"]!="legacy":
+   self.barrier(True);self.drain(True)
+   self.status("reconstructing_all_events_for_exact_legacy_rollback")
+   self.c.prepare_rollback();self.c.finish_rollback()
+  self.replace(original=True);self.barrier(False)
+  rollback=read_control(PRIVATE/"desired-rollback.json",0,0o400)
+  need(digest(rollback)==self.plan["scope"]["rollback_desired_state_sha256"],
+       "JOURNAL_ROLLBACK_DESIRED_SCOPE_BINDING")
+  from tools.audit_journal_release_scope import DESIRED
+  self.c._json(DESIRED,rollback,0o600)
+  self.native();self.protected()
+
+def complete(controller):
+ executor=ExactRelease(controller)
+ try:
+  with executor.release_locks():executor.complete()
+ finally:signal.setitimer(signal.ITIMER_REAL,0)
+
+
+def rollback_release(controller):
+ executor=ExactRelease(controller)
+ if executor.journal.get("outcome")=="rolled_back":return
+ # A rollback may start only within the exact original execution window.
+ if "recovery_started_at" not in executor.journal:executor.claim()
+ try:
+  with executor.release_locks():
+   executor.begin_recovery();executor.protected();executor.rollback()
+   executor.journal["outcome"]="rolled_back";executor.save()
+   executor.status("rolled_back",all_history_retained=True)
+ finally:signal.setitimer(signal.ITIMER_REAL,0)

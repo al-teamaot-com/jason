@@ -94,3 +94,72 @@ def test_admission_denies_cross_process_exclusive_lock(tmp_path):
             worker.stderr.close()
     assert worker.returncode == 0
     assert module.admission_allowed(path)
+
+
+def test_bounded_retry_admits_after_real_exclusive_lock_is_released(tmp_path, monkeypatch):
+    import threading
+    lock=tmp_path/'transaction.lock'
+    lock.touch(mode=0o600)
+    monkeypatch.setattr(module,'INITIAL_BACKOFF_SECONDS',0.01)
+    monkeypatch.setattr(module,'MAX_BACKOFF_SECONDS',0.02)
+    with lock.open('rb') as owner:
+        fcntl.flock(owner.fileno(),fcntl.LOCK_EX)
+        timer=threading.Timer(0.06,lambda:fcntl.flock(owner.fileno(),fcntl.LOCK_UN))
+        timer.start()
+        try:
+            assert module.admission_status(lock,retry_seconds=0.5)=='allowed'
+        finally:
+            timer.join()
+
+
+def test_persistent_contention_uses_bounded_exponential_backoff(monkeypatch,tmp_path):
+    clock=[0.0]; delays=[]
+    monkeypatch.setattr(module.time,'monotonic',lambda:clock[0])
+    def sleep(seconds):
+        delays.append(seconds);clock[0]+=seconds
+    monkeypatch.setattr(module.time,'sleep',sleep)
+    monkeypatch.setattr(module,'probe',lambda *a:'busy')
+    assert module.admission_status(tmp_path/'lock',retry_seconds=5)=='busy'
+    assert delays==[0.25,0.5,1.0,2.0,1.25]
+    assert sum(delays)==5.0
+
+
+def test_invalid_lock_never_retries(tmp_path,monkeypatch):
+    def unexpected_sleep(_): raise AssertionError('invalid lock must not be retried')
+    monkeypatch.setattr(module.time,'sleep',unexpected_sleep)
+    lock=tmp_path/'lock'
+    assert module.admission_status(lock,retry_seconds=20)=='unavailable'
+    lock.touch(mode=0o600);lock.chmod(0o666)
+    assert module.admission_status(lock,retry_seconds=20)=='untrusted'
+    lock.unlink();os.mkfifo(lock,0o600)
+    assert module.admission_status(lock,retry_seconds=20)=='untrusted'
+
+
+def test_owner_pause_appearing_during_contention_denies_admission(tmp_path,monkeypatch):
+    lock=tmp_path/'lock'; lock.touch(mode=0o600)
+    pause=tmp_path/'owner-pause.json'
+    with lock.open('rb') as owner:
+        fcntl.flock(owner.fileno(),fcntl.LOCK_EX)
+        def sleep(_):
+            pause.touch(mode=0o600)
+            fcntl.flock(owner.fileno(),fcntl.LOCK_UN)
+        monkeypatch.setattr(module.time,'sleep',sleep)
+        assert module.admission_status(lock,retry_seconds=20,pause_path=pause)=='paused'
+
+
+def test_lock_replaced_during_probe_is_denied(tmp_path,monkeypatch):
+    lock=tmp_path/'lock';lock.touch(mode=0o600)
+    real=module.fcntl.flock
+    def replace(fd,flags):
+        real(fd,flags)
+        lock.rename(tmp_path/'old-lock')
+        lock.touch(mode=0o600)
+    monkeypatch.setattr(module.fcntl,'flock',replace)
+    assert module.admission_status(lock,retry_seconds=20)=='untrusted'
+
+
+def test_retry_budget_cannot_be_unbounded(tmp_path):
+    import pytest
+    for value in (-1,21,float('inf'),float('nan')):
+        with pytest.raises(ValueError,match='retry budget'):
+            module.admission_status(tmp_path/'lock',retry_seconds=value)

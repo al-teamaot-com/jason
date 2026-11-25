@@ -1,0 +1,12 @@
+{
+  "assigned_elsewhere": false,
+  "company_identity_verified": true,
+  "exact_note_body_readback_verified": true,
+  "exact_note_promotion_verified": true,
+  "existing_managed_note": false,
+  "note_body": "JASON READ-ONLY INVESTIGATION - synthetic evidence only",
+  "note_fingerprint_already_verified": false,
+  "source_version_current": true,
+  "ticket_id": 143305,
+  "valid_nontransient_note_draft": true
+}

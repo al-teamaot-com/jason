@@ -1,0 +1,10 @@
+[Unit]
+Description=Jason temporary one-use exact audit archive request watcher
+Documentation=https://github.com/al-teamaot-com/jason/issues/2680
+
+[Path]
+PathChanged=/var/lib/jason/authority/audit-journal-release/requests
+Unit=jason-audit-journal-owner-executor.service
+
+[Install]
+WantedBy=multi-user.target

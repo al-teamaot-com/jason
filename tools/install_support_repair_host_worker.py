@@ -37,6 +37,9 @@ def main() -> int:
     pmv3_controller = repo / 'tools' / 'pmv3_engineering_controller.py'
     pmv3_integration_queue = repo / 'tools' / 'pmv3_integration_queue.py'
     development_runner = repo / 'tools' / 'owner_approved_development_worker.py'
+    dependency_runner = repo / 'tools' / 'dependency_conflict_service.py'
+    isolated_common = repo / 'tools' / 'isolated_service_common.py'
+    concurrency_scopes = repo / 'config' / 'development-concurrency-scopes.json'
     supervisor_runner = repo / 'tools' / 'engineering_supervisor.py'
     breaker_recovery_runner = repo / 'tools' / 'release_breaker_recovery_manager.py'
     evidence_module = repo / 'tools' / 'engineering_evidence_tools.py'
@@ -61,6 +64,8 @@ def main() -> int:
         raise SystemExit('PMV3 integration queue source is missing')
     if not development_runner.is_file():
         raise SystemExit('owner-approved development worker source is missing')
+    if not dependency_runner.is_file() or not isolated_common.is_file() or not concurrency_scopes.is_file():
+        raise SystemExit('development claim controller dependency source is missing')
     if not supervisor_runner.is_file() or not evidence_module.is_file():
         raise SystemExit('governed engineering supervisor or evidence source is missing')
     if not breaker_recovery_runner.is_file():
@@ -96,6 +101,9 @@ def main() -> int:
     _copy(pmv3_controller, install_root / 'pmv3_engineering_controller.py', 0o700)
     _copy(pmv3_integration_queue, install_root / 'pmv3_integration_queue.py', 0o700)
     _copy(development_runner, install_root / 'owner_approved_development_worker.py', 0o700)
+    _copy(dependency_runner, install_root / 'dependency_conflict_service.py', 0o600)
+    _copy(isolated_common, install_root / 'isolated_service_common.py', 0o600)
+    _copy(concurrency_scopes, install_root / 'development-concurrency-scopes.json', 0o600)
     _copy(supervisor_runner, install_root / 'engineering_supervisor.py', 0o700)
     _copy(breaker_recovery_runner, install_root / 'release_breaker_recovery_manager.py', 0o700)
     _copy(evidence_module, install_root / 'engineering_evidence_tools.py', 0o600)
@@ -110,6 +118,8 @@ def main() -> int:
         _copy(unit_root / unit, user_units / unit, 0o600)
 
     for path in (
+        home / 'jason-worktrees' / 'support-repair-closure',
+        spool.parent / 'autonomous-repair' / 'lifecycle-events',
         spool,
         spool / 'reasoning',
         spool / 'reasoning' / 'requests',
