@@ -10,13 +10,13 @@
 
 ## Purpose
 
-Jason should not require a new human production approval merely to restore behavior that was already approved when the repair is narrow, deterministic, fully tested, reversible, and materially equivalent in authority and risk to the previously accepted behavior.
+Jason should be able to classify, prepare, validate, and package a narrow repair autonomously when it restores already approved behavior and introduces no new authority or material risk. Final Production promotion remains separately governed by J-CHANGE-003 and requires explicit Owner approval bound to the exact promotion plan.
 
-This standard defines a pre-authorized **Autonomous Repair Release** class.
+This standard defines an **Autonomous Repair Candidate** class that may prepare and validate a repair without granting final Production promotion authority.
 
 The controlling rule is:
 
-> Restoring previously approved behavior may be autonomous. Expanding or materially changing behavior may not.
+> Restoring previously approved behavior may be autonomously prepared and validated. Final Production promotion still requires exact-plan Owner approval under J-CHANGE-003.
 
 ## Repair versus change
 
@@ -82,37 +82,29 @@ Branch-local success alone is not sufficient production evidence. Universal prot
 
 ## Human approval rule
 
-When all repair-eligibility criteria pass:
+When all repair-eligibility criteria pass, Jason may autonomously continue through classification, validation, packaging, evidence generation, and READY FOR PRODUCTION preparation.
 
-- the release class itself does **not** require a new human production approval;
-- the previously approved behavior is the governing human authorization being restored;
-- Jason may continue autonomously through the repair release lane.
+Final Production promotion is governed by J-CHANGE-003 and always requires explicit Owner approval bound to the exact Production promotion plan.
 
-When any repair-eligibility criterion fails or is uncertain:
+When any repair-eligibility criterion fails or is uncertain, the candidate is not an Autonomous Repair Release and follows the normal change/release path before reaching the same J-CHANGE-003 Production approval boundary.
 
-- `human_approval_required=true`;
-- the candidate falls back to the normal production release lane;
-- no classifier output may be used to broaden authority.
+No classifier output may broaden authority or create Production execution authority.
 
 ## Production execution boundary
 
-Autonomous repair classification is not arbitrary shell authority.
+Autonomous repair classification is not arbitrary shell authority and does not itself authorize Production execution.
 
-Production execution SHALL occur only through Jason's named governed deployment capability/runner using:
+An eligible repair may be prepared as an immutable candidate through Jason's governed repair tooling. Before Production mutation, the normal Production promotion capability must:
 
-- the exact immutable merged SHA;
-- the current known-good production SHA as rollback target;
-- deterministic deployment artifacts;
-- existing release/recovery checks;
-- health verification;
-- post-deploy acceptance specific to the support defect;
-- evidence capture.
+- use the exact immutable merged SHA and candidate artifact;
+- identify the current known-good Production revision and rollback target;
+- produce the exact J-CHANGE-003 Production promotion plan;
+- obtain explicit Owner approval bound to that plan fingerprint;
+- atomically reserve/consume that approval;
+- execute through the named governed deployment capability/runner;
+- preserve health, rollback, and defect-specific post-deploy acceptance evidence.
 
-Until that named governed production execution path is enabled for this release class, an eligible repair is recorded as:
-
-`autonomous_repair_authorized_blocked`
-
-This state means **no additional human approval is required**, but execution is blocked by a missing technical execution path or another objective precondition.
+Until those conditions are satisfied, an eligible repair remains READY FOR PRODUCTION or an equivalent blocked state. It must not self-promote into Production.
 
 ## Production-side parent requirement
 
@@ -182,4 +174,5 @@ Client endpoint actions, provider mutations, disruptive user actions, and other 
 
 ## Revision notes
 
+- 2026-10-02: Production execution authority moved under J-CHANGE-003; autonomous repair remains a preparation/classification lane but no longer bypasses exact-plan Owner approval for Production.
 - 2026-09-28: Initial pre-authorized Autonomous Repair Release class established.
