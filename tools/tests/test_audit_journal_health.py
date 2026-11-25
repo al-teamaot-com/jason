@@ -68,3 +68,85 @@ def test_daily_boundary_uses_new_york_calendar_across_dst(native,date):
 def test_scheduled_maintenance_cannot_authorize_initial_cutover(native):
  p,c,s=native
  with pytest.raises(JournalUnavailable,match="EXACT_RELEASE"):c.maintain()
+
+
+def test_segmented_health_readers_only_use_private_scratch_when_wal_aux_absent(native):
+    import os
+    from pathlib import Path
+    from tools.openclaw_authority_fast_health import read_only_probe
+    from orchestrator.journal_health import readonly_active_copy
+    p,c,s=native
+    c.transition(initial=True)
+    c.seal_one()
+    s.append_event(event("private-reader"))
+    s.close()
+    for suffix in ("-shm","-wal"):
+        # The synthetic writer has closed; only the canonical active DB
+        # remains before sandboxed health inspection.
+        assert not os.path.lexists(str(p.active)+suffix)
+    original_mode=p.active.parent.stat().st_mode & 0o777
+    os.chmod(p.active.parent,0o500)
+    try:
+        with readonly_active_copy(p,temp_root=p.archives) as (copy,cat,digest):
+            assert copy!=p.active and copy.exists()
+            assert (copy.parent.stat().st_mode & 0o777)==0o700
+            assert cat["mode"]=="segmented"
+            assert len(digest)==64
+        assert read_only_probe(p.active,profile=p) is True
+        assert not os.path.lexists(str(p.active)+"-shm")
+        assert not os.path.lexists(str(p.active)+"-wal")
+    finally:
+        os.chmod(p.active.parent,original_mode)
+
+
+def test_private_reader_rejects_untrusted_live_wal_symlink(native):
+    import os
+    from pathlib import Path
+    from orchestrator.journal_health import readonly_active_copy
+    p,c,s=native
+    c.transition(initial=True)
+    c.seal_one()
+    s.close()
+    auxiliary=Path(str(p.active)+"-wal")
+    assert not os.path.lexists(auxiliary)
+    auxiliary.symlink_to(p.active)
+    try:
+        with pytest.raises(JournalUnavailable,match="COPY_SOURCE_IDENTITY"):
+            with readonly_active_copy(p,temp_root=p.archives):
+                pass
+    finally:
+        auxiliary.unlink()
+
+
+def test_private_copy_reads_committed_wal_without_live_writer_mutation(native):
+    import hashlib
+    import os
+    import sqlite3
+    from pathlib import Path
+    from orchestrator.journal_health import readonly_active_copy
+    p,c,s=native
+    c.transition(initial=True)
+    c.seal_one()
+    s.close()
+    connection=sqlite3.connect(str(p.active),timeout=1)
+    try:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0]=="wal"
+        connection.execute("CREATE TABLE private_health_wal_probe(i INTEGER)")
+        connection.execute("INSERT INTO private_health_wal_probe VALUES(7)")
+        connection.commit()
+        wal=Path(str(p.active)+"-wal")
+        assert wal.is_file() and wal.stat().st_size>32
+        before={
+            name:hashlib.sha256(Path(name).read_bytes()).hexdigest()
+            for name in (str(p.active),str(wal))
+        }
+        with readonly_active_copy(p,temp_root=p.archives) as (private,_,_):
+            with sqlite3.connect("file:"+str(private)+"?mode=ro",uri=True) as db:
+                assert db.execute("SELECT i FROM private_health_wal_probe").fetchone()==(7,)
+        after={
+            name:hashlib.sha256(Path(name).read_bytes()).hexdigest()
+            for name in (str(p.active),str(wal))
+        }
+        assert after==before,"Health copy must not modify live journal or WAL"
+    finally:
+        connection.close()
