@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 
 from tools.legacy_json_acceptance_ledger import ROOT, build
@@ -73,6 +74,30 @@ def _counts(junit: Path) -> tuple[dict[str, dict[str, int]], dict[str,int]]:
     return per_file,totals
 
 
+def _module_passed(counts: dict[str, int]) -> bool:
+    return (counts.get("passed", 0) > 0
+            and counts.get("executed") == counts.get("passed")
+            and all(counts.get(kind, 0) == 0 for kind in
+                    ("failed", "errors", "skipped")))
+
+
+def _publish_result(output: Path, run_dir: Path, result: dict) -> None:
+    # Keep each invocation's evidence separate. The current status is a
+    # complete, atomically replaced receipt, never a previous run's success.
+    receipt = run_dir / "matrix-results.json"
+    receipt.write_text(json.dumps(result, indent=2, sort_keys=True)+"\n")
+    receipt.chmod(0o600)
+    with tempfile.NamedTemporaryFile(dir=output, prefix=".matrix-current-",
+                                     mode="w", delete=False) as current:
+        temporary = Path(current.name)
+        json.dump(result, current, indent=2, sort_keys=True)
+        current.write("\n")
+    try:
+        os.replace(temporary, output / "matrix-results.json")
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _exact_draft_reopen_results(junit: Path) -> dict[str, str]:
     """Evidence of each source draft's immutable restart, NOT job recovery."""
     output = {}
@@ -110,26 +135,53 @@ def run(*, root: Path = ROOT) -> dict:
     output.mkdir(mode=0o700,parents=True,exist_ok=True)
     if output.is_symlink():
         raise ValueError("PREPROD_MATRIX_OUTPUT_SYMLINK")
-    junit=output/"pytest-matrix.xml"
-    if junit.is_symlink():
-        raise ValueError("PREPROD_MATRIX_JUNIT_SYMLINK")
+    if (output/"matrix-results.json").is_symlink():
+        raise ValueError("PREPROD_MATRIX_EVIDENCE_SYMLINK")
+    expected_modules = {Path(name).stem for name in tests}
+    if len(expected_modules) != len(tests):
+        raise ValueError("PREPROD_MATRIX_AMBIGUOUS_TEST_MODULE")
+    run_dir = Path(tempfile.mkdtemp(prefix="run-", dir=output))
+    junit = run_dir / "pytest-matrix.xml"
+    base_receipt = {
+        "status": "isolated_synthetic_matrix_pending",
+        "run_id": run_dir.name,
+        "fully_accepted": 0,
+        "live_preproduction_provider_calls": 0,
+        "live_preproduction_provider_writes": 0,
+        "production_json_registry_modified": False,
+        "legacy_retirement_actions": 0,
+    }
+    _publish_result(output, run_dir, base_receipt)
     env=os.environ.copy()
     env["PYTHONPATH"]=".:implementation:implementation/runtime_service/src"
     cmd=[sys.executable,"-m","pytest","-q","-ra", "--disable-warnings",
          "--override-ini=junit_family=xunit1",
          "--junitxml",str(junit),*sorted(tests)]
-    completed=subprocess.run(cmd,cwd=root,env=env,stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT,text=True,timeout=180)
-    if not junit.is_file():
-        raise ValueError("PREPROD_MATRIX_JUNIT_MISSING")
-    file_counts, totals=_counts(junit)
-    per_source_reopen=_exact_draft_reopen_results(junit)
+    try:
+        completed=subprocess.run(cmd,cwd=root,env=env,stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT,text=True,timeout=180)
+        if not junit.is_file() or junit.is_symlink():
+            raise ValueError("PREPROD_MATRIX_JUNIT_MISSING_OR_UNTRUSTED")
+        file_counts, totals=_counts(junit)
+        per_source_reopen=_exact_draft_reopen_results(junit)
+    except (OSError, subprocess.TimeoutExpired, ET.ParseError, ValueError) as error:
+        _publish_result(output, run_dir, {
+            **base_receipt, "status": "isolated_synthetic_matrix_failed",
+            "failure": type(error).__name__,
+        })
+        raise
+    module_results = {
+        name: "pass" if _module_passed(file_counts.get(name, {}))
+        else "fail_or_missing"
+        for name in sorted(expected_modules)
+    }
+    unexpected_modules = sorted(set(file_counts) - expected_modules)
     outcomes={}
     for entry in ledger["entries"]:
         names=CASE_TESTS[entry["id"]]
         numbers={k:sum(file_counts.get(Path(n).stem,{}).get(k,0) for n in names)
                  for k in totals}
-        local_ok=bool(numbers["passed"]) and not numbers["failed"] and not numbers["errors"]
+        local_ok=all(module_results[Path(name).stem]=="pass" for name in names)
         outcomes[entry["id"]]={
             "json_fingerprint":entry["json_fingerprint"],
             "source_test_modules":list(names),
@@ -148,12 +200,18 @@ def run(*, root: Path = ROOT) -> dict:
     boundary={k:sum(file_counts.get(Path(n).stem,{}).get(k,0) for n in BOUNDARY_TESTS)
               for k in totals}
     result={
+        **base_receipt,
         "status": ("isolated_synthetic_matrix_pass" if completed.returncode==0
+                   and _module_passed(totals)
+                   and all(value=="pass" for value in module_results.values())
+                   and not unexpected_modules
                    and all(x["isolated_source_tests"]=="pass" for x in outcomes.values())
                    and all(v=="pass" for v in per_source_reopen.values())
                    and set(per_source_reopen)==ids
                    and shared["passed"]>0 and boundary["passed"]>0
                    else "isolated_synthetic_matrix_failed"),
+        "required_test_module_results": module_results,
+        "unexpected_test_modules": unexpected_modules,
         "junit_test_totals":totals,
         "shared_recovery_test_totals":shared,
         "governance_boundary_test_totals":boundary,
@@ -166,11 +224,7 @@ def run(*, root: Path = ROOT) -> dict:
         "pytest_exit_code":completed.returncode,
         "pytest_summary_tail":completed.stdout[-1200:],
     }
-    evidence=output/"matrix-results.json"
-    if evidence.is_symlink():
-        raise ValueError("PREPROD_MATRIX_EVIDENCE_SYMLINK")
-    evidence.write_text(json.dumps(result,indent=2,sort_keys=True)+"\n")
-    os.chmod(evidence,0o600)
+    _publish_result(output, run_dir, result)
     return result
 
 
