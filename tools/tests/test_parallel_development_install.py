@@ -384,6 +384,9 @@ def test_real_root_entrypoint_denies_incomplete_audit_before_owner_or_install(mo
     monkeypatch.setattr(real_sys,'argv',['parallel_development_install.py','--candidate-sha',CANDIDATE,'--review-only'])
     monkeypatch.setattr(install,'sys',SimpleNamespace(flags=SimpleNamespace(isolated=1)))
     monkeypatch.setattr(install,'os',SimpleNamespace(geteuid=lambda:0))
+    # Simulate the reviewed host worktree path in both GitHub Actions and on
+    # Jason. Do not weaken the installed Root path guard itself.
+    monkeypatch.setattr(install,'REPO',Path('/srv/jason/archive/engineering-worktrees/isolated-reviewed-candidate'))
     monkeypatch.setattr(install,'read',lambda *a,**k:install.canon({
         **_accepted_forward_fixture(),
         'phase':'awaiting_actual_no_restore_daily_rollover_and_native_health'}))
@@ -398,6 +401,9 @@ def test_real_root_entrypoint_reaches_pinned_issuer_only_after_forward_acceptanc
     monkeypatch.setattr(real_sys,'argv',['parallel_development_install.py','--candidate-sha',CANDIDATE,'--review-only'])
     monkeypatch.setattr(install,'sys',SimpleNamespace(flags=SimpleNamespace(isolated=1)))
     monkeypatch.setattr(install,'os',SimpleNamespace(geteuid=lambda:0))
+    # Simulate the reviewed host worktree path in both GitHub Actions and on
+    # Jason. Do not weaken the installed Root path guard itself.
+    monkeypatch.setattr(install,'REPO',Path('/srv/jason/archive/engineering-worktrees/isolated-reviewed-candidate'))
     monkeypatch.setattr(install,'read',lambda *a,**k:install.canon(_accepted_forward_fixture()))
     units={'jason-audit-journal-release.service':
             {'ActiveState':'inactive','MainPID':'0','Result':'success','ExecMainStatus':'0'},
