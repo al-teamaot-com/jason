@@ -127,48 +127,40 @@ def open_todo_issue_map(
         ["issue", "list", "--state", "open", "--limit", "5000",
          "--json", "number,title,body,url,updatedAt"],
         cwd=repo,
-    ) or []
-    # A short GitHub window hid canonical October TODO issues and admitted
-    # multiple duplicates. Saturated inventories are UNKNOWN, not empty.
-    if len(issues) >= 5000:
-        raise RuntimeError("TODO inventory at safe limit; do not admit new issue")
-    result: dict[str, dict[str, Any]] = {}
+    )
+    # An unavailable or saturated inventory is UNKNOWN, not empty.
+    if not isinstance(issues, list) or len(issues) >= 5000:
+        raise RuntimeError("TODO inventory unavailable or at safe limit; do not admit new issue")
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for issue in issues:
+        if not isinstance(issue, Mapping):
+            raise RuntimeError("Invalid TODO inventory row")
         body = str(issue.get("body") or "")
-        match = ISSUE_TODO.search(body)
-        if not match:
+        matches = {x.upper() for x in ISSUE_TODO.findall(body)}
+        if not matches:
             continue
-        item_id = match.group(1).upper()
-        prior = result.get(item_id)
-        if prior is not None:
-            # Identical duplicate issues do not create new work authority.
-            # Prefer the earliest issue for existence/duplicate suppression,
-            # NOT as a scope or approval decision.
-            differing = (
-                str(prior.get("body") or "") != body
-                or str(prior.get("title") or "") != str(issue.get("title") or "")
-            )
-            if differing and identity_conflicts is None:
-                raise RuntimeError("Conflicting GitHub TODO identities: " + item_id)
-            if identity_conflicts is not None and (differing or item_id in identity_conflicts):
-                conflict = identity_conflicts.setdefault(item_id, {
-                    "status": "quarantined",
-                    "reason": "divergent_open_github_todo_identity",
-                    "next_gate": "reconcile_exact_issue_scope_and_owner_authority",
-                    "issue_numbers": [],
-                    "issue_urls": [],
-                    "new_work_authorized": False,
-                })
-                # Include all known issue identities, never just the last pair.
-                numbers = set(conflict["issue_numbers"])
-                numbers.update((int(prior["number"]), int(issue["number"])))
-                conflict["issue_numbers"] = sorted(numbers)
-                urls = set(conflict["issue_urls"])
-                urls.update(str(row.get("url") or "") for row in (prior, issue))
-                conflict["issue_urls"] = sorted(url for url in urls if url)
-            if int(issue["number"]) >= int(prior["number"]):
-                continue
-        result[item_id] = dict(issue)
+        if len(matches) != 1 or type(issue.get("number")) is not int or issue["number"] < 1:
+            raise RuntimeError("Invalid GitHub TODO identity")
+        grouped.setdefault(next(iter(matches)), []).append(dict(issue))
+    result: dict[str, dict[str, Any]] = {}
+    for item_id, rows in grouped.items():
+        # The earliest issue is used solely for duplicate suppression.
+        # Group before comparing, so even identical duplicates seen before
+        # a divergent third issue remain in the conflict/capacity evidence.
+        result[item_id] = min(rows, key=lambda row: row["number"])
+        signatures = {(str(row.get("title") or ""), str(row.get("body") or "")) for row in rows}
+        if len(signatures) <= 1:
+            continue
+        if identity_conflicts is None:
+            raise RuntimeError("Conflicting GitHub TODO identities: " + item_id)
+        identity_conflicts[item_id] = {
+            "status": "quarantined",
+            "reason": "divergent_open_github_todo_identity",
+            "next_gate": "reconcile_exact_issue_scope_and_owner_authority",
+            "issue_numbers": sorted({row["number"] for row in rows}),
+            "issue_urls": sorted({str(row["url"]) for row in rows if row.get("url")}),
+            "new_work_authorized": False,
+        }
     return result
 
 
@@ -558,6 +550,13 @@ def main() -> int:
     fresh_issues = open_todo_issue_map(repo, identity_conflicts=fresh_conflicts)
     state["identity_conflicts"] = fresh_conflicts
     state["identity_conflict_count"] = len(fresh_conflicts)
+    state["existing_todo_issues"] = {
+        item_id: int(issue["number"]) for item_id, issue in sorted(fresh_issues.items())
+    }
+    state["capacity_consuming_todo_issues"] = (
+        capacity_consuming_todo_issue_count(fresh_issues, spool)
+        + additional_conflict_capacity(fresh_conflicts)
+    )
     if candidate.item_id in fresh_conflicts:
         state["status"] = "identity_conflict_quarantined"
         state["reason"] = "TODO issue identity diverged before admission"

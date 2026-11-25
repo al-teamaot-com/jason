@@ -304,6 +304,28 @@ class ConflictedIdentityIsolationTests(unittest.TestCase):
         )
         self.assertEqual(module.additional_conflict_capacity(conflicts), 2)
 
+    def test_identical_earlier_duplicate_is_included_in_later_divergent_group(self):
+        from itertools import permutations
+        from unittest.mock import patch
+        rows = [self._issue(1459, title="same"),
+                self._issue(1460, title="same"),
+                self._issue(1500, title="different")]
+        for issues in permutations(rows):
+            with self.subTest(order=[x["number"] for x in issues]), \
+                    patch.object(module, "gh_json", return_value=list(issues)):
+                conflicts = {}
+                result = module.open_todo_issue_map(Path("/tmp/repo"), identity_conflicts=conflicts)
+                self.assertEqual(result["TODO-OPS-013"]["number"], 1459)
+                self.assertEqual(conflicts["TODO-OPS-013"]["issue_numbers"], [1459,1460,1500])
+                self.assertEqual(module.additional_conflict_capacity(conflicts), 2)
+
+    def test_unknown_inventory_is_not_an_empty_inventory(self):
+        from unittest.mock import patch
+        for payload in (None, {}, "not an inventory"):
+            with patch.object(module, "gh_json", return_value=payload):
+                with self.assertRaisesRegex(RuntimeError, "inventory unavailable"):
+                    module.open_todo_issue_map(Path("/tmp/repo"), identity_conflicts={})
+
     def test_scheduled_dry_run_records_conflict_and_does_not_abort(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as td:

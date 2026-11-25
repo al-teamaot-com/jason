@@ -34,6 +34,12 @@ on:
       - "tools/engineering_pipeline.py"
       - "tools/install_support_repair_host_worker.py"
       - "tools/tests/test_engineering_pipeline.py"
+      - "tools/todo_engineering_intake.py"
+      - "tools/engineering_supervisor.py"
+      - "tools/pmv3_engineering_controller.py"
+      - "tools/tests/test_todo_engineering_intake.py"
+      - "tools/tests/test_engineering_supervisor.py"
+      - "tools/tests/test_pmv3_autonomous_stall.py"
       - "tests/test_pmv4_e_engineering_manager_relocation.py"
       - "infrastructure/pmv4-e-engineering-manager/**"
       - "tools/pmv4_e_six_unit_transaction_model.py"
@@ -107,6 +113,9 @@ jobs:
             tests/test_pmv4_e_engineering_manager_guard.py \
             tests/test_pmv4_e_engineering_pipeline_successor.py \
             tools/tests/test_engineering_pipeline.py \
+            tools/tests/test_todo_engineering_intake.py \
+            tools/tests/test_engineering_supervisor.py \
+            tools/tests/test_pmv3_autonomous_stall.py \
             tools/tests/test_install_support_repair_host_worker.py \
             tests/test_pmv4_e_engineering_manager_transaction.py \
             tests/test_pmv4_e_engineering_manager_install.py \

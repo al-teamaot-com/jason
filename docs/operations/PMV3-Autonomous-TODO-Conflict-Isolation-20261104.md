@@ -91,3 +91,15 @@ retry budgets and exact-SHA release approvals must remain intact.
 Source integration and any production promotion are controlled by Project
 Jason's protected release manager. A passing PR, a scheduled timer or a
 conversational `proceed` is not exact-SHA production authorization.
+
+## November 25 native successor reconciliation
+
+The installed system-manager pipeline contract at 0e8008f0a5577b4fd30804bbefe0db2134341778 passed native admission and six of seven work stages. The real scheduled cycle beginning at 14:35 EST failed TODO intake on the original open #1459/#1500 collision. The existing exact approved failed-acceptance transaction restored the engineering pause at 14:43:06 EST; production drift remained clear, the breaker closed, and the conflicting identities and earlier approvals were preserved.
+
+PR #2296 is reconciled with that protected-main baseline. It groups the entire valid issue inventory before quarantine, so identical early duplicates cannot disappear from a later divergent group's evidence. Unknown and saturated inventories remain fail-closed. Intake suppresses duplicate creation and reports the full quarantine; the existing release bridge retains its independent historical binding hold. No existing issue is closed, edited, rebound or granted new authority, and the approved parallel development worker and its claim policy are unchanged.
+
+The existing exact native PipelineSuccessor transaction now supports this reviewed predecessor/profile. It proves the prior immutable receipt and failed-acceptance pause, pins the three replacement worker files and the complete previous artifact inventory, retains the existing systemd sandbox, configuration, freeze, hold and protected services, and publishes a new receipt only through the existing independently authenticated Owner scope. The source candidate may not broaden native targets or bypass the root release transaction. Rollback retains the original pause and restores exactly the prior files/receipt. The previous activation failure and approval stay immutable.
+
+Use the native installer with --todo-conflict-successor from the exact current protected-main source and mandatory CI attestation. No installation is inferred from the merged PR. Native scheduled acceptance requires two distinct normal completed cycles, all seven stages successful, fresh TODO quarantine and supervisor hold, successful watchdog, fresh dependency admission/conflict enforcement, unchanged protected peers, drift PASS and breaker CLOSED. Each cycle is recorded in a root-private immutable receipt; any intervening failed stage prevents a false terminal acceptance. The work item remains quarantined pending independently verified reconciliation of its two scopes. This repair does not itself prove independent concurrent development or completion of the wider backlog.
+
+The live isolated inventory contained more than 150 supervisor dispositions. Authority-hold rows are now prioritized in the bounded report so the exact quarantined TODO remains visible; full counts and the disposition fingerprint still cover the entire inventory.

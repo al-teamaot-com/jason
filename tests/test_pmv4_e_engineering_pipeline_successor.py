@@ -79,3 +79,113 @@ def test_durable_scope_guard_and_full_stage_acceptance_are_present():
     assert 'all(x.get("status")=="succeeded" for x in pipeline["stages"].values())' in source
     assert 'PIPELINE_SCHEDULED_WATCHDOG_ACCEPTANCE_PENDING' in source
     assert 'self.restore()' in source
+
+
+def todo_plan():
+    p=plan()
+    p.update(predecessor_candidate_sha=m.TODO_CONFLICT_BASELINE,
+             worker_replacements=sorted(m.TODO_CONFLICT_WORKERS),
+             required_scheduled_cycles=2,
+             quarantine_existing_todo_identity="TODO-OPS-013",
+             conflicted_issues=[1459,1500],preserve_existing_issue_authority=True)
+    return p
+
+
+@pytest.mark.parametrize("key,value",[
+    ("worker_replacements",["owner_approved_development_worker.py"]),
+    ("required_scheduled_cycles",1),
+    ("quarantine_existing_todo_identity","TODO-OPS-999"),
+    ("conflicted_issues",[1500]),
+    ("preserve_existing_issue_authority",False),
+])
+def test_todo_scope_cannot_expand_worker_or_approval_authority(key,value):
+    p=todo_plan()
+    assert m.pipeline_scope_sha(p)==m.digest(m.canon(p))
+    p[key]=value
+    with pytest.raises(PermissionError):m.pipeline_scope_sha(p)
+
+
+def test_todo_successor_targets_existing_pipeline_without_new_authority():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.TODO_CONFLICT_BASELINE
+    a.changed_workers=m.TODO_CONFLICT_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("a"*40)/"tools"
+    paths=a.approved_targets()
+    assert {p.name for p in paths if p.parent==m.LIB}==set(m.TODO_CONFLICT_WORKERS)|{m.PIPELINE_PROGRAM.name}
+    assert m.POLICY not in paths and m.ENV not in paths
+    assert not any(p.name in ("production-deployment-freeze","auto-promotion-incident-hold",
+                              "owner_approved_development_worker.py") and p.parent==m.LIB for p in paths)
+
+
+def todo_cycle_fixture(tmp_path,monkeypatch):
+    from contextlib import nullcontext
+    from datetime import datetime,timezone
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.TODO_CONFLICT_BASELINE
+    a.directory=tmp_path
+    data={}
+    def read(p,*args):
+        if p.parent==tmp_path: return p.read_bytes()
+        return m.canon(data[p.name])
+    def write(p,raw,mode):
+        assert mode==0o400 and not p.exists()
+        p.write_bytes(raw)
+    a.n={"locks":nullcontext,"read":read,"write":write}
+    a.p={"read":read}
+    a.command=Mock(return_value=b"ENGINEERING_STAGE_END name=todo_intake status=succeeded\n")
+    monkeypatch.setattr(m,"snapshot",lambda p:None)
+    def cycle(n):
+        minute=5*n
+        start=datetime(2026,11,25,19,minute,tzinfo=timezone.utc)
+        finish=start.replace(second=20)
+        data["todo-intake-state.json"]={
+            "observed_at":start.replace(second=5).isoformat(),
+            "identity_conflicts":{"TODO-OPS-013":{"status":"quarantined",
+                 "issue_numbers":[1459,1500],"new_work_authorized":False}}}
+        data["engineering-supervisor-state.json"]={
+            "observed_at":start.replace(second=15).isoformat(),
+            "items":[{"id":"TODO-OPS-013","lane":"todo_identity","category":"human_authority"}]}
+        c={"started_at":start.isoformat(),"finished_at":finish.isoformat()}
+        p={"started_at":start.replace(second=1).isoformat(),"finished_at":finish.isoformat()}
+        return c,p,start
+    return a,data,cycle
+
+
+def test_todo_native_acceptance_requires_distinct_cycles(tmp_path,monkeypatch):
+    a,data,cycle=todo_cycle_fixture(tmp_path,monkeypatch)
+    sha=m.pipeline_scope_sha(todo_plan())
+    args=cycle(1)
+    assert not a.record_scheduled_acceptance(sha,{"production_authority":False},*args)
+    assert (tmp_path/"scheduled-cycle-1.json").exists()
+    assert not (tmp_path/"scheduled-acceptance.json").exists()
+    assert not a.record_scheduled_acceptance(sha,{"production_authority":False},*args)
+    assert a.record_scheduled_acceptance(sha,{"production_authority":False},*cycle(2))
+    result=json.loads((tmp_path/"scheduled-acceptance.json").read_text())
+    assert result["evidence"]["two_distinct_scheduled_cycles_verified"] is True
+    assert result["evidence"]["second_cycle_sha256"]==m.digest((tmp_path/"scheduled-cycle-2.json").read_bytes())
+
+
+def test_todo_native_acceptance_rejects_expanded_authority_and_stale_evidence(tmp_path,monkeypatch):
+    a,data,cycle=todo_cycle_fixture(tmp_path,monkeypatch)
+    args=cycle(1)
+    sha=m.pipeline_scope_sha(todo_plan())
+    data["todo-intake-state.json"]["identity_conflicts"]["TODO-OPS-013"]["new_work_authorized"]=True
+    with pytest.raises(PermissionError,match="QUARANTINE_NOT_VERIFIED"):
+        a.record_scheduled_acceptance(sha,{},*args)
+    args=cycle(1)
+    data["todo-intake-state.json"]["observed_at"]="2026-10-01T00:00:00+00:00"
+    with pytest.raises(PermissionError,match="QUARANTINE_NOT_VERIFIED"):
+        a.record_scheduled_acceptance(sha,{},*args)
+    assert not (tmp_path/"scheduled-cycle-1.json").exists()
+
+
+def test_todo_native_acceptance_never_hides_intervening_failure(tmp_path,monkeypatch):
+    a,data,cycle=todo_cycle_fixture(tmp_path,monkeypatch)
+    sha=m.pipeline_scope_sha(todo_plan())
+    assert not a.record_scheduled_acceptance(sha,{},*cycle(1))
+    a.command.return_value=b"ENGINEERING_STAGE_END name=todo_intake status=failed\nENGINEERING_STAGE_END name=todo_intake status=succeeded\n"
+    with pytest.raises(PermissionError,match="INTERVENING_FAILURE"):
+        a.record_scheduled_acceptance(sha,{},*cycle(2))
+    assert not (tmp_path/"scheduled-acceptance.json").exists()

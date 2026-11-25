@@ -203,3 +203,26 @@ def test_exhausted_development_without_handoff_needs_triage_not_unbounded_retrie
     assert snapshot["reason"] == "external_or_governed_gate"
     assert snapshot["category_counts"] == {"needs_triage": 1}
     assert snapshot["items"][0]["next_action"] == "complete_native_exhausted_recovery_handoff"
+
+def test_supervisor_preserves_identity_hold_at_real_inventory_size(tmp_path):
+    write(tmp_path, "state.json", {"items": {
+        f"SUPPORT-OPS-{n}": {"phase": "blocked", "reason": "historical repair"}
+        for n in range(1, 201)
+    }})
+    write(tmp_path, "development-state.json", {"items": {}})
+    write(tmp_path, "todo-intake-state.json", {
+        "downstream_commitments": {"outstanding_count": 1, "items": [
+            {"id": "TODO-OPS-013", "phase": "waiting_development_start"}
+        ]},
+        "identity_conflicts": {"TODO-OPS-013": {
+            "status": "quarantined", "issue_numbers": [1459,1500],
+            "new_work_authorized": False,
+        }},
+    })
+    snapshot=supervisor.build_snapshot(tmp_path)
+    assert snapshot["items_truncated"] is True
+    assert len(snapshot["items"]) == 150
+    assert snapshot["items"][0]["id"] == "TODO-OPS-013"
+    assert snapshot["items"][0]["lane"] == "todo_identity"
+    assert snapshot["items"][0]["category"] == "human_authority"
+    assert snapshot["identity_conflict_count"] == 1

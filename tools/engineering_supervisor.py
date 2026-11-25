@@ -208,7 +208,9 @@ def build_snapshot(spool: Path, prior: Mapping[str, Any] | None = None) -> dict[
             "category": category, "next_action": next_action,
         })
 
-    objects.sort(key=lambda row: (row["lane"], row["id"]))
+    # Authority holds must remain visible ahead of the bounded diagnostic
+    # inventory, even when hundreds of other historical jobs are present.
+    objects.sort(key=lambda row: (row["lane"] != "todo_identity", row["lane"], row["id"]))
     # Hash only normalized non-sensitive work disposition fields. This is a
     # durable change detector, not a record of private provider output.
     fingerprint = hashlib.sha256(json.dumps(objects, sort_keys=True).encode()).hexdigest()

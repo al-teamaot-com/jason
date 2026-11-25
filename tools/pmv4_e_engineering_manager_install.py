@@ -249,7 +249,8 @@ def native():
     return out
 
 
-def source_review(candidate, p, *, recovery=False, baseline=BASELINE, source_files=SOURCE_FILES):
+def source_review(candidate, p, *, recovery=False, baseline=BASELINE, source_files=SOURCE_FILES,
+                  supporting_files=frozenset()):
     git = lambda *args: p["git"](REPO, *args)
     need(re.fullmatch("[0-9a-f]{40}", candidate) is not None and
          git("rev-parse", "HEAD").decode().strip() == candidate and
@@ -271,8 +272,11 @@ def source_review(candidate, p, *, recovery=False, baseline=BASELINE, source_fil
                            "https://github.com/al-teamaot-com/jason.git", "refs/heads/main"]).decode().split()
              == [candidate, "refs/heads/main"], "CURRENT_MAIN_CI_NOT_EXACT")
     files = {}
-    for name in sorted(source_files):
+    need(not (set(source_files) & set(supporting_files)), "DUPLICATE_SOURCE_REVIEW_PATH")
+    for name in sorted(set(source_files) | set(supporting_files)):
         raw = git("show", candidate + ":" + name)
+        if name in supporting_files:
+            need(raw == git("show", baseline + ":" + name), "SUPPORTING_SOURCE_CHANGED")
         need(raw == p["read"](REPO / name, 1000, source=True), "SOURCE_BYTES_CHANGED")
         files[name] = raw
     need(files["tools/pmv4_e_engineering_manager_install.py"] == Path(__file__).read_bytes(),
@@ -810,6 +814,9 @@ class NativeAdapter:
                 evidence["native_drift"]!="pass" or evidence["breaker"]!="closed":
             print(json.dumps({"status":"scheduled_acceptance_pending_or_failed","evidence":evidence},sort_keys=True))
             return False
+        return self.record_scheduled_acceptance(sha,evidence,controller,pipeline,timer_at)
+
+    def record_scheduled_acceptance(self,sha,evidence,controller,pipeline,timer_at):
         with self.n["locks"]():
             need(snapshot(PAUSE) is None,"ACTIVATION_PAUSED_DURING_ACCEPTANCE")
             if not os.path.lexists(self.directory/"scheduled-acceptance.json"):
@@ -869,6 +876,28 @@ PIPELINE_SCOPE_FILES = {
     ".github/workflows/pmv4-e-providerfree-scheduler-parity.yml",
     "docs/operations/PMv4-Engineering-Manager-Sandbox-Recovery-20261125.md",
 }
+TODO_CONFLICT_BASELINE = "0e8008f0a5577b4fd30804bbefe0db2134341778"
+TODO_CONFLICT_WORKERS = frozenset({
+    "todo_engineering_intake.py", "engineering_supervisor.py", "pmv3_engineering_controller.py",
+})
+TODO_CONFLICT_SCOPE_FILES = {
+    "docs/operations/PMV3-Autonomous-TODO-Conflict-Isolation-20261104.md",
+    "tools/engineering_supervisor.py",
+    "tools/pmv3_engineering_controller.py",
+    "tools/todo_engineering_intake.py",
+    "tools/tests/test_engineering_supervisor.py",
+    "tools/tests/test_pmv3_autonomous_stall.py",
+    "tools/tests/test_todo_engineering_intake.py",
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    ".github/workflows/pmv4-e-providerfree-scheduler-parity.yml",
+}
+TODO_CONFLICT_SUPPORTING_FILES = {
+    "tools/engineering_pipeline.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+    "tools/pmv4_e_engineering_manager_relocation.py",
+    "infrastructure/pmv4-e-engineering-manager/systemd/" + SERVICES[0],
+}
 PIPELINE_UNIT = SYSTEM_UNITS / SERVICES[0]
 PIPELINE_PROGRAM = LIB / "engineering_pipeline.py"
 MANAGER_GUARD = ROOT / "manager_guard.py"
@@ -877,9 +906,9 @@ MANAGER_GUARD = ROOT / "manager_guard.py"
 def pipeline_scope_sha(plan):
     need(plan.get("action") == "REPAIR-EXACT-PMV4-ENGINEERING-PIPELINE-CONTRACT"
          and plan.get("policy", {}).get("rollback_sha") == LKG
-         and plan.get("predecessor_candidate_sha") == PIPELINE_BASELINE
+         and plan.get("predecessor_candidate_sha") in (PIPELINE_BASELINE, TODO_CONFLICT_BASELINE)
          and re.fullmatch("[0-9a-f]{40}", str(plan.get("policy", {}).get("candidate_sha", "")))
-         and plan["policy"]["candidate_sha"] not in (LKG, PIPELINE_BASELINE)
+         and plan["policy"]["candidate_sha"] not in (LKG, PIPELINE_BASELINE, TODO_CONFLICT_BASELINE)
          and plan.get("queue_cutover") is False
          and plan.get("temporary_timer_stops") == list(TIMERS)
          and plan.get("resume_after_verified_cutover") is True
@@ -891,13 +920,31 @@ def pipeline_scope_sha(plan):
          and plan.get("runtime_or_mcp_restart_allowed") is False
          and plan.get("rollback_authorized") is True,
          "PIPELINE_SCOPE_INVALID")
+    if plan["predecessor_candidate_sha"] == TODO_CONFLICT_BASELINE:
+        need(plan.get("worker_replacements") == sorted(TODO_CONFLICT_WORKERS)
+             and plan.get("required_scheduled_cycles") == 2
+             and plan.get("quarantine_existing_todo_identity") == "TODO-OPS-013"
+             and plan.get("conflicted_issues") == [1459,1500]
+             and plan.get("preserve_existing_issue_authority") is True,
+             "TODO_CONFLICT_EXACT_SCOPE_INVALID")
     return digest(canon(plan))
 
 
 class PipelineSuccessor(NativeAdapter):
     """Exact successor of the active manager receipt, with immutable ancestry."""
 
-    def __init__(self, candidate, n, p, code):
+    predecessor = PIPELINE_BASELINE
+    source_files = PIPELINE_SCOPE_FILES
+    supporting_files = frozenset()
+    changed_workers = frozenset({"engineering_pipeline.py"})
+
+    def __init__(self, candidate, n, p, code, *, predecessor=PIPELINE_BASELINE):
+        need(predecessor in (PIPELINE_BASELINE, TODO_CONFLICT_BASELINE), "PIPELINE_UNKNOWN_PREDECESSOR")
+        self.predecessor = predecessor
+        if predecessor == TODO_CONFLICT_BASELINE:
+            self.source_files = TODO_CONFLICT_SCOPE_FILES
+            self.supporting_files = TODO_CONFLICT_SUPPORTING_FILES
+            self.changed_workers = TODO_CONFLICT_WORKERS
         self.candidate, self.n, self.p, self.code = candidate, n, p, code
         self.g = load(code["tools/pmv4_e_engineering_manager_guard.py"],
                       REPO / "tools/pmv4_e_engineering_manager_guard.py")
@@ -912,6 +959,7 @@ class PipelineSuccessor(NativeAdapter):
     def approved_targets(self):
         names = set(self.g["ARTIFACTS"]) | set(self.g["PIPELINE_ARTIFACTS"])
         return {PIPELINE_UNIT, PIPELINE_PROGRAM, MANAGER_GUARD, RECEIPT, PAUSE,
+                *(LIB / name for name in self.changed_workers),
                 self.release.parent / "predecessor.json",
                 *(self.release / name for name in names)}
 
@@ -971,8 +1019,8 @@ class PipelineSuccessor(NativeAdapter):
         prior = snapshot(RECEIPT)
         need(prior is not None and prior[1:] == (0,0,0o444), "PIPELINE_PRIOR_RECEIPT_CUSTODY")
         receipt = self.g["validate_receipt"](json.loads(prior[0]))
-        need(receipt["candidate_sha"] == PIPELINE_BASELINE, "PIPELINE_PRIOR_SOURCE_CHANGED")
-        history = STATE / PIPELINE_BASELINE
+        need(receipt["candidate_sha"] == self.predecessor, "PIPELINE_PRIOR_SOURCE_CHANGED")
+        history = STATE / self.predecessor
         self.n["directory"](history,0o700)
         old_approval = self.n["read"](history/"approval.json",0,0o400,8_000_000)
         old = json.loads(old_approval)
@@ -985,15 +1033,27 @@ class PipelineSuccessor(NativeAdapter):
         need(activated.get("scope_sha256") == receipt["scope_sha256"]
              and activated.get("status") == "resumed_pending_scheduled_acceptance",
              "PIPELINE_PRIOR_ACTIVATION_NOT_VERIFIED")
-        self.read_guard(PIPELINE_BASELINE)
+        self.read_guard(self.predecessor)
         protected = self.protected()
         need(protected["effective_policy_sha256"] == receipt["effective_policy_sha256"],
              "PIPELINE_EFFECTIVE_POLICY_CHANGED")
-        encoded = old["before_images"][str(PAUSE)]
+        if self.predecessor == TODO_CONFLICT_BASELINE:
+            failed = json.loads(self.n["read"](history/"activation-rollback.json",0,0o400))
+            need(failed.get("status") == "engineering_paused_after_failed_acceptance"
+                 and failed.get("scope_sha256") == receipt["scope_sha256"]
+                 and failed.get("production_authority") is False
+                 and not os.path.lexists(history/"scheduled-acceptance.json")
+                 and not os.path.lexists(history/"rollback.json"),
+                 "TODO_CONFLICT_PREDECESSOR_FAILURE_NOT_ATTESTED")
+            encoded = old["after_images"][str(PAUSE)]
+        else:
+            encoded = old["before_images"][str(PAUSE)]
         pause = (base64.b64decode(encoded[0],validate=True),*encoded[1:])
         need(pause[1:] == (1000,1000,0o600) and digest(pause[0]) == OLD[PAUSE][2],
              "PIPELINE_PRIOR_PAUSE_CHANGED")
         self.pause_image = pause
+        if self.predecessor == TODO_CONFLICT_BASELINE:
+            need(snapshot(PAUSE) == pause, "TODO_CONFLICT_REQUIRES_RESTORED_PAUSE")
         source = self.g["PIPELINE_SOURCE"]
         need(source.is_symlink() and os.readlink(source) == self.p["SOURCE_TARGET"]
              and self.p["git"](source,"rev-parse","HEAD").decode().strip()
@@ -1020,12 +1080,17 @@ class PipelineSuccessor(NativeAdapter):
         pipeline_hashes = {}
         for name in sorted(self.g["PIPELINE_ARTIFACTS"]):
             live = snapshot(LIB/name)
-            accepted = self.p["git"](source,"show",self.g["PIPELINE_SOURCE_SHA"]+":tools/"+name)
+            if receipt["schema_version"] == "1.1":
+                accepted = self.p["read"](ROOT/"releases"/self.predecessor/"tools"/name,0,0o444)
+                need(digest(accepted) == receipt["pipeline_artifact_sha256"][name],
+                     "PIPELINE_PREDECESSOR_ARTIFACT_CHANGED:"+name)
+            else:
+                accepted = self.p["git"](source,"show",self.g["PIPELINE_SOURCE_SHA"]+":tools/"+name)
             need(live is not None and live[1] == live[2] == 1000 and live[0] == accepted,
                  "PIPELINE_UNAPPROVED_WORKER_CHANGED:"+name)
-            raw = self.code["tools/engineering_pipeline.py"] if name == PIPELINE_PROGRAM.name else live[0]
-            if name == PIPELINE_PROGRAM.name:
-                after[PIPELINE_PROGRAM] = (raw,*live[1:])
+            raw = self.code["tools/"+name] if name in self.changed_workers else live[0]
+            if name == PIPELINE_PROGRAM.name or name in self.changed_workers:
+                after[LIB/name] = (raw,*live[1:])
             after[self.release/name] = image(raw,0,0o444)
             pipeline_hashes[name] = digest(raw)
         for name,pin in receipt["artifact_sha256"].items():
@@ -1036,14 +1101,14 @@ class PipelineSuccessor(NativeAdapter):
                   ("candidate_sha","scope_sha256","approval_sha256","accepted_at",
                    "schema_version","action","guard_sha256","unit_sha256")}
         recipe.update(schema_version="1.1",action=self.g["PIPELINE_ACTION"],
-                      predecessor_candidate_sha=PIPELINE_BASELINE,
+                      predecessor_candidate_sha=self.predecessor,
                       predecessor_receipt_sha256=digest(prior[0]),
                       engineering_source_sha=self.g["PIPELINE_SOURCE_SHA"],
                       pipeline_artifact_sha256=pipeline_hashes,
                       guard_sha256=digest(after[MANAGER_GUARD][0]),
                       unit_sha256={**receipt["unit_sha256"],SERVICES[0]:digest(new_unit)})
         plan = {"action":self.g["PIPELINE_ACTION"],"policy":{"candidate_sha":self.candidate,
-                  "rollback_sha":LKG},"predecessor_candidate_sha":PIPELINE_BASELINE,
+                  "rollback_sha":LKG},"predecessor_candidate_sha":self.predecessor,
                 "queue_cutover":False,"production_authority":False,"provider_writes":False,
                 "runtime_or_mcp_restart_allowed":False,"freeze_or_hold_change":False,
                 "rollback_authorized":True,"restore_pause_on_failed_scheduled_acceptance":True,
@@ -1057,6 +1122,10 @@ class PipelineSuccessor(NativeAdapter):
                 "root_receipt_recipe":recipe,"protected_health":protected,
                 "source_hashes":{k:digest(v) for k,v in self.code.items()},
                 "rollback":"restore exact predecessor receipt and files; retain verified engineering pause; native revalidation only"}
+        if self.predecessor == TODO_CONFLICT_BASELINE:
+            plan.update(worker_replacements=sorted(self.changed_workers),
+                        required_scheduled_cycles=2, quarantine_existing_todo_identity="TODO-OPS-013",
+                        conflicted_issues=[1459,1500],preserve_existing_issue_authority=True)
         return plan,before,after
 
     def persist(self):
@@ -1080,6 +1149,7 @@ class PipelineSuccessor(NativeAdapter):
         sha = pipeline_scope_sha(self.plan)
         need(row["scope_sha256"] == sha
              and self.plan["policy"]["candidate_sha"] == self.candidate
+             and self.plan["predecessor_candidate_sha"] == self.predecessor
              and self.plan["source_hashes"] == {k:digest(v) for k,v in self.code.items()}
              and set(self.plan["installation_targets"]) == {str(x) for x in self.approved_targets()}
              and re.fullmatch("[0-9a-f-]{36}",str(row.get("owner_oid",""))) is not None,
@@ -1192,7 +1262,7 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                     self.systemctl(["reset-failed",service])
             self.systemctl(["start",*TIMERS])
         self.native_revalidation()
-        self.read_guard(PIPELINE_BASELINE)
+        self.read_guard(self.predecessor)
         need(self.protected() == self.plan["protected_health"]
              and all(snapshot(k) == (self.pause_image if k == PAUSE else v)
                      for k,v in self.before.items()),"PIPELINE_ROLLBACK_READBACK_FAILED")
@@ -1206,8 +1276,8 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
         self.actor = self.n["owner"](plan)
         self.plan = plan
         with self.n["locks"]():
-            need(source_review(self.candidate,self.p,baseline=PIPELINE_BASELINE,
-                               source_files=PIPELINE_SCOPE_FILES) == self.code,
+            need(source_review(self.candidate,self.p,baseline=self.predecessor,
+                               source_files=self.source_files,supporting_files=self.supporting_files) == self.code,
                  "PIPELINE_APPROVED_SOURCE_CHANGED")
             again,self.before,self.after = self.inspect()
             need(again == plan,"PIPELINE_APPROVED_SCOPE_CHANGED")
@@ -1217,7 +1287,7 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
             self.quiesce((SERVICES[0],))
             with self.n["locks"]():
                 need(self.protected() == plan["protected_health"],"PIPELINE_PRECUTOVER_HEALTH_CHANGED")
-                self.read_guard(PIPELINE_BASELINE)
+                self.read_guard(self.predecessor)
                 for path,old in self.before.items():
                     need(snapshot(path) == (self.pause_image if path == PAUSE else old),
                          "PIPELINE_PRECUTOVER_FILE_CHANGED")
@@ -1292,6 +1362,73 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
         # Preserve the original native timer/authority/conflict/peer checks.
         return super().verify_activation()
 
+    def record_scheduled_acceptance(self,sha,evidence,controller,pipeline,timer_at):
+        if self.predecessor != TODO_CONFLICT_BASELINE:
+            return super().record_scheduled_acceptance(sha,evidence,controller,pipeline,timer_at)
+        state_dir=PAUSE.parent
+        intake=json.loads(self.p["read"](state_dir/"todo-intake-state.json",1000,0o600))
+        supervisor=json.loads(self.p["read"](state_dir/"engineering-supervisor-state.json",1000,0o600))
+        conflict=(intake.get("identity_conflicts") or {}).get("TODO-OPS-013",{})
+        cycle_start=datetime.fromisoformat(controller["started_at"])
+        cycle_finish=datetime.fromisoformat(controller["finished_at"])
+        pipe_start=datetime.fromisoformat(pipeline["started_at"])
+        pipe_finish=datetime.fromisoformat(pipeline["finished_at"])
+        identities=conflict.get("issue_numbers") or []
+        try:
+            fresh = all(pipe_start <= datetime.fromisoformat(row["observed_at"]) <= cycle_finish
+                        for row in (intake,supervisor))
+        except (ValueError,KeyError,TypeError):
+            fresh=False
+        held=(conflict.get("status")=="quarantined" and conflict.get("new_work_authorized") is False
+              and {1459,1500}.issubset(set(identities))
+              and any(row.get("id")=="TODO-OPS-013" and row.get("lane")=="todo_identity"
+                      and row.get("category")=="human_authority" for row in supervisor.get("items",[])))
+        need(timer_at <= cycle_start <= pipe_start <= pipe_finish <= cycle_finish
+             and (cycle_start-timer_at).total_seconds()<=120 and fresh and held,
+             "TODO_CONFLICT_FRESH_QUARANTINE_NOT_VERIFIED")
+        current={"scope_sha256":sha,"started_at":controller["started_at"],
+                 "finished_at":controller["finished_at"],"timer_at":timer_at.isoformat(),
+                 "quarantined_issue_numbers":identities,"new_work_authorized":False,
+                 "evidence":evidence}
+        first_path=self.directory/"scheduled-cycle-1.json"
+        with self.n["locks"]():
+            need(snapshot(PAUSE) is None and not os.path.lexists(self.directory/"activation-rollback.json"),
+                 "TODO_CONFLICT_ACCEPTANCE_NOT_ACTIVE")
+            if not first_path.exists():
+                self.n["write"](first_path,canon(current),0o400)
+                print("TODO_CONFLICT_FIRST_SCHEDULED_CYCLE_VERIFIED")
+                return False
+            first=json.loads(self.n["read"](first_path,0,0o400))
+            need(first.get("scope_sha256")==sha and first.get("new_work_authorized") is False,
+                 "TODO_CONFLICT_FIRST_CYCLE_CUSTODY")
+            if first["started_at"]==current["started_at"]:
+                print("TODO_CONFLICT_SECOND_DISTINCT_CYCLE_PENDING")
+                return False
+            need(datetime.fromisoformat(first["finished_at"]) < cycle_start
+                 and datetime.fromisoformat(first["timer_at"]) < timer_at,
+                 "TODO_CONFLICT_CYCLE_ORDER")
+            # A later healthy state cannot hide a completed failed stage
+            # between the first and second acceptance cycles.
+            since=datetime.fromisoformat(first["finished_at"]).strftime("%Y-%m-%d %H:%M:%S UTC")
+            until=cycle_finish.strftime("%Y-%m-%d %H:%M:%S UTC")
+            log=self.command(["/usr/bin/journalctl","-u",SERVICES[0],"--since",since,
+                              "--until",until,"--no-pager","--grep",
+                              "^ENGINEERING_STAGE_END name=","-o","cat"],75).decode()
+            need(not re.search(r"ENGINEERING_STAGE_END name=\S+ status=(?:failed|skipped_dependency)",log)
+                 and "ENGINEERING_STAGE_END name=todo_intake status=succeeded" in log,
+                 "TODO_CONFLICT_INTERVENING_FAILURE_OR_JOURNAL_MISSING")
+            second_path=self.directory/"scheduled-cycle-2.json"
+            if not os.path.lexists(second_path):
+                self.n["write"](second_path,canon(current),0o400)
+            else:
+                second=json.loads(self.n["read"](second_path,0,0o400))
+                need(second==current,"TODO_CONFLICT_SECOND_CYCLE_CHANGED")
+        evidence={**evidence,"two_distinct_scheduled_cycles_verified":True,
+                  "todo_identity_quarantined":True,"quarantined_issue_numbers":identities,
+                  "first_cycle_sha256":digest(canon(first)),
+                  "second_cycle_sha256":digest(canon(current))}
+        return super().record_scheduled_acceptance(sha,evidence,controller,pipeline,timer_at)
+
     def restore_failed_activation_pause(self):
         sha=self.load_record()
         need(not os.path.lexists(self.directory/"scheduled-acceptance.json")
@@ -1326,7 +1463,9 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
 def main():
     cli = argparse.ArgumentParser()
     cli.add_argument("--candidate", required=True)
-    cli.add_argument("--pipeline-successor",action="store_true")
+    successor = cli.add_mutually_exclusive_group()
+    successor.add_argument("--pipeline-successor",action="store_true")
+    successor.add_argument("--todo-conflict-successor",action="store_true")
     choice=cli.add_mutually_exclusive_group()
     choice.add_argument("--apply", action="store_true")
     choice.add_argument("--recover",action="store_true")
@@ -1336,11 +1475,14 @@ def main():
     cli.add_argument("--scope-sha")
     a = cli.parse_args()
     n,p = native()
-    if a.pipeline_successor:
+    if a.pipeline_successor or a.todo_conflict_successor:
         need(not a.resume,"PIPELINE_RESUME_REQUIRES_VERIFIED_TRANSACTION")
+        predecessor = TODO_CONFLICT_BASELINE if a.todo_conflict_successor else PIPELINE_BASELINE
         code = source_review(a.candidate,p,recovery=a.recover or a.verify_activation or a.restore_failed_activation,
-                             baseline=PIPELINE_BASELINE,source_files=PIPELINE_SCOPE_FILES)
-        adapter = PipelineSuccessor(a.candidate,n,p,code)
+                             baseline=predecessor,
+                             source_files=TODO_CONFLICT_SCOPE_FILES if a.todo_conflict_successor else PIPELINE_SCOPE_FILES,
+                             supporting_files=TODO_CONFLICT_SUPPORTING_FILES if a.todo_conflict_successor else frozenset())
+        adapter = PipelineSuccessor(a.candidate,n,p,code,predecessor=predecessor)
         if a.verify_activation:
             if not adapter.verify_activation(): raise SystemExit(2)
             return
