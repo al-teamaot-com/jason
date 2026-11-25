@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime,timezone
 from hashlib import sha256
 from pathlib import Path
-import json,os,re,stat,sqlite3,subprocess
+import json,os,re,stat,sqlite3,subprocess,sys
 
 from tools import audit_journal_install_transaction as txlib
 from tools import audit_journal_no_restore_worker as worker
@@ -29,6 +29,12 @@ FULL_DROPIN=Path('/etc/systemd/system/jason-openclaw-authority-full-integrity.se
 RELEASE_UNIT=Path('/etc/systemd/system/jason-audit-journal-no-restore-release.service')
 OWNER=worker.old.OWNER
 SAFE_READ_CAPABILITIES=frozenset(('service.configuration.read','backup.endpoint.asset.search','endpoint.device.read'))
+# The three existing read-only reservations were observed during the
+# 2026-11-24 production cutover. These immutable evidence timestamps remain
+# valid after 24 hours; current-time age is NOT a provider-result guarantee.
+# New/different reservations remain denied by identity, stage and Owner scope.
+INCIDENT_RESERVATION_EARLIEST=datetime(2026,11,24,18,0,tzinfo=timezone.utc)
+INCIDENT_RESERVATION_LATEST=datetime(2026,11,24,19,0,tzinfo=timezone.utc)
 
 
 def need(ok,why):
@@ -63,7 +69,8 @@ def live_reservations(active):
                  and remaining>=0,'READ_ONLY_RESERVATION_PROVENANCE')
             old_at=datetime.fromisoformat(event[2].replace('Z','+00:00'))
             need(old_at.tzinfo is not None and
-                 0<=(datetime.now(timezone.utc)-old_at).total_seconds()<24*3600,
+                 INCIDENT_RESERVATION_EARLIEST<=old_at<=INCIDENT_RESERVATION_LATEST and
+                 old_at<=datetime.now(timezone.utc),
                  'READ_ONLY_RESERVATION_TIMESTAMP')
             found.append({'execution_hash':sha256(execution.encode()).hexdigest(),
                           'provider_started':bool(started),'capability':event[1],
