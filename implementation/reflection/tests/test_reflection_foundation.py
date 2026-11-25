@@ -125,6 +125,32 @@ def test_explicit_user_correction_is_signal_not_authority() -> None:
     assert "human approval" in candidates[0].proposal
 
 
+def test_engineering_failure_signals_are_bounded_and_deduplicable() -> None:
+    item = record(
+        capability_name="engineering.todo.reconcile",
+        provider_id=None,
+        search_strategies=(),
+        search_result_counts=(),
+        warning_codes=("engineering_worker_stalled", "engineering_ci_repeat_failure"),
+    )
+    drafts = detect_candidate_drafts(item)
+    assert {draft.signal_kind for draft in drafts} == {
+        ReflectionSignalKind.ENGINEERING_STALLED,
+        ReflectionSignalKind.ENGINEERING_CI_REPEAT_FAILURE,
+    }
+    assert len({draft.candidate_key("aot") for draft in drafts}) == 2
+    assert all("secret" not in draft.rationale for draft in drafts)
+    assert all("approval" in draft.proposal or "authorization" in draft.proposal for draft in drafts)
+
+
+def test_engineering_unknown_warning_does_not_create_candidates() -> None:
+    drafts = detect_candidate_drafts(record(
+        search_strategies=(), search_result_counts=(),
+        warning_codes=("http 502 token=do-not-copy",),
+    ))
+    assert drafts == ()
+
+
 def test_store_is_append_only_and_scoped(tmp_path: Path) -> None:
     path = tmp_path / "reflection.sqlite3"
     store = SQLiteReflectionStore(path)
