@@ -7,6 +7,7 @@ import audit_journal_operational_health as full
 import audit_journal_fast_health as fast
 import audit_journal_full_health_snapshot as wrapper
 from orchestrator import journal_health
+import audit_journal_health_private_reader as native_reader
 from orchestrator.segmented_journal import JournalUnavailable,PROFILE
 
 def evidence():
@@ -30,7 +31,7 @@ def test_new_full_adapter_routes_to_real_journal_verifier(tmp_path,monkeypatch):
  called=[]
  def verify(path,**kwargs):
   called.append((path,kwargs));return {"integrity":"ok","catalog_sha256":"fixture"}
- monkeypatch.setattr(journal_health,"full_integrity",verify)
+ monkeypatch.setattr(native_reader,"full_integrity",verify)
  result=full.orchestration_integrity(tmp_path/"active",tmp_path)
  assert result["catalog_sha256"]=="fixture"
  assert called==[(tmp_path/"active",{"temp_root":tmp_path})]
@@ -42,7 +43,7 @@ def test_new_fast_and_wrapper_require_coverage_when_adopted(tmp_path,monkeypatch
  assert wrapper.full_pass(evidence(),0)
  monkeypatch.setenv("JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE",str(PROFILE))
  def reject(value):raise JournalUnavailable("JOURNAL_HISTORY_NOT_COVERED")
- monkeypatch.setattr(journal_health,"validate_full_evidence",reject)
+ monkeypatch.setattr(native_reader,"validate_full_evidence",reject)
  assert fast.full_proof(path,fast.DATABASES,datetime.now(timezone.utc)) is None
  assert not wrapper.full_pass(evidence(),0)
 

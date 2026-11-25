@@ -25,3 +25,6 @@ COPY --chown=0:0 tools/tests/fixtures/audit_journal_writer_pam.conf /writer-pam.
 COPY --chown=0:0 tools/release_control_transition_worker.py tools/release_manager_host_runner.py tools/production_drift_watchdog.py tools/production_drift_guard.py /test-source/
 COPY --chown=0:0 tools/tests/audit_journal_native_admission_root_fixture.py /native-admission-fixture.py
 ENTRYPOINT ["/usr/bin/python3","-I","-B","/test.py"]
+
+COPY --chown=0:0 --chmod=0444 tools/audit_journal_health_reader_install.py /usr/local/lib/jason/audit-journal/trusted/tools/audit_journal_health_reader_install.py
+COPY --chown=0:0 --chmod=0444 tools/tests/audit_journal_health_reader_root_fixture.py /native-health-reader-fixture.py

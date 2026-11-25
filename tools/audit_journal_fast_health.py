@@ -85,7 +85,7 @@ def full_proof(path: Path, databases: dict[str, Path], now: datetime) -> tuple[d
         if not isinstance(evidence.get("delegations"), dict):
             return None
         if os.getenv("JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE",""):
-            from orchestrator.journal_health import validate_full_evidence
+            from audit_journal_health_private_reader import validate_full_evidence
             validate_full_evidence(evidence)
         return evidence, int(age)
     except (OSError, ValueError, TypeError, KeyError, RuntimeError, json.JSONDecodeError):
@@ -113,16 +113,31 @@ def adopt_legacy_proof(output: Path, full: Path, databases: dict[str, Path], now
             temp.unlink()
 
 
-def read_only_probe(path: Path) -> bool:
-    """Short schema lookup with no schema initialization and no database write."""
+def read_only_probe(path: Path, *, profile=None) -> bool:
+    """The live audit WAL must never be opened by sandboxed SQLite directly."""
     try:
-        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=3.0)) as conn:
-            conn.execute("PRAGMA query_only=ON")
-            conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
-        return True
-    except (sqlite3.Error, OSError, ValueError):
+        current=Path(path)
+        journal=DATABASES["orchestration_audit"]
+        if profile is not None or (current==journal
+                                   and os.getenv("JASON_ORCHESTRATION_EVENT_JOURNAL_PROFILE","")):
+            from audit_journal_health_private_reader import readonly_active_copy
+            from orchestrator.segmented_journal import JournalProfile,PROFILE
+            p=profile or JournalProfile.load(PROFILE)
+            if current!=p.active:
+                return False
+            with readonly_active_copy(p,temp_root=(p.archives if profile is not None
+                                                  else DEFAULT_OUTPUT.parent)) as (private,_,_):
+                return _readonly_schema(private)
+        return _readonly_schema(current)
+    except (sqlite3.Error,OSError,ValueError,RuntimeError):
         return False
 
+
+def _readonly_schema(path: Path) -> bool:
+    with closing(sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True,timeout=3.0)) as conn:
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+    return True
 
 def current_delegations(path: Path) -> dict[str, int] | None:
     """A bounded read-only live delegation view; never extend permissions."""
