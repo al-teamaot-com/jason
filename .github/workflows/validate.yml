@@ -191,7 +191,7 @@ jobs:
       - name: Test documentation evidence replay idempotency
         run: python3 -B -m unittest discover -s tests -p test_documentation_reconciler_replay.py
       - name: Test generated-branch recovery and bounded publisher diagnostics
-        run: python3 -B -m pytest -q tools/tests/test_documentation_source_reconciler.py tools/tests/test_documentation_success_reconciler.py tools/tests/test_documentation_publisher_git_recovery.py tools/tests/test_documentation_publisher_install.py tools/tests/test_documentation_publisher_readback_recovery.py
+        run: python3 -B -m pytest -q tools/tests/test_documentation_source_reconciler.py tools/tests/test_documentation_success_reconciler.py tools/tests/test_documentation_publisher_git_recovery.py tools/tests/test_documentation_publisher_install.py tools/tests/test_documentation_publisher_readback_recovery.py tools/tests/test_documentation_publisher_successor.py
       - name: Validate documentation control plane
         run: python3 tools/validate_documentation_control.py
       - name: Build documentation directly from canonical docs tree
@@ -236,7 +236,7 @@ jobs:
       - name: Test owner-approved development recovery and legacy handoff
         env:
           PYTHONPATH: tools
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tools/tests/test_owner_approved_development_worker.py
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tools/tests/test_owner_approved_development_worker.py tools/tests/test_parallel_development_admission.py tools/tests/test_parallel_development_claim_integration.py tools/tests/test_parallel_development_board.py tools/tests/test_parallel_development_install.py
       - name: Test PMV3 durable work engine and scheduler
         env:
           PYTHONPATH: tools
