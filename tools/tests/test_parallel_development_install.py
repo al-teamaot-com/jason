@@ -12,6 +12,21 @@ from tools import owner_approved_development_worker as worker
 
 CANDIDATE = 'a' * 40
 
+def test_optional_preproduction_shadow_not_a_mandatory_production_peer():
+    # The preproduction-only shadow gateway can be stopped after OOM without
+    # failing release health for the protected production worker. The native
+    # drift policy and core health guard still independently protect runtime
+    # and MCP. This is not an override of either guard.
+    policy=json.loads((Path(__file__).resolve().parents[2] /
+                       'config/production-desired-state.json').read_text())
+    required=set(policy['required_containers'])
+    assert required <= set(install.PEERS)
+    assert 'jason-pmv4-shadow-gateway' not in required
+    assert 'jason-pmv4-shadow-gateway' not in install.PEERS
+    assert {'jason-runtime','jason-mcp-pilot','jason-pmv4-ticket-core',
+            'jason-teams-gateway','openbao'} == set(install.PEERS)
+
+
 
 @pytest.fixture
 def images(tmp_path):

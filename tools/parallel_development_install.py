@@ -62,8 +62,13 @@ FORWARD_SCOPE_SHA256 = '697210854d0a0140d3a672750ad84d043e5ac99db117abd604346931
 FORWARD_ACTION = 'RECOVER-SEGMENTED-AUDIT-WITHOUT-LEGACY-REBUILD'
 FORWARD_ARCHIVED_EVENTS = 34616410
 DESIRED = Path('/etc/jason/release-readback-recovery/production-desired-state.json')
+# The shadow gateway is preproduction-only (production-core=excluded), and
+# is absent from the accepted LKG required_containers policy. Its stopped
+# state must not block an unrelated governed production host-worker release.
+# Root drift, protected container images, native core guard and locks remain
+# mandatory for the actual production peers.
 PEERS = ('jason-runtime', 'jason-mcp-pilot', 'jason-pmv4-ticket-core',
-         'jason-pmv4-shadow-gateway', 'jason-teams-gateway', 'openbao')
+         'jason-teams-gateway', 'openbao')
 USER = ('/usr/sbin/runuser', '-u', 'al', '--', '/usr/bin/env', '-i',
         'HOME=/home/al', 'PATH=/usr/local/bin:/usr/bin:/bin',
         'LANG=C.UTF-8', 'XDG_RUNTIME_DIR=/run/user/1000',
