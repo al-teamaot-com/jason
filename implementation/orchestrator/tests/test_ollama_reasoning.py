@@ -1431,3 +1431,23 @@ def test_deterministic_target_nic_collection_avoids_llm():
                 "/site/devices/1/nics",
         },
     )
+
+
+def test_extended_local_reasoning_budget_is_explicit_and_bounded():
+    transport = Transport({"ok": True})
+    llm = OllamaStructuredJsonClient(transport=transport, model="local-test",
+                                     output_token_limit=4096, context_tokens=32768,
+                                     timeout_seconds=180)
+    assert llm.complete(system="x", user="y", schema={"type":"object"},
+                        max_output_tokens=4096) == {"ok":True}
+    assert transport.calls[0]["json"]["options"] == {
+        "temperature":0, "num_predict":4096, "num_ctx":32768}
+    assert transport.calls[0]["timeout_seconds"] == 180
+    with pytest.raises(ValueError, match="output budget"):
+        llm.complete(system="x",user="y",schema={},max_output_tokens=4097)
+    with pytest.raises(ValueError, match="ceiling"):
+        OllamaStructuredJsonClient(transport=transport,model="local-test",
+                                   output_token_limit=4097)
+    with pytest.raises(ValueError, match="context budget"):
+        OllamaStructuredJsonClient(transport=transport,model="local-test",
+                                   context_tokens=32769)

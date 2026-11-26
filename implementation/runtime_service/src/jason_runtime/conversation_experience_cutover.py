@@ -62,6 +62,8 @@ from orchestrator.information_need_intent import InformationNeedIntentBuilder
 from orchestrator.model_runtime_adapter import (
     ModelRuntimeAdapter,
     ollama_grammar_compatible_schema,
+    ollama_extended_generation_schema,
+    validate_extended_local_result,
 )
 from orchestrator.ollama_reasoning import OllamaStructuredJsonClient
 from orchestrator.progressive_conversation_read import ProgressiveConversationReadEngine
@@ -143,6 +145,7 @@ def select_conversation_experience_flow(
     structured_client=None,
     integration_broker=None,
     investigation_client=None,
+    query_structured_client=None,
 ):
     """Return the existing flow or a fully composed model-independent Teams experience.
 
@@ -398,7 +401,7 @@ def select_conversation_experience_flow(
     if investigation_enabled:
         if investigation_client is None:
             raise RuntimeError(
-                "Investigation loop requires hosted OpenAI reasoning"
+                "Investigation loop requires governed structured reasoning"
             )
 
         if integration_broker is None:
@@ -406,6 +409,7 @@ def select_conversation_experience_flow(
                 "Investigation loop requires Integration Broker"
             )
 
+        investigation_client = _universal_query_client(investigation_client)
         investigation_loop = SimpleReasoningLoop(
             decisions=InvestigationDecisionEngine(
                 client=investigation_client,
@@ -473,7 +477,7 @@ def select_conversation_experience_flow(
         )
 
     query_client = _universal_query_client(
-        structured_client
+        query_structured_client if query_structured_client is not None else structured_client
     )
 
     universe_builder = RuntimeSemanticQueryUniverseBuilder(
@@ -548,68 +552,24 @@ def select_conversation_experience_flow(
     )
 
 
-def _universal_query_client(
-    structured_client,
-):
-    """Clone the hosted OpenAI structured client onto the lowest-cost model."""
+def _universal_query_client(structured_client):
+    """Use the composed non-metered structured route, without provider/model cloning.
 
-    if structured_client is None:
-        raise RuntimeError(
-            "Universal query planning requires "
-            "the hosted OpenAI structured client"
+    The existing deterministic query planner, execution broker, authorization,
+    evidence and schema validators remain the authority. A local client has no
+    provider credentials or tool access. Explicitly deny the retired hosted
+    API route, including an adapter wrapping it.
+    """
+    if isinstance(structured_client, ModelRuntimeAdapter):
+        if isinstance(structured_client.client, OllamaStructuredJsonClient):
+            return structured_client
+    elif isinstance(structured_client, OllamaStructuredJsonClient):
+        return ModelRuntimeAdapter(
+            client=structured_client,
+            schema_adapter=ollama_extended_generation_schema,
+            result_adapter=validate_extended_local_result,
         )
-
-    from dataclasses import replace
-
-    from orchestrator.model_runtime_adapter import (
-        ModelRuntimeAdapter,
-    )
-    from orchestrator.openai_reasoning import (
-        OpenAIStructuredJsonClient,
-    )
-
-    if isinstance(
-        structured_client,
-        ModelRuntimeAdapter,
-    ):
-        inner = structured_client.client
-
-        if not isinstance(
-            inner,
-            OpenAIStructuredJsonClient,
-        ):
-            raise RuntimeError(
-                "Universal query planning requires "
-                "OpenAI structured reasoning"
-            )
-
-        return replace(
-            structured_client,
-            client=replace(
-                inner,
-                model="gpt-5-nano",
-                response_format_name=(
-                    "jason_universal_query"
-                ),
-            ),
-        )
-
-    if isinstance(
-        structured_client,
-        OpenAIStructuredJsonClient,
-    ):
-        return replace(
-            structured_client,
-            model="gpt-5-nano",
-            response_format_name=(
-                "jason_universal_query"
-            ),
-        )
-
-    raise RuntimeError(
-        "Universal query planning requires "
-        "OpenAI structured reasoning"
-    )
+    raise RuntimeError("Universal query planning requires the governed local structured client")
 
 
 def _primary_resource_kinds(

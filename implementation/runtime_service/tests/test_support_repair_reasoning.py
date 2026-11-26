@@ -465,3 +465,31 @@ def test_normal_development_edit_turn_allows_bounded_evidence_requests(tmp_path)
     system=client.calls[0]['system']
     assert 'read-only evidence_requests' in system
     assert 'LAST authorized source-evidence turn' not in system
+
+
+def test_local_primary_engineering_request_uses_extended_bounded_contract(tmp_path):
+    from orchestrator.ollama_reasoning import OllamaStructuredJsonClient
+    from orchestrator.model_runtime_adapter import ModelRuntimeAdapter, ollama_grammar_compatible_schema
+    class Transport:
+        def __init__(self): self.calls=[]
+        def request(self, **kw):
+            self.calls.append(kw)
+            return {"message":{"content":json.dumps({
+                "summary":"synthetic edit","edits":[],"test_paths":[],
+                "blocked_reason":"no source in synthetic request","evidence_requests":[]})}}
+    transport=Transport()
+    local=ModelRuntimeAdapter(client=OllamaStructuredJsonClient(
+        transport=transport,model="local-test",output_token_limit=4096,
+        context_tokens=32768,timeout_seconds=180),
+        schema_adapter=ollama_grammar_compatible_schema)
+    req=_request("edit_plan")
+    d=tmp_path/"reasoning"/"requests";d.mkdir(parents=True)
+    (d/(req["request_id"]+".json")).write_text(json.dumps(req))
+    maint=SupportRepairReasoningMaintenance(structured_client=local,spool=tmp_path)
+    assert maint.tick()
+    rsp=json.loads((tmp_path/"reasoning"/"responses"/(req["request_id"]+".json")).read_text())
+    assert rsp["status"]=="succeeded" and rsp["result"]["blocked_reason"]
+    assert len(transport.calls)==1
+    assert transport.calls[0]["url"]=="http://jason-ollama:11434/api/chat"
+    assert transport.calls[0]["json"]["options"]["num_predict"]==4096
+    assert transport.calls[0]["json"]["options"]["num_ctx"]==32768
