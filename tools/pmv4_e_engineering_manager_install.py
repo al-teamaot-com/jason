@@ -249,6 +249,75 @@ def native():
     return out
 
 
+# Documentation reconciliation may advance protected main after CI without
+# changing any installable source. Only this exact pair of generated records
+# may be excluded from the source-integration successor's changed-path set.
+# The candidate itself must STILL be current protected main with exact CI.
+SOURCE_METADATA_PATHS = frozenset({
+    "docs/control/AUTOMATED-CHANGE-STATE.json",
+    "docs/control/AUTOMATED-CHANGE-STATE.md",
+})
+
+
+def reviewed_source_delta(git, baseline, candidate, source_files):
+    changed = set(git("diff", "--name-only", baseline, candidate).decode().splitlines())
+    if changed == source_files:
+        return
+    need(baseline == SOURCE_INTEGRATION_BASELINE
+         and set(source_files) == SOURCE_INTEGRATION_SCOPE_FILES
+         and changed == set(source_files) | SOURCE_METADATA_PATHS,
+         "UNREVIEWED_SOURCE_CHANGE")
+    # These records are never loaded into the installation source map. Verify
+    # ordinary tracked blobs and constrain the change to the validated-source
+    # evidence fields; neither production state nor arbitrary Markdown may drift.
+    json_path = "docs/control/AUTOMATED-CHANGE-STATE.json"
+    md_path = "docs/control/AUTOMATED-CHANGE-STATE.md"
+    for revision in (baseline, candidate):
+        for path in SOURCE_METADATA_PATHS:
+            entry = git("ls-tree", revision, "--", path).decode().strip()
+            need(re.fullmatch(r"100644 blob [0-9a-f]{40}\t" + re.escape(path), entry)
+                 is not None, "SOURCE_METADATA_NOT_REGULAR_BLOB")
+    old = json.loads(git("show", baseline + ":" + json_path))
+    new = json.loads(git("show", candidate + ":" + json_path))
+    need(isinstance(old, dict) and isinstance(new, dict)
+         and old.keys() == new.keys()
+         and {k:v for k,v in old.items() if k != "validated_source"}
+             == {k:v for k,v in new.items() if k != "validated_source"},
+         "SOURCE_METADATA_PRODUCTION_OR_SCHEMA_CHANGED")
+    a, b = old.get("validated_source"), new.get("validated_source")
+    keys = {"revision", "status", "workflow", "workflow_run_id",
+            "workflow_url", "observed_at"}
+    for value in (a, b):
+        need(isinstance(value, dict) and set(value) == keys
+             and all(isinstance(v, str) for v in value.values())
+             and value["status"] == "ci_passed"
+             and value["workflow"] == "Validate Jason"
+             and re.fullmatch(r"[0-9a-f]{40}", value["revision"]) is not None
+             and re.fullmatch(r"[0-9]+", value["workflow_run_id"]) is not None
+             and value["workflow_url"] == "https://github.com/al-teamaot-com/jason/actions/runs/" + value["workflow_run_id"],
+             "SOURCE_METADATA_EVIDENCE_SHAPE")
+        try:
+            timestamp = datetime.fromisoformat(value["observed_at"])
+            need(timestamp.utcoffset() is not None, "SOURCE_METADATA_TIMESTAMP")
+        except (ValueError, TypeError):
+            need(False, "SOURCE_METADATA_TIMESTAMP")
+    old_md = git("show", baseline + ":" + md_path).decode()
+    new_md = git("show", candidate + ":" + md_path).decode()
+    heading = "## Latest validated source\n"
+    next_heading = "## Latest production alignment\n"
+    need(old_md.count(heading) == 1 and old_md.count(next_heading) == 1,
+         "SOURCE_METADATA_MARKDOWN_LAYOUT")
+    prefix, section = old_md.split(heading, 1)
+    body, suffix = section.split(next_heading, 1)
+    for label, key in (("Revision", "revision"), ("Workflow run", "workflow_run_id"),
+                       ("Observed", "observed_at")):
+        line = "- " + label + ": `" + a[key] + "`\n"
+        need(body.count(line) == 1, "SOURCE_METADATA_MARKDOWN_EVIDENCE")
+        body = body.replace(line, "- " + label + ": `" + b[key] + "`\n", 1)
+    need(new_md == prefix + heading + body + next_heading + suffix,
+         "SOURCE_METADATA_MARKDOWN_UNREVIEWED_CHANGE")
+
+
 def source_review(candidate, p, *, recovery=False, baseline=BASELINE, source_files=SOURCE_FILES,
                   supporting_files=frozenset()):
     git = lambda *args: p["git"](REPO, *args)
@@ -258,8 +327,7 @@ def source_review(candidate, p, *, recovery=False, baseline=BASELINE, source_fil
          git("remote", "get-url", "origin").decode().strip() == "https://github.com/al-teamaot-com/jason.git" and
          git("rev-parse", "--is-shallow-repository").decode().strip() == "false",
          "PROTECTED_CHECKOUT_NOT_EXACT")
-    changed = set(git("diff", "--name-only", baseline, candidate).decode().splitlines())
-    need(changed == source_files, "UNREVIEWED_SOURCE_CHANGE")
+    reviewed_source_delta(git, baseline, candidate, source_files)
     if not recovery:
         helper_path = p["NATIVE"] / "pmv4_e_ci_refresh.py"
         helper = p["native_code"](helper_path, str(helper_path), 0, 0o444)
