@@ -116,69 +116,30 @@ A support item stops automatically only for a genuine governance/capability bloc
 
 For every autonomously claimed Support List item, the support-repair lane must emit owner lifecycle events through the same canonical governed Teams owner-notification path used for TODO engineering: **repair started**, **blocked / owner action required** when applicable, and **production-verified complete**. The start message identifies the support ID, defect summary, and repair scope. The blocked message identifies the exact blocker and required owner action. The completion message identifies the merged/deployed revision and the production acceptance evidence that proves the defect is resolved. A support fix is not "complete" for notification purposes merely because code was committed, CI passed, or a PR merged. Notification delivery uses the same durable message/correlation identity, provider/readback verification, bounded retry, duplicate suppression, and `SUPPORT-CONN-037` reliability requirements as TODO lifecycle messages.
 
-### Verified hosted-model credit replenishment
+### No paid AI/API reasoning — current Owner policy
 
-A hosted-model credit or billing error is **not** an ordinary transient transport
-failure. The runtime records a non-retryable failed reasoning receipt and the host
-worker must preserve that receipt and its retry budget; simply restarting the
-worker or overwriting the failed response is prohibited.
+The November 11 Owner decision (reaffirmed November 26) supersedes the earlier
+metered-credit recovery procedure. Do not invoke hosted-credit diagnostics,
+purchase credits, use API-key reasoning or paid fallbacks, or treat an old
+billing receipt as current authorization. Preserve existing failed requests,
+usage records and retry lineage; do not fabricate a credit-recovery receipt.
+Routine development uses ChatGPT + Desktop Commander + GitHub. J-Man/J-Dev
+remain optional under separately approved subscription-only routing. A local
+model or subscription adapter must independently meet the applicable existing
+reasoning and acceptance contract; neither an available model nor an account
+sign-in proves an existing worker can resume a failed repair.
 
-For a failed **P0 Support List** item specifically marked
-`credit_balance_exhausted` with HTTP 429 and owner action
-`restore_provider_credits`, the existing rootless support worker may queue
-**one new, separately fingerprinted reasoning request** only if a newer
-provider-reported metered success is recorded from an explicitly scoped,
-operator-authorized `provider-credit-verify` diagnostic in the local usage ledger.
-The evidence must postdate the failure and be fresh (at most 12 hours).
-The operator diagnostic must be a real, minimal hosted-model request through
-Jason's configured client; an account-billing screenshot or a manually entered
-ledger row is not equivalent to a provider-reported successful usage receipt.
-The readmission retains the old failure, response, and retry count, records its
-metered-proof lineage, respects active-work capacity, checks the original
-request fingerprint and current issue eligibility, and refuses pending governed
-repair handoffs or previously retried credit failures. A tiny successful model
-diagnostic proves billing availability **only**; it does not prove the prior
-large engineering request is valid, nor does it authorize source changes,
-provider writes, PR merges, or production deployment.
-
-This limited recovery applies to eligible P0 **support** reasoning, not
-automatically to blocked TODO/development items with independently exhausted
-retries. Those items retain their release-verified repair and readmission
-requirements. The canonical governed Release Manager remains the only
-production promotion path.
-
-### Operator diagnostic for confirmed hosted-credit replenishment
-
-After confirming credits in the existing hosted API account, an authorized operator
-may run the installed, one-shot diagnostic **inside the existing Jason runtime
-container**, where the canonical model configuration and OpenBao AppRole files
-are already mounted:
-
-```bash
-docker exec jason-runtime python -m jason_runtime.verify_hosted_credit
-```
-
-This command uses Jason's configured conversation model, approved OpenBao
-`openai.semantic_intent` secret, existing structured-model client, and append-only
-model-usage ledger. It never prints credentials or response bodies. On failure it emits only a
-sanitized HTTP status and allowlisted provider error code so an operator can
-distinguish billing (429) from request-contract errors (400). An HTTP 429 is not permission to retry or infer restored credits. It uses the same
-low reasoning-effort setting as the running OpenAI client. Success is
-reported only after the same request has a positive-token, provider-reported
-completed receipt carrying `workflow_id=provider-credit-verify` and
-`routing_profile=operator-authorized-diagnostic`. A blocked result must not be
-converted into a hand-entered success or an unbounded retry. The diagnostic
-makes a small billable request and must be operator-authorized.
-
-The subsequent scheduled support and owner-approved development workers
-independently re-admit at most one eligible bounded request per blocked item,
-subject to the original approval, immutable failed receipt, 12-hour receipt
-freshness, capacity, and each worker's existing exclusions. Observe real
-reasoning, tests, PR progression and protected release acceptance before
-claiming autonomous development is recovered. A successful diagnostic alone
-is not that acceptance.
-
-The canonical operational logic is `docs/playbooks/Jason-Support-List-Autonomous-Repair.md`.
+The old credit diagnostic and live semantic benchmark now deny before credential
+resolution or provider access. Runtime validation rejects both legacy hosted
+API flags. HTTP-runtime Compose disables those flags and removes dedicated
+paid-AI credential mounts; future Ticket Core settings and service-manifest
+projection also force them off. The installed protected Ticket Core and any
+other live runtime/MCP configuration are separate governed activation scopes;
+this source-only correction does not change their installed bytes, mounts,
+identity, or service state. Verify exact per-component production configuration,
+no paid route, unchanged protected peers, and the worker's real non-metered
+repair outcome before claiming enforcement or recovery. Source-only work is not
+production acceptance.
 
 ## Production boundary
 
@@ -310,7 +271,7 @@ Existing independent CI, guarded PR integration, CCC and exact-SHA production
 release authority remain unchanged. Source-only fixes are not proof of live
 Teams approval or disk repair acceptance.
 
-## Source-bound reasoning receipts and historical 429 replay
+## Source-bound reasoning receipts and historical 429 replay (historical; paid route prohibited)
 
 The content-addressed reasoning queue deduplicates requests by their exact
 `kind`, `support_item`, `title`, `evidence`, `acceptance`, and `context` JSON.

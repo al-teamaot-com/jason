@@ -117,3 +117,14 @@ def test_unresolved_is_visible():
         "processor model"
     ]
     assert extra == []
+
+
+
+def test_historical_live_benchmark_is_retired(monkeypatch, capsys):
+    import sys
+    import pytest
+    monkeypatch.setattr(sys, "argv", ["benchmark_openai_semantic_intent.py"])
+    assert module.main() == 2
+    assert "PAID_AI_API_PROHIBITED" in capsys.readouterr().err
+    with pytest.raises(PermissionError, match="PAID_AI_API_PROHIBITED"):
+        module.resolve_api_key("http://127.0.0.1:8200")
