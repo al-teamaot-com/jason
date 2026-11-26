@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tools import no_paid_ai_release_scope as policy
+from tools import deploy_live_container as policy
 from tools import deploy_live_container as clone
 
 
@@ -109,3 +109,9 @@ def test_hidden_configured_mount_and_legacy_shape_cannot_be_restored():
     obj=live();obj["HostConfig"]["Binds"]=["/other:/run/jason-secrets:ro"]
     with pytest.raises(policy.NoPaidAIDenied,match="LEGACY_MOUNT_SHAPE"):
         policy.project_container(obj)
+
+def test_effective_mount_enumeration_order_does_not_change_scope_digest():
+    a=live()
+    b=deepcopy(a)
+    b["Mounts"].reverse()
+    assert policy.release_evidence(a)==policy.release_evidence(b)
