@@ -1,0 +1,55 @@
+{
+  "authority_granted": false,
+  "facts_sha256": "ac5f0599084e57cac9c4656a00ba8399e94aa99b83c4533e19a6a84eb7d4d00e",
+  "fingerprint": "d0b54b17155b7126226242d462ccb8db3180654a244a5ce92ab8e1bb219f7ad7",
+  "instructions": [
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "page_size": 2,
+        "resource_id": 143305
+      },
+      "capability": "service.ticket.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_readonly_triage_note",
+      "step_id": "read_ticket",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {
+        "ticket_id": 143305
+      },
+      "capability": "service.ticket.notes.search",
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_readonly_triage_note",
+      "step_id": "read_notes",
+      "step_type": "diagnostic",
+      "terminal": false,
+      "version": "1.0.0-migration.1"
+    },
+    {
+      "approval_classification": null,
+      "approval_required": false,
+      "arguments": {},
+      "capability": null,
+      "execution_status": "proposed_only_no_provider_call",
+      "playbook_id": "unsupported_readonly_triage_note",
+      "step_id": "blocked",
+      "step_type": "human_review",
+      "terminal": true,
+      "version": "1.0.0-migration.1"
+    }
+  ],
+  "mode": "synthetic_shadow_trace",
+  "operational_acceptance": false,
+  "playbook_id": "unsupported_readonly_triage_note",
+  "provider_calls": 0,
+  "provider_mutations": 0,
+  "terminal_step": "blocked",
+  "version": "1.0.0-migration.1"
+}

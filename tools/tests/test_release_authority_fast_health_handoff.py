@@ -329,3 +329,130 @@ def test_successful_systemd_exit_without_fresh_fast_json_is_still_denied(
     monkeypatch.setattr(gate, "_call", lambda argv, **kw: "")
     with pytest.raises(gate.HandoffRefused, match="independent PASS"):
         gate.reconcile(source)
+
+
+def _write_owned(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data), encoding="utf-8")
+    path.chmod(0o600)
+
+
+def emergency_evidence(monkeypatch, tmp_path):
+    monkeypatch.setattr(gate.time, "time", lambda: gate.OWNER_EXPIRY_TIMESTAMP - 3600)
+    output = tmp_path / "current.json"
+    full = tmp_path / "full.json"
+    advisory = tmp_path / "advisory.json"
+    monkeypatch.setattr(gate, "OUTPUT", output)
+    monkeypatch.setattr(gate, "FULL", full)
+    monkeypatch.setattr(gate, "OWNER_ADVISORY", advisory)
+    data = {
+        "status": "fail", "check_mode": gate.CHECK_MODE,
+        "full_proof_status": "missing_or_invalid",
+        "snapshot_source_exit_code": 2,
+        "failures": ["full_integrity_proof_missing_stale_or_invalid"],
+        "provider_contacted": False, "provider_credentials_used": False,
+        "files": {key: {"present": True, "readable": True, "mode": "0o600"}
+                  for key in ("authority", "replay", "security_audit", "orchestration_audit")},
+        "trusted_key_registry": {"present": True, "mode": "0o600", "active_records": 1},
+        "delegations": {"expired_active_records": 0},
+    }
+    failure = {
+        "status": "fail", "failures": ["operational_health_timeout"],
+        "snapshot_source_exit_code": 124,
+        "provider_contacted": False, "provider_credentials_used": False,
+    }
+    review = {
+        "status": "degraded_read_safe",
+        "expires_at": gate.OWNER_EXPIRY,
+        "full_proof_verified": False,
+        "fast_databases_readable": True,
+        "full_proof_reason": "full_integrity_proof_missing_stale_or_invalid",
+        "no_authority_granted": True,
+        "approval_boundary": "local_root_owner_emergency_recovery_only",
+    }
+    _write_owned(output, data)
+    _write_owned(full, failure)
+    _write_owned(advisory, review)
+    return output, full, advisory
+
+
+def test_owner_emergency_override_exact_root_files_and_ttl(monkeypatch, tmp_path):
+    source = tmp_path / OLD
+    source_unit = source / gate.UNIT_IN_RELEASE
+    source_unit.parent.mkdir(parents=True)
+    source_unit.write_text("trusted canonical service")
+    installed = tmp_path / "unit.service"
+    installed.write_text(source_unit.read_text())
+    source_handler = source / gate.OWNER_HANDLER_SOURCE
+    source_handler.parent.mkdir(parents=True)
+    source_handler.write_text("trusted emergency handler")
+    root_handler = tmp_path / "root-handler.py"
+    root_handler.write_bytes(source_handler.read_bytes())
+    override = tmp_path / "91-owner-override.conf"
+    monkeypatch.setattr(gate, "INSTALLED", installed)
+    monkeypatch.setattr(gate, "OWNER_HANDLER", root_handler)
+    monkeypatch.setattr(gate, "OWNER_DROPIN", override)
+    monkeypatch.setattr(
+        gate, "EXACT_OWNER_DROPIN",
+        ("[Service]\nExecStart=\nExecStart=/usr/bin/python3 "
+         + str(root_handler) + "\n").encode(),
+    )
+    override.write_bytes(gate.EXACT_OWNER_DROPIN)
+    monkeypatch.setattr(gate, "_trusted_root_regular", lambda _: True)
+    monkeypatch.setattr(gate.time, "time", lambda: gate.OWNER_EXPIRY_TIMESTAMP - 60)
+    props = {
+        "FragmentPath": str(installed),
+        "DropInPaths": str(override),
+        "ExecStart": "argv[]=/usr/bin/python3 " + str(root_handler) + " ;",
+    }
+    monkeypatch.setattr(gate, "_show", lambda prop: props[prop])
+    monkeypatch.setattr(gate, "_call", lambda *a, **kw: "active")
+    assert gate._installed_is_exact(source) is True
+    override.write_text("unrecognized change")
+    with pytest.raises(gate.HandoffRefused, match="differs"):
+        gate._installed_is_exact(source)
+    override.write_bytes(gate.EXACT_OWNER_DROPIN)
+    root_handler.write_text("untrusted handler")
+    with pytest.raises(gate.HandoffRefused, match="differs"):
+        gate._installed_is_exact(source)
+    root_handler.write_bytes(source_handler.read_bytes())
+    props["DropInPaths"] = str(tmp_path / "unexpected.conf")
+    with pytest.raises(gate.HandoffRefused, match="unexpected"):
+        gate._installed_is_exact(source)
+    props["DropInPaths"] = str(override)
+    monkeypatch.setattr(gate.time, "time", lambda: gate.OWNER_EXPIRY_TIMESTAMP + 1)
+    with pytest.raises(gate.HandoffRefused, match="expired"):
+        gate._installed_is_exact(source)
+
+
+@pytest.mark.parametrize("alter", [
+    ("current", "failures", []),
+    ("current", "provider_contacted", True),
+    ("current", "delegations", {"expired_active_records": 1}),
+    ("full", "status", "pass"),
+    ("full", "failures", ["authority_integrity"]),
+    ("advisory", "status", "pass"),
+    ("advisory", "full_proof_verified", True),
+    ("advisory", "no_authority_granted", False),
+])
+def test_emergency_snapshots_allow_only_verified_degraded_read_safe(
+        monkeypatch, tmp_path, alter):
+    paths = emergency_evidence(monkeypatch, tmp_path)
+    gate._verify_emergency_snapshot(not_before_ns=0)
+    selected = dict(zip(("current", "full", "advisory"), paths))
+    target = selected[alter[0]]
+    payload = json.loads(target.read_text())
+    payload[alter[1]] = alter[2]
+    _write_owned(target, payload)
+    with pytest.raises(gate.HandoffRefused):
+        gate._verify_emergency_snapshot(not_before_ns=0)
+
+
+def test_emergency_degraded_reconcile_does_not_claim_full_pass(monkeypatch, tmp_path):
+    source = _reconcile_fixture(monkeypatch, tmp_path)
+    emergency_evidence(monkeypatch, tmp_path)
+    monkeypatch.setattr(gate, "_installed_is_exact", lambda _: True)
+    calls = []
+    monkeypatch.setattr(gate, "_call",
+                        lambda cmd, **kwargs: calls.append(cmd) or "")
+    assert gate.reconcile(source) == "OWNER_EMERGENCY_DEGRADED_READ_SAFE_NOT_FULL_PASS"
+    assert calls == [["/usr/bin/systemctl", "start", gate.UNIT]]

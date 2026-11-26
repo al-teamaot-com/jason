@@ -89,6 +89,17 @@ def test_native_worker_admission_guard_restores_on_deploy_exception(tmp_path, mo
 
 
 class ReleaseManagerHostRunnerTests(unittest.TestCase):
+    def test_manual_scope_reviewer_is_protected_production_control_core(self):
+        import fnmatch
+        import json
+        path = "tools/manual_release_scope.py"
+        policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
+        for change_class in ("feature", "support", "todo", "release_blocker"):
+            self.assertEqual(runner.classify_change_risk(change_class, [path]),
+                             "production_control_core")
+        self.assertTrue(any(fnmatch.fnmatch(path, pattern)
+                            for pattern in policy["protected_core_globs"]))
+
     def test_root_host_reconciliation_is_always_production_control_core(self):
         for path in (
             "tools/reconcile_production_host_services.sh",
@@ -213,7 +224,9 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                   "111111111111", "222222222222", "333333333333", "444444444444"]),
               patch.object(runner, "worktree", return_value=checkout),
               patch.object(runner, "run"),
-              patch.object(runner, "image_id", return_value="sha256:verified"),
+              patch.object(runner, "image_id", side_effect=lambda ref: (
+                  "sha256:d709ca54b66d41e22bd1f67782cd5f6d681c4337bffb359b632523762a27788a"
+                  if ref == "jason-mcp:generic-governed-8f1e864947a2" else "sha256:verified")),
               patch.object(runner, "remove_worktree")):
             runtime1, _ = runner.build_candidate(repo, state, SHA_A)
             runtime2, _ = runner.build_candidate(repo, state, SHA_A)
@@ -263,6 +276,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
     def test_preprod_mutation_guards_disable_known_write_paths(self):
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTOTASK_MUTATION_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTONOMY_WORKER_ENABLED"], "false")
+        self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_UNIVERSAL_APPROVAL_MODE"], "off")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED"], "false")
@@ -769,23 +783,15 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             }
             request_path = request_root / f"{release_id}.json"
             request_path.write_text(json.dumps(request), encoding="utf-8")
+            # Historical unsigned owner-al JSON is deliberately no longer
+            # sufficient production authorization. Even if the claimed Owner
+            # is named, the root-pinned independent signed OAuth proof is
+            # mandatory and no untrusted approval may reach approve_release.
             with patch.object(runner, "approve_release") as approve:
-                count = runner.consume_owner_approval_requests(ROOT, state_root)
-            self.assertEqual(count, 1)
-            approve.assert_called_once_with(
-                ROOT,
-                state_root,
-                release_id=release_id,
-                candidate_sha=SHA_A,
-                source="governed_mcp_owner:owner-al",
-            )
-            self.assertFalse(request_path.exists())
-            archived = (
-                state_root
-                / "owner-approval-requests-processed"
-                / f"{release_id}.json"
-            )
-            self.assertEqual(json.loads(archived.read_text(encoding="utf-8")), request)
+                with self.assertRaises((PermissionError, runner.ReleaseManagerError)):
+                    runner.consume_owner_approval_requests(ROOT, state_root)
+            approve.assert_not_called()
+            self.assertTrue(request_path.exists())
 
     def test_consume_owner_approval_request_rejects_release_sha_mismatch(self):
         import json
@@ -3842,7 +3848,7 @@ def test_scheduled_promotion_defers_exact_material_owner_review_without_deployin
     assert saved["owner_approval"] == record["owner_approval"]
     assert saved["rollback_sha"] == SHA_B
 
-def test_reviewed_owner_offer_can_request_only_missing_ccc_review(tmp_path):
+def test_reviewed_owner_offer_needs_no_separate_ccc_review(tmp_path):
     from types import SimpleNamespace
     import json
     policy = SimpleNamespace(
@@ -3858,7 +3864,7 @@ def test_reviewed_owner_offer_can_request_only_missing_ccc_review(tmp_path):
     }
     assert runner.signed_owner_offer_purpose(
         approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
-    ) == "ccc_material_review_only"
+    ) is None
     # The exact already-approved release needs no second release grant.
     original_approval = dict(approved["owner_approval"])
     assert approved["owner_approval"] == original_approval
@@ -3905,7 +3911,7 @@ def test_reviewed_offer_policy_mode_risk_and_identity_do_not_widen(tmp_path):
     ) is None
 
 
-def test_reviewed_offer_rejects_conflicting_ccc_evidence_not_overwrite(tmp_path):
+def test_reviewed_offer_ignores_legacy_ccc_evidence_for_release_authority(tmp_path):
     from types import SimpleNamespace
     import json
     import pytest
@@ -3923,10 +3929,9 @@ def test_reviewed_offer_rejects_conflicting_ccc_evidence_not_overwrite(tmp_path)
         {"status": "approved", "source_revision": SHA_A, "recorded_by": "person-other"},
     ):
         named.write_text(json.dumps(bad))
-        with pytest.raises(runner.ReleaseManagerError, match="conflicts"):
-            runner.signed_owner_offer_purpose(
-                approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
-            )
+        assert runner.signed_owner_offer_purpose(
+            approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
+        ) is None
         assert json.loads(named.read_text()) == bad
 
 
@@ -4585,6 +4590,69 @@ def test_native_preflight_passes_same_bound_env_to_both_scripts(tmp_path):
     assert env["JASON_RUNTIME_PRODUCTION_IMAGE"] == "runtime"
     assert env["JASON_MCP_PRODUCTION_IMAGE"] == "mcp"
     assert env["JASON_SOURCE_REVISION_OVERRIDE"] == SHA_A
+
+
+def test_preprod_disables_inherited_playbook_review_child_and_rejects_reactivation(tmp_path):
+    import json
+
+    state_root = tmp_path / "openclaw" / "release-manager"
+    state_root.mkdir(parents=True)
+    live = {
+        "inspect": {
+            "Config": {
+                "Env": [
+                    "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=true",
+                    "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED=true",
+                ],
+                "Labels": {},
+            },
+            "HostConfig": {"NetworkMode": "bridge", "Tmpfs": {}},
+            "Mounts": [],
+            "NetworkSettings": {"Networks": {}},
+        },
+    }
+    with patch.object(runner.subprocess, "run"), patch.object(runner, "run") as docker:
+        name, scratch = runner.create_preprod_container(
+            live=live, candidate_image="jason-runtime:test",
+            candidate_sha=SHA_A, state_root=state_root,
+            release_id="release-" + SHA_A[:16],
+        )
+    try:
+        create_args = docker.call_args.args[0]
+        projected = [
+            create_args[i + 1] for i, arg in enumerate(create_args[:-1])
+            if arg == "--env"
+        ]
+        assert "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=false" in projected
+        assert "JASON_AUTONOMY_WORKER_ENABLED=false" in projected
+        assert "JASON_AUTONOMY_SHADOW_ENABLED=false" in projected
+        assert "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED=false" in projected
+
+        def inspected_env(review_enabled: bool) -> str:
+            values = [
+                item.replace("JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=false",
+                             "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=true")
+                if review_enabled else item
+                for item in projected
+            ]
+            return json.dumps([{
+                "Config": {
+                    "Labels": {"com.teamaot.jason.source_revision": SHA_A},
+                    "Env": values,
+                },
+            }])
+
+        with patch.object(runner, "output", return_value=inspected_env(False)):
+            runner.verify_preprod_env(name, SHA_A)
+        with patch.object(runner, "output", return_value=inspected_env(True)):
+            with unittest.TestCase().assertRaisesRegex(
+                runner.ReleaseManagerError,
+                "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED",
+            ):
+                runner.verify_preprod_env(name, SHA_A)
+    finally:
+        import shutil
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def test_transactional_sqlite_snapshot_includes_uncheckpointed_commits(tmp_path):
@@ -6523,3 +6591,17 @@ def test_postacceptance_rollback_failure_restores_freeze_and_fails_receipt(tmp_p
     assert receipt['freeze_restored'] is True
     assert receipt['freeze_sha256_before'] == receipt['freeze_sha256_after']
     assert receipt['standing_authority'] is False
+
+
+
+def test_v31_owner_release_mode_is_not_treated_as_legacy_teams_pilot():
+    import pytest
+    from types import SimpleNamespace
+    assert runner._reviewed_mobile_release_mode(
+        SimpleNamespace(schema_version="3.1")
+    ) == "owner_reviewed"
+    assert runner._reviewed_mobile_release_mode(
+        SimpleNamespace(schema_version="4.1")
+    ) == "admin_approver_separated"
+    with pytest.raises(runner.ReleaseManagerError):
+        runner._reviewed_mobile_release_mode(SimpleNamespace(schema_version="9.0"))

@@ -173,6 +173,8 @@ def active_overlap_check(
     body: str,
     token: str,
     active_days: int,
+    *,
+    read_pages=None,
 ) -> list[str]:
     current_sensitive = {path for path in current_files if sensitive(path)}
     if not current_sensitive:
@@ -182,7 +184,8 @@ def active_overlap_check(
         f"https://api.github.com/repos/{repository}/pulls"
         f"?state=open&base={urllib.parse.quote(base_ref)}&sort=updated&direction=desc"
     )
-    open_pulls = paged(pulls_url, token)
+    reader = read_pages or paged
+    open_pulls = reader(pulls_url, token)
     cutoff = datetime.now(timezone.utc) - timedelta(days=active_days)
     acknowledged = parse_acknowledged(body)
     errors: list[str] = []
@@ -196,7 +199,7 @@ def active_overlap_check(
         if updated < cutoff:
             continue
 
-        files = paged(
+        files = reader(
             f"https://api.github.com/repos/{repository}/pulls/{number}/files",
             token,
         )

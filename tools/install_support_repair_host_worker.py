@@ -21,7 +21,13 @@ def main() -> int:
     parser.add_argument('--repo', type=Path, default=Path('/home/al/projects/jason'))
     parser.add_argument('--spool', type=Path, default=Path('/var/lib/jason/openclaw/support-repair'))
     parser.add_argument('--activate', action='store_true')
+    parser.add_argument(
+        '--activate-breaker-recovery', action='store_true',
+        help='Explicit opt-in to activate the independent, existing guarded recovery timer',
+    )
     args = parser.parse_args()
+    if args.activate_breaker_recovery and not args.activate:
+        parser.error('--activate-breaker-recovery requires --activate')
 
     repo = args.repo.expanduser().resolve()
     spool = args.spool.expanduser().resolve()
@@ -31,6 +37,9 @@ def main() -> int:
     pmv3_controller = repo / 'tools' / 'pmv3_engineering_controller.py'
     pmv3_integration_queue = repo / 'tools' / 'pmv3_integration_queue.py'
     development_runner = repo / 'tools' / 'owner_approved_development_worker.py'
+    dependency_runner = repo / 'tools' / 'dependency_conflict_service.py'
+    isolated_common = repo / 'tools' / 'isolated_service_common.py'
+    concurrency_scopes = repo / 'config' / 'development-concurrency-scopes.json'
     supervisor_runner = repo / 'tools' / 'engineering_supervisor.py'
     breaker_recovery_runner = repo / 'tools' / 'release_breaker_recovery_manager.py'
     evidence_module = repo / 'tools' / 'engineering_evidence_tools.py'
@@ -43,6 +52,8 @@ def main() -> int:
     documentation_impact_gate = repo / 'tools' / 'documentation_impact_gate.py'
     unit_root = repo / 'infrastructure' / 'openclaw-operations' / 'systemd' / 'user'
     units = ('jason-support-repair-worker.service', 'jason-support-repair-worker.timer')
+    recovery_units = ('jason-release-breaker-recovery.service', 'jason-release-breaker-recovery.timer')
+    units_to_install = units + recovery_units if args.activate_breaker_recovery else units
     if not runner.is_file():
         raise SystemExit('support repair host worker source is missing')
     if not pipeline_runner.is_file():
@@ -53,6 +64,8 @@ def main() -> int:
         raise SystemExit('PMV3 integration queue source is missing')
     if not development_runner.is_file():
         raise SystemExit('owner-approved development worker source is missing')
+    if not dependency_runner.is_file() or not isolated_common.is_file() or not concurrency_scopes.is_file():
+        raise SystemExit('development claim controller dependency source is missing')
     if not supervisor_runner.is_file() or not evidence_module.is_file():
         raise SystemExit('governed engineering supervisor or evidence source is missing')
     if not breaker_recovery_runner.is_file():
@@ -70,7 +83,7 @@ def main() -> int:
         raise SystemExit('release manager gate source is missing')
     if not worker_release_gate.is_file():
         raise SystemExit('PMV3 worker release admission gate source is missing')
-    for unit in units:
+    for unit in units_to_install:
         if not (unit_root / unit).is_file():
             raise SystemExit(f'systemd source unit is missing: {unit}')
 
@@ -88,6 +101,9 @@ def main() -> int:
     _copy(pmv3_controller, install_root / 'pmv3_engineering_controller.py', 0o700)
     _copy(pmv3_integration_queue, install_root / 'pmv3_integration_queue.py', 0o700)
     _copy(development_runner, install_root / 'owner_approved_development_worker.py', 0o700)
+    _copy(dependency_runner, install_root / 'dependency_conflict_service.py', 0o600)
+    _copy(isolated_common, install_root / 'isolated_service_common.py', 0o600)
+    _copy(concurrency_scopes, install_root / 'development-concurrency-scopes.json', 0o600)
     _copy(supervisor_runner, install_root / 'engineering_supervisor.py', 0o700)
     _copy(breaker_recovery_runner, install_root / 'release_breaker_recovery_manager.py', 0o700)
     _copy(evidence_module, install_root / 'engineering_evidence_tools.py', 0o600)
@@ -98,10 +114,12 @@ def main() -> int:
     _copy(worker_release_gate, install_root / 'pmv3_worker_release_gate.py', 0o700)
     _copy(change_integration_gate, install_root / 'change_integration_gate.py', 0o600)
     _copy(documentation_impact_gate, install_root / 'documentation_impact_gate.py', 0o600)
-    for unit in units:
+    for unit in units_to_install:
         _copy(unit_root / unit, user_units / unit, 0o600)
 
     for path in (
+        home / 'jason-worktrees' / 'support-repair-closure',
+        spool.parent / 'autonomous-repair' / 'lifecycle-events',
         spool,
         spool / 'reasoning',
         spool / 'reasoning' / 'requests',
@@ -134,10 +152,28 @@ def main() -> int:
             check=True,
             env=systemd_env,
         )
+        if args.activate_breaker_recovery:
+            try:
+                subprocess.run(
+                    ['systemctl', '--user', 'enable', '--now', 'jason-release-breaker-recovery.timer'],
+                    check=True, env=systemd_env,
+                )
+                subprocess.run(
+                    ['systemctl', '--user', 'is-active', '--quiet', 'jason-release-breaker-recovery.timer'],
+                    check=True, env=systemd_env,
+                )
+            except (OSError, subprocess.CalledProcessError):
+                # Fail closed: do not leave a potentially unverified recovery timer active.
+                subprocess.run(
+                    ['systemctl', '--user', 'disable', '--now', 'jason-release-breaker-recovery.timer'],
+                    check=False, env=systemd_env,
+                )
+                raise
 
     print(f"WORKER_PATH={install_root / 'support_repair_host_worker.py'}")
     print(f"SPOOL_PATH={spool}")
     print(f"ACTIVATED={'yes' if args.activate else 'no'}")
+    print(f"INDEPENDENT_BREAKER_RECOVERY={'activated' if args.activate_breaker_recovery else 'unchanged'}")
     return 0
 
 

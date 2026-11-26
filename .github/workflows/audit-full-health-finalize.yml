@@ -1,0 +1,65 @@
+name: Audit Full Health Finalize
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'tools/audit_full_health_p0_finalize.py'
+      - 'tools/audit_full_health_p0_native_resume.py'
+      - 'tools/tests/test_audit_full_health_p0_native_resume.py'
+      - 'tools/tests/audit_full_health_p0_native_resume_root_fixture.py'
+      - 'tools/audit_journal_release_scope.py'
+      - 'tools/tests/test_audit_journal_protected_peers.py'
+      - 'tools/tests/test_audit_full_health_p0_finalize.py'
+      - 'tools/tests/audit_full_health_p0_finalize_root_fixture.py'
+      - 'infrastructure/jason-audit-full-health-finalize/**'
+      - 'docs/engineering/Audit-Full-Health-P0-Recovery-20261122.md'
+      - '.github/workflows/audit-full-health-finalize.yml'
+      - '.dockerignore'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  one-use-native-finalization-and-signed-owner:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated unit-test dependencies
+        run: python -m pip install -q pytest ./implementation
+      - name: Verify genuine original full proof, cleanup refusal, and native breaker gates
+        env:
+          PYTHONPATH: .:tools:implementation
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+            tools/tests/test_audit_full_health_p0_finalize.py \
+            tools/tests/test_audit_full_health_p0_native_resume.py \
+            tools/tests/test_audit_journal_protected_peers.py \
+            tools/tests/test_audit_full_health_p0_recovery.py \
+            tools/tests/test_audit_journal_protected_peers.py \
+            tools/tests/test_audit_journal_health.py \
+            tools/tests/test_audit_journal_health_native.py \
+            tools/tests/test_openclaw_authority_operational_health.py \
+            tools/tests/test_openclaw_authority_fast_health.py \
+            tools/tests/test_openclaw_authority_health_snapshot.py
+          python -m py_compile \
+            tools/audit_full_health_p0_finalize.py \
+            tools/audit_full_health_p0_native_resume.py \
+            tools/audit_full_health_p0_recovery.py
+          python tools/validate_documentation_control.py
+          test ! -e /var/lib/jason-owner-release/audit-full-health-p0-finalize-20261122
+          test ! -e /etc/systemd/system/jason-openclaw-authority-full-integrity.service.d/93-audit-full-health-p0-recovery.conf
+      - name: Isolated Root ownership, exact unlink, and irreversible one-use refusal
+        run: |
+          docker build --network=none -f infrastructure/jason-audit-full-health-finalize/tests.Dockerfile -t audit-full-health-finalize-fixture .
+          docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=FOWNER --cap-add=SETGID --cap-add=SETUID --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=1g audit-full-health-finalize-fixture
+      - name: Isolated Root continuation reuses signed one-use Owner proof
+        run: |
+          docker build --network=none -f infrastructure/jason-audit-full-health-finalize/native-resume.Dockerfile -t audit-full-health-native-resume-fixture .
+          docker run --rm --network=none --read-only --cap-drop=ALL --cap-add=CHOWN --cap-add=FOWNER --cap-add=SETGID --cap-add=SETUID --cap-add=DAC_OVERRIDE --security-opt=no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=1g audit-full-health-native-resume-fixture

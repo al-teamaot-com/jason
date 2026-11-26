@@ -1,0 +1,32 @@
+[Unit]
+Description=Jason one-use exact Owner-approved audit journal objective
+After=docker.service jason-audit-journal-data-recovery.service
+Requires=docker.service jason-audit-journal-data-recovery.service
+RequiresMountsFor=/srv/jason/archive /var/lib/jason/governed-ticket-shared
+ConditionPathExists=/var/lib/jason-audit-journal/private/release-plan.json
+StartLimitIntervalSec=1h
+StartLimitBurst=2
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/usr/local/lib/jason/audit-journal/trusted
+ExecStart=/usr/bin/python3 -I -B -c "import runpy,sys;sys.path.insert(0,'/usr/local/lib/jason/audit-journal/trusted/implementation');runpy.run_path('/usr/local/lib/jason/audit-journal/trusted/tools/audit_journal_control.py',run_name='__main__')" --operation complete-release
+TimeoutStartSec=16h
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=1G
+TasksMax=32
+NoNewPrivileges=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_KILL CAP_AUDIT_WRITE
+AmbientCapabilities=CAP_SETUID
+UMask=0077
+# No private mount namespace: recovery publishes in the Host mount namespace.
+Restart=on-failure
+RestartSec=30s
+# At most one automatic retry per hour; exact claim/deadlines remain enforced.
+
+[Install]
+WantedBy=multi-user.target

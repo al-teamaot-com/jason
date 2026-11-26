@@ -1,0 +1,374 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "automation.component.execute",
+      "automation.job.output.read",
+      "automation.job.read",
+      "endpoint.device.read",
+      "service.ticket.note.create",
+      "service.ticket.notes.search",
+      "service.ticket.read"
+    ],
+    "approval_bound_branches": [
+      "quick_test",
+      "self_heal",
+      "write_note"
+    ],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "original alert/ticket stay Human Review pending separate approved alert/SOC cleanup and verified source parity"
+  },
+  "expected_state": {
+    "security_log_quick_test_healthy": true,
+    "single_self_heal_attempt_max": 1,
+    "quick_test_component_uid": "a50d486b-2cce-4658-9e11-64fb6bf9ab9d",
+    "self_heal_component_uid": "cdd297b4-378f-4ffc-b272-56833e926c81",
+    "no_unrelated_security_alert_cleanup": true
+  },
+  "migration": {
+    "source_conversion": "source_specific_partial_candidate_not_accepted",
+    "legacy_source_blob_sha": "60fbcc32388d59f0dab029ca440d905a87a51c44",
+    "legacy_registry_version": "1.0.0",
+    "source_map": "docs/playbooks/json/migration/source_maps/security_log_self_heal.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "Security Log self-heal clears security audit history and requires exact authenticated Owner approval bound to production-sensitive component and current incident, not merely a generic standing-safe label",
+      "Original registry does NOT authorize endpoint.alert.resolve or SOC/EDR alert cleanup; full authored side-effect cleanup and original-alert resolution cannot execute without separately governed source amendment",
+      "Secure exact SOC correlation of all event-log-cleared side effects and original ticket closure must be implemented through existing governed provider readback",
+      "Independent fresh Quick Test after one Security Log Self-Heal job requires separately persisted job identity and output, no speculative command replay",
+      "No isolated real-provider preproduction approval, safe target or production Core coexistence acceptance has been verified"
+    ],
+    "accepted_for_execution": false,
+    "production_activation_authorized": false
+  },
+  "playbook": {
+    "id": "security_log_self_heal",
+    "lifecycle": "pilot",
+    "name": "Security Log Self-Heal",
+    "owner": "AOT",
+    "source": "docs/playbooks/Security-Log-Self-Heal-Playbook.md",
+    "target_type": "endpoint",
+    "version": "1.0.0-migration.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "source_only": true,
+    "security_sensitive_event_log_clear": true,
+    "no_unapproved_event_log_mutation": true,
+    "no_unrelated_soc_cleanup": true,
+    "no_reboot": true,
+    "no_alert_resolve_without_source_authority": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "client_id",
+      "device_uid",
+      "original_alert_uid",
+      "quick_test_job_uid",
+      "self_heal_job_uid",
+      "self_heal_attempted",
+      "repair_started_at",
+      "independent_healthy_result",
+      "correlated_soc_alert_uids",
+      "correlated_ticket_ids",
+      "next_due_at"
+    ],
+    "no_duplicate_security_log_clear": true
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_gate"
+    },
+    {
+      "id": "ticket_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_client_ticket_alert_and_same_device_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_endpoint"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_endpoint",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "endpoint_gate"
+    },
+    {
+      "id": "endpoint_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_device_online_and_quick_test_component_current",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "quick_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "quick_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_owner_promotion_and_readonly_quick_test_job_identity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "quick_test"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "quick_test",
+      "type": "remediation",
+      "capability": "automation.component.execute",
+      "arguments": {
+        "$fact": "trusted_exact_security_log_quick_test_args"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "read_job"
+    },
+    {
+      "id": "read_job",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_existing_quick_test_job_args"
+      },
+      "next": "job_gate"
+    },
+    {
+      "id": "job_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "same_device_job_terminal_unique",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_stdout"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_stdout",
+      "type": "verification",
+      "capability": "automation.job.output.read",
+      "arguments": {
+        "$fact": "trusted_exact_security_log_job_output_args"
+      },
+      "next": "classification_gate"
+    },
+    {
+      "id": "classification_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "verified_security_log_disposition",
+            "operator": "eq",
+            "value": "healthy_original_alert_completion_unapproved"
+          },
+          "next": "human_review"
+        },
+        {
+          "when": {
+            "fact": "verified_security_log_disposition",
+            "operator": "eq",
+            "value": "one_security_log_self_heal_candidate_requires_source_grant"
+          },
+          "next": "security_sensitive_gate"
+        },
+        {
+          "when": {
+            "fact": "verified_security_log_disposition",
+            "operator": "eq",
+            "value": "one_repair_failed_human_review"
+          },
+          "next": "human_review"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "security_sensitive_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_security_log_mutation_owner_approval_and_one_attempt",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "self_heal"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "self_heal",
+      "type": "remediation",
+      "capability": "automation.component.execute",
+      "arguments": {
+        "$fact": "trusted_exact_security_log_self_heal_args"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "read_heal_job"
+    },
+    {
+      "id": "read_heal_job",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_self_heal_job_args"
+      },
+      "next": "heal_job_gate"
+    },
+    {
+      "id": "heal_job_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_heal_job_terminal_and_no_replay",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "verify_security_log"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "verify_security_log",
+      "type": "verification",
+      "capability": "automation.job.output.read",
+      "arguments": {
+        "$fact": "trusted_exact_independent_quick_test_output_args"
+      },
+      "next": "verify_gate"
+    },
+    {
+      "id": "verify_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "independent_security_log_healthy_and_no_unrelated_soc_side_effects",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "note_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_sensitive_internal_note_authorized_and_bound",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "write_note"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "write_note",
+      "type": "remediation",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "$fact": "trusted_exact_security_log_note_args"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_note"
+    },
+    {
+      "id": "verify_note",
+      "type": "verification",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "note_readback_gate"
+    },
+    {
+      "id": "note_readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_jason_security_note_provider_readback",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "human_review"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Datto RMM",
+    "exact_security_log_unreadable_alert": true,
+    "known_error": "Security log NOT readable"
+  },
+  "verification": {
+    "authoritative_source": "exact DRMM security alert, endpoint identity, Quick Test and Self-Heal job status/stdout plus independently governed SOC/Autotask security evidence",
+    "success_condition": "original alert/ticket stay Human Review pending separate approved alert/SOC cleanup and verified source parity"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "company_identity_exact": true,
+  "current_queue": "Jason",
+  "current_status": "In Progress",
+  "exact_handoff_promotion_verified": true,
+  "exact_handoff_readback_verified": true,
+  "internal_note_readback_verified": true,
+  "owned_by_jason": true,
+  "review_reason": "needs_human_review",
+  "source_snapshot_unchanged": true,
+  "ticket_id": 143305,
+  "unique_current_ticket": true
+}

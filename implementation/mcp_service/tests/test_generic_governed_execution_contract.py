@@ -1362,7 +1362,9 @@ def test_status_surfaces_pmv3_engineering_controller(monkeypatch, tmp_path):
     assert pmv3["pass_count"] == 2
     assert pmv3["last_disposition"] == "recoverable"
     assert pmv3["last_progress_sha256"] == "abc123"
-    assert pmv3["teams_only_approval"] is True
+    assert pmv3["historical_teams_only_approval"] is True
+    assert pmv3["teams_only_approval"] is None
+    assert pmv3["release_approval_policy"]["status"] == "unknown"
     assert pmv3["integration_queue"]["status"] == "release_locked"
     assert pmv3["integration_queue"]["release_lock_active"] is True
     assert pmv3["integration_queue"]["release_candidate_sha"] == "2" * 40
@@ -1374,4 +1376,86 @@ def test_status_pmv3_missing_state_is_truthful(monkeypatch, tmp_path):
     result = server._pmv3_engineering_snapshot()
     assert result["status"] == "unavailable"
     assert result["reason"] == "pmv3_controller_state_missing"
-    assert result["teams_only_approval"] is True
+    assert result["teams_only_approval"] is None
+
+
+
+def test_status_uses_current_owner_reviewed_lkg_instead_of_old_teams_snapshot(
+    monkeypatch, tmp_path,
+):
+    old = tmp_path / "old.json"
+    old.write_text(json.dumps({
+        "schema_version": "3.0", "status": "bounded_stall",
+        "finished_at": "2026-11-04T12:36:49+00:00",
+        "teams_only_approval": True, "passes": [],
+    }))
+    root = tmp_path / "release"
+    readback = root / "protected-readback"
+    readback.mkdir(parents=True)
+    sha = "e" * 40
+    state = {
+        "last_known_good": {"manifest": {
+            "revision": sha,
+            "mobile_release_approval_mode": "owner_reviewed",
+        }},
+        "circuit_breaker": {
+            "state": "closed", "revalidated_revision": sha,
+        },
+    }
+    (readback / "production-control-state.json").write_text(json.dumps(state))
+    monkeypatch.setenv("JASON_PMV3_ENGINEERING_STATE", str(old))
+    monkeypatch.setenv("JASON_RELEASE_MANAGER_STATE_ROOT", str(root))
+    monkeypatch.setattr(server, "_active_action_capabilities", lambda: [])
+    monkeypatch.setattr(
+        server, "_autonomous_ticket_work_snapshot",
+        lambda: {"status": "succeeded"},
+    )
+    monkeypatch.setattr(
+        server, "_production_commitment_snapshot",
+        lambda: {"status": "succeeded"},
+    )
+    result = server.jason_mcp_status()
+    assert result["pmv3_engineering"]["historical_teams_only_approval"] is True
+    assert result["pmv3_engineering"]["teams_only_approval"] is False
+    assert result["release_approval_policy"] == {
+        "status": "current", "mode": "owner_reviewed",
+        "teams_required": False, "revision": sha,
+        "source": "root_protected_last_known_good",
+    }
+    assert result["pmv3_engineering"]["finished_at"] == "2026-11-04T12:36:49+00:00"
+
+    # Changed or open release/breaker evidence must never claim Teams-free.
+    state["circuit_breaker"]["state"] = "open"
+    (readback / "production-control-state.json").write_text(json.dumps(state))
+    suspect = server.jason_mcp_status()
+    assert suspect["pmv3_engineering"]["teams_only_approval"] is None
+    assert suspect["release_approval_policy"]["status"] == "unknown"
+
+    state["circuit_breaker"]["state"] = "closed"
+    state["circuit_breaker"]["revalidated_revision"] = "a" * 40
+    (readback / "production-control-state.json").write_text(json.dumps(state))
+    suspect = server.jason_mcp_status()
+    assert suspect["pmv3_engineering"]["teams_only_approval"] is None
+
+
+def test_status_does_not_assume_non_teams_approval_for_other_release_modes(
+    monkeypatch, tmp_path,
+):
+    root = tmp_path / "release"
+    readback = root / "protected-readback"
+    readback.mkdir(parents=True)
+    sha = "b" * 40
+    p = readback / "production-control-state.json"
+    p.write_text(json.dumps({
+        "last_known_good": {"manifest": {
+            "revision": sha, "mobile_release_approval_mode": "admin_approver_separated",
+        }},
+        "circuit_breaker": {
+            "state": "closed", "revalidated_revision": sha,
+        },
+    }))
+    monkeypatch.setenv("JASON_RELEASE_MANAGER_STATE_ROOT", str(root))
+    value = server._current_release_approval_policy_snapshot()
+    assert value["status"] == "unknown"
+    assert value["teams_required"] is None
+    assert value["mode"] == "admin_approver_separated"

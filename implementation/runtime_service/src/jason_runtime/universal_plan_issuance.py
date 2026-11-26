@@ -61,6 +61,7 @@ class UniversalPlanIssuer:
     delivery: Any
     clock: Callable[[],datetime] = lambda:datetime.now(timezone.utc)
     approval_id_factory: Callable[[],str] = lambda:'planapproval-'+uuid4().hex
+    objective_enrollment: Any = None
 
     def submit_plan(self, *, requests: tuple[OrchestrationRequest,...], identity,
                     title: str, summary: str, production: bool,
@@ -236,13 +237,45 @@ class UniversalPlanIssuer:
                 'card_instance_challenge_sha256':hashlib.sha256(
                     card_challenge.encode('ascii')).hexdigest(),
             })
-        self.handler.requests.store(proposal,pinned,now=now)
-        self.handler.proposals.store(proposal)
+        if self.objective_enrollment is not None:
+            # The installed privileged consumer seals exact candidate material
+            # before a human is asked to approve. It supplies only its card nonce;
+            # no decision or execution authority is returned by staging.
+            enrolled = self.objective_enrollment.stage(
+                proposal=proposal, requests=pinned, pending=pending)
+            challenge = enrolled.get("card_instance_challenge")
+            if (enrolled.get("approval_id") != approval_id
+                    or enrolled.get("plan_fingerprint") != fingerprint
+                    or type(challenge) is not str
+                    or len(challenge) != 48
+                    or any(c not in "0123456789abcdef" for c in challenge)):
+                raise PermissionError("Root enrollment changed the reviewed objective")
+            pending = replace(pending, metadata=dict(pending.metadata,
+                card_instance_challenge=challenge,
+                card_instance_challenge_sha256=hashlib.sha256(challenge.encode("ascii")).hexdigest()))
+        if self.objective_enrollment is not None and self.handler.requests.contains(approval_id):
+            self.handler.requests.verify_proposal(proposal)
+        else:
+            self.handler.requests.store(proposal,pinned,now=now)
+        if self.objective_enrollment is not None and self.handler.proposals.contains(approval_id):
+            if self.handler.proposals.require(approval_id) != proposal:
+                raise PermissionError("retained objective proposal changed during recovery")
+        else:
+            self.handler.proposals.store(proposal)
+        existing = self.handler.service.teams_flow.approval_service.repository.get(approval_id)
+        if self.objective_enrollment is not None and existing is not None:
+            # A pending row exists before any delivery call. Its presence means
+            # a send may already have happened; never resend after restart.
+            return {"approval_id": approval_id, "status": existing.status.value,
+                    "reissued": False, "plan_fingerprint": fingerprint}
         self.handler.requests.record_progress(approval_id,state='awaiting_approval',now=now)
         coordinator=ApprovalRequestDeliveryCoordinator(self.handler.service.teams_flow.approval_service,
             self.handler.service.teams_flow.audit,self.delivery)
         try:
             receipt=coordinator.create_and_deliver(pending,now=now)
+            if self.objective_enrollment is not None:
+                self.objective_enrollment.record_delivery(
+                    approval_id=approval_id, receipt=receipt)
         except Exception as exc:
             # A partial/unknown delivery is observable and not automatically resent.
             # A valid delivered card can still be decided safely; callback revalidates.

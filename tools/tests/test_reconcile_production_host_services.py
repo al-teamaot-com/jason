@@ -504,7 +504,9 @@ def test_authority_health_refreshes_full_proof_only_when_existing_evidence_is_no
     assert 'JASON_AUTHORITY_FULL_INTEGRITY=RUN_REPAIRED_PROOF' in text
     assert 'JASON_AUTHORITY_FULL_INTEGRITY=WAIT_EXISTING_JOB' in text
     assert 'systemctl start "$CURRENT_UNIT"' in text
-    assert text.index('ensure_authority_full_integrity_proof') < text.index('for unit in "${MAINTENANCE_SERVICES[@]}"; do')
+    assert 'JASON_AUTHORITY_FULL_INTEGRITY=DEFERRED_BY_OWNER_EMERGENCY_NOT_VERIFIED' in text
+    assert text.count('\nensure_authority_full_integrity_proof\n') == 0
+    assert text.index('DEFERRED_BY_OWNER_EMERGENCY_NOT_VERIFIED') < text.index('for unit in "${MAINTENANCE_SERVICES[@]}"; do')
     assert '120s systemctl start "$unit"' in text
 
 

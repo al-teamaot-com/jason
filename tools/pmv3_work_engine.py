@@ -203,21 +203,131 @@ def record_teams_approval(
     }
 
 
+# A Teams-specific callback is not the only way to establish an approved
+# Owner decision. The trusted service adapter must verify Entra OAuth and
+# Jason authority BEFORE it calls this routine; this pure work engine never
+# accepts an unverified chat message, SSH string, or arbitrary user flag.
+OWNER_TENANT_ID = "f7054323-d52b-4863-8c2f-1898f0b6077c"
+OWNER_ENTRA_OBJECT_ID = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+
+
+def owner_approval_scope(item: Mapping[str, Any]) -> str:
+    """Bind an approval to one work item, generation and immutable action."""
+    stable = {
+        "item_id": str(item.get("id") or ""),
+        "action": str(item.get("action") or ""),
+        "generation": int(item.get("generation") or 0),
+        "request_id": str(item.get("approval_request_id") or ""),
+    }
+    return hashlib.sha256(json.dumps(
+        stable, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
+
+
+def record_authenticated_owner_approval(
+    state: dict[str, Any],
+    item_id: str,
+    *,
+    presented_evidence: Mapping[str, Any],
+    verified_decision: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+) -> None:
+    """Record only a separately verified exact-action Owner approval.
+
+    The verifier is an injected trusted Jason Entra identity/authorization
+    adapter, not a boolean supplied by an end user. It must authenticate the
+    Entra OAuth bearer, resolve an active Jason Owner, verify issuer-signed
+    request evidence and return normalized proof. A missing verifier denies.
+    No credential or raw bearer is retained in the work engine state.
+    """
+    if not callable(verified_decision):
+        raise ValueError("independent authenticated Owner verifier required")
+    item = state["items"].get(item_id)
+    if not isinstance(item, dict) or not item.get("approval_required"):
+        raise ValueError("existing approval-required work item required")
+    expected_request = str(item.get("approval_request_id") or "")
+    if not expected_request:
+        raise ValueError("approval request id required")
+    if not isinstance(presented_evidence, Mapping):
+        raise ValueError("opaque Owner evidence required")
+    normalized = verified_decision(presented_evidence)
+    if not isinstance(normalized, Mapping):
+        raise ValueError("independent Owner verifier returned no proof")
+    scope = owner_approval_scope(item)
+    decision = normalized.get("decision")
+    receipt_id = str(normalized.get("receipt_id") or "")
+    proof_digest = str(normalized.get("proof_sha256") or "")
+    if (normalized.get("issuer") != "jason_entra_owner_authority"
+            or normalized.get("authentication") != "entra_oauth_bearer"
+            or normalized.get("identity_status") != "active"
+            or normalized.get("owner_identity_id") != "person-al"
+            or normalized.get("microsoft_tenant_id") != OWNER_TENANT_ID
+            or normalized.get("microsoft_object_id") != OWNER_ENTRA_OBJECT_ID
+            or normalized.get("request_id") != expected_request
+            or normalized.get("action_scope_sha256") != scope
+            or decision not in {"approve", "deny"}
+            or not receipt_id
+            or len(proof_digest) != 64
+            or any(c not in "0123456789abcdef" for c in proof_digest)):
+        raise ValueError("authenticated Owner evidence not exact or independently verified")
+    # A receipt belongs to one request only; do not allow it to approve a
+    # second work item or overwrite an incompatible existing decision.
+    for key, other in state["items"].items():
+        previous = other.get("approval") if isinstance(other, Mapping) else None
+        if (key != item_id and isinstance(previous, Mapping)
+                and previous.get("receipt_id") == receipt_id):
+            raise ValueError("Owner approval receipt replay")
+    existing = item.get("approval")
+    if existing is not None:
+        if (not isinstance(existing, Mapping)
+                or existing.get("receipt_id") != receipt_id
+                or existing.get("decision") != decision
+                or existing.get("action_scope_sha256") != scope):
+            raise ValueError("conflicting Owner approval")
+        return
+    item["approval"] = {
+        "channel": "authenticated_owner",
+        "request_id": expected_request,
+        "decision": decision,
+        "actor_id": "person-al",
+        "tenant_id": OWNER_TENANT_ID,
+        "object_id": OWNER_ENTRA_OBJECT_ID,
+        "receipt_id": receipt_id,
+        "verified": True,
+        "proof_sha256": proof_digest,
+        "action_scope_sha256": scope,
+    }
+
+
 def approval_satisfied(item: Mapping[str, Any]) -> bool:
     if not bool(item.get("approval_required")):
         return True
     approval = item.get("approval")
     if not isinstance(approval, Mapping):
         return False
-    return (
-        approval.get("channel") == "teams"
-        and approval.get("verified") is True
+    channel = approval.get("channel")
+    core = (
+        approval.get("verified") is True
         and approval.get("decision") == "approve"
         and approval.get("request_id") == item.get("approval_request_id")
         and bool(approval.get("actor_id"))
         and bool(approval.get("tenant_id"))
         and bool(approval.get("receipt_id"))
     )
+    if not core:
+        return False
+    if channel == "teams":
+        return True
+    if channel == "authenticated_owner":
+        return (
+            approval.get("actor_id") == "person-al"
+            and approval.get("tenant_id") == OWNER_TENANT_ID
+            and approval.get("object_id") == OWNER_ENTRA_OBJECT_ID
+            and approval.get("action_scope_sha256") == owner_approval_scope(item)
+            and isinstance(approval.get("proof_sha256"), str)
+            and len(approval["proof_sha256"]) == 64
+            and all(c in "0123456789abcdef" for c in approval["proof_sha256"])
+        )
+    return False
 
 
 def classify_reason(reason: str) -> str:

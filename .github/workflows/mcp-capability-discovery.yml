@@ -9,6 +9,8 @@ on:
       - 'implementation/mcp_service/tests/test_endpoint_device_search_contract.py'
       - 'implementation/mcp_service/tests/test_ticket_work_lifecycle_contract.py'
       - 'implementation/mcp_service/tests/test_print_meter_usage_projection.py'
+      - 'implementation/mcp_service/tests/test_print_fleet_usage_projection.py'
+      - 'implementation/mcp_service/tests/test_print_device_pagination_projection.py'
       - 'implementation/orchestrator/contracts.py'
       - '.github/workflows/mcp-capability-discovery.yml'
   push:
@@ -19,6 +21,8 @@ on:
       - 'implementation/mcp_service/tests/test_endpoint_device_search_contract.py'
       - 'implementation/mcp_service/tests/test_ticket_work_lifecycle_contract.py'
       - 'implementation/mcp_service/tests/test_print_meter_usage_projection.py'
+      - 'implementation/mcp_service/tests/test_print_fleet_usage_projection.py'
+      - 'implementation/mcp_service/tests/test_print_device_pagination_projection.py'
       - 'implementation/orchestrator/contracts.py'
       - '.github/workflows/mcp-capability-discovery.yml'
 
@@ -56,6 +60,8 @@ jobs:
             implementation/mcp_service/tests/test_endpoint_device_search_contract.py \
             implementation/mcp_service/tests/test_ticket_work_lifecycle_contract.py \
             implementation/mcp_service/tests/test_print_meter_usage_projection.py \
+            implementation/mcp_service/tests/test_print_fleet_usage_projection.py \
+            implementation/mcp_service/tests/test_print_device_pagination_projection.py \
             implementation/orchestrator/contracts.py
 
       - name: Test capability discovery and governed-read failure boundary
@@ -65,4 +71,6 @@ jobs:
             implementation/mcp_service/tests/test_governed_read_failure_contract.py \
             implementation/mcp_service/tests/test_endpoint_device_search_contract.py \
             implementation/mcp_service/tests/test_ticket_work_lifecycle_contract.py \
-            implementation/mcp_service/tests/test_print_meter_usage_projection.py
+            implementation/mcp_service/tests/test_print_meter_usage_projection.py \
+            implementation/mcp_service/tests/test_print_fleet_usage_projection.py \
+            implementation/mcp_service/tests/test_print_device_pagination_projection.py

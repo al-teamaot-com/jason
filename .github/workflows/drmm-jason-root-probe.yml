@@ -1,0 +1,48 @@
+name: Exact Jason DRMM Root Identity Probe - source-only CI
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'implementation/mcp_service/tests/test_datto_component_approval_policy.py'
+      - 'implementation/runtime_service/src/jason_runtime/datto_component_execution.py'
+      - 'implementation/runtime_service/src/jason_runtime/datto_component_scope.py'
+      - 'implementation/runtime_service/tests/test_datto_component_execution_runtime.py'
+      - 'implementation/runtime_service/tests/test_datto_jason_root_probe_profile.py'
+      - 'config/drmm-jason-root-probe-v1.json'
+      - 'infrastructure/jason-mcp/production-deploy.sh'
+      - 'infrastructure/jason-runtime/production-deploy.sh'
+      - '.github/workflows/drmm-jason-root-probe.yml'
+  push:
+    paths:
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'implementation/runtime_service/src/jason_runtime/datto_component_execution.py'
+      - 'implementation/runtime_service/src/jason_runtime/datto_component_scope.py'
+      - '.github/workflows/drmm-jason-root-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exact-root-identity:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src:implementation/mcp_service/src
+      JASON_GOVERNED_EXECUTION_DB: /tmp/jason-root-probe-ci-only-approvals.sqlite3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated source test dependencies
+        run: |
+          python -m pip install pytest
+          python -m pip install -e ./implementation -e ./implementation/connectors/openclaw -e ./implementation/runtime_service -e ./implementation/mcp_service
+      - name: Compile and validate release entrypoints
+        run: |
+          python -m py_compile implementation/mcp_service/src/jason_mcp/server.py implementation/runtime_service/src/jason_runtime/datto_component_execution.py implementation/runtime_service/src/jason_runtime/datto_component_scope.py
+          bash -n infrastructure/jason-mcp/production-deploy.sh infrastructure/jason-runtime/production-deploy.sh
+      - name: Verify exact production target and per-run denials
+        run: |
+          python -m pytest -q implementation/mcp_service/tests/test_datto_component_approval_policy.py implementation/runtime_service/tests/test_datto_component_execution_runtime.py -k 'jason_root_probe or linux_worker or linux_shell'
+          python -m pytest -q implementation/runtime_service/tests/test_datto_jason_root_probe_profile.py

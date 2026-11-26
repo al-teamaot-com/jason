@@ -55,6 +55,15 @@ def scenario(tmp_path: Path):
         "owner_approval": {
             "approved": True, "candidate_sha": SHA,
             "source": "authenticated_mobile_teams_owner:" + APPROVAL_ID,
+            "transaction_binding": {
+                "candidate_sha": SHA,
+                "rollback_sha": ROLLBACK,
+                "scope_sha256": SCOPE,
+                "manifest_sha256": hashlib.sha256(json.dumps(
+                    manifest, sort_keys=True, separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")).hexdigest(),
+            },
         },
         "history": [],
     }
@@ -88,6 +97,34 @@ def record_grant(tmp_path, args):
          patch.object(runner, "revalidate_circuit_breaker"), \
          patch.object(runner, "live_production_alignment"):
         return runner.record_signed_initial_unfreeze(ROOT, tmp_path, **args)
+
+
+def test_exact_owner_release_is_the_one_transaction_authority(tmp_path):
+    marker_path, raw, record, binding, args = scenario(tmp_path)
+    assert not (tmp_path / "owner-signed-unfreeze-receipts").exists()
+    assert not (tmp_path / "owner-explicit-unfreeze-receipts").exists()
+    context = runner.owner_release_transaction_context(tmp_path, record)
+    assert context is not None
+    assert context["recovery_profile_id"] == "owner_exact_release_transaction"
+    assert context["candidate_sha"] == SHA
+    assert context["rollback_sha"] == ROLLBACK
+    assert context["scope_sha256"] == SCOPE
+    opened = runner.begin_one_transaction_freeze_exception(tmp_path, context)
+    assert not marker_path.exists()
+    runner.restore_one_transaction_freeze_exception(
+        tmp_path, opened, release_state="closed"
+    )
+    assert marker_path.read_bytes() == raw
+    assert not (tmp_path / "owner-signed-unfreeze-receipts").exists()
+    assert not (tmp_path / "owner-explicit-unfreeze-receipts").exists()
+
+
+def test_exact_owner_release_transaction_fails_closed_on_scope_drift(tmp_path):
+    marker_path, raw, record, binding, args = scenario(tmp_path)
+    record["manual_scope_review"]["scope_sha256"] = "0" * 64
+    assert runner.owner_release_transaction_context(tmp_path, record) is None
+    assert marker_path.read_bytes() == raw
+    assert not (tmp_path / "owner-unfreeze-receipts").exists()
 
 
 def test_one_signed_click_produces_separate_exact_receipt_and_restores_freeze(tmp_path):
@@ -511,7 +548,7 @@ def test_approval_only_purpose_recognizes_unused_expired_initial_receipt(
     assert runner.signed_owner_offer_purpose(
         record, SHA, policy, "owner_reviewed",
         ccc_root=ccc, state_root=tmp_path,
-    ) == "initial_unfreeze_renewal_only"
+    ) is None
     assert marker.read_bytes() == raw
     assert original.read_bytes() == original_raw
     record["renewed_initial_unfreeze_authorization"] = {

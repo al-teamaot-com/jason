@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "profile": "aot-autotask-catalog-runtime-mcp-v1",
+  "protected_feature_sha": "565f388b0e72b0b2695d47ce146c9238de893948",
+  "snapshot_sha": "755fa5fe3f75958fee2427a0af0777dd242d8f00",
+  "rollback_sha": "d1b8c196dadd4b672ec8ba47075f27bb61c98d63",
+  "snapshot_ref": "refs/heads/prep/catalog-identity-grants-owner-approval-isolated-20261117",
+  "changed_files": [
+    ".github/workflows/security-regressions.yml",
+    "docs/engineering/reviews/CATALOG_EXACT_GRANT_ADMIN_20261117.md",
+    "docs/engineering/reviews/CATALOG_SERVICE_IDENTITY_20261117.md",
+    "implementation/kernel/catalog_scoped_promotion_contract.py",
+    "implementation/mcp_service/src/jason_mcp/catalog_grant_admin.py",
+    "implementation/mcp_service/src/jason_mcp/catalog_scoped_promotion_approval.py",
+    "implementation/mcp_service/src/jason_mcp/server.py",
+    "implementation/mcp_service/tests/test_autotask_catalog_grant_admin.py",
+    "implementation/orchestrator/tests/test_execution_plan_binding.py",
+    "implementation/runtime_service/src/jason_runtime/autotask_procurement.py",
+    "implementation/runtime_service/tests/test_autotask_catalog_service_identity.py"
+  ],
+  "scope_sha256": "d91998d980fc9b19105270e95067ded1a2068aaecf9ba59d5de642163dbc5ec9",
+  "runtime_image_id": "sha256:dbd4d017dcc2deaf83109f5a0c6e68b3473c6de13881a56aa17238b647bbce66",
+  "mcp_image_id": "sha256:da57dd05bfde19321ddb4eca2b1910aff41aee7027905365fdb76a12aa1989f2",
+  "rollback_runtime_image_id": "sha256:c43f9f7364a4b2b16bdec261fa35db2b861eabe959ba818f689582bbb1b7d132",
+  "rollback_mcp_image_id": "sha256:b2f74bf1513568f6c9df7a2ffa764b1a5f43303c8317702741d646f223db1477",
+  "freeze_sha256": "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f",
+  "runtime_settings": {
+    "JASON_AUTOTASK_CATALOG_AUTH_MODE": "jason_managed"
+  },
+  "mcp_settings": {
+    "JASON_AUTOTASK_CATALOG_GRANT_ADMIN_PROFILE": "aot-catalog-self-owner-v1"
+  }
+}

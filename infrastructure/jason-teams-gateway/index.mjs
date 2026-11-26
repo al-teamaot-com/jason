@@ -1,4 +1,5 @@
 import { parseApprovalSubmit } from "./approval-submit.mjs";
+import { objectiveApprovalRuntimeUrl } from "./objective-approval-route.mjs";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -519,7 +520,11 @@ agent.onActivity("message", async (context) => {
       PRIVATE_KEY_PATH,
     );
     const result = await postConversationEnvelope({
-      runtimeUrl: RUNTIME_URL,
+      runtimeUrl: objectiveApprovalRuntimeUrl({
+        approvalId: approvalSubmit?.approvalId,
+        runtimeUrl: RUNTIME_URL,
+        objectiveUrl: process.env.JASON_OWNER_OBJECTIVE_URL,
+      }),
       envelope: signed,
       timeoutMs: REQUEST_TIMEOUT_MS,
     });
