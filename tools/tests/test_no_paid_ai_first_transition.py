@@ -280,3 +280,76 @@ def test_pinned_hold_bytes_cannot_be_changed_even_with_correct_mode(monkeypatch)
     monkeypatch.setattr(first,"read_file",lambda *a,**k:b"changed hold")
     with pytest.raises(first.TransitionDenied,match="FREEZE_OR_HOLD_CHANGED"):
         first.fixed_controls()
+
+
+@pytest.mark.parametrize("role,key",[
+    ("jason-runtime","JASON_UNIVERSAL_QUERY_ENABLED"),
+    ("jason-mcp-pilot","JASON_INVESTIGATION_LOOP_ENABLED"),
+    ("jason-pmv4-ticket-core",None),
+])
+def test_exact_hosted_only_startup_delta_preserves_approved_body(role,key):
+    body=first.body_for(before(role),policy,contract)
+    if key:
+        body["Env"].append(key+"=true")
+    old=deepcopy(body)
+    new=first.startup_compatible_body(role,body)
+    assert body==old
+    assert {k:v for k,v in new.items() if k!="Env"}=={k:v for k,v in old.items() if k!="Env"}
+    expected=dict(x.split("=",1) for x in old["Env"])
+    if key: expected[key]="false"
+    assert dict(x.split("=",1) for x in new["Env"])==expected
+    assert first.startup_compatible_body(role,new)==new
+
+
+def test_exact_failed_runtime_restart_timestamp_only_is_volatile():
+    role="jason-runtime";old=before(role);old["Id"]=first.FAILED_RUNTIME_ID
+    row={"original_id":first.FAILED_RUNTIME_ID,"failed_runtime_restart_timestamp_volatile":True}
+    a=first.baseline_digest(old,role,row,policy)
+    old["State"]["StartedAt"]="2026-11-26T22:29:00Z"
+    assert first.baseline_digest(old,role,row,policy)==a
+    old["HostConfig"]["Memory"]=1
+    assert first.baseline_digest(old,role,row,policy)!=a
+    old["Id"]="d"*64
+    with pytest.raises(first.TransitionDenied,match="RESTART_NORMALIZATION_NOT_EXACT"):
+        first.baseline_digest(old,role,row,policy)
+
+
+def test_startup_plan_uses_only_exact_prior_bodies_and_current_failed_runtime(monkeypatch):
+    roles=first.ORDER
+    originals={r:before(r) for r in roles}
+    for i,r in enumerate(roles):
+        originals[r]["Id"]=str(i+1)*64
+    approved={r:first.body_for(originals[r],policy,contract) for r in roles}
+    for r,key in first.STARTUP_FLAGS.items():
+        originals[r]["Config"]["Env"].append(key+"=true")
+        approved[r]=first.body_for(originals[r],policy,contract)
+    prior={"controls":{"freeze":"unchanged"},"protected_peers":{"peer":"same"},
+           "ticket_identity":[1,2],"lkg":{"revision":first.LKG},
+           "components":{r:row_for(originals[r],approved[r]) for r in roles}}
+    runtime=policy.project_container(originals[roles[0]])
+    runtime["Id"]=first.FAILED_RUNTIME_ID
+    runtime["State"]["Health"]={"Status":"unhealthy"}
+    class ReadOnlyEngine:
+        def lookup(self,ref,required=False):
+            if ref==roles[0]: return deepcopy(runtime)
+            if ref in roles[1:]: return deepcopy(originals[ref])
+            assert ref==originals[roles[0]]["Id"]
+            return None
+    engine=ReadOnlyEngine()
+    monkeypatch.setattr(first,"prior_failed_plan",lambda owner:(deepcopy(prior),deepcopy(approved)))
+    monkeypatch.setattr(first,"fixed_controls",lambda:prior["controls"])
+    monkeypatch.setattr(first,"peers",lambda:prior["protected_peers"])
+    monkeypatch.setattr(first,"ticket_identity",lambda:prior["ticket_identity"])
+    monkeypatch.setattr(first,"startup_breaker_state",lambda *a,**k:{"state":"open"})
+    libs={"owner":None,"policy":policy,"engine":contract,"hashes":{"fixed":"source"}}
+    scope,bodies=first.startup_repair_plan("f"*40,libs,engine)
+    assert scope["action"]==first.STARTUP_ACTION
+    assert scope["prior_scope_sha256"]==first.FAILED_SCOPE
+    assert scope["components"][roles[0]]["original_id"]==first.FAILED_RUNTIME_ID
+    assert all(scope["components"][r]["original_id"]==prior["components"][r]["original_id"] for r in roles[1:])
+    assert bodies=={r:first.startup_compatible_body(r,approved[r]) for r in roles}
+    runtime["State"]["StartedAt"]="2026-11-26T22:59:00Z"
+    assert first.startup_repair_plan("f"*40,libs,engine)==(scope,bodies)
+    runtime["Config"]["Env"].append("JASON_UNRELATED_MODE=changed")
+    with pytest.raises(first.TransitionDenied,match="FAILED_RUNTIME_EXACT_SUCCESSOR_REQUIRED"):
+        first.startup_repair_plan("f"*40,libs,engine)

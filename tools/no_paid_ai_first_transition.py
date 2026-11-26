@@ -25,6 +25,16 @@ import time
 import types
 
 ACTION = "ENFORCE-EXACT-NO-PAID-AI-FIRST-TRANSITION"
+STARTUP_ACTION = "RECOVER-EXACT-NO-PAID-AI-STARTUP"
+FAILED_CANDIDATE = "753f25e2f511d0bf83da1b43588a6046bdc5752e"
+FAILED_SCOPE = "e62c983b1902e77e94e49d6fdd890133b4a9716de52d89ea47c3dc2b52c9066e"
+FAILED_RUNTIME_ID = "090acdc29d80a2ceaaf7a21045aa948e43259d31780ba1138afc02a852f4ede0"
+# Exact legacy hosted-only cutovers observed on these immutable images.
+# Retain base governed conversation and all ticket/provider authority.
+STARTUP_FLAGS = {
+    "jason-runtime": "JASON_UNIVERSAL_QUERY_ENABLED",
+    "jason-mcp-pilot": "JASON_INVESTIGATION_LOOP_ENABLED",
+}
 ORDER = ("jason-runtime", "jason-mcp-pilot", "jason-pmv4-ticket-core")
 LKG = "d1b8c196dadd4b672ec8ba47075f27bb61c98d63"
 TICKET_REVISION = "13917410bb0ea1d5d37a314b3a3f131d416bf154"
@@ -204,6 +214,33 @@ def retired_name(role, original_id):
     return role+"-rollback-audit-no-paid-retired-"+original_id[:12]
 
 
+def baseline_digest(container,role,row,policy):
+    evidence=policy.release_evidence(container)
+    if row.get("failed_runtime_restart_timestamp_volatile") is True:
+        need(role==ORDER[0] and row["original_id"]==FAILED_RUNTIME_ID
+             and container["Id"]==FAILED_RUNTIME_ID,"RESTART_NORMALIZATION_NOT_EXACT")
+        # Docker repeatedly changes StartedAt for the exact failed successor.
+        # Bind its ID, image, full Config, all host settings and mounts instead.
+        evidence["started_at"]=None
+    return digest(evidence)
+
+
+def startup_compatible_body(role, body):
+    from copy import deepcopy
+    out=deepcopy(body)
+    key=STARTUP_FLAGS.get(role)
+    if key:
+        assignments=[i for i,v in enumerate(out["Env"]) if v.startswith(key+"=")]
+        need(len(assignments)<=1,"STARTUP_CUTOVER_DUPLICATE")
+        if assignments:
+            i=assignments[0]
+            need(out["Env"][i] in (key+"=true",key+"=false"),"STARTUP_CUTOVER_VALUE")
+            out["Env"][i]=key+"=false"
+        else:
+            out["Env"].append(key+"=false")
+    return out
+
+
 def predecessor_evidence(current, role, row, body, policy, *, recovery):
     """Only the exact, recorded original can enter retirement.
 
@@ -223,7 +260,7 @@ def predecessor_evidence(current, role, row, body, policy, *, recovery):
              "PREDECESSOR_RESTART_SCOPE_CHANGED")
         normalized["Name"]="/"+role
         normalized["HostConfig"]["RestartPolicy"]=body["HostConfig"]["RestartPolicy"]
-    need(digest(policy.release_evidence(normalized))==row["baseline_sha256"]
+    need(baseline_digest(normalized,role,row,policy)==row["baseline_sha256"]
          and digest(current["Config"])==row["original_config_sha256"]
          and set(current["NetworkSettings"]["Networks"])==set(body["NetworkingConfig"]["EndpointsConfig"]),
          "LIVE_PREDECESSOR_SCOPE_CHANGED")
@@ -468,6 +505,103 @@ def plan(candidate, libs, engine):
     return scope,bodies
 
 
+def prior_failed_plan(owner):
+    record=RECORDS/FAILED_CANDIDATE
+    owner.directory(RECORDS,0o700);owner.directory(record,0o700)
+    receipt=json.loads(read_file(record/"authorization.json",0,0o400))
+    packet=json.loads(read_file(record/"approved-safe-plan.json",0,0o400))
+    prior=packet["scope"]; bodies=packet["bodies"]
+    need(not (record/"result.json").exists()
+         and receipt.get("independently_verified_entra_owner") is True
+         and receipt.get("action")==ACTION and receipt.get("scope_sha256")==FAILED_SCOPE
+         and digest(prior)==FAILED_SCOPE and prior.get("action")==ACTION
+         and prior["policy"]=={"candidate_sha":FAILED_CANDIDATE,"rollback_sha":LKG}
+         and prior.get("same_image_non_paid_recovery_only") is True
+         and set(prior["components"])==set(bodies)==set(ORDER),
+         "FAILED_EXACT_AUTHORIZATION_REQUIRED")
+    for role,row in prior["components"].items():
+        need(digest(bodies[role])==row["configuration_sha256"]==row["rollback_configuration_sha256"]
+             and bodies[role]["Image"]==row["image_id"],"FAILED_APPROVED_BODY_CHANGED")
+    return prior,bodies
+
+
+def startup_breaker_state(scope,engine,*,initial=False):
+    control=json.loads(read_file(MANAGER/"production-control-state.json",0,0o600))
+    drift=json.loads(read_file(MANAGER/"production-drift.json",0,0o600))
+    last=control["last_known_good"]["manifest"]; breaker=control["circuit_breaker"]
+    age=(datetime.now(timezone.utc)-datetime.fromisoformat(drift["observed_at"])).total_seconds()
+    need(last.get("complete") is True and all(last.get(k)==v for k,v in scope["lkg"].items())
+         and all(last.get(k)==LKG for k in ("runtime_revision","mcp_revision","host_revision"))
+         and 0<=age<=180,"STARTUP_NATIVE_LKG_OR_STALE_DRIFT")
+    stable={k:breaker.get(k) for k in ("state","source","reason","opened_at","problem_count","problem_kinds","evidence_path")}
+    if initial:
+        # This exact breaker was observed after the failed approved transition.
+        # Its latest independent drift is clean but the runtime is not healthy.
+        need(stable=={
+          "state":"open","source":"production_drift_watchdog",
+          "reason":"continuous_production_drift_detected",
+          "opened_at":"2026-11-26T22:19:09+00:00",
+          "problem_count":1,"problem_kinds":["failed_user_unit"],
+          "evidence_path":str(MANAGER/"production-drift.json")
+        },"STARTUP_UNREVIEWED_BREAKER")
+        need(drift.get("status")=="pass" and drift.get("problems")==[],"STARTUP_CURRENT_DRIFT_NOT_CLEAR")
+        actual=live_drift()
+        need(actual.get("status")=="pass" and actual.get("problems")==[],"STARTUP_CURRENT_DRIFT_NOT_CLEAR")
+        return stable
+    # Recovery may continue the same authenticated scope; it may not close
+    # the breaker or accept an unrelated breaker or new drift.
+    need(stable==scope["prior_breaker"] or
+         (breaker.get("state")=="closed" and breaker.get("revalidated_revision")==LKG),
+         "STARTUP_RECOVERY_BREAKER_CHANGED")
+    allowed=[]
+    for role,row in scope["components"].items():
+        current=engine.lookup(role);old=engine.lookup(row["original_id"])
+        if current is None or not current["State"]["Running"]:
+            allowed.append({"kind":"required_container_not_running","container":role})
+        if old is not None and old["Name"]=="/"+retired_name(role,row["original_id"]) and old["State"]["Running"]:
+            allowed.append({"kind":"undeclared_running_container","container":retired_name(role,row["original_id"])})
+    for evidence in (drift,live_drift()):
+        need(evidence.get("status") in ("pass","drift_detected")
+             and all(p in allowed for p in evidence.get("problems",[])),"STARTUP_UNRELATED_RECOVERY_DRIFT")
+    return stable
+
+
+def startup_repair_plan(candidate,libs,engine):
+    prior,approved=prior_failed_plan(libs["owner"])
+    need(fixed_controls()==prior["controls"] and peers()==prior["protected_peers"]
+         and ticket_identity()==prior["ticket_identity"],"FAILED_SCOPE_PROTECTED_STATE_CHANGED")
+    breaker=startup_breaker_state(prior,engine,initial=True)
+    rows={};bodies={}
+    for role in ORDER:
+        current=engine.lookup(role,required=True);row=prior["components"][role]
+        need(current["Image"]==row["image_id"],"FAILED_SCOPE_IMAGE_CHANGED")
+        body=startup_compatible_body(role,approved[role])
+        if role==ORDER[0]:
+            need(current["Id"]==FAILED_RUNTIME_ID and engine.lookup(row["original_id"]) is None
+                 and compliant(current,approved[role],libs["policy"],libs["engine"])
+                 and (current["State"].get("Health") or {}).get("Status")!="healthy",
+                 "FAILED_RUNTIME_EXACT_SUCCESSOR_REQUIRED")
+            row={"original_id":current["Id"],"image_id":current["Image"],
+                 "original_config_sha256":digest(current["Config"]),
+                 "failed_runtime_restart_timestamp_volatile":True}
+            row["baseline_sha256"]=baseline_digest(current,role,row,libs["policy"])
+        else:
+            predecessor_evidence(current,role,row,approved[role],libs["policy"],recovery=False)
+            need(current["State"]["Running"] is True,"FAILED_SCOPE_PEER_NOT_RUNNING")
+            row=dict(row)
+        row["configuration_sha256"]=row["rollback_configuration_sha256"]=digest(body)
+        rows[role]=row;bodies[role]=body
+    scope={"action":STARTUP_ACTION,"policy":{"candidate_sha":candidate,"rollback_sha":LKG},
+           "installation_targets":list(ORDER)+[str(RECORDS/candidate)],
+           "queue_cutover":False,"controls":prior["controls"],"lkg":prior["lkg"],
+           "protected_peers":prior["protected_peers"],"ticket_identity":prior["ticket_identity"],
+           "source_sha256":libs["hashes"],"components":rows,
+           "same_image_non_paid_recovery_only":True,"prior_candidate":FAILED_CANDIDATE,
+           "prior_scope_sha256":FAILED_SCOPE,"prior_breaker":breaker,
+           "hosted_only_modes_disabled":STARTUP_FLAGS}
+    return scope,bodies
+
+
 def health_check(engine, policy, contract, role, body, cid):
     deadline=time.monotonic()+180
     while time.monotonic()<deadline:
@@ -507,12 +641,16 @@ def execute(scope,bodies,libs,engine,record,*,recovery=False):
         print(role+":"+phase,flush=True)
     need(fixed_controls()==scope["controls"] and peers()==scope["protected_peers"]
          and ticket_identity()==scope["ticket_identity"],"PROTECTED_SCOPE_CHANGED")
-    if recovery:
+    if scope["action"]==STARTUP_ACTION:
+        startup_breaker_state(scope,engine,initial=False)
+    elif recovery:
         recovery_gate(scope,engine)
     for role in ORDER:
         row=scope["components"][role];body=bodies[role]
         need(digest(body)==row["configuration_sha256"]==row["rollback_configuration_sha256"]
              and body["Image"]==row["image_id"],"SAFE_RECREATION_SPEC_CHANGED")
+        if scope["action"]==STARTUP_ACTION:
+            need(body==startup_compatible_body(role,body),"HOSTED_ONLY_STARTUP_MODE_ENABLED")
         current=engine.lookup(role)
         old=engine.lookup(row["original_id"])
         if old is not None:
@@ -564,6 +702,7 @@ def main(argv=None):
     parser=argparse.ArgumentParser()
     parser.add_argument("--candidate",required=True)
     parser.add_argument("--scope-sha")
+    parser.add_argument("--startup-repair",action="store_true")
     mode=parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--preflight",action="store_true")
     mode.add_argument("--apply",action="store_true")
@@ -572,6 +711,8 @@ def main(argv=None):
     libs=sources(args.candidate,recovery=args.recover)
     owner=libs["owner"];engine=libs["engine"].DockerEngine()
     record=RECORDS/args.candidate
+    action=STARTUP_ACTION if args.startup_repair else ACTION
+    planning=startup_repair_plan if args.startup_repair else plan
     if args.recover:
         owner.directory(RECORDS,0o700);owner.directory(record,0o700)
         receipt=json.loads(read_file(record/"authorization.json",0,0o400))
@@ -579,14 +720,14 @@ def main(argv=None):
         scope=packet["scope"];bodies=packet["bodies"]
         need(not (record/"result.json").exists() and receipt.get("independently_verified_entra_owner") is True
              and receipt["scope_sha256"]==args.scope_sha==digest(scope)
-             and receipt.get("action")==ACTION
-             and scope["action"]==ACTION and scope["policy"]["candidate_sha"]==args.candidate
+             and receipt.get("action")==action
+             and scope["action"]==action and scope["policy"]["candidate_sha"]==args.candidate
              and scope["source_sha256"]==libs["hashes"],"EXACT_RECOVERY_RECEIPT_REQUIRED")
         with owner.locks():
             execute(scope,bodies,libs,engine,record,recovery=True)
         return 0
     with owner.locks():
-        scope,bodies=plan(args.candidate,libs,engine)
+        scope,bodies=planning(args.candidate,libs,engine)
         need(not record.exists() and not record.is_symlink(),"RELEASE_ALREADY_CLAIMED")
     print(json.dumps({"status":"read_only_native_preflight","scope":scope,
                       "scope_sha256":digest(scope),"production_changes":False},sort_keys=True),flush=True)
@@ -595,7 +736,7 @@ def main(argv=None):
     need(args.scope_sha==digest(scope),"EXACT_SCOPE_REQUIRED")
     actor=owner.owner(scope)
     with owner.locks():
-        again,verified=plan(args.candidate,libs,engine)
+        again,verified=planning(args.candidate,libs,engine)
         need(again==scope and verified==bodies,"SCOPE_CHANGED_AFTER_OWNER_DECISION")
         if not RECORDS.exists():
             RECORDS.mkdir(mode=0o700)
@@ -607,7 +748,7 @@ def main(argv=None):
         owner.write(record/"approved-safe-plan.json",canon({"scope":scope,"bodies":bodies}),0o400)
         owner.write(record/"authorization.json",canon({"scope_sha256":digest(scope),
              "independently_verified_entra_owner":True,"owner":actor,
-             "approved_at":now(),"action":ACTION}),0o400)
+             "approved_at":now(),"action":action}),0o400)
         execute(scope,bodies,libs,engine,record)
     return 0
 
