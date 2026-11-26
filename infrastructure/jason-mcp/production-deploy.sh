@@ -369,7 +369,7 @@ for arg in "$@"; do
   fi
 done
 
-python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden \
+python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden --enforce-no-paid-ai \
   --set-env JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_ROLE_ID_PATH=/run/jason-secrets/openbao/quickbooks-development/role_id \
   --set-env JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_SECRET_ID_PATH=/run/jason-secrets/openbao/quickbooks-development/secret_id \
   --set-env JASON_QUICKBOOKS_DEVELOPMENT_OAUTH_DB="$QBO_DEV_DB" \

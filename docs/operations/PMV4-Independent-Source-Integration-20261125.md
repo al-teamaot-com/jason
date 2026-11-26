@@ -42,3 +42,24 @@ happen during normal acceptance; no production or provider write is
 authorized. This PR is source-only until exact activation is approved,
 installed and verified. Do not merge around the existing legacy lock:
 use only its existing explicitly admitted bounded release-recovery path.
+
+## November 26: generated validation metadata reconciliation
+
+The November 25 source-integration installer correctly refused the previously
+reviewed SHA after protected main advanced through documentation reconciliation
+(PR #2753). The only intervening changes were the two generated
+`docs/control/AUTOMATED-CHANGE-STATE` JSON and Markdown records. The legacy
+integration lock still prevents ordinary source merges.
+
+This source-only correction retains the exact current protected-main SHA,
+required CI, clean checkout, immutable reviewed installable files, authenticated
+Owner scope, native locks, rollback and two-cycle acceptance. For this exact
+source-integration successor only, the source delta may additionally contain
+both generated records, as regular tracked files, provided the JSON changes
+only the validated-source evidence fields and the Markdown matches those
+changes exactly. Neither record is loaded as executable source or used as
+approval or proof of current CI. Production alignment, schema, workflow/status,
+other documentation, and any extra implementation change remain fail-closed.
+The new candidate and exact scope require fresh native preflight and Owner
+confirmation; do not reuse the previous scope hash or bypass the integration
+lock. Source tests alone do not authorize installation.

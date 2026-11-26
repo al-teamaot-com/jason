@@ -125,16 +125,23 @@ def main() -> int:
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     # Always fail closed on unusable or untrusted registry, before socket bind.
-    status = snapshot(args.registry)
     if args.once:
-        print(json.dumps(status, sort_keys=True))
+        print(json.dumps(snapshot(args.registry), sort_keys=True))
         return 0
     if args.socket is None or not args.socket.is_absolute():
         raise RunbookReadServiceDenied("RUNBOOK_SOCKET_ABSOLUTE_PATH_REQUIRED")
-    with _Server(args.socket, args.registry) as server:
-        print("RUNBOOK_MANAGEMENT_READ_SERVICE=READY generation="
-              + str(status["registry_generation"]), flush=True)
-        server.serve_forever(poll_interval=0.2)
+    # Keep a read-only connection without an open transaction so writers
+    # cannot remove the live WAL sidecars. Requests still take fresh snapshots.
+    anchor = SQLitePlaybookRegistry(args.registry, read_only=True)
+    try:
+        anchor.audited_read_only_snapshot()
+        status = snapshot(args.registry)
+        with _Server(args.socket, args.registry) as server:
+            print("RUNBOOK_MANAGEMENT_READ_SERVICE=READY generation="
+                  + str(status["registry_generation"]), flush=True)
+            server.serve_forever(poll_interval=0.2)
+    finally:
+        anchor.close()
     return 0
 
 

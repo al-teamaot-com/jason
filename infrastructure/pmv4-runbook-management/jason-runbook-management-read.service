@@ -1,6 +1,7 @@
 [Unit]
 Description=Jason PMv4 independently supervised runbook read/hot-load service
-After=local-fs.target
+Requires=jason-runbook-wal-prepare.service
+After=local-fs.target jason-runbook-wal-prepare.service
 ConditionPathExists=/var/lib/jason/openclaw/json-playbooks.sqlite3
 StartLimitIntervalSec=300
 StartLimitBurst=3

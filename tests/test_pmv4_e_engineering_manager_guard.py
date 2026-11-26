@@ -124,3 +124,27 @@ def test_pipeline_unit_covers_exact_runtime_write_roots():
     assert "ProtectSystem=strict" in unit and "ProtectHome=read-only" in unit
     assert "/var/lib/jason/openclaw" not in g.PIPELINE_WRITES
     assert "/home/al/jason-worktrees" not in g.PIPELINE_WRITES
+
+
+def test_closed_loop_receipt_requires_exact_resolver_pin_and_preserves_old_receipts():
+    old = receipt()
+    old.update(schema_version="1.1", action=g.PIPELINE_ACTION,
+               predecessor_candidate_sha="1"*40, predecessor_receipt_sha256="2"*64,
+               engineering_source_sha=g.PIPELINE_SOURCE_SHA,
+               pipeline_artifact_sha256={name:"3"*64 for name in g.PIPELINE_ARTIFACTS})
+    assert g.validate_receipt(old) == old
+    new = deepcopy(old)
+    new["predecessor_candidate_sha"] = g.CLOSED_LOOP_PREDECESSOR
+    with pytest.raises(g.Denied):
+        g.validate_receipt(new)
+    new["pipeline_artifact_sha256"]["issue_resolution_engine.py"] = "4"*64
+    assert g.validate_receipt(new) == new
+    for name in ("foreign.py", "jason_self_heal_watchdog.py"):
+        bad = deepcopy(new)
+        bad["pipeline_artifact_sha256"][name] = "5"*64
+        with pytest.raises(g.Denied):
+            g.validate_receipt(bad)
+    bad = deepcopy(old)
+    bad["pipeline_artifact_sha256"]["issue_resolution_engine.py"] = "4"*64
+    with pytest.raises(g.Denied):
+        g.validate_receipt(bad)
