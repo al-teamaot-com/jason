@@ -97,3 +97,19 @@ def test_memory_file_is_auditable_json(tmp_path):
     assert payload["schema_version"] == "1.0"
     assert payload["families"]["runtime_health"]["occurrence_count"] == 1
     assert incidents[0]["priority"] == "P1"
+
+
+def test_engineering_progress_uses_one_stable_internal_repair_family(tmp_path):
+    incidents = engine.correlate_failures([
+        "engineering_progress_critical_support_stalled",
+        "engineering_progress_active_work_not_advancing",
+    ])
+    assert len(incidents) == 1
+    item = engine.update_recurrence_memory(tmp_path / "memory.json", incidents)[0]
+    assert item["family"] == "engineering_progress"
+    assert item["priority"] == "P0"
+    assert item["repair"]["requires_owner_action"] is False
+    assert item["repair"]["level"] == 2
+    assert item["verification_contract"]["closure_requires_detector_recheck"] is True
+    later = engine.correlate_failures(["engineering_progress_evidence_stale"])[0]
+    assert later["fingerprint"] == item["fingerprint"]

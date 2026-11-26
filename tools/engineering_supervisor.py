@@ -119,6 +119,56 @@ def classify_record(
     return "needs_triage", "complete_native_exhausted_recovery_handoff"
 
 
+# A route describes the next owning-worker action, not authority to retry it.
+EXTERNAL_BLOCKER_CATEGORIES = frozenset({"external_dependency", "dependency_hold", "human_authority"})
+RECOVERABLE_BLOCKER_CATEGORIES = frozenset({"recoverable_source", "recoverable_transport", "recoverable_validation"})
+ENGINEERING_STALL_CYCLES = 3
+
+
+def critical_support_disposition(pipeline: Mapping[str, Any], supervisor: Mapping[str, Any]) -> str:
+    """Classify exact critical IDs, not unrelated historical aggregate counts.
+
+    Missing or exhausted evidence must receive bounded diagnostic review, never
+    be represented as human authority or permission to replay a request.
+    """
+    blocker = pipeline.get("critical_support_blocker")
+    if blocker is None:
+        return "none"
+    if not isinstance(blocker, Mapping):
+        return "diagnostic_review"
+    blocked = blocker.get("blocked_items")
+    missing = blocker.get("unadmitted_items")
+    routes = supervisor.get("support_blocker_routes")
+    if (blocker.get("reason") != "critical_support_stalled"
+            or not isinstance(blocked, list) or not isinstance(missing, list)
+            or not isinstance(routes, Mapping)
+            or blocker.get("blocked_count") != len(blocked)
+            or blocker.get("unadmitted_count") != len(missing)):
+        return "diagnostic_review"
+    if not blocked + missing or any(not isinstance(i, str) for i in blocked + missing):
+        return "diagnostic_review"
+    identifiers = set(blocked + missing)
+    categories = set()
+    internal_cycles = []
+    for identifier in identifiers:
+        route = routes.get(identifier)
+        if not isinstance(route, Mapping):
+            return "diagnostic_review"
+        category = str(route.get("category") or "")
+        categories.add(category)
+        if category not in EXTERNAL_BLOCKER_CATEGORIES:
+            cycles = route.get("unchanged_cycles", supervisor.get("unchanged_cycles"))
+            if type(cycles) is not int or cycles < 0:
+                return "diagnostic_review"
+            internal_cycles.append(cycles)
+    if categories <= EXTERNAL_BLOCKER_CATEGORIES:
+        return "external"
+    if categories - EXTERNAL_BLOCKER_CATEGORIES <= RECOVERABLE_BLOCKER_CATEGORIES:
+        if internal_cycles and max(internal_cycles) < ENGINEERING_STALL_CYCLES:
+            return "recoverable"
+    return "diagnostic_review"
+
+
 def build_snapshot(spool: Path, prior: Mapping[str, Any] | None = None) -> dict[str, Any]:
     for required in ("state.json", "development-state.json", "todo-intake-state.json"):
         if not (spool / required).is_file():
@@ -208,12 +258,51 @@ def build_snapshot(spool: Path, prior: Mapping[str, Any] | None = None) -> dict[
             "category": category, "next_action": next_action,
         })
 
+    # Preserve the routing for exact blocked support identities independently
+    # of the bounded display inventory. A truncated UI must not hide a P0.
+    support_routes = {
+        row["id"]: {"category": row["category"], "next_action": row["next_action"],
+                    "progress_sha256": row["progress_sha256"]}
+        for row in objects
+        if row["lane"] == "support" and row["phase"] in {"blocked", "escalated"}
+    }
+    audit = support.get("admission_audit") or {}
+    if isinstance(audit, Mapping):
+        collisions = audit.get("identity_conflicts") or {}
+        for identifier in audit.get("unadmitted_p0") or []:
+            if not isinstance(identifier, str) or not re.fullmatch(
+                    r"(?:SUPPORT-[A-Z]+-[0-9]+|SUPPORT-AUTO-[A-F0-9]{12})", identifier):
+                raise ValueError("invalid unadmitted support identity")
+            if isinstance(collisions, Mapping) and identifier in collisions:
+                support_routes[identifier] = {"category": "human_authority",
+                    "next_action": "reconcile_exact_issue_scope_and_owner_authority"}
+            else:
+                support_routes[identifier] = {"category": "needs_triage",
+                    "next_action": "reconcile_canonical_support_admission"}
+
+    # An unrelated job advancing cannot reset the recovery budget for this
+    # exact blocked item. Preserve only evidence-backed per-item observations.
+    previous_routes = prior.get("support_blocker_routes", {}) if isinstance(prior, Mapping) else {}
+    if not isinstance(previous_routes, Mapping):
+        previous_routes = {}
+    for identifier, route in support_routes.items():
+        previous = previous_routes.get(identifier)
+        comparable = {k: v for k, v in previous.items() if k != "unchanged_cycles"} if isinstance(previous, Mapping) else {}
+        count = previous.get("unchanged_cycles") if isinstance(previous, Mapping) else None
+        route["unchanged_cycles"] = (
+            min(count + 1, 288) if comparable == route and type(count) is int and count >= 0 else 0
+        )
+
     # Authority holds must remain visible ahead of the bounded diagnostic
     # inventory, even when hundreds of other historical jobs are present.
     objects.sort(key=lambda row: (row["lane"] != "todo_identity", row["lane"], row["id"]))
     # Hash only normalized non-sensitive work disposition fields. This is a
     # durable change detector, not a record of private provider output.
-    fingerprint = hashlib.sha256(json.dumps(objects, sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps(
+        {"items": objects, "support_blocker_routes": {
+            key: {k: v for k, v in route.items() if k != "unchanged_cycles"}
+            for key, route in support_routes.items()}},
+        sort_keys=True).encode()).hexdigest()
     prior = prior if isinstance(prior, Mapping) else {}
     previous_fingerprint = prior.get("disposition_sha256")
     no_progress = (min(int(prior.get("unchanged_cycles") or 0) + 1, 288)
@@ -242,6 +331,7 @@ def build_snapshot(spool: Path, prior: Mapping[str, Any] | None = None) -> dict[
         "category_counts": counts,
         "items": objects[:150],
         "items_truncated": len(objects) > 150,
+        "support_blocker_routes": support_routes,
         "action_owner": "existing_governed_worker_or_verified_human",
     }
 

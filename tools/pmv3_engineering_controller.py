@@ -30,9 +30,11 @@ from typing import Any, Callable, Mapping
 try:
     import pmv3_integration_queue as integration_queue
     import pmv3_worker_release_gate as release_gate
+    from engineering_supervisor import critical_support_disposition
 except ModuleNotFoundError:
     from tools import pmv3_integration_queue as integration_queue
     from tools import pmv3_worker_release_gate as release_gate
+    from tools.engineering_supervisor import critical_support_disposition
 
 
 def now() -> str:
@@ -123,6 +125,16 @@ def classify(
     if pipeline.get("status") == "healthy":
         return "complete", "pipeline_healthy"
 
+    # A distinct quarantined TODO or external approval must never mask a
+    # failed worker stage or a critical support repair requiring diagnosis.
+    if pipeline.get("failed_work_stages"):
+        return "recoverable", "work_stage_failed"
+    critical_route = critical_support_disposition(pipeline, supervisor)
+    if critical_route == "recoverable":
+        return "recoverable", "critical_support_recoverable"
+    if critical_route == "diagnostic_review":
+        return "bounded_stall", "critical_support_repair_handoff"
+
     reason = str(supervisor.get("reason") or "")
     if reason == "internal_recovery_needed":
         return "recoverable", "internal_recovery_needed"
@@ -140,20 +152,8 @@ def classify(
             return "recoverable", "approved_work_stalled_recoverable"
         return "waiting_external", "approved_work_stalled_external"
 
-    if pipeline.get("failed_work_stages"):
-        return "recoverable", "work_stage_failed"
-
-    if pipeline.get("critical_support_blocker"):
-        counts = supervisor.get("category_counts") if isinstance(supervisor.get("category_counts"), Mapping) else {}
-        recoverable = sum(int(counts.get(name) or 0) for name in (
-            "recoverable_source", "recoverable_transport",
-            "recoverable_validation",
-        ))
-        return (
-            ("recoverable", "critical_support_recoverable")
-            if recoverable else
-            ("waiting_external", "critical_support_external")
-        )
+    if critical_route == "external":
+        return "waiting_external", "critical_support_external"
 
     return "waiting_external", "unclassified_governed_gate"
 
@@ -325,7 +325,7 @@ def controller_run(
             state["status"] = "complete"
             state["reason"] = reason
             break
-        if disposition in {"control_failure", "waiting_external"}:
+        if disposition in {"control_failure", "waiting_external", "bounded_stall"}:
             state["status"] = disposition
             state["reason"] = reason
             break
