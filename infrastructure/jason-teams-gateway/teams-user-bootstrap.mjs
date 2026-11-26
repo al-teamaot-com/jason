@@ -91,6 +91,55 @@ async function assertEnabledAotMember({ aadObjectId, accessToken, fetchImpl }) {
   }
 }
 
+// The Bot Framework can accept a message for an unlicensed Entra account.
+// That is *not* proof that the human can open Teams and sign an approval.
+// Preflight the privileged release approver before persisting an approval
+// request. Only a Microsoft Teams service plan in Enabled state counts.
+export async function assertTeamsApprovalRecipientReady({
+  aadObjectId, tenantId, clientId, clientSecret, fetchImpl = fetch,
+}) {
+  if (!aadObjectId || !tenantId || !clientId || !clientSecret) {
+    throw new TeamsBootstrapError("invalid_request", "Teams approver readiness requires an exact identity");
+  }
+  const accessToken = await getGraphToken({ tenantId, clientId, clientSecret, fetchImpl });
+  const { response, payload } = await graphRequest({
+    accessToken, fetchImpl,
+    path: `/users/${encodeURIComponent(aadObjectId)}?$select=id,accountEnabled,userType,assignedPlans`,
+  });
+  if (response.status === 404) {
+    throw new TeamsBootstrapError("identity_not_found", "Teams release approver not found");
+  }
+  if (!response.ok) {
+    throw new TeamsBootstrapError(
+      "approver_readiness_unverifiable",
+      `Teams release approver licensing could not be verified (HTTP ${response.status})`,
+    );
+  }
+  if (String(payload.id ?? "").toLowerCase() !== aadObjectId.toLowerCase()
+      || payload.accountEnabled !== true
+      || String(payload.userType ?? "").toLowerCase() !== "member") {
+    throw new TeamsBootstrapError("identity_not_authorized", "Teams release approver identity is not an active tenant member");
+  }
+  if (!Array.isArray(payload.assignedPlans)) {
+    throw new TeamsBootstrapError(
+      "approver_readiness_unverifiable",
+      "Teams release approver plan status was not returned by Microsoft Graph",
+    );
+  }
+  const teamsEnabled = payload.assignedPlans.some((plan) =>
+    String(plan?.service ?? "").toLowerCase() === "teamspaceapi"
+    && String(plan?.capabilityStatus ?? "").toLowerCase() === "enabled"
+  );
+  if (!teamsEnabled) {
+    throw new TeamsBootstrapError(
+      "approver_teams_license_unavailable",
+      "The privileged approver lacks an enabled Teams service plan",
+    );
+  }
+  return { ready: true, check: "teams_assigned_plan", actor: aadObjectId.toLowerCase() };
+}
+
+
 async function appInstalled({ aadObjectId, acceptedCatalogAppIds, accessToken, fetchImpl }) {
   let path = `/users/${encodeURIComponent(aadObjectId)}/teamwork/installedApps?$expand=teamsAppDefinition`;
   while (path) {

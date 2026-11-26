@@ -332,3 +332,64 @@ def test_source_integration_native_cycles_require_policy_and_unchanged_productio
     assert result["independent_source_policy_verified"] is True
     assert result["native_production_unchanged"] is True
     assert result["two_distinct_scheduled_cycles_verified"] is True
+
+
+@pytest.fixture
+def reviewed_metadata():
+    old = {"revision":"a"*40,"status":"ci_passed","workflow":"Validate Jason",
+           "workflow_run_id":"100","workflow_url":"https://github.com/al-teamaot-com/jason/actions/runs/100",
+           "observed_at":"2026-11-25T17:47:15+00:00"}
+    new = dict(old, revision="b"*40, workflow_run_id="101",
+               workflow_url="https://github.com/al-teamaot-com/jason/actions/runs/101",
+               observed_at="2026-11-26T05:00:09+00:00")
+    def doc(v):
+        return {"schema_version":"1.0","production":{"revision":m.LKG},
+                "validated_source":v}
+    def markdown(v):
+        return ("# State\n\n## Latest validated source\n\n"
+                "- Revision: `"+v["revision"]+"`\n"
+                "- Status: `ci_passed`\n- Workflow: `Validate Jason`\n"
+                "- Workflow run: `"+v["workflow_run_id"]+"`\n"
+                "- Observed: `"+v["observed_at"]+"`\n\n"
+                "## Latest production alignment\n\nUnchanged\n")
+    return doc(old), doc(new), markdown(old), markdown(new)
+
+
+@pytest.mark.parametrize("fault", [None, "extra_path", "one_record", "other_baseline",
+                                    "production", "markdown", "bad_url", "symlink"])
+def test_reviewed_source_delta_metadata_only(reviewed_metadata, fault):
+    old, new, old_md, new_md = reviewed_metadata
+    baseline = m.SOURCE_INTEGRATION_BASELINE
+    candidate = "c"*40
+    changed = set(m.SOURCE_INTEGRATION_SCOPE_FILES) | m.SOURCE_METADATA_PATHS
+    if fault == "extra_path": changed.add("tools/foreign.py")
+    if fault == "one_record": changed.remove("docs/control/AUTOMATED-CHANGE-STATE.md")
+    if fault == "other_baseline": baseline = m.RELEASE_RETRY_BASELINE
+    if fault == "production": new["production"]["revision"] = candidate
+    if fault == "markdown": new_md += "Unreviewed text\n"
+    if fault == "bad_url": new["validated_source"]["workflow_url"] = "https://invalid.example/"
+    def git(*args):
+        if args[0] == "diff": return "\n".join(sorted(changed)).encode()
+        if args[0] == "ls-tree":
+            mode = "120000" if fault == "symlink" and args[1] == candidate else "100644"
+            return (mode + " blob " + "d"*40 + "\t" + args[-1]+"\n").encode()
+        if args[0] == "show":
+            rev, path = args[1].split(":", 1)
+            if path.endswith(".json"):
+                return json.dumps(old if rev == baseline else new).encode()
+            return (old_md if rev == baseline else new_md).encode()
+        raise AssertionError(args)
+    if fault is None:
+        m.reviewed_source_delta(git, baseline, candidate, m.SOURCE_INTEGRATION_SCOPE_FILES)
+    else:
+        with pytest.raises(PermissionError):
+            m.reviewed_source_delta(git, baseline, candidate, m.SOURCE_INTEGRATION_SCOPE_FILES)
+
+
+def test_metadata_exception_does_not_remove_exact_current_main_ci_gate():
+    import inspect
+    source = inspect.getsource(m.source_review)
+    assert "ci[\"protected_main\"] == candidate" in source
+    assert "ci[\"required_ci_passed\"] is True" in source
+    assert "CURRENT_MAIN_CI_NOT_EXACT" in source
+    assert "reviewed_source_delta(git, baseline, candidate, source_files)" in source
