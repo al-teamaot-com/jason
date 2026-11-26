@@ -164,6 +164,21 @@ def blocked_critical_support(spool: Path, repo: Path) -> dict[str, Any] | None:
     return None
 
 
+def stage_repository(stage: Stage, scripts: Path, repo: Path) -> Path:
+    """Separate native LKG policy custody from relocated engineering source.
+
+    The native recovery manager still checks the selected checkout HEAD against
+    protected LKG and loads its immutable policy from that exact Git object.
+    Never change a checkout, substitute a policy, or retry with mutable main.
+    All ordinary engineering stages retain their existing repository.
+    """
+    if stage.name == "release_breaker_recovery":
+        relocated = scripts / "engineering-worker-source"
+        if relocated.is_symlink() and repo.resolve() == relocated.resolve():
+            return scripts / "engineering-source-repo"
+    return repo
+
+
 def run_pipeline(
     *,
     scripts: Path,
@@ -193,7 +208,8 @@ def run_pipeline(
         else:
             command = [
                 sys.executable, str(scripts / stage.script),
-                "--repo", str(repo), "--spool", str(spool), *stage.args,
+                "--repo", str(stage_repository(stage, scripts, repo)),
+                "--spool", str(spool), *stage.args,
             ]
             if stage.name in {"integration", "release_bridge", "release_breaker_recovery"}:
                 command += ["--release-state", str(release_state)]
