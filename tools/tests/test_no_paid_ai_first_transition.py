@@ -247,3 +247,36 @@ def test_native_drift_actual_exit_contract(monkeypatch,rc,status,problems,accept
     else:
         with pytest.raises(first.TransitionDenied,match="NATIVE_DRIFT"):
             first.live_drift()
+
+@pytest.mark.parametrize("name,actual_mode,request_mode,uid,gid,allowed",[
+    ("auto-promotion-incident-hold",0o664,0o664,1000,1000,True),
+    ("auto-promotion-incident-hold",0o664,None,1000,1000,False),
+    ("auto-promotion-incident-hold",0o664,0o664,1000,1001,False),
+    ("auto-promotion-incident-hold",0o666,0o664,1000,1000,False),
+    ("unrelated-source.py",0o664,0o664,1000,1000,False),
+    ("unrelated-source.py",0o644,None,1000,1000,True),
+])
+def test_exact_legacy_hold_custody_only(tmp_path,monkeypatch,name,actual_mode,request_mode,uid,gid,allowed):
+    from types import SimpleNamespace
+    import os
+    monkeypatch.setattr(first,"MANAGER",tmp_path)
+    target=tmp_path/name
+    target.write_bytes(b"immutable hold fixture")
+    target.chmod(actual_mode)
+    actual_fstat=os.fstat
+    def fixture_stat(fd):
+        st=actual_fstat(fd)
+        return SimpleNamespace(st_dev=st.st_dev,st_ino=st.st_ino,st_uid=uid,st_gid=gid,
+                               st_nlink=st.st_nlink,st_mode=st.st_mode,st_size=st.st_size)
+    monkeypatch.setattr(first.os,"fstat",fixture_stat)
+    if allowed:
+        assert first.read_file(target,1000,request_mode)==b"immutable hold fixture"
+    else:
+        with pytest.raises(first.TransitionDenied,match="FILE_CUSTODY"):
+            first.read_file(target,1000,request_mode)
+
+def test_pinned_hold_bytes_cannot_be_changed_even_with_correct_mode(monkeypatch):
+    paths=first.CONTROL_PINS
+    monkeypatch.setattr(first,"read_file",lambda *a,**k:b"changed hold")
+    with pytest.raises(first.TransitionDenied,match="FREEZE_OR_HOLD_CHANGED"):
+        first.fixed_controls()

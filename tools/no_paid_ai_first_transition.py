@@ -86,9 +86,16 @@ def read_file(path, uid, mode=None, maximum=4_000_000):
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
         link = path.lstat()
+        # The existing PMv3 incident hold is intentionally al:al 0664.
+        # Its sole group-writable exception is exact path/owner/group/mode;
+        # fixed_controls also verifies the immutable approved digest.
+        legacy_hold = (path == MANAGER/"auto-promotion-incident-hold"
+                       and uid == 1000 and mode == 0o664
+                       and st.st_uid == st.st_gid == 1000
+                       and stat.S_IMODE(st.st_mode) == 0o664)
         need(stat.S_ISREG(st.st_mode) and (st.st_dev,st.st_ino)==(link.st_dev,link.st_ino)
              and st.st_uid==uid and (uid!=0 or st.st_gid==0)
-             and st.st_nlink==1 and not st.st_mode&0o022
+             and st.st_nlink==1 and (not st.st_mode&0o022 or legacy_hold)
              and (mode is None or stat.S_IMODE(st.st_mode)==mode)
              and 0<st.st_size<=maximum,"FILE_CUSTODY:"+path.name)
         raw=f.read(maximum+1)
