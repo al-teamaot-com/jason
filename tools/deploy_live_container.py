@@ -26,6 +26,9 @@ else:
 # Exact no-paid-AI policy projection (pure metadata; no authority or I/O).
 TARGETS = frozenset(("jason-runtime", "jason-mcp-pilot", "jason-pmv4-ticket-core"))
 FLAGS = ("JASON_HOSTED_CONVERSATION_ENABLED", "JASON_HOSTED_SEMANTICS_ENABLED")
+# Legacy diagnostic checks the conversation model BEFORE credential resolution.
+# Blank both selectors in the same-image containment and every later rollback.
+PAID_MODEL_SELECTORS = ("JASON_OPENAI_CONVERSATION_MODEL", "JASON_OPENAI_SEMANTIC_MODEL")
 CREDENTIAL_MOUNTS = frozenset((
     "/run/jason-secrets/openbao/openai/role_id",
     "/run/jason-secrets/openbao/openai/secret_id",
@@ -73,6 +76,8 @@ def project_environment(env: Mapping[str, str]) -> dict[str, str]:
     result = dict(env)
     for key in FLAGS:
         result[key] = "false"
+    for key in PAID_MODEL_SELECTORS:
+        result[key] = ""
     # Do not inherit an alternate credential path from old configuration.
     # The fixed paths are deliberately absent from the successor mounts.
     result.update(ROLE_PATHS)
@@ -142,6 +147,7 @@ def project_host_config(host: Mapping[str, Any], effective_mounts: list[Mapping[
 def validate_no_paid_container(container: Mapping[str, Any]) -> None:
     env = environment(container)
     _need(all(env.get(k) == "false" for k in FLAGS), "HOSTED_FLAGS_ENABLED_OR_MISSING")
+    _need(all(env.get(k) == "" for k in PAID_MODEL_SELECTORS), "PAID_MODEL_SELECTOR_NOT_EMPTY")
     _need(all(env.get(k, v) == v for k, v in ROLE_PATHS.items()), "ALTERNATE_CREDENTIAL_PATH")
     _need(not any(env.get(k) for k in RAW_CREDENTIALS), "RAW_CREDENTIAL_PRESENT")
     mounts = container.get("Mounts")
@@ -173,7 +179,7 @@ def release_evidence(container: Mapping[str, Any]) -> dict[str, Any]:
                      - set(x["Destination"] for x in projected["Mounts"]))
     _need(set(removed).issubset(CREDENTIAL_MOUNTS), "REMOVAL_SCOPE_EXPANDED")
     changed_keys = sorted(k for k in set(env) | set(after) if env.get(k) != after.get(k))
-    _need(set(changed_keys).issubset(set(FLAGS) | set(ROLE_PATHS)), "ENV_SCOPE_EXPANDED")
+    _need(set(changed_keys).issubset(set(FLAGS) | set(ROLE_PATHS) | set(PAID_MODEL_SELECTORS)), "ENV_SCOPE_EXPANDED")
     return {
         "component": container["Name"].removeprefix("/"),
         "container_id": container["Id"],
@@ -422,6 +428,7 @@ def _build_create_command(
         key, value = _parse_env_assignment(assignment)
         if enforce_no_paid_ai:
             if ((key in FLAGS and value != "false")
+                    or (key in PAID_MODEL_SELECTORS and value != "")
                     or (key in ROLE_PATHS and value != ROLE_PATHS[key])
                     or (key in RAW_CREDENTIALS and value)):
                 raise NoPaidAIDenied("NO_PAID_AI_ENV_OVERRIDE_DENIED")

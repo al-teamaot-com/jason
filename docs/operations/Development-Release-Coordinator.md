@@ -361,3 +361,49 @@ scan acceptance. The installed M365-only scoped backport and financial-only
 independent-component profile do not authorize this transition. Do not
 repurpose them or run an ungoverned Docker replacement. A rehearsal image
 or a read-only scope manifest cannot issue Owner authority.
+
+### Exact initial no-paid-AI containment profile
+
+The no_paid_ai_first_transition.py profile extends the existing governed native
+container-release machinery with one fixed first-transition policy; it is not
+an arbitrary Docker deployment interface. It reuses the root-installed audit
+journal Docker engine, independent native protected CI attestor, existing Entra
+Owner device-code verifier and both production locks. Source-only until the
+exact protected-main candidate and all native required checks pass. Owner
+approval is bound to the candidate, current live container IDs/images, config
+and recovery hashes, source hashes, freeze/hold bytes, protected peers and
+canonical ticket ledger identity. An externally SHA256-pinned root launcher
+must use a clean private exact reviewed checkout and isolated Python. The
+read-only native preflight must succeed before requesting this decision.
+
+The initial transition retains all three existing immutable images and
+source revisions (runtime, MCP and protected Ticket Core), both native
+release controls, all unrelated credentials, state mounts, audit bindings,
+commands and resource limits. It disables both hosted flags, blanks the
+two model selectors (so the old credit diagnostic stops before credential
+resolution), and removes only the six dedicated paid-AI AppRole mounts.
+Root custody contains only the compliant recreation configuration, not a
+restartable paid-enabled rollback configuration.
+
+The exact release consumes one authenticated approval. Before stopping each
+predecessor, disable Docker restart and rename it out of the native canonical
+service name; remove that exact stopped ID without volume deletion. Validate
+the compliant replacement before starting. Lost native responses are
+reconciled by exact readback, not by starting the predecessor. Interruption
+recovery uses only the existing root-private exact authorization and the
+identical safe recreation spec; unexpected scope, foreign container, unrelated
+drift or breaker reason fails closed. A failed health check must never
+re-enable paid reasoning. It may leave a component unavailable, requiring
+compliant recovery; it is not a successful release. Any existing open native
+breaker must be independently revalidated by the established native controller
+before final acceptance. No standing authorization or generic root execution
+is installed by this profile.
+
+Verify actual effective settings without a hosted probe; runtime and MCP local
+health, two genuine distinct Ticket Core scans with zero duplicate items,
+unchanged ledger identity and protected peers, exact no-paid configuration
+and independent native drift must pass. Historical paid diagnostics must
+not be invoked. This same-image configuration containment precedes later
+ordinary source deployment (which retires the diagnostic in code). No
+subscription-only reasoning provider or successful autonomous repair is
+implied by disabling the prohibited route.
