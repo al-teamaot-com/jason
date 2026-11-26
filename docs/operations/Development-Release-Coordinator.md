@@ -337,3 +337,27 @@ release verification, or another request for tools leave the job blocked.
 A successful model response is still **not** acceptance. Exact-text code
 changes, changed tests, protected CI and separate reviewed release/CCC gates
 remain required; actual Teams Approve/Deny awaits independent human clicks.
+
+### Governed no-paid-AI release and rollback boundary (November 26)
+
+The live shared deployment path clones the predecessor's effective Docker
+configuration, not the Compose defaults. Candidate and rollback must therefore
+both project the exact disabled hosted flags and omit the two dedicated
+read-only OpenAI AppRole mounts. Canonical runtime/MCP deployment explicitly
+requires this existing clone-path profile. An ordinary clone is **not** the
+first policy-transition executor: its failure handler restarts the original
+container, so it must refuse a predecessor with paid flags or credentials.
+No exception may restore that paid-enabled original. New Ticket Core
+manifests exclude the two obsolete credentials and both paid flags; its
+already accepted exact projection and live protected worker may change only
+under its own governed successor. The source-only projection preserves
+unrelated mounts, state, permissions and worker resource constraints.
+
+The first no-paid transition needs one reviewed, authenticated exact action
+with both host release locks, the active freeze and hold preserved, live
+component/image custody, a separately verified non-metered rollback for
+each component, unchanged peer service identities, and real health/ticket
+scan acceptance. The installed M365-only scoped backport and financial-only
+independent-component profile do not authorize this transition. Do not
+repurpose them or run an ungoverned Docker replacement. A rehearsal image
+or a read-only scope manifest cannot issue Owner authority.

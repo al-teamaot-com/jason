@@ -15,10 +15,12 @@ if __package__:
     from .pmv4_mcp_projection import (
         EXACT_MOUNTS, add_projection_mounts, should_omit_existing,
     )
+    from . import no_paid_ai_release_scope as no_paid_ai
 else:
     from pmv4_mcp_projection import (
         EXACT_MOUNTS, add_projection_mounts, should_omit_existing,
     )
+    import no_paid_ai_release_scope as no_paid_ai
 
 
 def _run(args: list[str], *, env: dict[str, str] | None = None, quiet: bool = False) -> None:
@@ -208,14 +210,21 @@ def _build_create_command(
     omit_readonly_bind_destinations: tuple[str, ...] = (),
     pmv4_owner_projection: bool = False,
     omit_pmv4_owner_projection: bool = False,
+    enforce_no_paid_ai: bool = False,
 ):
     if pmv4_owner_projection and omit_pmv4_owner_projection:
         raise ValueError("PMV4_OWNER_PROJECTION_MODE_CONFLICT")
     if (pmv4_owner_projection or omit_pmv4_owner_projection) and live != "jason-mcp-pilot":
         raise ValueError("PMV4_OWNER_PROJECTION_TARGET_DENIED")
     src = _inspect(live)
-    config = src["Config"]
-    host = src["HostConfig"]
+    if enforce_no_paid_ai:
+        # Exact same projection is required for both candidate and rollback.
+        # Keep the original inspect record for authority/baseline validation.
+        projected = no_paid_ai.project_container(src)
+    else:
+        projected = src
+    config = projected["Config"]
+    host = projected["HostConfig"]
 
     env_map = os.environ.copy()
     env_keys: list[str] = []
@@ -234,6 +243,11 @@ def _build_create_command(
 
     for assignment in set_env:
         key, value = _parse_env_assignment(assignment)
+        if enforce_no_paid_ai:
+            if ((key in no_paid_ai.FLAGS and value != "false")
+                    or (key in no_paid_ai.ROLE_PATHS and value != no_paid_ai.ROLE_PATHS[key])
+                    or (key in no_paid_ai.RAW_CREDENTIALS and value)):
+                raise no_paid_ai.NoPaidAIDenied("NO_PAID_AI_ENV_OVERRIDE_DENIED")
         env_map[key] = value
         if key not in env_keys:
             env_keys.append(key)
@@ -275,7 +289,7 @@ def _build_create_command(
         args += ["--env", key]
 
     existing_mounts: dict[str, tuple[str, bool]] = {}
-    for mount in src.get("Mounts") or []:
+    for mount in projected.get("Mounts") or []:
         mount_type = mount.get("Type")
         if mount_type not in {"bind", "volume"}:
             raise RuntimeError(f"unsupported mount type for exact clone: {mount_type}")
@@ -305,6 +319,8 @@ def _build_create_command(
             raw_bind,
             probe_image=image,
         )
+        if enforce_no_paid_ai and no_paid_ai._intersects_paid_path(destination):
+            raise no_paid_ai.NoPaidAIDenied("NO_PAID_AI_BIND_OVERRIDE_DENIED")
         if destination in additional_destinations:
             raise ValueError(f"duplicate additional bind destination: {destination}")
         additional_destinations.add(destination)
@@ -402,6 +418,8 @@ def main() -> int:
     parser.add_argument("--health-interval", type=float, default=2.0)
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--harden", action="store_true")
+    parser.add_argument("--enforce-no-paid-ai", action="store_true",
+                        help="Preserve the Owner no-paid-AI policy on this fixed runtime target")
     parser.add_argument("--pmv4-owner-projection", action="store_true",
                         help="Project only the separately authorized PMv4 shadow Owner decision store")
     parser.add_argument("--omit-pmv4-owner-projection-on-rollback", action="store_true",
@@ -498,7 +516,16 @@ def main() -> int:
         ),
         pmv4_owner_projection=args.pmv4_owner_projection,
         omit_pmv4_owner_projection=args.omit_pmv4_owner_projection_on_rollback,
+        enforce_no_paid_ai=args.enforce_no_paid_ai,
     )
+    if args.enforce_no_paid_ai:
+        # The existing failure handler restarts the original container.
+        # Never enter it with an unsafe predecessor. A separate exact first
+        # transition must establish a compliant rollback baseline.
+        try:
+            no_paid_ai.validate_no_paid_container(source)
+        except no_paid_ai.NoPaidAIDenied as error:
+            raise SystemExit("NO_PAID_AI_INITIAL_TRANSITION_REQUIRED: " + str(error)) from error
 
     print("PREFLIGHT=PASS")
     print(f"LIVE_CONTAINER={args.live}")
@@ -549,6 +576,9 @@ def main() -> int:
         if env_revision is not None and env_revision != args.source_revision:
             raise RuntimeError("replacement JASON_SOURCE_REVISION mismatch")
 
+        if args.enforce_no_paid_ai:
+            no_paid_ai.validate_no_paid_container(replacement)
+            print("NO_PAID_AI_CONFIGURATION=PASS")
         if args.harden:
             host_config = replacement["HostConfig"]
             if host_config.get("ReadonlyRootfs") is not True:
