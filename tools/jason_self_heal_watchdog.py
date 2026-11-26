@@ -427,8 +427,13 @@ def production_convergence_failures(
             desired = (release_dir if candidate_artifact else baseline_dir) / relative
             if control_mode=="replacement" and name=="root_host_reconciler":
                 installed = PMV4_E_ROOT_HOST_RECONCILER
-            if routing and Path(relative).name in routing["artifact_sources"]:
-                desired = Path(routing["artifact_sources"][Path(relative).name]["source"])
+            if routing:
+                # Both inventories are returned by the same root-owned guard
+                # after checking immutable receipt and installed artifact bytes.
+                accepted_sources = {**routing["artifact_sources"],
+                                    **routing.get("pipeline_artifact_sources", {})}
+                if Path(relative).name in accepted_sources:
+                    desired = Path(accepted_sources[Path(relative).name]["source"])
             desired_hash = _sha256(desired)
             installed_hash = _sha256(installed)
             scheduled_artifacts[name] = {
@@ -1299,6 +1304,7 @@ def main() -> int:
             "state": "healthy",
             "last_verified_at": now(),
             "previous_fingerprint": state.get("fingerprint"),
+            "engineering_progress": evidence.get("engineering_progress"),
             "incidents": [],
         })
         return 0
@@ -1321,6 +1327,7 @@ def main() -> int:
                 "recovery_actions": actions,
                 "verified_at": now(),
                 "verification": "original detector rerun passed with no remaining failures",
+                "engineering_progress": evidence_after.get("engineering_progress"),
                 "incidents": [],
             })
             return 0
@@ -1358,6 +1365,7 @@ def main() -> int:
         "incident_paths": incident_paths,
         "incidents": incidents,
         "owner_escalations": owner_escalations,
+        "engineering_progress": evidence.get("engineering_progress"),
         "updated_at": now(),
     })
     return 0

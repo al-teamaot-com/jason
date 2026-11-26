@@ -393,3 +393,109 @@ def test_metadata_exception_does_not_remove_exact_current_main_ci_gate():
     assert "ci[\"required_ci_passed\"] is True" in source
     assert "CURRENT_MAIN_CI_NOT_EXACT" in source
     assert "reviewed_source_delta(git, baseline, candidate, source_files)" in source
+
+
+def closed_loop_plan():
+    p = source_integration_plan()
+    p.update(predecessor_candidate_sha=m.CLOSED_LOOP_BASELINE,
+             worker_replacements=sorted(m.CLOSED_LOOP_WORKERS),
+             engineering_progress_detector_required=True,
+             closed_loop_source_review={
+                 "scope_commit":"7"*40,"scope_parent":"8"*40,
+                 "excluded_source_paths":["docs/unrelated.md"],
+             })
+    return p
+
+
+@pytest.mark.parametrize("key,value", [
+    ("worker_replacements",["jason_self_heal_watchdog.py"]),
+    ("production_authority",True),
+    ("provider_writes",True),
+    ("runtime_or_mcp_restart_allowed",True),
+    ("freeze_or_hold_change",True),
+    ("engineering_progress_detector_required",False),
+    ("required_scheduled_cycles",1),
+    ("closed_loop_source_review",None),
+    ("closed_loop_source_review",{"scope_commit":"7"*40,"scope_parent":"8"*40,
+                                  "excluded_source_paths":["tools/engineering_supervisor.py"]}),
+])
+def test_closed_loop_scope_rejects_expansion_and_missing_evidence(key,value):
+    p=closed_loop_plan()
+    assert m.pipeline_scope_sha(p)==m.digest(m.canon(p))
+    p[key]=value
+    with pytest.raises(PermissionError):
+        m.pipeline_scope_sha(p)
+
+
+def test_closed_loop_targets_preserve_existing_manager_and_pin_resolver():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.CLOSED_LOOP_BASELINE
+    a.changed_workers=m.CLOSED_LOOP_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("a"*40)/"tools"
+    targets=a.approved_targets()
+    assert {m.LIB/name for name in m.CLOSED_LOOP_WORKERS} <= targets
+    assert {x.name for x in targets if x.parent==a.release} == (
+        set(g.ARTIFACTS)|set(g.CLOSED_LOOP_PIPELINE_ARTIFACTS))
+    assert not any(x in targets for x in (m.POLICY,m.ENV))
+    assert not any(x.name in ("production-deployment-freeze","auto-promotion-incident-hold",
+                              "production-control-state.json") for x in targets)
+
+
+def test_closed_loop_requires_accepted_independent_source_predecessor(tmp_path):
+    a=object.__new__(m.PipelineSuccessor)
+    a.n={"read":lambda p,*args:p.read_bytes()}
+    activation={"at":"2026-11-26T19:00:00+00:00","scope_sha256":"1"*64}
+    accepted={"status":"scheduled_engineering_acceptance_verified","scope_sha256":"1"*64,
+              "evidence":{"two_distinct_scheduled_cycles_verified":True,
+                          "todo_identity_quarantined":True,
+                          "production_authority":False,
+                          "bounded_release_retry_policy_verified":True}}
+    path=tmp_path/"scheduled-acceptance.json"
+    path.write_bytes(m.canon(accepted))
+    with pytest.raises(PermissionError,match="PREDECESSOR_SOURCE_POLICY_NOT_ACCEPTED"):
+        a.verify_closed_loop_predecessor(tmp_path,activation)
+    accepted["evidence"]["independent_source_policy_verified"]=True
+    path.write_bytes(m.canon(accepted))
+    a.verify_closed_loop_predecessor(tmp_path,activation)
+
+
+def test_closed_loop_exact_git_scope_and_intervening_changes(tmp_path,monkeypatch):
+    import subprocess
+    repo=tmp_path/"repo"
+    repo.mkdir()
+    def git(*args):
+        return subprocess.check_output(["git","-C",str(repo),*args],stderr=subprocess.PIPE)
+    git("init","-q")
+    git("config","user.name","Isolated Test")
+    git("config","user.email","test@example.invalid")
+    def commit(message, changes):
+        for name,body in changes.items():
+            path=repo/name
+            path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text(body)
+        git("add","--all")
+        git("commit","-qm",message)
+        return git("rev-parse","HEAD").decode().strip()
+    baseline=commit("base",{"tools/pmv4_e_engineering_manager_install.py":"old",
+                            "tools/engineering_supervisor.py":"old",
+                            "tools/pmv3_integration_queue.py":"old"})
+    monkeypatch.setattr(m,"CLOSED_LOOP_BASELINE",baseline)
+    scope={"tools/pmv4_e_engineering_manager_install.py","tools/engineering_supervisor.py"}
+    monkeypatch.setattr(m,"CLOSED_LOOP_SCOPE_FILES",scope)
+    monkeypatch.setattr(m,"CLOSED_LOOP_PROTECTED_PATHS",scope|{"tools/pmv3_integration_queue.py"})
+    parent=commit("independent source only",{"docs/unrelated.md":"one"})
+    anchor=commit("exact scoped source",{
+        "tools/pmv4_e_engineering_manager_install.py":"new",
+        "tools/engineering_supervisor.py":"new"})
+    candidate=commit("additional source only",{"docs/other.md":"two"})
+    assert m.review_closed_loop_delta(git,candidate)=={
+        "scope_commit":anchor,"scope_parent":parent,
+        "excluded_source_paths":["docs/other.md","docs/unrelated.md"]}
+    changed=commit("protected control change",{"tools/pmv3_integration_queue.py":"new"})
+    with pytest.raises(PermissionError,match="INTERVENING_PROTECTED_SOURCE_CHANGE"):
+        m.review_closed_loop_delta(git,changed)
+    reverted=commit("revert protected control",{"tools/pmv3_integration_queue.py":"old"})
+    with pytest.raises(PermissionError,match="INTERVENING_PROTECTED_SOURCE_CHANGE"):
+        m.review_closed_loop_delta(git,reverted)
