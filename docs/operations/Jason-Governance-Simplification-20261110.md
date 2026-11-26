@@ -89,6 +89,10 @@ After this contract is production-verified:
 1. retire issuance of obsolete CCC-only/unfreeze/replacement/renewal approval offers;
 2. remove dead compatibility code only after no retained in-flight record depends on it;
 3. convert standing Owner pause/freeze terminology to technical state controls where still required;
+
+### Source implementation checkpoint — standing engineering pause
+
+The standing Engineering Owner Pause is no longer part of the target replacement-lane authorization model. Replacement engineering lanes must instead prove the legacy monolithic engineering service is inactive and its timer is inactive plus disabled or masked before each run. The existing production-transaction lock and support-first lane serialization remain mandatory. The pause receipt/drop-in may remain in the currently installed production environment until this exact change is released; source readiness does not itself authorize removing installed controls.
 4. keep only one normal release path and one bounded recovery path;
 5. move independent security review to a risk-based rule (authorization/crypto/root/tenant/credential changes), not every routine release;
 6. replace exact-version autonomous playbook promotion with authority-envelope promotion only after separate non-interference validation.
@@ -112,3 +116,9 @@ The simplification is production-ready only when all of the following are true:
 Integration coordination: #2398 #2395 #2378 #2393 #2382 #2377 #2373 #2279
 
 Later integration of these active overlapping branches must preserve the one-Owner-decision transaction contract. In particular, Teams identity/routing work may change who receives or authenticates the exact Owner decision, but it must not restore duplicate CCC, unfreeze, replacement-unfreeze, or renewal approvals. Orthogonal Workboard, client-notification, reachability, and superseded-approval recovery behavior must be rebased and regression-tested rather than discarded.
+
+### Standing-pause integration coordination
+
+Integration coordination: #2386 #2391
+
+Preserve #2386 second-drive worktree placement and fail-closed storage headroom behavior when isolated-service units are reconciled. Preserve #2391 isolated-service topology, migration/ticket-continuity evidence and rollback contract, but supersede its standing Owner-pause receipt/drop-in requirement with the technical legacy-controller quiescence invariant defined here.

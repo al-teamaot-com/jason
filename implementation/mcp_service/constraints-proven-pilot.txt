@@ -1,4 +1,7 @@
 # Exact dependency closure proven in jason-mcp-pilot on 2026-09-09.
+# 2026-11-12: MCP cryptography pin raised to 50.0.2 to match the
+# audited runtime and MCP declared >=50,<51 security requirement.
+# Reverify with a resolver test and canonical image build before release.
 # Frozen base image:
 #   jason-runtime:mcp-base-20260909
 # MCP pilot:
@@ -12,7 +15,7 @@
 annotated-types==0.8.0
 anyio==4.15.1
 click==8.5.0
-cryptography==46.0.7
+cryptography==50.0.2
 h11==0.16.0
 httpcore2==2.12.0
 httpx2==2.12.0

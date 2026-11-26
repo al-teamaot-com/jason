@@ -29,8 +29,10 @@ from typing import Any, Callable, Mapping
 
 try:
     import pmv3_integration_queue as integration_queue
+    import pmv3_worker_release_gate as release_gate
 except ModuleNotFoundError:
     from tools import pmv3_integration_queue as integration_queue
+    from tools import pmv3_worker_release_gate as release_gate
 
 
 def now() -> str:
@@ -132,7 +134,7 @@ def classify(
         counts = supervisor.get("category_counts") if isinstance(supervisor.get("category_counts"), Mapping) else {}
         recoverable = sum(int(counts.get(name) or 0) for name in (
             "recoverable_source", "recoverable_transport",
-            "recoverable_validation", "needs_triage",
+            "recoverable_validation",
         ))
         if recoverable:
             return "recoverable", "approved_work_stalled_recoverable"
@@ -145,7 +147,7 @@ def classify(
         counts = supervisor.get("category_counts") if isinstance(supervisor.get("category_counts"), Mapping) else {}
         recoverable = sum(int(counts.get(name) or 0) for name in (
             "recoverable_source", "recoverable_transport",
-            "recoverable_validation", "needs_triage",
+            "recoverable_validation",
         ))
         return (
             ("recoverable", "critical_support_recoverable")
@@ -227,6 +229,7 @@ def controller_run(
     runner: Callable[..., Any] = subprocess.run,
     sleeper: Callable[[float], None] = time.sleep,
     integration_reconciler: Callable[..., Mapping[str, Any]] = integration_queue.reconcile,
+    retry_release_contention: bool = False,
 ) -> dict[str, Any]:
     state_path = spool / "pmv3-engineering-controller-state.json"
     state = {
@@ -235,12 +238,23 @@ def controller_run(
         "finished_at": None,
         "status": "running",
         "passes": [],
-        "teams_only_approval": True,
     }
+    def transaction_blocked() -> bool:
+        if not retry_release_contention:
+            # Preserve legacy/disposable controller callers' admission contract.
+            return production_transaction_active(release_state)
+        result = release_gate.admission_status(
+            release_state / "production-transaction.lock",
+            retry_seconds=release_gate.RETRY_SECONDS,
+            pause_path=spool / "pmv3-engineering-owner-pause.json",
+        )
+        state["release_gate_status"] = result
+        return result != "allowed"
+
     # Check the production lock BEFORE touching the integration queue. Queue
     # reconciliation can perform governed source integration and must not run
     # while Release Manager owns the same production transaction mutex.
-    if production_transaction_active(release_state):
+    if transaction_blocked():
         return _defer_for_production_transaction(state, state_path)
     state["integration_queue"] = reconcile_integration_queue(
         spool=spool, release_state=release_state, reconciler=integration_reconciler,
@@ -251,7 +265,7 @@ def controller_run(
     unchanged = 0
 
     for pass_number in range(1, max(1, int(max_passes)) + 1):
-        if production_transaction_active(release_state):
+        if transaction_blocked():
             return _defer_for_production_transaction(state, state_path)
         try:
             return_code = run_pipeline(
@@ -276,7 +290,7 @@ def controller_run(
         # A production transaction may begin while an already-started
         # engineering pass runs. Record that pass, but do not reconcile the
         # integration queue after the production lock was acquired.
-        if production_transaction_active(release_state):
+        if transaction_blocked():
             state["passes"].append({
                 "pass": pass_number, "pipeline_return_code": return_code,
                 "disposition": "deferred",
@@ -346,6 +360,7 @@ def main() -> int:
     parser.add_argument("--unchanged-limit", type=int, default=2)
     parser.add_argument("--retry-delay", type=float, default=5.0)
     parser.add_argument("--pipeline-timeout", type=int, default=3900)
+    parser.add_argument("--retry-release-contention", action="store_true")
     args = parser.parse_args()
     state = controller_run(
         scripts=Path(__file__).resolve().parent,
@@ -356,12 +371,12 @@ def main() -> int:
         unchanged_limit=max(1, args.unchanged_limit),
         retry_delay=max(0.0, args.retry_delay),
         pipeline_timeout=max(1, args.pipeline_timeout),
+        retry_release_contention=args.retry_release_contention,
     )
     print("PMV3_ENGINEERING_CONTROLLER " + json.dumps({
         "status": state["status"],
         "reason": state.get("reason"),
         "pass_count": state.get("pass_count"),
-        "teams_only_approval": True,
     }, sort_keys=True))
     return service_exit_code(state)
 

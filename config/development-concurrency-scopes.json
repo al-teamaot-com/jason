@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Conservative engineering-domain declarations only; not an authority grant",
+  "workstreams": {
+    "DEV-1069": {
+      "kind": "infrastructure", "files": ["tools/dependency_conflict_service.py", "tools/owner_approved_development_worker.py"],
+      "components": ["development-admission"], "contracts": ["engineering-claim-state"], "providers": [], "schemas": ["engineering-admission-ledger"], "deployment_paths": ["engineering-worker-install"], "authorization_paths": [], "tenant_scopes": [], "depends_on": []
+    },
+    "DEV-1117": {
+      "kind": "feature", "files": [], "components": ["sharepoint-reader"], "contracts": ["sharepoint-shared-api"], "providers": ["microsoft-sharepoint"], "schemas": [], "deployment_paths": [], "authorization_paths": ["sharepoint-governed-read"], "tenant_scopes": [], "depends_on": []
+    },
+    "DEV-2294": {
+      "kind": "feature", "files": [], "components": ["financial-statement-organizer"], "contracts": ["sharepoint-shared-api"], "providers": ["microsoft-sharepoint"], "schemas": ["financial-statement-intake"], "deployment_paths": [], "authorization_paths": ["sharepoint-governed-read"], "tenant_scopes": [], "depends_on": []
+    },
+    "DEV-1545": {
+      "kind": "feature", "files": [], "components": ["universal-teams-approver"], "contracts": ["shared-approval-contract"], "providers": ["microsoft-teams"], "schemas": [], "deployment_paths": [], "authorization_paths": ["shared-human-approval"], "tenant_scopes": [], "depends_on": []
+    },
+    "DEV-759": {
+      "kind": "feature", "files": [], "components": ["procurement-intake"], "contracts": ["shared-approval-contract"], "providers": ["microsoft-teams", "autotask"], "schemas": ["procurement-invoice"], "deployment_paths": [], "authorization_paths": ["shared-human-approval"], "tenant_scopes": [], "depends_on": []
+    },
+    "DEV-1470": {
+      "kind": "feature", "files": [], "components": ["accounting-reconciliation"], "contracts": ["sharepoint-shared-api"], "providers": ["intuit-quickbooks", "microsoft-sharepoint"], "schemas": ["accounting-transaction"], "deployment_paths": [], "authorization_paths": ["sharepoint-governed-read"], "tenant_scopes": [], "depends_on": []
+    }
+  }
+}

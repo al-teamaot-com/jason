@@ -108,3 +108,56 @@ def test_interpreter_resolves_deterministic_decision_without_execution():
     assert instruction.step_id == "start_service"
     assert instruction.capability == "endpoint.service.start"
     assert instruction.approval_classification == "non_destructive"
+
+
+def test_capability_first_binds_prior_governed_facts_without_execution():
+    payload = sample()
+    payload["steps"][0]["arguments"] = {
+        "service": {"$fact": "service_name"},
+        "scope": {"ticket_id": {"$fact": "ticket_id"}},
+    }
+    runtime = JsonPlaybookInterpreter(validate_playbook_document(payload))
+    instruction = runtime.instruction(
+        facts={"service_name": "Spooler", "ticket_id": 12345},
+    )
+    assert instruction.capability == "endpoint.service.read"
+    assert instruction.arguments == {
+        "service": "Spooler", "scope": {"ticket_id": 12345},
+    }
+    assert payload["steps"][0]["arguments"]["service"] == {"$fact": "service_name"}
+
+
+def test_capability_first_missing_fact_fails_closed():
+    payload = sample()
+    payload["steps"][0]["arguments"] = {"ticket_id": {"$fact": "ticket_id"}}
+    runtime = JsonPlaybookInterpreter(validate_playbook_document(payload))
+    with pytest.raises(KeyError, match="PLAYBOOK_REQUIRED_FACT_MISSING"):
+        runtime.instruction(facts={})
+
+
+def test_capability_first_rejects_mixed_expression_reference():
+    payload = sample()
+    payload["steps"][0]["arguments"] = {
+        "ticket_id": {"$fact": "ticket_id", "default": 5},
+    }
+    with pytest.raises(PlaybookValidationError) as caught:
+        validate_playbook_document(payload)
+    assert "check_service:FACT_REFERENCE_INVALID" in caught.value.errors
+
+
+def test_capability_first_never_executes_provider_operation():
+    payload = sample()
+    payload["steps"][0]["arguments"] = {"ticket_id": {"$fact": "ticket_id"}}
+    runtime = JsonPlaybookInterpreter(validate_playbook_document(payload))
+    first = runtime.instruction(facts={"ticket_id": 7})
+    second = runtime.instruction(facts={"ticket_id": 7})
+    assert first == second
+    assert runtime.next_step(first.step_id) == "service_state"
+
+
+def test_capability_first_forbids_expression_keys_at_validation():
+    payload = sample()
+    payload["steps"][0]["arguments"] = {"ticket_id": {"$eval": "danger"}}
+    with pytest.raises(PlaybookValidationError) as caught:
+        validate_playbook_document(payload)
+    assert "check_service:ARGUMENT_EXPRESSION_FORBIDDEN" in caught.value.errors

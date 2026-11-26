@@ -1,7 +1,7 @@
 {
-  "schema_version": "4.0",
+  "schema_version": "3.1",
   "organization_id": "aot",
-  "policy_mode": "admin_approver_separated",
+  "policy_mode": "owner_reviewed",
   "owner_identity_ids": [
     "person-al"
   ],
@@ -13,16 +13,8 @@
   "capability": "release.production.approve",
   "high_impact_review": {
     "owner_exact_sha_required": true,
-    "signed_teams_identity_required": true,
-    "independent_ccc_required": true,
-    "protected_release_gates_unchanged": true
-  },
-  "admin_approver_binding": {
-    "microsoft_tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
-    "microsoft_object_id": "c848022d-e13b-4457-84b0-e2f5c00dcaf6"
-  },
-  "regular_requester_binding": {
-    "microsoft_tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
-    "microsoft_object_id": "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+    "protected_release_gates_unchanged": true,
+    "authenticated_entra_owner_decision_required": true,
+    "independent_native_release_health_required": true
   }
 }

@@ -1,0 +1,219 @@
+{
+  "id": "datto_edr_av",
+  "implementation_mentions_unreviewed": [
+    "implementation/autonomous_remediation/datto_edr_av_api_contract.py",
+    "implementation/autonomous_remediation/datto_edr_av_runtime_contract.py",
+    "implementation/mcp_service/src/jason_mcp/server.py",
+    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
+    "implementation/runtime_service/src/jason_runtime/json_edr_av_planner.py"
+  ],
+  "json_source_conversion_accepted": false,
+  "legacy_enabled": true,
+  "legacy_registry_lifecycle": "production",
+  "legacy_registry_version": "1.3.0",
+  "legacy_source": "implementation/autonomous_remediation/datto_edr_av_playbook.py",
+  "live_approval_granted_by_map": false,
+  "mapping_is_not_parity_or_authority": true,
+  "python_symbols": [
+    {
+      "first_line": 57,
+      "last_line": 70,
+      "name": "PlaybookState"
+    },
+    {
+      "first_line": 73,
+      "last_line": 77,
+      "name": "ActionKind"
+    },
+    {
+      "first_line": 80,
+      "last_line": 83,
+      "name": "ApprovalClass"
+    },
+    {
+      "first_line": 86,
+      "last_line": 99,
+      "name": "RepairStep"
+    },
+    {
+      "first_line": 103,
+      "last_line": 125,
+      "name": "HealthObservation"
+    },
+    {
+      "first_line": 129,
+      "last_line": 143,
+      "name": "ExecutionObservation"
+    },
+    {
+      "first_line": 147,
+      "last_line": 157,
+      "name": "PlannedAction"
+    },
+    {
+      "first_line": 161,
+      "last_line": 340,
+      "name": "PlaybookRun"
+    },
+    {
+      "first_line": 343,
+      "last_line": 344,
+      "name": "DuplicateExecutionError"
+    },
+    {
+      "first_line": 347,
+      "last_line": 348,
+      "name": "InvalidPlaybookTransition"
+    },
+    {
+      "first_line": 351,
+      "last_line": 362,
+      "name": "initial_health_check"
+    },
+    {
+      "first_line": 365,
+      "last_line": 470,
+      "name": "next_action"
+    },
+    {
+      "first_line": 473,
+      "last_line": 505,
+      "name": "_next_recovery_action"
+    },
+    {
+      "first_line": 508,
+      "last_line": 528,
+      "name": "verification_action"
+    },
+    {
+      "first_line": 531,
+      "last_line": 560,
+      "name": "internal_ticket_note"
+    },
+    {
+      "first_line": 563,
+      "last_line": 599,
+      "name": "metrics_payload"
+    },
+    {
+      "first_line": 602,
+      "last_line": 633,
+      "name": "telemetry_event"
+    },
+    {
+      "first_line": 636,
+      "last_line": 672,
+      "name": "escalation_payload"
+    },
+    {
+      "first_line": 675,
+      "last_line": 694,
+      "name": "_component_action"
+    },
+    {
+      "first_line": 697,
+      "last_line": 712,
+      "name": "_av_update_action"
+    },
+    {
+      "first_line": 715,
+      "last_line": 727,
+      "name": "_scheduled_reboot_action"
+    },
+    {
+      "first_line": 730,
+      "last_line": 738,
+      "name": "_edr_missing_or_broken"
+    },
+    {
+      "first_line": 741,
+      "last_line": 750,
+      "name": "_av_needs_repair"
+    },
+    {
+      "first_line": 753,
+      "last_line": 763,
+      "name": "_ordinary_repairs_exhausted"
+    },
+    {
+      "first_line": 766,
+      "last_line": 776,
+      "name": "_escalation_summary"
+    },
+    {
+      "first_line": 124,
+      "last_line": 125,
+      "name": "is_authoritatively_healthy"
+    },
+    {
+      "first_line": 142,
+      "last_line": 143,
+      "name": "force_update_appears_hung"
+    },
+    {
+      "first_line": 186,
+      "last_line": 187,
+      "name": "idempotency_key"
+    },
+    {
+      "first_line": 189,
+      "last_line": 203,
+      "name": "record_job"
+    },
+    {
+      "first_line": 205,
+      "last_line": 221,
+      "name": "record_execution"
+    },
+    {
+      "first_line": 224,
+      "last_line": 225,
+      "name": "security_resolution_required"
+    },
+    {
+      "first_line": 228,
+      "last_line": 229,
+      "name": "threat_resolved"
+    },
+    {
+      "first_line": 232,
+      "last_line": 245,
+      "name": "completion_ready"
+    },
+    {
+      "first_line": 247,
+      "last_line": 266,
+      "name": "record_health"
+    },
+    {
+      "first_line": 268,
+      "last_line": 299,
+      "name": "record_security_evidence"
+    },
+    {
+      "first_line": 301,
+      "last_line": 322,
+      "name": "record_recurrence_check"
+    },
+    {
+      "first_line": 324,
+      "last_line": 335,
+      "name": "record_scan"
+    },
+    {
+      "first_line": 337,
+      "last_line": 340,
+      "name": "escalate"
+    }
+  ],
+  "registry_allowed_mutations": [
+    "automation.component.execute",
+    "service.ticket.note.create",
+    "service.ticket.update"
+  ],
+  "section_map": [],
+  "source_blob_sha": "c3645b2c003e6f4079b62d32572e27b00cdd57b9",
+  "source_format": "py",
+  "source_sha256": "84858da6eeb8569923a0ab9d3d758741cb2899d143b754318fd6f51a2751c99e",
+  "source_size_bytes": 30625
+}

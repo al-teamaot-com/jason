@@ -1,0 +1,206 @@
+{
+  "id": "unsupported_triage_human_review",
+  "implementation_mentions_unreviewed": [
+    "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
+    "implementation/runtime_service/src/jason_runtime/json_governed_mutation_bridge.py"
+  ],
+  "json_source_conversion_accepted": false,
+  "legacy_enabled": true,
+  "legacy_registry_lifecycle": "production",
+  "legacy_registry_version": "1.0.0",
+  "legacy_source": "docs/playbooks/Jason-Unsupported-Triage-Human-Review-Handoff-Pilot.md",
+  "live_approval_granted_by_map": false,
+  "mapping_is_not_parity_or_authority": true,
+  "python_symbols": [],
+  "registry_allowed_mutations": [
+    "service.ticket.update"
+  ],
+  "section_map": [
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 34,
+      "heading": "Section Goal",
+      "last_line": 37,
+      "number": 1,
+      "section_sha256": "d4359c29626a5d1aa866cc260a8dd724251feaa5a7d7085e402fe208c03d89f7"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 38,
+      "heading": "Trigger",
+      "last_line": 41,
+      "number": 2,
+      "section_sha256": "c9625831352b349fca5cde99e12e46796c8feb534922c2cda057bf867355190b"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 42,
+      "heading": "Scope and Boundaries",
+      "last_line": 45,
+      "number": 3,
+      "section_sha256": "62335e61f9a6de1bfb3eb5100f8d7360775cae3eead9220345ca9b7f803ea4cd"
+    },
+    {
+      "capability_mentions_unreviewed": [
+        "service.ticket.search"
+      ],
+      "first_line": 46,
+      "heading": "Initial Identification",
+      "last_line": 49,
+      "number": 4,
+      "section_sha256": "34726e206d9d4013b8045307fa032dc668e45ea21e56d6fcfb149949fc019cd1"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 50,
+      "heading": "Expected State",
+      "last_line": 53,
+      "number": 5,
+      "section_sha256": "fe463f6ad8fd4222e4f88ce710f2455881e1466739cd331bbb1545ac1a58012f"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 54,
+      "heading": "State Model",
+      "last_line": 57,
+      "number": 6,
+      "section_sha256": "178be599c3a2e4aa012734130c4fb07735c635c6f95833d9743edf1f8890bce0"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 58,
+      "heading": "Diagnostic Workflow",
+      "last_line": 61,
+      "number": 7,
+      "section_sha256": "4d01b184d2ac6825bc824ecc8d806e7bba47572ced36265ceb9dd9daeed4b6ad"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 62,
+      "heading": "Decision Gates",
+      "last_line": 65,
+      "number": 8,
+      "section_sha256": "82c6cb3f7e2105614bcb378d5917a28155039f9ce0cd4bf6aff38a9b0af50e9d"
+    },
+    {
+      "capability_mentions_unreviewed": [
+        "service.ticket.update"
+      ],
+      "first_line": 66,
+      "heading": "Remediation",
+      "last_line": 69,
+      "number": 9,
+      "section_sha256": "8edfd20de028d1434a385a41e7a498fbfe52fa699bf4f2a63c3f926bc56e5635"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 70,
+      "heading": "Retry Policy",
+      "last_line": 73,
+      "number": 10,
+      "section_sha256": "e2288886ccdcdd1a6c5926284e47d3305ad26ec3422fc2bee512bdc1688a072c"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 74,
+      "heading": "Periodic Rechecks",
+      "last_line": 77,
+      "number": 11,
+      "section_sha256": "c13f1f8769e9beacd95f5008c7f05c36bd26d9cc183c4bb1170588df52dfeda5"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 78,
+      "heading": "Aging / Stale Condition",
+      "last_line": 81,
+      "number": 12,
+      "section_sha256": "e9de2e3148b7bf0f43eb25729300ccc12f6fa0a4ead06432fa12b13426603877"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 82,
+      "heading": "Dependency Handling",
+      "last_line": 85,
+      "number": 13,
+      "section_sha256": "0c18cf4b46436cd03e10722c16d5522d5a67bfb0e5e46de72d7fa67150a0dc01"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 86,
+      "heading": "Documentation Requirements",
+      "last_line": 89,
+      "number": 14,
+      "section_sha256": "0162caa4cca7464cbbf3b2977679719b6f7cb66754b1e94cb6022fcb60343498"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 90,
+      "heading": "Failure Handling",
+      "last_line": 93,
+      "number": 15,
+      "section_sha256": "4f723266d372a1988024a2ed8e9580a21719e82a67a3dd80f5b6a40751dcec5d"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 94,
+      "heading": "Escalation Criteria",
+      "last_line": 97,
+      "number": 16,
+      "section_sha256": "d64818ba9fe25f96c3fe3e7d8a2c996cb8758a2579b2a27b7eceb6efaf8f6f94"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 98,
+      "heading": "Verification",
+      "last_line": 101,
+      "number": 17,
+      "section_sha256": "1de8cd0161979afff49095918f7ec0faae2e5308b363721896668d5e1f45cb67"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 102,
+      "heading": "Completion Criteria",
+      "last_line": 105,
+      "number": 18,
+      "section_sha256": "1047c967114f45ff274900a17bdca22d59663b23325212121ca3e2d250c73dd2"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 106,
+      "heading": "Final Resolution Note",
+      "last_line": 109,
+      "number": 19,
+      "section_sha256": "bf7112deaff8a36df1fd8bbff6e0fc842ec831d7d03a4cb3467ec5b862d54c38"
+    },
+    {
+      "capability_mentions_unreviewed": [
+        "service.ticket.update"
+      ],
+      "first_line": 110,
+      "heading": "Required Capabilities",
+      "last_line": 113,
+      "number": 20,
+      "section_sha256": "4195224a5bd3e9cb2ffadff3a4c80584e6532f8b7042363f812322ada9ff95eb"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 114,
+      "heading": "Acceptance Test",
+      "last_line": 117,
+      "number": 21,
+      "section_sha256": "b2078c52db82dd45656ba5b382c8f0b60e5962f5bca6d8b936cffe5d8d40b4ac"
+    },
+    {
+      "capability_mentions_unreviewed": [],
+      "first_line": 118,
+      "heading": "Section Goal Closure",
+      "last_line": 120,
+      "number": 22,
+      "section_sha256": "e5a01c8a43ef750586701e57e75dd374c015ab493f2c3bd59dffbd570fb150d0"
+    }
+  ],
+  "source_blob_sha": "5f28c92f9d44e7f2a58cec30258b7d8f4c08ab27",
+  "source_format": "md",
+  "source_sha256": "1e54b4982c76ba30e4b7b9ef3b2f0bd49ee226998c987864fc630ec085d6dddc",
+  "source_size_bytes": 6636
+}

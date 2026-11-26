@@ -1,0 +1,265 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "service.ticket.read",
+      "service.ticket.notes.search",
+      "service.ticket.note.create",
+      "service.ticket.note.update"
+    ],
+    "approval_bound_branches": [
+      "create_note",
+      "update_note"
+    ],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "Projection already current or exact authorized internal note revision verified; never change original ticket state"
+  },
+  "expected_state": {
+    "activity_note_title": "Jason Activity",
+    "rendering_source": "existing managed_ticket_notes.render_activity_chunks",
+    "no_consecutive_phase_reason_duplicates": true,
+    "append_only_prior_note": true,
+    "rollover": "Jason Activity 2, 3,...",
+    "internal_note_type": 3,
+    "publish": 2
+  },
+  "migration": {
+    "source_conversion": "guarded_one_chunk_projection_candidate_not_accepted",
+    "legacy_source_blob_sha": "727db8ae9808c3464e1f4eb348944ee4542c64c5",
+    "legacy_registry_version": "1.0.0",
+    "source_map": "docs/playbooks/json/migration/source_maps/jason_activity_log.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "No live versioned internal persisted activity read adapter attached to the JSON interpreter",
+      "The JSON v1 runtime does not orchestrate multiple consecutive rollover chunks as one durable batch",
+      "No exact owner-promoted provider write/readback acceptance of create/update through this candidate",
+      "No independent continued/changed source-state and reboot recovery acceptance with real Autotask session"
+    ],
+    "production_activation_authorized": false,
+    "accepted_for_execution": false
+  },
+  "playbook": {
+    "id": "jason_activity_log",
+    "lifecycle": "pilot",
+    "name": "Jason - Managed Activity Log",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-Activity-Log.md",
+    "target_type": "ticket",
+    "version": "1.0.0-migration.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "ticket_note_only": true,
+    "requires_existing_exact_jason_creator": true,
+    "internal_visibility_only": true,
+    "no_ticket_field_mutation": true,
+    "no_client_communication": true,
+    "source_only": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "client_id",
+      "source_activity_fingerprint",
+      "note_title",
+      "note_id",
+      "prior_note_sha256",
+      "new_note_sha256",
+      "action_intent",
+      "next_recheck"
+    ],
+    "no_provider_write_retry_on_uncertain_result": true,
+    "mutation_requires_existing_exact_owner_promotion": true,
+    "source_activity_read": "existing autonomy_ticket_activity via authorized worker-store API; no new provider capability"
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_gate"
+    },
+    {
+      "id": "ticket_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_company_ticket_and_activity_proven",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_notes"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_notes",
+      "type": "diagnostic",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "projection_gate"
+    },
+    {
+      "id": "projection_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "verified_projection_disposition",
+            "operator": "eq",
+            "value": "current"
+          },
+          "next": "already_current"
+        },
+        {
+          "when": {
+            "fact": "verified_projection_disposition",
+            "operator": "eq",
+            "value": "create"
+          },
+          "next": "create_guard"
+        },
+        {
+          "when": {
+            "fact": "verified_projection_disposition",
+            "operator": "eq",
+            "value": "update"
+          },
+          "next": "update_guard"
+        },
+        {
+          "when": {
+            "fact": "verified_projection_disposition",
+            "operator": "eq",
+            "value": "none"
+          },
+          "next": "no_activity"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "create_guard",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_owner_promotion_and_intent_bound",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "create_note"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "update_guard",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_jason_internal_note_owned_and_promotion_bound",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "update_note"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "create_note",
+      "type": "remediation",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "$fact": "verified_exact_note_mutation_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_note"
+    },
+    {
+      "id": "update_note",
+      "type": "remediation",
+      "capability": "service.ticket.note.update",
+      "arguments": {
+        "$fact": "verified_exact_note_mutation_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_note"
+    },
+    {
+      "id": "verify_note",
+      "type": "verification",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "readback_gate"
+    },
+    {
+      "id": "readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_creator_visibility_note_body_and_sha_readback",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "verified_complete"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "already_current",
+      "type": "complete"
+    },
+    {
+      "id": "no_activity",
+      "type": "complete"
+    },
+    {
+      "id": "verified_complete",
+      "type": "complete"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Autotask",
+    "exact_ticket_with_persisted_jason_activity": true,
+    "no_ticket_ownership_or_queue_change": true
+  },
+  "verification": {
+    "authoritative_source": "existing local autonomy_ticket_activity and Autotask service.ticket.notes.search",
+    "success_condition": "exact current Jason-managed internal note body, title, creator identity and hash verified; no unrelated ticket mutations"
+  }
+}

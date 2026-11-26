@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import shutil
 import sqlite3
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic
 
 DEFAULT_AUTHORITY = Path('/var/lib/jason/authority/authority.sqlite3')
 DEFAULT_REPLAY = Path('/var/lib/jason/openclaw/replay.sqlite3')
@@ -111,6 +114,15 @@ def backup_restore_proof(source: Path, temp_root: Path | None = None) -> dict[st
         }
 
 
+def _stage_complete(label: str, start: float) -> float:
+    """Secret-free stage timing retained even if the outer 60-minute job times out."""
+    elapsed = round(monotonic() - start, 3)
+    # The wrapper captures stderr and only admits known, complete stage
+    # markers to failed-timeout evidence; these lines are never PASS proof.
+    print(f'JASON_FULL_INTEGRITY_STAGE_V1|{label}|{elapsed}', file=sys.stderr, flush=True)
+    return elapsed
+
+
 def run(args: argparse.Namespace) -> int:
     files = {
         'authority': args.authority_database,
@@ -120,27 +132,69 @@ def run(args: argparse.Namespace) -> int:
     }
     file_state = {}
     failures = []
-    for name, path in files.items():
-        present = path.exists()
-        current_mode = mode(path)
-        integrity = sqlite_integrity(path) if present else None
-        file_state[name] = {'path': str(path), 'present': present, 'mode': current_mode, 'integrity': integrity}
-        if not present:
-            failures.append(f'{name}_missing')
-        elif current_mode != '0o600':
-            failures.append(f'{name}_permissions')
-        elif integrity != 'ok':
-            failures.append(f'{name}_integrity')
+    stage_seconds: dict[str, float] = {}
 
-    delegation = active_delegation_state(args.authority_database) if args.authority_database.exists() else {}
-    backup = backup_restore_proof(args.authority_database, args.backup_temp_root) if args.authority_database.exists() else {}
-    registry = registry_health(args.key_registry)
-    if not registry.get('present'):
-        failures.append('key_registry_missing')
-    elif registry.get('mode') != '0o600':
-        failures.append('key_registry_permissions')
-    elif int(registry.get('active_records', 0) or 0) < 1:
-        failures.append('key_registry_no_active_keys')
+    # The 36+ GB orchestration audit dominates elapsed time. Start its
+    # unchanged FULL PRAGMA integrity_check before the authority checks and
+    # complete authority backup/restore independently while it runs.
+    # Exactly one additional thread: no daemon, extra signing capability,
+    # provider access, permanent worker, checkpoint or weakened quick_check.
+    # Two independent SQLite connections preserve normal WAL reader safety.
+    # The existing outer 3600-second subprocess boundary remains strict.
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='jason-audit-integrity') as pool:
+        orchestration = files['orchestration_audit']
+        orchestration_present = orchestration.exists()
+        orchestration_started = monotonic()
+        audit_check = pool.submit(sqlite_integrity, orchestration) if orchestration_present else None
+
+        for name in ('authority', 'replay', 'security_audit'):
+            path = files[name]
+            present = path.exists()
+            current_mode = mode(path)
+            started = monotonic()
+            integrity = sqlite_integrity(path) if present else None
+            if present:
+                stage_seconds[name] = _stage_complete(name, started)
+            file_state[name] = {
+                'path': str(path), 'present': present,
+                'mode': current_mode, 'integrity': integrity,
+            }
+            if not present:
+                failures.append(f'{name}_missing')
+            elif current_mode != '0o600':
+                failures.append(f'{name}_permissions')
+            elif integrity != 'ok':
+                failures.append(f'{name}_integrity')
+
+        delegation = active_delegation_state(args.authority_database) if args.authority_database.exists() else {}
+        started = monotonic()
+        backup = backup_restore_proof(args.authority_database, args.backup_temp_root) if args.authority_database.exists() else {}
+        if args.authority_database.exists():
+            stage_seconds['authority_backup_restore'] = _stage_complete('authority_backup_restore', started)
+
+        registry = registry_health(args.key_registry)
+        if not registry.get('present'):
+            failures.append('key_registry_missing')
+        elif registry.get('mode') != '0o600':
+            failures.append('key_registry_permissions')
+        elif int(registry.get('active_records', 0) or 0) < 1:
+            failures.append('key_registry_no_active_keys')
+
+        integrity = audit_check.result() if audit_check is not None else None
+        if audit_check is not None:
+            stage_seconds['orchestration_audit'] = _stage_complete('orchestration_audit', orchestration_started)
+        current_mode = mode(orchestration)
+        file_state['orchestration_audit'] = {
+            'path': str(orchestration), 'present': orchestration_present,
+            'mode': current_mode, 'integrity': integrity,
+        }
+        if not orchestration_present:
+            failures.append('orchestration_audit_missing')
+        elif current_mode != '0o600':
+            failures.append('orchestration_audit_permissions')
+        elif integrity != 'ok':
+            failures.append('orchestration_audit_integrity')
+
     if backup and not (
         backup.get('backup_integrity') == 'ok'
         and backup.get('restore_integrity') == 'ok'
@@ -158,6 +212,7 @@ def run(args: argparse.Namespace) -> int:
         'trusted_key_registry': registry,
         'backup_restore_proof': backup,
         'failures': failures,
+        'completed_stage_seconds': stage_seconds,
         'provider_contacted': False,
         'provider_credentials_used': False,
     }

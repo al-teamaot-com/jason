@@ -1,0 +1,19 @@
+[Unit]
+Description=Jason bounded independent production breaker recovery request
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Independent of PM engineering Owner pause. The manager itself cannot close
+# root-owned breakers; it only requests guarded native root revalidation.
+WorkingDirectory=/home/al/.local/lib/jason/engineering-source-repo
+Environment=HOME=/home/al
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/release_breaker_recovery_manager.py --repo /home/al/.local/lib/jason/engineering-source-repo --spool /var/lib/jason/openclaw/support-repair --release-state /var/lib/jason/openclaw/release-manager
+TimeoutStartSec=120
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/jason/openclaw/support-repair /var/lib/jason/openclaw/release-manager

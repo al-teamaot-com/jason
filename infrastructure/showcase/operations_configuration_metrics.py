@@ -39,7 +39,6 @@ KNOWN_TIMER_DESCRIPTIONS = {
     "jason-kfs-collector.timer": "Collect scheduled KFS copier telemetry.",
     "jason-dnsfilter-boundary-reconcile.timer": "Reconcile the governed DNSFilter boundary.",
     "jason-boot-recovery.timer": "Check boot recovery and post-restart health.",
-    "jason-ccc.timer": "Run recurring constitutional/compliance certification checks.",
     "jason-openbao-backup.timer": "Create the scheduled OpenBao recovery backup/checkpoint.",
 }
 

@@ -134,8 +134,17 @@ class SQLiteMicrosoftIdentityBindingStore:
     trusting the transport to assert an address at execution time.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, read_only: bool = False) -> None:
         self._path = Path(path)
+        if type(read_only) is not bool:
+            raise TypeError("read_only must be a boolean")
+        if read_only:
+            self._connection = sqlite3.connect(
+                self._path.absolute().as_uri() + "?mode=ro", uri=True,
+                check_same_thread=False,
+            )
+            self._connection.execute("PRAGMA query_only=ON")
+            return
         self._path.parent.mkdir(parents=True, exist_ok=True)
         # MCP synchronous tools are dispatched through worker threads while the
         # runtime is process-cached. Allow this durable connection to follow the

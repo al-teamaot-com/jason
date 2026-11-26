@@ -34,9 +34,7 @@ Four additional user-service/timer pairs are staged for `support`, `todo-intake`
 entrypoints** and use their native approved-work, support-first, bounded-claim,
 recovery and evidence rules. They do not create a second engineering queue.
 Each instance has its own timer/failure domain and must pass the existing
-`pmv3_worker_release_gate.py` production-transaction admission check. These
-units require the durable old-controller owner-pause receipt to be present;
-they cannot start alongside a resumed old monolithic controller.
+`pmv3_worker_release_gate.py` production-transaction admission check. These units do not require a standing Owner-pause receipt. The admission wrapper instead proves the legacy monolithic service is inactive and its timer is inactive plus disabled or masked, so replacement lanes cannot compete with the old controller.
 
 The read-only inspection on November 4 found that the production-transaction
 gate exists in source but is not present at the prospective installed path.
@@ -113,8 +111,4 @@ Owner authorization, ticket-continuity proof and independently verified
 rollback. Do not replace or resume the old engineering loop merely because
 this guard passes unit tests.
 
-The admission wrapper double-checks that the old PMV3 engineering service has
-an Owner-approved systemd no-start drop-in **and** that systemd's actually
-loaded `ActiveState=inactive` / `ConditionResult=no` is observed before any
-new engineering worker is admitted. A stale pause file alone is insufficient;
-this prevents hidden duplicate controllers after native reconciliation.
+The admission wrapper independently checks systemd before every replacement-lane run: the old PMV3 engineering service must be `inactive`, and its timer must be `inactive` and `disabled` or `masked`. This is a technical concurrency invariant rather than a standing Owner authorization artifact, and it prevents hidden duplicate controllers after native reconciliation.

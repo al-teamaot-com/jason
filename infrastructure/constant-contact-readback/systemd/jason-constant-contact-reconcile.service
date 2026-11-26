@@ -1,0 +1,12 @@
+[Unit]
+Description=Project Jason Constant Contact GET-only import reconciliation
+After=network-online.target
+ConditionPathExists=/opt/jason/current
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec --workdir /app jason-runtime /usr/local/bin/python3 -m jason_runtime.constant_contact_reconcile_entrypoint --run-once --max-items 25
+TimeoutStartSec=15min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

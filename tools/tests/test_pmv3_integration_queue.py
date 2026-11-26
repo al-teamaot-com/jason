@@ -18,10 +18,6 @@ class FakeApi:
         self.gates = []
         self.merges = []
         self.updates = []
-        self.gate_required = False
-
-    def ensure_gate_required(self):
-        self.gate_required = True
 
     def main_sha(self):
         return self._main
@@ -173,12 +169,11 @@ def test_main_ahead_of_lkg_infers_release_lock_and_blocks_merges(tmp_path):
     write_lkg(release, '1' * 40)
     a = pr(1, 'a' * 40)
     api = FakeApi(main_sha='2' * 40, prs=[a])
-    state = queue.reconcile(api=api, spool=spool, release_state=release, batch_size=3)
+    state = queue.reconcile(independent_source=False, api=api, spool=spool, release_state=release, batch_size=3)
     assert state['status'] == 'release_locked'
     assert state['release_lock']['candidate_sha'] == '2' * 40
     assert api.merges == []
     assert any(x[1] == 'pending' for x in api.gates)
-    assert api.gate_required is True
 
 
 def test_release_lock_clears_when_candidate_becomes_lkg(tmp_path):
@@ -193,7 +188,7 @@ def test_release_lock_clears_when_candidate_becomes_lkg(tmp_path):
         'release_lock': {'active': True, 'candidate_sha': candidate, 'locked_at': queue.now()},
     }))
     api = FakeApi(main_sha=candidate, prs=[])
-    state = queue.reconcile(api=api, spool=spool, release_state=release, state_path=state_path)
+    state = queue.reconcile(independent_source=False, api=api, spool=spool, release_state=release, state_path=state_path)
     assert state['release_lock'] is None
     assert state['status'] == 'idle'
 
@@ -205,7 +200,7 @@ def test_train_merges_first_ready_pr_then_keeps_train_open(tmp_path):
     write_lkg(release, base)
     a, b = pr(1, 'a' * 40), pr(2, 'b' * 40)
     api = FakeApi(main_sha=base, prs=[a, b])
-    state = queue.reconcile(api=api, spool=spool, release_state=release, batch_size=2)
+    state = queue.reconcile(independent_source=False, api=api, spool=spool, release_state=release, batch_size=2)
     assert [x[0] for x in api.merges] == [1]
     merged_sha = api.merges[0][2]
     assert any(sha == merged_sha and status == 'success' for sha, status, _ in api.gates)
@@ -222,7 +217,7 @@ def test_train_completion_locks_exact_final_main(tmp_path):
     write_lkg(release, base)
     a = pr(1, 'a' * 40)
     api = FakeApi(main_sha=base, prs=[a])
-    state = queue.reconcile(api=api, spool=spool, release_state=release, batch_size=1)
+    state = queue.reconcile(independent_source=False, api=api, spool=spool, release_state=release, batch_size=1)
     assert state['status'] == 'release_locked'
     assert state['train'] is None
     assert state['release_lock']['candidate_sha'] == api._main
@@ -239,7 +234,7 @@ def test_selected_behind_pr_updates_branch_instead_of_merging(tmp_path):
     write_lkg(release, base)
     a = pr(1, 'a' * 40, merge_state='BEHIND')
     api = FakeApi(main_sha=base, prs=[a])
-    state = queue.reconcile(api=api, spool=spool, release_state=release)
+    state = queue.reconcile(independent_source=False, api=api, spool=spool, release_state=release)
     assert api.updates == [(1, 'a' * 40)]
     assert api.merges == []
     assert state['status'] == 'integrating'
@@ -259,7 +254,7 @@ def test_explicit_recovery_pr_can_advance_locked_candidate(tmp_path):
     }))
     recovery = pr(9, '9' * 40, labels=[queue.RECOVERY_LABEL], title='P0 recovery: repair release gate')
     api = FakeApi(main_sha=locked, prs=[recovery])
-    state = queue.reconcile(api=api, spool=spool, release_state=release, state_path=state_path)
+    state = queue.reconcile(independent_source=False, api=api, spool=spool, release_state=release, state_path=state_path)
     assert [x[0] for x in api.merges] == [9]
     merged_sha = api.merges[0][2]
     assert any(sha == merged_sha and status == 'success' for sha, status, _ in api.gates)
@@ -292,7 +287,7 @@ def test_recovery_merge_checkpoints_locked_candidate_before_status_api_failure(t
         prs=[pr(9, '9' * 40, labels=[queue.RECOVERY_LABEL])],
     )
     with pytest.raises(RuntimeError, match='status API outage'):
-        queue.reconcile(api=api, spool=spool, release_state=release, state_path=state_path)
+        queue.reconcile(independent_source=False, api=api, spool=spool, release_state=release, state_path=state_path)
     assert len(api.merges) == 1
     checkpoint = queue.load_state(state_path)
     assert checkpoint['status'] == 'release_locked'
@@ -313,7 +308,7 @@ def test_unknown_lkg_fails_closed_and_does_not_start_train(tmp_path):
     write_approved(spool, 1)
     a = pr(1, 'a' * 40)
     api = FakeApi(main_sha='2' * 40, prs=[a])
-    state = queue.reconcile(api=api, spool=spool, release_state=release)
+    state = queue.reconcile(independent_source=False, api=api, spool=spool, release_state=release)
     assert state['status'] == 'release_locked'
     assert state['release_lock']['reason'] == 'verified_production_revision_unknown'
     assert api.merges == []
@@ -339,7 +334,7 @@ def test_read_only_status_refreshes_live_revision_without_mutating_queue(tmp_pat
     write_lkg(release, merged)
     api = FakeApi(main_sha=merged, prs=[])
 
-    result = queue.current_status(api=api, spool=spool, release_state=release)
+    result = queue.current_status(independent_source=False, api=api, spool=spool, release_state=release)
     assert result['main_sha'] == merged
     assert result['production_lkg_sha'] == merged
     assert result['stored_main_sha'] == prior
@@ -350,7 +345,7 @@ def test_read_only_status_refreshes_live_revision_without_mutating_queue(tmp_pat
     assert result['release_lock_active'] is True  # Stored lock remains enforceable.
     assert result['release_candidate_sha'] == merged
     assert path.read_bytes() == original
-    assert not api.merges and not api.gates and not api.gate_required
+    assert not api.merges and not api.gates
 
 
 def test_read_only_status_keeps_main_ahead_of_production_locked(tmp_path):
@@ -365,26 +360,26 @@ def test_read_only_status_keeps_main_ahead_of_production_locked(tmp_path):
     write_lkg(release, prior)
     api = FakeApi(main_sha=candidate, prs=[])
 
-    result = queue.current_status(api=api, spool=spool, release_state=release)
+    result = queue.current_status(independent_source=False, api=api, spool=spool, release_state=release)
     assert result['main_sha'] == candidate
     assert result['production_lkg_sha'] == prior
     assert result['status'] == 'release_locked'
     assert result['release_lock_reconciliation_pending'] is False
     assert result['queue_state_stale'] is True
     assert path.read_bytes() == original
-    assert not api.merges and not api.gates and not api.gate_required
+    assert not api.merges and not api.gates
 
 
 def test_read_only_status_unknown_production_is_fail_closed(tmp_path):
     spool, release = tmp_path / 'spool', tmp_path / 'release'
     spool.mkdir()
     api = FakeApi(main_sha='c' * 40, prs=[])
-    result = queue.current_status(api=api, spool=spool, release_state=release)
+    result = queue.current_status(independent_source=False, api=api, spool=spool, release_state=release)
     assert result['status'] == 'release_locked'
     assert result['production_lkg_sha'] == ''
     assert result['release_lock_reconciliation_pending'] is False
     assert not (spool / 'pmv3-integration-queue-state.json').exists()
-    assert not api.merges and not api.gates and not api.gate_required
+    assert not api.merges and not api.gates
 
 
 def test_read_only_status_rejects_unverifiable_protected_main(tmp_path):
@@ -396,9 +391,9 @@ def test_read_only_status_rejects_unverifiable_protected_main(tmp_path):
     before = ledger.read_bytes()
     api = FakeApi(main_sha='unavailable', prs=[])
     with pytest.raises(ValueError, match='protected main SHA is unavailable'):
-        queue.current_status(api=api, spool=spool, release_state=release)
+        queue.current_status(independent_source=False, api=api, spool=spool, release_state=release)
     assert ledger.read_bytes() == before
-    assert not api.gates and not api.merges and not api.gate_required
+    assert not api.gates and not api.merges
 
 
 def test_read_only_status_does_not_clear_unrelated_release_lock(tmp_path):
@@ -415,10 +410,211 @@ def test_read_only_status_does_not_clear_unrelated_release_lock(tmp_path):
     }))
     before = ledger.read_bytes()
     api = FakeApi(main_sha=accepted, prs=[])
-    result = queue.current_status(api=api, spool=spool, release_state=release)
+    result = queue.current_status(independent_source=False, api=api, spool=spool, release_state=release)
     assert result['status'] == 'release_locked'
     assert result['release_lock_active'] is True
     assert result['release_lock_reconciliation_pending'] is False
     assert result['release_candidate_sha'] == unrelated
     assert ledger.read_bytes() == before
-    assert not api.gates and not api.merges and not api.gate_required
+    assert not api.gates and not api.merges
+
+
+
+def test_retired_required_integration_check_is_never_reinstalled():
+    # The source and mock API intentionally provide no branch-protection
+    # writer. A future attempt to resurrect the old call will fail existing
+    # controller/regression tests rather than quietly rewriting GitHub rules.
+    assert not hasattr(queue.GhApi, "ensure_gate_required")
+    assert not hasattr(FakeApi, "ensure_gate_required")
+
+
+def independent_fixture(tmp_path, *numbers):
+    spool, release = tmp_path / "spool", tmp_path / "release"
+    write_approved(spool, *numbers)
+    write_lkg(release, "f" * 40)
+    lock = release / "production-transaction.lock"
+    lock.touch(mode=0o660)
+    lock.chmod(0o660)
+    entries = [pr(n, hex(n+10)[2:] * 40) for n in numbers]
+    for row in entries:
+        row["baseRefName"] = "main"
+    api = FakeApi(main_sha="2" * 40, prs=entries)
+    api.source_ready = lambda n, head, main, files, body=None: (
+        api.main_sha() == main and api.prs[n]["headRefOid"] == head and api.files[n] == files)
+    return spool, release, api
+
+
+def test_independent_trains_advance_without_production_promotion(tmp_path):
+    spool, release, api = independent_fixture(tmp_path, 1, 2)
+    path = spool / "pmv3-integration-queue-state.json"
+    old = queue._release_lock("2"*40, None, reason="main_ahead_of_verified_production")
+    path.write_text(json.dumps({**queue.empty_state(), "release_lock": old}))
+    native = release / "protected-readback" / "production-control-state.json"
+    before = native.read_bytes()
+    lock_inode = (release / "production-transaction.lock").stat().st_ino
+    for _ in range(2):
+        state = queue.reconcile(api=api, spool=spool, release_state=release, batch_size=1)
+        assert state["status"] == "source_backlog"
+        assert state["release_lock"] is None
+        assert state["legacy_release_locks"] == [old]
+        assert state["source_backlog"]["pending_production_review"] is True
+        assert state["source_backlog"]["production_authority"] is False
+    assert [x[0] for x in api.merges] == [1,2]
+    assert native.read_bytes() == before
+    assert (release / "production-transaction.lock").stat().st_ino == lock_inode
+    old_bytes = path.read_bytes()
+    status = queue.current_status(api=api,spool=spool,release_state=release)
+    assert status["status"] == "source_backlog"
+    assert status["source_backlog"]["main_sha"] == api.main_sha()
+    assert path.read_bytes() == old_bytes
+
+
+def test_independent_mutex_blocks_actual_production_lock_and_second_queue(tmp_path):
+    import fcntl
+    spool, release, api = independent_fixture(tmp_path, 1)
+    for path in (release / "production-transaction.lock", spool / ".pmv3-source-integration.lock"):
+        with path.open("a+") as handle:
+            path.chmod(0o600)
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = queue.reconcile(api=api, spool=spool, release_state=release)
+            assert result["status"] == "source_integration_deferred"
+    assert not api.merges and not api.gates and not api.updates
+    assert not (spool / "pmv3-integration-queue-state.json").exists()
+
+
+def test_independent_mutex_remains_held_during_merge(tmp_path):
+    import fcntl
+    spool, release, api = independent_fixture(tmp_path, 1)
+    merge = api.merge_pull_request
+    def guarded(n,sha):
+        with (release / "production-transaction.lock").open("r") as f:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        return merge(n,sha)
+    api.merge_pull_request=guarded
+    queue.reconcile(api=api,spool=spool,release_state=release)
+    assert len(api.merges)==1
+
+
+@pytest.mark.parametrize("defect",["missing","symlink","untrusted"])
+def test_independent_mutex_denies_missing_or_untrusted_lock(tmp_path,defect):
+    spool,release,api=independent_fixture(tmp_path,1)
+    path=release/"production-transaction.lock"
+    if defect=="untrusted":path.chmod(0o666)
+    else:
+        path.unlink()
+        if defect=="symlink":
+            target=release/"other"
+            target.touch()
+            path.symlink_to(target)
+    with pytest.raises((OSError,PermissionError)):
+        queue.reconcile(api=api,spool=spool,release_state=release)
+    assert not api.merges and not api.gates and not api.updates
+
+
+def test_independent_unknown_lkg_blocks_even_recovery_pr(tmp_path):
+    spool,release,api=independent_fixture(tmp_path,1)
+    (release/"protected-readback/production-control-state.json").unlink()
+    api.prs[1]["labels"]=[{"name":queue.RECOVERY_LABEL}]
+    state=queue.reconcile(api=api,spool=spool,release_state=release)
+    assert state["status"]=="release_locked"
+    assert not api.merges and not api.updates
+
+
+@pytest.mark.parametrize("defect",["draft","revoked","base","changed_files","pause","lock_replaced","main_moved","body","checks"])
+def test_independent_rechecks_exact_source_at_mutation(tmp_path,defect):
+    spool,release,api=independent_fixture(tmp_path,1)
+    def stale(*args):
+        if defect=="draft":api.prs[1]["isDraft"]=True
+        elif defect=="revoked":write_approved(spool)
+        elif defect=="base":api.prs[1]["baseRefName"]="other"
+        elif defect=="changed_files":api.files[1].add("unreviewed")
+        elif defect=="pause":(spool/"pmv3-engineering-owner-pause.json").touch()
+        elif defect=="lock_replaced":
+            path=release/"production-transaction.lock"
+            path.rename(release/"old-lock")
+            path.touch(mode=0o600)
+        elif defect=="main_moved":api._main="3"*40
+        elif defect=="body":api.prs[1]["body"]="changed review"
+        elif defect=="checks":api.states[api.prs[1]["headRefOid"]]["runtime-service"]="pending"
+        return True
+    api.source_ready=stale
+    try:queue.reconcile(api=api,spool=spool,release_state=release)
+    except PermissionError:pass
+    assert not api.merges and not api.updates
+
+
+def test_independent_required_checks_and_exact_review_are_mandatory(tmp_path):
+    spool,release,api=independent_fixture(tmp_path,1)
+    api.source_ready=lambda *a:False
+    queue.reconcile(api=api,spool=spool,release_state=release)
+    assert not api.merges
+    api.source_ready=lambda *a:True
+    api.states[api.prs[1]["headRefOid"]]["runtime-service"]="failure"
+    queue.reconcile(api=api,spool=spool,release_state=release)
+    assert not api.merges
+
+
+def test_independent_merge_checkpoint_survives_advisory_status_error(tmp_path):
+    spool,release,api=independent_fixture(tmp_path,1)
+    set_gate=api.set_gate
+    def fail(sha,state,desc):
+        if "integrated selected" in desc:raise RuntimeError("status network failure")
+        set_gate(sha,state,desc)
+    api.set_gate=fail
+    with pytest.raises(RuntimeError,match="status network failure"):
+        queue.reconcile(api=api,spool=spool,release_state=release)
+    saved=queue.load_state(spool/"pmv3-integration-queue-state.json")
+    assert saved["train"]["merged"]==[1]
+    assert saved["source_backlog"]["main_sha"]==api.main_sha()
+    api.set_gate=set_gate
+    queue.reconcile(api=api,spool=spool,release_state=release)
+    assert len(api.merges)==1
+
+
+def test_source_ready_requires_strict_current_base_and_fresh_overlap_review(monkeypatch):
+    api=queue.GhApi()
+    main,head="1"*40,"2"*40
+    files={"tools/example.py"}
+    prefix="repos/al-teamaot-com/jason/"
+    answers={
+        prefix+"branches/main":{"protected":True,"commit":{"sha":main}},
+        prefix+"branches/main/protection/required_status_checks":{"strict":True,"contexts":["repository-hygiene"]},
+        prefix+f"compare/{main}...{head}":{"status":"ahead","merge_base_commit":{"sha":main}},
+    }
+    monkeypatch.setattr(api,"_api_json",lambda path:answers[path])
+    monkeypatch.setattr(api,"pull_request",lambda n:{"state":"open","isDraft":False,"baseRefName":"main","baseRefOid":main,"headRefOid":head,"changedFileCount":1,"body":""})
+    monkeypatch.setattr(api,"changed_files",lambda n:files)
+    monkeypatch.setattr(api,"_run",lambda args:json.dumps([[]]))
+    assert api.source_ready(1,head,main,files)
+    answers[prefix+"branches/main/protection/required_status_checks"]["strict"]=False
+    assert not api.source_ready(1,head,main,files)
+    answers[prefix+"branches/main/protection/required_status_checks"]["strict"]=True
+    answers[prefix+f"compare/{main}...{head}"]["merge_base_commit"]["sha"]="3"*40
+    assert not api.source_ready(1,head,main,files)
+    answers[prefix+f"compare/{main}...{head}"]["merge_base_commit"]["sha"]=main
+    from datetime import datetime,timezone
+    def overlap(args):
+        if "/pulls?" in args[-1]:
+            return json.dumps([[{"number":2,"updated_at":datetime.now(timezone.utc).isoformat()}]])
+        return json.dumps([[{"filename":"tools/example.py"}]])
+    monkeypatch.setattr(api,"_run",overlap)
+    assert not api.source_ready(1,head,main,files)
+
+
+def test_long_source_review_does_not_hold_production_mutex(tmp_path):
+    import fcntl
+    spool,release,api=independent_fixture(tmp_path,1)
+    handle=(release/"production-transaction.lock").open("r")
+    def concurrent_release(*args):
+        fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        return True
+    api.source_ready=concurrent_release
+    try:
+        state=queue.reconcile(api=api,spool=spool,release_state=release)
+        assert state["status"]=="source_integration_deferred"
+        assert not api.merges and not api.updates
+    finally:handle.close()
+    api.source_ready=lambda *args:True
+    queue.reconcile(api=api,spool=spool,release_state=release)
+    assert len(api.merges)==1

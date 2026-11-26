@@ -30,22 +30,35 @@ to this engine until the scheduler/recovery acceptance suite passes.
 
 ## Approval channel
 
-Teams is the only human approval channel for PMV3.
-
-Approval-required work is not runnable unless PMV3 receives a verified approval
-decision from Jason's authenticated Teams Approval Service / Universal Teams
-Approval path and the decision is bound to the exact approval request.
+Teams is no longer the only accepted human approval channel. The Owner
+directed removal of the mandatory Teams dependency on 2026-11-10. This
+source-level work-engine contract accepts either a verified Teams approval
+or an **independently verified authenticated Entra Owner decision** bound to
+the exact request, work item, action and generation. The Owner identity is
+`person-al` and the licensed regular Entra account, not the unlicensed
+admin Teams account. An injected trusted service adapter must verify the
+OAuth bearer, active Jason authority, and signed decision evidence **before**
+calling `record_authenticated_owner_approval`; this isolated engine does
+not itself verify OAuth tokens.
 
 The following are never approval:
-- SSH or shell commands;
-- local files or environment variables;
+- bare SSH or shell commands;
+- local files or environment variables without independent verification;
 - GitHub comments or repository access;
 - typed chat text such as "approve";
 - direct state/database edits;
 - copied, expired, mismatched, replayed or unverified approval payloads.
 
-Teams Deny leaves the work non-runnable. PMV3 must never instruct the Owner to
-SSH to Jason to approve work.
+A denied decision on either channel leaves work non-runnable. Do not prompt
+the Owner to obtain an impossible Teams approval. The isolated scheduler now accepts this trusted verifier as an **injected
+Python callback** and an explicit opaque evidence envelope. Its CLI has no
+flag or file input for independently verified Owner decisions; untrusted
+local approval JSON remains Teams-only and rejects channel substitution.
+No production adapter or approval channel is activated by this
+source-only policy/engine update. The live service-side Entra OAuth adapter
+and release-controller/root verification must be separately integrated
+and tested before deployment. Keep the current production freeze and
+breaker intact.
 
 
 ## Governed engineering continuation controller
@@ -116,19 +129,19 @@ onboarding attestation, provider credential, or approval semantics from those
 branches. Later integration must preserve both workstreams.
 ## Governed integration and release queue
 
-PMV3 separates concurrent development from serialized production integration. Development branches, pull-request updates, and CI may continue while a production candidate is being built or deployed. Protected `main` integration is controlled by the required GitHub status context `pmv3-integration-gate`.
+PMV3 separates concurrent development from serialized production integration. Development branches, pull-request updates, and CI may continue while a production candidate is being built or deployed. The Owner retired the previously required GitHub status context `pmv3-integration-gate` on November 10, 2026. The integration queue can retain advisory status reporting, but it must never restore or write branch protection. The eight ordinary required CI checks, strict protected-branch rules, Teams authorization, production freeze, and exact-release gates remain independent and enforceable.
 
-The integration queue admits only pull requests backed by durable Owner-approved development evidence, or an explicitly governed `pmv3-integration-ready` label. It selects a bounded release train (default maximum three PRs), prefers higher-priority work, and batches only PRs whose changed-file sets do not overlap. Only the currently selected PR receives a successful integration-gate status. Other PRs remain queued with a pending gate; this blocks merge without blocking development or CI.
+The integration queue admits only pull requests backed by durable Owner-approved development evidence, or an explicitly governed `pmv3-integration-ready` label. It selects a bounded release train (default maximum three PRs), prefers higher-priority work, and batches only PRs whose changed-file sets do not overlap. The optional queue may publish selected/queued statuses for visibility only; these no longer block GitHub merges. Existing CI and review requirements still apply.
 
-After the train is merged, PMV3 records the exact resulting `main` SHA as the production candidate and closes the integration gate for all unrelated PRs. The lock remains until the exact candidate becomes the verified Last Known Good production revision. A restart or missing queue state fails closed: if protected `main` differs from verified production, PMV3 reconstructs the release lock from observed state.
+The Owner-approved November 25 independent-source policy separates source integration from production release selection. A protected-main revision different from verified production is an undeployed source backlog, not an active production transaction. Once the native successor is authorized, installed and verified, admitted source trains may continue without first deploying earlier integrated source. The former queue-only lock is archived in the existing queue state; no native release record, production mutex, signed approval, LKG, freeze or hold is removed or changed.
 
-A release lock does not grant production authority. Release Manager validation, exact-revision Teams approval, deployment, verification, rollback, and production-freeze rules remain unchanged. A bounded release-recovery PR may advance a locked candidate only when it is durably admitted and explicitly labeled `pmv3-release-recovery`; ordinary development cannot bypass the lock.
+The existing native release manager retains the exclusive production mutex, immutable candidate identity, scope review, Owner approval, deployment, verification and rollback. Source reconciliation holds an exclusive queue lease and takes a shared lease on the actual production mutex only for final mutation, checks the exact current protected base, fresh PR admission, file inventory, overlap review and required CI before mutation. Unknown LKG, missing/untrusted lock, Owner pause or an actual exclusive production transaction continues to deny integration. An existing pinned release that no longer satisfies current-main admission must be re-reviewed, never silently retargeted or re-approved. Rollback of the source-integration worker does not revert already approved GitHub merges.
 
-Canonical queue states are:
+Canonical independent-source queue states are:
 
-`IDLE -> INTEGRATING -> RELEASE_LOCKED -> (production verified/LKG) -> IDLE`
+`IDLE / SOURCE_BACKLOG -> INTEGRATING -> IDLE / SOURCE_BACKLOG`
 
-Development continues in every queue state. Queue-control failure is fail-closed for merges and must not stop development.
+`RELEASE_LOCKED` remains fail-closed for an unknown verified production revision. An actual mutex conflict or Owner pause defers source reconciliation. The legacy deployed policy remains effective until the exact native successor is accepted. Queue-control failure is fail-closed for merges and must not stop development.
 
 
 ## 2026-11-04 PMV3 recovery lock and autonomous-intake integration acceptance

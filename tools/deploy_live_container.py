@@ -11,6 +11,15 @@ import sys
 import time
 from typing import Any
 
+if __package__:
+    from .pmv4_mcp_projection import (
+        EXACT_MOUNTS, add_projection_mounts, should_omit_existing,
+    )
+else:
+    from pmv4_mcp_projection import (
+        EXACT_MOUNTS, add_projection_mounts, should_omit_existing,
+    )
+
 
 def _run(args: list[str], *, env: dict[str, str] | None = None, quiet: bool = False) -> None:
     kwargs: dict[str, Any] = {"check": True, "text": True}
@@ -196,7 +205,14 @@ def _build_create_command(
     harden: bool,
     set_env: tuple[str, ...] = (),
     additional_readonly_binds: tuple[str, ...] = (),
+    omit_readonly_bind_destinations: tuple[str, ...] = (),
+    pmv4_owner_projection: bool = False,
+    omit_pmv4_owner_projection: bool = False,
 ):
+    if pmv4_owner_projection and omit_pmv4_owner_projection:
+        raise ValueError("PMV4_OWNER_PROJECTION_MODE_CONFLICT")
+    if (pmv4_owner_projection or omit_pmv4_owner_projection) and live != "jason-mcp-pilot":
+        raise ValueError("PMV4_OWNER_PROJECTION_TARGET_DENIED")
     src = _inspect(live)
     config = src["Config"]
     host = src["HostConfig"]
@@ -266,6 +282,17 @@ def _build_create_command(
         source = str(mount["Source"])
         destination = str(mount["Destination"])
         writable = bool(mount.get("RW", False))
+        if omit_pmv4_owner_projection and should_omit_existing(source, destination, writable):
+            if mount_type != "bind":
+                raise ValueError("PMV4_OWNER_ROLLBACK_BIND_TYPE_INVALID")
+            continue
+        if (not pmv4_owner_projection and not omit_pmv4_owner_projection
+                and destination in {row[1] for row in EXACT_MOUNTS}):
+            raise ValueError("PMV4_OWNER_PROJECTION_MODE_REQUIRED")
+        if destination in omit_readonly_bind_destinations:
+            if writable or mount_type != "bind":
+                raise ValueError("cannot omit writable or non-bind mount during rollback")
+            continue
         existing_mounts[destination] = (source, writable)
         spec = f"type={mount_type},src={source},dst={destination}"
         if not writable:
@@ -293,6 +320,26 @@ def _build_create_command(
             "--mount",
             f"type=bind,src={source},dst={destination},readonly",
         ]
+
+    if pmv4_owner_projection:
+        if (not harden
+                or "JASON_PMV4_OWNER_ISSUER_ENABLED=true" not in set_env
+                or env_map.get("JASON_PMV4_OWNER_ISSUER_ENABLED") != "true"):
+            raise ValueError("PMV4_OWNER_EXPLICIT_INSTALL_PROFILE_REQUIRED")
+        add_projection_mounts(
+            args, existing_mounts,
+            # The established MCP verifier uses this same documented
+            # AOT Entra application client ID as its default audience.
+            expected_audience=env_map.get(
+                "JASON_MCP_ENTRA_CLIENT_ID",
+                "9b9996e9-5c34-48b7-948c-f44f89352f89",
+            ),
+        )
+    if omit_pmv4_owner_projection and env_map.get("JASON_PMV4_OWNER_ISSUER_ENABLED") != "false":
+        raise ValueError("PMV4_OWNER_ROLLBACK_MUST_DISABLE_ISSUER")
+    if (not pmv4_owner_projection and not omit_pmv4_owner_projection
+            and env_map.get("JASON_PMV4_OWNER_ISSUER_ENABLED") == "true"):
+        raise ValueError("PMV4_OWNER_PROJECTION_REQUIRED_FOR_ENABLED_ISSUER")
 
     for container_port, bindings in (host.get("PortBindings") or {}).items():
         for binding in bindings or []:
@@ -355,6 +402,10 @@ def main() -> int:
     parser.add_argument("--health-interval", type=float, default=2.0)
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--harden", action="store_true")
+    parser.add_argument("--pmv4-owner-projection", action="store_true",
+                        help="Project only the separately authorized PMv4 shadow Owner decision store")
+    parser.add_argument("--omit-pmv4-owner-projection-on-rollback", action="store_true",
+                        help="Remove only fixed PMv4 Owner mounts on exact MCP rollback")
     parser.add_argument(
         "--set-env",
         action="append",
@@ -368,6 +419,16 @@ def main() -> int:
         help="Add one read-only bind mount as absolute SOURCE:DESTINATION.",
     )
     parser.add_argument(
+        "--omit-owner-release-signer-bind-on-rollback",
+        action="store_true",
+        help="Remove only the exact owner signer private mount when deploying the rollback image.",
+    )
+    parser.add_argument(
+        "--omit-microsoft-group-binds-on-rollback",
+        action="store_true",
+        help="Remove only fixed AOT Microsoft group AppRole read/write mounts on the exact rollback image.",
+    )
+    parser.add_argument(
         "--promote-image-tag",
         action="append",
         default=[],
@@ -378,7 +439,36 @@ def main() -> int:
         help="Image tag to retarget to the actual pre-deployment live image after successful verification.",
     )
     args = parser.parse_args()
+    SIGNER_DESTINATION = "/run/jason-secrets/owner-release/private_key"
+    if args.omit_pmv4_owner_projection_on_rollback and (
+        args.live != "jason-mcp-pilot"
+        or args.image != "jason-mcp:rollback-current"
+        or "JASON_PMV4_OWNER_ISSUER_ENABLED=false" not in args.set_env
+    ):
+        parser.error("PMv4 Owner projection may be omitted only for exact MCP rollback")
+    if args.pmv4_owner_projection and (
+        args.live != "jason-mcp-pilot"
+        or "JASON_PMV4_OWNER_ISSUER_ENABLED=true" not in args.set_env
+    ):
+        parser.error("PMv4 Owner projection requires exact MCP activation")
+    if args.omit_owner_release_signer_bind_on_rollback and (
+        args.live != "jason-mcp-pilot"
+        or args.image != "jason-mcp:rollback-current"
+        or "JASON_OWNER_RELEASE_ED25519_KEY_PATH=" not in args.set_env
+    ):
+        parser.error("Owner signer mount may be omitted only for exact MCP rollback")
 
+    GROUP_MOUNT_DESTINATIONS = tuple(
+        f"/run/jason-secrets/openbao/microsoft-group-{role}/{field}"
+        for role in ("read", "write") for field in ("role_id", "secret_id")
+    )
+    if args.omit_microsoft_group_binds_on_rollback and (
+        (args.live, args.image) not in {
+            ("jason-runtime", "jason-runtime:rollback-current"),
+            ("jason-mcp-pilot", "jason-mcp:rollback-current"),
+        } or "JASON_M365_GROUP_ADMIN_PROFILE=" not in args.set_env
+    ):
+        parser.error("Microsoft group AppRole mounts may be omitted only for an exact disabled rollback")
     promote_tags = list(dict.fromkeys(tag.strip() for tag in args.promote_image_tag if tag.strip()))
     rollback_image_tag = str(args.rollback_image_tag or "").strip() or None
     if rollback_image_tag and not promote_tags:
@@ -402,6 +492,12 @@ def main() -> int:
         harden=args.harden,
         set_env=tuple(args.set_env),
         additional_readonly_binds=tuple(args.add_readonly_bind),
+        omit_readonly_bind_destinations=(
+            ((SIGNER_DESTINATION,) if args.omit_owner_release_signer_bind_on_rollback else ())
+            + (GROUP_MOUNT_DESTINATIONS if args.omit_microsoft_group_binds_on_rollback else ())
+        ),
+        pmv4_owner_projection=args.pmv4_owner_projection,
+        omit_pmv4_owner_projection=args.omit_pmv4_owner_projection_on_rollback,
     )
 
     print("PREFLIGHT=PASS")
@@ -417,6 +513,10 @@ def main() -> int:
     print(f"HARDENING_REQUESTED={args.harden}")
     print(f"SET_ENV_COUNT={len(args.set_env)}")
     print(f"ADDITIONAL_READONLY_BIND_COUNT={len(args.add_readonly_bind)}")
+    print(f"OWNER_SIGNER_BIND_OMITTED={args.omit_owner_release_signer_bind_on_rollback}")
+    print(f"M365_GROUP_APPROLE_MOUNTS_REMOVED={args.omit_microsoft_group_binds_on_rollback}")
+    print(f"PMV4_OWNER_PROJECTION_ENABLED={args.pmv4_owner_projection}")
+    print(f"PMV4_OWNER_PROJECTION_REMOVED={args.omit_pmv4_owner_projection_on_rollback}")
     print(f"PROMOTE_IMAGE_TAG_COUNT={len(promote_tags)}")
     print(f"ROLLBACK_IMAGE_TAG={rollback_image_tag or ''}")
     if args.preflight:

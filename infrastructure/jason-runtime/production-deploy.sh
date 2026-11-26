@@ -153,6 +153,42 @@ if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
 fi
 
+# Exact source-bound Microsoft group pilot; rollbacks always disable write access.
+# AppRole credentials are independent, read-only, and mounted ONLY when active.
+if [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
+  M365_GROUP_PROFILE=""
+else
+  M365_GROUP_PROFILE="$(python3 "$REPO_ROOT/tools/microsoft_group_admin_release_profile.py" \
+    --source "$REPO_ROOT/config/microsoft_graph/group-admin-release.json")" || exit 2
+  if [ -n "${JASON_M365_GROUP_ADMIN_PROFILE:-}" ] &&
+     [ "$JASON_M365_GROUP_ADMIN_PROFILE" != "$M365_GROUP_PROFILE" ]; then
+    echo "DENIED: Microsoft group activation differs from reviewed source" >&2
+    exit 2
+  fi
+fi
+M365_GROUP_BIND_ARGS=()
+if [ -z "$M365_GROUP_PROFILE" ] && [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
+  M365_GROUP_BIND_ARGS=(--omit-microsoft-group-binds-on-rollback)
+fi
+if [ -n "$M365_GROUP_PROFILE" ]; then
+  for group_role in read write; do
+    host_base="/opt/jason/bootstrap/secrets/openbao/microsoft-graph-group-${group_role}-approle"
+    mount_base="/run/jason-secrets/openbao/microsoft-group-${group_role}"
+    for key_file in role-id secret-id; do
+      host_file="$host_base/$key_file"
+      if [ ! -f "$host_file" ] || [ -L "$host_file" ] ||
+         [ "$(stat -c '%u:%g:%a' "$host_file")" != "0:1000:640" ]; then
+        echo "DENIED: Microsoft group AppRole runtime projection unavailable or unsafe" >&2
+        exit 2
+      fi
+    done
+    M365_GROUP_BIND_ARGS+=(
+      --add-readonly-bind "$host_base/role-id:$mount_base/role_id"
+      --add-readonly-bind "$host_base/secret-id:$mount_base/secret_id"
+    )
+  done
+fi
+
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 ROLLBACK="jason-runtime-rollback-$STAMP"
 
@@ -232,7 +268,13 @@ elif version == "3.0":
     expected = {"schema_version", "organization_id", "policy_mode",
                 "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
                 "capability", "high_impact_review"}
-elif version == "4.0":
+elif version == "3.1":
+    mode = "owner_reviewed"
+    risks = {"normal", "production_control_core"}
+    expected = {"schema_version", "organization_id", "policy_mode",
+                "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
+                "capability", "high_impact_review"}
+elif version in {"4.0", "4.1"}:
     mode = "admin_approver_separated"
     risks = {"normal", "production_control_core"}
     expected = {"schema_version", "organization_id", "policy_mode",
@@ -252,12 +294,16 @@ if (set(d) != expected or d.get("organization_id") != "aot"
         or d.get("capability") != "release.production.approve"
         or d.get("high_impact_review") != {
             "owner_exact_sha_required": True,
-            "signed_teams_identity_required": True,
-            "independent_ccc_required": True,
+            **({"authenticated_entra_owner_decision_required": True}
+               if version == "3.1"
+               else {"signed_teams_identity_required": True}),
+            **({"independent_native_release_health_required": True}
+                       if version == "3.1"
+                       else {"independent_ccc_required": True}),
             "protected_release_gates_unchanged": True,
         }):
     raise SystemExit("DENIED: source mobile release approval policy is invalid")
-if version == "4.0":
+if version in {"4.0", "4.1"}:
     def exact_binding(field):
         binding=d.get(field)
         if not isinstance(binding, dict) or set(binding) != {
@@ -298,6 +344,8 @@ exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime 
   --set-env "JASON_OWNER_UAT_SESSION_ID=$OWNER_UAT_SESSION" \
   --set-env "JASON_RELEASE_MOBILE_APPROVAL_MODE=$RELEASE_APPROVAL_MODE" \
   --set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE"   --set-env "JASON_PM_V2_CONTROL_PROFILE=$PM_V2_CONTROL_PROFILE"   --set-env "JASON_PM_V2_SHARED_ROOT=$PM_V2_SHARED_ROOT" \
+  --set-env "JASON_M365_GROUP_ADMIN_PROFILE=$M365_GROUP_PROFILE" \
+  "${M365_GROUP_BIND_ARGS[@]}" \
   --set-env "JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH=$QBO_MOUNT_BASE/role_id" \
   --set-env "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH=$QBO_MOUNT_BASE/secret_id" \
   --set-env "JASON_QUICKBOOKS_OAUTH_DB=$QBO_DB" \
@@ -306,6 +354,7 @@ exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime 
   --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \
+  --set-env "JASON_DATTO_JASON_ROOT_PROBE_DEVICE_UID=${JASON_DATTO_JASON_ROOT_PROBE_DEVICE_UID:-}" \
   --add-readonly-bind "$QBO_ROLE_HOST:$QBO_MOUNT_BASE/role_id" \
   --add-readonly-bind "$QBO_SECRET_HOST:$QBO_MOUNT_BASE/secret_id" \
   --promote-image-tag jason-runtime:production \

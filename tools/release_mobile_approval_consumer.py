@@ -99,6 +99,31 @@ def _authorized_policy_owner_identity(*, binding, owner, policy, receipt_identit
     if (owner is None or owner.status != "active"
             or owner.organization_id != policy.organization_id):
         raise PermissionError("mobile release approval has no active independent Jason owner identity")
+    if policy.schema_version in {"4.0", "4.1"}:
+        # Independently attest the exact Teams actor again at the host.
+        # The transport recipient is the regular licensed Owner for V4.1;
+        # only administrative provider/grant operations require admin OID.
+        expected = (policy.regular_requester_binding if policy.schema_version == "4.1"
+                    else policy.admin_approver_binding)
+        other = (policy.admin_approver_binding if policy.schema_version == "4.1"
+                 else policy.regular_requester_binding)
+        if expected is None or other is None:
+            raise PermissionError("separated release identity policy is incomplete")
+        try:
+            expected_identity = "person-entra-" + uuid.UUID(expected[1]).hex
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise PermissionError("release identity binding is invalid") from exc
+        if (
+            (binding.microsoft_tenant_id, binding.microsoft_object_id) != expected
+            or (binding.microsoft_tenant_id, binding.microsoft_object_id) == other
+            or binding.status != "active"
+            or binding.client_id is not None
+            or binding.jason_identity_id != expected_identity
+            or owner.identity_id != expected_identity
+            or owner.identity_type not in ("human", "person")
+        ):
+            raise PermissionError("host release approval actor is not exact Entra Owner")
+        return receipt_identity_id
     if owner.identity_id == receipt_identity_id:
         return receipt_identity_id
     fallback_email = OWNER_EMAIL_FALLBACKS.get(receipt_identity_id)
@@ -366,7 +391,7 @@ def consume_mobile_release_decisions(
             authenticator=key_auth, allowed_machine_identities=frozenset({"svc-openclaw-gateway"}),
             allowed_approval_prefixes=(REQUEST_PREFIX,), clock=lambda: timestamp,
             allowed_selection_keys=(frozenset({"card_challenge"})
-                                    if policy.schema_version in {"2.0", "3.0"} else frozenset()),
+                                    if policy.schema_version in {"2.0", "3.0", "4.0", "4.1"} else frozenset()),
         )
         token = json.dumps(signed, separators=(",", ":"), ensure_ascii=False)
         _, original = verifier.parse(token)
@@ -378,7 +403,7 @@ def consume_mobile_release_decisions(
                 or original.documents
                 or principal.authentication_evidence_hash != evidence_sha):
             raise PermissionError("original signed Teams evidence does not match decision receipt")
-        if policy.schema_version in {"2.0", "3.0"}:
+        if policy.schema_version in {"2.0", "3.0", "4.0", "4.1"}:
             proof = request.metadata.get("card_instance_challenge")
             if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
                     or hashlib.sha256(proof.encode("ascii")).hexdigest()
@@ -422,7 +447,7 @@ def consume_mobile_release_decisions(
             # original owner/CCC approval. Original evidence remains immutable.
             if (review_only or replacement_only
                     or record_initial_unfreeze_renewal is None
-                    or policy.schema_version not in {"2.0", "3.0"}
+                    or policy.schema_version not in {"2.0", "3.0", "4.1"}
                     or prior_approval.get("approved") is not True
                     or prior_approval.get("candidate_sha") != request.metadata.get("candidate_sha")
                     or not str(prior_approval.get("source") or "").startswith(
@@ -503,7 +528,7 @@ def consume_mobile_release_decisions(
             # signature, user binding, exact short-lived card challenge and
             # policy checks have all passed above.
             if (review_only or record_replacement_unfreeze is None
-                    or policy.schema_version not in {"2.0", "3.0"}
+                    or policy.schema_version not in {"2.0", "3.0", "4.1"}
                     or prior_approval.get("approved") is not True
                     or prior_approval.get("candidate_sha") != request.metadata.get("candidate_sha")):
                 raise PermissionError("replacement Teams unfreeze needs an exact prior owner grant")
@@ -519,7 +544,7 @@ def consume_mobile_release_decisions(
             expected = create_mobile_release_request(
                 candidate, policy, now=request.requested_at,
                 card_challenge=(request.metadata.get("card_instance_challenge")
-                                if policy.schema_version in {"2.0", "3.0"} else None),
+                                if policy.schema_version in {"2.0", "3.0", "4.0", "4.1"} else None),
             )
             if (request.metadata != {**expected.metadata, **{
                     key: value for key, value in request.metadata.items()
@@ -560,7 +585,7 @@ def consume_mobile_release_decisions(
             completed += 1
             continue
         if review_only:
-            if (policy.schema_version not in {"2.0", "3.0"}
+            if (policy.schema_version not in {"2.0", "3.0", "4.1"}
                     or prior_approval.get("approved") is not True
                     or prior_approval.get("candidate_sha") != request.metadata.get("candidate_sha")
                     or digest(raw_release.get("release_manifest") or {})
@@ -650,7 +675,7 @@ def consume_mobile_release_decisions(
         expected = create_mobile_release_request(
             candidate, policy, now=request.requested_at,
             card_challenge=(request.metadata.get("card_instance_challenge")
-                            if policy.schema_version in {"2.0", "3.0"} else None),
+                            if policy.schema_version in {"2.0", "3.0", "4.0", "4.1"} else None),
             renewed_from=renewed_from, renewal_nonce=renewal_nonce,
         )
         if (request.metadata != {**expected.metadata, **{

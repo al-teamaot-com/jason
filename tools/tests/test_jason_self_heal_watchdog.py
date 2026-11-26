@@ -26,6 +26,8 @@ def isolated_release_transaction_lock(tmp_path, monkeypatch):
     lock = tmp_path / "production-transaction.lock"
     lock.touch(mode=0o600)
     monkeypatch.setattr(module, "PRODUCTION_TRANSACTION_LOCK", lock)
+    # Legacy unit fixtures must not discover the real Stage E marker.
+    monkeypatch.setattr(module, "PMV4_E_MARKER", tmp_path / "absent-stage-e.json")
     return lock
 
 

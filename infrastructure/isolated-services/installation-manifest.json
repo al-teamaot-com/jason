@@ -38,7 +38,6 @@
     "infrastructure/isolated-services/jason-independent-supervisor.timer"
   ],
   "expected_initial_units": "all_disabled_until_explicit_migration_phase",
-  "owner_pause_preservation": "old_monolithic_worker_start_condition_must_remain_until_replacement_lanes_verified",
   "production_safety_invariants": [
     "owner_exact_sha_teams_authorization",
     "single_production_transaction",
@@ -103,7 +102,9 @@
     "does_not_grant_provider_or_ticket_write_authority": true,
     "requires_ticket_continuity_release_gate": true,
     "does_not_enable_or_replace_existing_workers": true,
-    "requires_loaded_legacy_systemd_inactive_condition": true,
-    "old_controller_guard_path": "/home/al/.config/systemd/user/jason-support-repair-worker.service.d/owner-pause.conf"
-  }
+    "requires_legacy_controller_service_inactive": true,
+    "requires_legacy_controller_timer_inactive_and_disabled_or_masked": true,
+    "standing_owner_pause_receipt_required": false
+  },
+  "legacy_controller_retirement": "old monolithic engineering service must be inactive and its timer inactive plus disabled or masked before replacement lanes can run"
 }
