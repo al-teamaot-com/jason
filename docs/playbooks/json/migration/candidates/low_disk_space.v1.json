@@ -1,0 +1,373 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "service.ticket.read",
+      "endpoint.device.read",
+      "management.alert.search",
+      "endpoint.powershell.read",
+      "endpoint.alert.history.search",
+      "automation.component.execute",
+      "automation.job.read"
+    ],
+    "approval_bound_branches": [
+      "run_cleanup"
+    ],
+    "disruptive_branches": []
+  },
+  "completion": {
+    "terminal_disposition": "verified resolved or Human Review; clean fixed workstation only"
+  },
+  "expected_state": {
+    "low_disk_monitor_cleared": true,
+    "exact_drive_free_space_verified": true,
+    "storage_health_safe": true,
+    "grace_minutes_for_existing_autotask_cleanup": 15,
+    "max_extra_cleanup_attempts": 1
+  },
+  "migration": {
+    "source_conversion": "pure_storage_classification_and_gated_intent_only_not_accepted",
+    "legacy_source_blob_sha": "4702c9a6895ca552a2e70ee2a9bc1eeb5685daf4",
+    "legacy_registry_version": "1.1.0",
+    "source_map": "docs/playbooks/json/migration/source_maps/low_disk_space.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "Trusted read-only multi-command volume/large-file/VSS/physical disk evidence collection and parser fanout incomplete",
+      "Exact 15-minute existing Autotask cleanup grace and DRMM alert scoping plus current volume policy threshold",
+      "Only approved versioned Sysmon component after individual job plan and durable one-attempt lock",
+      "Complete job status and output read, per-device monitor/current free-space evidence, ticket note and terminal readback",
+      "Full restart/recheck, provider failure, protected role and live isolated preproduction acceptance"
+    ],
+    "accepted_for_execution": false,
+    "production_activation_authorized": false
+  },
+  "playbook": {
+    "id": "low_disk_space",
+    "lifecycle": "pilot",
+    "name": "Jason - Windows Low Disk Space",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-Windows-Low-Disk-Space.md",
+    "target_type": "ticket",
+    "version": "1.1.0-migration.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "no_arbitrary_file_deletion": true,
+    "server_human_review": true,
+    "no_disruption": true,
+    "source_only": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "device_uid",
+      "client_id",
+      "drive_letter",
+      "baseline_free_bytes",
+      "current_alert_uid",
+      "grace_started",
+      "last_approved_job_id",
+      "last_cleanup_intent_sha",
+      "recheck_at"
+    ],
+    "no_duplicate_execution": true
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_gate"
+    },
+    {
+      "id": "ticket_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_ticket_client_ci_and_work_start_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_endpoint"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_endpoint",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "online_gate"
+    },
+    {
+      "id": "online_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_device_online",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_monitor"
+        }
+      ],
+      "default": "wait_device"
+    },
+    {
+      "id": "read_monitor",
+      "type": "diagnostic",
+      "capability": "management.alert.search",
+      "arguments": {
+        "status": "open"
+      },
+      "next": "monitor_gate"
+    },
+    {
+      "id": "monitor_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_drive_and_monitor_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "grace_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "grace_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "monitor_cleared_and_free_space_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "verify_ticket"
+        },
+        {
+          "when": {
+            "fact": "grace_elapsed_and_monitor_still_open",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_volume"
+        }
+      ],
+      "default": "wait_grace"
+    },
+    {
+      "id": "read_volume",
+      "type": "diagnostic",
+      "capability": "endpoint.powershell.read",
+      "arguments": {
+        "device_uid": {
+          "$fact": "device_uid"
+        },
+        "command": {
+          "$fact": "approved_nonmutating_volume_readonly_command"
+        },
+        "timeout_seconds": 45
+      },
+      "next": "read_storage"
+    },
+    {
+      "id": "read_storage",
+      "type": "diagnostic",
+      "capability": "endpoint.alert.history.search",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "classification_gate"
+    },
+    {
+      "id": "classification_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "verified_cleanup_disposition",
+            "operator": "eq",
+            "value": "one_exact_cleanup_candidate_requires_promotion"
+          },
+          "next": "cleanup_approval"
+        },
+        {
+          "when": {
+            "fact": "verified_cleanup_disposition",
+            "operator": "eq",
+            "value": "monitor_cleared_verify_ticket"
+          },
+          "next": "verify_ticket"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "cleanup_approval",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_component_identity_client_owner_grant_and_no_prior_attempt",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "run_cleanup"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "run_cleanup",
+      "type": "remediation",
+      "capability": "automation.component.execute",
+      "arguments": {
+        "$fact": "trusted_exact_cleanup_job_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "read_job"
+    },
+    {
+      "id": "read_job",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_existing_job_read_arguments"
+      },
+      "next": "job_gate"
+    },
+    {
+      "id": "job_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "single_job_terminal_verified_and_same_device",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_free_after"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_free_after",
+      "type": "diagnostic",
+      "capability": "endpoint.powershell.read",
+      "arguments": {
+        "device_uid": {
+          "$fact": "device_uid"
+        },
+        "command": {
+          "$fact": "approved_nonmutating_volume_readonly_command"
+        },
+        "timeout_seconds": 45
+      },
+      "next": "read_alert_after"
+    },
+    {
+      "id": "read_alert_after",
+      "type": "diagnostic",
+      "capability": "management.alert.search",
+      "arguments": {
+        "status": "open"
+      },
+      "next": "after_gate"
+    },
+    {
+      "id": "after_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_monitor_cleared_capacity_safe_no_risk",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "verify_ticket"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "verify_ticket",
+      "type": "verification",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_readback_gate"
+    },
+    {
+      "id": "ticket_readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_current_ticket_resolution_safe_and_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "complete"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "wait_device",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "human_review"
+    },
+    {
+      "id": "wait_grace",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "human_review"
+    },
+    {
+      "id": "complete",
+      "type": "complete"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Autotask/Datto RMM",
+    "title_contains": "Low Disk Space",
+    "exact_drive_required": true
+  },
+  "verification": {
+    "authoritative_source": "Datto RMM exact low disk monitor, same-volume free-space read and Autotask exact ticket readback",
+    "success_condition": "current low-disk alert cleared and volume capacity independently measured, no storage risk and no duplicate cleanup"
+  }
+}

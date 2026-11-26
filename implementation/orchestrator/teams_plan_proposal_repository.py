@@ -39,6 +39,11 @@ class PlanProposalRepository:
         with sqlite3.connect(self.path) as db:
             db.execute('INSERT INTO plan_proposals VALUES (?,?)', (proposal.approval_id, json.dumps(payload, sort_keys=True)))
 
+    def contains(self, approval_id: str) -> bool:
+        with sqlite3.connect(self.path) as db:
+            return db.execute("SELECT 1 FROM plan_proposals WHERE approval_id=?",
+                              (approval_id,)).fetchone() is not None
+
     def require(self, approval_id: str) -> ServerOwnedPlanProposal:
         if not approval_id:
             raise PermissionError('missing approval identifier')

@@ -5040,11 +5040,53 @@ class OperationalAutonomyMaintenance:
             if work.phase in {"vulscan_investigate", "vulscan_monitoring"}:
                 self._investigate_vulscan(work, ticket)
                 return
-            if work.phase == "vulscan_client_notification_verify_complete":
-                self._verify_vulscan_client_notification(work, continue_monitoring=False)
-                return
-            if work.phase == "vulscan_client_notification_verify_monitoring":
-                self._verify_vulscan_client_notification(work, continue_monitoring=True)
+            if work.phase in {
+                "vulscan_client_notification_verify_complete",
+                "vulscan_client_notification_verify_monitoring",
+            }:
+                # A removed client disposition must not strand an old durable
+                # notification-verification phase. Preserve the original
+                # dispatch-pending fingerprint and baseline for audit, without
+                # claiming delivery or retrying a non-idempotent message.
+                policy = resolve_vulscan_policy(
+                    client_id=work.company_id,
+                    site_id=ticket.get("companyLocationID"),
+                    device_id=work.device_uid,
+                    user_id=ticket.get("contactID"),
+                    ticket_id=work.ticket_id,
+                )
+                if not policy.client_notification_required:
+                    # The old notification phase replaced the prior patch
+                    # wait reason. Keep its first-NOT_APPROVED timestamp so a
+                    # migration cannot silently reset the ten-day escalation.
+                    approval_age = ""
+                    for event in reversed(self.store.ticket_activity(work.ticket_id)):
+                        match = re.search(
+                            r"first_not_approved_at=[^;]+",
+                            str(event.get("reason") or ""),
+                        )
+                        if match:
+                            approval_age = "; " + match.group(0)
+                            break
+                    reconsider = self._replace(
+                        work,
+                        phase="vulscan_investigate",
+                        last_reason=(
+                            "Legacy client-notification requirement retired; "
+                            "prior dispatch intent retained without resend or "
+                            "delivery claim. Rechecking exact patches under "
+                            "standard VulScan policy." + approval_age
+                        ),
+                    )
+                    self.store.put(reconsider)
+                    self._investigate_vulscan(reconsider, ticket)
+                    return
+                self._verify_vulscan_client_notification(
+                    work,
+                    continue_monitoring=(
+                        work.phase == "vulscan_client_notification_verify_monitoring"
+                    ),
+                )
                 return
 
         if work.playbook_id == DISK_BAD_BLOCK_SCOPE.playbook_id:

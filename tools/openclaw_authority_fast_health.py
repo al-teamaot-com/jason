@@ -20,7 +20,7 @@ import tempfile
 
 from openclaw_authority_health_snapshot import write_atomic_snapshot
 from openclaw_authority_operational_health import (
-    DEFAULT_AUTHORITY, DEFAULT_REPLAY, DEFAULT_SECURITY, DEFAULT_ORCH,
+    DEFAULT_AUTHORITY, DEFAULT_REPLAY, DEFAULT_SECURITY,
     DEFAULT_REGISTRY, registry_health,
 )
 
@@ -31,7 +31,10 @@ DATABASES = {
     "authority": DEFAULT_AUTHORITY,
     "replay": DEFAULT_REPLAY,
     "security_audit": DEFAULT_SECURITY,
-    "orchestration_audit": DEFAULT_ORCH,
+    # Root-pinned full checker retains its exact historical bytes. The live
+    # full-proof job must be separately authorized with an explicit --orchestration-audit
+    # argument; do not claim fast health PASS from a stale proof.
+    "orchestration_audit": Path('/var/lib/jason/governed-ticket-shared/orchestration-events.sqlite3'),
 }
 
 

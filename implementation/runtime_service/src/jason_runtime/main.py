@@ -17,6 +17,14 @@ from .server import serve
 
 def main() -> None:
     settings = RuntimeSettings.from_env()
+    settings.validate()
+    # Embedded dispatch owns its exclusive kernel lock inside the worker
+    # process, not here in the HTTP/supervisor parent. Orphaned children must
+    # never outlive the lock. External mode never spawns embedded dispatch.
+    _run_hosted_runtime(settings)
+
+
+def _run_hosted_runtime(settings: RuntimeSettings) -> None:
     processes = []
     supervisor = None
     stop = None
@@ -25,7 +33,7 @@ def main() -> None:
 
     if autonomy_maintenance_enabled(settings):
         context = get_context("spawn")
-        if settings.autonomy_worker_enabled:
+        if settings.autonomy_worker_enabled and settings.ticket_worker_hosting == "embedded":
             ticket_settings = ticket_worker_runtime_settings(settings)
 
             def factory():

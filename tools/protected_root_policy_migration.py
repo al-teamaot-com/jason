@@ -4,7 +4,8 @@
 Root-only, invoked from an immutable candidate during native host reconciliation
 and by the already installed root-owned reconciler before downgrading.
 Never runs through a provider or grants release authority. A missing or
-mismatched owner approval, CCC review, protected source or exact diff fails.
+mismatched Owner approval, legacy CCC evidence where applicable, protected source
+or exact reviewed desired-state delta fails.
 """
 from __future__ import annotations
 
@@ -79,7 +80,17 @@ APPROVED_PM_V31_PROVIDER_HEALTH_DELTA = {
     "required_user_units": frozenset(),
     "allowed_user_units": frozenset(),
 }
+# Owner-retired CCC is the only supported DELETION plan. Stage preserves
+# the old allowed units until native removal completes; final apply removes
+# exactly these two obsolete allowances. Historical receipts stay intact.
+APPROVED_CCC_RETIREMENT_DELTA = {
+    "required_system_units": frozenset(),
+    "allowed_system_units": frozenset({"jason-ccc.service", "jason-ccc.timer"}),
+    "required_user_units": frozenset(),
+    "allowed_user_units": frozenset(),
+}
 APPROVED_PLANS = (
+    APPROVED_CCC_RETIREMENT_DELTA,
     APPROVED_DELTA,
     APPROVED_HELD_OFFER_DELTA,
     APPROVED_PM_V2_SHADOW_DELTA,
@@ -89,6 +100,8 @@ APPROVED_PLANS = (
 
 def _staged_delta(plan: dict[str, frozenset[str]]) -> dict[str, frozenset[str]]:
     """Allow new system/user timers without requiring them before installation."""
+    if plan == APPROVED_CCC_RETIREMENT_DELTA:
+        return {name: frozenset() for name in UNIT_FIELDS}
     return {
         "required_system_units": frozenset(),
         "allowed_system_units": plan["allowed_system_units"] | plan["required_system_units"],
@@ -224,6 +237,7 @@ def _planned_delta(previous: dict, candidate: dict) -> dict[str, frozenset[str]]
     if set(previous) != set(candidate):
         raise MigrationRefused("candidate changed desired-state policy keys")
     actual = {}
+    removed = {}
     for key in previous:
         if key not in UNIT_FIELDS:
             if previous[key] != candidate[key]:
@@ -231,10 +245,17 @@ def _planned_delta(previous: dict, candidate: dict) -> dict[str, frozenset[str]]
             continue
         old = set(previous[key])
         new = set(candidate[key])
-        if old - new:
-            raise MigrationRefused("unapproved desired-state unit removal: " + key)
+        removed[key] = frozenset(old - new)
         actual[key] = frozenset(new - old)
+    if any(removed.values()):
+        if (all(not value for value in actual.values())
+                and all(removed[key] == APPROVED_CCC_RETIREMENT_DELTA[key]
+                        for key in UNIT_FIELDS)):
+            return APPROVED_CCC_RETIREMENT_DELTA
+        raise MigrationRefused("unapproved desired-state unit removal")
     for plan in APPROVED_PLANS:
+        if plan == APPROVED_CCC_RETIREMENT_DELTA:
+            continue
         if all(actual[key] == plan[key] for key in UNIT_FIELDS):
             return plan
     raise MigrationRefused("unapproved desired-state unit delta: " + ", ".join(
@@ -254,11 +275,68 @@ def _approval(candidate_sha: str, rollback_sha: str) -> None:
             or manifest.get("rollback_sha") != rollback_sha
             or record.get("risk_profile") != "production_control_core"):
         raise MigrationRefused("exact owner-approved production release record required")
-    review = json.loads(CCC_REVIEW.read_text())
-    if (review.get("source_revision") != candidate_sha
-            or review.get("status") != "approved"
-            or review.get("recorded_by") != "person-al"):
-        raise MigrationRefused("exact owner-reviewed CCC material evidence required")
+    # The Owner-retired CCC path uses the SAME exact one-transaction Owner
+    # authority already consumed by native Release Manager, not a second CCC
+    # approval. Verify the immutable Git policy and all SHA/scope/manifest
+    # bindings again at this separately root-owned transition boundary.
+    command = ["/usr/bin/git", "-c", f"safe.directory={MANAGED_GIT}",
+               "-C", str(MANAGED_GIT), "show",
+               f"{candidate_sha}:config/mobile-release-approval-policy.json"]
+    try:
+        policy_bytes = subprocess.check_output(
+            command, stderr=subprocess.DEVNULL, timeout=15,
+        )
+        if len(policy_bytes) > 32768:
+            raise MigrationRefused("reviewed Owner release policy too large")
+        policy = json.loads(policy_bytes)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            OSError, ValueError, TypeError) as exc:
+        raise MigrationRefused("exact reviewed Owner release policy unavailable") from exc
+    if not isinstance(policy, dict):
+        raise MigrationRefused("reviewed Owner release policy invalid")
+
+    if policy.get("schema_version") == "3.1":
+        binding = owner.get("transaction_binding") or {}
+        scope = record.get("manual_scope_review") or {}
+        actual_manifest_hash = digest(json.dumps(
+            manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8"))
+        if (policy.get("policy_mode") != "owner_reviewed"
+                or policy.get("organization_id") != "aot"
+                or policy.get("capability") != "release.production.approve"
+                or not all(policy.get("high_impact_review", {}).get(flag) is True
+                    for flag in (
+                        "owner_exact_sha_required",
+                        "protected_release_gates_unchanged",
+                        "authenticated_entra_owner_decision_required",
+                        "independent_native_release_health_required",
+                    ))
+                or manifest.get("mobile_release_approval_policy_digest")
+                    != "sha256:" + digest(policy_bytes)
+                or scope.get("candidate_sha") != candidate_sha
+                or scope.get("baseline_sha") != rollback_sha
+                or not isinstance(scope.get("scope_sha256"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", scope["scope_sha256"]) is None
+                or binding.get("candidate_sha") != candidate_sha
+                or binding.get("rollback_sha") != rollback_sha
+                or binding.get("scope_sha256") != scope["scope_sha256"]
+                or binding.get("manifest_sha256") != actual_manifest_hash
+                or not (
+                    owner.get("source") == "explicit_owner_instruction"
+                    or str(owner.get("source") or "").startswith(
+                        "authenticated_signed_mcp_owner:"
+                    )
+                )):
+            raise MigrationRefused("exact Owner-bound native release authority required")
+    elif policy.get("schema_version") in {"1.0", "2.0", "3.0", "4.0"}:
+        # Historical source policy may still require archival CCC evidence.
+        review = json.loads(CCC_REVIEW.read_text())
+        if (review.get("source_revision") != candidate_sha
+                or review.get("status") != "approved"
+                or review.get("recorded_by") != "person-al"):
+            raise MigrationRefused("exact owner-reviewed CCC material evidence required")
+    else:
+        raise MigrationRefused("unsupported reviewed Owner release policy schema")
     control = _json(_root_only(ROOT / "production-control-state.json"))
     lkg = (control.get("last_known_good") or {}).get("manifest") or {}
     if (lkg.get("revision") != rollback_sha or lkg.get("complete") is not True
@@ -334,19 +412,25 @@ def preview_exact_migration(candidate_sha: str, rollback_sha: str) -> str:
         actual = set(root[field])
         if not known.issubset(actual):
             raise MigrationRefused("root policy lost a known-good declaration: " + field)
-        if actual.intersection(plan[field] | _staged_delta(plan)[field]):
+        if (plan != APPROVED_CCC_RETIREMENT_DELTA
+                and actual.intersection(plan[field] | _staged_delta(plan)[field])):
             raise MigrationRefused("candidate-only unit already present without migration receipt")
     # The specific PMv3.1 provider-health plan can retain exactly two
     # validated historical predecessors. Every other plan keeps the original
     # one-predecessor ceiling; deeper/partial/untrusted chains fail closed.
     _trusted_prior_applied_receipt(rollback_sha, original, plan)
-    return "OWNER_CCC_REVIEWED_DELTA_ONLY"
+    return ("OWNER_EXACT_RELEASE_REVIEWED_CCC_RETIREMENT"
+            if plan == APPROVED_CCC_RETIREMENT_DELTA
+            else "OWNER_CCC_REVIEWED_DELTA_ONLY")
 
 
 def _overlay_policy(root_policy: dict, additions: dict[str, frozenset[str]]) -> bytes:
     result = dict(root_policy)
     for key in UNIT_FIELDS:
-        result[key] = sorted(set(root_policy[key]) | additions[key])
+        if additions == APPROVED_CCC_RETIREMENT_DELTA:
+            result[key] = sorted(set(root_policy[key]) - additions[key])
+        else:
+            result[key] = sorted(set(root_policy[key]) | additions[key])
     return (json.dumps(result, indent=2, sort_keys=True) + "\n").encode()
 
 
@@ -435,7 +519,10 @@ def _trusted_prior_applied_receipt(
     prior_bytes = _root_only(ACTIVE)
     _verify_trusted_applied_receipt_chain(
         prior_bytes, rollback_sha, root_policy,
-        nested_remaining=(1 if plan == APPROVED_PM_V31_PROVIDER_HEALTH_DELTA else 0),
+        nested_remaining=(
+            2 if plan == APPROVED_CCC_RETIREMENT_DELTA
+            else 1 if plan == APPROVED_PM_V31_PROVIDER_HEALTH_DELTA else 0
+        ),
     )
     return prior_bytes
 
@@ -487,10 +574,13 @@ def stage_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
             current = set(root_policy[key])
             if not set(previous[key]).issubset(current):
                 raise MigrationRefused("root recovery overlay missing known-good units: " + key)
-            if current.intersection(stage[key] | plan[key]):
+            if (plan != APPROVED_CCC_RETIREMENT_DELTA
+                    and current.intersection(stage[key] | plan[key])):
                 raise MigrationRefused("candidate-specific root unit already present without ledger")
 
-    staged = _overlay_policy(root_policy, stage)
+    # A removal-only stage must retain the original protected policy BYTES;
+    # formatting/canonicalization is not an authorization to rewrite it.
+    staged = original if plan == APPROVED_CCC_RETIREMENT_DELTA else _overlay_policy(root_policy, stage)
     final = _overlay_policy(root_policy, plan)
     receipt = {
         "schema_version": "1.0", "candidate_sha": candidate_sha,
@@ -498,7 +588,11 @@ def stage_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
         "original_sha256": digest(original), "staged_sha256": digest(staged),
         "applied_sha256": digest(final),
         "original_policy_base64": base64.b64encode(original).decode("ascii"),
-        "authorized_by": "exact_owner_approval_and_ccc_material_review",
+        "authorized_by": (
+            "exact_owner_bound_native_release_ccc_retirement"
+            if plan == APPROVED_CCC_RETIREMENT_DELTA
+            else "exact_owner_approval_and_ccc_material_review"
+        ),
         "reviewed_delta": {key: sorted(v) for key, v in plan.items()},
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -586,7 +680,8 @@ def restore_for_baseline(target_sha: str) -> str:
         _verify_trusted_applied_receipt_chain(
             parent_bytes, target_sha, original,
             nested_remaining=(
-                1 if _receipt_plan(receipt) == APPROVED_PM_V31_PROVIDER_HEALTH_DELTA
+                2 if _receipt_plan(receipt) == APPROVED_CCC_RETIREMENT_DELTA
+                else 1 if _receipt_plan(receipt) == APPROVED_PM_V31_PROVIDER_HEALTH_DELTA
                 else 0
             ),
         )
@@ -692,7 +787,8 @@ def prepare_rollback(target_sha: str) -> str:
             raise MigrationRefused("root rollback original policy checksum mismatch")
         baseline = _json(original)
         _safe_units(baseline)
-        allowed = _overlay_policy(baseline, _staged_delta(plan))
+        allowed = (original if plan == APPROVED_CCC_RETIREMENT_DELTA
+                   else _overlay_policy(baseline, _staged_delta(plan)))
         if digest(allowed) != receipt.get("staged_sha256"):
             raise MigrationRefused("root rollback allowed-only stage hash mismatch")
         _atomic(POLICY, allowed)
@@ -712,12 +808,13 @@ def complete_rollback(target_sha: str) -> str:
     if receipt.get("rollback_sha") != target_sha or receipt.get("phase") != "rollback_prepared":
         raise MigrationRefused("root rollback completion not in approved phase")
     plan = _receipt_plan(receipt)
-    for unit in plan["required_system_units"] | plan["allowed_system_units"]:
-        if (SYSTEMD_SYSTEM_UNITS / unit).exists():
-            raise MigrationRefused("candidate system unit still installed during rollback")
-    for unit in plan["required_user_units"] | plan["allowed_user_units"]:
-        if (SYSTEMD_USER_UNITS / unit).exists():
-            raise MigrationRefused("candidate user unit still installed during rollback")
+    if plan != APPROVED_CCC_RETIREMENT_DELTA:
+        for unit in plan["required_system_units"] | plan["allowed_system_units"]:
+            if (SYSTEMD_SYSTEM_UNITS / unit).exists():
+                raise MigrationRefused("candidate system unit still installed during rollback")
+        for unit in plan["required_user_units"] | plan["allowed_user_units"]:
+            if (SYSTEMD_USER_UNITS / unit).exists():
+                raise MigrationRefused("candidate user unit still installed during rollback")
     # restore_for_baseline checks the root-protected LKG SHA, exact original
     # bytes and phase-bound policy digest before archiving the receipt.
     return restore_for_baseline(target_sha)

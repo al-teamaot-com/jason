@@ -51,6 +51,9 @@ from mcp.server.transport_security import (
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
+from orchestrator.microsoft_group_admin_catalog import (
+    GROUP_ADMIN_CAPABILITIES, require_group_pilot_client_scope,
+)
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 from autonomous_remediation.autonomous_principal import (
@@ -81,6 +84,8 @@ from connectors.dnsfilter.mcp_oauth import (
     DnsFilterMcpOAuthStore,
     complete_dnsfilter_oauth,
 )
+from connectors.constant_contact.callback import complete_authorization as complete_constant_contact_oauth
+from connectors.constant_contact.oauth_store import EncryptedOAuthStore
 from connectors.quickbooks.connector import (
     QUICKBOOKS_LOGICAL_SECRET,
     QUICKBOOKS_PRODUCTION_LOGICAL_SECRET,
@@ -99,6 +104,8 @@ from connectors.datto_edr.threat_correlation import (
 )
 from pydantic import AnyHttpUrl
 from jason_mcp.release_approval_request import queue_release_approval_request
+from jason_mcp.independent_component_release_approval import queue_component_release_approval
+from jason_mcp.pmv4_entra_claims import verify_signed_entra_claims
 from jason_mcp.production_read_acceptance import record_authenticated_owner_read
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
@@ -140,6 +147,11 @@ from jason_runtime.datto_component_scope import (
     DATTO_AD_HOC_POWERSHELL_UID,
     DATTO_AD_HOC_LINUX_SHELL_NAME,
     DATTO_AD_HOC_LINUX_SHELL_UID,
+    DATTO_JASON_ROOT_PROBE_DEVICE_UID,
+    DATTO_JASON_ROOT_PROBE_ALLOWLIST,
+    DATTO_JASON_ROOT_PROBE_DEVICE_CLASS,
+    jason_root_probe_enabled,
+    jason_root_probe_command_allowed,
     DATTO_EXECUTION_COMPONENTS_JSON_ENV,
     DATTO_APPROVAL_MODE_PER_RUN,
     DattoApprovedComponent,
@@ -234,6 +246,19 @@ JASON_QUICKBOOKS_PRODUCTION_OPENBAO_SECRET_ID_PATH = Path(
     )
 )
 
+JASON_CONSTANT_CONTACT_OAUTH_DB = Path(os.environ.get(
+    "JASON_CONSTANT_CONTACT_OAUTH_DB",
+    "/var/lib/jason/openclaw/constant-contact/oauth.sqlite3",
+))
+JASON_CONSTANT_CONTACT_OPENBAO_ROLE_ID_PATH = Path(os.environ.get(
+    "JASON_CONSTANT_CONTACT_OPENBAO_ROLE_ID_PATH",
+    "/run/jason-secrets/openbao/constant-contact/role_id",
+))
+JASON_CONSTANT_CONTACT_OPENBAO_SECRET_ID_PATH = Path(os.environ.get(
+    "JASON_CONSTANT_CONTACT_OPENBAO_SECRET_ID_PATH",
+    "/run/jason-secrets/openbao/constant-contact/secret_id",
+))
+
 JASON_AUTOENROLL_DOMAINS = frozenset(
     item.strip().casefold()
     for item in os.environ.get(
@@ -275,52 +300,24 @@ class EntraTokenVerifier(TokenVerifier):
             cache_keys=True,
         )
 
-    async def verify_token(
-        self,
-        token: str,
-    ) -> AccessToken | None:
-        if not token:
+    def verify_signed_claims(self, token: str) -> Mapping[str, Any] | None:
+        """Revalidate signature and full Entra claims for exact Owner decisions.
+
+        Ordinary MCP AccessToken intentionally carries only tid/oid.
+        The PMv4 Owner issuer needs fresh signed issuer/audience/time claims,
+        not claims reconstructed from the minimized request context.
+        """
+        return verify_signed_entra_claims(
+            token,
+            signing_key_lookup=self._jwks.get_signing_key_from_jwt,
+            audience=JASON_ENTRA_CLIENT_ID,
+            issuer=JASON_ENTRA_ISSUER,
+        )
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        claims = self.verify_signed_claims(token)
+        if claims is None:
             return None
-
-        try:
-            signing_key = (
-                self._jwks.get_signing_key_from_jwt(
-                    token
-                )
-            )
-
-            claims = jwt.decode(
-                token,
-                signing_key.key,
-                algorithms=["RS256"],
-                audience=JASON_ENTRA_CLIENT_ID,
-                issuer=JASON_ENTRA_ISSUER,
-                leeway=60,
-                options={
-                    "require": [
-                        "exp",
-                        "iat",
-                        "nbf",
-                        "aud",
-                        "iss",
-                        "tid",
-                        "oid",
-                    ],
-                },
-            )
-
-        except (
-            PyJWTError,
-            ValueError,
-            TypeError,
-            KeyError,
-        ):
-            return None
-        except Exception:
-            # Authentication fails closed. Do not expose JWKS/provider
-            # transport or token-validation internals to the caller.
-            return None
-
         tenant_id = str(
             claims.get("tid") or ""
         ).strip()
@@ -392,6 +389,8 @@ _MCP_INTERNAL_NOTE_SURFACE_ENABLED = (
 logger = logging.getLogger("jason_mcp.server")
 
 
+_entra_token_verifier = EntraTokenVerifier()
+
 mcp = MCPServer(
     "Jason",
     instructions=(
@@ -406,7 +405,7 @@ mcp = MCPServer(
         "Jason identity, authority, policy and Central Orchestrator "
         "remain authoritative."
     ),
-    token_verifier=EntraTokenVerifier(),
+    token_verifier=_entra_token_verifier,
     auth=AuthSettings(
         issuer_url=AnyHttpUrl(
             JASON_OAUTH_ISSUER_URL
@@ -1716,9 +1715,50 @@ def _governed_read_for_identity(
             if capability_name == "automation.component.search"
             else _project_print_meter_usage_search(result.output)
             if capability_name == "print.meter.usage.search"
+            else _project_print_fleet_usage_report(result.output)
+            if capability_name == "print.fleet.usage.rank"
             else _safe(dict(result.output))
         ),
     }
+
+
+def _repair_kfs_device_projection_pagination(evidence: Any) -> Any:
+    """Never mark a 100-entry MCP-bound KFS page as a complete larger fleet.
+
+    The underlying KFS DeviceList contract supplies matched_count and an
+    absolute zero-based offset. Generic evidence projection may cap rich
+    device entries without updating next_offset/complete. Correct *metadata
+    only*; do not widen disclosure or synthesize device records.
+    """
+    if not isinstance(evidence, Mapping):
+        return evidence
+    data = evidence.get("data")
+    if not isinstance(data, Mapping):
+        return evidence
+    devices = data.get("devices")
+    offset = data.get("offset")
+    matched = data.get("matched_count")
+    if (
+        not isinstance(devices, list)
+        or type(offset) is not int
+        or type(matched) is not int
+        or offset < 0 or matched < 0
+    ):
+        return evidence
+    actual_count = len(devices)
+    if devices and devices[-1] == "[collection-bounded]":
+        actual_count -= 1
+    next_offset = offset + actual_count
+    if data.get("complete") is True and next_offset < matched:
+        fixed_data = dict(data)
+        fixed_data["complete"] = False
+        fixed_data["next_offset"] = next_offset
+        fixed_data["projection_bounded"] = True
+        fixed_data["returned_device_count"] = actual_count
+        fixed_evidence = dict(evidence)
+        fixed_evidence["data"] = fixed_data
+        return fixed_evidence
+    return evidence
 
 
 def _project_print_meter_usage_search(output: Mapping[str, Any]) -> dict[str, Any]:
@@ -1761,6 +1801,35 @@ def _project_print_meter_usage_search(output: Mapping[str, Any]) -> dict[str, An
     else:
         safe_data["records"] = _safe(raw_records)
 
+    result["data"] = safe_data
+    return result
+
+
+def _project_print_fleet_usage_report(output: Mapping[str, Any]) -> dict[str, Any]:
+    """Preserve complete, source-validated fleet lists with per-row redaction.
+
+    Generic MCP projection truncates arbitrary lists to 100. A report must
+    retain every source-reconciled device, or fail closed on impossible bounds.
+    """
+    root = dict(output or {})
+    raw_data = root.pop("data", None)
+    projected = _safe(root)
+    result = dict(projected) if isinstance(projected, Mapping) else {}
+    if not isinstance(raw_data, Mapping):
+        result["data"] = _safe(raw_data)
+        return result
+    data = dict(raw_data)
+    collections = {}
+    for field in ("ranked_devices", "listed_devices", "exceptions"):
+        if field not in data:
+            continue
+        records = data.pop(field)
+        if not isinstance(records, (list, tuple)) or len(records) > 1000:
+            raise ValueError("governed fleet report collection exceeds exact source bounds")
+        collections[field] = [_safe(item) for item in records]
+    safe_data = _safe(data)
+    safe_data = dict(safe_data) if isinstance(safe_data, Mapping) else {}
+    safe_data.update(collections)
     result["data"] = safe_data
     return result
 
@@ -3344,7 +3413,7 @@ def _active_datto_execution_components():
     worker_uid = os.environ.get(
         "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
     ).strip()
-    if worker_uid and not any(
+    if (worker_uid or jason_root_probe_enabled()) and not any(
         component.uid == DATTO_AD_HOC_LINUX_SHELL_UID
         or component.name.casefold() == DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
         for component in components
@@ -3376,6 +3445,10 @@ def _canonicalize_governed_action_arguments(
     """
 
     raw = dict(arguments or {})
+
+    if capability_name in GROUP_ADMIN_CAPABILITIES:
+        from connectors.microsoft_graph.governed_operations import operation
+        return operation(capability_name).validate_arguments(raw)
 
     if capability_name == "service.ticket.create":
         if "payload" in raw:
@@ -3624,7 +3697,9 @@ def _canonicalize_governed_action_arguments(
         "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
     ).strip()
 
-    if (not all(expected.values()) or not components) and not worker_uid:
+    if (not all(expected.values()) or not components) and not (
+        worker_uid or jason_root_probe_enabled()
+    ):
         raise ValueError(
             "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE"
         )
@@ -3745,13 +3820,21 @@ def _canonicalize_governed_action_arguments(
             != DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
         ):
             raise ValueError("DATTO_LINUX_SHELL_COMPONENT_IDENTITY_MISMATCH")
-        approved_worker = os.environ.get(
-            "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
-        ).strip()
-        if not approved_worker or requested_device != approved_worker:
-            raise ValueError("DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED")
-        effective_allowlist = "aot-approved-linux-worker"
-        effective_class = "Server"
+        if requested_device == DATTO_JASON_ROOT_PROBE_DEVICE_UID:
+            if not jason_root_probe_enabled():
+                raise ValueError("DATTO_JASON_ROOT_PROBE_NOT_ENROLLED")
+            if not jason_root_probe_command_allowed(variables):
+                raise ValueError("DATTO_JASON_ROOT_PROBE_COMMAND_NOT_APPROVED")
+            effective_allowlist = DATTO_JASON_ROOT_PROBE_ALLOWLIST
+            effective_class = DATTO_JASON_ROOT_PROBE_DEVICE_CLASS
+        else:
+            approved_worker = os.environ.get(
+                "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+            ).strip()
+            if not approved_worker or requested_device != approved_worker:
+                raise ValueError("DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED")
+            effective_allowlist = "aot-approved-linux-worker"
+            effective_class = "Server"
     else:
         if not all(expected.values()) or not configured_datto_components():
             raise ValueError("DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE")
@@ -3789,6 +3872,20 @@ def _governed_execute(
         assurance,
         client_id,
     ) = _authenticated_write_identity()
+
+    # Only the verified AOT Owner can select the registered AOT internal pilot
+    # tenant. No target/client selector comes from model/provider arguments.
+    try:
+        client_id = require_group_pilot_client_scope(
+            capability_name=capability_name, principal_id=principal,
+            organization_id=organization, bound_client_id=client_id,
+        )
+    except PermissionError:
+        return {
+            "status": "denied",
+            "capability": capability_name,
+            "reason_codes": ["M365_GROUP_PILOT_OWNER_OR_CLIENT_SCOPE_DENIED"],
+        }
 
     try:
         capability = app.capabilities.get_current(
@@ -3956,7 +4053,11 @@ def _governed_execute(
     if decision.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
         approval_decided_by = principal
 
-        if capability_name == "automation.component.execute":
+        if capability_name in GROUP_ADMIN_CAPABILITIES:
+            # Separate exact-action approval: never infer an approval merely
+            # from discovery, a plan, or standing technician authority.
+            imperative_approval = explicit_approval is True
+        elif capability_name == "automation.component.execute":
             if datto_approval_mode == "standing_safe":
                 imperative_approval = True
 
@@ -4299,18 +4400,47 @@ _UNSUPERVISED_COMPONENT_BLOCK_PATTERNS = (
 )
 
 
-def _authority_admin_owner() -> tuple[str, str]:
-    """Administer exact grants with the authenticated privileged account only.
+def _licensed_jason_owner() -> tuple[str, str]:
+    """Authenticate Jason's exact licensed Owner, not the Entra admin login.
 
-    V4 is a distinct *opt-in* release policy. It does not remap the admin
+    The upstream signed OAuth middleware independently validates the bearer,
+    tenant, active Entra-to-Jason binding and active human identity. This check
+    must still bind the exact licensed-owner object, its unscoped Jason
+    principal and organization; an email string alone conveys no authority.
+    """
+    from jason_mcp.release_owner_identity import (
+        LICENSED_OWNER_OID, LICENSED_OWNER_PRINCIPAL, OWNER_TENANT_ID,
+    )
+
+    principal, organization, assurance, client_id = _authenticated_write_identity()
+    token = get_access_token()
+    claims = (getattr(token, "claims", None) or {}) if token is not None else {}
+    if (organization != "aot" or assurance != "entra-oauth-bearer"
+            or client_id is not None or principal != LICENSED_OWNER_PRINCIPAL
+            or claims.get("tid") != OWNER_TENANT_ID
+            or claims.get("oid") != LICENSED_OWNER_OID):
+        raise PermissionError("JASON_LICENSED_OWNER_REQUIRED")
+    return principal, organization
+
+
+def _authority_admin_owner() -> tuple[str, str]:
+    """Authorize exact Jason Owner controls with an explicit policy profile.
+
+    `jason-owner-v1` binds only the licensed Jason Owner. Historical profiles
+    stay available for reviewed rollback until separately retired; they are
+    not silently promoted or used as evidence for a new production grant.
+
+    V4/V4.1 is a distinct *opt-in* release policy. It does not remap the admin
     Entra identity into the routine technician account or write identity
     bindings. An enabled profile must be attested by source-controlled release
     input and the exact root-owned private policy; unknown profiles fail closed.
     """
     principal, organization, assurance, client_id = _authenticated_write_identity()
     mode = os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE", "").strip()
-    if mode not in {"", "admin-separated-v1"}:
+    if mode not in {"", "admin-separated-v1", "jason-owner-v1"}:
         raise PermissionError("AUTHORITY_GRANT_ADMIN_POLICY_INVALID")
+    if mode == "jason-owner-v1":
+        return _licensed_jason_owner()
     if mode == "admin-separated-v1":
         from uuid import UUID
         from jason_runtime.mobile_release_approval import read_mobile_release_policy
@@ -4320,7 +4450,7 @@ def _authority_admin_owner() -> tuple[str, str]:
             "/var/lib/jason/authority/mobile-release-approval-policy.json",
         )))
         if (
-            policy.schema_version != "4.0"
+            policy.schema_version not in {"4.0", "4.1"}
             or policy.admin_approver_binding is None
             or policy.regular_requester_binding is None
         ):
@@ -4350,6 +4480,32 @@ def _authority_admin_owner() -> tuple[str, str]:
     if not owners or principal not in owners:
         raise PermissionError("AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED")
     return principal, organization
+
+
+
+def _authority_admin_or_catalog_self(app: Any) -> tuple[str, str, bool]:
+    """Existing Owner admin, or separately enabled four-capability self grant.
+
+    The fallback never changes the shared Owner allowlist and cannot serve
+    unrelated admin actions. It reuses the already authenticated Entra binder.
+    """
+    try:
+        actor, organization = _authority_admin_owner()
+        return actor, organization, False
+    except PermissionError as exc:
+        if str(exc) != "AUTHORITY_GRANT_ADMIN_OWNER_REQUIRED":
+            raise
+    from jason_mcp.catalog_grant_admin import verify_catalog_grant_admin_actor
+    principal, organization, assurance, client_id = _authenticated_write_identity()
+    token = get_access_token()
+    actor, organization = verify_catalog_grant_admin_actor(
+        principal=principal, organization=organization,
+        assurance=assurance, client_id=client_id,
+        claims=(getattr(token, "claims", None) or {}) if token is not None else {},
+        admin_profile=os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE", "").strip(),
+    )
+    _authority_grant_subject(app, actor, organization)
+    return actor, organization, True
 
 
 def _exact_authority_capability(app: Any, capability: str) -> str:
@@ -4398,7 +4554,7 @@ def _authority_grant_id(*, subject: str, capability: str, organization: str, cli
     return f"grant_exact_{digest}"
 
 
-def _authority_grant_audit(*, app: Any, event_type: str, admin_principal: str, organization: str, capability: str, grant_id: str) -> None:
+def _authority_grant_audit(*, app: Any, event_type: str, admin_principal: str, organization: str, capability: str, grant_id: str, catalog_scope: bool = False) -> None:
     audit = app.identity_authority.audit
     if audit is None:
         raise RuntimeError("AUTHORITY_GRANT_AUDIT_UNAVAILABLE")
@@ -4409,7 +4565,9 @@ def _authority_grant_audit(*, app: Any, event_type: str, admin_principal: str, o
         organization_id=organization,
         capability=capability,
         outcome="succeeded",
-        reason_codes=("EXACT_GRANT_ADMIN", f"GRANT_ID:{grant_id}"),
+        reason_codes=("EXACT_GRANT_ADMIN",) + (
+            ("CATALOG_SELF_GRANT_ADMIN",) if catalog_scope else ()
+        ) + (f"GRANT_ID:{grant_id}",),
     )
 
 def _provider_health_canary_grant_ids(
@@ -4430,11 +4588,27 @@ def _provider_health_canary_grant_ids(
     }
 
 
+def _preprod_observe_status_owner() -> tuple[str, str]:
+    """Exact AOT release Owner may OBSERVE preproduction readiness only.
+
+    The existing `_release_approval_owner` verifies the Entra bearer,
+    tenant, object ID, active Jason binding, and AOT organization. This
+    helper additionally rejects client-scoped accounts. It never authorizes
+    grant administration, promotions, provider writes, or JSON activation.
+    """
+    principal, organization = _release_approval_owner()
+    bound_principal, bound_org, assurance, client_id = _authenticated_write_identity()
+    if (principal != bound_principal or organization != bound_org
+            or assurance != "entra-oauth-bearer" or client_id is not None):
+        raise PermissionError("PREPROD_STATUS_EXACT_AOT_OWNER_REQUIRED")
+    return principal, organization
+
+
 @mcp.tool()
 def provider_health_canary_status() -> dict[str, Any]:
-    """Owner-only: report exact observe authority for provider health canaries."""
+    """Verified AOT Owner read-only provider canary readiness; no grant."""
     try:
-        admin, organization = _authority_admin_owner()
+        admin, organization = _preprod_observe_status_owner()
         app = _runtime()
         identity = app.identity_authority.identities.get(
             PROVIDER_HEALTH_CANARY_PRINCIPAL
@@ -4595,10 +4769,15 @@ def revoke_provider_health_canaries() -> dict[str, Any]:
 def list_exact_authority_grants(subject_id: str = "") -> dict[str, Any]:
     """Owner-only: list exact Jason authority grants for one active AOT subject."""
     try:
-        admin, organization = _authority_admin_owner()
         app = _runtime()
+        admin, organization, catalog_only = _authority_admin_or_catalog_self(app)
         subject = _authority_grant_subject(app, subject_id or admin, organization)
+        if catalog_only and subject != admin:
+            raise PermissionError("CATALOG_GRANT_ADMIN_SCOPE_DENIED")
         grants = app.identity_authority.grants.list_for_subject(subject)
+        if catalog_only:
+            from jason_mcp.catalog_grant_admin import catalog_visible_grant
+            grants = [grant for grant in grants if catalog_visible_grant(actor=admin, grant=grant)]
     except (PermissionError, ValueError, RuntimeError) as exc:
         return {"status":"rejected","error_code":str(exc)}
     return {
@@ -4624,8 +4803,17 @@ def grant_exact_authority(
 ) -> dict[str, Any]:
     """Owner-only: add one exact authority grant; execute grants always require approval."""
     try:
-        admin, organization = _authority_admin_owner()
         app = _runtime()
+        admin, organization, catalog_only = _authority_admin_or_catalog_self(app)
+        # Narrow fallback validates raw request before resolving another subject
+        # or an unrelated capability. Global Owner behavior is unchanged.
+        if catalog_only:
+            from jason_mcp.catalog_grant_admin import require_catalog_grant_scope
+            require_catalog_grant_scope(
+                actor=admin, subject=subject_id, capability=capability,
+                permission=str(permission or "").strip().casefold(),
+                approval_required=approval_required, client_id=client_id,
+            )
         subject = _authority_grant_subject(app, subject_id, organization)
         exact_capability = _exact_authority_capability(app, capability)
         normalized_client = None if client_id is None or not str(client_id).strip() else str(client_id).strip()
@@ -4653,11 +4841,13 @@ def grant_exact_authority(
             raise ValueError("AUTHORITY_GRANT_ID_CONFLICT")
         _authority_grant_audit(
             app=app,event_type="authority.grant.create.requested",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=exact_capability,grant_id=grant_id,
         )
         repo.put(candidate)
         _authority_grant_audit(
             app=app,event_type="authority.grant.created",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=exact_capability,grant_id=grant_id,
         )
     except (PermissionError, ValueError, RuntimeError) as exc:
@@ -4673,8 +4863,8 @@ def grant_exact_authority(
 def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
     """Owner-only: revoke one exact Jason authority grant by grant ID."""
     try:
-        admin, organization = _authority_admin_owner()
         app = _runtime()
+        admin, organization, catalog_only = _authority_admin_or_catalog_self(app)
         requested = str(grant_id or "").strip()
         if not requested:
             raise ValueError("AUTHORITY_GRANT_ID_REQUIRED")
@@ -4682,10 +4872,15 @@ def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
         current = repo.get(requested)
         if current is None:
             raise ValueError("AUTHORITY_GRANT_NOT_FOUND")
+        if catalog_only:
+            from jason_mcp.catalog_grant_admin import catalog_visible_grant
+            if not catalog_visible_grant(actor=admin, grant=current):
+                raise PermissionError("CATALOG_GRANT_ADMIN_SCOPE_DENIED")
         if current.organization_id != organization:
             raise PermissionError("AUTHORITY_GRANT_ORGANIZATION_MISMATCH")
         _authority_grant_audit(
             app=app,event_type="authority.grant.revoke.requested",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=current.capability,grant_id=requested,
         )
         revoked = repo.revoke(requested)
@@ -4693,6 +4888,7 @@ def revoke_exact_authority_grant(grant_id: str) -> dict[str, Any]:
             raise ValueError("AUTHORITY_GRANT_NOT_FOUND")
         _authority_grant_audit(
             app=app,event_type="authority.grant.revoked",admin_principal=admin,
+            catalog_scope=catalog_only,
             organization=organization,capability=revoked.capability,grant_id=requested,
         )
     except (PermissionError, ValueError, RuntimeError) as exc:
@@ -4996,9 +5192,9 @@ def _active_autonomy_acceptance_promotion():
 
 @mcp.tool()
 def autonomy_execution_acceptance_status() -> dict[str, Any]:
-    """Owner-only: report the exact first autonomous-write acceptance authority state."""
+    """Verified AOT Owner read-only first-acceptance readiness; no approval."""
     try:
-        principal, _ = _authority_admin_owner()
+        principal, _ = _preprod_observe_status_owner()
         app = _runtime()
         grants = app.identity_authority.grants.list_for_subject(
             "jason-autonomy-worker"
@@ -5225,6 +5421,8 @@ def run_autonomy_execution_acceptance() -> dict[str, Any]:
 
 
 def _component_approval_owner() -> tuple[str, str]:
+    if os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE", "").strip() == "jason-owner-v1":
+        return _licensed_jason_owner()
     principal, organization, _, _ = _authenticated_write_identity()
     owners = approval_owner_identities()
     if not owners or principal not in owners:
@@ -5233,9 +5431,25 @@ def _component_approval_owner() -> tuple[str, str]:
 
 
 def _release_approval_owner() -> tuple[str, str]:
-    principal, organization, _, _ = _authenticated_write_identity()
-    owners = approval_owner_identities()
-    if not owners or principal not in owners:
+    if os.environ.get("JASON_AOT_ADMIN_APPROVER_PROFILE", "").strip() == "jason-owner-v1":
+        return _licensed_jason_owner()
+    # Historical profiles remain rollback-compatible until independently retired.
+    # Unlike global authority-grant administration, release approval may be
+    # performed by the exact licensed Owner's active Entra OAuth subject. The
+    # Entra/Jason identity middleware above independently verifies bearer
+    # signature, tenant, expiry and active binding before this decision.
+    from jason_mcp.release_owner_identity import authorized_release_owner
+
+    principal, organization, assurance, _ = _authenticated_write_identity()
+    token = get_access_token()
+    claims = (token.claims or {}) if token is not None else None
+    if not authorized_release_owner(
+        principal=principal,
+        organization_id=organization,
+        assurance=assurance,
+        verified_token_claims=claims,
+        existing_owner_identities=approval_owner_identities(),
+    ):
         raise PermissionError("RELEASE_APPROVAL_OWNER_REQUIRED")
     return principal, organization
 
@@ -5261,6 +5475,18 @@ def approve_release_candidate(
                 "/var/lib/jason/openclaw/release-manager",
             )
         )
+        from kernel.signed_owner_release import read_service_owner_signing_key
+
+        # The MCP OAuth middleware has authenticated and resolved this exact
+        # Owner subject. No model/caller-supplied identity or private signing
+        # key is accepted. Absence of the separately provisioned signer denies.
+        signer_path = os.getenv("JASON_OWNER_RELEASE_ED25519_KEY_PATH", "").strip()
+        if not signer_path or not signer_path.startswith("/"):
+            raise PermissionError("RELEASE_APPROVAL_SIGNER_NOT_CONFIGURED")
+        signer = read_service_owner_signing_key(Path(signer_path))
+        token = get_access_token()
+        if token is None:
+            raise PermissionError("RELEASE_APPROVAL_AUTHENTICATED_SESSION_REQUIRED")
         request = queue_release_approval_request(
             state_root=state_root,
             release_id=release_id,
@@ -5268,6 +5494,8 @@ def approve_release_candidate(
             approved_by=principal,
             organization_id=organization,
             reason=reason,
+            verified_token_claims=token.claims or {},
+            service_signer=signer,
         )
     except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
         return {"status": "rejected", "error_code": str(exc)}
@@ -5280,6 +5508,293 @@ def approve_release_candidate(
         "approval_source": request.get("source", "authenticated_jason_mcp_owner"),
         "promotion": "separate_release_manager_transaction",
     }
+
+
+@mcp.tool()
+def approve_catalog_scoped_runtime_mcp_release(
+    release_id: str,
+    candidate_sha: str,
+    manifest_sha256: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Entra-verified Owner signs ONE exact catalog-only dual-image release.
+
+    Returns approval metadata only; neither unfreezes nor promotes anything.
+    Host root independently rechecks public-key signature and full manifest.
+    """
+    try:
+        principal, organization = _release_approval_owner()
+        token = get_access_token()
+        if token is None:
+            raise PermissionError("CATALOG_SCOPED_OWNER_OAUTH_REQUIRED")
+        signer_path = os.getenv("JASON_OWNER_RELEASE_ED25519_KEY_PATH", "").strip()
+        if not signer_path.startswith("/"):
+            raise PermissionError("CATALOG_SCOPED_OWNER_SIGNER_REQUIRED")
+        from kernel.signed_owner_release import read_service_owner_signing_key
+        from jason_mcp.catalog_scoped_promotion_approval import (
+            queue_catalog_scoped_approval,
+        )
+        signer = read_service_owner_signing_key(Path(signer_path))
+        receipt = queue_catalog_scoped_approval(
+            state_root=Path("/var/lib/jason/authority/catalog-scoped-release"),
+            release_id=release_id,
+            candidate_sha=candidate_sha,
+            manifest_sha256=manifest_sha256,
+            approved_by=principal,
+            organization_id=organization,
+            verified_token_claims=token.claims or {},
+            service_signer=signer,
+            affirmative_decision=affirmative_decision,
+        )
+        return dict(receipt)
+    except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+
+@mcp.tool()
+def approve_audit_journal_adoption(
+    release_id: str,
+    candidate_sha: str,
+    scope_sha256: str,
+    manifest_sha256: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Owner OAuth-signs ONE Root-preflighted daily audit archive adoption.
+
+    Separate from a full Jason software release and administrative grants.
+    No device-code flow, terminal prompt, provider writes, or Root execution.
+    The independent native Root consumer validates the original signed offer,
+    installed Root source, freeze, and the live migration scope before cutover.
+    Disabled unless a separately governed installed Root consumer is enabled.
+    """
+    try:
+        if os.getenv("JASON_AUDIT_JOURNAL_OWNER_ISSUER_ENABLED") != "true":
+            raise PermissionError("AUDIT_JOURNAL_OWNER_ISSUER_NOT_ACTIVATED")
+        principal, organization = _release_approval_owner()
+        token = get_access_token()
+        if token is None:
+            raise PermissionError("AUDIT_JOURNAL_ENTRA_BEARER_REQUIRED")
+        signer_path = os.getenv("JASON_OWNER_RELEASE_ED25519_KEY_PATH", "").strip()
+        if not signer_path.startswith("/"):
+            raise PermissionError("AUDIT_JOURNAL_SERVICE_SIGNER_NOT_CONFIGURED")
+        from kernel.signed_owner_release import read_service_owner_signing_key
+        from jason_mcp.audit_journal_adoption_approval import (
+            queue_exact_archive_owner_approval,
+        )
+        signer = read_service_owner_signing_key(Path(signer_path))
+        receipt = queue_exact_archive_owner_approval(
+            state_root=Path("/var/lib/jason/authority/audit-journal-release"),
+            release_id=release_id,
+            candidate_sha=candidate_sha,
+            scope_sha256=scope_sha256,
+            manifest_sha256=manifest_sha256,
+            approved_by=principal,
+            organization_id=organization,
+            verified_token_claims=token.claims or {},
+            service_signer=signer,
+            affirmative_decision=affirmative_decision,
+        )
+        return dict(receipt)
+    except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+
+@mcp.tool()
+def approve_independent_component_release(
+    component_id: str,
+    candidate_sha: str,
+    image_digest: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Authenticated Owner: sign ONE prepared independent-component release.
+
+    Approval is never an install, a PMV3/PMv4 promotion, a global unfreeze, or
+    a standing permission. The root-installed component-only release controller
+    must independently validate and consume the time-limited signed receipt.
+    Disabled until a matching governed component offer and signer are present.
+    """
+    try:
+        principal, organization = _release_approval_owner()
+        signer_path = os.getenv("JASON_OWNER_RELEASE_ED25519_KEY_PATH", "").strip()
+        if not signer_path.startswith("/"):
+            raise PermissionError("COMPONENT_RELEASE_SIGNER_NOT_CONFIGURED")
+        from kernel.signed_owner_release import read_service_owner_signing_key
+        signer = read_service_owner_signing_key(Path(signer_path))
+        token = get_access_token()
+        if token is None:
+            raise PermissionError("COMPONENT_RELEASE_AUTHENTICATED_SESSION_REQUIRED")
+        result = queue_component_release_approval(
+            state_root=Path(os.getenv(
+                "JASON_RELEASE_MANAGER_STATE_ROOT",
+                "/var/lib/jason/openclaw/release-manager",
+            )),
+            component_id=component_id,
+            candidate_sha=candidate_sha,
+            image_digest=image_digest,
+            approved_by=principal,
+            organization_id=organization,
+            verified_token_claims=token.claims or {},
+            service_signer=signer,
+            confirmed_decision=affirmative_decision,
+        )
+    except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    return {
+        "status": "succeeded",
+        "release_id": result["release_id"],
+        "component_id": result["component_id"],
+        "candidate_sha": result["candidate_sha"],
+        "approved_by": result["approved_by"],
+        "approval_source": result["source"],
+        "promotion": "separate_root_governed_component_transaction",
+    }
+
+
+@mcp.tool()
+def authorize_pmv4_shadow_release(
+    candidate_sha: str,
+    rollback_sha: str,
+    scope_sha256: str,
+    manifest_sha256: str,
+    freeze_sha256: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Owner-only, one-use exact PMv4 shadow release authorization.
+
+    Requires active Entra OAuth and an explicit exact-action confirmation.
+    Does not install controls, deploy, restart, alter the freeze, or bypass
+    the independently privileged protected breaker / release transaction.
+    Disabled until the separately governed host trust installation.
+    """
+    try:
+        if os.environ.get("JASON_PMV4_OWNER_ISSUER_ENABLED") != "true":
+            raise PermissionError("PMV4_OWNER_ISSUER_NOT_INSTALLED")
+        principal, organization = _release_approval_owner()
+        access_token = get_access_token()
+        if access_token is None or not isinstance(access_token.token, str):
+            raise PermissionError("PMV4_ENTRA_OWNER_BEARER_REQUIRED")
+        from jason_mcp.pmv4_owner_bridge import authorize_exact_shadow_from_mcp
+        response = authorize_exact_shadow_from_mcp(
+            bearer_token=access_token.token,
+            verified_owner_principal=principal,
+            verified_organization=organization,
+            verify_entra_bearer=_entra_token_verifier.verify_signed_claims,
+            candidate_sha=candidate_sha,
+            rollback_sha=rollback_sha,
+            scope_sha256=scope_sha256,
+            manifest_sha256=manifest_sha256,
+            freeze_sha256=freeze_sha256,
+            affirmative_decision=affirmative_decision,
+        )
+        return {
+            "status": "succeeded", **response,
+            "production_deployment": False,
+            "next_stage": "separately_governed_host_release_transaction",
+        }
+    except (PermissionError, ValueError, RuntimeError, OSError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+
+@mcp.tool()
+def authorize_pmv4_stage_a0_install(
+    candidate_sha: str,
+    scope_sha256: str,
+    manifest_sha256: str,
+    freeze_sha256: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Queue one exact authenticated Owner decision for PMv4 Stage A0.
+
+    Does not install, restart, deploy, unfreeze, change breaker, or grant a
+    standing release authority. This tool is disabled until its separately
+    governed, exact-release source profile is enabled.
+    """
+    try:
+        if os.environ.get("JASON_PMV4_STAGE_A0_ISSUER_ENABLED") != "true":
+            raise PermissionError("PMV4_STAGE_A0_OWNER_ISSUER_NOT_INSTALLED")
+        principal, organization = _release_approval_owner()
+        access_token = get_access_token()
+        if access_token is None or not isinstance(access_token.token, str):
+            raise PermissionError("PMV4_STAGE_A0_ENTRA_BEARER_REQUIRED")
+        from jason_mcp.pmv4_stage_a0_owner_issuer import issue_stage_a0_request
+        from jason_mcp.pmv4_owner_bridge import public_protected_main_head
+        exact_binding = {
+            "service": "pmv4-stage-a0-host-bootstrap",
+            "candidate_sha": candidate_sha,
+            "rollback_sha": "0" * 40,
+            "scope_sha256": scope_sha256,
+            "manifest_sha256": manifest_sha256,
+            "freeze_sha256": freeze_sha256,
+            "owner_principal": principal,
+        }
+        def consent(binding: Mapping[str, Any]) -> bool:
+            return isinstance(binding, Mapping) and dict(binding) == exact_binding
+        response = issue_stage_a0_request(
+            bearer_token=access_token.token,
+            verified_principal=principal,
+            verified_organization=organization,
+            verify_entra_bearer=_entra_token_verifier.verify_signed_claims,
+            exact_owner_consent=consent,
+            protected_main_check=public_protected_main_head,
+            candidate_sha=candidate_sha,
+            reviewed_scope_sha256=scope_sha256,
+            manifest_sha256=manifest_sha256,
+            freeze_sha256=freeze_sha256,
+            affirmative_decision=affirmative_decision,
+        )
+        return {
+            **response, "root_execution": "separately_governed_exact_stage",
+            "standing_authority": False, "production_deployment": False,
+        }
+    except (PermissionError, ValueError, RuntimeError, OSError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+
+@mcp.tool()
+def authorize_pmv4_stage_e_cutover(
+    candidate_sha: str,
+    rollback_sha: str,
+    scope_sha256: str,
+    manifest_sha256: str,
+    freeze_sha256: str,
+    affirmative_decision: str = "",
+) -> dict[str, Any]:
+    """Queue one authenticated, exact Stage E Owner decision.
+
+    If installed and enabled, the independent root worker may consume this
+    request to perform the six-unit cutover after its own production gates.
+    No standing authority is granted. Disabled by default.
+    """
+    try:
+        if os.environ.get("JASON_PMV4_STAGE_E_ISSUER_ENABLED") != "true":
+            raise PermissionError("PMV4_STAGE_E_OWNER_ISSUER_NOT_INSTALLED")
+        principal, organization = _release_approval_owner()
+        access_token = get_access_token()
+        if access_token is None or not isinstance(access_token.token, str):
+            raise PermissionError("PMV4_STAGE_E_ENTRA_BEARER_REQUIRED")
+        from jason_mcp.pmv4_e_owner_bridge import issue_stage_e_request
+        from jason_mcp.pmv4_owner_bridge import public_protected_main_head
+        exact_binding = {
+            "service": "pmv4-stage-e-six-unit-cutover",
+            "candidate_sha": candidate_sha, "rollback_sha": rollback_sha,
+            "scope_sha256": scope_sha256, "manifest_sha256": manifest_sha256,
+            "freeze_sha256": freeze_sha256, "owner_principal": principal,
+        }
+        def consent(binding: Mapping[str, Any]) -> bool:
+            return isinstance(binding, Mapping) and dict(binding) == exact_binding
+        return issue_stage_e_request(
+            bearer_token=access_token.token,
+            verified_principal=principal, verified_organization=organization,
+            verify_entra_bearer=_entra_token_verifier.verify_signed_claims,
+            exact_owner_consent=consent,
+            protected_main_check=public_protected_main_head,
+            candidate_sha=candidate_sha, rollback_sha=rollback_sha,
+            scope_sha256=scope_sha256, manifest_sha256=manifest_sha256,
+            freeze_sha256=freeze_sha256,
+            affirmative_decision=affirmative_decision,
+        )
+    except (PermissionError, ValueError, RuntimeError, OSError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
 
 
 def _component_unsupervised_block_reason(
@@ -6204,11 +6719,11 @@ def stage_json_playbook(payload_json: str) -> dict[str, Any]:
 
 @mcp.tool()
 def list_json_playbooks() -> dict[str, Any]:
-    """List durable JSON playbook versions and the current active version."""
+    """Read existing JSON definitions without initializing or migrating schema."""
     registry = None
     try:
         _authenticated_identity()
-        registry = open_json_playbook_registry()
+        registry = open_json_playbook_registry(read_only=True)
         return {
             "status": "succeeded",
             "generation": registry.generation(),
@@ -6350,6 +6865,60 @@ def _production_commitment_snapshot() -> dict[str, object]:
     }
 
 
+def _current_release_approval_policy_snapshot() -> dict[str, object]:
+    """Read the protected production LKG, never infer approval from PMV3 history.
+
+    Legacy PMV3 records permanently describe their historical Teams-only
+    engineering train. A current approval mode is stated only when root's
+    last-known-good revision agrees with the closed, revalidated breaker.
+    Unknown or mismatched evidence is UNKNOWN rather than a false all-clear.
+    """
+    root = Path(os.environ.get(
+        "JASON_RELEASE_MANAGER_STATE_ROOT",
+        "/var/lib/jason/openclaw/release-manager",
+    ))
+    try:
+        report = json.loads(
+            (root / "protected-readback/production-control-state.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        manifest = report["last_known_good"]["manifest"]
+        breaker = report["circuit_breaker"]
+        revision = str(manifest["revision"]).lower()
+        if (
+            not re.fullmatch(r"[0-9a-f]{40}", revision)
+            or breaker.get("state") != "closed"
+            or breaker.get("revalidated_revision") != revision
+        ):
+            raise ValueError("production revision or breaker is unverified")
+        mode = str(manifest.get("mobile_release_approval_mode") or "")
+        if mode != "owner_reviewed":
+            return {
+                "status": "unknown",
+                "reason": "production_release_mode_not_owner_reviewed",
+                "mode": mode or None,
+                "teams_required": None,
+                "revision": revision,
+                "source": "root_protected_last_known_good",
+            }
+        return {
+            "status": "current",
+            "mode": mode,
+            "teams_required": False,
+            "revision": revision,
+            "source": "root_protected_last_known_good",
+        }
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return {
+            "status": "unknown",
+            "reason": "protected_production_approval_evidence_unavailable_or_mismatched",
+            "mode": None,
+            "teams_required": None,
+            "source": "root_protected_last_known_good",
+        }
+
+
 def _pmv3_engineering_snapshot() -> dict[str, object]:
     path = Path(
         os.environ.get(
@@ -6362,7 +6931,7 @@ def _pmv3_engineering_snapshot() -> dict[str, object]:
             "status": "unavailable",
             "reason": "pmv3_controller_state_missing",
             "pass_count": 0,
-            "teams_only_approval": True,
+            "teams_only_approval": None,
         }
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -6371,14 +6940,14 @@ def _pmv3_engineering_snapshot() -> dict[str, object]:
             "status": "unavailable",
             "reason": f"pmv3_controller_state_invalid:{type(exc).__name__}",
             "pass_count": 0,
-            "teams_only_approval": True,
+            "teams_only_approval": None,
         }
     if not isinstance(payload, Mapping):
         return {
             "status": "unavailable",
             "reason": "pmv3_controller_state_invalid_shape",
             "pass_count": 0,
-            "teams_only_approval": True,
+            "teams_only_approval": None,
         }
     passes = payload.get("passes")
     passes = passes if isinstance(passes, list) else []
@@ -6406,7 +6975,11 @@ def _pmv3_engineering_snapshot() -> dict[str, object]:
         "last_disposition": str(last_pass.get("disposition") or ""),
         "last_progress_sha256": str(last_pass.get("progress_sha256") or ""),
         "unchanged_passes": int(last_pass.get("unchanged_passes") or 0),
-        "teams_only_approval": payload.get("teams_only_approval") is True,
+        "teams_only_approval": (
+            payload.get("teams_only_approval")
+            if isinstance(payload.get("teams_only_approval"), bool)
+            else None
+        ),
         "integration_queue": integration_queue,
     }
 
@@ -6420,6 +6993,15 @@ def jason_mcp_status() -> dict[str, object]:
 
     autonomy_work = _autonomous_ticket_work_snapshot()
     pmv3_engineering = _pmv3_engineering_snapshot()
+    live_release_approval = _current_release_approval_policy_snapshot()
+    pmv3_engineering["historical_teams_only_approval"] = (
+        pmv3_engineering.get("teams_only_approval")
+    )
+    # Preserve the original historical value separately. This compatibility
+    # field must reflect CURRENT authorization, not a November engineering
+    # train that can never be the source of live Owner approval.
+    pmv3_engineering["teams_only_approval"] = live_release_approval["teams_required"]
+    pmv3_engineering["release_approval_policy"] = live_release_approval
     pmv3_engineering["ticket_processing"] = {
         key: autonomy_work.get(key)
         for key in (
@@ -6474,6 +7056,7 @@ def jason_mcp_status() -> dict[str, object]:
         "autonomy_work": autonomy_work,
         "production_commitments": _production_commitment_snapshot(),
         "pmv3_engineering": pmv3_engineering,
+        "release_approval_policy": live_release_approval,
     }
 
 
@@ -6629,6 +7212,17 @@ def _annotate_requester_eligibility(
             else PermissionMode.EXECUTE
         )
 
+        try:
+            scoped_client = require_group_pilot_client_scope(
+                capability_name=str(projected.get("capability") or ""),
+                principal_id=principal, organization_id=organization,
+                bound_client_id=client_id,
+            )
+        except PermissionError:
+            projected["permission_mode"] = requested_mode.value
+            projected["authority_outcome"] = "denied"
+            projected["potentially_eligible"] = False
+            return projected
         decision = app.identity_authority.evaluate(
             AuthorityRequest(
                 request_id=(
@@ -6639,7 +7233,7 @@ def _annotate_requester_eligibility(
                 ),
                 principal_id=principal,
                 organization_id=organization,
-                client_id=client_id,
+                client_id=scoped_client,
                 capability=str(
                     projected.get("capability")
                     or ""
@@ -7283,6 +7877,7 @@ def execute_read_capability(
         # boundary here would silently truncate its already-safe 1000-record
         # fleet dataset back to 100 and make fleet-wide analytics incomplete.
         "print.meter.usage.search",
+        "print.fleet.usage.rank",
     }
 
     if capability_name not in known_projected:
@@ -7344,6 +7939,14 @@ def execute_read_capability(
                 result["evidence"] = _safe(
                     evidence
                 )
+
+    # Generic safe projections can cap KFS's rich DeviceList to 100 entries.
+    # Do not then claim the full 443+ device fleet was returned. Preserve a
+    # deterministic continuation offset while retaining the existing bound.
+    if capability_name == "print.device.search":
+        result["evidence"] = _repair_kfs_device_projection_pagination(
+            result.get("evidence")
+        )
 
     # The native Production Manager cannot accept a read-surface release
     # based on HTTP 200 alone. Only a real Entra-authenticated owner request
@@ -7773,6 +8376,84 @@ def _send_procurement_review_to_teams(
             raise RuntimeError("Teams procurement review delivery failed")
         message_ids.append(str(sent["message_id"]))
     return tuple(message_ids)
+
+
+def _constant_contact_import_workflow():
+    # Disabled unless the reviewed, separately opt-in pilot is activated.
+    flow = getattr(_runtime(), "constant_contact_import_workflow", None)
+    if flow is None:
+        raise PermissionError("CONSTANT_CONTACT_IMPORT_PILOT_INACTIVE")
+    return flow
+
+
+def _constant_contact_mcp_identity():
+    from types import SimpleNamespace
+    tenant_id, object_id = _authenticated_microsoft_transport_identity()
+    # Assurance is independently derived from validated MCP Entra bearer
+    # evidence; no caller-supplied identity or approval is accepted.
+    return SimpleNamespace(
+        authentication_assurance="entra-oauth-bearer",
+        microsoft_tenant_id=tenant_id,
+        microsoft_object_id=object_id,
+    )
+
+
+@mcp.tool()
+def constant_contact_excel_preview(
+    workbook_base64: str,
+    source_sha256: str,
+    source_reference: str,
+    filename: str,
+    list_ids: list[str],
+) -> dict[str, Any]:
+    """Preview a SHA-verified XLSX attachment in the disabled-by-default pilot.
+
+    Supply exact original XLSX bytes as base64, not reconstructed contact rows.
+    This is a provider-read preview, NOT an upload or write authorization.
+    """
+    identity = _constant_contact_mcp_identity()
+    try:
+        flow = _constant_contact_import_workflow()
+        return flow.preview_attachment(
+            identity=identity,
+            workbook_base64=workbook_base64,
+            source_sha256=source_sha256,
+            source_reference=source_reference,
+            filename=filename,
+            list_ids=tuple(list_ids),
+        )
+    except PermissionError:
+        return {"status": "denied", "error_code": "constant_contact_not_authorized"}
+    except Exception:
+        return {"status": "rejected", "error_code": "constant_contact_preview_unavailable"}
+
+
+@mcp.tool()
+def constant_contact_excel_request_approval(work_id: str) -> dict[str, Any]:
+    """Request existing canonical signed exact-plan approval; never import directly."""
+    identity = _constant_contact_mcp_identity()
+    try:
+        return _constant_contact_import_workflow().submit_approval(
+            identity=identity, work_id=work_id,
+        )
+    except PermissionError:
+        return {"status": "denied", "error_code": "constant_contact_not_authorized"}
+    except Exception:
+        return {"status": "rejected", "error_code": "constant_contact_approval_unavailable"}
+
+
+@mcp.tool()
+def constant_contact_excel_readback(work_id: str) -> dict[str, Any]:
+    """Read exact provider import activity and list membership; never POST."""
+    identity = _constant_contact_mcp_identity()
+    try:
+        return _constant_contact_import_workflow().readback(
+            identity=identity, work_id=work_id,
+        )
+    except PermissionError:
+        return {"status": "denied", "error_code": "constant_contact_not_authorized"}
+    except Exception:
+        return {"status": "rejected", "error_code": "constant_contact_readback_unavailable"}
 
 
 @mcp.tool()
@@ -8514,6 +9195,54 @@ async def _complete_quickbooks_oauth_callback(
     )
 
 
+def _constant_contact_credentials() -> Mapping[str, str]:
+    resolver = OpenBaoSecretResolver(
+        base_url=os.environ.get("JASON_OPENBAO_URL", "http://openbao:8200"),
+        role_id_path=JASON_CONSTANT_CONTACT_OPENBAO_ROLE_ID_PATH,
+        secret_id_path=JASON_CONSTANT_CONTACT_OPENBAO_SECRET_ID_PATH,
+    )
+    return resolver.resolve(
+        "constant_contact.oauth_client",
+        ConnectorContext(
+            correlation_id="constant-contact-oauth-callback",
+            principal_id="svc-jason-mcp-oauth",
+            organization_id="aot",
+            client_id=None,
+            capability="constant_contact.oauth.complete",
+            mode="execute",
+        ),
+    )
+
+
+def _complete_constant_contact_callback(query_string: str) -> dict[str, object]:
+    import base64
+    credentials = _constant_contact_credentials()
+    try:
+        key = base64.b64decode(credentials["token_key_b64"], validate=True)
+    except (KeyError, ValueError):
+        raise ValueError("Constant Contact OAuth token encryption key unavailable") from None
+    return complete_constant_contact_oauth(
+        query_string=query_string,
+        store=EncryptedOAuthStore(JASON_CONSTANT_CONTACT_OAUTH_DB, key),
+        credentials=credentials,
+    )
+
+
+async def constant_contact_oauth_callback(request: StarletteRequest):
+    try:
+        result = await asyncio.to_thread(
+            _complete_constant_contact_callback, request.url.query,
+        )
+    except Exception:
+        logger.warning("Constant Contact OAuth authorization rejected without credential disclosure")
+        return JSONResponse(
+            {"status": "error", "message": "Constant Contact authorization could not be completed."},
+            status_code=400,
+            headers={"Cache-Control": "no-store"},
+        )
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
 async def quickbooks_oauth_callback(request: StarletteRequest):
     return await _complete_quickbooks_oauth_callback(
         request, environment="sandbox"
@@ -8666,6 +9395,11 @@ app.add_route(
 app.add_route(
     "/oauth/dnsfilter/callback",
     dnsfilter_oauth_callback,
+    methods=["GET"],
+)
+app.add_route(
+    "/oauth/constant-contact/callback",
+    constant_contact_oauth_callback,
     methods=["GET"],
 )
 app.add_route(

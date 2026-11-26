@@ -1,0 +1,19 @@
+{
+  "agent_id": "synthetic-agent-1",
+  "alert_in_24_hour_window": true,
+  "alert_uid": "synthetic-alert-1",
+  "current_nonarchived_detection_count": 0,
+  "device_uid": "synthetic-device-1",
+  "exact_agent_and_av_engine_healthy": true,
+  "exact_alert_device_identity": true,
+  "exact_alert_resolution_readback_verified": true,
+  "exact_alert_ticket_number_present": true,
+  "exact_endpoint_online": true,
+  "exact_reconciliation_owner_promotion_verified": true,
+  "exact_ticket_complete_readback_verified": true,
+  "registered_alert_class": "endpoint_security_threat_ctx",
+  "resolution_note": "Synthetic verified healthy alert, no live provider action",
+  "ticket_id": 1111,
+  "ticket_number": "T-SYNTH-1",
+  "unique_exact_linked_ticket_open": true
+}

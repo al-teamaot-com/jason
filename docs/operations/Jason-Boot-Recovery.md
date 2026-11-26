@@ -101,3 +101,9 @@ This production acceptance proves the installed recovery controller, timer, curr
 It does **not** prove a complete host power-cycle/reboot sequence after installation. That test remains pending separate explicit approval because host reboot is disruptive under Jason governance.
 
 Authoritative evidence record: `docs/sessions/Jason-Boot-Recovery-Production-Acceptance-2026-09-24.md`.
+
+### Provider-read credential freshness recovery
+
+Boot recovery treats the protected IT Glue and Autotask read AppRole files as the authoritative local source. Existing staged runtime files are not considered healthy merely because owner, mode, and size are valid. The root recovery controller compares the bounded credential bytes in memory without printing or hashing them. If any staged file differs, it atomically re-stages the complete provider-read set with the existing root-only staging helper, verifies convergence, and recreates only `jason-runtime` from its exact live image/revision using `deploy_live_container.py` so file bind mounts attach to the refreshed inode.
+
+No provider API credential is changed and no OpenBao AppRole is rotated by this recovery. Unchanged credentials cause no runtime recreation. A replacement must pass the normal runtime health check; the exact-clone helper restores the previous container on failure. After successful replacement, the temporary credential-refresh rollback container is removed so it cannot become production drift. Credential values and hashes are never emitted.

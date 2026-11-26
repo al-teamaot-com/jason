@@ -1,0 +1,36 @@
+name: PMv4 JSON governed mutation source boundary
+
+on:
+  pull_request:
+    paths:
+      - "implementation/autonomous_remediation/playbook_ticket_evidence.py"
+      - "implementation/runtime_service/src/jason_runtime/json_governed_mutation_bridge.py"
+      - "implementation/runtime_service/tests/test_json_governed_mutation_bridge.py"
+      - "tests/test_playbook_ticket_evidence.py"
+      - "docs/playbooks/json/migration/GOVERNED-MUTATION-SOURCE-BOUNDARY.md"
+      - ".github/workflows/json-governed-mutation-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  one-shot-action-gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check pytest jsonschema
+      - name: Prove exact source, current governed reads, Owner promotion and recovery
+        env:
+          PYTHONPATH: .:implementation:implementation/runtime_service/src
+        run: |
+          python -m pytest -q \
+            implementation/runtime_service/tests/test_json_governed_mutation_bridge.py \
+            tests/test_playbook_ticket_evidence.py \
+            implementation/runtime_service/tests/test_json_governed_action_reuse.py \
+            implementation/autonomous_remediation/test_json_playbook_document.py \
+            implementation/autonomous_remediation/test_json_playbook_store.py

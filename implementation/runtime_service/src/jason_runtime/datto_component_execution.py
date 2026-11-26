@@ -60,6 +60,12 @@ from orchestrator.service import CapabilityInvoker
 from .datto_component_scope import (
     DATTO_AD_HOC_LINUX_SHELL_NAME,
     DATTO_AD_HOC_LINUX_SHELL_UID,
+    DATTO_JASON_ROOT_PROBE_DEVICE_UID,
+    DATTO_JASON_ROOT_PROBE_ALLOWLIST,
+    DATTO_JASON_ROOT_PROBE_DEVICE_CLASS,
+    DATTO_JASON_ROOT_PROBE_COMMAND,
+    jason_root_probe_enabled,
+    jason_root_probe_command_allowed,
     DATTO_EXECUTION_COMPONENT_NAME_ENV,
     DATTO_EXECUTION_COMPONENT_UID_ENV,
     DATTO_EXECUTION_COMPONENTS_JSON_ENV,
@@ -708,13 +714,22 @@ class DattoRmmComponentExecutionConnector:
         worker_uid = os.environ.get(
             "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
         ).strip()
+        root_probe_target = requested_target == DATTO_JASON_ROOT_PROBE_DEVICE_UID
+        root_probe_scope = shell_named and root_probe_target and jason_root_probe_enabled()
+        worker_scope = (
+            shell_named and not root_probe_target
+            and bool(worker_uid) and requested_target == worker_uid
+        )
         if shell_named and (
             requested_uid != DATTO_AD_HOC_LINUX_SHELL_UID
             or requested_name.casefold() != DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
-            or not worker_uid or requested_target != worker_uid
+            or not (worker_scope or root_probe_scope)
         ):
             raise PermissionError("DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED")
-        worker_scope = shell_named and requested_target == worker_uid
+        if root_probe_scope and not jason_root_probe_command_allowed(
+            request.arguments.get("variables", {})
+        ):
+            raise PermissionError("DATTO_JASON_ROOT_PROBE_COMMAND_NOT_APPROVED")
 
         pilot = self._pilot
         playbook_scoped_component = (
@@ -730,20 +745,20 @@ class DattoRmmComponentExecutionConnector:
                 or playbook_scoped_component is not None
             )
         )
-        if pilot is None and not autonomous_scope and not worker_scope:
+        if pilot is None and not autonomous_scope and not (worker_scope or root_probe_scope):
             raise PermissionError("DATTO_COMPONENT_EXECUTION_SCOPE_DISABLED")
 
         requested_allowlist = str(
             request.arguments.get("allowlist_name") or ""
         ).strip()
-        effective_allowlist = (
-            "aot-approved-linux-worker"
-            if worker_scope else (
-                pilot.allowlist_name
-                if pilot is not None
-                else DATTO_COMPONENT_EXECUTION_AUTONOMY_ALLOWLIST
-            )
-        )
+        if root_probe_scope:
+            effective_allowlist = DATTO_JASON_ROOT_PROBE_ALLOWLIST
+        elif worker_scope:
+            effective_allowlist = "aot-approved-linux-worker"
+        elif pilot is not None:
+            effective_allowlist = pilot.allowlist_name
+        else:
+            effective_allowlist = DATTO_COMPONENT_EXECUTION_AUTONOMY_ALLOWLIST
         if requested_allowlist and requested_allowlist != effective_allowlist:
             raise PermissionError("DATTO_COMPONENT_ALLOWLIST_MISMATCH")
 
@@ -758,14 +773,14 @@ class DattoRmmComponentExecutionConnector:
         requested_class = str(
             request.arguments.get("device_class") or ""
         ).strip()
-        effective_device_class = (
-            "Server"
-            if worker_scope else (
-                pilot.device_class
-                if pilot is not None
-                else DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS
-            )
-        )
+        if root_probe_scope:
+            effective_device_class = DATTO_JASON_ROOT_PROBE_DEVICE_CLASS
+        elif worker_scope:
+            effective_device_class = "Server"
+        elif pilot is not None:
+            effective_device_class = pilot.device_class
+        else:
+            effective_device_class = DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS
         if (
             requested_class
             and requested_class.casefold() != effective_device_class.casefold()
@@ -781,8 +796,11 @@ class DattoRmmComponentExecutionConnector:
                 uid=DATTO_AD_HOC_LINUX_SHELL_UID,
                 name=DATTO_AD_HOC_LINUX_SHELL_NAME,
                 approval_mode="per_run",
-                approval_source="separate_worker_enrollment",
-            ) if worker_scope else (
+                approval_source=(
+                    "exact_jason_readonly_root_identity"
+                    if root_probe_scope else "separate_worker_enrollment"
+                ),
+            ) if (worker_scope or root_probe_scope) else (
                 playbook_scoped_component
                 if playbook_scoped_component is not None
                 else resolve_datto_component(
@@ -804,16 +822,23 @@ class DattoRmmComponentExecutionConnector:
             approved_worker = os.environ.get(
                 "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
             ).strip()
+            exact_worker = (
+                requested_device != DATTO_JASON_ROOT_PROBE_DEVICE_UID
+                and bool(approved_worker) and requested_device == approved_worker
+            )
             if (
                 selected_component.uid != DATTO_AD_HOC_LINUX_SHELL_UID
                 or selected_component.name.casefold()
                 != DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
-                or not approved_worker
-                or requested_device != approved_worker
+                or not (exact_worker or root_probe_scope)
             ):
                 raise PermissionError(
                     "DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED"
                 )
+            if root_probe_scope and not jason_root_probe_command_allowed(
+                request.arguments.get("variables", {})
+            ):
+                raise PermissionError("DATTO_JASON_ROOT_PROBE_COMMAND_NOT_APPROVED")
             if selected_component.requires_explicit_approval is not True:
                 raise PermissionError("DATTO_LINUX_SHELL_PER_RUN_REQUIRED")
 
@@ -957,19 +982,32 @@ class DattoRmmComponentExecutionConnector:
             and selected_component.name.casefold()
             == DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
         )
-        if worker_execution and os.environ.get(
+        root_probe_execution = (
+            worker_execution and requested_device == DATTO_JASON_ROOT_PROBE_DEVICE_UID
+        )
+        if root_probe_execution:
+            if not jason_root_probe_enabled():
+                raise PermissionError("DATTO_JASON_ROOT_PROBE_NOT_ENROLLED")
+            variables = prepared.provider_request.body.get(
+                "jobComponent", {}
+            ).get("variables", [])
+            if variables != [{"name": "usrInput", "value": DATTO_JASON_ROOT_PROBE_COMMAND}]:
+                raise PermissionError("DATTO_JASON_ROOT_PROBE_COMMAND_NOT_APPROVED")
+        elif worker_execution and os.environ.get(
             "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
         ).strip() != requested_device:
             raise PermissionError("DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED")
+        if root_probe_execution:
+            expected_device_class = DATTO_JASON_ROOT_PROBE_DEVICE_CLASS
+        elif worker_execution:
+            expected_device_class = "Server"
+        elif self._pilot is not None:
+            expected_device_class = self._pilot.device_class
+        else:
+            expected_device_class = DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS
         expected_parameters = {
             "allowlist_name": opaque.prepared.allowlist_entry.allowlist_name,
-            "device_class": (
-                "Server" if worker_execution else (
-                    self._pilot.device_class
-                    if self._pilot is not None
-                    else DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS
-                )
-            ),
+            "device_class": expected_device_class,
             "component_name": selected_component.name,
         }
         if expected_parameters != dict(prepared_execution.parameters):

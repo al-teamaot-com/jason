@@ -18,6 +18,10 @@ SHA = re.compile(r"[0-9a-f]{40}\Z")
 RELATIVE_SYSTEM_SOURCES = (
     "infrastructure/showcase/systemd",
     "infrastructure/openclaw-operations/systemd",
+    # Legacy CCC scheduler is retired using the same exact-byte-verified
+    # production unit-delta/rollback protocol, not by masking the drift
+    # monitor or treating a failed CCC service as healthy.
+    "infrastructure/ccc/systemd",
 )
 RELATIVE_USER_SOURCES = (
     "infrastructure/openclaw-operations/systemd/user",

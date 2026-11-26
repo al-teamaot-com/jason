@@ -190,3 +190,75 @@ def test_evidence_inherits_release_controller_owner(tmp_path):
     assert evidence.stat().st_gid == control.stat().st_gid
     assert stat.S_IMODE(evidence.stat().st_mode) == 0o600
     assert json.loads(control.read_text())['circuit_breaker']['state'] == 'open'
+
+
+def test_same_open_breaker_keeps_original_incident_timestamp(tmp_path, monkeypatch):
+    control = tmp_path / "control.json"
+    evidence = tmp_path / "evidence.json"
+    state = tmp_path / "watchdog.json"
+    control.write_text(json.dumps({
+        "schema_version": "1.0",
+        "last_known_good": {"release_id": "release-good"},
+        "circuit_breaker": {"state": "closed"},
+    }))
+    result = {
+        "schema_version": "1.0",
+        "status": "drift_detected",
+        "problems": [{"kind": "failed_system_unit",
+                      "unit": "jason-openclaw-authority-health.service"}],
+    }
+    monkeypatch.setattr(watchdog, "now", lambda: "2026-11-13T14:05:00Z")
+    assert watchdog.apply_result(result, control_state=control,
+                                 evidence=evidence, watchdog_state=state)==2
+    first = json.loads(control.read_text())
+    assert first["circuit_breaker"]["opened_at"]=="2026-11-13T14:05:00Z"
+    monkeypatch.setattr(watchdog, "now", lambda: "2026-11-13T14:06:00Z")
+    assert watchdog.apply_result(result, control_state=control,
+                                 evidence=evidence, watchdog_state=state)==2
+    second = json.loads(control.read_text())
+    assert second["circuit_breaker"]["opened_at"]=="2026-11-13T14:05:00Z"
+    assert second["circuit_breaker"]["updated_at"]=="2026-11-13T14:06:00Z"
+    assert second["last_known_good"]==first["last_known_good"]
+    assert json.loads(state.read_text())["circuit_breaker_action"]=="opened"
+
+
+def test_grafana_warning_does_not_close_previously_open_genuine_breaker(tmp_path):
+    control = tmp_path / "control.json"
+    evidence = tmp_path / "evidence.json"
+    state = tmp_path / "watchdog.json"
+    control.write_text(json.dumps({
+        "schema_version": "1.0",
+        "circuit_breaker": {"state": "open",
+                            "reason": "prior_genuine_drift",
+                            "opened_at": "2026-11-13T13:00:00Z"},
+    }))
+    result = {
+        "schema_version": "1.0", "status": "pass",
+        "problems": [], "advisories": [{
+            "kind": "independent_optional_system_unit_failed",
+            "unit": "jason-grafana-assurance.service", "state": "failed",
+        }],
+    }
+    assert watchdog.apply_result(result, control_state=control,
+                                 evidence=evidence, watchdog_state=state)==0
+    assert json.loads(control.read_text())["circuit_breaker"]["state"]=="open"
+    assert json.loads(state.read_text())["advisory_count"]==1
+    assert json.loads(state.read_text())["circuit_breaker_action"]=="none"
+    assert json.loads(evidence.read_text())["advisories"]==result["advisories"]
+
+
+def test_watchdog_systemd_unit_treats_reported_drift_as_success_only():
+    # Systemd must not turn a correct "drift found" result into an unrelated
+    # failed_system_unit incident on the next watchdog cycle.
+    from configparser import ConfigParser
+    unit = ROOT / "infrastructure/openclaw-operations/systemd/jason-production-drift-watchdog.service"
+    # systemd permits repeated ReadOnlyPaths= etc., unlike strict INI.
+    config=ConfigParser(interpolation=None, strict=False)
+    config.read(unit)
+    assert config["Service"]["Type"]=="oneshot"
+    assert config["Service"]["SuccessExitStatus"]=="2"
+    assert "production_drift_watchdog.py" in config["Service"]["ExecStart"]
+    assert "SuccessExitStatus=2" in unit.read_text()
+    # The CLI return code remains nonzero to signal detected drift to
+    # direct callers; only this systemd timer invocation treats it as a
+    # completed observation.

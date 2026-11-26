@@ -4,18 +4,39 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 DEFAULT_OUTPUT = Path('/var/lib/jason/openclaw/operational-health.json')
+LAST_SUCCESS = Path('/var/lib/jason/openclaw/operational-full-health-last-pass.json')
 # Full SQLite checks now cover a >28 GB orchestration audit and multi-GB
-# authority backup/restore. Retain a strict bound, but allow one 60-minute
+# authority backup/restore. Retain a strict bound, but allow one 90-minute
 # overnight attempt; never convert a timeout into a passing proof.
-SOURCE_HEALTH_TIMEOUT_SECONDS = 3600
+SOURCE_HEALTH_TIMEOUT_SECONDS = 5400
 BACKUP_TEMP_ROOT = Path('/srv/jason/archive')
 SOURCE_HEALTH_TIMEOUT_EXIT_CODE = 124
+
+# Stage progress is informational evidence on failure, never a replacement
+# for a completed full SQLite integrity + backup/restore proof.
+_STAGE_LINE = re.compile(
+    r'^JASON_FULL_INTEGRITY_STAGE_V1\|(authority|replay|security_audit|'
+    r'authority_backup_restore|orchestration_audit)\|([0-9]{1,7}(?:\.[0-9]{1,3})?)$'
+)
+
+
+def completed_timeout_stages(stderr: bytes | str | None) -> dict[str, float]:
+    if not stderr:
+        return {}
+    raw = stderr.decode('utf-8', errors='replace') if isinstance(stderr, bytes) else stderr
+    completed: dict[str, float] = {}
+    for line in raw.splitlines():
+        match = _STAGE_LINE.fullmatch(line.strip())
+        if match is not None:
+            completed[match.group(1)] = float(match.group(2))
+    return completed
 
 
 def write_atomic_snapshot(output: Path, report: dict[str, object]) -> None:
@@ -46,17 +67,23 @@ def main() -> int:
 
     tool = Path(__file__).with_name('openclaw_authority_operational_health.py')
     try:
-        completed = subprocess.run(
-            [sys.executable, str(tool), '--backup-temp-root', str(BACKUP_TEMP_ROOT)],
-            capture_output=True,
-            text=True,
-            check=False,
-            # Full PRAGMA integrity_check includes the multi-GB orchestration
-            # audit database, plus authority backup/restore verification.
-            # Keep the *complete* checks bounded, but do not truncate them.
-            timeout=SOURCE_HEALTH_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
+        # The child process cannot remove its backup/restore copies if
+        # subprocess.run kills it at the hard timeout. The parent owns exactly
+        # one new 0700 archive scratch directory and safely cleans only this
+        # run, leaving all unrelated and prior evidence untouched.
+        with tempfile.TemporaryDirectory(
+            prefix='jason-authority-integrity-run-', dir=BACKUP_TEMP_ROOT
+        ) as scoped_backup_root:
+            completed = subprocess.run(
+                [sys.executable, str(tool), '--backup-temp-root', scoped_backup_root],
+                capture_output=True,
+                text=True,
+                check=False,
+                # Full PRAGMA integrity_check still runs on all four databases.
+                # The outer 5400-second bound and fail-closed result remain.
+                timeout=SOURCE_HEALTH_TIMEOUT_SECONDS,
+            )
+    except subprocess.TimeoutExpired as exc:
         # A timeout must not leave a previously successful snapshot looking
         # current: publish explicit failure evidence and exit nonzero.
         report = {
@@ -64,6 +91,7 @@ def main() -> int:
             'failures': ['operational_health_timeout'],
             'snapshot_source_exit_code': SOURCE_HEALTH_TIMEOUT_EXIT_CODE,
             'snapshot_timeout_seconds': SOURCE_HEALTH_TIMEOUT_SECONDS,
+            'completed_stage_seconds': completed_timeout_stages(exc.stderr),
             'provider_contacted': False,
             'provider_credentials_used': False,
         }
@@ -75,10 +103,42 @@ def main() -> int:
             'source_exit_code': SOURCE_HEALTH_TIMEOUT_EXIT_CODE,
         }, sort_keys=True))
         return SOURCE_HEALTH_TIMEOUT_EXIT_CODE
+    except OSError:
+        report = {
+            'status': 'fail',
+            'failures': ['operational_health_launch_error'],
+            'provider_contacted': False,
+            'provider_credentials_used': False,
+        }
+        write_atomic_snapshot(args.output, report)
+        return 2
     if not completed.stdout.strip():
-        raise SystemExit('operational health tool returned no JSON output')
+        # A source exception can exit without producing JSON. Never leave an
+        # old PASS as the current full-integrity result.
+        report = {
+            'status': 'fail',
+            'failures': ['operational_health_missing_output'],
+            'snapshot_source_exit_code': completed.returncode,
+            'provider_contacted': False,
+            'provider_credentials_used': False,
+        }
+        write_atomic_snapshot(args.output, report)
+        return completed.returncode if completed.returncode != 0 else 2
 
-    report = json.loads(completed.stdout)
+    try:
+        report = json.loads(completed.stdout)
+    except (json.JSONDecodeError, ValueError):
+        report = None
+    if not isinstance(report, dict):
+        report = {
+            'status': 'fail',
+            'failures': ['operational_health_invalid_json'],
+            'snapshot_source_exit_code': completed.returncode,
+            'provider_contacted': False,
+            'provider_credentials_used': False,
+        }
+        write_atomic_snapshot(args.output, report)
+        return completed.returncode if completed.returncode != 0 else 2
     report['snapshot_source_exit_code'] = completed.returncode
     if completed.returncode != 0:
         # Even a contradictory source response must never publish PASS.
@@ -91,6 +151,14 @@ def main() -> int:
         report['failures'] = failures
 
     write_atomic_snapshot(args.output, report)
+    # Keep the last verified PASS separately, so a later timeout cannot erase
+    # the proof of a completed scan. Never archive a nonzero/partial result.
+    if (report.get('status') == 'pass'
+            and completed.returncode == 0
+            and report.get('failures') == []
+            and report.get('provider_contacted') is False
+            and report.get('provider_credentials_used') is False):
+        write_atomic_snapshot(LAST_SUCCESS, report)
 
     print(json.dumps({
         'status': report.get('status', 'fail'),

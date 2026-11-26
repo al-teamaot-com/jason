@@ -125,7 +125,12 @@ policy = _validated_mobile_release_policy(
     repo / "config" / "mobile-release-approval-policy.json",
     source_v2_required=True,
 )
-print("admin-separated-v1" if policy["mode"] == "admin_approver_separated" else "")
+from jason_owner_auth_profile import declared_jason_owner_profile
+historical = "admin-separated-v1" if policy["mode"] == "admin_approver_separated" else ""
+licensed = declared_jason_owner_profile(repo)
+if licensed and historical:
+    raise SystemExit("JASON_OWNER_SOURCE_PROFILE_CONFLICT")
+print(licensed or historical)
 PY_ADMIN_ROLE
 )" || exit 2
 if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
@@ -136,6 +141,42 @@ else
     echo "DENIED: admin approval profile differs from reviewed exact source" >&2
     exit 2
   fi
+fi
+
+# Exact source-bound Microsoft group pilot; rollbacks always disable write access.
+# AppRole credentials are independent, read-only, and mounted ONLY when active.
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  M365_GROUP_PROFILE=""
+else
+  M365_GROUP_PROFILE="$(python3 "$REPO_ROOT/tools/microsoft_group_admin_release_profile.py" \
+    --source "$REPO_ROOT/config/microsoft_graph/group-admin-release.json")" || exit 2
+  if [ -n "${JASON_M365_GROUP_ADMIN_PROFILE:-}" ] &&
+     [ "$JASON_M365_GROUP_ADMIN_PROFILE" != "$M365_GROUP_PROFILE" ]; then
+    echo "DENIED: Microsoft group activation differs from reviewed source" >&2
+    exit 2
+  fi
+fi
+M365_GROUP_BIND_ARGS=()
+if [ -z "$M365_GROUP_PROFILE" ] && [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  M365_GROUP_BIND_ARGS=(--omit-microsoft-group-binds-on-rollback)
+fi
+if [ -n "$M365_GROUP_PROFILE" ]; then
+  for group_role in read write; do
+    host_base="/opt/jason/bootstrap/secrets/openbao/microsoft-graph-group-${group_role}-approle"
+    mount_base="/run/jason-secrets/openbao/microsoft-group-${group_role}"
+    for key_file in role-id secret-id; do
+      host_file="$host_base/$key_file"
+      if [ ! -f "$host_file" ] || [ -L "$host_file" ] ||
+         [ "$(stat -c '%u:%g:%a' "$host_file")" != "0:1000:640" ]; then
+        echo "DENIED: Microsoft group AppRole runtime projection unavailable or unsafe" >&2
+        exit 2
+      fi
+    done
+    M365_GROUP_BIND_ARGS+=(
+      --add-readonly-bind "$host_base/role-id:$mount_base/role_id"
+      --add-readonly-bind "$host_base/secret-id:$mount_base/secret_id"
+    )
+  done
 fi
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -172,6 +213,155 @@ if [ -f "$QBO_PROD_ROLE_HOST" ] && [ -f "$QBO_PROD_SECRET_HOST" ]; then
   )
 fi
 
+# The independently approved Owner signing secret is provisioned OUTSIDE
+# Git and Docker builds. A missing or unsafe signer denies activation.
+OWNER_SIGNER_HOST="/var/lib/jason/runtime-secrets/owner-release/private_key"
+OWNER_SIGNER_CONTAINER="/run/jason-secrets/owner-release/private_key"
+OWNER_SIGNER_ARGS=()
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  # A V2 rollback must not retain the new signing secret or live auth path.
+  OWNER_SIGNER_ARGS=(
+    --set-env "JASON_OWNER_RELEASE_ED25519_KEY_PATH="
+    --omit-owner-release-signer-bind-on-rollback
+  )
+else
+  if [ -L "$OWNER_SIGNER_HOST" ] || [ ! -f "$OWNER_SIGNER_HOST" ]; then
+    echo "DENIED: Owner release signing key has not been provisioned" >&2
+    exit 2
+  fi
+  OWNER_SIGNER_OWNER_MODE="$(stat -c '%u:%g:%a' "$OWNER_SIGNER_HOST")"
+  if [ "$OWNER_SIGNER_OWNER_MODE" != "1000:1000:400" ] ||
+     [ "$(stat -c '%s' "$OWNER_SIGNER_HOST")" != "32" ]; then
+    echo "DENIED: Owner signing key mode, UID or exact Ed25519 length invalid" >&2
+    exit 2
+  fi
+  # Source-key must match the separately root-owned policy's pinned
+  # public key. This is a non-mutating proof before Docker replacement,
+  # including during --preflight. Never print private bytes.
+  OWNER_SIGNER_PUBLIC_POLICY="/etc/jason-owner-release/verified-owner-public-key.json"
+  PYTHONPATH="$REPO_ROOT/implementation" python3 - "$OWNER_SIGNER_HOST" "$OWNER_SIGNER_PUBLIC_POLICY" <<'PY_OWNER_SIGNER'
+import sys
+from pathlib import Path
+from kernel.signed_owner_release import (
+    read_pinned_root_owner_public_key, read_service_owner_signing_key,
+    public_key_sha256,
+)
+private = read_service_owner_signing_key(Path(sys.argv[1]))
+trusted = read_pinned_root_owner_public_key(Path(sys.argv[2]))
+if public_key_sha256(private.public_key()) != public_key_sha256(trusted):
+    raise SystemExit("DENIED: Owner signer differs from root-approved public key")
+print("MCP_OWNER_SIGNER_ROOT_TRUST_PRECHECK=PASS")
+PY_OWNER_SIGNER
+  OWNER_SIGNER_ARGS=(
+    --set-env "JASON_OWNER_RELEASE_ED25519_KEY_PATH=$OWNER_SIGNER_CONTAINER"
+    --add-readonly-bind "$OWNER_SIGNER_HOST:$OWNER_SIGNER_CONTAINER"
+  )
+fi
+
+# PMv4 Owner shadow issuer is OFF until a reviewed exact source release
+# explicitly enables its host projection. Read source only; never trust a
+# free-form host environment variable for authority or an alternate mount.
+PMV4_OWNER_MODE="$(python3 - "$REPO_ROOT/config/pmv4-owner-issuer-activation.json" <<'PY_PMV4_OWNER'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("DENIED: PMv4 Owner activation source is missing")
+try:
+    doc=json.loads(p.read_text())
+except (OSError,ValueError):
+    raise SystemExit("DENIED: PMv4 Owner activation source invalid")
+if (not isinstance(doc,dict)
+        or set(doc)!={"schema_version","service","mode"}
+        or doc["schema_version"]!="1.0"
+        or doc["service"]!="jason-pmv4-shadow"
+        or doc["mode"] not in ("off","on")):
+    raise SystemExit("DENIED: PMv4 Owner activation source invalid")
+print(doc["mode"])
+PY_PMV4_OWNER
+)" || exit 2
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  PMV4_OWNER_ARGS=(
+    --set-env "JASON_PMV4_OWNER_ISSUER_ENABLED=false"
+    --omit-pmv4-owner-projection-on-rollback
+  )
+elif [ "$PMV4_OWNER_MODE" = "on" ]; then
+  PMV4_OWNER_ARGS=(
+    --set-env "JASON_PMV4_OWNER_ISSUER_ENABLED=true"
+    --pmv4-owner-projection
+  )
+else
+  PMV4_OWNER_ARGS=(--set-env "JASON_PMV4_OWNER_ISSUER_ENABLED=false")
+fi
+
+# Stage A0 Owner issuer reuses the existing MCP authenticated bearer and
+# signer mount. Its separate, reviewed source profile is OFF by default;
+# a future exact Owner-approved MCP release must explicitly change it.
+PMV4_STAGE_A0_MODE="$(python3 - "$REPO_ROOT/config/pmv4-stage-a0-issuer-activation.json" <<'PY_PMV4_A0'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("DENIED: PMv4 Stage A0 issuer source profile missing")
+try:
+    doc=json.loads(p.read_text())
+except (OSError,ValueError):
+    raise SystemExit("DENIED: PMv4 Stage A0 issuer source profile invalid")
+if (not isinstance(doc,dict)
+        or set(doc)!={"schema_version","service","mode"}
+        or doc["schema_version"]!="1.0"
+        or doc["service"]!="pmv4-stage-a0-host-bootstrap"
+        or doc["mode"] not in ("off","on")):
+    raise SystemExit("DENIED: PMv4 Stage A0 issuer profile not exact")
+print(doc["mode"])
+PY_PMV4_A0
+)" || exit 2
+# Activation never bypasses existing signer checks; the established
+# root-reconciler must be staged and separately approved first.
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  PMV4_STAGE_A0_ARGS=(--set-env "JASON_PMV4_STAGE_A0_ISSUER_ENABLED=false")
+elif [ "$PMV4_STAGE_A0_MODE" = "on" ]; then
+  if [ "${#OWNER_SIGNER_ARGS[@]}" -eq 0 ]; then
+    echo "DENIED: Stage A0 has no trusted Owner signing mount" >&2
+    exit 2
+  fi
+  PMV4_STAGE_A0_ARGS=(--set-env "JASON_PMV4_STAGE_A0_ISSUER_ENABLED=true")
+else
+  PMV4_STAGE_A0_ARGS=(--set-env "JASON_PMV4_STAGE_A0_ISSUER_ENABLED=false")
+fi
+
+# Stage E is independently gated and remains disabled in this source profile.
+PMV4_STAGE_E_MODE="$(python3 - "$REPO_ROOT/config/pmv4-stage-e-issuer-activation.json" <<'PY_PMV4_E'
+import json,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("DENIED: PMv4 Stage E issuer profile missing")
+try:
+    doc=json.loads(p.read_text())
+except (OSError,ValueError):
+    raise SystemExit("DENIED: PMv4 Stage E issuer profile invalid")
+if (not isinstance(doc,dict)
+        or set(doc)!={"schema_version","service","mode"}
+        or doc["schema_version"]!="1.0"
+        or doc["service"]!="pmv4-stage-e-six-unit-cutover"
+        or doc["mode"] not in ("off","on")):
+    raise SystemExit("DENIED: PMv4 Stage E issuer profile not exact")
+print(doc["mode"])
+PY_PMV4_E
+)" || exit 2
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  PMV4_STAGE_E_ARGS=(--set-env "JASON_PMV4_STAGE_E_ISSUER_ENABLED=false")
+elif [ "$PMV4_STAGE_E_MODE" = "on" ]; then
+  if [ "${#OWNER_SIGNER_ARGS[@]}" -eq 0 ]; then
+    echo "DENIED: Stage E has no trusted Owner signing mount" >&2
+    exit 2
+  fi
+  PMV4_STAGE_E_ARGS=(--set-env "JASON_PMV4_STAGE_E_ISSUER_ENABLED=true")
+else
+  PMV4_STAGE_E_ARGS=(--set-env "JASON_PMV4_STAGE_E_ISSUER_ENABLED=false")
+fi
+
 PREFLIGHT=false
 for arg in "$@"; do
   if [ "$arg" = "--preflight" ]; then
@@ -189,15 +379,26 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --set-env "JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE=$STAFF_NOTE_PROFILE" \
   --set-env "JASON_AOT_ADMIN_APPROVER_PROFILE=$ADMIN_APPROVER_PROFILE" \
   --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
+  --set-env "JASON_M365_GROUP_ADMIN_PROFILE=$M365_GROUP_PROFILE" \
+  "${M365_GROUP_BIND_ARGS[@]}" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \
+  --set-env "JASON_DATTO_JASON_ROOT_PROBE_DEVICE_UID=${JASON_DATTO_JASON_ROOT_PROBE_DEVICE_UID:-}" \
   --add-readonly-bind "$QBO_DEV_ROLE_HOST:/run/jason-secrets/openbao/quickbooks-development/role_id" \
   --add-readonly-bind "$QBO_DEV_SECRET_HOST:/run/jason-secrets/openbao/quickbooks-development/secret_id" \
   "${QBO_PROD_ARGS[@]}" \
+  "${OWNER_SIGNER_ARGS[@]}" \
+  "${PMV4_OWNER_ARGS[@]}" \
+  "${PMV4_STAGE_A0_ARGS[@]}" \
+  "${PMV4_STAGE_E_ARGS[@]}" \
   --promote-image-tag jason-mcp:production \
   --rollback-image-tag jason-mcp:rollback-current \
   --health-url http://127.0.0.1:8000/healthz   "$@"
 
 if [ "$PREFLIGHT" != "true" ]; then
   docker exec -i jason-mcp-pilot python -c 'import jason_mcp.server as s; x=s.jason_mcp_status(); assert x["status"]=="ok"; assert x["governed_execution"]=="central-orchestrator"; assert x["generic_execution_tool"] is True; assert x["direct_provider_access"] is False; print("MCP_GOVERNANCE_POSTCHECK=PASS")'
+  if [ "$IMAGE" != "jason-mcp:rollback-current" ]; then
+    # Verify the 0400 mount in the unprivileged MCP process without logging bytes.
+    docker exec -i jason-mcp-pilot python -c 'import os,stat;from pathlib import Path;from kernel.signed_owner_release import read_service_owner_signing_key;p=Path(os.environ["JASON_OWNER_RELEASE_ED25519_KEY_PATH"]);s=p.lstat();assert not p.is_symlink() and stat.S_ISREG(s.st_mode) and stat.S_IMODE(s.st_mode)==0o400 and s.st_uid==os.geteuid()==1000;read_service_owner_signing_key(p);print("MCP_OWNER_RELEASE_SIGNER_MOUNT=PASS")'
+  fi
 fi

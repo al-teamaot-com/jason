@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """PMV3 governed integration queue and production-candidate merge lock.
 
-Development remains concurrent. Integration to protected ``main`` is serialized
-through a required GitHub status context. PMV3 admits only Owner-approved
+Development remains concurrent. PMV3's optional integration queue records
+advisory status and never writes protected-branch requirements. The Owner
+retired its required status context on 2026-11-10; normal GitHub branch
+protection and release governance remain. PMV3 admits only Owner-approved
 development evidence (or an explicit integration-ready label), builds a bounded
 non-overlapping release train, merges one PR at a time after all existing
-required checks pass, then locks further integration until the exact resulting
-candidate becomes Last Known Good in production.
+required checks pass. Undeployed source backlog is not a production transaction.
+The native release manager remains solely responsible for pinned production
+candidates, exact approvals, freeze, rollback and verified convergence.
 
 This module has no production deployment authority and never records production
 approval. It only controls repository integration under PMV3 standing
@@ -15,8 +18,12 @@ engineering authority.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import json
 import os
+import re
+import stat
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -28,6 +35,7 @@ GATE_CONTEXT = "pmv3-integration-gate"
 DEFAULT_REPOSITORY = "al-teamaot-com/jason"
 INTEGRATION_READY_LABEL = "pmv3-integration-ready"
 RECOVERY_LABEL = "pmv3-release-recovery"
+SOURCE_POLICY = "independent_source_v1"
 
 
 def now() -> str:
@@ -133,7 +141,7 @@ def production_lkg_revision(release_state: Path) -> str:
         return ""
     manifest = ((value.get("last_known_good") or {}).get("manifest") or {})
     revision = str(manifest.get("revision") or "").strip().casefold()
-    return revision if len(revision) == 40 else ""
+    return revision if re.fullmatch(r"[0-9a-f]{40}", revision) else ""
 
 
 def _priority(pr: Mapping[str, Any]) -> tuple[int, str, int]:
@@ -153,8 +161,8 @@ def _priority(pr: Mapping[str, Any]) -> tuple[int, str, int]:
 
 
 class IntegrationApi(Protocol):
-    def ensure_gate_required(self) -> None: ...
     def main_sha(self) -> str: ...
+    def source_ready(self, number: int, head: str, main: str, files: set[str], body=None) -> bool: ...
     def open_pull_requests(self) -> list[dict[str, Any]]: ...
     def pull_request(self, number: int) -> dict[str, Any]: ...
     def changed_files(self, number: int) -> set[str]: ...
@@ -172,7 +180,7 @@ class GhApi:
     def _run(self, args: list[str], *, input_text: str | None = None) -> str:
         completed = subprocess.run(
             ["gh", *args], text=True, input=input_text,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, timeout=45,
             env={**os.environ, "GH_PAGER": "cat", "PAGER": "cat"},
         )
         if completed.returncode != 0:
@@ -183,17 +191,6 @@ class GhApi:
     def _api_json(self, path: str) -> Any:
         raw = self._run(["api", path])
         return json.loads(raw)
-
-    def ensure_gate_required(self) -> None:
-        path = f"repos/{self.repository}/branches/main/protection/required_status_checks"
-        required = self._api_json(path)
-        contexts = [str(x) for x in required.get("contexts") or []]
-        if GATE_CONTEXT in contexts:
-            return
-        self._run([
-            "api", "--method", "POST", path + "/contexts",
-            "-f", f"contexts[]={GATE_CONTEXT}", "--silent",
-        ])
 
     def main_sha(self) -> str:
         value = self._api_json(f"repos/{self.repository}/branches/main")
@@ -249,6 +246,10 @@ class GhApi:
             "isDraft": bool(value.get("draft")),
             "headRefOid": str(((value.get("head") or {}).get("sha")) or ""),
             "headRefName": str(((value.get("head") or {}).get("ref")) or ""),
+            "baseRefName": str(((value.get("base") or {}).get("ref")) or ""),
+            "baseRefOid": str(((value.get("base") or {}).get("sha")) or ""),
+            "changedFileCount": value.get("changed_files"),
+            "body": str(value.get("body") or ""),
             "mergeable": "MERGEABLE" if value.get("mergeable") is True else (
                 "CONFLICTING" if value.get("mergeable") is False else "UNKNOWN"
             ),
@@ -321,6 +322,46 @@ class GhApi:
             return True
         except RuntimeError:
             return False
+
+    def source_ready(self, number: int, head: str, main: str, files: set[str], body=None) -> bool:
+        branch = self._api_json(f"repos/{self.repository}/branches/main")
+        policy = self._api_json(f"repos/{self.repository}/branches/main/protection/required_status_checks")
+        if (branch.get("protected") is not True
+                or (branch.get("commit") or {}).get("sha") != main
+                or policy.get("strict") is not True
+                or "repository-hygiene" not in policy.get("contexts", [])):
+            return False
+        compare = self._api_json(f"repos/{self.repository}/compare/{main}...{head}")
+        if (compare.get("status") not in {"ahead", "identical"}
+                or (compare.get("merge_base_commit") or {}).get("sha") != main):
+            return False
+        fresh = self.pull_request(number)
+        try:
+            from change_integration_gate import active_overlap_check
+        except ModuleNotFoundError:
+            from tools.change_integration_gate import active_overlap_check
+
+        def pages(url, _token):
+            prefix = f"https://api.github.com/repos/{self.repository}/"
+            if not url.startswith(prefix):
+                raise PermissionError("SOURCE_OVERLAP_REVIEW_URL")
+            payload = json.loads(self._run(["api", "--paginate", "--slurp",
+                                           url.removeprefix("https://api.github.com/")]))
+            if not isinstance(payload, list) or any(not isinstance(x, list) for x in payload):
+                raise ValueError("SOURCE_OVERLAP_REVIEW_INCOMPLETE")
+            return [row for page in payload for row in page]
+
+        return (fresh.get("state") == "open" and fresh.get("isDraft") is False
+                and fresh.get("baseRefName") == "main"
+                and fresh.get("baseRefOid") == main
+                and fresh.get("headRefOid") == head
+                and (body is None or fresh.get("body") == body)
+                and type(fresh.get("changedFileCount")) is int
+                and fresh["changedFileCount"] == len(files)
+                and self.changed_files(number) == files
+                and not active_overlap_check(self.repository, number, "main", files,
+                                             fresh["body"], "", 7, read_pages=pages)
+                and self.main_sha() == main)
 
     def merge_pull_request(self, number: int, sha: str) -> str:
         raw = self._run([
@@ -462,18 +503,105 @@ def _recovery_candidate(prs: list[dict[str, Any]], durable: set[int]) -> dict[st
     return candidates[0] if candidates else None
 
 
-def reconcile(
-    *,
-    api: IntegrationApi,
-    spool: Path,
-    release_state: Path,
-    state_path: Path | None = None,
-    batch_size: int = 3,
-) -> dict[str, Any]:
+class SourceIntegrationDeferred(PermissionError):
+    """A real production transaction owns the mutex; no source mutation."""
+
+
+@contextmanager
+def trusted_flock(path: Path, mode: int, *, create: bool = False):
+    flags = os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+    fd = os.open(path, flags | (os.O_RDWR | os.O_CREAT if create else os.O_RDONLY), 0o600)
+    try:
+        def validate():
+            st = os.fstat(fd)
+            current = path.lstat()
+            if (not stat.S_ISREG(st.st_mode) or not stat.S_ISREG(current.st_mode)
+                    or st.st_uid != os.getuid() or current.st_uid != os.getuid()
+                    or st.st_mode & 0o002 or current.st_mode & 0o002
+                    or (create and (st.st_mode & 0o077 or current.st_mode & 0o077))
+                    or (current.st_dev, current.st_ino) != (st.st_dev, st.st_ino)):
+                raise PermissionError("SOURCE_INTEGRATION_LOCK_UNTRUSTED_OR_REPLACED")
+            return st.st_dev, st.st_ino
+
+        validate()
+        try:
+            fcntl.flock(fd, mode | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield None
+            return
+        validate()
+        yield validate
+    finally:
+        os.close(fd)
+
+
+@contextmanager
+def source_mutex(spool: Path, release_state: Path):
+    """Serialize queue reconciliation, leasing production only for mutation.
+
+    Long source reviews need no production lock. Before actual mutation,
+    reacquire the original native mutex and recheck all changing identities.
+    Never create or replace the production lock.
+    """
+    lock = release_state / "production-transaction.lock"
+    pause = spool / "pmv3-engineering-owner-pause.json"
+    with trusted_flock(spool / ".pmv3-source-integration.lock", fcntl.LOCK_EX, create=True) as queue_guard:
+        if queue_guard is None or os.path.lexists(pause):
+            yield None
+            return
+        with trusted_flock(lock, fcntl.LOCK_SH) as probe:
+            if probe is None:
+                yield None
+                return
+            original_inode = probe()
+        @contextmanager
+        def mutation_guard():
+            with trusted_flock(lock, fcntl.LOCK_SH) as production_guard:
+                if production_guard is None:
+                    raise SourceIntegrationDeferred("SOURCE_INTEGRATION_PRODUCTION_BUSY")
+                def validate():
+                    queue_guard()
+                    if production_guard() != original_inode:
+                        raise PermissionError("SOURCE_INTEGRATION_LOCK_REPLACED")
+                    if os.path.lexists(pause):
+                        raise PermissionError("SOURCE_INTEGRATION_PAUSED")
+                validate()
+                yield validate
+        yield mutation_guard
+
+
+def reconcile(*, api: IntegrationApi, spool: Path, release_state: Path,
+              state_path: Path | None = None, batch_size: int = 3,
+              independent_source: bool = True) -> dict[str, Any]:
+    if not independent_source:
+        return _reconcile(api=api, spool=spool, release_state=release_state,
+                          state_path=state_path, batch_size=batch_size, independent_source=False)
+    with source_mutex(spool, release_state) as admitted:
+        if not admitted:
+            state = load_state(state_path or spool / "pmv3-integration-queue-state.json")
+            return {**state, "status": "source_integration_deferred",
+                    "integration_policy": SOURCE_POLICY, "production_authority": False}
+        try:
+            return _reconcile(api=api, spool=spool, release_state=release_state,
+                              state_path=state_path, batch_size=batch_size, independent_source=True,
+                              mutation_guard=admitted)
+        except SourceIntegrationDeferred:
+            state = load_state(state_path or spool / "pmv3-integration-queue-state.json")
+            return {**state, "status": "source_integration_deferred",
+                    "integration_policy": SOURCE_POLICY, "production_authority": False}
+
+
+def _reconcile(*, api: IntegrationApi, spool: Path, release_state: Path,
+               state_path: Path | None, batch_size: int,
+               independent_source: bool, mutation_guard=None) -> dict[str, Any]:
     state_path = state_path or (spool / "pmv3-integration-queue-state.json")
     state = load_state(state_path)
-    api.ensure_gate_required()
+    # Owner retired the PMV3 GitHub required-status context on 2026-11-10.
+    # This queue may still publish advisory status, but must never reconfigure
+    # protected-branch requirements or restore that self-imposed merge gate.
     main_sha = api.main_sha()
+    if independent_source and not re.fullmatch(r"[0-9a-f]{40}", main_sha):
+        raise ValueError("authoritative protected main SHA is unavailable")
     lkg_sha = production_lkg_revision(release_state)
     prs = api.open_pull_requests()
     durable = approved_pr_numbers(spool)
@@ -485,7 +613,53 @@ def reconcile(
     lock = state.get("release_lock") if isinstance(state.get("release_lock"), dict) else None
     train = state.get("train") if isinstance(state.get("train"), dict) else None
 
-    # A completed and accepted release unlocks integration automatically.
+    source_allowed = bool(independent_source and lkg_sha)
+    if independent_source:
+        state["integration_policy"] = SOURCE_POLICY
+        state["production_authority"] = False
+        if not source_allowed:
+            if train is not None:
+                state["suspended_source_train"] = train
+            state["train"] = None
+            train = None
+        elif lock:
+            archived = list(state.get("legacy_release_locks") or [])
+            if lock not in archived:
+                archived.append(lock)
+            state["legacy_release_locks"] = archived
+            state["release_lock"] = None
+            lock = None
+
+    def pending(items, description):
+        if not independent_source:
+            _set_all_pending(api, items, description)
+
+    @contextmanager
+    def check_mutation(number, sha, files, reviewed_body, *, merge=False):
+        if not independent_source:
+            yield
+            return
+        with mutation_guard() as validate:
+            validate()
+            fresh = api.pull_request(number)
+            if (fresh.get("state") != "open" or fresh.get("isDraft") is not False
+                    or fresh.get("baseRefName") != "main" or fresh.get("headRefOid") != sha
+                    or fresh.get("body") != reviewed_body
+                    or not _is_admitted(fresh, approved_pr_numbers(spool))
+                    or api.changed_files(number) != set(files)
+                    or api.main_sha() != main_sha
+                    or production_lkg_revision(release_state) != lkg_sha):
+                raise PermissionError("SOURCE_INTEGRATION_REVIEW_CHANGED")
+            if merge:
+                ready, _ = checks_ready(api, sha)
+                if (not ready or not api.required_contexts()
+                        or fresh.get("mergeable") != "MERGEABLE"
+                        or fresh.get("mergeStateStatus") not in {"CLEAN", "UNSTABLE"}):
+                    raise PermissionError("SOURCE_INTEGRATION_REQUIRED_CHECKS_CHANGED")
+            validate()
+            yield
+
+    # A completed and accepted release unlocks legacy integration automatically.
     if lock and lkg_sha and lkg_sha == str(lock.get("candidate_sha") or ""):
         state["release_lock"] = None
         lock = None
@@ -499,7 +673,7 @@ def reconcile(
                 main_sha, None, reason="verified_production_revision_unknown"
             )
             lock = state["release_lock"]
-    elif train is None and main_sha and lkg_sha and main_sha != lkg_sha:
+    elif not source_allowed and train is None and main_sha and lkg_sha and main_sha != lkg_sha:
         if not lock or str(lock.get("candidate_sha") or "") != main_sha:
             state["release_lock"] = _release_lock(
                 main_sha, None, reason="main_ahead_of_verified_production"
@@ -510,7 +684,7 @@ def reconcile(
         # Recovery PRs are the only integration allowed while a release lock is
         # active, and only with explicit PMV3 recovery labeling plus normal
         # durable admission and all existing required checks.
-        recovery = _recovery_candidate(prs, durable)
+        recovery = None if independent_source else _recovery_candidate(prs, durable)
         if recovery is not None:
             # Discovery carries no mergeability assertion. Re-read the exact
             # selected recovery PR before setting its gate or merging it.
@@ -556,14 +730,14 @@ def reconcile(
                     merged_sha, "success",
                     "PMV3 integrated selected release-recovery PR; exact candidate locked",
                 )
-                _set_all_pending(api, [pr for pr in prs if int(pr.get("number") or 0) != int(recovery["number"])],
+                pending([pr for pr in prs if int(pr.get("number") or 0) != int(recovery["number"])],
                                  "PMV3 release candidate locked; development continues")
             else:
                 api.set_gate(rsha, "pending", "PMV3 recovery PR waiting required checks")
                 state["status"] = "release_locked"
                 state["last_action"] = {"action": "recovery_waiting_checks", "missing": missing[:12], "at": now()}
         else:
-            _set_all_pending(api, prs, "PMV3 release candidate locked; development continues")
+            pending(prs, "PMV3 release candidate locked; development continues")
             state["status"] = "release_locked"
             state["last_action"] = {"action": "hold_integration_for_release", "at": now()}
         state["train"] = None
@@ -581,7 +755,7 @@ def reconcile(
                     "at": now(),
                 }
             else:
-                _set_all_pending(api, prs, "PMV3 queue: not selected for integration")
+                pending(prs, "PMV3 queue: not selected for integration")
                 state["status"] = "idle"
                 state["last_action"] = {"action": "no_ready_approved_prs", "at": now()}
                 state["waiting"] = [
@@ -594,12 +768,11 @@ def reconcile(
             if current is None:
                 final_sha = api.main_sha()
                 state["main_sha"] = final_sha
-                state["release_lock"] = _release_lock(
-                    final_sha, train, reason="release_train_complete_awaiting_production"
-                )
+                state["release_lock"] = (None if source_allowed else _release_lock(
+                    final_sha, train, reason="release_train_complete_awaiting_production"))
                 state["train"] = None
-                state["status"] = "release_locked"
-                _set_all_pending(api, prs, "PMV3 release train complete; awaiting production")
+                state["status"] = "source_backlog" if source_allowed else "release_locked"
+                pending(prs, "PMV3 release train complete; awaiting production")
             else:
                 number = int(current["pr_number"])
                 fresh = api.pull_request(number)
@@ -614,14 +787,23 @@ def reconcile(
                 else:
                     sha = str(fresh.get("headRefOid") or "")
                     current["head_sha"] = sha
-                    _set_all_pending(
-                        api,
+                    pending(
                         [pr for pr in prs if int(pr.get("number") or 0) != number],
                         f"PMV3 queue: release train {train['train_id']} in progress",
                     )
                     mergeability = str(fresh.get("mergeable") or "").upper()
                     merge_state = str(fresh.get("mergeStateStatus") or "").upper()
-                    if mergeability == "CONFLICTING" or merge_state == "DIRTY":
+                    if independent_source and (
+                            fresh.get("state") != "open" or fresh.get("isDraft") is not False
+                            or fresh.get("baseRefName") != "main"
+                            or not _is_admitted(fresh, approved_pr_numbers(spool))
+                            or not re.fullmatch(r"[0-9a-f]{40}", sha)
+                            or set(current["files"]) != api.changed_files(number)):
+                        current["state"] = "skipped"
+                        current["reason"] = "fresh_source_admission_or_scope_changed"
+                        train["skipped"].append(number)
+                        state["last_action"] = {"action": "source_review_required", "pr_number": number, "at": now()}
+                    elif mergeability == "CONFLICTING" or merge_state == "DIRTY":
                         api.set_gate(sha, "pending", "PMV3 selected PR has merge conflict; skipped from train")
                         current["state"] = "skipped"
                         current["reason"] = "merge_conflict"
@@ -631,8 +813,13 @@ def reconcile(
                         api.set_gate(sha, "pending", "PMV3 selected; waiting for GitHub mergeability")
                         state["last_action"] = {"action": "waiting_mergeability", "pr_number": number, "at": now()}
                     elif merge_state == "BEHIND":
+                        if independent_source and (api.main_sha() != main_sha or
+                                os.path.lexists(spool / "pmv3-engineering-owner-pause.json")):
+                            raise PermissionError("SOURCE_INTEGRATION_BASE_OR_PAUSE_CHANGED")
                         api.set_gate(sha, "pending", "PMV3 selected; updating branch to current main")
-                        if not api.update_branch(number, sha):
+                        with check_mutation(number, sha, current["files"], fresh.get("body")):
+                            updated = api.update_branch(number, sha)
+                        if not updated:
                             current["state"] = "skipped"
                             current["reason"] = "unable_to_update_branch"
                             train["skipped"].append(number)
@@ -640,20 +827,23 @@ def reconcile(
                             state["last_action"] = {"action": "updated_selected_pr_branch", "pr_number": number, "at": now()}
                     else:
                         ready, missing = checks_ready(api, sha)
-                        if not ready:
-                            api.set_gate(sha, "pending", "PMV3 selected; waiting required checks")
+                        if not ready or (independent_source and (
+                                mergeability != "MERGEABLE" or merge_state not in {"CLEAN", "UNSTABLE"}
+                                or not api.required_contexts()
+                                or not api.source_ready(number, sha, main_sha, set(current["files"]), fresh.get("body"))
+                                or os.path.lexists(spool / "pmv3-engineering-owner-pause.json")
+                                or production_lkg_revision(release_state) != lkg_sha)):
+                            api.set_gate(sha, "pending", "PMV3 selected; waiting required checks or exact source review")
                             state["last_action"] = {
                                 "action": "selected_pr_waiting_checks", "pr_number": number,
                                 "missing": missing[:12], "at": now(),
                             }
                         else:
-                            api.set_gate(sha, "success", f"PMV3 selected in {train['train_id']}")
-                            merged_sha = api.merge_pull_request(number, sha)
+                            if not independent_source:
+                                api.set_gate(sha, "success", f"PMV3 selected in {train['train_id']}")
+                            with check_mutation(number, sha, current["files"], fresh.get("body"), merge=True):
+                                merged_sha = api.merge_pull_request(number, sha)
                             state["main_sha"] = merged_sha
-                            api.set_gate(
-                                merged_sha, "success",
-                                f"PMV3 integrated selected PR in {train['train_id']}",
-                            )
                             current["state"] = "merged"
                             current["merge_sha"] = merged_sha
                             train["merged"].append(number)
@@ -661,18 +851,29 @@ def reconcile(
                                 "action": "merged_selected_pr", "pr_number": number,
                                 "merge_sha": merged_sha, "at": now(),
                             }
+                            if independent_source:
+                                state["source_backlog"] = {"main_sha": merged_sha, "verified_production_sha": lkg_sha,
+                                    "pending_production_review": merged_sha != lkg_sha, "production_authority": False}
+                            atomic_json(state_path, state)
+                            api.set_gate(merged_sha, "success", f"PMV3 integrated selected PR in {train['train_id']}")
                 if _current_train_pr(train) is None:
                     final_sha = api.main_sha()
                     state["main_sha"] = final_sha
-                    state["release_lock"] = _release_lock(
-                        final_sha, train, reason="release_train_complete_awaiting_production"
-                    )
+                    state["release_lock"] = (None if source_allowed else _release_lock(
+                        final_sha, train, reason="release_train_complete_awaiting_production"))
                     state["train"] = None
-                    state["status"] = "release_locked"
-                    _set_all_pending(api, api.open_pull_requests(), "PMV3 release train complete; awaiting production")
+                    state["status"] = "source_backlog" if source_allowed else "release_locked"
+                    if not independent_source:
+                        pending(api.open_pull_requests(), "PMV3 release train complete; awaiting production")
                 else:
                     state["status"] = "integrating"
 
+    if independent_source:
+        state["source_backlog"] = {"main_sha": state["main_sha"], "verified_production_sha": lkg_sha,
+            "pending_production_review": bool(lkg_sha and state["main_sha"] != lkg_sha),
+            "production_authority": False}
+        if state["status"] in {"idle", "source_backlog"}:
+            state["status"] = "source_backlog" if state["source_backlog"]["pending_production_review"] else "idle"
     active_train = state.get("train") if isinstance(state.get("train"), dict) else None
     state["metrics"] = {
         "admitted_open": len(admitted_open),
@@ -696,6 +897,9 @@ def snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
         "production_lkg_sha": state.get("production_lkg_sha"),
         "release_lock_active": bool(lock),
         "release_candidate_sha": (lock or {}).get("candidate_sha"),
+        "integration_policy": state.get("integration_policy", "legacy"),
+        "source_backlog": state.get("source_backlog"),
+        "production_authority": False,
         "train_id": (train or {}).get("train_id"),
         "train_prs": [int(x.get("pr_number") or 0) for x in (train or {}).get("prs") or []],
         "queue_depth": len(state.get("queue") or []),
@@ -704,7 +908,8 @@ def snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def current_status(*, api: IntegrationApi, spool: Path, release_state: Path) -> dict[str, Any]:
+def current_status(*, api: IntegrationApi, spool: Path, release_state: Path,
+                   independent_source: bool = True) -> dict[str, Any]:
     """Read live SHA identities without advancing or mutating the integration queue.
 
     A paused queue may retain its previous cycle after an accepted deployment.
@@ -730,8 +935,16 @@ def current_status(*, api: IntegrationApi, spool: Path, release_state: Path) -> 
     completed = bool(lock and main_sha == lkg_sha
                      and str(lock.get("candidate_sha") or "") == main_sha)
     result["release_lock_reconciliation_pending"] = completed
-    if not lkg_sha or main_sha != lkg_sha:
-        # Missing/older production must never be reported as safely idle.
+    if independent_source and lkg_sha:
+        result["integration_policy"] = SOURCE_POLICY
+        result["source_backlog"] = {"main_sha": main_sha, "verified_production_sha": lkg_sha,
+                                    "pending_production_review": main_sha != lkg_sha,
+                                    "production_authority": False}
+        if state.get("integration_policy") != SOURCE_POLICY or lock:
+            result["status"] = "source_policy_reconciliation_pending"
+        elif main_sha != lkg_sha and not isinstance(state.get("train"), Mapping):
+            result["status"] = "source_backlog"
+    elif not lkg_sha or main_sha != lkg_sha:
         result["status"] = "release_locked"
     elif completed:
         result["status"] = "release_complete_pending_queue_refresh"

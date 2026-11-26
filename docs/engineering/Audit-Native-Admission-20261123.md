@@ -1,0 +1,25 @@
+# Audit migration native admission correction — November 23, 2026
+
+The exact Owner-approved service-context repair at `4ba98e05e4512d7accb77595b8e8c05086d8b0a6`, scope `301b077f04c7dfd2757da47949aede12b18f34ca82c692d6b8173f769875261f`, passed its complete Root preflight and authenticated Owner decision. It stopped at `JOURNAL_CONTEXT_REPAIR_GUARDED_NATIVE_REVALIDATION` before queueing. The underlying child rejection was discarded by that version. The public profile/catalog remained the original f0 revision and legacy generation zero; the release worker is inactive and disabled. The database has not cut over.
+
+## Contract error and correction
+
+The installer and exact objective worker hold the production transaction mutex. The existing scheduled drift watchdog deliberately returns zero with `status=deferred` under that mutex and does not regenerate drift. Treating this successful service exit as a fresh PASS leaves the previous failed report in place. The Root transition controller denies a non-PASS report before its stale-PASS refresh logic. This contract mismatch is reproduced with the real watchdog and Root transition routines in an isolated Root fixture.
+
+Before queueing, the interactive Root installer now invokes the **unchanged existing controller's** finite `refresh_stale_drift` routine under the retained transaction mutex. The exact Root controller and immutable baseline drift evaluator bytes are pinned and included in protected scope. That independent routine evaluates the actual Root-owned desired policy and writes only genuine drift evidence. The existing UID-1000 request protocol then asks the existing Root service to revalidate the immutable LKG and breaker. There is no direct breaker write, new privileged service, verifier exception or change to native controller source.
+
+The hardened objective worker uses the Root transition service for subsequent independent refreshes. It does not launch the independent evaluator within its restricted capability/PAM context. The installed native service refreshes an expired PASS itself. For each acceptance/policy stage the worker requires a new actual native observation. If the prior PASS is still within the existing 180-second validity window, the persistent worker waits for genuine expiry (at most 191 seconds including the native ten-second clock tolerance), retaining the mutex and exact execution budget, then requests the native transition. Evidence timestamps and statuses are never manufactured or edited to force expiry. Initial repair, final ready policy and rollback preserve the same independent native safety checks.
+
+Native rejection detail, already bounded by the Root controller, is returned in captured command output instead of being hidden behind the generic error.
+
+## Recovering the failed repair without discarding history
+
+The next fresh exact Owner grant covers the repair and remaining archive objective. The preflight recognizes only the specific authenticated 4ba/301b attempt above, only if its durable transaction is fully rolled back, its immutable Source/Owner records are intact, every replacement is restored byte-for-byte with its original mode, its newly created final-policy file is absent, and no retry was claimed. It binds the prior authorization/transaction fingerprints into the new scope and rechecks them before execution. Unknown targets, partial/queued outcomes, altered approvals, changed before-images or competing retries deny. The original f0 Owner/bootstrap/failure records and the failed 4ba approval/execution remain untouched. Old execution authority is never replayed.
+
+The exact known remaining drift is the inactive maintenance timer, with the release service now inactive/disabled after the failed repair reset its failure state. This is admitted only with the verified fully undone prior attempt. The initial Root policy declares the timer as allowed; final acceptance requires actual enabled/active timer, successful scheduled cycle and the ready policy. Original producers, database identity, freeze, holds, base images and six existing rollback slots remain bound.
+
+## Evidence and boundaries
+
+The real Root fixture reproduces the deferred-watchdog denial, verifies the genuine refresh and UID-1000 transition, checks native stale-PASS refresh inside the service protocol, and denies an independently failed evaluation, changed immutable runtime image and source tampering. Inventory and provider observations are explicitly synthetic inside disposable containers without host mounts, network or Docker socket. The separate live read-only production manifest matched all twelve immutable LKG fields at 15:46:20 UTC on November 23.
+
+Existing SQLite/concurrency/archive/restore/reclamation tests, real Root file custody/rollback fixtures and hardened writer tests remain required. Source tests and CI do not establish production acceptance. The migration is complete only after actual cutover, all-history verification/cold restore, protected producer readback, reclamation, timer cycle and fresh native acceptance succeed.

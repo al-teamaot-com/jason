@@ -11,7 +11,9 @@ def test_verified_dependency_readmits_once(tmp_path, monkeypatch):
         'retry_eligible': True, 'dependency_recheck': 'verified_for_governed_readmission_check',
         'governing_dependencies': [issue]}}}))
     monkeypatch.setattr(worker, 'active_support_count', lambda _: 0)
-    monkeypatch.setattr(worker.todo_bridge, 'dependency_state_for_item', lambda *_: {'retry_eligible': True})
+    monkeypatch.setattr(worker.todo_bridge, 'dependency_state_for_item',
+                        lambda *_: {'retry_eligible': True,
+                                    'dependency_recheck': 'verified_for_governed_readmission_check'})
     item = {'id': 'DEV-953', 'issue_number': 953, 'body': f'- Governing release dependencies: {issue}'}
     state = {'items': {'DEV-953': {'phase': 'blocked', 'blocker_class': 'blocked_by_dependency'}}}
     assert worker.readmit_explicit_verified_dependencies(state, [item], spool, max_active=2) == 1

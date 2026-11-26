@@ -1,0 +1,17 @@
+# Audit installer stopped-unit idempotence — November 23, 2026
+
+The b9274191a79bda16bb687a866b4458bda6bf6361 exact repair, Owner scope 7dc2fc5b4a67ae9e8a896934525ce65be4815ad9184612a161d3e50b54fe9f94, passed complete Root preflight and Owner authorization, then returned the generic JOURNAL_INSTALL_COMMAND_FAILED. Public profile and trusted-source before-images were restored at 16:05:49 UTC. No authority-health activation occurred inside the failed apply window. No migration was queued and the catalog remained legacy generation zero.
+
+The apply unconditionally invoked systemctl reset-failed after replacing files even when the prior 4ba attempt had already reset the release service to inactive. An unloaded inactive service makes systemd return exit 1 with "Unit ... not loaded". This was reproduced on Jason's actual non-production user manager. Both the command wrapper and top-level exception formatter hid the exact failing operation.
+
+The permanent correction checks MainPID zero and actual ActiveState first, resets only an actual failed unit, and skips the redundant operation for an inactive unit. Running/activating/deactivating states still deny. The command error now preserves a bounded executable, finite operation, unit identity, exit code and known reason without printing arbitrary arguments, captured stdout/stderr or private data. Other error detail retains the existing boundary.
+
+## Existing exact approval recovery
+
+The b927 frozen installer already authorizes one bounded --resume-context-repair within its eight-hour execution window. No changed artifact, amended approval or fresh identity decision is needed to run those exact approved bytes. The caller can hold a native systemd Manager.RefUnit reference while invoking that frozen resume, retaining an inactive unit in memory through disable/manager reload and its existing reset-failed command. A reference does not start, stop, restart or reconfigure the unit. It is released when its private D-Bus connection closes. The original immutable Owner record, execution scope, rollback before-images, one-use retry, exclusive locks, protected baseline, numeric-UID execution, native health and guarded breaker revalidation remain enforced by the unmodified installer.
+
+The operator command must verify the frozen installer's exact SHA256 46804f9c3e00aa22956150f7fb19efaa3cc046b9c01db7d7b1752ae3ac33290c, require the exact 7dc scope and a fully rolled-back non-queued transaction with no previous retry, and bind the release unit bytes to that Owner scope before loading/referencing it. It must never patch or bypass frozen source, reset the breaker, change policy, issue a new execution grant or activate the service outside the approved installer. Unknown, expired, queued or modified states deny.
+
+Real user-manager tests confirmed the bad unloaded-unit reset, then confirmed that a temporary reference survives manager reload and permits the unchanged reset command with MainPID zero/inactive. The corrected source helper was separately exercised against actual successful/collected and failed disposable units: it skipped reset for the former and successfully reset the latter. No production unit or Root policy was touched in these tests.
+
+Keep this source follow-up separate from the already claimed b927 execution; do not implicitly substitute its changed Source into the active exact approval. Production migration and operational acceptance remain outstanding until the existing approved objective completes and is independently verified.

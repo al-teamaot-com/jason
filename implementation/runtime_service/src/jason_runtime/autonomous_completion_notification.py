@@ -45,11 +45,13 @@ CAPABILITY = "communication.teams.autonomy.completion.send"
 PROVIDER = "microsoft_teams_gateway_autonomy_completion"
 PROFILE_ENV = "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE"
 PROFILE = "person-al-v1"
-RECIPIENT_JASON_IDENTITY = "person-al"
-# The historical logical owner alias is not present in newer Entra-authenticated
-# Teams binding stores. Pin fallback to the AOT owner's exact verified email;
-# require a single active, AOT (non-client), Entra-derived identity mapping.
+# Notifications are sent to the licensed Owner's exact active AOT Entra
+# identity, not the legacy person-al binding (which is the unlicensed admin).
+# Neither the recipient nor approval authority is caller-selectable.
 RECIPIENT_OWNER_EMAIL = "al@teamaot.com"
+RECIPIENT_OWNER_TENANT_ID = "f7054323-d52b-4863-8c2f-1898f0b6077c"
+RECIPIENT_OWNER_OBJECT_ID = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+RECIPIENT_JASON_IDENTITY = "person-entra-" + uuid.UUID(RECIPIENT_OWNER_OBJECT_ID).hex
 
 EXECUTE_GRANT_ID = "grant-jason-autonomy-worker-teams-autonomy-completion-v1"
 
@@ -114,7 +116,7 @@ def _capability(now: datetime) -> CapabilityDefinition:
                 "bounded event identifiers",
             ),
             verification_requirements=(
-                "recipient resolves from active person-al Teams binding",
+                "recipient resolves from the exact licensed Owner Entra binding",
                 "exactly one proactive Teams send attempt",
                 "provider returns message id",
             ),
@@ -196,7 +198,7 @@ def _provider(now: datetime) -> ExecutionProvider:
             approval_owner="AOT Owner",
         ),
         created_at=now,
-        metadata={"write_capability": "true", "fixed_recipient": "person-al"},
+        metadata={"write_capability": "true", "fixed_recipient": RECIPIENT_JASON_IDENTITY},
     )
 
 
@@ -672,37 +674,22 @@ class AutonomousCompletionTeamsInvoker:
         binding = self.bindings.find_active_by_jason_identity(
             jason_identity_id=RECIPIENT_JASON_IDENTITY
         )
-        if binding is None:
-            # Legacy person-al was replaced by person-entra-<object-id> in
-            # authenticated Teams auto-enrollment. Resolve the same owner
-            # through the trusted persistence layer; never enumerate identities,
-            # accept an argument recipient, or choose an arbitrary active user.
-            lookup = getattr(self.bindings, "find_active_by_email", None)
-            binding = (
-                lookup(email_address=RECIPIENT_OWNER_EMAIL)
-                if callable(lookup) else None
-            )
-            if binding is not None:
-                try:
-                    expected_identity = (
-                        "person-entra-" +
-                        uuid.UUID(str(binding.microsoft_object_id)).hex
-                    )
-                except (ValueError, AttributeError, TypeError):
-                    raise PermissionError("owner Teams binding identity is invalid")
-                if (
-                    str(getattr(binding, "email_address", "") or "").strip().casefold()
-                    != RECIPIENT_OWNER_EMAIL
-                    or str(getattr(binding, "jason_identity_id", "")) != expected_identity
-                    or getattr(binding, "client_id", None) is not None
-                ):
-                    raise PermissionError("owner Teams binding identity mismatch")
         if binding is None or getattr(binding, "status", None) != "active":
-            raise PermissionError("person-al Teams identity binding unavailable")
-        tenant = str(binding.microsoft_tenant_id).strip()
-        aad = str(binding.microsoft_object_id).strip()
-        if not tenant or not aad:
-            raise PermissionError("person-al Teams binding is incomplete")
+            raise PermissionError("licensed Owner Teams binding unavailable")
+        try:
+            tenant = str(uuid.UUID(str(binding.microsoft_tenant_id)))
+            aad = str(uuid.UUID(str(binding.microsoft_object_id)))
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise PermissionError("Owner Teams Entra binding is invalid") from exc
+        if (
+            tenant != RECIPIENT_OWNER_TENANT_ID
+            or aad != RECIPIENT_OWNER_OBJECT_ID
+            or str(getattr(binding, "email_address", "") or "").strip().casefold()
+            != RECIPIENT_OWNER_EMAIL
+            or str(getattr(binding, "jason_identity_id", "")) != RECIPIENT_JASON_IDENTITY
+            or getattr(binding, "client_id", None) is not None
+        ):
+            raise PermissionError("licensed Owner Teams binding identity mismatch")
         token = self.token_file.read_text(encoding="utf-8").strip()
         if not token:
             raise PermissionError("Teams proactive token unavailable")
@@ -728,7 +715,7 @@ class AutonomousCompletionTeamsInvoker:
             material_parameters={"event_type": event},
             symbolic_resolutions={
                 "recipient_jason_identity": str(binding.jason_identity_id),
-                "recipient_owner_alias": RECIPIENT_JASON_IDENTITY,
+                "recipient_owner_email": RECIPIENT_OWNER_EMAIL,
             },
         )
         return PreparedExecutionPlan(
