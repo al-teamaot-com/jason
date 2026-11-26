@@ -1217,6 +1217,12 @@ class RuntimeSettings:
         return settings
 
     def validate(self) -> None:
+        # Owner decision, 2026-11-11; reaffirmed 2026-11-26.
+        # In this runtime revision both legacy hosted flags instantiate a
+        # metered OpenAI API client. They are not subscription authentication.
+        # Reject before opening authority stores or resolving credentials.
+        if self.hosted_semantics_enabled or self.hosted_conversation_enabled:
+            raise ValueError("PAID_AI_API_PROHIBITED: direct hosted API reasoning is not authorized")
         if self.universal_approval_mode not in {"off", "enforced"}:
             raise ValueError("JASON_UNIVERSAL_APPROVAL_MODE must be off or enforced")
         if self.release_mobile_approval_mode not in {

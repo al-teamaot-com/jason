@@ -338,7 +338,7 @@ else
   RELEASE_APPROVAL_MODE="$SOURCE_RELEASE_APPROVAL_MODE"
 fi
 
-exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden \
+exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden --enforce-no-paid-ai \
   --set-env "JASON_OWNER_UAT_MODE=$OWNER_UAT_MODE" \
   --set-env "JASON_OWNER_UAT_WORKER_ENABLED=$OWNER_UAT_WORKER" \
   --set-env "JASON_OWNER_UAT_SESSION_ID=$OWNER_UAT_SESSION" \

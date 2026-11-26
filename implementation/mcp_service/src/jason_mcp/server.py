@@ -6565,16 +6565,24 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
     else:
         progress_time = None
 
-    for historical in scan_history:
+    # A scan timestamp marks completion, not the start of processing. An
+    # activity recorded during that scan is evidence of progress even if it
+    # precedes the completion timestamp. Count only fully bounded intervals.
+    for historical, previous in zip(scan_history, scan_history[1:]):
         if int(historical.get("eligible") or 0) <= 0:
             break
         try:
             scan_time = datetime.fromisoformat(
                 str(historical.get("scanned_at") or "").replace("Z", "+00:00")
             )
+            previous_time = datetime.fromisoformat(
+                str(previous.get("scanned_at") or "").replace("Z", "+00:00")
+            )
+            if scan_time <= previous_time:
+                break
+            if progress_time is not None and progress_time > previous_time:
+                break
         except (TypeError, ValueError, OverflowError):
-            break
-        if progress_time is not None and progress_time >= scan_time:
             break
         if int(historical.get("selected") or 0) > 0:
             break
@@ -6600,16 +6608,8 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
     elif heartbeat is not None and heartbeat_state not in {"idle", "completed", "running"}:
         processing_state = "DEGRADED"
         state_reason = "ticket_worker_heartbeat_unhealthy"
-    elif (
-        eligible_now is not None
-        and eligible_now > 0
-        and active_count == 0
-        and active_slots is not None
-        and active_slots > 0
-        and selected == 0
-    ):
-        processing_state = "STALLED"
-        state_reason = "eligible_work_with_free_capacity_but_no_active_or_selected_work"
+    # active_slots is observed end-of-scan occupancy, not free capacity.
+    # Require sustained lack of progress before declaring a stall.
     elif eligible_now is not None and eligible_now > 0 and consecutive_no_progress_cycles >= 2:
         processing_state = "STALLED"
         state_reason = "actionable_work_has_no_meaningful_progress_for_multiple_cycles"
@@ -6624,8 +6624,8 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
             processing_state = "PROCESSING"
             state_reason = "actionable_work_is_actively_processing"
     elif eligible_now is not None and eligible_now > 0:
-        processing_state = "STALLED"
-        state_reason = "actionable_work_exists_but_none_is_active"
+        processing_state = "BACKLOGGED"
+        state_reason = "eligible_backlog_awaiting_next_scan_without_sustained_stall"
     elif blocked_count > 0 or governance_blocked > 0:
         processing_state = "BLOCKED"
         state_reason = "no_actionable_work_selected_but_blocked_work_remains"

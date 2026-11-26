@@ -46,6 +46,8 @@ PIPELINE_ARTIFACTS = frozenset({
     "release_manager_gate.py", "pmv3_worker_release_gate.py",
     "change_integration_gate.py", "documentation_impact_gate.py",
 })
+CLOSED_LOOP_PREDECESSOR = "9b69aa8e2cdc7c9a037d044a5ac9d00cfcc2870f"
+CLOSED_LOOP_PIPELINE_ARTIFACTS = PIPELINE_ARTIFACTS | {"issue_resolution_engine.py"}
 PIPELINE_SOURCE = Path("/home/al/.local/lib/jason/engineering-worker-source")
 PIPELINE_SOURCE_SHA = "1a7e7c1b03fce7dffa3ac6aab26480d614327e69"
 PIPELINE_WRITES = (
@@ -112,7 +114,10 @@ def validate_receipt(row):
              and exact(row.get("predecessor_receipt_sha256"), 64)
              and row.get("engineering_source_sha") == PIPELINE_SOURCE_SHA
              and isinstance(row.get("pipeline_artifact_sha256"), dict)
-             and set(row["pipeline_artifact_sha256"]) == PIPELINE_ARTIFACTS
+             and set(row["pipeline_artifact_sha256"]) == (
+                 CLOSED_LOOP_PIPELINE_ARTIFACTS
+                 if row.get("predecessor_candidate_sha") == CLOSED_LOOP_PREDECESSOR
+                 else PIPELINE_ARTIFACTS)
              and all(exact(x, 64) for x in row["pipeline_artifact_sha256"].values()),
              "PIPELINE_SUCCESSOR_RECEIPT_INVALID")
     need(set(row) == fields and row["schema_version"] in ("1.0", "1.1")
@@ -212,6 +217,7 @@ def status(*, require_system=False):
         need(digest(read(saved, 0, 0o444)) == expected
              and digest(read(live, 1000)) == expected, "ARTIFACT_CHANGED:" + name)
         artifacts[name] = {"source": str(saved), "sha256": expected}
+    pipeline_sources = {}
     if row["schema_version"] == "1.1":
         prior = read(release / "predecessor.json", 0, 0o444)
         predecessor = validate_receipt(json.loads(prior))
@@ -223,6 +229,7 @@ def status(*, require_system=False):
             need(digest(read(release / "tools" / name, 0, 0o444)) == expected
                  and digest(read(Path("/home/al/.local/lib/jason") / name, 1000)) == expected,
                  "PIPELINE_ARTIFACT_CHANGED:" + name)
+            pipeline_sources[name] = {"source": str(release / "tools" / name), "sha256": expected}
         source_head = subprocess.run(
             ["/usr/bin/git", "-C", str(PIPELINE_SOURCE), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=10, check=False,
@@ -241,6 +248,7 @@ def status(*, require_system=False):
     return {"status": "verified_system_manager", "candidate_sha": row["candidate_sha"],
             "rollback_sha": row["rollback_sha"], "scope_sha256": row["scope_sha256"],
             "system_timers": list(TIMERS), "artifact_sources": artifacts,
+            "pipeline_artifact_sources": pipeline_sources,
             "production_authority": False}
 
 
