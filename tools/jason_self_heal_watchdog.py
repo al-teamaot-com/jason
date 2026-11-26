@@ -28,6 +28,7 @@ from typing import Any, Mapping
 
 from issue_resolution_engine import acceptance_text, correlate_failures, update_recurrence_memory
 from jason_host_storage_health import storage_capacity_failures
+from engineering_supervisor import critical_support_disposition, ENGINEERING_STALL_CYCLES
 
 DEFAULT_ROOT = Path("/var/lib/jason/openclaw/self-heal")
 HEALTH_URL = "http://127.0.0.1:9467/metrics"
@@ -871,6 +872,89 @@ def health_metrics() -> tuple[dict[str, float], str | None]:
     return metrics, None
 
 
+ENGINEERING_EVIDENCE_MAX_AGE = 15 * 60
+ENGINEERING_STAGE_MAX_AGE = 20 * 60
+ENGINEERING_ACTIVE_STALL_CYCLES = 12
+
+
+def engineering_progress_failures(root: Path, *, observed_at: datetime | None = None) -> tuple[list[str], dict[str, Any]]:
+    """Independently inspect engineering outcome evidence, not unit exit codes.
+
+    In-flight work and real pauses are not proof of recovery. Retain an already
+    observed engineering incident until a fresh completed detector readback.
+    No worker state, retry budget, owner authority, or production lock is changed.
+    """
+    now_at = observed_at or datetime.now(timezone.utc)
+    spool = root.parent / "support-repair"
+    pipeline = read_json(spool / "engineering-pipeline-state.json")
+    supervisor = read_json(spool / "engineering-supervisor-state.json")
+    controller = read_json(spool / "pmv3-engineering-controller-state.json")
+    prior = read_json(root / "state.json")
+    prior_failures = prior.get("failures")
+    retained = sorted({s for s in prior_failures
+                       if isinstance(s, str) and s.startswith("engineering_progress_")}) if isinstance(prior_failures, list) else []
+    evidence = {"pipeline_status": pipeline.get("status"),
+                "controller_status": controller.get("status"),
+                "supervisor_status": supervisor.get("status"),
+                "unchanged_cycles": supervisor.get("unchanged_cycles")}
+
+    def age(value):
+        stamp = _parse_iso8601(value)
+        return (now_at - stamp).total_seconds() if stamp else None
+
+    def fresh(value, limit=ENGINEERING_EVIDENCE_MAX_AGE):
+        seconds = age(value)
+        return seconds is not None and 0 <= seconds <= limit
+
+    if ((spool / "pmv3-engineering-owner-pause.json").is_file()
+            or (controller.get("status") == "deferred"
+                and controller.get("reason") == "production_transaction_active"
+                and fresh(controller.get("finished_at")))):
+        return retained, {**evidence, "probe_status": "governed_pause_pending_verification"}
+    if pipeline.get("status") == "running":
+        stages = pipeline.get("stages")
+        times = [pipeline.get("started_at")]
+        if isinstance(stages, Mapping):
+            times.extend(row.get("checked_at") for row in stages.values() if isinstance(row, Mapping))
+        if any(fresh(value, ENGINEERING_STAGE_MAX_AGE) for value in times):
+            return retained, {**evidence, "probe_status": "running_pending_verification"}
+        return ["engineering_progress_evidence_stale"], {**evidence, "probe_status": "running_stale"}
+
+    started = _parse_iso8601(pipeline.get("started_at"))
+    finished = _parse_iso8601(pipeline.get("finished_at"))
+    inspected = _parse_iso8601(supervisor.get("observed_at"))
+    if (pipeline.get("status") not in {"healthy", "degraded"}
+            or not fresh(pipeline.get("finished_at"))
+            or not started or not finished or not inspected
+            or not started <= inspected <= finished):
+        return ["engineering_progress_evidence_unknown"], {**evidence, "probe_status": "unknown"}
+    cycles = supervisor.get("unchanged_cycles")
+    if type(cycles) is not int or cycles < 0:
+        return ["engineering_progress_evidence_unknown"], {**evidence, "probe_status": "unknown"}
+
+    failures = []
+    route = critical_support_disposition(pipeline, supervisor)
+    evidence["critical_support_route"] = route
+    blocker = pipeline.get("critical_support_blocker")
+    ids = blocker.get("blocked_items") if isinstance(blocker, Mapping) else None
+    evidence["critical_support_ids"] = [i for i in ids if isinstance(i, str)][:12] if isinstance(ids, list) else []
+    if (route == "diagnostic_review"
+            or (route == "recoverable"
+                and "engineering_progress_critical_support_stalled" in retained)):
+        failures.append("engineering_progress_critical_support_stalled")
+    if pipeline.get("failed_work_stages") and (
+            cycles >= ENGINEERING_STALL_CYCLES or controller.get("status") == "bounded_stall"):
+        failures.append("engineering_progress_worker_stage_stalled")
+    if (supervisor.get("reason") == "internal_recovery_needed"
+            and cycles >= ENGINEERING_STALL_CYCLES):
+        failures.append("engineering_progress_approved_work_stalled")
+    if (type(supervisor.get("active")) is int and supervisor["active"] > 0
+            and cycles >= ENGINEERING_ACTIVE_STALL_CYCLES):
+        failures.append("engineering_progress_active_work_not_advancing")
+    # A real external gate alone is not an engineering defect or a new grant.
+    return sorted(set(failures)), {**evidence, "probe_status": "completed"}
+
+
 def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
     failures: list[str] = []
     evidence: dict[str, Any] = {}
@@ -909,6 +993,10 @@ def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
     workflow_failures, workflow_evidence = stale_operational_work_failures()
     evidence["stale_operational_work"] = workflow_evidence
     failures.extend(workflow_failures)
+
+    engineering_failures, engineering_evidence = engineering_progress_failures(root)
+    evidence["engineering_progress"] = engineering_evidence
+    failures.extend(engineering_failures)
 
     admission_failures, admission_evidence = autonomy_admission_failures()
     evidence["autonomy_admission"] = admission_evidence
