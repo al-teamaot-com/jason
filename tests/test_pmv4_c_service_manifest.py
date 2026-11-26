@@ -56,7 +56,7 @@ def test_manifest_is_non_http_exact_bounded_worker():
     assert m["environment"]["JASON_SOURCE_REVISION"]==SOURCE
     assert m["labels"]["com.aot.jason.lifecycle"]=="production-candidate"
     assert m["environment"]["JASON_HOSTED_CONVERSATION_ENABLED"]=="false"
-    assert m["environment"]["JASON_HOSTED_SEMANTICS_ENABLED"]=="true"
+    assert m["environment"]["JASON_HOSTED_SEMANTICS_ENABLED"]=="false"
     for key in (
         "JASON_AUTONOMOUS_REPAIR_DEPLOYMENT_PROFILE",
         "JASON_PM_V2_CONTROL_PROFILE",
