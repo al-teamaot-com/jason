@@ -350,8 +350,20 @@ def recovery_gate(scope, engine):
 
 
 def live_drift():
-    return json.loads(subprocess.check_output(["/usr/bin/python3","-I","-B",
-        "/opt/jason/current/tools/production_drift_guard.py","--config",str(DESIRED)],timeout=120))
+    # The native evaluator's documented drift-detected exit status is 2.
+    # Parse that real result during interrupted recovery, never treat arbitrary
+    # process failures or inconsistent status/exit pairs as valid evidence.
+    result=subprocess.run(["/usr/bin/python3","-I","-B",
+        "/opt/jason/current/tools/production_drift_guard.py","--config",str(DESIRED)],
+        capture_output=True,text=True,timeout=120,check=False)
+    need(result.returncode in (0,2),"NATIVE_DRIFT_EXECUTION_FAILED")
+    observed=json.loads(result.stdout)
+    expected="pass" if result.returncode==0 else "drift_detected"
+    need(isinstance(observed,dict) and observed.get("status")==expected
+         and isinstance(observed.get("problems"),list)
+         and (bool(observed["problems"])==(result.returncode==2)),
+         "NATIVE_DRIFT_RESULT_INCONSISTENT")
+    return observed
 
 
 def native_docker(*args, timeout=30):

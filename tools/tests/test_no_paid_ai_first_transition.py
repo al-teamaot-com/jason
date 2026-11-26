@@ -229,3 +229,21 @@ def test_native_in_memory_module_load_sets_relative_import_scope(monkeypatch):
         assert m.value==42
     finally:
         sys.modules.pop(name,None)
+
+@pytest.mark.parametrize("rc,status,problems,accepted",[
+    (0,"pass",[],True),
+    (2,"drift_detected",[{"kind":"required_container_not_running","container":"jason-runtime"}],True),
+    (1,"pass",[],False),
+    (2,"pass",[],False),
+    (0,"drift_detected",[{"kind":"test"}],False),
+    (2,"drift_detected",[],False),
+])
+def test_native_drift_actual_exit_contract(monkeypatch,rc,status,problems,accepted):
+    from types import SimpleNamespace
+    monkeypatch.setattr(first.subprocess,"run",lambda *a,**k:SimpleNamespace(
+        returncode=rc,stdout=json.dumps({"status":status,"problems":problems})))
+    if accepted:
+        assert first.live_drift()=={"status":status,"problems":problems}
+    else:
+        with pytest.raises(first.TransitionDenied,match="NATIVE_DRIFT"):
+            first.live_drift()
