@@ -407,3 +407,24 @@ not be invoked. This same-image configuration containment precedes later
 ordinary source deployment (which retires the diagnostic in code). No
 subscription-only reasoning provider or successful autonomous repair is
 implied by disabling the prohibited route.
+
+### Recovery of the interrupted no-paid first transition
+
+The approved same-image transition at 753f25e2f511d0bf83da1b43588a6046bdc5752e
+successfully removed the paid runtime route, but the runtime's legacy universal
+query composition rejects a non-OpenAI client. Its MCP peer likewise has a
+hosted-only investigation cutover. Do not restore the old paid-enabled
+configuration. The corrected exact native startup profile derives the new
+safe bodies from the immutable prior root-held plan. Only the runtime universal
+query flag and MCP investigation-loop flag are additionally disabled. Base
+governed local conversation remains enabled; the old Ticket Core body is
+unchanged. The actual immutable images successfully constructed their full
+runtime/worker compositions in network-disabled synthetic fixtures. This is
+startup compatibility evidence, not proof of real provider reasoning quality.
+The correction needs its own authenticated exact scope because the prior
+approval did not contain the two cutover flags. It preserves the original
+receipt, current known open breaker, freeze, hold, image revisions, peer
+identities and ticket ledger; it cannot close the breaker. Verify health,
+two real scans, no-paid configuration and native revalidation before closure.
+The legacy universal query and investigation modes remain unavailable until
+a separately governed non-metered reasoning route is implemented and accepted.
