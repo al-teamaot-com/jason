@@ -945,3 +945,37 @@ def test_engineering_progress_requires_fresh_completed_evidence(tmp_path):
         "engineering_progress_evidence_stale"]
     (spool / "pmv3-engineering-owner-pause.json").write_text("{}")
     assert module.engineering_progress_failures(root, observed_at=now_at)[0] == failures
+
+def test_exact_git_status_timeout_is_inconclusive_and_nonmutating(monkeypatch,tmp_path):
+    import subprocess
+    import pytest
+    command=["git","--no-optional-locks","-C","/approved/engineering","status","--porcelain"]
+    def timeout(root):
+        raise subprocess.TimeoutExpired(command,10)
+    monkeypatch.setattr(module,"detect",timeout)
+    failures,evidence=module.bounded_detect(tmp_path)
+    assert failures==["production_convergence_engineering_source_probe_timeout"]
+    assert evidence["probe_status"]=="inconclusive"
+    assert evidence["probe_command"]==["git","status"]
+    monkeypatch.setattr(module,"non_disruptive_release_guard",
+                        lambda:pytest.fail("uncertain source must not acquire mutation gate"))
+    assert module.bounded_recovery(failures+["container_down:jason-runtime"])==[]
+    assert module.bounded_recovery(["production_convergence_engineering_manager_successor_invalid",
+                                     "mcp_status_functional_failure"])==[]
+
+
+def test_git_probe_timeout_retries_and_persists_without_unit_failure(monkeypatch,tmp_path):
+    import subprocess
+    import sys
+    command=["git","-C","/approved/engineering","status","--porcelain"]
+    def timeout(root):
+        raise subprocess.TimeoutExpired(command,10)
+    monkeypatch.setattr(module,"detect",timeout)
+    monkeypatch.setattr(module,"request_engineering_worker",
+                        lambda:"deferred_engineering_manager_successor_invalid")
+    monkeypatch.setattr(sys,"argv",["watchdog","--root",str(tmp_path)])
+    assert module.main()==0
+    state=json.loads((tmp_path/"state.json").read_text())
+    assert state["state"] not in ("healthy","recovered")
+    assert state["last_recovery_actions"]==[]
+    assert state["failures"]==["production_convergence_engineering_source_probe_timeout"]

@@ -565,3 +565,96 @@ def test_breaker_scheduled_route_requires_fresh_native_ledger(fault):
     else:ledger.pop("observed_at")
     with pytest.raises(PermissionError,match="SCHEDULED_POLICY_ROUTE_NOT_VERIFIED"):
         m.verify_scheduled_breaker_policy_route(pipeline,ledger)
+
+def watchdog_recovery_plan():
+    p=breaker_custody_plan()
+    p.pop("breaker_custody_source_review",None)
+    p.update(predecessor_candidate_sha=m.WATCHDOG_RECOVERY_BASELINE,
+             worker_replacements=sorted(m.WATCHDOG_RECOVERY_WORKERS),
+             failed_unit_reset_scope=list(m.SERVICES),
+             precutover_exact_faults=list(m.WATCHDOG_RECOVERY_FAULTS),
+             derived_reporter_exit2_only={"unit":m.DRIFT_REPORTER_UNIT,
+                                         "pins":m.DRIFT_REPORTER_PINS,
+                                         "properties":m.DRIFT_REPORTER_EXIT2},
+             local_reasoning_runtime_activation=False)
+    return p
+
+
+@pytest.mark.parametrize("key,value", [
+    ("failed_unit_reset_scope",["jason-runtime.service"]),
+    ("failed_unit_reset_scope",list(m.SERVICES)+["extra.service"]),
+    ("precutover_exact_faults",[]),
+    ("derived_reporter_exit2_only",{}),
+    ("local_reasoning_runtime_activation",True),
+    ("runtime_or_mcp_restart_allowed",True),
+    ("production_authority",True),
+    ("provider_writes",True),
+    ("freeze_or_hold_change",True),
+    ("worker_replacements",["jason_self_heal_watchdog.py"]),
+])
+def test_watchdog_recovery_exact_scope_denies_expansion(key,value):
+    p=watchdog_recovery_plan()
+    assert len(m.pipeline_scope_sha(p))==64
+    p[key]=value
+    with pytest.raises(PermissionError):m.pipeline_scope_sha(p)
+
+
+def test_failed_manager_preflight_rejects_unrelated_duplicate_or_stale_drift():
+    from copy import deepcopy
+    from datetime import datetime,timezone,timedelta
+    control={"circuit_breaker":{"state":"open","source":"production_drift_watchdog",
+             "reason":"continuous_production_drift_detected","problem_count":2,
+             "problem_kinds":["failed_system_unit"]}}
+    drift={"status":"drift_detected","problems":deepcopy(m.WATCHDOG_RECOVERY_FAULTS),
+           "observed_at":datetime.now(timezone.utc).isoformat()}
+    assert m.verify_failed_manager_drift(control,drift,deepcopy(drift))==m.WATCHDOG_RECOVERY_FAULTS
+    for changed in ([],drift["problems"]+[{"kind":"failed_system_unit","state":"failed","unit":"openbao.service"}],
+                    [drift["problems"][0]]*2):
+        bad={**drift,"problems":changed}
+        with pytest.raises(PermissionError):m.verify_failed_manager_drift(control,drift,bad)
+    bad={**drift,"observed_at":(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()}
+    with pytest.raises(PermissionError):m.verify_failed_manager_drift(control,bad,drift)
+    bad=deepcopy(control);bad["circuit_breaker"]["reason"]="manual_hold"
+    with pytest.raises(PermissionError):m.verify_failed_manager_drift(bad,drift,drift)
+
+
+def test_watchdog_recovery_root_target_set_excludes_runtime_and_other_units():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.WATCHDOG_RECOVERY_BASELINE
+    a.changed_workers=m.WATCHDOG_RECOVERY_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("f"*40)/"tools"
+    targets=a.approved_targets()
+    assert all(m.LIB/name in targets for name in m.WATCHDOG_RECOVERY_WORKERS)
+    assert m.MANAGER_GUARD in targets and m.RECEIPT in targets
+    assert m.POLICY not in targets and m.ENV not in targets
+    assert all(not str(x).startswith("/opt/jason/") for x in targets)
+    assert not any(x.name in {"jason-runtime.service","jason-pmv4-ticket-core.service"} for x in targets)
+
+
+def test_failed_manager_reporter_exit2_is_only_a_verified_derived_observation():
+    from copy import deepcopy
+    from datetime import datetime,timezone
+    control={"circuit_breaker":{"state":"open","source":"production_drift_watchdog",
+             "reason":"continuous_production_drift_detected","problem_count":2,
+             "problem_kinds":["failed_system_unit"]}}
+    drift={"status":"drift_detected","problems":deepcopy(m.WATCHDOG_RECOVERY_FAULTS),
+           "observed_at":datetime.now(timezone.utc).isoformat()}
+    evaluated={**drift,"problems":[*drift["problems"],m.DRIFT_REPORTER_FAULT]}
+    assert m.verify_failed_manager_drift(control,drift,evaluated,
+        reporter=m.DRIFT_REPORTER_EXIT2)==m.WATCHDOG_RECOVERY_FAULTS
+    for key,value in (("ExecMainStatus","1"),("MainPID","123"),
+                      ("Result","timeout"),("DropInPaths","/tmp/foreign")):
+        with pytest.raises(PermissionError):
+            m.verify_failed_manager_drift(control,drift,evaluated,
+                reporter={**m.DRIFT_REPORTER_EXIT2,key:value})
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,drift,evaluated)
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,evaluated,evaluated,
+            reporter=m.DRIFT_REPORTER_EXIT2)
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,drift,
+            {**evaluated,"problems":[*evaluated["problems"],m.DRIFT_REPORTER_FAULT]},
+            reporter=m.DRIFT_REPORTER_EXIT2)

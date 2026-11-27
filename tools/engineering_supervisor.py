@@ -67,8 +67,11 @@ def classify(phase: str, reason: str, *, lane: str) -> tuple[str, str]:
         return "active", "continue_native_worker"
     if phase not in {"blocked", "escalated", "development_blocked", "waiting_external_dependency"}:
         return "needs_triage", "inspect_bounded_state_evidence"
+    if any(term in text for term in ("credit_balance_exhausted", "restore_provider_credits",
+                                      "billing credits")):
+        return "recoverable_transport", "native_worker_verify_non_metered_reasoning_then_readmit"
     if any(term in text for term in ("credential", "api details", "api access", "provider license",
-                                      "billing credits", "credit_balance_exhausted", "tenant permission")):
+                                      "tenant permission")):
         return "external_dependency", "obtain_authorized_provider_dependency"
     if any(term in text for term in ("prerequisite", "blocked by dependency", "after support-cap",
                                       "do not begin", "gate hold", "until the prerequisite")):

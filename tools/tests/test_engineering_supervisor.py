@@ -257,3 +257,8 @@ def test_critical_support_routes_are_not_hidden_by_truncated_inventory(tmp_path)
     assert supervisor.critical_support_disposition(blocker, snap) == "external"
     blocker["critical_support_blocker"]["blocked_items"] = [{}]
     assert supervisor.critical_support_disposition(blocker, snap) == "diagnostic_review"
+
+def test_retired_paid_credit_failure_routes_to_local_recovery():
+    from tools.engineering_supervisor import classify
+    assert classify("blocked","Hosted reasoning blocked: credit_balance_exhausted; Owner action: restore_provider_credits",lane="support")==(
+        "recoverable_transport","native_worker_verify_non_metered_reasoning_then_readmit")

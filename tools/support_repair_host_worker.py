@@ -715,7 +715,16 @@ def companion_source_paths(path: str) -> list[str]:
     return companions
 
 
-def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any]) -> list[dict[str, str]]:
+def literal_failure_identifiers(evidence: str) -> list[str]:
+    # Source evidence can contain exact machine-generated symptom codes.
+    # Preserve those tokens rather than relying exclusively on paraphrases.
+    return list(dict.fromkeys(re.findall(
+        r'\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+){2,}\b',
+        str(evidence)[:5000])))[:4]
+
+
+def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any],
+                *, failure_identifiers: list[str] | None = None) -> list[dict[str, str]]:
     candidate_scores: dict[str, int] = {}
     concept_scores: list[tuple[dict[str, int], set[str], str | None]] = []
 
@@ -823,9 +832,37 @@ def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any
         specificity = sum(1.0 / frequencies[t] for t in matching)
         ranked_names.append((-specificity, -len(matching), path))
 
-    paths: list[str] = [
-        path for _, _, path in sorted(ranked_names)[:5]
+    # Exact observed symptom identifiers are stronger evidence than model
+    # paraphrases or filenames. Admit at most two implementation sources and
+    # their tracked test companions, through the same existing path gate.
+    # This is source navigation, not authority to edit the selected file.
+    literal_scores: dict[str, int] = {}
+    identifiers = [
+        value for value in (failure_identifiers or [])[:4]
+        if isinstance(value, str) and len(value) <= 160
+        and re.fullmatch(r'[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+){2,}', value)
     ]
+    for term in identifiers:
+        output = run(['git', 'grep', '-l', '-I', '-F', term], cwd=worktree, check=False)
+        for raw in output.splitlines():
+            path = eligible_path(raw)
+            if (path is not None and path.endswith('.py')
+                    and path.startswith(('implementation/', 'tools/'))
+                    and '/tests/' not in path and not Path(path).name.startswith('test_')):
+                literal_scores[path] = literal_scores.get(path, 0) + 1
+    literal_paths = sorted(literal_scores,
+                           key=lambda path: (-literal_scores[path], search_path_priority(path)))[:2]
+    paths: list[str] = list(literal_paths)
+    for path in literal_paths:
+        for companion in companion_source_paths(path):
+            eligible = eligible_path(companion)
+            if eligible is not None and eligible not in paths and len(paths) < 4:
+                paths.append(eligible)
+    for _, _, path in sorted(ranked_names):
+        if len(paths) >= 5:
+            break
+        if path not in paths:
+            paths.append(path)
 
     # First pass: one best source candidate per reasoning concept.
     for group, concept_tokens, subject in concept_scores:
@@ -868,7 +905,7 @@ def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any
             break
 
     excerpts = []
-    expanded_terms = expanded_search_terms(terms)
+    expanded_terms = list(dict.fromkeys([*identifiers, *expanded_search_terms(terms)]))[:40]
     for path in paths:
         candidate = worktree / path
         try:
@@ -1910,6 +1947,183 @@ def readmit_after_verified_credit_replenishment(
             'provider_credit_original_failure_id': failed_id,
             'provider_credit_receipt_id': receipt['entry_id'],
             'provider_credit_requeue_id': new_id,
+            'reasoning_request_id': new_id,
+            'updated_at': now(),
+        })
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
+
+def verified_later_local_reasoning_success(
+    spool: Path, *, failed_rid: str, failed_at: datetime, kind: str,
+    max_proof_age_hours: int = 12,
+) -> dict[str, str] | None:
+    """Read the same protected worker spool used by ordinary reasoning.
+
+    Require a newer, content-addressed request and a real completed response
+    with local-only route provenance. No paid ledger is consulted. The model
+    response is not a release receipt and cannot extend work authority.
+    """
+    if (failed_at.tzinfo is None or kind not in {'search_plan', 'edit_plan'}
+            or not re.fullmatch(r'[a-f0-9]{64}', failed_rid)):
+        return None
+    current = datetime.now(timezone.utc)
+    if failed_at > current:
+        return None
+    def read(path):
+        info = path.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or info.st_mode & 0o077 or not 0 < info.st_size <= 250000):
+            raise ValueError('untrusted reasoning spool file')
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
+            actual = os.fstat(stream.fileno())
+            if (actual.st_dev, actual.st_ino, actual.st_uid, actual.st_mode, actual.st_size) != (
+                    info.st_dev, info.st_ino, info.st_uid, info.st_mode, info.st_size):
+                raise ValueError('reasoning spool file changed')
+            raw = stream.read(250001)
+        if len(raw) != info.st_size:
+            raise ValueError('reasoning spool file changed')
+        return json.loads(raw)
+    try:
+        responses = spool / 'reasoning' / 'responses'
+        files = sorted(responses.glob('*.json'),
+                       key=lambda p: p.stat().st_mtime, reverse=True)[:128]
+        for path in files:
+            if path.stem == failed_rid or not re.fullmatch(r'[a-f0-9]{64}', path.stem):
+                continue
+            try:
+                proof = read(path)
+                route = proof.get('non_metered_reasoning')
+                result = proof.get('result')
+                if (not isinstance(route, Mapping)
+                        or route.get('profile') != 'bounded_local_engineering_v1'
+                        or route.get('endpoint') != 'http://jason-ollama:11434'
+                        or route.get('model') not in ('qwen3:1.7b', 'qwen3.5:4b', 'qwen3.5:9b')
+                        or route.get('canonical_schema_validated') is not True
+                        or route.get('hosted_fallback') is not False
+                        or proof.get('primary_provider_error_code')
+                        or proof.get('required_owner_action')
+                        or proof.get('status') != 'succeeded'
+                        or proof.get('kind') != kind
+                        or proof.get('request_id') != path.stem
+                        or not isinstance(result, Mapping)
+                        or result.get('blocked_reason')):
+                    continue
+                if kind == 'search_plan' and not result.get('search_terms'):
+                    continue
+                if kind == 'edit_plan' and not (result.get('evidence_requests')
+                                                or (result.get('edits') and result.get('test_paths'))):
+                    continue
+                at = datetime.fromisoformat(proof['completed_at'])
+                if (at.tzinfo is None or at <= failed_at
+                        or not 0 <= (current-at).total_seconds() <= max_proof_age_hours*3600):
+                    continue
+                request = read(spool/'reasoning'/'requests'/path.name)
+                if (request_id(request) != path.stem
+                        or request.get('request_id') != path.stem
+                        or request.get('kind') != kind
+                        or request.get('support_item') != proof.get('support_item')):
+                    continue
+                return {'request_id': path.stem, 'model': route['model'],
+                        'completed_at': at.isoformat()}
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                continue
+    except (OSError, ValueError, TypeError):
+        return None
+    return None
+
+
+def readmit_after_verified_local_reasoning(
+    state: dict[str, Any], eligible: list[dict[str, str]], spool: Path,
+    *, max_active: int,
+) -> list[str]:
+    """One new P0 source diagnosis after fresh local search readiness.
+
+    The original failure and source excerpts are retained. A local success is evidence of a
+    repaired planning dependency, not authority to apply an edit or deploy.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(
+        1 for record in records.values()
+        if isinstance(record, Mapping)
+        and record.get('phase') in {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
+    )
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed = []
+    for item in eligible:
+        if not slots:
+            break
+        if item.get('priority') != 'P0':
+            continue
+        record = records.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        handoff = record.get('recovery_handoff_intake')
+        if (record.get('local_reasoning_requeue_id') or record.get('pr_number')
+                or record.get('blocker_class') in {'external_authority', 'blocked_by_dependency', 'internal_retry_exhausted'}
+                or (isinstance(handoff, Mapping)
+                    and handoff.get('status') == 'awaiting_governed_repair')):
+            continue
+        reason = str(record.get('reason') or '')
+        if reason.startswith('edit reasoning failed: Hosted reasoning blocked: credit_balance_exhausted'):
+            kind, phase = 'edit_plan', 'implementing'
+        elif reason.startswith('reasoning request failed: Hosted reasoning blocked: credit_balance_exhausted'):
+            kind, phase = 'search_plan', 'diagnosing'
+        else:
+            continue
+        failed_id = str(record.get('reasoning_request_id') or '')
+        if not re.fullmatch(r'[a-f0-9]{64}', failed_id):
+            continue
+        prior = reasoning_response(spool, failed_id)
+        if (not isinstance(prior, Mapping) or prior.get('status') != 'failed'
+                or prior.get('request_id') != failed_id
+                or prior.get('primary_provider_error_code') != 'credit_balance_exhausted'
+                or prior.get('required_owner_action') != 'restore_provider_credits'
+                or prior.get('primary_http_status') != 429
+                or prior.get('retryable') is not False):
+            continue
+        try:
+            failed_at = datetime.fromisoformat(str(prior['completed_at']).replace('Z', '+00:00'))
+            receipt = verified_later_local_reasoning_success(
+                spool, failed_rid=failed_id, failed_at=failed_at, kind='search_plan')
+            source = spool / 'reasoning' / 'requests' / (failed_id + '.json')
+            if not source.is_file() or source.stat().st_size > 200_000 or receipt is None:
+                continue
+            original = json.loads(source.read_text(encoding='utf-8'))
+            if (not isinstance(original, dict) or request_id(original) != failed_id
+                    or original.get('request_id') != failed_id
+                    or original.get('support_item') != item['id']
+                    or original.get('kind') != kind
+                    or not isinstance(original.get('context'), dict)):
+                continue
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            continue
+        if 'verified_local_recovery' in original['context']:
+            continue
+        # Do not replay stale source anchors from a failed hosted edit plan.
+        # Re-enter existing source diagnosis; no additional authority or
+        # evidence-turn budget is granted by this diagnostic readiness proof.
+        if any(original.get(k) != item.get(k) for k in ('title','evidence','acceptance')):
+            continue
+        context = {'scope_review': 'source_diagnosis_only'}
+        context['verified_local_recovery'] = {
+            'failed_request_id': failed_id,
+            'local_proof_request_id': receipt['request_id'],
+            'local_model': receipt['model'],
+            'verified_at': receipt['completed_at'],
+            'retry_limit': 1,
+        }
+        new_id = queue_reasoning(spool, kind='search_plan', item=item, context=context)
+        if new_id == failed_id:
+            continue
+        record.update({
+            'phase': 'diagnosing',
+            'reason': 'One bounded new request after verified local reasoning readiness.',
+            'local_reasoning_original_failure_id': failed_id,
+            'local_reasoning_proof_id': receipt['request_id'],
+            'local_reasoning_requeue_id': new_id,
             'reasoning_request_id': new_id,
             'updated_at': now(),
         })
@@ -3218,7 +3432,7 @@ def main() -> int:
 
     readmit_recovered_reasoning(state, support, spool, max_active=args.max_active)
     readmit_after_verified_transport_recovery(state, support, spool, max_active=args.max_active)
-    readmit_after_verified_credit_replenishment(state, support, spool, max_active=args.max_active)
+    readmit_after_verified_local_reasoning(state, support, spool, max_active=args.max_active)
     readmit_verified_stale_clean_source(
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
@@ -3476,7 +3690,9 @@ def main() -> int:
                 if result.get('blocked_reason'):
                     record.update({'phase': 'blocked', 'reason': str(result['blocked_reason']), 'updated_at': now()})
                     continue
-                excerpts = safe_search(worktree, list(result.get('search_terms') or []), gate, policy)
+                excerpts = safe_search(
+                    worktree, list(result.get('search_terms') or []), gate, policy,
+                    failure_identifiers=literal_failure_identifiers(item.get('evidence') or ''))
                 if not excerpts:
                     record.update({'phase': 'blocked', 'reason': 'no J-CHANGE-002-eligible source excerpts matched repair search plan', 'updated_at': now()})
                     continue
