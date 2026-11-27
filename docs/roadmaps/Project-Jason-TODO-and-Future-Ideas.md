@@ -45,6 +45,12 @@ Jason may use this backlog as an engineering intake source under the governed TO
 
 ---
 
+## Active P0 stabilization dependency
+
+- **Closed-loop autonomous engineering recovery — P0, in progress.** Existing approved [issue #1196](https://github.com/al-teamaot-com/jason/issues/1196) owns this outcome. Owner direction, 2026-11-26: Jason must discover and resolve degraded/stalled engineering itself, without prompting. Reuse the Engineering Supervisor, Self-Heal Watchdog and existing governed Support/Development/Release Manager; do not create a duplicate TODO admission or manager. Acceptance requires actual work advancement, fresh scheduled verification, durable bounded recovery handoffs, accurate external-blocker escalation, and independent production acceptance. Production authorization remains separate. Related existing repair [#1586](https://github.com/al-teamaot-com/jason/issues/1586).
+
+Current execution evidence: [November 26 eight-workstream stabilization reconciliation](../operations/Weekly-Stabilization-Reconciliation-20261126.md). The accepted no-paid-API containment is separate from non-metered reasoning and actual engineering repair acceptance. Existing TODO states and quarantine are unchanged until their governing acceptance gates pass.
+
 ## Future reasoning and quality controls
 
 ### TODO-AI-001 — Reasoning quality, independent review, and confidence calibration

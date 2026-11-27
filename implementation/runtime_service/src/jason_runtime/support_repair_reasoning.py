@@ -143,6 +143,127 @@ def _edit_schema() -> dict[str, Any]:
     }
 
 
+def _local_edit_schema() -> dict[str, Any]:
+    schema = _edit_schema()
+    # Encode the tool/argument relationship in the generation grammar, not
+    # merely natural-language instructions. The host still independently
+    # validates tracked path, source policy, symbols and remaining budgets.
+    def tool_branch(tool, query, path):
+        return {
+            'type': 'object', 'additionalProperties': False,
+            'required': ['tool', 'query', 'path'],
+            'properties': {
+                'tool': {'type': 'string', 'enum': [tool]},
+                'query': query, 'path': path,
+            },
+        }
+    search = tool_branch('search_source',
+        {'type': 'string', 'minLength': 3, 'maxLength': 100},
+        {'type': 'null'})
+    read = tool_branch('read_source',
+        {'anyOf': [
+            {'type': 'string', 'minLength': 1, 'maxLength': 100,
+             'pattern': '^[A-Za-z_][A-Za-z0-9_]*$'},
+            {'type': 'null'}]},
+        {'type': 'string', 'minLength': 1, 'maxLength': 240})
+    schema['properties']['evidence_requests']['items'] = {
+        'anyOf': [search, read]}
+    return schema
+
+
+def _validate_local_edit_result(result: Mapping[str, Any]) -> None:
+    # Explicitly retain validation even if a backend grammar implementation
+    # ignores regex or nested union constraints. Never rewrite model requests
+    # to target a file the model did not explicitly supply.
+    from jsonschema import Draft202012Validator
+    if not Draft202012Validator(_local_edit_schema()).is_valid(result):
+        raise ValueError('local engineering tool or patch contract invalid')
+    calls = result['evidence_requests']
+    if calls and (result['edits'] or result['test_paths'] or result['blocked_reason']):
+        raise ValueError('local engineering evidence request mixed with terminal output')
+    for call in calls:
+        if call['tool'] == 'read_source':
+            path = call['path']
+            if (re.fullmatch(r'[A-Za-z0-9_./-]+', path) is None
+                    or Path(path).is_absolute()
+                    or any(part.startswith('.') or part == '..' for part in path.split('/'))
+                    or any(not part for part in path.split('/'))):
+                raise ValueError('local engineering source path invalid')
+        elif (' OR ' in call['query'] or ' AND ' in call['query']
+                or '\\n' in call['query']):
+            raise ValueError('local engineering search must contain one bounded term')
+
+
+LOCAL_ENGINEERING_MAX_PROMPT_BYTES = 16000
+_LOCAL_SOURCE_PROJECTION_KEY = 'local_source_projection'
+
+
+def _prompt_json(value: Mapping[str, Any]) -> str:
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
+def bounded_local_source_prompt(
+    document: Mapping[str, Any], *, max_bytes: int,
+) -> tuple[str, dict[str, Any] | None]:
+    """Bound model input without rewriting the immutable governed request.
+
+    Preserve every non-excerpt field, including approved scope and evidence
+    receipts. Retain exact complete excerpt bytes, never fabricate a truncated
+    source anchor. Omitted paths remain discoverable through the existing
+    governed source-evidence loop. No model-controlled tool is executed here.
+    """
+    original = _prompt_json(document)
+    size = len(original.encode('utf-8'))
+    if size <= max_bytes:
+        return original, None
+    source = document.get('context')
+    if not isinstance(source, Mapping) or _LOCAL_SOURCE_PROJECTION_KEY in source:
+        raise ValueError('local reasoning context cannot be safely projected')
+    excerpts = source.get('source_excerpts')
+    if not isinstance(excerpts, list) or not excerpts:
+        raise ValueError('local reasoning input exceeds bounded non-source context')
+    paths = []
+    for entry in excerpts:
+        if (not isinstance(entry, Mapping)
+                or not isinstance(entry.get('path'), str)
+                or not 1 <= len(entry['path']) <= 240
+                or not isinstance(entry.get('content'), str)
+                or entry['path'] in paths):
+            raise ValueError('local reasoning source inventory is invalid')
+        paths.append(entry['path'])
+    base = dict(source)
+    base['source_excerpts'] = []
+    projection = {'omitted_source_paths': list(paths),
+                  'all_supplied_excerpts_are_complete': True}
+    base[_LOCAL_SOURCE_PROJECTION_KEY] = projection
+    projected = dict(document)
+    projected['context'] = base
+    # Existing source evidence ordering already prioritizes explicit recent
+    # read_source receipts. Do not discard the receipt or replace an excerpt.
+    current = _prompt_json(projected)
+    if len(current.encode('utf-8')) > max_bytes:
+        raise ValueError('local reasoning input exceeds bounded non-source context')
+    for entry in excerpts:
+        base['source_excerpts'].append(dict(entry))
+        projection['omitted_source_paths'].remove(entry['path'])
+        candidate = _prompt_json(projected)
+        if len(candidate.encode('utf-8')) <= max_bytes:
+            current = candidate
+        else:
+            base['source_excerpts'].pop()
+            projection['omitted_source_paths'].append(entry['path'])
+            current = _prompt_json(projected)
+    projected_size = len(current.encode('utf-8'))
+    if projected_size > max_bytes:
+        raise ValueError('local reasoning source projection exceeded its budget')
+    return current, {
+        'original_prompt_bytes': size,
+        'projected_prompt_bytes': projected_size,
+        'omitted_source_count': len(projection['omitted_source_paths']),
+        'original_request_unchanged': True,
+    }
+
+
 class SupportRepairReasoningMaintenance:
     """Convert bounded repair evidence into non-executing repository edit proposals.
 
@@ -151,9 +272,15 @@ class SupportRepairReasoningMaintenance:
     deterministically validates every proposed path and exact-text replacement.
     """
 
-    def __init__(self, *, structured_client, fallback_structured_client=None, spool: Path = DEFAULT_SPOOL, interval_seconds: int = 5, now=None) -> None:
+    def __init__(self, *, structured_client, fallback_structured_client=None, spool: Path = DEFAULT_SPOOL, interval_seconds: int = 5, now=None, local_prompt_max_bytes: int | None = None) -> None:
         if interval_seconds < 1:
             raise ValueError('support repair reasoning interval must be positive')
+        if local_prompt_max_bytes is not None:
+            if not 12000 <= local_prompt_max_bytes <= 32000:
+                raise ValueError('local engineering prompt budget is invalid')
+            if fallback_structured_client is not None:
+                raise ValueError('local engineering reasoning cannot use fallback')
+        self.local_prompt_max_bytes = local_prompt_max_bytes
         self.structured_client = structured_client
         self.fallback_structured_client = fallback_structured_client
         self.spool = Path(spool)
@@ -161,6 +288,34 @@ class SupportRepairReasoningMaintenance:
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.next_due_at: datetime | None = None
         self.attempt_diagnostics: dict[str, Any] = {}
+
+    def local_route_evidence(self) -> dict[str, Any] | None:
+        from orchestrator.ollama_reasoning import OllamaStructuredJsonClient
+        from orchestrator.model_runtime_adapter import (
+            ModelRuntimeAdapter, ollama_extended_generation_schema,
+            validate_extended_local_result,
+        )
+        adapter = self.structured_client
+        if (self.local_prompt_max_bytes is None
+                or self.fallback_structured_client is not None
+                or not isinstance(adapter, ModelRuntimeAdapter)
+                or adapter.schema_adapter is not ollama_extended_generation_schema
+                or adapter.result_adapter is not validate_extended_local_result
+                or not isinstance(adapter.client, OllamaStructuredJsonClient)):
+            return None
+        client = adapter.client
+        if (client.base_url.rstrip('/') != 'http://jason-ollama:11434'
+                or client.model not in ('qwen3:1.7b', 'qwen3.5:4b', 'qwen3.5:9b')
+                or client.output_token_limit != 4096
+                or client.context_tokens != 32768):
+            return None
+        return {
+            'profile': 'bounded_local_engineering_v1',
+            'model': client.model,
+            'endpoint': 'http://jason-ollama:11434',
+            'canonical_schema_validated': True,
+            'hosted_fallback': False,
+        }
 
     def _validate_request(self, raw: Mapping[str, Any]) -> dict[str, Any]:
         kind = str(raw.get('kind') or '').strip()
@@ -224,6 +379,7 @@ class SupportRepairReasoningMaintenance:
                     'You are the bounded Project Jason owner-approved development patch proposer. '
                     'Use only the supplied repository excerpts and approved issue scope. '
                     'Return exact-text replacements; do not invent unseen surrounding code. '
+                    'For test_paths return exact changed repository-relative test file paths, not pytest node IDs or shell commands. '
                     'Implement the smallest complete change plus regression tests. '
                     'Do not add credentials, broaden authority beyond the issue, weaken security/governance, bypass existing controls, or perform deployment. '
                     'If additional repository source is needed, request up to three read-only evidence_requests instead of guessing or blocking: '
@@ -237,6 +393,7 @@ class SupportRepairReasoningMaintenance:
                     'You are the bounded Project Jason repair patch proposer. '
                     'Use only the supplied repository excerpts and failure evidence. '
                     'Return exact-text replacements; do not invent unseen surrounding code. '
+                    'For test_paths return exact changed repository-relative test file paths, not pytest node IDs or shell commands. '
                     'Prefer the smallest repair plus regression test. Do not modify governance, authority, security, credentials, dependencies, workflows, deployment, or infrastructure. '
                     'If source context is insufficient, return up to three read-only evidence_requests: '
                     'search_source(query with null path), or read_source(tracked path with one exact function identifier or null). Never place prose, multiple names, line numbers or commands into read_source query. Use two separate requests for two symbols. '
@@ -256,6 +413,16 @@ class SupportRepairReasoningMaintenance:
                     'Do not guess unseen text, fabricate success, or ask for more tools.'
                 )
             schema = _edit_schema()
+            if self.local_prompt_max_bytes is not None:
+                schema = _local_edit_schema()
+                system += (
+                    ' Tool argument examples (illustrative only; choose actual '
+                    'relevant source): {"tool":"search_source","query":"function_name","path":null}; '
+                    '{"tool":"read_source","query":"function_name","path":"implementation/example.py"}. '
+                    'Never put a file path, colon, parentheses or more than one '
+                    'function in read_source query. Use one search term per '
+                    'search_source call; do not join queries with OR or AND.'
+                )
         else:
             system = (
                 'You are the Project Jason governed production-acceptance reviewer. '
@@ -265,24 +432,40 @@ class SupportRepairReasoningMaintenance:
             )
             schema = _acceptance_schema()
 
-        user = json.dumps(
-            {
-                'support_item': request['support_item'],
-                'title': request['title'],
-                'evidence': request['evidence'],
-                'acceptance': request['acceptance'],
-                'context': context,
-            },
-            sort_keys=True,
-            ensure_ascii=False,
-        )
+        document = {
+            'support_item': request['support_item'],
+            'title': request['title'],
+            'evidence': request['evidence'],
+            'acceptance': request['acceptance'],
+            'context': context,
+        }
+        user = _prompt_json(document)
+        if self.local_prompt_max_bytes is not None and kind == 'edit_plan':
+            user, projection = bounded_local_source_prompt(
+                document, max_bytes=self.local_prompt_max_bytes)
+            if projection is not None:
+                self.attempt_diagnostics['local_source_projection'] = projection
+                system += (
+                    ' The model-only context is byte-budgeted. The supplied source '
+                    'excerpts are exact complete excerpts, not necessarily whole files. '
+                    'The local_source_projection omitted_source_paths list identifies '
+                    'excerpts omitted from this prompt, NOT files known to contain '
+                    'the defect. Never guess omitted code. Use the existing '
+                    'read-only evidence_requests mechanism to request one exact '
+                    'function or a targeted source search if necessary, respecting '
+                    'the host evidence-turn limit. If a final evidence turn lacks '
+                    'the needed exact source, return a specific blocker, not edits.'
+                )
         try:
-            return self.structured_client.complete(
+            result = self.structured_client.complete(
                 system=system,
                 user=user,
                 schema=schema,
                 max_output_tokens=4096,
             )
+            if self.local_prompt_max_bytes is not None and kind == 'edit_plan':
+                _validate_local_edit_result(result)
+            return result
         except ConnectorTransportError as exc:
             billing = _billing_blocker(exc)
             if billing:
@@ -395,6 +578,9 @@ class SupportRepairReasoningMaintenance:
                     'result': result,
                     'completed_at': _now(),
                 }
+                local_route = self.local_route_evidence()
+                if local_route is not None:
+                    payload['non_metered_reasoning'] = local_route
             except Exception as exc:
                 payload = {
                     'status': 'failed',
@@ -423,7 +609,7 @@ class SupportRepairReasoningMaintenance:
         return processed
 
 
-def build_support_repair_reasoning_maintenance(*, enabled: bool, structured_client, fallback_structured_client=None, spool: Path = DEFAULT_SPOOL):
+def build_support_repair_reasoning_maintenance(*, enabled: bool, structured_client, fallback_structured_client=None, spool: Path = DEFAULT_SPOOL, local_prompt_max_bytes: int | None = None):
     if not enabled or structured_client is None:
         return None
     return SupportRepairReasoningMaintenance(
@@ -431,4 +617,5 @@ def build_support_repair_reasoning_maintenance(*, enabled: bool, structured_clie
         fallback_structured_client=fallback_structured_client,
         spool=spool,
         interval_seconds=int(os.getenv('JASON_SUPPORT_REPAIR_REASONING_INTERVAL_SECONDS', '5')),
+        local_prompt_max_bytes=local_prompt_max_bytes,
     )

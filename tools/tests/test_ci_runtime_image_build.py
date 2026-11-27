@@ -39,6 +39,27 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(calls[1][0], ['docker', 'pull', build.BASE_IMAGES[1]])
         self.assertIn('PYTHON_BASE_IMAGE=docker.io/library/python@' + DIGEST, calls[-1][0])
 
+    def test_exact_ecr_bare_data_limit_diagnostic_uses_existing_official_origin(self):
+        error = 'Error response from daemon: error from registry: Data limit exceeded'
+        result, calls = self.run_case([(1, error), (0, 'Digest: ' + DIGEST), (0, '')])
+        self.assertEqual(result, 0)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[1][0], ['docker', 'pull', build.BASE_IMAGES[1]])
+        self.assertIn('PYTHON_BASE_IMAGE=docker.io/library/python@' + DIGEST, calls[-1][0])
+
+    def test_data_limit_does_not_override_security_denial(self):
+        diagnostic = 'Error response from daemon: error from registry: Data limit exceeded'
+        for message in ('401 unauthorized', '403 denied', 'certificate invalid', 'manifest unknown'):
+            with self.subTest(message=message):
+                result, calls = self.run_case([(1, diagnostic + '\n' + message)])
+                self.assertEqual(result, 1)
+                self.assertEqual(len(calls), 1)
+
+    def test_ambiguous_quota_text_is_not_a_registry_failover(self):
+        result, calls = self.run_case([(1, 'local data limit exceeded')])
+        self.assertEqual(result, 1)
+        self.assertEqual(len(calls), 1)
+
     def test_both_registries_limited_fails_without_build(self):
         result, calls = self.run_case([(1, 'toomanyrequests'), (1, '429')])
         self.assertEqual(result, 1)

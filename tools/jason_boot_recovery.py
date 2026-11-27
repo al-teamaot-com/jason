@@ -307,6 +307,83 @@ def ensure_mcp() -> None:
     raise RecoveryError("jason-mcp-pilot did not pass health verification")
 
 
+def inspect_container(name: str) -> dict:
+    result = run(["docker", "inspect", name])
+    require_ok(result, f"required container inspection failed: {name}")
+    objects = json.loads(result.stdout or "[]")
+    if len(objects) != 1 or not isinstance(objects[0], dict):
+        raise RecoveryError("invalid container inspection")
+    return objects[0]
+
+
+def ticket_hosting(info: dict) -> str:
+    entries = info.get("Config", {}).get("Env") or []
+    values = [item.split("=", 1)[1] for item in entries
+              if item.startswith("JASON_TICKET_WORKER_HOSTING=")]
+    if len(values) > 1:
+        raise RecoveryError("ambiguous ticket-worker hosting")
+    return values[0] if values else "embedded"
+
+
+def recover_ticket_core(*,
+                        transaction_lock: Path = Path("/var/lib/jason/openclaw/release-manager/production-transaction.lock"),
+                        owner_lock: Path = Path("/var/lib/jason/ticket-core/autonomy-operational-work.sqlite3.owner.lock")) -> None:
+    """Recover only the already approved external worker after the known boot failure."""
+    import fcntl
+    if ticket_hosting(inspect_container(RUNTIME_CONTAINER)) != "external":
+        return
+    name = "jason-pmv4-ticket-core"
+    fd = os.open(transaction_lock, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("TICKET_CORE_RECOVERY=DEFERRED_PRODUCTION_TRANSACTION")
+            return
+        info = inspect_container(name)
+        state = info["State"]
+        identity = info["Id"]
+        if (len(identity) != 64 or any(ch not in "0123456789abcdef" for ch in identity)
+                or info.get("Name") != "/" + name
+                or ticket_hosting(info) != "external"
+                or info.get("Path") != "python"
+                or info.get("Args") != ["-m", "jason_runtime.ticket_worker_service"]
+                or not info.get("Config", {}).get("Healthcheck", {}).get("Test")
+                or info.get("Config", {}).get("Healthcheck", {}).get("Test") == ["NONE"]
+                or info.get("HostConfig", {}).get("RestartPolicy", {}).get("Name") != "unless-stopped"):
+            raise RecoveryError("unexpected external ticket-core topology")
+        if state.get("Status") == "running":
+            wait_container_health(identity)
+            return
+        error = state.get("Error") or ""
+        if (state.get("Status") != "exited" or state.get("ExitCode") != 127
+                or "failed to fulfil mount request" not in error
+                or "no such file or directory" not in error
+                or not any(str(path) in error for path in STAGED_FILES)):
+            raise RecoveryError("ticket core stopped outside known boot credential-mount failure")
+        sources = [Path(m["Source"]) for m in info.get("Mounts", [])]
+        if not sources or any(not p.is_absolute() or not p.exists() for p in sources):
+            raise RecoveryError("ticket-core mount readiness failed")
+        if not staged_credentials_ready() or not staged_credentials_current():
+            raise RecoveryError("staged credentials not ready")
+        lock_probe = (
+            "import os,fcntl,sys; "
+            "fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NOFOLLOW); "
+            "fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB); os.close(fd)"
+        )
+        require_ok(run(["runuser", "-u", "al", "--", "/usr/bin/python3", "-c",
+                        lock_probe, str(owner_lock)]),
+                   "external ticket-worker lock unavailable")
+        require_ok(run(["docker", "start", identity], quiet=True),
+                   "existing ticket-core boot recovery failed")
+        wait_container_health(identity)
+        if inspect_container(name).get("Id") != identity:
+            raise RecoveryError("ticket-core identity changed during recovery")
+        print("TICKET_CORE_BOOT_RECOVERY=PASS")
+    finally:
+        os.close(fd)
+
+
 def main() -> int:
     try:
         print("JASON_BOOT_RECOVERY=START")
@@ -329,6 +406,7 @@ def main() -> int:
         docker_start(RUNTIME_CONTAINER)
         wait_container_health(RUNTIME_CONTAINER)
         ensure_mcp()
+        recover_ticket_core()
 
         for optional in ("jason-teams-gateway", "jason-ollama", "openclaw-openclaw-gateway-1"):
             if docker_exists(optional):

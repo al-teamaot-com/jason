@@ -124,3 +124,90 @@ def test_pipeline_unit_covers_exact_runtime_write_roots():
     assert "ProtectSystem=strict" in unit and "ProtectHome=read-only" in unit
     assert "/var/lib/jason/openclaw" not in g.PIPELINE_WRITES
     assert "/home/al/jason-worktrees" not in g.PIPELINE_WRITES
+
+
+def test_closed_loop_receipt_requires_exact_resolver_pin_and_preserves_old_receipts():
+    old = receipt()
+    old.update(schema_version="1.1", action=g.PIPELINE_ACTION,
+               predecessor_candidate_sha="1"*40, predecessor_receipt_sha256="2"*64,
+               engineering_source_sha=g.PIPELINE_SOURCE_SHA,
+               pipeline_artifact_sha256={name:"3"*64 for name in g.PIPELINE_ARTIFACTS})
+    assert g.validate_receipt(old) == old
+    new = deepcopy(old)
+    new["predecessor_candidate_sha"] = g.CLOSED_LOOP_PREDECESSOR
+    with pytest.raises(g.Denied):
+        g.validate_receipt(new)
+    new["pipeline_artifact_sha256"]["issue_resolution_engine.py"] = "4"*64
+    assert g.validate_receipt(new) == new
+    for name in ("foreign.py", "jason_self_heal_watchdog.py"):
+        bad = deepcopy(new)
+        bad["pipeline_artifact_sha256"][name] = "5"*64
+        with pytest.raises(g.Denied):
+            g.validate_receipt(bad)
+    bad = deepcopy(old)
+    bad["pipeline_artifact_sha256"]["issue_resolution_engine.py"] = "4"*64
+    with pytest.raises(g.Denied):
+        g.validate_receipt(bad)
+
+
+def test_breaker_custody_successor_keeps_the_complete_closed_loop_inventory():
+    row = receipt()
+    row.update(schema_version="1.1", action=g.PIPELINE_ACTION,
+               predecessor_candidate_sha=g.BREAKER_CUSTODY_PREDECESSOR,
+               predecessor_receipt_sha256="2"*64,
+               engineering_source_sha=g.PIPELINE_SOURCE_SHA,
+               pipeline_artifact_sha256={name:"3"*64 for name in g.CLOSED_LOOP_PIPELINE_ARTIFACTS})
+    assert g.validate_receipt(row) == row
+    for name in ("issue_resolution_engine.py", "release_breaker_recovery_manager.py"):
+        bad = deepcopy(row)
+        del bad["pipeline_artifact_sha256"][name]
+        with pytest.raises(g.Denied):
+            g.validate_receipt(bad)
+
+def test_watchdog_diagnostic_admission_never_asserts_failed_peer_healthy():
+    old,new = topology()
+    query=lambda n,user:(old if user else new)[n]
+    peer=g.SERVICES[0]
+    new[peer].update(ActiveState="failed",MainPID="0")
+    # Ordinary status and engineering retain exact fail-closed semantics.
+    with pytest.raises(g.Denied,match="NOT_OPERATIONAL"):
+        g.verify_topology(query)
+    assert g.verify_topology(query,diagnostic_watchdog=True)==peer
+    for key,bad in (("MainPID","123"),("ProtectSystem","no"),
+                    ("User","root"),("DropInPaths","/foreign")):
+        before=new[peer].get(key);new[peer][key]=bad
+        with pytest.raises(g.Denied):
+            g.verify_topology(query,diagnostic_watchdog=True)
+        new[peer][key]=before
+    new[g.SERVICES[1]].update(ActiveState="failed",MainPID="0")
+    with pytest.raises(g.Denied):
+        g.verify_topology(query,diagnostic_watchdog=True)
+
+def test_failed_manager_attestation_requires_both_quiescent_exact_units():
+    old,new=topology()
+    query=lambda n,user:(old if user else new)[n]
+    for service in g.SERVICES:
+        new[service].update(ActiveState="failed",MainPID="0")
+    assert g.verify_topology(query,attest_failed_pair=True)==tuple(sorted(g.SERVICES))
+    with pytest.raises(g.Denied):
+        g.verify_topology(query)
+    for key,value in (("MainPID","123"),("DropInPaths","/unknown"),("ProtectHome","no"),("ActiveState","inactive")):
+        prior=new[g.SERVICES[0]][key]
+        new[g.SERVICES[0]][key]=value
+        with pytest.raises(g.Denied):
+            g.verify_topology(query,attest_failed_pair=True)
+        new[g.SERVICES[0]][key]=prior
+
+
+def test_local_reasoning_worker_pin_only_changes_for_exact_new_successor():
+    r=receipt()
+    r.update(schema_version="1.1",action=g.PIPELINE_ACTION,
+             predecessor_candidate_sha=g.WATCHDOG_RECOVERY_PREDECESSOR,
+             predecessor_receipt_sha256="2"*64,engineering_source_sha=g.PIPELINE_SOURCE_SHA,
+             pipeline_artifact_sha256={name:"3"*64 for name in g.CLOSED_LOOP_PIPELINE_ARTIFACTS})
+    r["artifact_sha256"]["owner_approved_development_worker.py"]=g.LOCAL_REASONING_OWNER_WORKER_SHA256
+    assert g.validate_receipt(r)==r
+    wrong=deepcopy(r);wrong["artifact_sha256"]["owner_approved_development_worker.py"]=g.ARTIFACTS["owner_approved_development_worker.py"]
+    with pytest.raises(g.Denied):g.validate_receipt(wrong)
+    wrong=deepcopy(r);wrong["predecessor_candidate_sha"]=g.BREAKER_CUSTODY_PREDECESSOR
+    with pytest.raises(g.Denied):g.validate_receipt(wrong)

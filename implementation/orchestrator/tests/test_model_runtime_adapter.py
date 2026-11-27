@@ -397,3 +397,23 @@ def test_openai_optional_closed_properties_are_nullable_then_restored():
         "resource_selector": {"hostname": "DEVICE-12"},
         "resolved": True,
     }
+
+def test_extended_ollama_generation_compacts_large_strings_but_validates_canonical_bounds():
+    from copy import deepcopy
+    from orchestrator.model_runtime_adapter import (
+        ollama_extended_generation_schema, validate_extended_local_result)
+    schema={"type":"object","additionalProperties":False,"required":["old_text","path"],
+            "properties":{"old_text":{"type":"string","minLength":1,"maxLength":12000},
+                          "path":{"type":"string","minLength":1,"maxLength":240}}}
+    before=deepcopy(schema)
+    adapted=ollama_extended_generation_schema(schema)
+    assert schema==before
+    assert adapted["properties"]["old_text"]=={"type":"string","minLength":1}
+    assert adapted["properties"]["path"]==schema["properties"]["path"]
+    assert validate_extended_local_result({"old_text":"exact anchor","path":"a.py"},schema)
+    for wrong in ({"old_text":"x"*12001,"path":"a.py"},
+                  {"old_text":"","path":"a.py"},
+                  {"old_text":"x","path":"x"*241},
+                  {"old_text":"x","path":"a.py","extra":True}):
+        with pytest.raises(ValueError,match="canonical structured contract"):
+            validate_extended_local_result(wrong,schema)

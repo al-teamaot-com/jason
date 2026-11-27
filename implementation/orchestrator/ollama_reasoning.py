@@ -31,6 +31,19 @@ class OllamaStructuredJsonClient:
     model: str
     base_url: str = "http://jason-ollama:11434"
     timeout_seconds: float = 45.0
+    # Keep every existing caller at its original 1024-token ceiling.
+    # A deliberately composed reasoning profile may opt into the bounded
+    # larger structured contracts used by query planning and source repair.
+    output_token_limit: int = 1024
+    context_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        if not 16 <= self.output_token_limit <= 4096:
+            raise ValueError("Ollama output token ceiling is invalid")
+        if self.context_tokens is not None and not 4096 <= self.context_tokens <= 32768:
+            raise ValueError("Ollama context budget is invalid")
+        if self.context_tokens is not None and self.output_token_limit >= self.context_tokens:
+            raise ValueError("Ollama output budget must fit within context")
 
     def complete(
         self,
@@ -42,7 +55,7 @@ class OllamaStructuredJsonClient:
     ) -> Mapping[str, Any]:
         if not self.model.strip():
             raise ValueError("Ollama model is required")
-        if max_output_tokens < 16 or max_output_tokens > 1024:
+        if max_output_tokens < 16 or max_output_tokens > self.output_token_limit:
             raise ValueError("Ollama structured reasoning output budget is invalid")
         request_payload = {
             "model": self.model,
@@ -59,13 +72,15 @@ class OllamaStructuredJsonClient:
             },
         }
 
+        if self.context_tokens is not None:
+            request_payload["options"]["num_ctx"] = self.context_tokens
         last_json_error: json.JSONDecodeError | None = None
 
         for attempt in range(2):
             attempt_output_tokens = (
                 max_output_tokens
                 if attempt == 0
-                else min(max_output_tokens * 2, 1024)
+                else min(max_output_tokens * 2, self.output_token_limit)
             )
             request_payload["options"]["num_predict"] = attempt_output_tokens
             response = self.transport.request(

@@ -116,69 +116,30 @@ A support item stops automatically only for a genuine governance/capability bloc
 
 For every autonomously claimed Support List item, the support-repair lane must emit owner lifecycle events through the same canonical governed Teams owner-notification path used for TODO engineering: **repair started**, **blocked / owner action required** when applicable, and **production-verified complete**. The start message identifies the support ID, defect summary, and repair scope. The blocked message identifies the exact blocker and required owner action. The completion message identifies the merged/deployed revision and the production acceptance evidence that proves the defect is resolved. A support fix is not "complete" for notification purposes merely because code was committed, CI passed, or a PR merged. Notification delivery uses the same durable message/correlation identity, provider/readback verification, bounded retry, duplicate suppression, and `SUPPORT-CONN-037` reliability requirements as TODO lifecycle messages.
 
-### Verified hosted-model credit replenishment
+### No paid AI/API reasoning — current Owner policy
 
-A hosted-model credit or billing error is **not** an ordinary transient transport
-failure. The runtime records a non-retryable failed reasoning receipt and the host
-worker must preserve that receipt and its retry budget; simply restarting the
-worker or overwriting the failed response is prohibited.
+The November 11 Owner decision (reaffirmed November 26) supersedes the earlier
+metered-credit recovery procedure. Do not invoke hosted-credit diagnostics,
+purchase credits, use API-key reasoning or paid fallbacks, or treat an old
+billing receipt as current authorization. Preserve existing failed requests,
+usage records and retry lineage; do not fabricate a credit-recovery receipt.
+Routine development uses ChatGPT + Desktop Commander + GitHub. J-Man/J-Dev
+remain optional under separately approved subscription-only routing. A local
+model or subscription adapter must independently meet the applicable existing
+reasoning and acceptance contract; neither an available model nor an account
+sign-in proves an existing worker can resume a failed repair.
 
-For a failed **P0 Support List** item specifically marked
-`credit_balance_exhausted` with HTTP 429 and owner action
-`restore_provider_credits`, the existing rootless support worker may queue
-**one new, separately fingerprinted reasoning request** only if a newer
-provider-reported metered success is recorded from an explicitly scoped,
-operator-authorized `provider-credit-verify` diagnostic in the local usage ledger.
-The evidence must postdate the failure and be fresh (at most 12 hours).
-The operator diagnostic must be a real, minimal hosted-model request through
-Jason's configured client; an account-billing screenshot or a manually entered
-ledger row is not equivalent to a provider-reported successful usage receipt.
-The readmission retains the old failure, response, and retry count, records its
-metered-proof lineage, respects active-work capacity, checks the original
-request fingerprint and current issue eligibility, and refuses pending governed
-repair handoffs or previously retried credit failures. A tiny successful model
-diagnostic proves billing availability **only**; it does not prove the prior
-large engineering request is valid, nor does it authorize source changes,
-provider writes, PR merges, or production deployment.
-
-This limited recovery applies to eligible P0 **support** reasoning, not
-automatically to blocked TODO/development items with independently exhausted
-retries. Those items retain their release-verified repair and readmission
-requirements. The canonical governed Release Manager remains the only
-production promotion path.
-
-### Operator diagnostic for confirmed hosted-credit replenishment
-
-After confirming credits in the existing hosted API account, an authorized operator
-may run the installed, one-shot diagnostic **inside the existing Jason runtime
-container**, where the canonical model configuration and OpenBao AppRole files
-are already mounted:
-
-```bash
-docker exec jason-runtime python -m jason_runtime.verify_hosted_credit
-```
-
-This command uses Jason's configured conversation model, approved OpenBao
-`openai.semantic_intent` secret, existing structured-model client, and append-only
-model-usage ledger. It never prints credentials or response bodies. On failure it emits only a
-sanitized HTTP status and allowlisted provider error code so an operator can
-distinguish billing (429) from request-contract errors (400). An HTTP 429 is not permission to retry or infer restored credits. It uses the same
-low reasoning-effort setting as the running OpenAI client. Success is
-reported only after the same request has a positive-token, provider-reported
-completed receipt carrying `workflow_id=provider-credit-verify` and
-`routing_profile=operator-authorized-diagnostic`. A blocked result must not be
-converted into a hand-entered success or an unbounded retry. The diagnostic
-makes a small billable request and must be operator-authorized.
-
-The subsequent scheduled support and owner-approved development workers
-independently re-admit at most one eligible bounded request per blocked item,
-subject to the original approval, immutable failed receipt, 12-hour receipt
-freshness, capacity, and each worker's existing exclusions. Observe real
-reasoning, tests, PR progression and protected release acceptance before
-claiming autonomous development is recovered. A successful diagnostic alone
-is not that acceptance.
-
-The canonical operational logic is `docs/playbooks/Jason-Support-List-Autonomous-Repair.md`.
+The old credit diagnostic and live semantic benchmark now deny before credential
+resolution or provider access. Runtime validation rejects both legacy hosted
+API flags. HTTP-runtime Compose disables those flags and removes dedicated
+paid-AI credential mounts; future Ticket Core settings and service-manifest
+projection also force them off. The installed protected Ticket Core and any
+other live runtime/MCP configuration are separate governed activation scopes;
+this source-only correction does not change their installed bytes, mounts,
+identity, or service state. Verify exact per-component production configuration,
+no paid route, unchanged protected peers, and the worker's real non-metered
+repair outcome before claiming enforcement or recovery. Source-only work is not
+production acceptance.
 
 ## Production boundary
 
@@ -310,7 +271,7 @@ Existing independent CI, guarded PR integration, CCC and exact-SHA production
 release authority remain unchanged. Source-only fixes are not proof of live
 Teams approval or disk repair acceptance.
 
-## Source-bound reasoning receipts and historical 429 replay
+## Source-bound reasoning receipts and historical 429 replay (historical; paid route prohibited)
 
 The content-addressed reasoning queue deduplicates requests by their exact
 `kind`, `support_item`, `title`, `evidence`, `acceptance`, and `context` JSON.
@@ -376,3 +337,94 @@ release verification, or another request for tools leave the job blocked.
 A successful model response is still **not** acceptance. Exact-text code
 changes, changed tests, protected CI and separate reviewed release/CCC gates
 remain required; actual Teams Approve/Deny awaits independent human clicks.
+
+### Governed no-paid-AI release and rollback boundary (November 26)
+
+The live shared deployment path clones the predecessor's effective Docker
+configuration, not the Compose defaults. Candidate and rollback must therefore
+both project the exact disabled hosted flags and omit the two dedicated
+read-only OpenAI AppRole mounts. Canonical runtime/MCP deployment explicitly
+requires this existing clone-path profile. An ordinary clone is **not** the
+first policy-transition executor: its failure handler restarts the original
+container, so it must refuse a predecessor with paid flags or credentials.
+No exception may restore that paid-enabled original. New Ticket Core
+manifests exclude the two obsolete credentials and both paid flags; its
+already accepted exact projection and live protected worker may change only
+under its own governed successor. The source-only projection preserves
+unrelated mounts, state, permissions and worker resource constraints.
+
+The first no-paid transition needs one reviewed, authenticated exact action
+with both host release locks, the active freeze and hold preserved, live
+component/image custody, a separately verified non-metered rollback for
+each component, unchanged peer service identities, and real health/ticket
+scan acceptance. The installed M365-only scoped backport and financial-only
+independent-component profile do not authorize this transition. Do not
+repurpose them or run an ungoverned Docker replacement. A rehearsal image
+or a read-only scope manifest cannot issue Owner authority.
+
+### Exact initial no-paid-AI containment profile
+
+The no_paid_ai_first_transition.py profile extends the existing governed native
+container-release machinery with one fixed first-transition policy; it is not
+an arbitrary Docker deployment interface. It reuses the root-installed audit
+journal Docker engine, independent native protected CI attestor, existing Entra
+Owner device-code verifier and both production locks. Source-only until the
+exact protected-main candidate and all native required checks pass. Owner
+approval is bound to the candidate, current live container IDs/images, config
+and recovery hashes, source hashes, freeze/hold bytes, protected peers and
+canonical ticket ledger identity. An externally SHA256-pinned root launcher
+must use a clean private exact reviewed checkout and isolated Python. The
+read-only native preflight must succeed before requesting this decision.
+
+The initial transition retains all three existing immutable images and
+source revisions (runtime, MCP and protected Ticket Core), both native
+release controls, all unrelated credentials, state mounts, audit bindings,
+commands and resource limits. It disables both hosted flags, blanks the
+two model selectors (so the old credit diagnostic stops before credential
+resolution), and removes only the six dedicated paid-AI AppRole mounts.
+Root custody contains only the compliant recreation configuration, not a
+restartable paid-enabled rollback configuration.
+
+The exact release consumes one authenticated approval. Before stopping each
+predecessor, disable Docker restart and rename it out of the native canonical
+service name; remove that exact stopped ID without volume deletion. Validate
+the compliant replacement before starting. Lost native responses are
+reconciled by exact readback, not by starting the predecessor. Interruption
+recovery uses only the existing root-private exact authorization and the
+identical safe recreation spec; unexpected scope, foreign container, unrelated
+drift or breaker reason fails closed. A failed health check must never
+re-enable paid reasoning. It may leave a component unavailable, requiring
+compliant recovery; it is not a successful release. Any existing open native
+breaker must be independently revalidated by the established native controller
+before final acceptance. No standing authorization or generic root execution
+is installed by this profile.
+
+Verify actual effective settings without a hosted probe; runtime and MCP local
+health, two genuine distinct Ticket Core scans with zero duplicate items,
+unchanged ledger identity and protected peers, exact no-paid configuration
+and independent native drift must pass. Historical paid diagnostics must
+not be invoked. This same-image configuration containment precedes later
+ordinary source deployment (which retires the diagnostic in code). No
+subscription-only reasoning provider or successful autonomous repair is
+implied by disabling the prohibited route.
+
+### Recovery of the interrupted no-paid first transition
+
+The approved same-image transition at 753f25e2f511d0bf83da1b43588a6046bdc5752e
+successfully removed the paid runtime route, but the runtime's legacy universal
+query composition rejects a non-OpenAI client. Its MCP peer likewise has a
+hosted-only investigation cutover. Do not restore the old paid-enabled
+configuration. The corrected exact native startup profile derives the new
+safe bodies from the immutable prior root-held plan. Only the runtime universal
+query flag and MCP investigation-loop flag are additionally disabled. Base
+governed local conversation remains enabled; the old Ticket Core body is
+unchanged. The actual immutable images successfully constructed their full
+runtime/worker compositions in network-disabled synthetic fixtures. This is
+startup compatibility evidence, not proof of real provider reasoning quality.
+The correction needs its own authenticated exact scope because the prior
+approval did not contain the two cutover flags. It preserves the original
+receipt, current known open breaker, freeze, hold, image revisions, peer
+identities and ticket ledger; it cannot close the breaker. Verify health,
+two real scans, no-paid configuration and native revalidation before closure.
+The legacy universal query and investigation modes remain unavailable until
+a separately governed non-metered reasoning route is implemented and accepted.

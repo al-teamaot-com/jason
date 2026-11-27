@@ -319,3 +319,31 @@ def _adapt_schema_value(value: Any) -> Any:
         return [_adapt_schema_value(item) for item in value]
 
     return value
+
+def ollama_extended_generation_schema(schema: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Compact only large string length productions in Ollama's generation view.
+
+    The actual canonical bounds remain mandatory in validate_extended_local_result.
+    Large exact-text source anchors (12K/16K characters) cannot be expanded by
+    the installed Ollama sampler grammar. The generation token ceiling remains
+    bounded; this is not permission to return an over-limit patch or query.
+    """
+    def compact(value):
+        if isinstance(value, Mapping):
+            return {key: compact(item) for key, item in value.items()
+                    if not (value.get("type") == "string" and
+                            key in ("minLength", "maxLength") and
+                            isinstance(item, int) and item > 512)}
+        if isinstance(value, list):
+            return [compact(item) for item in value]
+        return value
+    return compact(ollama_grammar_compatible_schema(schema))
+
+
+def validate_extended_local_result(result: Mapping[str, Any], schema: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Validate the untouched canonical contract, not the compact grammar."""
+    from jsonschema import Draft202012Validator
+    # Do not retain or log raw model output in an exception.
+    if not Draft202012Validator(schema).is_valid(result):
+        raise ValueError("local reasoning result violates the canonical structured contract")
+    return dict(result)

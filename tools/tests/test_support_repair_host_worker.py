@@ -2928,3 +2928,89 @@ def test_stale_clean_source_recovery_refuses_unsafe_or_duplicate_state(
     ) == []
     assert calls == []
     assert record['phase'] == 'blocked'
+
+def _local_reasoning_proof(spool, *, route_overrides=None, failed=False):
+    import os
+    from datetime import datetime, timezone
+    item={'id':'SUPPORT-OPS-PROBE','title':'Local readiness','evidence':'bounded',
+          'acceptance':'schema and source navigation'}
+    rid=worker.queue_reasoning(spool,kind='search_plan',item=item,context={})
+    path=spool/'reasoning'/'responses'/(rid+'.json')
+    path.parent.mkdir(parents=True,exist_ok=True)
+    route={'profile':'bounded_local_engineering_v1','model':'qwen3.5:4b',
+           'endpoint':'http://jason-ollama:11434',
+           'canonical_schema_validated':True,'hosted_fallback':False}
+    route.update(route_overrides or {})
+    path.write_text(json.dumps({'request_id':rid,'kind':'search_plan',
+        'support_item':item['id'],'status':'failed' if failed else 'succeeded',
+        'completed_at':datetime.now(timezone.utc).isoformat(),
+        'non_metered_reasoning':route,
+        'result':{'diagnosis':'bounded','search_terms':['function_name'],'blocked_reason':None}}))
+    os.chmod(path,0o600)
+    return rid
+
+
+def test_local_readiness_restarts_diagnosis_without_paid_receipt_or_stale_edit(tmp_path,monkeypatch):
+    item,failed,ledger,record=_credit_reload_fixture(tmp_path,successful=False)
+    before=worker.reasoning_response(tmp_path,failed)
+    proof=_local_reasoning_proof(tmp_path)
+    def denied(*args,**kw):raise AssertionError('paid ledger must not be consulted')
+    monkeypatch.setattr(worker,'verified_credit_reload_receipt',denied)
+    state={'items':{item['id']:record}}
+    assert worker.readmit_after_verified_local_reasoning(state,[item],tmp_path,max_active=1)==[item['id']]
+    rid=record['reasoning_request_id']
+    assert rid!=failed and record['phase']=='diagnosing'
+    assert record['local_reasoning_proof_id']==proof and record['self_recovery_attempts']==2
+    req=json.loads((tmp_path/'reasoning'/'requests'/(rid+'.json')).read_text())
+    assert req['kind']=='search_plan' and 'source_excerpts' not in req['context']
+    assert req['context']['verified_local_recovery']['failed_request_id']==failed
+    assert worker.reasoning_response(tmp_path,failed)==before
+    record['phase']='blocked'
+    record['reason']='reasoning request failed: Hosted reasoning blocked: credit_balance_exhausted'
+    assert not worker.readmit_after_verified_local_reasoning(state,[item],tmp_path,max_active=1)
+
+
+def test_local_readmission_denies_hosted_or_unverified_proof_and_external_scope(tmp_path):
+    for i,overrides in enumerate((
+        {'hosted_fallback':True},{'endpoint':'https://ollama.com'},
+        {'model':'external-cloud'},{'canonical_schema_validated':False})):
+        root=tmp_path/str(i)
+        item,failed,ledger,record=_credit_reload_fixture(root,successful=False)
+        _local_reasoning_proof(root,route_overrides=overrides)
+        assert not worker.readmit_after_verified_local_reasoning(
+            {'items':{item['id']:record}},[item],root,max_active=1)
+        assert record['reasoning_request_id']==failed
+    root=tmp_path/'scope'
+    item,failed,ledger,record=_credit_reload_fixture(root,successful=False)
+    _local_reasoning_proof(root)
+    state={'items':{item['id']:record}}
+    assert not worker.readmit_after_verified_local_reasoning(state,[dict(item,evidence='new unreviewed scope')],root,max_active=1)
+    record['blocker_class']='external_authority'
+    assert not worker.readmit_after_verified_local_reasoning(state,[item],root,max_active=1)
+
+def test_exact_observed_failure_identifiers_prioritize_real_source_and_test(tmp_path,monkeypatch):
+    code="engineering_progress_critical_support_stalled"
+    paths=["implementation/unrelated_progress.py","tools/issue_resolution_engine.py",
+           "tools/tests/test_issue_resolution_engine.py","tools/secret_policy.py"]
+    for rel in paths:
+        target=tmp_path/rel;target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_text(code if "issue_resolution" in rel or "secret" in rel else "progress")
+    class Guard:
+        def path_denial_reason(self,path,policy):
+            return "denied" if path.endswith("secret_policy.py") else None
+    def fake_run(args,**kw):
+        if args[:3]==["git","ls-files","--"]:
+            return paths[0]
+        if args[-1]==code:
+            return "\n".join(paths[1:])
+        if args[-1]=="progress":
+            return paths[0]
+        return ""
+    monkeypatch.setattr(worker,"run",fake_run)
+    identifiers=worker.literal_failure_identifiers("observed "+code+"; ordinary prose")
+    assert identifiers==[code]
+    rows=worker.safe_search(tmp_path,["progress"],Guard(),{},failure_identifiers=identifiers)
+    found=[r["path"] for r in rows]
+    assert found[:2]==paths[1:3]
+    assert paths[3] not in found
+    assert code in rows[0]["content"]

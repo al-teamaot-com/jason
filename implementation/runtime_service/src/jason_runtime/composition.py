@@ -100,6 +100,8 @@ from orchestrator.model_runtime_adapter import (
     ModelRuntimeAdapter,
     openai_structured_output_compatible_schema,
     openai_structured_output_restore_optional_values,
+    ollama_extended_generation_schema,
+    validate_extended_local_result,
 )
 from orchestrator.ollama_semantic_intent_planning import OllamaSemanticIntentPlanningReasoner
 from orchestrator.planning_context_reader import GovernedPlanningContextReaderAdapter
@@ -246,7 +248,9 @@ from .autonomous_repair_deployment import (
 from .autonomous_repair_maintenance import (
     build_autonomous_repair_deployment_maintenance,
 )
-from .support_repair_reasoning import build_support_repair_reasoning_maintenance
+from .support_repair_reasoning import (
+    LOCAL_ENGINEERING_MAX_PROMPT_BYTES, build_support_repair_reasoning_maintenance,
+)
 from .autotask_ticket_create import (
     build_autotask_ticket_create_invoker,
     register_autotask_ticket_create_invoker,
@@ -1216,6 +1220,12 @@ class RuntimeSettings:
         return settings
 
     def validate(self) -> None:
+        # Owner decision, 2026-11-11; reaffirmed 2026-11-26.
+        # In this runtime revision both legacy hosted flags instantiate a
+        # metered OpenAI API client. They are not subscription authentication.
+        # Reject before opening authority stores or resolving credentials.
+        if self.hosted_semantics_enabled or self.hosted_conversation_enabled:
+            raise ValueError("PAID_AI_API_PROHIBITED: direct hosted API reasoning is not authorized")
         if self.universal_approval_mode not in {"off", "enforced"}:
             raise ValueError("JASON_UNIVERSAL_APPROVAL_MODE must be off or enforced")
         if self.release_mobile_approval_mode not in {
@@ -1827,6 +1837,22 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         transport=http_transport,
         model=settings.ollama_model,
         base_url=settings.ollama_url,
+    )
+
+    # Keep the ordinary conversation model and budget unchanged. An advanced
+    # local model is an explicit deployment setting, not an external fallback.
+    extended_local_model = os.getenv("JASON_EXTENDED_OLLAMA_MODEL", "").strip() or settings.ollama_model
+    local_structured_client = ModelRuntimeAdapter(
+        client=OllamaStructuredJsonClient(
+            transport=http_transport,
+            model=extended_local_model,
+            base_url=settings.ollama_url,
+            timeout_seconds=180.0,
+            output_token_limit=4096,
+            context_tokens=32768,
+        ),
+        schema_adapter=ollama_extended_generation_schema,
+        result_adapter=validate_extended_local_result,
     )
 
     model_usage_ledger = None
@@ -2762,9 +2788,10 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         orchestrator=orchestrator,
         transport=return_transport,
         http_transport=http_transport,
-        structured_client=hosted_conversation_client or ollama_client,
+        structured_client=ollama_client,
         integration_broker=integration_broker,
-        investigation_client=hosted_conversation_client,
+        investigation_client=local_structured_client,
+        query_structured_client=local_structured_client,
     )
 
     playbook_approval_flow = None
@@ -3156,11 +3183,10 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     )
     support_repair_reasoning_maintenance = build_support_repair_reasoning_maintenance(
         enabled=settings.support_repair_autonomy_enabled,
-        structured_client=hosted_conversation_client or ollama_client,
-        fallback_structured_client=(
-            ollama_client if hosted_conversation_client is not None else None
-        ),
+        structured_client=local_structured_client,
+        fallback_structured_client=None,
         spool=settings.support_repair_spool,
+        local_prompt_max_bytes=LOCAL_ENGINEERING_MAX_PROMPT_BYTES,
     )
     autonomous_repair_deployment_maintenance = (
         build_autonomous_repair_deployment_maintenance(

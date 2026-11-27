@@ -291,3 +291,17 @@ def test_explicit_local_role_models_append_existing_runtime_client_as_final_fall
         "experience:hosted-runtime-model",
         "experience:quality-local",
     ]
+
+
+def test_universal_route_reuses_exact_local_structured_adapter_and_denies_hosted():
+    from orchestrator.ollama_reasoning import OllamaStructuredJsonClient
+    from orchestrator.model_runtime_adapter import ModelRuntimeAdapter, ollama_grammar_compatible_schema
+    from jason_runtime.conversation_experience_cutover import _universal_query_client
+    local=ModelRuntimeAdapter(client=OllamaStructuredJsonClient(
+        transport=Dummy(),model="local-test",output_token_limit=4096,context_tokens=32768),
+        schema_adapter=ollama_grammar_compatible_schema)
+    assert _universal_query_client(local) is local
+    assert _universal_query_client(local.client).client is local.client
+    for foreign in (None,Dummy(),ModelRuntimeAdapter(client=Dummy(),schema_adapter=lambda x:x)):
+        with pytest.raises(RuntimeError,match="governed local"):
+            _universal_query_client(foreign)

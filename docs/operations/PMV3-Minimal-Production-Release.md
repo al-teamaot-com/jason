@@ -5,10 +5,14 @@ This document replaces the retired duplicate CCC operational instructions. It is
 ## One release path
 
 1. **Build** one immutable runtime/MCP artifact for an exact protected-main SHA. Inventory its complete change scope.
-2. **Validate** targeted and foundational regression, a production-equivalent isolated preproduction test, image digests, current production health, and the verified rollback SHA. A failed required check is a stop.
+2. **Validate** targeted and foundational regression, applicable protected security checks, a production-equivalent isolated preproduction test, image digests, current production health, and the verified rollback SHA. Apply the risk-based independent-review policy only when the candidate materially changes a protected authority/security boundary. A failed required check is a stop.
 3. **Approve once** with the exact SHA, reviewed scope, rollback SHA, manifest fingerprint, approver identity and timestamp. The same exact Owner decision is the one-transaction release authority. No second unfreeze decision and no second CCC human review.
 4. **Deploy** through the native locked Production Manager transaction. While the legacy freeze marker remains during migration, Production Manager opens/restores it internally from the exact release transaction binding; it is not a second Owner authorization.
 5. **Verify** live runtime/MCP/host alignment and immutable image identity, functional smoke, ticket-processing continuity, protected drift, and complete production manifest. Restore freeze automatically; use the pinned rollback on failure and verify rollback before clearing the breaker.
+
+## Risk-based independent review
+
+Separate independent review is required only when the candidate materially changes authority/identity, cryptographic trust, root/credential privilege, tenant/client or information-release isolation, release break-glass/protection, or provider-write/autonomy scope. Merely touching PMV3/release files or receiving a `production_control_core` classification does not itself create another human review requirement. See `docs/operations/Jason-Risk-Based-Independent-Review-20261110.md`. Protected security CI and the normal exact release evidence remain mandatory for every applicable release.
 
 ## Removed complexity
 

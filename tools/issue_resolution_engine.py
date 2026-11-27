@@ -27,6 +27,7 @@ FAMILY_TITLES = {
     "provider_health": "Provider health degraded",
     "ticket_admission": "Ticket admission outcome degraded",
     "operational_outcome": "Operational outcome contract incomplete",
+    "engineering_progress": "Jason autonomous engineering recovery stalled",
     "service_health": "Jason service health degraded",
     "host_storage_capacity": "Jason host storage capacity degraded",
     "unknown": "Jason operational invariant degraded",
@@ -47,6 +48,11 @@ ROOT_INVARIANTS = {
     "operational_outcome": (
         "every promised operational outcome reaches verified, failed-with-evidence, or a real external blocker by its deadline"
     ),
+    "engineering_progress": (
+        "approved engineering advances through the existing governed workers, "
+        "or has a specific verified external dependency; internal stalls receive "
+        "bounded diagnosis and durable repair ownership"
+    ),
     "service_health": "required Jason services and scheduled workers are not failed or silently stale",
     "host_storage_capacity": "the system and archive filesystems remain mounted, readable, and have safe allocatable block and inode headroom",
     "unknown": "the affected already-approved Jason function is restored and independently re-verified",
@@ -58,6 +64,7 @@ RELATED_FAMILIES = {
     "provider_health": ["provider_health"],
     "ticket_admission": ["ticket_admission"],
     "operational_outcome": ["operational_outcome"],
+    "engineering_progress": ["engineering_progress"],
     "service_health": ["service_health", "production_convergence"],
     "host_storage_capacity": ["host_storage_capacity"],
     "unknown": ["unknown"],
@@ -100,6 +107,8 @@ def failure_family(failure: str) -> str:
         return "provider_health"
     if value.startswith("host_storage_"):
         return "host_storage_capacity"
+    if value.startswith("engineering_progress_"):
+        return "engineering_progress"
     if value.startswith("autonomy_"):
         return "ticket_admission"
     if value.startswith("outcome_contract_") or value.startswith("workflow_outcome_stale:"):
@@ -212,6 +221,12 @@ def verification_contract(family: str, failures: list[str]) -> dict[str, Any]:
             "rerun the original outcome verifier",
             "prove the promised outcome is verified or has a real external blocker with evidence",
         ],
+        "engineering_progress": [
+            "rerun engineering progress detector against fresh completed normal cycles",
+            "prove the owning worker advanced the actual stalled item or verified its genuine external gate",
+            "preserve exact authority, retry history, identity quarantine and concurrency limits",
+            "verify normal scheduled operation and no duplicate work or production authority",
+        ],
         "service_health": [
             "rerun service/unit health checks",
             "prove scheduled implementation matches the active production release",
@@ -318,7 +333,12 @@ def update_recurrence_memory(
         item["occurrence_count"] = occurrence_count
         item["recurring"] = occurrence_count >= 2
         item["architectural_correction_required"] = occurrence_count >= 2
-        if family == "host_storage_capacity":
+        if family == "engineering_progress":
+            item["priority"] = "P0" if any(
+                str(symptom) == "engineering_progress_critical_support_stalled"
+                for symptom in item.get("symptoms", [])
+            ) or occurrence_count >= 2 else "P1"
+        elif family == "host_storage_capacity":
             item["priority"] = (
                 "P0" if any(
                     str(symptom).startswith(("host_storage_capacity_critical:", "host_storage_mount_missing:"))
