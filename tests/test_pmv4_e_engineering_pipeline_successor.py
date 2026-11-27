@@ -745,3 +745,49 @@ def test_legacy_successor_passes_exact_scope_to_existing_authenticator():
         a.apply(p,m.pipeline_scope_sha(p))
     a.n["owner"].assert_called_once_with(p)
     a.n["locks"].assert_not_called()
+
+
+@pytest.mark.parametrize("reason",sorted(m.PIPELINE_HEALTH_DENIAL_REASONS))
+def test_independent_health_denial_reason_preserved(reason):
+    with pytest.raises(PermissionError,match="PIPELINE_NATIVE_CORE_HEALTH:"+reason):
+        m.verify_pipeline_native_core_health({
+            "verified":False,"reason":reason,"production_authority":False})
+
+
+@pytest.mark.parametrize("invalid",[
+    None, [], {}, {"verified":1,"production_authority":False,"production_revision":m.LKG},
+    {"verified":True,"production_authority":0,"production_revision":m.LKG},
+    {"verified":True,"production_authority":True,"production_revision":m.LKG},
+    {"verified":True,"production_authority":False,"production_revision":"0"*40},
+    {"verified":False,"reason":"native_readback_live_core_and_authority_verified"},
+    {"verified":False,"reason":["unrecognized"]},
+])
+def test_health_diagnostics_never_turn_denial_into_acceptance(invalid):
+    with pytest.raises(PermissionError,match="PIPELINE_NATIVE_CORE_HEALTH"):
+        m.verify_pipeline_native_core_health(invalid)
+
+
+def test_health_diagnostic_does_not_echo_arbitrary_child_output():
+    with pytest.raises(PermissionError,match="invalid_or_unrecognized_result") as caught:
+        m.verify_pipeline_native_core_health({"verified":False,"reason":"fixture-private-output"})
+    assert "fixture-private-output" not in str(caught.value)
+
+
+def test_exact_native_health_still_requires_original_three_conditions():
+    assert m.verify_pipeline_native_core_health({
+        "verified":True,"production_authority":False,"production_revision":m.LKG}) is None
+
+
+
+def test_normal_manager_stage_images_bind_reader_custody():
+    from tools import owner_approved_development_worker as worker
+    code = {rel: (m.REPO / rel).read_bytes()
+            for rel in m.NORMAL_MANAGER_STAGE_FILES.values()}
+    images = m.normal_manager_stage_images(code)
+    assert set(images) == set(m.NORMAL_MANAGER_STAGE_FILES)
+    raw, uid, gid, mode = images[worker.NATIVE_HEALTH_GUARD]
+    assert (uid, gid, mode) == (0, 0, 0o444)
+    assert m.digest(raw) == worker.NATIVE_HEALTH_GUARD_SHA256
+    for path, value in images.items():
+        if path != worker.NATIVE_HEALTH_GUARD:
+            assert value[1:] == (0, 0, 0o644)

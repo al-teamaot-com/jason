@@ -189,3 +189,41 @@ pin, native fixture assertion, or legacy installer is relaxed. Run the
 original transition regression against both variants and the new
 component-reader denial checks. Trigger the audit workflow on either
 transition source change, before merge.
+
+## Native preparation failure: exact guard mode and denial reporting
+
+The authenticated attempt on candidate 34f9fc7cd57adf9889ec0461e74e06ede1f36a64
+recorded the exact parent approval at 15:40:49 UTC on November 27 and
+terminated with a verified predecessor rollback at 15:41:49 UTC. The
+original engineering pause is retained. The former manager remains active;
+the production freeze, incident hold and protected application peers remain
+unchanged.
+
+The reviewed preparation after-image specifies mode 0644 for the new
+native health guard, whereas the existing independently pinned worker
+requires a root-owned, single-link regular file with exact mode 0444 and
+matching digest. This is a deterministic custody contract defect. An
+isolated, network-disabled, read-only container with synthetic ledger state
+reproduced rejection of the original 0644 image and acceptance of the
+corrected 0444 image with identical guard bytes. It did not exercise
+production acceptance or any provider. The earlier suspected readback
+freshness race alone cannot explain the later attempt. The original
+installer discarded the independent reader's precise denial reason, so
+the historical child result cannot be recovered.
+
+The source correction stages the guard with its existing required 0444
+mode and preserves all independent health and ownership assertions.
+Bounded diagnostic reporting retains known health denial reasons without
+echoing arbitrary child output. Local affected regression: 257 passed,
+5 isolated-root cases skipped in the ordinary run. The actual strict
+reader custody rehearsal passed separately.
+
+The failed attempt is terminal, not reusable authorization. A corrected
+release requires normal protected-main review and a fresh exact approval.
+The preserved pause is a rollback protection: the ordinary successor
+preflight requires an unpaused predecessor, and the existing resume route
+requires a verified non-rolled-back cutover. Do not remove that pause
+manually, overwrite the immutable failure record, or claim this source
+correction alone provides a supported recovery transition. Establish the
+applicable governed recovery scope and verify the restored predecessor
+before another production attempt.

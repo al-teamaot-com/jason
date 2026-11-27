@@ -91,6 +91,44 @@ def need(ok, why):
         raise PermissionError("ENGINEERING_MANAGER_INSTALL_" + why)
 
 
+# Preserve a bounded diagnostic from the existing independent health reader.
+# This changes error reporting only; it never converts a denied check into PASS.
+PIPELINE_HEALTH_DENIAL_REASONS = frozenset({
+    "noncanonical_engineering_spool",
+    "audit_migration_not_accepted",
+    "audit_release_not_quiescent",
+    "audit_maintenance_not_active",
+    "audit_maintenance_not_verified",
+    "native_readback_schema_invalid",
+    "native_release_health_unverified",
+    "live_core_health_unverified",
+    "live_core_image_mismatch",
+    "authority_health_unverified",
+    "full_restore_proof_unverified",
+    "native_health_changed_during_probe",
+    "native_health_evidence_unavailable",
+    *("native_health_unit_not_successful:" + name for name in (
+        "jason-production-drift-watchdog.service",
+        "jason-pmv4-component-readback.service",
+        "jason-openclaw-authority-health.service",
+    )),
+})
+
+
+def verify_pipeline_native_core_health(health):
+    if isinstance(health, dict):
+        if (health.get("verified") is True
+                and health.get("production_authority") is False
+                and health.get("production_revision") == LKG):
+            return
+        reason = health.get("reason")
+        if isinstance(reason, str) and reason in PIPELINE_HEALTH_DENIAL_REASONS:
+            need(False, "PIPELINE_NATIVE_CORE_HEALTH:" + reason)
+        if health.get("verified") is True:
+            need(False, "PIPELINE_NATIVE_CORE_HEALTH:invalid_authority_or_revision")
+    need(False, "PIPELINE_NATIVE_CORE_HEALTH:invalid_or_unrecognized_result")
+
+
 def digest(raw):
     return sha256(raw).hexdigest()
 
@@ -1181,6 +1219,13 @@ NORMAL_MANAGER_STAGE_FILES = {
     Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py"):
         "tools/scoped_backport_component_readback.py",
 }
+def normal_manager_stage_images(code):
+    """Stage the native guard using the exact custody required by its reader."""
+    return {path: image(code[rel], 0,
+                        0o444 if rel == "tools/pmv4_host_release_guard.py" else 0o644)
+            for path, rel in NORMAL_MANAGER_STAGE_FILES.items()}
+
+
 NORMAL_MANAGER_SCOPE_FILES = {
     *(NORMAL_MANAGER_STAGE_FILES.values()),
     *("tools/" + name for name in NORMAL_MANAGER_WORKERS),
@@ -1612,8 +1657,7 @@ class PipelineSuccessor(NativeAdapter):
                      "import owner_approved_development_worker as w;"
                      "print(json.dumps(w.verified_development_health(Path('/var/lib/jason/openclaw/support-repair'))))")
             health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",probe],130))
-            need(health.get("verified") is True and health.get("production_authority") is False
-                 and health.get("production_revision") == LKG, "PIPELINE_NATIVE_CORE_HEALTH")
+            verify_pipeline_native_core_health(health)
         rows = json.loads(self.command(["/usr/bin/docker","inspect","--type","container",*p["PEERS"]]))
         if self.predecessor == WATCHDOG_RECOVERY_BASELINE:
             for x in rows:
@@ -1800,13 +1844,13 @@ class PipelineSuccessor(NativeAdapter):
                  MANAGER_GUARD:image(self.code["tools/pmv4_e_engineering_manager_guard.py"],0,0o444),
                  PAUSE:pause,self.release.parent/"predecessor.json":image(prior[0],0,0o444)}
         if self.predecessor == NORMAL_MANAGER_BASELINE:
-            for path,rel in NORMAL_MANAGER_STAGE_FILES.items():
+            for path,value in normal_manager_stage_images(self.code).items():
                 # Never overwrite a different native generation or adopt an
                 # unrecorded existing artifact. All three files are absent in
                 # the accepted predecessor, and rollback removes only ours.
                 need(before[path] is None, "NORMAL_MANAGER_STAGE_TARGET_ALREADY_PRESENT")
                 self.n["directory"](path.parent,0o755)
-                after[path] = image(self.code[rel],0,0o644)
+                after[path] = value
         pipeline_hashes = {}
         for name in sorted(self.pipeline_artifact_names()):
             live = snapshot(LIB/name)
