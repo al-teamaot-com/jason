@@ -49,6 +49,8 @@ PIPELINE_ARTIFACTS = frozenset({
 CLOSED_LOOP_PREDECESSOR = "9b69aa8e2cdc7c9a037d044a5ac9d00cfcc2870f"
 BREAKER_CUSTODY_PREDECESSOR = "1c028724328e0a758a59f7a58478e242317b84b1"
 WATCHDOG_RECOVERY_PREDECESSOR = "c4e78d700b7ac347e9dee50c750d5de99780e2a2"
+NORMAL_MANAGER_PREDECESSOR = "81ad19542cc8a720debb09d2ea7c511db6b9fc20"
+NORMAL_MANAGER_OWNER_WORKER_SHA256 = "4a279d521a55e1ae1fe66f13b7dfd106fbda697c053ba42b2308cc19f1fc019e"
 LOCAL_REASONING_OWNER_WORKER_SHA256 = "4d72d2db1ac01a37f20e6624cb11bd632eaf4d63acf61e2612bb549b7e415029"
 CLOSED_LOOP_PIPELINE_ARTIFACTS = PIPELINE_ARTIFACTS | {"issue_resolution_engine.py"}
 PIPELINE_SOURCE = Path("/home/al/.local/lib/jason/engineering-worker-source")
@@ -120,7 +122,8 @@ def validate_receipt(row):
              and set(row["pipeline_artifact_sha256"]) == (
                  CLOSED_LOOP_PIPELINE_ARTIFACTS
                  if row.get("predecessor_candidate_sha") in (
-                     CLOSED_LOOP_PREDECESSOR, BREAKER_CUSTODY_PREDECESSOR, WATCHDOG_RECOVERY_PREDECESSOR)
+                     CLOSED_LOOP_PREDECESSOR, BREAKER_CUSTODY_PREDECESSOR, WATCHDOG_RECOVERY_PREDECESSOR,
+                     NORMAL_MANAGER_PREDECESSOR)
                  else PIPELINE_ARTIFACTS)
              and all(exact(x, 64) for x in row["pipeline_artifact_sha256"].values()),
              "PIPELINE_SUCCESSOR_RECEIPT_INVALID")
@@ -140,6 +143,8 @@ def validate_receipt(row):
     # reasoning owner worker. All historical receipts retain their old pin.
     if successor and row["predecessor_candidate_sha"] == WATCHDOG_RECOVERY_PREDECESSOR:
         pins["owner_approved_development_worker.py"] = LOCAL_REASONING_OWNER_WORKER_SHA256
+    if successor and row["predecessor_candidate_sha"] == NORMAL_MANAGER_PREDECESSOR:
+        pins["owner_approved_development_worker.py"] = NORMAL_MANAGER_OWNER_WORKER_SHA256
     need(all(row["artifact_sha256"][name] == pin for name, pin in pins.items() if pin),
          "PARALLEL_APPROVED_ARTIFACT_CHANGED")
     when = datetime.fromisoformat(row["accepted_at"])

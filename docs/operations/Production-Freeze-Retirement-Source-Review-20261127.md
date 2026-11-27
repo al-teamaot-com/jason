@@ -90,3 +90,25 @@ has been completed. Existing freeze and incident hold remain intact.
 ## Concurrent source integration
 
 Integration coordination: #2766. Preserve both independent security-regression workflow steps. The isolated MCP image built from the exact live LKG plus the two issuer/proof source files passed unprivileged normal-proof issuance and cross-mode denial with a synthetic root-owned public policy in a disposable network-disabled container. No live signer, provider credentials, or production state were mounted. This evidence does not authorize a native install.
+
+## Existing native-manager successor preparation
+
+The installed manager is the accepted 81ad19542cc8a720debb09d2ea7c511db6b9fc20
+successor. Its original receipt and saved worker bytes are independently
+attested. Use the existing authenticated engineering-manager transaction's
+new normal-manager successor mode to stage the fixed normal Owner verifier,
+component readback, and versioned host guard in their exact native paths.
+The existing manager receipt then binds the new runner, watchdog and
+development worker to immutable saved copies. Retain the original
+independent-component guard and all historical receipts. The complete
+protected-main candidate remains subject to the existing native CI check;
+the manager installation source inventory records unrelated source changes
+without installing their application artifacts. The concurrent composition
+source is reviewed but not deployed.
+
+This bounded prerequisite uses the existing before/after image journal,
+production locks, Entra Owner authentication, rollback and two scheduled
+acceptance cycles. It requires the freeze and incident hold to be
+unchanged. It neither restarts application containers nor grants
+production/provider authority. Its own preflight, exact native installation
+and scheduled acceptance remain necessary; it is not a retirement receipt.

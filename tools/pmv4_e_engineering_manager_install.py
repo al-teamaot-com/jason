@@ -309,6 +309,10 @@ def review_breaker_custody_delta(git, candidate):
 
 
 def reviewed_source_delta(git, baseline, candidate, source_files):
+    if baseline == NORMAL_MANAGER_BASELINE:
+        need(set(source_files) == NORMAL_MANAGER_SCOPE_FILES,
+             "NORMAL_MANAGER_SOURCE_SCOPE_INVALID")
+        return review_normal_manager_delta(git, candidate)
     if baseline == WATCHDOG_RECOVERY_BASELINE:
         need(set(source_files) == WATCHDOG_RECOVERY_SCOPE_FILES,
              "WATCHDOG_RECOVERY_SOURCE_SCOPE_INVALID")
@@ -1161,8 +1165,65 @@ WATCHDOG_RECOVERY_SCOPE_FILES = {
     "tools/tests/test_support_repair_host_worker.py",
 }
 WATCHDOG_RECOVERY_SUPPORTING_FILES = BREAKER_CUSTODY_SUPPORTING_FILES | {"tools/engineering_pipeline.py"}
-CLOSED_LOOP_BASELINES = (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE, WATCHDOG_RECOVERY_BASELINE)
-CUSTODY_BASELINES = (BREAKER_CUSTODY_BASELINE, WATCHDOG_RECOVERY_BASELINE)
+# This preparatory successor does NOT remove a freeze, change a hold,
+# deploy a container, grant provider rights, or activate a normal release.
+# Reuse the existing authenticated transaction and predecessor acceptance.
+NORMAL_MANAGER_BASELINE = "81ad19542cc8a720debb09d2ea7c511db6b9fc20"
+NORMAL_MANAGER_WORKERS = frozenset({
+    "release_manager_host_runner.py", "jason_self_heal_watchdog.py",
+    "owner_approved_development_worker.py",
+})
+NORMAL_MANAGER_STAGE_FILES = {
+    Path("/usr/local/lib/jason/owner_signed_release_v2.py"):
+        "implementation/kernel/signed_owner_release_v2.py",
+    Path("/usr/local/lib/jason/scoped-backport/tools/pmv4_host_release_guard.py"):
+        "tools/pmv4_host_release_guard.py",
+    Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py"):
+        "tools/scoped_backport_component_readback.py",
+}
+NORMAL_MANAGER_SCOPE_FILES = {
+    *(NORMAL_MANAGER_STAGE_FILES.values()),
+    *("tools/" + name for name in NORMAL_MANAGER_WORKERS),
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "tests/test_pmv4_e_engineering_manager_guard.py",
+    "docs/operations/Production-Freeze-Retirement-Source-Review-20261127.md",
+    # The concurrently reviewed composition source changed since the installed
+    # manager. Include its exact bytes in source review, but never materialize
+    # it or any application artifact in this preparatory host transaction.
+    "implementation/runtime_service/src/jason_runtime/composition.py",
+}
+NORMAL_MANAGER_SUPPORTING_FILES = WATCHDOG_RECOVERY_SUPPORTING_FILES
+NORMAL_MANAGER_PROTECTED_PATHS = (
+    CLOSED_LOOP_PROTECTED_PATHS | WATCHDOG_RECOVERY_SCOPE_FILES
+    | NORMAL_MANAGER_SUPPORTING_FILES | {
+        "tools/pmv4_e_engineering_manager_transaction.py",
+        "tools/pmv4_e_engineering_manager_relocation.py",
+        "tools/pmv4_e_unit_admission.py",
+        "config/release-breaker-self-recovery-policy.json",
+    }
+) - NORMAL_MANAGER_SCOPE_FILES
+
+def review_normal_manager_delta(git, candidate):
+    # Independently CI-attest the complete protected-main commit using the
+    # existing source_review() gate. Project only these exact reviewed files
+    # onto the installed receipt; enumerate, but NEVER install unrelated work.
+    git("merge-base", "--is-ancestor", NORMAL_MANAGER_BASELINE, candidate)
+    changed = set(git("diff", "--no-renames", "--name-only",
+                      NORMAL_MANAGER_BASELINE, candidate).decode().splitlines())
+    need(NORMAL_MANAGER_SCOPE_FILES <= changed, "NORMAL_MANAGER_SOURCE_DELTA_INCOMPLETE")
+    excluded = changed - NORMAL_MANAGER_SCOPE_FILES
+    need(not (excluded & NORMAL_MANAGER_PROTECTED_PATHS)
+         and not any(path.startswith(("infrastructure/pmv4-e-engineering-manager/",
+                                      "tools/pmv4_e_")) for path in excluded),
+         "NORMAL_MANAGER_UNREVIEWED_PROTECTED_SOURCE")
+    return {"baseline": NORMAL_MANAGER_BASELINE, "candidate": candidate,
+            "reviewed_source_paths": sorted(NORMAL_MANAGER_SCOPE_FILES),
+            "excluded_source_paths": sorted(excluded)}
+
+CLOSED_LOOP_BASELINES = (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE, WATCHDOG_RECOVERY_BASELINE, NORMAL_MANAGER_BASELINE)
+CUSTODY_BASELINES = (BREAKER_CUSTODY_BASELINE, WATCHDOG_RECOVERY_BASELINE, NORMAL_MANAGER_BASELINE)
 SOURCE_POLICY_BASELINES = (SOURCE_INTEGRATION_BASELINE, *CLOSED_LOOP_BASELINES)
 SCHEDULED_BASELINES = (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, *SOURCE_POLICY_BASELINES)
 SUCCESSOR_BASELINES = (PIPELINE_BASELINE, *SCHEDULED_BASELINES)
@@ -1317,6 +1378,34 @@ def pipeline_scope_sha(plan):
                  "properties":DRIFT_REPORTER_EXIT2}
              and plan.get("local_reasoning_runtime_activation") is False,
              "WATCHDOG_RECOVERY_EXACT_SCOPE_INVALID")
+    if plan["predecessor_candidate_sha"] == NORMAL_MANAGER_BASELINE:
+        source = plan.get("normal_manager_source_review")
+        need(isinstance(source, dict) and set(source) == {
+                "baseline", "candidate", "reviewed_source_paths", "excluded_source_paths"}
+             and source["baseline"] == NORMAL_MANAGER_BASELINE
+             and source["candidate"] == plan["policy"]["candidate_sha"]
+             and source["reviewed_source_paths"] == sorted(NORMAL_MANAGER_SCOPE_FILES)
+             and isinstance(source["excluded_source_paths"], list)
+             and all(isinstance(x,str) for x in source["excluded_source_paths"])
+             and source["excluded_source_paths"] == sorted(set(source["excluded_source_paths"]))
+             and not set(source["excluded_source_paths"]) & (NORMAL_MANAGER_SCOPE_FILES | NORMAL_MANAGER_PROTECTED_PATHS)
+             and not any(x.startswith(("infrastructure/pmv4-e-engineering-manager/","tools/pmv4_e_"))
+                         for x in source["excluded_source_paths"])
+             and plan.get("worker_replacements") == sorted(NORMAL_MANAGER_WORKERS)
+             and plan.get("normal_manager_stage_targets") == sorted(map(str,NORMAL_MANAGER_STAGE_FILES))
+             and plan.get("normal_mode_activation") is False
+             and plan.get("required_scheduled_cycles") == 2
+             and plan.get("engineering_progress_detector_required") is True
+             and plan.get("breaker_policy_source") == BREAKER_POLICY_SOURCE
+             and plan.get("source_integration_policy") == "independent_source_v1"
+             and plan.get("production_transaction_mutex_preserved") is True
+             and plan.get("exact_native_release_records_unchanged") is True
+             and plan.get("source_merges_not_rolled_back") is True
+             and plan.get("release_gate_retry_budget_seconds") == 20
+             and plan.get("quarantine_existing_todo_identity") == "TODO-OPS-013"
+             and plan.get("conflicted_issues") == [1459,1500]
+             and plan.get("preserve_existing_issue_authority") is True,
+             "NORMAL_MANAGER_EXACT_SCOPE_INVALID")
     return digest(canon(plan))
 
 
@@ -1368,6 +1457,10 @@ class PipelineSuccessor(NativeAdapter):
             self.source_files = CLOSED_LOOP_SCOPE_FILES
             self.supporting_files = CLOSED_LOOP_SUPPORTING_FILES
             self.changed_workers = CLOSED_LOOP_WORKERS
+        elif predecessor == NORMAL_MANAGER_BASELINE:
+            self.source_files = NORMAL_MANAGER_SCOPE_FILES
+            self.supporting_files = NORMAL_MANAGER_SUPPORTING_FILES
+            self.changed_workers = NORMAL_MANAGER_WORKERS
         elif predecessor == WATCHDOG_RECOVERY_BASELINE:
             self.source_files = WATCHDOG_RECOVERY_SCOPE_FILES
             self.supporting_files = WATCHDOG_RECOVERY_SUPPORTING_FILES
@@ -1395,10 +1488,13 @@ class PipelineSuccessor(NativeAdapter):
 
     def approved_targets(self):
         names = set(self.g["ARTIFACTS"]) | self.pipeline_artifact_names()
-        return {PIPELINE_UNIT, PIPELINE_PROGRAM, MANAGER_GUARD, RECEIPT, PAUSE,
-                *(LIB / name for name in self.changed_workers),
-                self.release.parent / "predecessor.json",
-                *(self.release / name for name in names)}
+        targets = {PIPELINE_UNIT, PIPELINE_PROGRAM, MANAGER_GUARD, RECEIPT, PAUSE,
+                   *(LIB / name for name in self.changed_workers),
+                   self.release.parent / "predecessor.json",
+                   *(self.release / name for name in names)}
+        if self.predecessor == NORMAL_MANAGER_BASELINE:
+            targets.update(NORMAL_MANAGER_STAGE_FILES)
+        return targets
 
     def read_guard(self, candidate):
         row = json.loads(self.command([*self.p["USER"], "/usr/bin/python3", "-I", "-B",
@@ -1684,6 +1780,14 @@ class PipelineSuccessor(NativeAdapter):
         after = {PIPELINE_UNIT:image(new_unit,0,0o644),
                  MANAGER_GUARD:image(self.code["tools/pmv4_e_engineering_manager_guard.py"],0,0o444),
                  PAUSE:pause,self.release.parent/"predecessor.json":image(prior[0],0,0o444)}
+        if self.predecessor == NORMAL_MANAGER_BASELINE:
+            for path,rel in NORMAL_MANAGER_STAGE_FILES.items():
+                # Never overwrite a different native generation or adopt an
+                # unrecorded existing artifact. All three files are absent in
+                # the accepted predecessor, and rollback removes only ours.
+                need(before[path] is None, "NORMAL_MANAGER_STAGE_TARGET_ALREADY_PRESENT")
+                self.n["directory"](path.parent,0o755)
+                after[path] = image(self.code[rel],0,0o644)
         pipeline_hashes = {}
         for name in sorted(self.pipeline_artifact_names()):
             live = snapshot(LIB/name)
@@ -1709,7 +1813,7 @@ class PipelineSuccessor(NativeAdapter):
         for name,pin in receipt["artifact_sha256"].items():
             raw = self.p["read"](LIB/name,1000)
             need(digest(raw) == pin, "PIPELINE_PREVIOUS_ARTIFACT_CHANGED:"+name)
-            if self.predecessor in (CLOSED_LOOP_BASELINE, WATCHDOG_RECOVERY_BASELINE) and name in self.changed_workers:
+            if self.predecessor in (CLOSED_LOOP_BASELINE, WATCHDOG_RECOVERY_BASELINE, NORMAL_MANAGER_BASELINE) and name in self.changed_workers:
                 live = before[LIB/name]
                 need(live is not None and live[0] == raw and live[1] == live[2] == 1000,
                      "CLOSED_LOOP_WATCHDOG_CUSTODY")
@@ -1767,6 +1871,13 @@ class PipelineSuccessor(NativeAdapter):
                 lambda *args: self.p["git"](REPO,*args),self.candidate),
                 breaker_policy_source=self.verify_breaker_policy_source(),
                 engineering_progress_detector_required=True)
+        if self.predecessor == NORMAL_MANAGER_BASELINE:
+            plan.update(normal_manager_source_review=review_normal_manager_delta(
+                            lambda *args:self.p["git"](REPO,*args),self.candidate),
+                        normal_manager_stage_targets=sorted(map(str,NORMAL_MANAGER_STAGE_FILES)),
+                        normal_mode_activation=False,
+                        breaker_policy_source=self.verify_breaker_policy_source(),
+                        engineering_progress_detector_required=True)
         if self.predecessor == WATCHDOG_RECOVERY_BASELINE:
             plan.update(breaker_policy_source=self.verify_breaker_policy_source(),
                         engineering_progress_detector_required=True,
@@ -2216,6 +2327,7 @@ def main():
     successor.add_argument("--closed-loop-successor",action="store_true")
     successor.add_argument("--breaker-custody-successor",action="store_true")
     successor.add_argument("--watchdog-recovery-successor",action="store_true")
+    successor.add_argument("--normal-manager-successor",action="store_true")
     choice=cli.add_mutually_exclusive_group()
     choice.add_argument("--apply", action="store_true")
     choice.add_argument("--recover",action="store_true")
@@ -2227,9 +2339,11 @@ def main():
     n,p = native()
     if (a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor
             or a.source_integration_successor or a.closed_loop_successor or a.breaker_custody_successor
-            or a.watchdog_recovery_successor):
+            or a.watchdog_recovery_successor or a.normal_manager_successor):
         need(not a.resume,"PIPELINE_RESUME_REQUIRES_VERIFIED_TRANSACTION")
-        if a.watchdog_recovery_successor:
+        if a.normal_manager_successor:
+            predecessor,files,supporting=NORMAL_MANAGER_BASELINE,NORMAL_MANAGER_SCOPE_FILES,NORMAL_MANAGER_SUPPORTING_FILES
+        elif a.watchdog_recovery_successor:
             predecessor,files,supporting=WATCHDOG_RECOVERY_BASELINE,WATCHDOG_RECOVERY_SCOPE_FILES,WATCHDOG_RECOVERY_SUPPORTING_FILES
         elif a.breaker_custody_successor:
             predecessor,files,supporting=BREAKER_CUSTODY_BASELINE,BREAKER_CUSTODY_SCOPE_FILES,BREAKER_CUSTODY_SUPPORTING_FILES
