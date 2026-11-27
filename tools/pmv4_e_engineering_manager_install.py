@@ -249,6 +249,137 @@ def native():
     return out
 
 
+# Documentation reconciliation may advance protected main after CI without
+# changing any installable source. Only this exact pair of generated records
+# may be excluded from the source-integration successor's changed-path set.
+# The candidate itself must STILL be current protected main with exact CI.
+SOURCE_METADATA_PATHS = frozenset({
+    "docs/control/AUTOMATED-CHANGE-STATE.json",
+    "docs/control/AUTOMATED-CHANGE-STATE.md",
+})
+
+
+def review_exact_successor_delta(git, candidate, baseline, scope_files, protected_paths, label):
+    """Bind the exact squash-integrated change and inventory every excluded path.
+
+    The candidate itself still must be current protected main with native CI.
+    Other source-only work is never installed; intervening changes to any
+    scoped worker, dependency, unit or native control deny this transaction.
+    """
+    need(re.fullmatch(r"[0-9a-f]{40}", candidate) is not None, label + "_CANDIDATE")
+    git("merge-base", "--is-ancestor", baseline, candidate)
+    anchor = git("log", "--first-parent", "-1", "--format=%H",
+                 baseline + ".." + candidate, "--",
+                 "tools/pmv4_e_engineering_manager_install.py").decode().strip()
+    need(re.fullmatch(r"[0-9a-f]{40}", anchor) is not None, label + "_SCOPE_COMMIT")
+    parents = git("rev-list", "--parents", "-n", "1", anchor).decode().split()
+    need(len(parents) == 2 and parents[0] == anchor
+         and re.fullmatch(r"[0-9a-f]{40}", parents[1]) is not None,
+         label + "_SINGLE_REVIEWED_COMMIT_REQUIRED")
+    parent = parents[1]
+    git("merge-base", "--is-ancestor", baseline, parent)
+    git("merge-base", "--is-ancestor", anchor, candidate)
+    changed = set(git("diff", "--no-renames", "--name-only", parent, anchor).decode().splitlines())
+    need(changed == scope_files, label + "_REVIEWED_PATHS_CHANGED")
+    before = git("log", "--format=", "--name-only", "--no-renames",
+                 baseline + ".." + parent).decode().splitlines()
+    after = git("log", "--format=", "--name-only", "--no-renames",
+                anchor + ".." + candidate).decode().splitlines()
+    excluded = {path for path in before + after if path}
+    need(not (excluded & protected_paths)
+         and not any(path.startswith(("infrastructure/pmv4-e-engineering-manager/",
+                                      "tools/pmv4_e_", "config/")) for path in excluded),
+         label + "_INTERVENING_PROTECTED_SOURCE_CHANGE")
+    need(set(git("diff", "--no-renames", "--name-only", parent, candidate).decode().splitlines())
+         <= scope_files | excluded, label + "_SOURCE_INVENTORY_INCOMPLETE")
+    return {"scope_commit": anchor, "scope_parent": parent,
+            "excluded_source_paths": sorted(excluded)}
+
+
+def review_closed_loop_delta(git, candidate):
+    return review_exact_successor_delta(
+        git, candidate, CLOSED_LOOP_BASELINE, CLOSED_LOOP_SCOPE_FILES,
+        CLOSED_LOOP_PROTECTED_PATHS, "CLOSED_LOOP")
+
+
+def review_breaker_custody_delta(git, candidate):
+    return review_exact_successor_delta(
+        git, candidate, BREAKER_CUSTODY_BASELINE, BREAKER_CUSTODY_SCOPE_FILES,
+        BREAKER_CUSTODY_PROTECTED_PATHS, "BREAKER_CUSTODY")
+
+
+def reviewed_source_delta(git, baseline, candidate, source_files):
+    if baseline == WATCHDOG_RECOVERY_BASELINE:
+        need(set(source_files) == WATCHDOG_RECOVERY_SCOPE_FILES,
+             "WATCHDOG_RECOVERY_SOURCE_SCOPE_INVALID")
+        git("merge-base", "--is-ancestor", baseline, candidate)
+        need(set(git("diff","--no-renames","--name-only",baseline,candidate).decode().splitlines())
+             == WATCHDOG_RECOVERY_SCOPE_FILES, "WATCHDOG_RECOVERY_SOURCE_DELTA_CHANGED")
+        return
+    if baseline == BREAKER_CUSTODY_BASELINE:
+        need(set(source_files) == BREAKER_CUSTODY_SCOPE_FILES, "BREAKER_CUSTODY_SCOPE_INVALID")
+        return review_breaker_custody_delta(git, candidate)
+    if baseline == CLOSED_LOOP_BASELINE:
+        need(set(source_files) == CLOSED_LOOP_SCOPE_FILES, "CLOSED_LOOP_SCOPE_INVALID")
+        return review_closed_loop_delta(git, candidate)
+    changed = set(git("diff", "--name-only", baseline, candidate).decode().splitlines())
+    if changed == source_files:
+        return
+    need(baseline == SOURCE_INTEGRATION_BASELINE
+         and set(source_files) == SOURCE_INTEGRATION_SCOPE_FILES
+         and changed == set(source_files) | SOURCE_METADATA_PATHS,
+         "UNREVIEWED_SOURCE_CHANGE")
+    # These records are never loaded into the installation source map. Verify
+    # ordinary tracked blobs and constrain the change to the validated-source
+    # evidence fields; neither production state nor arbitrary Markdown may drift.
+    json_path = "docs/control/AUTOMATED-CHANGE-STATE.json"
+    md_path = "docs/control/AUTOMATED-CHANGE-STATE.md"
+    for revision in (baseline, candidate):
+        for path in SOURCE_METADATA_PATHS:
+            entry = git("ls-tree", revision, "--", path).decode().strip()
+            need(re.fullmatch(r"100644 blob [0-9a-f]{40}\t" + re.escape(path), entry)
+                 is not None, "SOURCE_METADATA_NOT_REGULAR_BLOB")
+    old = json.loads(git("show", baseline + ":" + json_path))
+    new = json.loads(git("show", candidate + ":" + json_path))
+    need(isinstance(old, dict) and isinstance(new, dict)
+         and old.keys() == new.keys()
+         and {k:v for k,v in old.items() if k != "validated_source"}
+             == {k:v for k,v in new.items() if k != "validated_source"},
+         "SOURCE_METADATA_PRODUCTION_OR_SCHEMA_CHANGED")
+    a, b = old.get("validated_source"), new.get("validated_source")
+    keys = {"revision", "status", "workflow", "workflow_run_id",
+            "workflow_url", "observed_at"}
+    for value in (a, b):
+        need(isinstance(value, dict) and set(value) == keys
+             and all(isinstance(v, str) for v in value.values())
+             and value["status"] == "ci_passed"
+             and value["workflow"] == "Validate Jason"
+             and re.fullmatch(r"[0-9a-f]{40}", value["revision"]) is not None
+             and re.fullmatch(r"[0-9]+", value["workflow_run_id"]) is not None
+             and value["workflow_url"] == "https://github.com/al-teamaot-com/jason/actions/runs/" + value["workflow_run_id"],
+             "SOURCE_METADATA_EVIDENCE_SHAPE")
+        try:
+            timestamp = datetime.fromisoformat(value["observed_at"])
+            need(timestamp.utcoffset() is not None, "SOURCE_METADATA_TIMESTAMP")
+        except (ValueError, TypeError):
+            need(False, "SOURCE_METADATA_TIMESTAMP")
+    old_md = git("show", baseline + ":" + md_path).decode()
+    new_md = git("show", candidate + ":" + md_path).decode()
+    heading = "## Latest validated source\n"
+    next_heading = "## Latest production alignment\n"
+    need(old_md.count(heading) == 1 and old_md.count(next_heading) == 1,
+         "SOURCE_METADATA_MARKDOWN_LAYOUT")
+    prefix, section = old_md.split(heading, 1)
+    body, suffix = section.split(next_heading, 1)
+    for label, key in (("Revision", "revision"), ("Workflow run", "workflow_run_id"),
+                       ("Observed", "observed_at")):
+        line = "- " + label + ": `" + a[key] + "`\n"
+        need(body.count(line) == 1, "SOURCE_METADATA_MARKDOWN_EVIDENCE")
+        body = body.replace(line, "- " + label + ": `" + b[key] + "`\n", 1)
+    need(new_md == prefix + heading + body + next_heading + suffix,
+         "SOURCE_METADATA_MARKDOWN_UNREVIEWED_CHANGE")
+
+
 def source_review(candidate, p, *, recovery=False, baseline=BASELINE, source_files=SOURCE_FILES,
                   supporting_files=frozenset()):
     git = lambda *args: p["git"](REPO, *args)
@@ -258,8 +389,7 @@ def source_review(candidate, p, *, recovery=False, baseline=BASELINE, source_fil
          git("remote", "get-url", "origin").decode().strip() == "https://github.com/al-teamaot-com/jason.git" and
          git("rev-parse", "--is-shallow-repository").decode().strip() == "false",
          "PROTECTED_CHECKOUT_NOT_EXACT")
-    changed = set(git("diff", "--name-only", baseline, candidate).decode().splitlines())
-    need(changed == source_files, "UNREVIEWED_SOURCE_CHANGE")
+    reviewed_source_delta(git, baseline, candidate, source_files)
     if not recovery:
         helper_path = p["NATIVE"] / "pmv4_e_ci_refresh.py"
         helper = p["native_code"](helper_path, str(helper_path), 0, 0o444)
@@ -936,6 +1066,156 @@ SOURCE_INTEGRATION_SUPPORTING_FILES = {
     "tools/pmv4_e_engineering_manager_relocation.py",
     "infrastructure/pmv4-e-engineering-manager/systemd/" + SERVICES[0],
 }
+# Exact successor of the accepted independent-source manager. The installed
+# watchdog, resolver, supervisor and controller are one reviewed transaction.
+CLOSED_LOOP_BASELINE = "9b69aa8e2cdc7c9a037d044a5ac9d00cfcc2870f"
+CLOSED_LOOP_WORKERS = frozenset({"engineering_supervisor.py", "pmv3_engineering_controller.py",
+                                 "jason_self_heal_watchdog.py", "issue_resolution_engine.py"})
+CLOSED_LOOP_SCOPE_FILES = {
+    "docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md",
+    "docs/operations/PMV4-Engineering-Closed-Loop-Recovery-20261126.md",
+    *("tools/" + name for name in CLOSED_LOOP_WORKERS),
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+    "tools/tests/test_engineering_supervisor.py",
+    "tools/tests/test_issue_resolution_engine.py",
+    "tools/tests/test_jason_self_heal_watchdog.py",
+    "tools/tests/test_pmv3_engineering_controller.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "tests/test_pmv4_e_engineering_manager_guard.py",
+}
+CLOSED_LOOP_SUPPORTING_FILES = {
+    "tools/engineering_pipeline.py",
+    "tools/pmv4_e_engineering_manager_relocation.py",
+    "infrastructure/pmv4-e-engineering-manager/systemd/" + SERVICES[0],
+}
+# These are the entire existing native-manager install surfaces and controls;
+# unrelated source-only merges may not modify them outside the exact scope.
+CLOSED_LOOP_PROTECTED_PATHS = {
+    *CLOSED_LOOP_SCOPE_FILES, *CLOSED_LOOP_SUPPORTING_FILES, *NATIVE,
+    "tools/release_manager_host_runner.py",
+    "tools/pmv4_e_engineering_manager_client.py",
+    "tools/owner_approved_development_worker.py",
+    "tools/dependency_conflict_service.py",
+    "tools/development-concurrency-scopes.json",
+    "tools/isolated_service_common.py",
+    "tools/support_repair_host_worker.py", "tools/todo_engineering_intake.py",
+    "tools/todo_release_bridge.py", "tools/release_breaker_recovery_manager.py",
+    "tools/pmv3_integration_queue.py", "tools/engineering_evidence_tools.py",
+    "tools/operational_acceptance_reader.py", "tools/release_manager_gate.py",
+    "tools/pmv3_worker_release_gate.py", "tools/change_integration_gate.py",
+    "tools/documentation_impact_gate.py", "tools/production_drift_guard.py",
+    "config/release-manager-policy.json", "config/production-desired-state.json",
+}
+# Reuse the existing signed transaction for the exact accepted predecessor.
+BREAKER_CUSTODY_BASELINE = "1c028724328e0a758a59f7a58478e242317b84b1"
+BREAKER_CUSTODY_WORKERS = frozenset({"engineering_pipeline.py"})
+BREAKER_CUSTODY_SCOPE_FILES = {
+    "docs/operations/PMV4-Breaker-Recovery-Policy-Custody-20261125.md",
+    "tools/engineering_pipeline.py",
+    "tools/tests/test_engineering_pipeline.py",
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "tests/test_pmv4_e_engineering_manager_guard.py",
+}
+BREAKER_CUSTODY_SUPPORTING_FILES = CLOSED_LOOP_SUPPORTING_FILES - {"tools/engineering_pipeline.py"}
+# Exclude only the already-reviewed weekly reconciliation documentation.
+BREAKER_CUSTODY_PROTECTED_PATHS = (
+    CLOSED_LOOP_PROTECTED_PATHS | BREAKER_CUSTODY_SCOPE_FILES
+) - {"docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md"}
+BREAKER_POLICY_REL = "config/release-breaker-self-recovery-policy.json"
+BREAKER_POLICY_SOURCE = {
+    "repository": str(LIB / "engineering-source-repo"),
+    "revision": LKG,
+    "policy_sha256": "aa50f13341b228344b4da3e153fd2102d88ef0ffe71d96bd213605b42f14ba2d",
+}
+WATCHDOG_RECOVERY_BASELINE = "c4e78d700b7ac347e9dee50c750d5de99780e2a2"
+WATCHDOG_RECOVERY_WORKERS = frozenset({
+    "jason_self_heal_watchdog.py", "support_repair_host_worker.py",
+    "owner_approved_development_worker.py", "engineering_supervisor.py",
+})
+WATCHDOG_RECOVERY_SCOPE_FILES = {
+    ".github/workflows/conversation-experience.yml",
+    "docs/operations/PMv4-Watchdog-Failure-Recovery-20261127.md",
+    "implementation/orchestrator/model_runtime_adapter.py",
+    "implementation/orchestrator/ollama_reasoning.py",
+    "implementation/orchestrator/tests/test_model_runtime_adapter.py",
+    "implementation/orchestrator/tests/test_ollama_reasoning.py",
+    "implementation/runtime_service/src/jason_runtime/composition.py",
+    "implementation/runtime_service/src/jason_runtime/conversation_experience_cutover.py",
+    "implementation/runtime_service/src/jason_runtime/support_repair_reasoning.py",
+    "implementation/runtime_service/tests/test_conversation_experience_cutover.py",
+    "implementation/runtime_service/tests/test_support_repair_reasoning.py",
+    "tests/test_pmv4_e_engineering_manager_guard.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "tools/engineering_supervisor.py",
+    "tools/jason_self_heal_watchdog.py",
+    "tools/owner_approved_development_worker.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/support_repair_host_worker.py",
+    "tools/tests/test_engineering_supervisor.py",
+    "tools/tests/test_jason_self_heal_watchdog.py",
+    "tools/tests/test_owner_approved_development_worker.py",
+    "tools/tests/test_support_repair_host_worker.py",
+}
+WATCHDOG_RECOVERY_SUPPORTING_FILES = BREAKER_CUSTODY_SUPPORTING_FILES | {"tools/engineering_pipeline.py"}
+CLOSED_LOOP_BASELINES = (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE, WATCHDOG_RECOVERY_BASELINE)
+CUSTODY_BASELINES = (BREAKER_CUSTODY_BASELINE, WATCHDOG_RECOVERY_BASELINE)
+SOURCE_POLICY_BASELINES = (SOURCE_INTEGRATION_BASELINE, *CLOSED_LOOP_BASELINES)
+SCHEDULED_BASELINES = (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, *SOURCE_POLICY_BASELINES)
+SUCCESSOR_BASELINES = (PIPELINE_BASELINE, *SCHEDULED_BASELINES)
+WATCHDOG_RECOVERY_FAULTS = sorted(
+    ({"kind": "failed_system_unit", "state": "failed", "unit": n} for n in SERVICES),
+    key=lambda row: row["unit"],
+)
+
+DRIFT_REPORTER_UNIT = "jason-production-drift-watchdog.service"
+DRIFT_REPORTER_FAULT = {"kind":"failed_system_unit","state":"failed","unit":DRIFT_REPORTER_UNIT}
+DRIFT_REPORTER_PINS = {
+    "/opt/jason/current/tools/production_drift_watchdog.py":
+        "b6c53a7c015b83fccc5f2fd8c123e7a676ef212a9dd9800811db1ac5a1da7d8f",
+    "/etc/systemd/system/jason-production-drift-watchdog.service":
+        "c5ad8d61dedc7a31b417754c9122bff576648fb1650783644d52166fb9a8b5b6",
+    "/etc/systemd/system/jason-production-drift-watchdog.service.d/10-readback-recovery.conf":
+        "6ab206d2775324bd24ff86446d5f7e427f7e248dcebe010d6de59449215b2790",
+}
+DRIFT_REPORTER_EXIT2 = {
+    "LoadState":"loaded","ActiveState":"failed","MainPID":"0",
+    "Result":"exit-code","ExecMainCode":"1","ExecMainStatus":"2",
+    "FragmentPath":"/etc/systemd/system/jason-production-drift-watchdog.service",
+    "DropInPaths":"/etc/systemd/system/jason-production-drift-watchdog.service.d/10-readback-recovery.conf",
+}
+
+def verify_failed_manager_drift(control, drift, evaluated, *, reporter=None):
+    """Exact failed-unit containment, not a waiver of native drift."""
+    breaker = control.get("circuit_breaker") or {}
+    need(breaker.get("state") == "open"
+         and breaker.get("source") == "production_drift_watchdog"
+         and breaker.get("reason") == "continuous_production_drift_detected"
+         and breaker.get("problem_count") == 2
+         and breaker.get("problem_kinds") == ["failed_system_unit"],
+         "WATCHDOG_RECOVERY_BREAKER_NOT_EXACT")
+    # The pinned drift reporter returns 2 after recording the actual pair.
+    # Its *own* later failed-unit record is a derived symptom, not a third
+    # independent fault. The authoritative recorded list must still be the
+    # exact pair; allow the derived record only in a fresh external evaluation
+    # with verified reporter custody and exact systemd exit-status evidence.
+    for row, external in ((drift,False),(evaluated,True)):
+        problems = sorted(row.get("problems") or [],key=lambda item:item.get("unit",""))
+        allowed = problems == WATCHDOG_RECOVERY_FAULTS
+        if external and reporter == DRIFT_REPORTER_EXIT2:
+            allowed = allowed or problems == sorted(
+                [*WATCHDOG_RECOVERY_FAULTS,DRIFT_REPORTER_FAULT],key=lambda item:item["unit"])
+        need(row.get("status") == "drift_detected" and allowed,
+             "WATCHDOG_RECOVERY_UNRELATED_DRIFT")
+        observed = datetime.fromisoformat(row["observed_at"])
+        need(observed.tzinfo is not None
+             and 0 <= (datetime.now(timezone.utc)-observed).total_seconds() <= 180,
+             "WATCHDOG_RECOVERY_STALE_DRIFT")
+    return list(WATCHDOG_RECOVERY_FAULTS)
+
 PIPELINE_UNIT = SYSTEM_UNITS / SERVICES[0]
 PIPELINE_PROGRAM = LIB / "engineering_pipeline.py"
 MANAGER_GUARD = ROOT / "manager_guard.py"
@@ -944,9 +1224,9 @@ MANAGER_GUARD = ROOT / "manager_guard.py"
 def pipeline_scope_sha(plan):
     need(plan.get("action") == "REPAIR-EXACT-PMV4-ENGINEERING-PIPELINE-CONTRACT"
          and plan.get("policy", {}).get("rollback_sha") == LKG
-         and plan.get("predecessor_candidate_sha") in (PIPELINE_BASELINE, TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE)
+         and plan.get("predecessor_candidate_sha") in SUCCESSOR_BASELINES
          and re.fullmatch("[0-9a-f]{40}", str(plan.get("policy", {}).get("candidate_sha", "")))
-         and plan["policy"]["candidate_sha"] not in (LKG, PIPELINE_BASELINE, TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE)
+         and plan["policy"]["candidate_sha"] not in (LKG, *SUCCESSOR_BASELINES)
          and plan.get("queue_cutover") is False
          and plan.get("temporary_timer_stops") == list(TIMERS)
          and plan.get("resume_after_verified_cutover") is True
@@ -986,7 +1266,79 @@ def pipeline_scope_sha(plan):
              and plan.get("source_merges_not_rolled_back") is True
              and plan.get("release_gate_retry_budget_seconds") == 20,
              "SOURCE_INTEGRATION_EXACT_SCOPE_INVALID")
+    if plan["predecessor_candidate_sha"] in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        custody = plan["predecessor_candidate_sha"] == BREAKER_CUSTODY_BASELINE
+        workers = BREAKER_CUSTODY_WORKERS if custody else CLOSED_LOOP_WORKERS
+        protected_paths = BREAKER_CUSTODY_PROTECTED_PATHS if custody else CLOSED_LOOP_PROTECTED_PATHS
+        source = plan.get("breaker_custody_source_review" if custody else "closed_loop_source_review")
+        need(isinstance(source, dict), "CLOSED_LOOP_SOURCE_REVIEW_MISSING")
+        excluded = source.get("excluded_source_paths")
+        need(plan.get("worker_replacements") == sorted(workers)
+             and plan.get("required_scheduled_cycles") == 2
+             and plan.get("source_integration_policy") == "independent_source_v1"
+             and plan.get("production_transaction_mutex_preserved") is True
+             and plan.get("exact_native_release_records_unchanged") is True
+             and plan.get("source_merges_not_rolled_back") is True
+             and plan.get("release_gate_retry_budget_seconds") == 20
+             and plan.get("quarantine_existing_todo_identity") == "TODO-OPS-013"
+             and plan.get("conflicted_issues") == [1459,1500]
+             and plan.get("preserve_existing_issue_authority") is True
+             and plan.get("engineering_progress_detector_required") is True
+             and isinstance(source, dict) and set(source) == {
+                 "scope_commit", "scope_parent", "excluded_source_paths"}
+             and all(re.fullmatch(r"[0-9a-f]{40}", str(source.get(k,"")))
+                     for k in ("scope_commit", "scope_parent"))
+             and isinstance(excluded, list) and all(isinstance(x,str) for x in excluded)
+             and excluded == sorted(set(excluded))
+             and not (set(excluded) & protected_paths)
+             and not any(x.startswith(("infrastructure/pmv4-e-engineering-manager/",
+                                       "tools/pmv4_e_", "config/")) for x in excluded),
+             "CLOSED_LOOP_EXACT_SCOPE_INVALID")
+        if custody:
+            need(plan.get("breaker_policy_source") == BREAKER_POLICY_SOURCE,
+                 "BREAKER_CUSTODY_EXACT_POLICY_SOURCE_REQUIRED")
+    if plan["predecessor_candidate_sha"] == WATCHDOG_RECOVERY_BASELINE:
+        need(plan.get("worker_replacements") == sorted(WATCHDOG_RECOVERY_WORKERS)
+             and plan.get("required_scheduled_cycles") == 2
+             and plan.get("source_integration_policy") == "independent_source_v1"
+             and plan.get("production_transaction_mutex_preserved") is True
+             and plan.get("exact_native_release_records_unchanged") is True
+             and plan.get("source_merges_not_rolled_back") is True
+             and plan.get("release_gate_retry_budget_seconds") == 20
+             and plan.get("quarantine_existing_todo_identity") == "TODO-OPS-013"
+             and plan.get("conflicted_issues") == [1459,1500]
+             and plan.get("preserve_existing_issue_authority") is True
+             and plan.get("engineering_progress_detector_required") is True
+             and plan.get("breaker_policy_source") == BREAKER_POLICY_SOURCE
+             and plan.get("failed_unit_reset_scope") == list(SERVICES)
+             and plan.get("precutover_exact_faults") == WATCHDOG_RECOVERY_FAULTS
+             and plan.get("derived_reporter_exit2_only") == {
+                 "unit":DRIFT_REPORTER_UNIT,"pins":DRIFT_REPORTER_PINS,
+                 "properties":DRIFT_REPORTER_EXIT2}
+             and plan.get("local_reasoning_runtime_activation") is False,
+             "WATCHDOG_RECOVERY_EXACT_SCOPE_INVALID")
     return digest(canon(plan))
+
+
+def verify_scheduled_breaker_policy_route(pipeline, ledger):
+    stage = pipeline.get("stages", {}).get("release_breaker_recovery", {})
+    try:
+        observed = datetime.fromisoformat(ledger["observed_at"])
+        start = datetime.fromisoformat(pipeline["started_at"])
+        finish = datetime.fromisoformat(pipeline["finished_at"])
+        # The pipeline stores timestamps at second precision.
+        fresh = all(x.utcoffset() is not None for x in (observed,start,finish)) and (
+            int(start.timestamp()) <= int(observed.timestamp()) <= int(finish.timestamp()))
+    except (TypeError,ValueError,KeyError,OverflowError):
+        fresh = False
+    need(stage.get("status") == "succeeded"
+         and stage.get("policy_repository") == BREAKER_POLICY_SOURCE["repository"]
+         and fresh and ledger.get("lkg_revision") == LKG
+         and ledger.get("breaker_state") == "closed"
+         and ledger.get("status") in ("already_closed","root_verified_closed")
+         and ledger.get("next_action") == "none",
+         "BREAKER_CUSTODY_SCHEDULED_POLICY_ROUTE_NOT_VERIFIED")
+    return dict(BREAKER_POLICY_SOURCE)
 
 
 class PipelineSuccessor(NativeAdapter):
@@ -998,7 +1350,7 @@ class PipelineSuccessor(NativeAdapter):
     changed_workers = frozenset({"engineering_pipeline.py"})
 
     def __init__(self, candidate, n, p, code, *, predecessor=PIPELINE_BASELINE):
-        need(predecessor in (PIPELINE_BASELINE, TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE), "PIPELINE_UNKNOWN_PREDECESSOR")
+        need(predecessor in SUCCESSOR_BASELINES, "PIPELINE_UNKNOWN_PREDECESSOR")
         self.predecessor = predecessor
         if predecessor == TODO_CONFLICT_BASELINE:
             self.source_files = TODO_CONFLICT_SCOPE_FILES
@@ -1012,6 +1364,18 @@ class PipelineSuccessor(NativeAdapter):
             self.source_files = SOURCE_INTEGRATION_SCOPE_FILES
             self.supporting_files = SOURCE_INTEGRATION_SUPPORTING_FILES
             self.changed_workers = SOURCE_INTEGRATION_WORKERS
+        elif predecessor == CLOSED_LOOP_BASELINE:
+            self.source_files = CLOSED_LOOP_SCOPE_FILES
+            self.supporting_files = CLOSED_LOOP_SUPPORTING_FILES
+            self.changed_workers = CLOSED_LOOP_WORKERS
+        elif predecessor == WATCHDOG_RECOVERY_BASELINE:
+            self.source_files = WATCHDOG_RECOVERY_SCOPE_FILES
+            self.supporting_files = WATCHDOG_RECOVERY_SUPPORTING_FILES
+            self.changed_workers = WATCHDOG_RECOVERY_WORKERS
+        elif predecessor == BREAKER_CUSTODY_BASELINE:
+            self.source_files = BREAKER_CUSTODY_SCOPE_FILES
+            self.supporting_files = BREAKER_CUSTODY_SUPPORTING_FILES
+            self.changed_workers = BREAKER_CUSTODY_WORKERS
         self.candidate, self.n, self.p, self.code = candidate, n, p, code
         self.g = load(code["tools/pmv4_e_engineering_manager_guard.py"],
                       REPO / "tools/pmv4_e_engineering_manager_guard.py")
@@ -1023,8 +1387,14 @@ class PipelineSuccessor(NativeAdapter):
         self.pause_image = self.receipt_bytes = None
         self.lock = None
 
+    def pipeline_artifact_names(self):
+        names = set(self.g["PIPELINE_ARTIFACTS"])
+        if self.predecessor in CLOSED_LOOP_BASELINES:
+            names |= {"issue_resolution_engine.py"}
+        return names
+
     def approved_targets(self):
-        names = set(self.g["ARTIFACTS"]) | set(self.g["PIPELINE_ARTIFACTS"])
+        names = set(self.g["ARTIFACTS"]) | self.pipeline_artifact_names()
         return {PIPELINE_UNIT, PIPELINE_PROGRAM, MANAGER_GUARD, RECEIPT, PAUSE,
                 *(LIB / name for name in self.changed_workers),
                 self.release.parent / "predecessor.json",
@@ -1039,7 +1409,27 @@ class PipelineSuccessor(NativeAdapter):
              "PIPELINE_NATIVE_MANAGER_GUARD")
         return row
 
-    def protected(self):
+    def attest_failed_predecessor(self):
+        need(self.predecessor == WATCHDOG_RECOVERY_BASELINE,
+             "WATCHDOG_RECOVERY_PREDECESSOR_REQUIRED")
+        raw = self.code["tools/pmv4_e_engineering_manager_guard.py"]
+        code = ("import hashlib,json,sys; b=sys.stdin.buffer.read(2000001);"
+                "assert hashlib.sha256(b).hexdigest()==sys.argv[1];"
+                "ns={'__name__':'reviewed_failed_manager_preflight','__file__':sys.argv[2]};"
+                "exec(compile(b,sys.argv[2],'exec'),ns);"
+                "print(json.dumps(ns['status'](attest_failed_predecessor=True)))")
+        row = json.loads(self.p["command"]([*self.p["USER"],"/usr/bin/python3","-I","-B",
+                         "-c",code,digest(raw),str(REPO/"tools/pmv4_e_engineering_manager_guard.py")],
+                         timeout=130,data=raw))
+        need(row.get("status") == "verified_failed_manager_integrity"
+             and row.get("candidate_sha") == self.predecessor
+             and row.get("operational_ready") is False
+             and row.get("production_authority") is False
+             and row.get("failed_peer") == sorted(SERVICES),
+             "WATCHDOG_RECOVERY_PREDECESSOR_INTEGRITY")
+        return row
+
+    def protected(self, *, failed_manager_recovery=False):
         p = self.p
         controls = {}
         for path in (self.n["FREEZE"], self.n["HOLD"]):
@@ -1051,23 +1441,77 @@ class PipelineSuccessor(NativeAdapter):
         need(manifest.get("complete") is True
              and all(manifest.get(k) == LKG for k in
                      ("revision", "runtime_revision", "mcp_revision", "host_revision"))
-             and control["circuit_breaker"]["state"] == "closed"
-             and control["circuit_breaker"]["revalidated_revision"] == LKG,
+             and (failed_manager_recovery or (
+                 control["circuit_breaker"]["state"] == "closed"
+                 and control["circuit_breaker"]["revalidated_revision"] == LKG)),
              "PIPELINE_PROTECTED_LKG_OR_BREAKER")
+        if failed_manager_recovery:
+            need(self.predecessor == WATCHDOG_RECOVERY_BASELINE,
+                 "WATCHDOG_RECOVERY_PROFILE_REQUIRED")
         guard = Path("/opt/jason/current/tools/production_drift_guard.py")
         need(digest(p["read"](guard,0)) == p["PINNED"][str(guard)],
              "NATIVE_DRIFT_CODE_CHANGED")
-        drift = json.loads(self.command(["/usr/bin/python3",str(guard),"--config",str(POLICY)],75))
-        need(drift.get("status") == "pass" and drift.get("problems") == [],
-             "PIPELINE_NATIVE_DRIFT")
-        probe = ("import sys,json;from pathlib import Path;"
-                 "sys.path[:0]=['/home/al/.local/lib/jason','/opt/jason/current/tools'];"
-                 "import owner_approved_development_worker as w;"
-                 "print(json.dumps(w.verified_development_health(Path('/var/lib/jason/openclaw/support-repair'))))")
-        health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",probe],130))
-        need(health.get("verified") is True and health.get("production_authority") is False
-             and health.get("production_revision") == LKG, "PIPELINE_NATIVE_CORE_HEALTH")
+        if failed_manager_recovery:
+            # The existing evaluator returns rc=2 for real drift. Read its
+            # result without invoking its output-writing CLI or changing the
+            # authoritative breaker. Only these two exact faults are admitted
+            # for this signed host repair, not for production promotion.
+            probe = ("import json,sys;from pathlib import Path;"
+                     "p=Path(sys.argv[1]);n={'__name__':'native_drift_preflight','__file__':str(p)};"
+                     "exec(compile(p.read_bytes(),str(p),'exec'),n);"
+                     "print(json.dumps(n['evaluate'](json.loads(Path(sys.argv[2]).read_text()))))")
+            evaluated = json.loads(self.command(["/usr/bin/python3","-I","-B","-c",probe,
+                                                  str(guard),str(POLICY)],75))
+            drift = json.loads(p["read"](MANAGER/"production-drift.json",0,0o600))
+            reporter = None
+            if DRIFT_REPORTER_FAULT in evaluated.get("problems",[]):
+                for path,pin in DRIFT_REPORTER_PINS.items():
+                    need(digest(p["read"](Path(path),0)) == pin,
+                         "WATCHDOG_RECOVERY_REPORTER_CUSTODY")
+                show = self.systemctl(["show",DRIFT_REPORTER_UNIT,
+                                       *["-p"+k for k in DRIFT_REPORTER_EXIT2]]).decode()
+                reporter = dict(line.split("=",1) for line in show.splitlines() if "=" in line)
+            verify_failed_manager_drift(control,drift,evaluated,reporter=reporter)
+            need(p["forward_audit_accepted"](json.loads(p["read"](p["AUDIT"],0,0o444)))
+                 and p["audit_recovery_service_complete"](),
+                 "WATCHDOG_RECOVERY_AUDIT_NOT_ACCEPTED")
+            native_core = p["GUARD_PATH"]
+            need(digest(p["read"](native_core,0,0o444)) == p["GUARD_AFTER_SHA"],
+                 "WATCHDOG_RECOVERY_CORE_GUARD_CHANGED")
+            probe = ("import json,sys;from pathlib import Path;"
+                     "p=Path(sys.argv[1]);n={'__name__':'native_core_preflight','__file__':str(p)};"
+                     "exec(compile(p.read_bytes(),str(p),'exec'),n);"
+                     "print(json.dumps(n['IndependentHostGuard']().core_health_evidence()))")
+            health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",
+                                                probe,str(native_core)],130))
+            need(health.get("status") == "verified" and health.get("source_sha") == LKG
+                 and health.get("runtime_healthy") is True and health.get("mcp_running") is True
+                 and health.get("worker_scan_fresh") is True,
+                 "WATCHDOG_RECOVERY_CORE_HEALTH")
+        else:
+            drift = json.loads(self.command(["/usr/bin/python3",str(guard),"--config",str(POLICY)],75))
+            need(drift.get("status") == "pass" and drift.get("problems") == [],
+                 "PIPELINE_NATIVE_DRIFT")
+            probe = ("import sys,json;from pathlib import Path;"
+                     "sys.path[:0]=['/home/al/.local/lib/jason','/opt/jason/current/tools'];"
+                     "import owner_approved_development_worker as w;"
+                     "print(json.dumps(w.verified_development_health(Path('/var/lib/jason/openclaw/support-repair'))))")
+            health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",probe],130))
+            need(health.get("verified") is True and health.get("production_authority") is False
+                 and health.get("production_revision") == LKG, "PIPELINE_NATIVE_CORE_HEALTH")
         rows = json.loads(self.command(["/usr/bin/docker","inspect","--type","container",*p["PEERS"]]))
+        if self.predecessor == WATCHDOG_RECOVERY_BASELINE:
+            for x in rows:
+                if x["Name"].lstrip("/") not in ("jason-runtime","jason-mcp-pilot","jason-pmv4-ticket-core"):
+                    continue
+                env = dict(entry.split("=",1) for entry in x["Config"]["Env"])
+                need(all(env.get(key) == "false" for key in (
+                    "JASON_HOSTED_CONVERSATION_ENABLED","JASON_HOSTED_SEMANTICS_ENABLED"))
+                     and not any(env.get(key) for key in ("OPENAI_API_KEY","JASON_OPENAI_API_KEY",
+                                                         "OPENAI_API_TOKEN","JASON_OPENAI_API_TOKEN"))
+                     and not any("/openai/" in mount.get("Destination","") + "/"
+                                 for mount in x.get("Mounts",[])),
+                     "WATCHDOG_RECOVERY_PAID_AI_CONFIGURATION_DENIED")
         peers = {x["Name"].lstrip("/"):{"id":x["Id"],"image":x["Image"],
                   "started_at":x["State"]["StartedAt"]} for x in rows}
         need(set(peers) == set(p["PEERS"])
@@ -1134,6 +1578,29 @@ class PipelineSuccessor(NativeAdapter):
         need(accepted.get("evidence",{}).get("bounded_release_retry_policy_verified") is True,
              "SOURCE_INTEGRATION_PREDECESSOR_RETRY_NOT_VERIFIED")
 
+    def verify_closed_loop_predecessor(self, history, activation):
+        self.verify_source_integration_predecessor(history, activation)
+        accepted=json.loads(self.n["read"](history/"scheduled-acceptance.json",0,0o400))
+        need(accepted.get("evidence",{}).get("independent_source_policy_verified") is True,
+             "CLOSED_LOOP_PREDECESSOR_SOURCE_POLICY_NOT_ACCEPTED")
+
+    def verify_breaker_policy_source(self):
+        expected = BREAKER_POLICY_SOURCE
+        repo = Path(expected["repository"])
+        need(repo.resolve(strict=True) == repo, "BREAKER_CUSTODY_POLICY_REPOSITORY_ALIAS")
+        info = repo.lstat()
+        need(stat.S_ISDIR(info.st_mode) and info.st_uid == info.st_gid == 1000
+             and not info.st_mode & 0o022, "BREAKER_CUSTODY_POLICY_REPOSITORY_CUSTODY")
+        git = self.p["git"]
+        need(git(repo, "rev-parse", "HEAD").decode().strip() == expected["revision"]
+             and not git(repo, "status", "--porcelain", "--untracked-files=all").strip(),
+             "BREAKER_CUSTODY_POLICY_REPOSITORY_REVISION")
+        raw = git(repo, "show", expected["revision"] + ":" + BREAKER_POLICY_REL)
+        protected = self.p["read"](Path("/opt/jason/releases") / LKG / BREAKER_POLICY_REL, 0)
+        need(raw == protected and digest(raw) == expected["policy_sha256"],
+             "BREAKER_CUSTODY_POLICY_SOURCE_MISMATCH")
+        return dict(expected)
+
     def inspect(self):
         need(not os.path.lexists(self.directory) and not os.path.lexists(self.release.parent),
              "PIPELINE_SUCCESSOR_ALREADY_PRESENT")
@@ -1155,8 +1622,12 @@ class PipelineSuccessor(NativeAdapter):
         need(activated.get("scope_sha256") == receipt["scope_sha256"]
              and activated.get("status") == "resumed_pending_scheduled_acceptance",
              "PIPELINE_PRIOR_ACTIVATION_NOT_VERIFIED")
-        self.read_guard(self.predecessor)
-        protected = self.protected()
+        fault_recovery = self.predecessor == WATCHDOG_RECOVERY_BASELINE
+        if fault_recovery:
+            self.attest_failed_predecessor()
+        else:
+            self.read_guard(self.predecessor)
+        protected = self.protected(failed_manager_recovery=True) if fault_recovery else self.protected()
         need(protected["effective_policy_sha256"] == receipt["effective_policy_sha256"],
              "PIPELINE_EFFECTIVE_POLICY_CHANGED")
         if self.predecessor == TODO_CONFLICT_BASELINE:
@@ -1175,6 +1646,12 @@ class PipelineSuccessor(NativeAdapter):
         elif self.predecessor == SOURCE_INTEGRATION_BASELINE:
             need(snapshot(PAUSE) is None,"SOURCE_INTEGRATION_PREDECESSOR_PAUSED")
             self.verify_source_integration_predecessor(history,activated)
+            encoded = old["after_images"][str(PAUSE)]
+        elif self.predecessor in CLOSED_LOOP_BASELINES:
+            need(snapshot(PAUSE) is None,"CLOSED_LOOP_PREDECESSOR_PAUSED")
+            self.verify_closed_loop_predecessor(history,activated)
+            if self.predecessor in CUSTODY_BASELINES:
+                self.verify_breaker_policy_source()
             encoded = old["after_images"][str(PAUSE)]
         else:
             encoded = old["before_images"][str(PAUSE)]
@@ -1208,9 +1685,14 @@ class PipelineSuccessor(NativeAdapter):
                  MANAGER_GUARD:image(self.code["tools/pmv4_e_engineering_manager_guard.py"],0,0o444),
                  PAUSE:pause,self.release.parent/"predecessor.json":image(prior[0],0,0o444)}
         pipeline_hashes = {}
-        for name in sorted(self.g["PIPELINE_ARTIFACTS"]):
+        for name in sorted(self.pipeline_artifact_names()):
             live = snapshot(LIB/name)
-            if receipt["schema_version"] == "1.1":
+            if self.predecessor == CLOSED_LOOP_BASELINE and name == "issue_resolution_engine.py":
+                # This was a legacy runtime artifact, not a prior manager pin.
+                # Pin its exact already installed predecessor bytes before
+                # moving it into the root receipt's verified pipeline inventory.
+                accepted = self.p["git"](REPO,"show",self.predecessor+":tools/"+name)
+            elif receipt["schema_version"] == "1.1":
                 accepted = self.p["read"](ROOT/"releases"/self.predecessor/"tools"/name,0,0o444)
                 need(digest(accepted) == receipt["pipeline_artifact_sha256"][name],
                      "PIPELINE_PREDECESSOR_ARTIFACT_CHANGED:"+name)
@@ -1223,10 +1705,18 @@ class PipelineSuccessor(NativeAdapter):
                 after[LIB/name] = (raw,*live[1:])
             after[self.release/name] = image(raw,0,0o444)
             pipeline_hashes[name] = digest(raw)
+        artifact_hashes = {}
         for name,pin in receipt["artifact_sha256"].items():
             raw = self.p["read"](LIB/name,1000)
             need(digest(raw) == pin, "PIPELINE_PREVIOUS_ARTIFACT_CHANGED:"+name)
+            if self.predecessor in (CLOSED_LOOP_BASELINE, WATCHDOG_RECOVERY_BASELINE) and name in self.changed_workers:
+                live = before[LIB/name]
+                need(live is not None and live[0] == raw and live[1] == live[2] == 1000,
+                     "CLOSED_LOOP_WATCHDOG_CUSTODY")
+                raw = self.code["tools/"+name]
+                after[LIB/name] = (raw,*live[1:])
             after[self.release/name] = image(raw,0,0o444)
+            artifact_hashes[name] = digest(raw)
         recipe = {k:v for k,v in receipt.items() if k not in
                   ("candidate_sha","scope_sha256","approval_sha256","accepted_at",
                    "schema_version","action","guard_sha256","unit_sha256")}
@@ -1235,6 +1725,7 @@ class PipelineSuccessor(NativeAdapter):
                       predecessor_receipt_sha256=digest(prior[0]),
                       engineering_source_sha=self.g["PIPELINE_SOURCE_SHA"],
                       pipeline_artifact_sha256=pipeline_hashes,
+                      artifact_sha256=artifact_hashes,
                       guard_sha256=digest(after[MANAGER_GUARD][0]),
                       unit_sha256={**receipt["unit_sha256"],SERVICES[0]:digest(new_unit)})
         plan = {"action":self.g["PIPELINE_ACTION"],"policy":{"candidate_sha":self.candidate,
@@ -1252,7 +1743,7 @@ class PipelineSuccessor(NativeAdapter):
                 "root_receipt_recipe":recipe,"protected_health":protected,
                 "source_hashes":{k:digest(v) for k,v in self.code.items()},
                 "rollback":"restore exact predecessor receipt and files; retain verified engineering pause; native revalidation only"}
-        if self.predecessor in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE):
+        if self.predecessor in SCHEDULED_BASELINES:
             plan.update(worker_replacements=sorted(self.changed_workers),
                         required_scheduled_cycles=2, quarantine_existing_todo_identity="TODO-OPS-013",
                         conflicted_issues=[1459,1500],preserve_existing_issue_authority=True)
@@ -1261,12 +1752,30 @@ class PipelineSuccessor(NativeAdapter):
                         retry_only_on_contention=True,legacy_release_guard_immediate=True,
                         preserve_predecessor_acceptance_requirements=True,
                         supersede_pending_only_before_first_worker_execution=True)
-        if self.predecessor == SOURCE_INTEGRATION_BASELINE:
+        if self.predecessor in SOURCE_POLICY_BASELINES:
             plan.update(source_integration_policy="independent_source_v1",
                         production_transaction_mutex_preserved=True,
                         exact_native_release_records_unchanged=True,
                         source_merges_not_rolled_back=True,
                         release_gate_retry_budget_seconds=20)
+        if self.predecessor == CLOSED_LOOP_BASELINE:
+            plan.update(closed_loop_source_review=review_closed_loop_delta(
+                lambda *args: self.p["git"](REPO,*args),self.candidate),
+                engineering_progress_detector_required=True)
+        if self.predecessor == BREAKER_CUSTODY_BASELINE:
+            plan.update(breaker_custody_source_review=review_breaker_custody_delta(
+                lambda *args: self.p["git"](REPO,*args),self.candidate),
+                breaker_policy_source=self.verify_breaker_policy_source(),
+                engineering_progress_detector_required=True)
+        if self.predecessor == WATCHDOG_RECOVERY_BASELINE:
+            plan.update(breaker_policy_source=self.verify_breaker_policy_source(),
+                        engineering_progress_detector_required=True,
+                        failed_unit_reset_scope=list(SERVICES),
+                        precutover_exact_faults=list(WATCHDOG_RECOVERY_FAULTS),
+                        derived_reporter_exit2_only={
+                            "unit":DRIFT_REPORTER_UNIT,"pins":DRIFT_REPORTER_PINS,
+                            "properties":DRIFT_REPORTER_EXIT2},
+                        local_reasoning_runtime_activation=False)
         return plan,before,after
 
     def persist(self):
@@ -1342,6 +1851,9 @@ class PipelineSuccessor(NativeAdapter):
             need(snapshot(path) == (None if resumed and path == PAUSE else value),
                  "PIPELINE_INSTALLED_FILE_CHANGED:"+path.name)
         need(self.protected() == self.plan["protected_health"],"PIPELINE_PROTECTED_STATE_CHANGED")
+        if self.predecessor in CUSTODY_BASELINES:
+            need(self.verify_breaker_policy_source() == self.plan["breaker_policy_source"],
+                 "BREAKER_CUSTODY_APPROVED_POLICY_SOURCE_CHANGED")
 
     def namespace_probe(self):
         # No real work item is run. The exact system-manager sandbox is tested
@@ -1423,12 +1935,20 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
             again,self.before,self.after = self.inspect()
             need(again == plan,"PIPELINE_APPROVED_SCOPE_CHANGED")
             self.persist()
+        fault_recovery = self.predecessor == WATCHDOG_RECOVERY_BASELINE
+        mutation_started = not fault_recovery
         try:
-            with self.n["locks"](): self.pause()
-            self.quiesce((SERVICES[0],))
+            if not fault_recovery:
+                with self.n["locks"](): self.pause()
+                self.quiesce((SERVICES[0],))
             with self.n["locks"]():
-                need(self.protected() == plan["protected_health"],"PIPELINE_PRECUTOVER_HEALTH_CHANGED")
-                self.read_guard(self.predecessor)
+                protected = (self.protected(failed_manager_recovery=True)
+                             if fault_recovery else self.protected())
+                need(protected == plan["protected_health"],"PIPELINE_PRECUTOVER_HEALTH_CHANGED")
+                if fault_recovery:
+                    self.attest_failed_predecessor()
+                else:
+                    self.read_guard(self.predecessor)
                 if self.predecessor == RELEASE_RETRY_BASELINE:
                     history=STATE/self.predecessor
                     activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
@@ -1437,17 +1957,47 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                     history=STATE/self.predecessor
                     activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
                     self.verify_source_integration_predecessor(history,activated)
+                if self.predecessor in CLOSED_LOOP_BASELINES:
+                    history=STATE/self.predecessor
+                    activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
+                    self.verify_closed_loop_predecessor(history,activated)
+                    if self.predecessor in CUSTODY_BASELINES:
+                        need(self.verify_breaker_policy_source() == plan["breaker_policy_source"],
+                             "BREAKER_CUSTODY_APPROVED_POLICY_SOURCE_CHANGED")
                 for path,old in self.before.items():
-                    need(snapshot(path) == (self.pause_image if path == PAUSE else old),
+                    need(snapshot(path) == (self.pause_image if path == PAUSE and not fault_recovery else old),
                          "PIPELINE_PRECUTOVER_FILE_CHANGED")
+                if fault_recovery:
+                    drift = json.loads(self.p["read"](MANAGER/"production-drift.json",0,0o600))
+                    control = json.loads(self.p["read"](MANAGER/"production-control-state.json",0,0o600))
+                    verify_failed_manager_drift(control,drift,drift)
+                    evidence = {name:self.properties(name,False) for name in SERVICES}
+                    need(all(row.get("ActiveState") == "failed" and row.get("MainPID") == "0"
+                             for row in evidence.values()),"WATCHDOG_RECOVERY_NOT_QUIESCENT")
+                    self.n["write"](self.directory/"precutover-fault.json",canon({
+                        "scope_sha256":sha,"observed_at":drift["observed_at"],
+                        "problems":drift["problems"],"breaker":control["circuit_breaker"],
+                        "services":evidence,"production_authority":False,
+                    }),0o400)
+                    mutation_started = True
                 self.systemctl(["stop",*TIMERS])
-                self.quiesce((SERVICES[1],),45)
+                if fault_recovery:
+                    self.pause()
+                    self.quiesce(SERVICES,45,rollback=True)
+                else:
+                    self.quiesce((SERVICES[1],),45)
                 self.release.parent.mkdir(mode=0o755); self.n["sync_dir"](self.release.parent.parent)
                 self.release.mkdir(mode=0o755); self.n["sync_dir"](self.release.parent)
                 for path,value in self.after.items():
                     if path not in (PAUSE,RECEIPT): self.change(path,self.before[path],value)
                 self.change(RECEIPT,self.before[RECEIPT],self.after[RECEIPT])
                 self.systemctl(["daemon-reload"])
+                if fault_recovery:
+                    for service in SERVICES:
+                        props = self.properties(service,False)
+                        need(props.get("ActiveState") == "failed" and props.get("MainPID") == "0",
+                             "WATCHDOG_RECOVERY_FAILED_STATE_CHANGED")
+                    self.systemctl(["reset-failed",*SERVICES])
                 self.systemctl(["start",*TIMERS])
                 self.read_guard(self.candidate)
                 self.namespace_probe()
@@ -1465,7 +2015,12 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                     "status":"resumed_pending_scheduled_acceptance","scope_sha256":sha,
                     "at":stamp(),"production_authority":False}),0o400)
         except BaseException:
-            self.restore()
+            if mutation_started:
+                self.restore()
+            elif fault_recovery:
+                self.n["write"](self.directory/"rollback.json",canon({
+                    "status":"no_mutation_after_durable_receipt",
+                    "scope_sha256":sha,"at":stamp(),"production_authority":False}),0o400)
             raise
         print("ENGINEERING_PIPELINE_SUCCESSOR_RESUMED_PENDING_SCHEDULED_ACCEPTANCE")
 
@@ -1508,18 +2063,29 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                 and watchdog.get("ExecMainStatus")=="0"):
             print("PIPELINE_SCHEDULED_WATCHDOG_ACCEPTANCE_PENDING")
             return False
+        if self.predecessor in CLOSED_LOOP_BASELINES:
+            observed=json.loads(self.p["read"](MANAGER.parent/"self-heal/state.json",1000,0o600))
+            probe=observed.get("engineering_progress")
+            try:
+                probe_at=datetime.fromisoformat(observed.get("updated_at") or observed.get("last_verified_at") or observed.get("verified_at"))
+            except (ValueError,TypeError):
+                probe_at=datetime.fromtimestamp(0,timezone.utc)
+            if not (probe_at>=start and isinstance(probe,dict)
+                    and probe.get("probe_status")=="completed"):
+                print("CLOSED_LOOP_FRESH_WATCHDOG_PROBE_PENDING")
+                return False
         # Preserve the original native timer/authority/conflict/peer checks.
         return super().verify_activation()
 
     def record_scheduled_acceptance(self,sha,evidence,controller,pipeline,timer_at):
-        if self.predecessor not in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE):
+        if self.predecessor not in SCHEDULED_BASELINES:
             return super().record_scheduled_acceptance(sha,evidence,controller,pipeline,timer_at)
-        if self.predecessor in (RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE):
+        if self.predecessor in (RELEASE_RETRY_BASELINE, *SOURCE_POLICY_BASELINES):
             need(controller.get("release_gate_status")=="allowed",
                  "RELEASE_RETRY_CONTROLLER_ADMISSION_NOT_VERIFIED")
             evidence={**evidence,"bounded_release_retry_policy_verified":True}
         state_dir=PAUSE.parent
-        if self.predecessor == SOURCE_INTEGRATION_BASELINE:
+        if self.predecessor in SOURCE_POLICY_BASELINES:
             queue=json.loads(self.p["read"](state_dir/"pmv3-integration-queue-state.json",1000,0o600))
             view=controller.get("integration_queue") or {}
             backlog=queue.get("source_backlog") or {}
@@ -1538,6 +2104,13 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                  "SOURCE_INTEGRATION_SCHEDULED_POLICY_NOT_VERIFIED")
             evidence={**evidence,"independent_source_policy_verified":True,
                       "source_backlog_preserved":True,"native_production_unchanged":True}
+        if self.predecessor in CUSTODY_BASELINES:
+            ledger=json.loads(self.p["read"](state_dir/"release-breaker-recovery-state.json",1000,0o600))
+            route=verify_scheduled_breaker_policy_route(pipeline,ledger)
+            need(self.verify_breaker_policy_source() == BREAKER_POLICY_SOURCE,
+                 "BREAKER_CUSTODY_SCHEDULED_POLICY_SOURCE_CHANGED")
+            evidence={**evidence,"breaker_policy_route_verified":True,
+                      "breaker_policy_source":route}
         intake=json.loads(self.p["read"](state_dir/"todo-intake-state.json",1000,0o600))
         supervisor=json.loads(self.p["read"](state_dir/"engineering-supervisor-state.json",1000,0o600))
         conflict=(intake.get("identity_conflicts") or {}).get("TODO-OPS-013",{})
@@ -1640,6 +2213,9 @@ def main():
     successor.add_argument("--todo-conflict-successor",action="store_true")
     successor.add_argument("--release-retry-successor",action="store_true")
     successor.add_argument("--source-integration-successor",action="store_true")
+    successor.add_argument("--closed-loop-successor",action="store_true")
+    successor.add_argument("--breaker-custody-successor",action="store_true")
+    successor.add_argument("--watchdog-recovery-successor",action="store_true")
     choice=cli.add_mutually_exclusive_group()
     choice.add_argument("--apply", action="store_true")
     choice.add_argument("--recover",action="store_true")
@@ -1649,9 +2225,17 @@ def main():
     cli.add_argument("--scope-sha")
     a = cli.parse_args()
     n,p = native()
-    if a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor or a.source_integration_successor:
+    if (a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor
+            or a.source_integration_successor or a.closed_loop_successor or a.breaker_custody_successor
+            or a.watchdog_recovery_successor):
         need(not a.resume,"PIPELINE_RESUME_REQUIRES_VERIFIED_TRANSACTION")
-        if a.source_integration_successor:
+        if a.watchdog_recovery_successor:
+            predecessor,files,supporting=WATCHDOG_RECOVERY_BASELINE,WATCHDOG_RECOVERY_SCOPE_FILES,WATCHDOG_RECOVERY_SUPPORTING_FILES
+        elif a.breaker_custody_successor:
+            predecessor,files,supporting=BREAKER_CUSTODY_BASELINE,BREAKER_CUSTODY_SCOPE_FILES,BREAKER_CUSTODY_SUPPORTING_FILES
+        elif a.closed_loop_successor:
+            predecessor,files,supporting=CLOSED_LOOP_BASELINE,CLOSED_LOOP_SCOPE_FILES,CLOSED_LOOP_SUPPORTING_FILES
+        elif a.source_integration_successor:
             predecessor,files,supporting=SOURCE_INTEGRATION_BASELINE,SOURCE_INTEGRATION_SCOPE_FILES,SOURCE_INTEGRATION_SUPPORTING_FILES
         elif a.release_retry_successor:
             predecessor,files,supporting=RELEASE_RETRY_BASELINE,RELEASE_RETRY_SCOPE_FILES,RELEASE_RETRY_SUPPORTING_FILES

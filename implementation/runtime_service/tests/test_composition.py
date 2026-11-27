@@ -1117,3 +1117,17 @@ def test_group_admin_default_composition_has_no_owner_group_grants(tmp_path, mon
             GRANT_PREFIX+name.replace(".","-")
         ) is None for name in ("identity.group.create","identity.group.member.add")
     )
+
+
+
+def test_paid_ai_routes_are_denied_before_runtime_bootstrap(tmp_path):
+    import pytest
+    for flags in (
+        {"hosted_semantics_enabled": True},
+        {"hosted_conversation_enabled": True},
+        {"hosted_semantics_enabled": True, "hosted_conversation_enabled": True},
+    ):
+        settings = replace(_settings(tmp_path), **flags)
+        with pytest.raises(ValueError, match="PAID_AI_API_PROHIBITED"):
+            build_runtime_application(settings)
+        assert not settings.authority_db.exists()

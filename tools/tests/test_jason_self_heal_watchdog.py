@@ -907,3 +907,75 @@ def test_repeated_docker_probe_timeout_persists_inconclusive_failure(monkeypatch
     assert data['state'] != 'recovered'
     assert data['failures'] == ['docker_probe_timeout']
     assert data['last_recovery_actions'] == []
+
+
+def test_engineering_progress_requires_fresh_completed_evidence(tmp_path):
+    root = tmp_path / "self-heal"
+    spool = tmp_path / "support-repair"
+    root.mkdir()
+    spool.mkdir()
+    now_at = datetime(2026, 11, 26, 19, 46, tzinfo=timezone.utc)
+    def write(name, payload):
+        (spool / name).write_text(json.dumps(payload))
+    critical = {"reason": "critical_support_stalled", "blocked_count": 1, "unadmitted_count": 0,
+                "blocked_items": ["SUPPORT-OPS-054"], "unadmitted_items": []}
+    pipeline = {"status": "degraded", "started_at": (now_at - timedelta(minutes=2)).isoformat(),
+                "finished_at": now_at.isoformat(), "critical_support_blocker": critical,
+                "failed_work_stages": []}
+    supervisor = {"status": "degraded", "observed_at": now_at.isoformat(),
+                  "reason": "external_or_governed_gate", "active": 0, "unchanged_cycles": 153,
+                  "support_blocker_routes": {"SUPPORT-OPS-054": {"category": "recoverable_source"}}}
+    write("engineering-pipeline-state.json", pipeline)
+    write("engineering-supervisor-state.json", supervisor)
+    failures, evidence = module.engineering_progress_failures(root, observed_at=now_at)
+    assert failures == ["engineering_progress_critical_support_stalled"]
+    assert evidence["critical_support_ids"] == ["SUPPORT-OPS-054"]
+    (root / "state.json").write_text(json.dumps({"failures": failures}))
+    write("engineering-pipeline-state.json", {"status": "running", "started_at": now_at.isoformat()})
+    assert module.engineering_progress_failures(root, observed_at=now_at)[0] == failures
+    write("engineering-pipeline-state.json", pipeline)
+    supervisor["support_blocker_routes"]["SUPPORT-OPS-054"]["category"] = "human_authority"
+    write("engineering-supervisor-state.json", supervisor)
+    assert module.engineering_progress_failures(root, observed_at=now_at)[0] == []
+    assert module.engineering_progress_failures(root, observed_at=now_at + timedelta(minutes=16))[0] == [
+        "engineering_progress_evidence_unknown"]
+    write("engineering-pipeline-state.json", {"status": "running",
+          "started_at": (now_at - timedelta(minutes=21)).isoformat()})
+    assert module.engineering_progress_failures(root, observed_at=now_at)[0] == [
+        "engineering_progress_evidence_stale"]
+    (spool / "pmv3-engineering-owner-pause.json").write_text("{}")
+    assert module.engineering_progress_failures(root, observed_at=now_at)[0] == failures
+
+def test_exact_git_status_timeout_is_inconclusive_and_nonmutating(monkeypatch,tmp_path):
+    import subprocess
+    import pytest
+    command=["git","--no-optional-locks","-C","/approved/engineering","status","--porcelain"]
+    def timeout(root):
+        raise subprocess.TimeoutExpired(command,10)
+    monkeypatch.setattr(module,"detect",timeout)
+    failures,evidence=module.bounded_detect(tmp_path)
+    assert failures==["production_convergence_engineering_source_probe_timeout"]
+    assert evidence["probe_status"]=="inconclusive"
+    assert evidence["probe_command"]==["git","status"]
+    monkeypatch.setattr(module,"non_disruptive_release_guard",
+                        lambda:pytest.fail("uncertain source must not acquire mutation gate"))
+    assert module.bounded_recovery(failures+["container_down:jason-runtime"])==[]
+    assert module.bounded_recovery(["production_convergence_engineering_manager_successor_invalid",
+                                     "mcp_status_functional_failure"])==[]
+
+
+def test_git_probe_timeout_retries_and_persists_without_unit_failure(monkeypatch,tmp_path):
+    import subprocess
+    import sys
+    command=["git","-C","/approved/engineering","status","--porcelain"]
+    def timeout(root):
+        raise subprocess.TimeoutExpired(command,10)
+    monkeypatch.setattr(module,"detect",timeout)
+    monkeypatch.setattr(module,"request_engineering_worker",
+                        lambda:"deferred_engineering_manager_successor_invalid")
+    monkeypatch.setattr(sys,"argv",["watchdog","--root",str(tmp_path)])
+    assert module.main()==0
+    state=json.loads((tmp_path/"state.json").read_text())
+    assert state["state"] not in ("healthy","recovered")
+    assert state["last_recovery_actions"]==[]
+    assert state["failures"]==["production_convergence_engineering_source_probe_timeout"]

@@ -332,3 +332,329 @@ def test_source_integration_native_cycles_require_policy_and_unchanged_productio
     assert result["independent_source_policy_verified"] is True
     assert result["native_production_unchanged"] is True
     assert result["two_distinct_scheduled_cycles_verified"] is True
+
+
+@pytest.fixture
+def reviewed_metadata():
+    old = {"revision":"a"*40,"status":"ci_passed","workflow":"Validate Jason",
+           "workflow_run_id":"100","workflow_url":"https://github.com/al-teamaot-com/jason/actions/runs/100",
+           "observed_at":"2026-11-25T17:47:15+00:00"}
+    new = dict(old, revision="b"*40, workflow_run_id="101",
+               workflow_url="https://github.com/al-teamaot-com/jason/actions/runs/101",
+               observed_at="2026-11-26T05:00:09+00:00")
+    def doc(v):
+        return {"schema_version":"1.0","production":{"revision":m.LKG},
+                "validated_source":v}
+    def markdown(v):
+        return ("# State\n\n## Latest validated source\n\n"
+                "- Revision: `"+v["revision"]+"`\n"
+                "- Status: `ci_passed`\n- Workflow: `Validate Jason`\n"
+                "- Workflow run: `"+v["workflow_run_id"]+"`\n"
+                "- Observed: `"+v["observed_at"]+"`\n\n"
+                "## Latest production alignment\n\nUnchanged\n")
+    return doc(old), doc(new), markdown(old), markdown(new)
+
+
+@pytest.mark.parametrize("fault", [None, "extra_path", "one_record", "other_baseline",
+                                    "production", "markdown", "bad_url", "symlink"])
+def test_reviewed_source_delta_metadata_only(reviewed_metadata, fault):
+    old, new, old_md, new_md = reviewed_metadata
+    baseline = m.SOURCE_INTEGRATION_BASELINE
+    candidate = "c"*40
+    changed = set(m.SOURCE_INTEGRATION_SCOPE_FILES) | m.SOURCE_METADATA_PATHS
+    if fault == "extra_path": changed.add("tools/foreign.py")
+    if fault == "one_record": changed.remove("docs/control/AUTOMATED-CHANGE-STATE.md")
+    if fault == "other_baseline": baseline = m.RELEASE_RETRY_BASELINE
+    if fault == "production": new["production"]["revision"] = candidate
+    if fault == "markdown": new_md += "Unreviewed text\n"
+    if fault == "bad_url": new["validated_source"]["workflow_url"] = "https://invalid.example/"
+    def git(*args):
+        if args[0] == "diff": return "\n".join(sorted(changed)).encode()
+        if args[0] == "ls-tree":
+            mode = "120000" if fault == "symlink" and args[1] == candidate else "100644"
+            return (mode + " blob " + "d"*40 + "\t" + args[-1]+"\n").encode()
+        if args[0] == "show":
+            rev, path = args[1].split(":", 1)
+            if path.endswith(".json"):
+                return json.dumps(old if rev == baseline else new).encode()
+            return (old_md if rev == baseline else new_md).encode()
+        raise AssertionError(args)
+    if fault is None:
+        m.reviewed_source_delta(git, baseline, candidate, m.SOURCE_INTEGRATION_SCOPE_FILES)
+    else:
+        with pytest.raises(PermissionError):
+            m.reviewed_source_delta(git, baseline, candidate, m.SOURCE_INTEGRATION_SCOPE_FILES)
+
+
+def test_metadata_exception_does_not_remove_exact_current_main_ci_gate():
+    import inspect
+    source = inspect.getsource(m.source_review)
+    assert "ci[\"protected_main\"] == candidate" in source
+    assert "ci[\"required_ci_passed\"] is True" in source
+    assert "CURRENT_MAIN_CI_NOT_EXACT" in source
+    assert "reviewed_source_delta(git, baseline, candidate, source_files)" in source
+
+
+def closed_loop_plan():
+    p = source_integration_plan()
+    p.update(predecessor_candidate_sha=m.CLOSED_LOOP_BASELINE,
+             worker_replacements=sorted(m.CLOSED_LOOP_WORKERS),
+             engineering_progress_detector_required=True,
+             closed_loop_source_review={
+                 "scope_commit":"7"*40,"scope_parent":"8"*40,
+                 "excluded_source_paths":["docs/unrelated.md"],
+             })
+    return p
+
+
+@pytest.mark.parametrize("key,value", [
+    ("worker_replacements",["jason_self_heal_watchdog.py"]),
+    ("production_authority",True),
+    ("provider_writes",True),
+    ("runtime_or_mcp_restart_allowed",True),
+    ("freeze_or_hold_change",True),
+    ("engineering_progress_detector_required",False),
+    ("required_scheduled_cycles",1),
+    ("closed_loop_source_review",None),
+    ("closed_loop_source_review",{"scope_commit":"7"*40,"scope_parent":"8"*40,
+                                  "excluded_source_paths":["tools/engineering_supervisor.py"]}),
+])
+def test_closed_loop_scope_rejects_expansion_and_missing_evidence(key,value):
+    p=closed_loop_plan()
+    assert m.pipeline_scope_sha(p)==m.digest(m.canon(p))
+    p[key]=value
+    with pytest.raises(PermissionError):
+        m.pipeline_scope_sha(p)
+
+
+def test_closed_loop_targets_preserve_existing_manager_and_pin_resolver():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.CLOSED_LOOP_BASELINE
+    a.changed_workers=m.CLOSED_LOOP_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("a"*40)/"tools"
+    targets=a.approved_targets()
+    assert {m.LIB/name for name in m.CLOSED_LOOP_WORKERS} <= targets
+    assert {x.name for x in targets if x.parent==a.release} == (
+        set(g.ARTIFACTS)|set(g.CLOSED_LOOP_PIPELINE_ARTIFACTS))
+    assert not any(x in targets for x in (m.POLICY,m.ENV))
+    assert not any(x.name in ("production-deployment-freeze","auto-promotion-incident-hold",
+                              "production-control-state.json") for x in targets)
+
+
+def test_closed_loop_requires_accepted_independent_source_predecessor(tmp_path):
+    a=object.__new__(m.PipelineSuccessor)
+    a.n={"read":lambda p,*args:p.read_bytes()}
+    activation={"at":"2026-11-26T19:00:00+00:00","scope_sha256":"1"*64}
+    accepted={"status":"scheduled_engineering_acceptance_verified","scope_sha256":"1"*64,
+              "evidence":{"two_distinct_scheduled_cycles_verified":True,
+                          "todo_identity_quarantined":True,
+                          "production_authority":False,
+                          "bounded_release_retry_policy_verified":True}}
+    path=tmp_path/"scheduled-acceptance.json"
+    path.write_bytes(m.canon(accepted))
+    with pytest.raises(PermissionError,match="PREDECESSOR_SOURCE_POLICY_NOT_ACCEPTED"):
+        a.verify_closed_loop_predecessor(tmp_path,activation)
+    accepted["evidence"]["independent_source_policy_verified"]=True
+    path.write_bytes(m.canon(accepted))
+    a.verify_closed_loop_predecessor(tmp_path,activation)
+
+
+def test_closed_loop_exact_git_scope_and_intervening_changes(tmp_path,monkeypatch):
+    import subprocess
+    repo=tmp_path/"repo"
+    repo.mkdir()
+    def git(*args):
+        return subprocess.check_output(["git","-C",str(repo),*args],stderr=subprocess.PIPE)
+    git("init","-q")
+    git("config","user.name","Isolated Test")
+    git("config","user.email","test@example.invalid")
+    def commit(message, changes):
+        for name,body in changes.items():
+            path=repo/name
+            path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text(body)
+        git("add","--all")
+        git("commit","-qm",message)
+        return git("rev-parse","HEAD").decode().strip()
+    baseline=commit("base",{"tools/pmv4_e_engineering_manager_install.py":"old",
+                            "tools/engineering_supervisor.py":"old",
+                            "tools/pmv3_integration_queue.py":"old"})
+    monkeypatch.setattr(m,"CLOSED_LOOP_BASELINE",baseline)
+    scope={"tools/pmv4_e_engineering_manager_install.py","tools/engineering_supervisor.py"}
+    monkeypatch.setattr(m,"CLOSED_LOOP_SCOPE_FILES",scope)
+    monkeypatch.setattr(m,"CLOSED_LOOP_PROTECTED_PATHS",scope|{"tools/pmv3_integration_queue.py"})
+    parent=commit("independent source only",{"docs/unrelated.md":"one"})
+    anchor=commit("exact scoped source",{
+        "tools/pmv4_e_engineering_manager_install.py":"new",
+        "tools/engineering_supervisor.py":"new"})
+    candidate=commit("additional source only",{"docs/other.md":"two"})
+    assert m.review_closed_loop_delta(git,candidate)=={
+        "scope_commit":anchor,"scope_parent":parent,
+        "excluded_source_paths":["docs/other.md","docs/unrelated.md"]}
+    changed=commit("protected control change",{"tools/pmv3_integration_queue.py":"new"})
+    with pytest.raises(PermissionError,match="INTERVENING_PROTECTED_SOURCE_CHANGE"):
+        m.review_closed_loop_delta(git,changed)
+    reverted=commit("revert protected control",{"tools/pmv3_integration_queue.py":"old"})
+    with pytest.raises(PermissionError,match="INTERVENING_PROTECTED_SOURCE_CHANGE"):
+        m.review_closed_loop_delta(git,reverted)
+
+
+def breaker_custody_plan():
+    p = source_integration_plan()
+    p.update(predecessor_candidate_sha=m.BREAKER_CUSTODY_BASELINE,
+             worker_replacements=sorted(m.BREAKER_CUSTODY_WORKERS),
+             engineering_progress_detector_required=True,
+             breaker_custody_source_review={
+                 "scope_commit":"7"*40,"scope_parent":"8"*40,
+                 "excluded_source_paths":["docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md"],
+             },
+             breaker_policy_source=dict(m.BREAKER_POLICY_SOURCE))
+    return p
+
+
+@pytest.mark.parametrize("key,value", [
+    ("worker_replacements",["release_manager_host_runner.py"]),
+    ("provider_writes",True), ("production_authority",True),
+    ("freeze_or_hold_change",True), ("runtime_or_mcp_restart_allowed",True),
+    ("engineering_progress_detector_required",False),
+    ("required_scheduled_cycles",1),
+    ("breaker_policy_source",{"repository":"/tmp/untrusted","revision":"0"*40}),
+    ("breaker_custody_source_review",{"scope_commit":"7"*40,"scope_parent":"8"*40,
+                                    "excluded_source_paths":["tools/pmv3_integration_queue.py"]}),
+])
+def test_breaker_custody_scope_preserves_existing_authority(key,value):
+    p=breaker_custody_plan()
+    assert m.pipeline_scope_sha(p)==m.digest(m.canon(p))
+    p[key]=value
+    with pytest.raises(PermissionError):
+        m.pipeline_scope_sha(p)
+
+
+def test_breaker_custody_only_replaces_pipeline_and_preserves_resolver_pin():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.BREAKER_CUSTODY_BASELINE
+    a.changed_workers=m.BREAKER_CUSTODY_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("a"*40)/"tools"
+    targets=a.approved_targets()
+    assert {p.name for p in targets if p.parent==m.LIB}=={"engineering_pipeline.py"}
+    assert {x.name for x in targets if x.parent==a.release} == (
+        set(g.ARTIFACTS)|set(g.CLOSED_LOOP_PIPELINE_ARTIFACTS))
+    assert m.POLICY not in targets and m.ENV not in targets
+
+
+@pytest.mark.parametrize("fault", ["wrong_repo","wrong_revision","stale","open","pending","missing","failed"])
+def test_breaker_scheduled_route_requires_fresh_native_ledger(fault):
+    pipeline={"started_at":"2026-11-27T06:00:00+00:00",
+              "finished_at":"2026-11-27T06:01:00+00:00",
+              "stages":{"release_breaker_recovery":{
+                  "status":"succeeded","policy_repository":m.BREAKER_POLICY_SOURCE["repository"]}}}
+    ledger={"observed_at":"2026-11-27T06:01:00.100000+00:00",
+            "status":"already_closed","lkg_revision":m.LKG,
+            "breaker_state":"closed","next_action":"none"}
+    assert m.verify_scheduled_breaker_policy_route(pipeline,ledger)==m.BREAKER_POLICY_SOURCE
+    if fault=="wrong_repo":pipeline["stages"]["release_breaker_recovery"]["policy_repository"]="/tmp/other"
+    elif fault=="wrong_revision":ledger["lkg_revision"]="0"*40
+    elif fault=="stale":ledger["observed_at"]="2026-11-27T05:59:59+00:00"
+    elif fault=="open":ledger["breaker_state"]="open"
+    elif fault=="pending":ledger["status"]="pending_root_verification"
+    elif fault=="failed":pipeline["stages"]["release_breaker_recovery"]["status"]="failed"
+    else:ledger.pop("observed_at")
+    with pytest.raises(PermissionError,match="SCHEDULED_POLICY_ROUTE_NOT_VERIFIED"):
+        m.verify_scheduled_breaker_policy_route(pipeline,ledger)
+
+def watchdog_recovery_plan():
+    p=breaker_custody_plan()
+    p.pop("breaker_custody_source_review",None)
+    p.update(predecessor_candidate_sha=m.WATCHDOG_RECOVERY_BASELINE,
+             worker_replacements=sorted(m.WATCHDOG_RECOVERY_WORKERS),
+             failed_unit_reset_scope=list(m.SERVICES),
+             precutover_exact_faults=list(m.WATCHDOG_RECOVERY_FAULTS),
+             derived_reporter_exit2_only={"unit":m.DRIFT_REPORTER_UNIT,
+                                         "pins":m.DRIFT_REPORTER_PINS,
+                                         "properties":m.DRIFT_REPORTER_EXIT2},
+             local_reasoning_runtime_activation=False)
+    return p
+
+
+@pytest.mark.parametrize("key,value", [
+    ("failed_unit_reset_scope",["jason-runtime.service"]),
+    ("failed_unit_reset_scope",list(m.SERVICES)+["extra.service"]),
+    ("precutover_exact_faults",[]),
+    ("derived_reporter_exit2_only",{}),
+    ("local_reasoning_runtime_activation",True),
+    ("runtime_or_mcp_restart_allowed",True),
+    ("production_authority",True),
+    ("provider_writes",True),
+    ("freeze_or_hold_change",True),
+    ("worker_replacements",["jason_self_heal_watchdog.py"]),
+])
+def test_watchdog_recovery_exact_scope_denies_expansion(key,value):
+    p=watchdog_recovery_plan()
+    assert len(m.pipeline_scope_sha(p))==64
+    p[key]=value
+    with pytest.raises(PermissionError):m.pipeline_scope_sha(p)
+
+
+def test_failed_manager_preflight_rejects_unrelated_duplicate_or_stale_drift():
+    from copy import deepcopy
+    from datetime import datetime,timezone,timedelta
+    control={"circuit_breaker":{"state":"open","source":"production_drift_watchdog",
+             "reason":"continuous_production_drift_detected","problem_count":2,
+             "problem_kinds":["failed_system_unit"]}}
+    drift={"status":"drift_detected","problems":deepcopy(m.WATCHDOG_RECOVERY_FAULTS),
+           "observed_at":datetime.now(timezone.utc).isoformat()}
+    assert m.verify_failed_manager_drift(control,drift,deepcopy(drift))==m.WATCHDOG_RECOVERY_FAULTS
+    for changed in ([],drift["problems"]+[{"kind":"failed_system_unit","state":"failed","unit":"openbao.service"}],
+                    [drift["problems"][0]]*2):
+        bad={**drift,"problems":changed}
+        with pytest.raises(PermissionError):m.verify_failed_manager_drift(control,drift,bad)
+    bad={**drift,"observed_at":(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()}
+    with pytest.raises(PermissionError):m.verify_failed_manager_drift(control,bad,drift)
+    bad=deepcopy(control);bad["circuit_breaker"]["reason"]="manual_hold"
+    with pytest.raises(PermissionError):m.verify_failed_manager_drift(bad,drift,drift)
+
+
+def test_watchdog_recovery_root_target_set_excludes_runtime_and_other_units():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.WATCHDOG_RECOVERY_BASELINE
+    a.changed_workers=m.WATCHDOG_RECOVERY_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("f"*40)/"tools"
+    targets=a.approved_targets()
+    assert all(m.LIB/name in targets for name in m.WATCHDOG_RECOVERY_WORKERS)
+    assert m.MANAGER_GUARD in targets and m.RECEIPT in targets
+    assert m.POLICY not in targets and m.ENV not in targets
+    assert all(not str(x).startswith("/opt/jason/") for x in targets)
+    assert not any(x.name in {"jason-runtime.service","jason-pmv4-ticket-core.service"} for x in targets)
+
+
+def test_failed_manager_reporter_exit2_is_only_a_verified_derived_observation():
+    from copy import deepcopy
+    from datetime import datetime,timezone
+    control={"circuit_breaker":{"state":"open","source":"production_drift_watchdog",
+             "reason":"continuous_production_drift_detected","problem_count":2,
+             "problem_kinds":["failed_system_unit"]}}
+    drift={"status":"drift_detected","problems":deepcopy(m.WATCHDOG_RECOVERY_FAULTS),
+           "observed_at":datetime.now(timezone.utc).isoformat()}
+    evaluated={**drift,"problems":[*drift["problems"],m.DRIFT_REPORTER_FAULT]}
+    assert m.verify_failed_manager_drift(control,drift,evaluated,
+        reporter=m.DRIFT_REPORTER_EXIT2)==m.WATCHDOG_RECOVERY_FAULTS
+    for key,value in (("ExecMainStatus","1"),("MainPID","123"),
+                      ("Result","timeout"),("DropInPaths","/tmp/foreign")):
+        with pytest.raises(PermissionError):
+            m.verify_failed_manager_drift(control,drift,evaluated,
+                reporter={**m.DRIFT_REPORTER_EXIT2,key:value})
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,drift,evaluated)
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,evaluated,evaluated,
+            reporter=m.DRIFT_REPORTER_EXIT2)
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,drift,
+            {**evaluated,"problems":[*evaluated["problems"],m.DRIFT_REPORTER_FAULT]},
+            reporter=m.DRIFT_REPORTER_EXIT2)

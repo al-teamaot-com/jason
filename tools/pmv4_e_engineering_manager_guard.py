@@ -46,6 +46,11 @@ PIPELINE_ARTIFACTS = frozenset({
     "release_manager_gate.py", "pmv3_worker_release_gate.py",
     "change_integration_gate.py", "documentation_impact_gate.py",
 })
+CLOSED_LOOP_PREDECESSOR = "9b69aa8e2cdc7c9a037d044a5ac9d00cfcc2870f"
+BREAKER_CUSTODY_PREDECESSOR = "1c028724328e0a758a59f7a58478e242317b84b1"
+WATCHDOG_RECOVERY_PREDECESSOR = "c4e78d700b7ac347e9dee50c750d5de99780e2a2"
+LOCAL_REASONING_OWNER_WORKER_SHA256 = "4d72d2db1ac01a37f20e6624cb11bd632eaf4d63acf61e2612bb549b7e415029"
+CLOSED_LOOP_PIPELINE_ARTIFACTS = PIPELINE_ARTIFACTS | {"issue_resolution_engine.py"}
 PIPELINE_SOURCE = Path("/home/al/.local/lib/jason/engineering-worker-source")
 PIPELINE_SOURCE_SHA = "1a7e7c1b03fce7dffa3ac6aab26480d614327e69"
 PIPELINE_WRITES = (
@@ -112,7 +117,11 @@ def validate_receipt(row):
              and exact(row.get("predecessor_receipt_sha256"), 64)
              and row.get("engineering_source_sha") == PIPELINE_SOURCE_SHA
              and isinstance(row.get("pipeline_artifact_sha256"), dict)
-             and set(row["pipeline_artifact_sha256"]) == PIPELINE_ARTIFACTS
+             and set(row["pipeline_artifact_sha256"]) == (
+                 CLOSED_LOOP_PIPELINE_ARTIFACTS
+                 if row.get("predecessor_candidate_sha") in (
+                     CLOSED_LOOP_PREDECESSOR, BREAKER_CUSTODY_PREDECESSOR, WATCHDOG_RECOVERY_PREDECESSOR)
+                 else PIPELINE_ARTIFACTS)
              and all(exact(x, 64) for x in row["pipeline_artifact_sha256"].values()),
              "PIPELINE_SUCCESSOR_RECEIPT_INVALID")
     need(set(row) == fields and row["schema_version"] in ("1.0", "1.1")
@@ -126,7 +135,12 @@ def validate_receipt(row):
     for field, keys in (("unit_sha256", UNITS), ("artifact_sha256", ARTIFACTS)):
         need(isinstance(row[field], dict) and set(row[field]) == set(keys)
              and all(exact(x, 64) for x in row[field].values()), "EXACT_HASH_SET")
-    need(all(row["artifact_sha256"][name] == pin for name, pin in ARTIFACTS.items() if pin),
+    pins = dict(ARTIFACTS)
+    # This one reviewed successor installs the already merged local
+    # reasoning owner worker. All historical receipts retain their old pin.
+    if successor and row["predecessor_candidate_sha"] == WATCHDOG_RECOVERY_PREDECESSOR:
+        pins["owner_approved_development_worker.py"] = LOCAL_REASONING_OWNER_WORKER_SHA256
+    need(all(row["artifact_sha256"][name] == pin for name, pin in pins.items() if pin),
          "PARALLEL_APPROVED_ARTIFACT_CHANGED")
     when = datetime.fromisoformat(row["accepted_at"])
     need(when.tzinfo is not None and when <= datetime.now(timezone.utc), "RECEIPT_TIME")
@@ -151,7 +165,17 @@ def properties(name, *, user):
     return values
 
 
-def verify_topology(query):
+def verify_topology(query, *, diagnostic_watchdog=False, attest_failed_pair=False):
+    """Validate immutable unit topology independently from operational faults.
+
+    Only the actual scheduled watchdog may be admitted when its exact peer
+    oneshot is failed and quiescent. Ordinary status and engineering
+    admission still deny. The watchdog must obtain strict routing before
+    any existing recovery action; the native drift/breaker gates are unchanged.
+    """
+    need(not (diagnostic_watchdog and attest_failed_pair), "RECOVERY_ATTESTATION_MODE")
+    failed_peer = None
+    failed_pair = []
     for name in UNITS:
         old = query(name, user=True)
         need(old.get("LoadState") == "not-found" and old.get("ActiveState") == "inactive"
@@ -164,11 +188,23 @@ def verify_topology(query):
             need(new.get("ActiveState") == "active" and new.get("UnitFileState") == "enabled",
                  "SYSTEM_TIMER_INACTIVE")
         else:
-            need(new.get("ActiveState") in ("inactive", "activating", "active")
-                 and all(new.get(k) == v for k, v in {
+            need(all(new.get(k) == v for k, v in {
                      "User": "al", "Group": "al", "NoNewPrivileges": "yes",
                      "PrivateTmp": "yes", "ProtectSystem": "strict", "ProtectHome": "read-only",
                  }.items()), "SYSTEM_SERVICE_SANDBOX_CHANGED")
+            active = new.get("ActiveState")
+            if attest_failed_pair and active == "failed" and new.get("MainPID") == "0":
+                failed_pair.append(name)
+            elif (diagnostic_watchdog and name == SERVICES[0] and active == "failed"
+                    and new.get("MainPID") == "0"):
+                failed_peer = name
+            else:
+                need(active in ("inactive", "activating", "active"),
+                     "SYSTEM_SERVICE_NOT_OPERATIONAL:" + name)
+    if attest_failed_pair:
+        need(set(failed_pair) == set(SERVICES), "RECOVERY_FAILED_PAIR_NOT_EXACT")
+        return tuple(sorted(failed_pair))
+    return failed_peer
 
 
 def verify_service_context(raw):
@@ -193,14 +229,20 @@ def verify_pipeline_sandbox():
 
 
 
-def status(*, require_system=False):
+def status(*, require_system=False, attest_failed_predecessor=False):
     need(os.geteuid() == os.getegid() == 1000, "UNEXPECTED_SERVICE_ACCOUNT")
     for path in (ROOT, RECEIPT.parent, RECEIPT.parent.parent, Path("/etc/systemd/system")):
         root_directory(path)
     row = validate_receipt(json.loads(read(RECEIPT, 0, 0o444)))
     need(digest(read(STAGE_E, 0, 0o444)) == row["stage_e_sha256"], "ORIGINAL_STAGE_E_CHANGED")
-    need(Path(__file__).resolve() == ENTRY and digest(read(ENTRY, 0, 0o444)) == row["guard_sha256"],
-         "GUARD_CHANGED")
+    # The native signed installer may use the reviewed successor source
+    # strictly as a read-only preflight of the failed predecessor. This is
+    # never a successful live routing/status proof and is not a CLI mode.
+    need(not attest_failed_predecessor or (
+        not require_system and row["candidate_sha"] == WATCHDOG_RECOVERY_PREDECESSOR),
+        "RECOVERY_PREDECESSOR_NOT_EXACT")
+    need((attest_failed_predecessor or Path(__file__).resolve() == ENTRY)
+         and digest(read(ENTRY, 0, 0o444)) == row["guard_sha256"], "GUARD_CHANGED")
     need(Path("/opt/jason/current").resolve(strict=True).name == row["rollback_sha"], "RUNTIME_CHANGED")
     release = ROOT / "releases" / row["candidate_sha"]
     for path in (ROOT / "releases", release, release / "tools"):
@@ -212,6 +254,7 @@ def status(*, require_system=False):
         need(digest(read(saved, 0, 0o444)) == expected
              and digest(read(live, 1000)) == expected, "ARTIFACT_CHANGED:" + name)
         artifacts[name] = {"source": str(saved), "sha256": expected}
+    pipeline_sources = {}
     if row["schema_version"] == "1.1":
         prior = read(release / "predecessor.json", 0, 0o444)
         predecessor = validate_receipt(json.loads(prior))
@@ -223,6 +266,7 @@ def status(*, require_system=False):
             need(digest(read(release / "tools" / name, 0, 0o444)) == expected
                  and digest(read(Path("/home/al/.local/lib/jason") / name, 1000)) == expected,
                  "PIPELINE_ARTIFACT_CHANGED:" + name)
+            pipeline_sources[name] = {"source": str(release / "tools" / name), "sha256": expected}
         source_head = subprocess.run(
             ["/usr/bin/git", "-C", str(PIPELINE_SOURCE), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=10, check=False,
@@ -233,14 +277,20 @@ def status(*, require_system=False):
     for name, expected in row["unit_sha256"].items():
         need(digest(read(Path("/etc/systemd/system") / name, 0, 0o644)) == expected,
              "UNIT_BYTES_CHANGED")
-    verify_topology(properties)
-    if require_system:
-        service = verify_service_context(Path("/proc/self/cgroup").read_text())
-        if row["schema_version"] == "1.1" and service == SERVICES[0]:
-            verify_pipeline_sandbox()
-    return {"status": "verified_system_manager", "candidate_sha": row["candidate_sha"],
+    service = (verify_service_context(Path("/proc/self/cgroup").read_text())
+               if require_system else None)
+    failed_peer = verify_topology(properties, diagnostic_watchdog=service == SERVICES[1],
+                                  attest_failed_pair=attest_failed_predecessor)
+    if require_system and row["schema_version"] == "1.1" and service == SERVICES[0]:
+        verify_pipeline_sandbox()
+    return {"status": ("verified_failed_manager_integrity" if attest_failed_predecessor
+                       else "verified_system_manager" if failed_peer is None
+                       else "watchdog_diagnostics_only"),
+            "operational_ready": failed_peer is None,
+            "failed_peer": failed_peer, "candidate_sha": row["candidate_sha"],
             "rollback_sha": row["rollback_sha"], "scope_sha256": row["scope_sha256"],
             "system_timers": list(TIMERS), "artifact_sources": artifacts,
+            "pipeline_artifact_sources": pipeline_sources,
             "production_authority": False}
 
 

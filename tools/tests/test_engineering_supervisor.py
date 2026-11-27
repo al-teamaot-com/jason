@@ -226,3 +226,39 @@ def test_supervisor_preserves_identity_hold_at_real_inventory_size(tmp_path):
     assert snapshot["items"][0]["lane"] == "todo_identity"
     assert snapshot["items"][0]["category"] == "human_authority"
     assert snapshot["identity_conflict_count"] == 1
+
+
+def test_critical_support_routes_are_not_hidden_by_truncated_inventory(tmp_path):
+    rows = {f"SUPPORT-AUTO-{n:012X}": {"phase": "blocked", "reason": "Missing source excerpt"}
+            for n in range(180)}
+    rows["SUPPORT-OPS-054"] = {"phase": "blocked", "reason": "EvidenceToolError: source evidence turn budget exhausted"}
+    write(tmp_path, "state.json", {"items": rows})
+    write(tmp_path, "development-state.json", {"items": {}})
+    write(tmp_path, "todo-intake-state.json", {
+        "engineering_capacity": 3, "downstream_commitments": {"outstanding_count": 1},
+    })
+    snap = supervisor.build_snapshot(tmp_path)
+    assert snap["items_truncated"] is True
+    assert snap["support_blocker_routes"]["SUPPORT-OPS-054"]["category"] == "recoverable_source"
+    blocker = {"critical_support_blocker": {
+        "reason": "critical_support_stalled", "blocked_count": 1, "unadmitted_count": 0,
+        "blocked_items": ["SUPPORT-OPS-054"], "unadmitted_items": [],
+    }}
+    assert supervisor.critical_support_disposition(blocker, snap) == "recoverable"
+    for n in range(3):
+        write(tmp_path, "development-state.json", {"items": {
+            "DEV-1234": {"phase": "implementing", "reasoning_request_id": str(n)}
+        }})
+        snap = supervisor.build_snapshot(tmp_path, prior=snap)
+    assert snap["unchanged_cycles"] == 0
+    assert snap["support_blocker_routes"]["SUPPORT-OPS-054"]["unchanged_cycles"] == 3
+    assert supervisor.critical_support_disposition(blocker, snap) == "diagnostic_review"
+    snap["support_blocker_routes"]["SUPPORT-OPS-054"]["category"] = "human_authority"
+    assert supervisor.critical_support_disposition(blocker, snap) == "external"
+    blocker["critical_support_blocker"]["blocked_items"] = [{}]
+    assert supervisor.critical_support_disposition(blocker, snap) == "diagnostic_review"
+
+def test_retired_paid_credit_failure_routes_to_local_recovery():
+    from tools.engineering_supervisor import classify
+    assert classify("blocked","Hosted reasoning blocked: credit_balance_exhausted; Owner action: restore_provider_credits",lane="support")==(
+        "recoverable_transport","native_worker_verify_non_metered_reasoning_then_readmit")

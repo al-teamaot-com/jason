@@ -72,6 +72,7 @@ FORCED_ENV = {
         "/var/lib/jason/openclaw/quickbooks-production/oauth.sqlite3",
     "JASON_TEAMS_PROACTIVE_TOKEN_FILE":
         "/run/jason-secrets/teams-proactive-gateway/token",
+    "JASON_HOSTED_SEMANTICS_ENABLED": "false",
     "JASON_HOSTED_CONVERSATION_ENABLED": "false",
     "JASON_DYNAMIC_CONVERSATION_ENABLED": "false",
     "JASON_CONVERSATION_EXPERIENCE_ENABLED": "false",

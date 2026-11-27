@@ -48,7 +48,7 @@ def ticket_worker_runtime_settings(settings: RuntimeSettings) -> RuntimeSettings
     # Stage C external and embedded dispatch children own ONLY the operational
     # ticket-worker loop. Do not inherit unrelated HTTP/Teams approval flows,
     # non-ticket schedulers or PM-related background services from the parent.
-    # Preserve worker provider, promotion and hosted-analysis capability flags.
+    # Preserve worker provider and promotion flags, but never paid AI routing.
     return replace(
         settings,
         autonomy_worker_enabled=True,
@@ -64,9 +64,8 @@ def ticket_worker_runtime_settings(settings: RuntimeSettings) -> RuntimeSettings
         owner_uat_worker_enabled=False,
         drmm_recent_alert_reconciliation_enabled=False,
         windows_time_source_shadow_enabled=False,
-        # Hosted *conversation* requires dynamic conversation, which is
-        # intentionally disabled in the non-HTTP Ticket Core process.
-        # Hosted *semantics* stays enabled for governed ticket reasoning.
+        # Neither legacy hosted flag represents a subscription route.
+        hosted_semantics_enabled=False,
         hosted_conversation_enabled=False,
         dynamic_conversation_enabled=False,
         conversation_experience_enabled=False,

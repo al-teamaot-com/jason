@@ -1,0 +1,20 @@
+[Unit]
+Description=Jason read-only SQLite WAL sidecar preparation
+After=local-fs.target
+Before=jason-runbook-management-read.service
+
+[Service]
+Type=oneshot
+User=al
+Group=al
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/jason/runbook-management/prepare_wal.py
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ReadWritePaths=/var/lib/jason/openclaw
+ReadOnlyPaths=/var/lib/jason/openclaw/json-playbooks.sqlite3
