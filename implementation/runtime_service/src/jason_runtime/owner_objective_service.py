@@ -13,6 +13,7 @@ from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import sqlite3
 from pathlib import Path
 import stat
 import threading
@@ -157,24 +158,146 @@ class ObjectiveApplication:
     status_maintenance: object = None
     issuance_lock: object = field(default_factory=threading.RLock)
 
+    def _canonical_decision(self, approval_id, evidence_hash):
+        accepted = self.handler.service.teams_flow.approval_service.repository.accepted_decision(approval_id)
+        if accepted is None:
+            return False
+        if (accepted.status != "approved" or accepted.channel != "microsoft_teams"
+                or accepted.authentication_evidence_hash != evidence_hash):
+            raise PermissionError("different or nonaffirmative canonical decision")
+        return True
+
+    def _callback(self, envelope, parsed):
+        submit = parsed.approval_submit
+        return self.handler.handle(approval_id=submit.approval_id, decision=submit.decision,
+            microsoft_tenant_id=parsed.microsoft_tenant_id,
+            microsoft_object_id=parsed.microsoft_object_id,
+            conversation_id=parsed.conversation_id, channel_response_id=submit.channel_response_id,
+            decided_at=parsed.issued_at, selections=submit.selections, signed_envelope=envelope)
+
+    def _handoff_pending(self, approval_id):
+        return {"status": "blocked", "approval_id": approval_id,
+                "executed": False, "plan_status": "decision_handoff_pending",
+                "reply": {"text": "The signed decision is retained for validation. "
+                         "No execution is authorized until both approval checks succeed. "
+                         "Do not submit another decision for this plan."}}
+
+    def _recover_recorded_decision(self, approval_id, evidence_hash):
+        if not self._canonical_decision(approval_id, evidence_hash):
+            return None
+        self.handler.requests.finish_objective_handoff(approval_id, evidence_hash,
+            state="recorded", now=self.clock())
+        # The canonical maintenance worker independently re-verifies original
+        # evidence, current authority and native gates. Do not claim execution.
+        return {"status": "completed", "approval_id": approval_id,
+                "approval_status": "approved", "executed": False,
+                "reply": {"text": "The original approval was recorded. "
+                         "Jason will verify continuation through the existing worker."}}
+
+    def _run_handoff(self, approval_id, evidence_hash, envelope, parsed):
+        existing = self._recover_recorded_decision(approval_id, evidence_hash)
+        if existing is not None:
+            return existing
+        # Existing Root verification is mandatory. No new signing or permission
+        # path is introduced and a rejected native decision is not retried.
+        try:
+            proposal = self.handler.proposals.require(approval_id)
+            self.handler.requests.verify_proposal(proposal)
+            admitted = self.root_client.call("admit", approval_id=approval_id,
+                                             signed_envelope=envelope)
+            if (admitted.get("owner_decision_recorded") is not True
+                    or admitted.get("approval_id") != approval_id
+                    or admitted.get("plan_fingerprint") != proposal.plan_fingerprint):
+                raise PermissionError("Root did not retain this exact decision")
+            result = self._callback(envelope, parsed)
+            if not self._canonical_decision(approval_id, evidence_hash):
+                raise PermissionError("canonical approval not recorded")
+            self.handler.requests.finish_objective_handoff(approval_id, evidence_hash,
+                state="recorded", now=self.clock())
+            return result
+        except PermissionError:
+            # If canonical acceptance was already atomically persisted, a
+            # later publication exception cannot turn it into a new decision.
+            recovered = self._recover_recorded_decision(approval_id, evidence_hash)
+            if recovered is not None:
+                return recovered
+            self.handler.requests.finish_objective_handoff(approval_id, evidence_hash,
+                state="rejected", now=self.clock())
+            raise
+        except (TimeoutError, OSError, sqlite3.OperationalError):
+            # Only transient transport/storage failure may be retried. Both
+            # original validators still run with their normal freshness gates.
+            recovered = self._recover_recorded_decision(approval_id, evidence_hash)
+            return recovered if recovered is not None else self._handoff_pending(approval_id)
+
     def interaction(self, envelope):
         token = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
         _, parsed = self.handler.evidence_verifier.parse(token)
         submit = parsed.approval_submit
         if submit is None or not submit.approval_id.startswith(PREFIX):
             raise PermissionError("approval is outside the isolated objective component")
-        if submit.approval_id != self.config["campaign"]["deny_approval_id"] and submit.decision == "approve":
-            # Root independently retains the original decision before transient
-            # CI/native gates can consume the transport freshness window.
-            admitted = self.root_client.call("admit", approval_id=submit.approval_id,
-                                             signed_envelope=envelope)
-            if admitted.get("owner_decision_recorded") is not True:
-                raise PermissionError("Root did not retain the original Owner decision")
-        return self.handler.handle(approval_id=submit.approval_id, decision=submit.decision,
-            microsoft_tenant_id=parsed.microsoft_tenant_id,
-            microsoft_object_id=parsed.microsoft_object_id,
-            conversation_id=parsed.conversation_id, channel_response_id=submit.channel_response_id,
-            decided_at=parsed.issued_at, selections=submit.selections, signed_envelope=envelope)
+        if submit.approval_id == self.config["campaign"]["deny_approval_id"] or submit.decision != "approve":
+            return self._callback(envelope, parsed)
+        with self.issuance_lock:
+            principal = self.handler.evidence_verifier.verify(token)
+            approval_id, evidence_hash = submit.approval_id, principal.authentication_evidence_hash
+            if self._canonical_decision(approval_id, evidence_hash):
+                # Do not permit a new callback to consume an old decision.
+                raise PermissionError("plan decision was already recorded")
+            pending = self.handler.service.teams_flow.approval_service.repository.get(approval_id)
+            proposal = self.handler.proposals.require(approval_id)
+            self.handler.requests.verify_proposal(proposal)
+            if (pending is None or pending.status.value != "pending"
+                    or dict(submit.selections) != {"card_challenge": pending.metadata.get("card_instance_challenge")}):
+                raise PermissionError("original pending objective card required")
+            # Retain only a cryptographically verified, live-bound and currently
+            # permitted candidate; Root and the canonical service subsequently
+            # reperform all acceptance checks. The pointer itself is not approval.
+            flow = self.handler.service.teams_flow
+            response = flow.ingress.accept_verified_interaction(principal=principal,
+                payload={"approval_id": approval_id, "decision": "approve",
+                         "organization_id": proposal.organization_id,
+                         "channel_response_id": submit.channel_response_id}, decided_at=self.clock())
+            if response.approver_identity_id == proposal.requester_id:
+                raise PermissionError("requester cannot approve their own plan")
+            for step in self.handler.requests.steps(approval_id):
+                self.handler.policy.assert_request_allowed(step, required=step.requester_kind == "service")
+                if not flow.approval_service.authority.can_approve(
+                        approver_identity_id=response.approver_identity_id,
+                        organization_id=step.organization_id, client_id=step.client_id,
+                        capability=step.capability_name, requested_mode=step.permission_mode):
+                    raise PermissionError("current approver authority required")
+            self.handler.requests.retain_objective_handoff(approval_id, evidence_hash,
+                                                           envelope, now=self.clock())
+            return self._run_handoff(approval_id, evidence_hash, envelope, parsed)
+
+    def _recover_handoffs(self):
+        # Reuse the existing maintenance loop, private DB and signed evidence.
+        # Never backdate verification or manufacture an accepted decision when
+        # an unaccepted original callback has expired.
+        with self.issuance_lock:
+            for approval_id, evidence_hash in self.handler.requests.pending_objective_handoffs(prefix=PREFIX):
+                try:
+                    if self._recover_recorded_decision(approval_id, evidence_hash) is not None:
+                        continue
+                    envelope = self.handler.requests.transport_evidence(evidence_hash)
+                    token = json.dumps(envelope, sort_keys=True, separators=(",", ":"))
+                    _, parsed = self.handler.evidence_verifier.parse(token)
+                    principal = self.handler.evidence_verifier.verify(token)
+                    if (principal.authentication_evidence_hash != evidence_hash
+                            or parsed.approval_submit.approval_id != approval_id
+                            or parsed.approval_submit.decision != "approve"):
+                        raise PermissionError("retained objective evidence changed")
+                except PermissionError:
+                    # Fail closed on changed, invalid or expired material. A
+                    # conflicting canonical decision remains intact.
+                    self.handler.requests.finish_objective_handoff(approval_id, evidence_hash,
+                        state="rejected", now=self.clock())
+                    continue
+                try:
+                    self._run_handoff(approval_id, evidence_hash, envelope, parsed)
+                except PermissionError:
+                    pass  # Durable terminal rejection; other work may continue.
 
     def issue(self, case):
         with self.issuance_lock:
@@ -309,6 +432,7 @@ class ObjectiveApplication:
             ready = read_profile(Path(activation))
             if ready.get("ready") is not True or ready.get("source_sha") != self.config["source_sha"]:
                 return
+        self._recover_handoffs()
         self.issue("deny")
         self.issue("approve")
         for approval_id in self.handler.requests.objective_submission_ids(

@@ -52,3 +52,28 @@ completed effects through independent readback under the same original grant.
 Never reset a consumed claim, forge success or blindly repeat an unknown effect.
 Rollback preserves all newer decisions and evidence. Completion needs live
 operational acceptance, not just code, green CI, installation or a card send.
+
+## Retained callback handoff (source review, 2026-11-27)
+
+A failure between independently verified Root admission and canonical
+approval acceptance is distinct from an explicit denial. The existing
+universal plan database retains the exact signed callback as non-bearer
+transport evidence and an immutable evidence-hash scheduling pointer.
+The existing maintenance worker may reconcile an atomically accepted
+canonical decision or retry the exact callback while the original signed
+transport is still fresh. Every retry uses the unchanged Root verifier,
+current policy and approver binding, and canonical approval service.
+A denial, changed evidence, revoked authority, or expired unaccepted
+callback terminates the handoff; none can create a grant. Do not backdate
+verification or infer a decision from a retained scheduling record.
+Native step claims, independent readback, and release gates remain
+unchanged. No additional approval issuer, signer, scheduler, or authority
+store is introduced. The transport's original lifetime is not extended.
+
+This source change is limited to the already registered Owner-objective
+Teams workflow. It does not register the rollback-retention action,
+enable a ChatGPT maintenance approval transport, or authorize production
+installation. The failed terminal retention confirmation is not a
+recoverable authenticated decision under this policy. Deployment and
+any future action registration remain subject to independent governed
+review and exact authorization. Source review is not live acceptance.

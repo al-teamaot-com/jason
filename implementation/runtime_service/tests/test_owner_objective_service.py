@@ -384,3 +384,132 @@ def test_expired_undecided_requests_release_capacity_without_new_effect_or_old_c
     assert len(env.delivery.requests)==5 and len(env.native.effects)==2
     assert env.app.handler.requests.objective_submission_ids(
         prefix="planapproval-objective-",now=later,ttl_seconds=86400)==(result["approval_id"],)
+
+
+def test_restart_recovers_fresh_original_decision_after_root_admission(env, monkeypatch):
+    deny_then_issue(env)
+    original = signed(env, "approve", "approve")
+    approval = env.config["campaign"]["approve_approval_id"]
+    def fail(*args):
+        raise TimeoutError("transient canonical callback failure")
+    monkeypatch.setattr(env.app, "_callback", fail)
+    result = env.app.interaction(original)
+    assert result["plan_status"] == "decision_handoff_pending"
+    assert result["executed"] is False
+    assert env.native.store._plan(approval).joinpath("verified-decision.json").is_file()
+    assert env.app.handler.service.teams_flow.approval_service.repository.accepted_decision(approval) is None
+    assert not env.native.effects
+    restarted = build(env.config, delivery=env.delivery, root_client=env.native, clock=lambda:NOW)
+    restarted.maintenance()
+    assert restarted.handler.requests.progress(approval)["state"] == "completed"
+    assert not restarted.handler.requests.pending_objective_handoffs(prefix="planapproval-objective-")
+    assert len(env.native.effects) == 2 and len(env.delivery.requests) == 2
+    restarted.maintenance()
+    assert len(env.native.effects) == 2 and len(env.delivery.requests) == 2
+
+
+def test_expired_unaccepted_handoff_cannot_create_approval_or_effect(env, monkeypatch):
+    deny_then_issue(env)
+    original = signed(env, "approve", "approve")
+    approval = env.config["campaign"]["approve_approval_id"]
+    def fail(*args):
+        raise TimeoutError("transient canonical callback failure")
+    monkeypatch.setattr(env.app, "_callback", fail)
+    result = env.app.interaction(original)
+    assert result["plan_status"] == "decision_handoff_pending"
+    later = NOW + timedelta(minutes=10)
+    env.native.now = later
+    restarted = build(env.config, delivery=env.delivery, root_client=env.native, clock=lambda:later)
+    restarted.maintenance()
+    assert restarted.handler.service.teams_flow.approval_service.repository.accepted_decision(approval) is None
+    assert not restarted.handler.requests.pending_objective_handoffs(prefix="planapproval-objective-")
+    assert not env.native.effects
+    assert len(env.delivery.requests) == 2
+
+
+def test_root_rejection_cannot_be_turned_into_approval_or_retry(env, monkeypatch):
+    deny_then_issue(env)
+    original = signed(env, "approve", "approve")
+    approval = env.config["campaign"]["approve_approval_id"]
+    before = env.native.call
+    calls = []
+    def deny_admit(operation, **kw):
+        if operation == "admit":
+            calls.append(operation)
+            raise PermissionError("native approval denied")
+        return before(operation, **kw)
+    monkeypatch.setattr(env.native, "call", deny_admit)
+    with pytest.raises(PermissionError, match="native approval denied"):
+        env.app.interaction(original)
+    env.app.maintenance()
+    assert calls == ["admit"]
+    assert not env.native.effects
+    assert env.app.handler.service.teams_flow.approval_service.repository.accepted_decision(approval) is None
+
+
+def test_changed_signed_material_cannot_replace_pending_handoff(env, monkeypatch):
+    deny_then_issue(env)
+    original = signed(env, "approve", "approve")
+    def fail(*args):
+        raise TimeoutError("transient callback failure")
+    monkeypatch.setattr(env.app, "_callback", fail)
+    env.app.interaction(original)
+    different = dict(original)
+    different["text"] = "different reviewed material"
+    different["signature"] = base64.b64encode(env.key.sign(canonical_signed_payload(different))).decode()
+    with pytest.raises(PermissionError, match="handoff changed"):
+        env.app.interaction(different)
+    assert not env.native.effects
+    assert len(env.app.handler.requests.pending_objective_handoffs(prefix="planapproval-objective-")) == 1
+
+
+def test_already_persisted_canonical_decision_reconciles_lost_ack(env, monkeypatch):
+    deny_then_issue(env)
+    original = signed(env, "approve", "approve")
+    approval = env.config["campaign"]["approve_approval_id"]
+    handle = env.app._callback
+    def lose_ack(*args):
+        handle(*args)
+        raise TimeoutError("response lost after canonical atomic decision")
+    monkeypatch.setattr(env.app, "_callback", lose_ack)
+    result = env.app.interaction(original)
+    assert result["approval_status"] == "approved" and result["executed"] is False
+    assert not env.app.handler.requests.pending_objective_handoffs(prefix="planapproval-objective-")
+    env.app.maintenance()
+    assert env.app.handler.requests.progress(approval)["state"] == "completed"
+    assert len(env.native.effects) == 2
+
+
+def test_restart_rejects_pending_callback_if_reviewed_policy_changes(env, monkeypatch):
+    deny_then_issue(env)
+    original = signed(env, "approve", "approve")
+    approval = env.config["campaign"]["approve_approval_id"]
+    def fail(*args):
+        raise TimeoutError("transient callback failure")
+    monkeypatch.setattr(env.app, "_callback", fail)
+    env.app.interaction(original)
+    p = Path(env.config["policy_path"])
+    policy = json.loads(p.read_text())
+    policy["organizations"]["aot"]["max_ttl_seconds"] = 43200
+    p.write_text(json.dumps(policy))
+    restarted = build(env.config, delivery=env.delivery, root_client=env.native, clock=lambda:NOW)
+    restarted.maintenance()
+    assert restarted.handler.service.teams_flow.approval_service.repository.accepted_decision(approval) is None
+    assert not restarted.handler.requests.pending_objective_handoffs(prefix="planapproval-objective-")
+    assert not env.native.effects
+
+
+def test_restart_rejects_pending_callback_after_actor_binding_revocation(env, monkeypatch):
+    deny_then_issue(env)
+    original = signed(env, "approve", "approve")
+    approval = env.config["campaign"]["approve_approval_id"]
+    def fail(*args):
+        raise TimeoutError("transient callback failure")
+    monkeypatch.setattr(env.app, "_callback", fail)
+    env.app.interaction(original)
+    env.native.ports["current_owner_identity"] = lambda *_: None
+    restarted = build(env.config, delivery=env.delivery, root_client=env.native, clock=lambda:NOW)
+    restarted.maintenance()
+    assert restarted.handler.service.teams_flow.approval_service.repository.accepted_decision(approval) is None
+    assert not restarted.handler.requests.pending_objective_handoffs(prefix="planapproval-objective-")
+    assert not env.native.effects
