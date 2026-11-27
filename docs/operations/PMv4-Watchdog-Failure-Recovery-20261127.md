@@ -33,7 +33,16 @@ breaker by changing its ledger or downgrading the required units.
   accepted c4e78d70 predecessor. A recovery preflight attests the actual
   failed pair and every immutable predecessor pin, and independently checks
   that the authoritative and freshly evaluated native drift report exactly
-  these two faults. It does not represent the failed manager as ready.
+  these two faults. The installed drift reporter exits 2 after correctly
+  recording drift; its own subsequent failed-unit flag can therefore appear
+  in a separate read-only evaluation. The authoritative drift list must
+  still contain exactly the pair. Only with the pinned reporter program,
+  unit and drop-in bytes and exact systemd failed/exit-code/2/zero-PID
+  evidence may the independent evaluation contain this one derived record.
+  No other fault is admitted, no recorded evidence is rewritten, and no
+  additional reset or stop is authorized. Native revalidation must still
+  obtain an actual unqualified drift pass. It does not represent the failed
+  manager as ready.
   Check the protected runtime LKG, native core/ticket health, accepted
   audit recovery, existing no-paid-AI configuration and unchanged freeze/hold.
 * Once exact protected source and CI are attested, one independently

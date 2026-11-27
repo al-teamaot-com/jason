@@ -1171,7 +1171,24 @@ WATCHDOG_RECOVERY_FAULTS = sorted(
     key=lambda row: row["unit"],
 )
 
-def verify_failed_manager_drift(control, drift, evaluated):
+DRIFT_REPORTER_UNIT = "jason-production-drift-watchdog.service"
+DRIFT_REPORTER_FAULT = {"kind":"failed_system_unit","state":"failed","unit":DRIFT_REPORTER_UNIT}
+DRIFT_REPORTER_PINS = {
+    "/opt/jason/current/tools/production_drift_watchdog.py":
+        "b6c53a7c015b83fccc5f2fd8c123e7a676ef212a9dd9800811db1ac5a1da7d8f",
+    "/etc/systemd/system/jason-production-drift-watchdog.service":
+        "c5ad8d61dedc7a31b417754c9122bff576648fb1650783644d52166fb9a8b5b6",
+    "/etc/systemd/system/jason-production-drift-watchdog.service.d/10-readback-recovery.conf":
+        "6ab206d2775324bd24ff86446d5f7e427f7e248dcebe010d6de59449215b2790",
+}
+DRIFT_REPORTER_EXIT2 = {
+    "LoadState":"loaded","ActiveState":"failed","MainPID":"0",
+    "Result":"exit-code","ExecMainCode":"1","ExecMainStatus":"2",
+    "FragmentPath":"/etc/systemd/system/jason-production-drift-watchdog.service",
+    "DropInPaths":"/etc/systemd/system/jason-production-drift-watchdog.service.d/10-readback-recovery.conf",
+}
+
+def verify_failed_manager_drift(control, drift, evaluated, *, reporter=None):
     """Exact failed-unit containment, not a waiver of native drift."""
     breaker = control.get("circuit_breaker") or {}
     need(breaker.get("state") == "open"
@@ -1180,10 +1197,18 @@ def verify_failed_manager_drift(control, drift, evaluated):
          and breaker.get("problem_count") == 2
          and breaker.get("problem_kinds") == ["failed_system_unit"],
          "WATCHDOG_RECOVERY_BREAKER_NOT_EXACT")
-    for row in (drift, evaluated):
-        need(row.get("status") == "drift_detected"
-             and sorted(row.get("problems") or [],key=lambda item:item.get("unit",""))
-                 == WATCHDOG_RECOVERY_FAULTS,
+    # The pinned drift reporter returns 2 after recording the actual pair.
+    # Its *own* later failed-unit record is a derived symptom, not a third
+    # independent fault. The authoritative recorded list must still be the
+    # exact pair; allow the derived record only in a fresh external evaluation
+    # with verified reporter custody and exact systemd exit-status evidence.
+    for row, external in ((drift,False),(evaluated,True)):
+        problems = sorted(row.get("problems") or [],key=lambda item:item.get("unit",""))
+        allowed = problems == WATCHDOG_RECOVERY_FAULTS
+        if external and reporter == DRIFT_REPORTER_EXIT2:
+            allowed = allowed or problems == sorted(
+                [*WATCHDOG_RECOVERY_FAULTS,DRIFT_REPORTER_FAULT],key=lambda item:item["unit"])
+        need(row.get("status") == "drift_detected" and allowed,
              "WATCHDOG_RECOVERY_UNRELATED_DRIFT")
         observed = datetime.fromisoformat(row["observed_at"])
         need(observed.tzinfo is not None
@@ -1287,6 +1312,9 @@ def pipeline_scope_sha(plan):
              and plan.get("breaker_policy_source") == BREAKER_POLICY_SOURCE
              and plan.get("failed_unit_reset_scope") == list(SERVICES)
              and plan.get("precutover_exact_faults") == WATCHDOG_RECOVERY_FAULTS
+             and plan.get("derived_reporter_exit2_only") == {
+                 "unit":DRIFT_REPORTER_UNIT,"pins":DRIFT_REPORTER_PINS,
+                 "properties":DRIFT_REPORTER_EXIT2}
              and plan.get("local_reasoning_runtime_activation") is False,
              "WATCHDOG_RECOVERY_EXACT_SCOPE_INVALID")
     return digest(canon(plan))
@@ -1435,7 +1463,15 @@ class PipelineSuccessor(NativeAdapter):
             evaluated = json.loads(self.command(["/usr/bin/python3","-I","-B","-c",probe,
                                                   str(guard),str(POLICY)],75))
             drift = json.loads(p["read"](MANAGER/"production-drift.json",0,0o600))
-            verify_failed_manager_drift(control,drift,evaluated)
+            reporter = None
+            if DRIFT_REPORTER_FAULT in evaluated.get("problems",[]):
+                for path,pin in DRIFT_REPORTER_PINS.items():
+                    need(digest(p["read"](Path(path),0)) == pin,
+                         "WATCHDOG_RECOVERY_REPORTER_CUSTODY")
+                show = self.systemctl(["show",DRIFT_REPORTER_UNIT,
+                                       *["-p"+k for k in DRIFT_REPORTER_EXIT2]]).decode()
+                reporter = dict(line.split("=",1) for line in show.splitlines() if "=" in line)
+            verify_failed_manager_drift(control,drift,evaluated,reporter=reporter)
             need(p["forward_audit_accepted"](json.loads(p["read"](p["AUDIT"],0,0o444)))
                  and p["audit_recovery_service_complete"](),
                  "WATCHDOG_RECOVERY_AUDIT_NOT_ACCEPTED")
@@ -1736,6 +1772,9 @@ class PipelineSuccessor(NativeAdapter):
                         engineering_progress_detector_required=True,
                         failed_unit_reset_scope=list(SERVICES),
                         precutover_exact_faults=list(WATCHDOG_RECOVERY_FAULTS),
+                        derived_reporter_exit2_only={
+                            "unit":DRIFT_REPORTER_UNIT,"pins":DRIFT_REPORTER_PINS,
+                            "properties":DRIFT_REPORTER_EXIT2},
                         local_reasoning_runtime_activation=False)
         return plan,before,after
 

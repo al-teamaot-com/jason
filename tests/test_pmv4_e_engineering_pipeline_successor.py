@@ -573,6 +573,9 @@ def watchdog_recovery_plan():
              worker_replacements=sorted(m.WATCHDOG_RECOVERY_WORKERS),
              failed_unit_reset_scope=list(m.SERVICES),
              precutover_exact_faults=list(m.WATCHDOG_RECOVERY_FAULTS),
+             derived_reporter_exit2_only={"unit":m.DRIFT_REPORTER_UNIT,
+                                         "pins":m.DRIFT_REPORTER_PINS,
+                                         "properties":m.DRIFT_REPORTER_EXIT2},
              local_reasoning_runtime_activation=False)
     return p
 
@@ -581,6 +584,7 @@ def watchdog_recovery_plan():
     ("failed_unit_reset_scope",["jason-runtime.service"]),
     ("failed_unit_reset_scope",list(m.SERVICES)+["extra.service"]),
     ("precutover_exact_faults",[]),
+    ("derived_reporter_exit2_only",{}),
     ("local_reasoning_runtime_activation",True),
     ("runtime_or_mcp_restart_allowed",True),
     ("production_authority",True),
@@ -627,3 +631,30 @@ def test_watchdog_recovery_root_target_set_excludes_runtime_and_other_units():
     assert m.POLICY not in targets and m.ENV not in targets
     assert all(not str(x).startswith("/opt/jason/") for x in targets)
     assert not any(x.name in {"jason-runtime.service","jason-pmv4-ticket-core.service"} for x in targets)
+
+
+def test_failed_manager_reporter_exit2_is_only_a_verified_derived_observation():
+    from copy import deepcopy
+    from datetime import datetime,timezone
+    control={"circuit_breaker":{"state":"open","source":"production_drift_watchdog",
+             "reason":"continuous_production_drift_detected","problem_count":2,
+             "problem_kinds":["failed_system_unit"]}}
+    drift={"status":"drift_detected","problems":deepcopy(m.WATCHDOG_RECOVERY_FAULTS),
+           "observed_at":datetime.now(timezone.utc).isoformat()}
+    evaluated={**drift,"problems":[*drift["problems"],m.DRIFT_REPORTER_FAULT]}
+    assert m.verify_failed_manager_drift(control,drift,evaluated,
+        reporter=m.DRIFT_REPORTER_EXIT2)==m.WATCHDOG_RECOVERY_FAULTS
+    for key,value in (("ExecMainStatus","1"),("MainPID","123"),
+                      ("Result","timeout"),("DropInPaths","/tmp/foreign")):
+        with pytest.raises(PermissionError):
+            m.verify_failed_manager_drift(control,drift,evaluated,
+                reporter={**m.DRIFT_REPORTER_EXIT2,key:value})
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,drift,evaluated)
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,evaluated,evaluated,
+            reporter=m.DRIFT_REPORTER_EXIT2)
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,drift,
+            {**evaluated,"problems":[*evaluated["problems"],m.DRIFT_REPORTER_FAULT]},
+            reporter=m.DRIFT_REPORTER_EXIT2)
