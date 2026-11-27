@@ -1,3 +1,4 @@
+import { recordIssuedApprovalCard, canonicalDecision, updateOriginalApprovalCard, updateIssuedApprovalCards } from "./approval-card-state.mjs";
 import { parseApprovalSubmit } from "./approval-submit.mjs";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -20,7 +21,11 @@ import {
 } from "./bridge-core.mjs";
 import { createApprovalDecisionStore } from "./approval-decision-store.mjs";
 import { buildProactiveActivity, resolveProactiveSendResult } from "./proactive-send-result.mjs";
-import { ensureTeamsUserBootstrap, TeamsBootstrapError } from "./teams-user-bootstrap.mjs";
+import {
+  ensureTeamsUserBootstrap,
+  assertTeamsApprovalRecipientReady,
+  TeamsBootstrapError,
+} from "./teams-user-bootstrap.mjs";
 
 const PORT = Number(process.env.PORT ?? 3979);
 const OPENCLAW_CONFIG_PATH =
@@ -521,8 +526,23 @@ agent.onActivity("message", async (context) => {
     });
 
     logRuntimeFailure(result, { conversationId, messageId });
+    const recordedDecision = approvalSubmit ? canonicalDecision(result, approvalSubmit) : null;
+    if (recordedDecision) {
+      try {
+        const updated = await updateOriginalApprovalCard({ context, store: approvalDecisions,
+          tenantId, aadObjectId, conversationId, replyToId: callbackReplyToId,
+          approvalSubmit, result });
+        console.log(JSON.stringify({ event: "jason_teams_approval_card_state", approvalId: approvalSubmit.approvalId,
+          state: updated ? "provider_updated" : "original_reference_unavailable" }));
+      } catch {
+        // Decision is durable. A presentation failure must never replay execution.
+        console.error(JSON.stringify({ event: "jason_teams_approval_card_state", approvalId: approvalSubmit.approvalId,
+          state: "update_reconciliation_required" }));
+      }
+    }
+
     if (approvalSubmit && Number(result?.httpStatus ?? 0) < 400 &&
-        (result?.payload?.status === "completed" ||
+        (recordedDecision || result?.payload?.status === "completed" ||
           (approvalSubmit.approvalId.startsWith("planapproval-") &&
            result?.payload?.status === "approved" && result?.payload?.executed === false))) {
       approvalDecisions.finalize({
@@ -601,6 +621,51 @@ server.get("/healthz", (_req, res) => {
     runtime: RUNTIME_URL,
   });
 });
+// Read-only reachability gate for signed production approvals, not an
+// alternative approval or send route. Caller authentication is identical to
+// /internal/proactive/send; no Teams message or approval is created.
+server.post("/internal/proactive/approver-readiness", async (req, res) => {
+  if (!PROACTIVE_TOKEN || req.get("authorization") !== `Bearer ${PROACTIVE_TOKEN}`) {
+    res.status(401).json({ status: "rejected", error_code: "unauthorized" });
+    return;
+  }
+  const aadObjectId = nonBlank(req.body?.aadObjectId);
+  const tenantId = nonBlank(req.body?.tenantId);
+  if (!isUuid(aadObjectId) || !isUuid(tenantId)) {
+    res.status(400).json({ status: "rejected", error_code: "invalid_request" });
+    return;
+  }
+  if (tenantId.toLowerCase() !== auth.tenantId.toLowerCase()) {
+    res.status(403).json({ status: "rejected", error_code: "tenant_mismatch" });
+    return;
+  }
+  try {
+    const check = await assertTeamsApprovalRecipientReady({
+      aadObjectId, tenantId,
+      clientId: auth.clientId, clientSecret: auth.clientSecret,
+    });
+    console.log(JSON.stringify({ event: "jason_teams_approver_ready", aadObjectId }));
+    res.json({ status: "ready", check: check.check });
+  } catch (error) {
+    const code = error instanceof TeamsBootstrapError
+      ? error.code : "approver_readiness_unverifiable";
+    const status = code === "approver_teams_license_unavailable" ? 409
+      : code === "identity_not_found" ? 404
+      : code === "identity_not_authorized" ? 403 : 503;
+    console.error(JSON.stringify({
+      event: "jason_teams_approver_unreachable", aadObjectId, errorCode: code,
+    }));
+    res.status(status).json({ status: "blocked", error_code: code });
+  }
+});
+
+function isProductionReleaseApprovalCard(card) {
+  return Array.isArray(card?.actions) && card.actions.some((action) =>
+    action?.type === "Action.Submit"
+    && typeof action?.data?.approval_id === "string"
+    && /^relapproval-[0-9a-f]{32}$/.test(action.data.approval_id));
+}
+
 server.post("/internal/proactive/send", async (req, res) => {
   if (!PROACTIVE_TOKEN || req.get("authorization") !== `Bearer ${PROACTIVE_TOKEN}`) {
     console.error(JSON.stringify({ event: "jason_teams_proactive_rejected", errorCode: "unauthorized" }));
@@ -611,7 +676,8 @@ server.post("/internal/proactive/send", async (req, res) => {
   const tenantId = nonBlank(req.body?.tenantId);
   const text = nonBlank(req.body?.text);
   const card = req.body?.card && typeof req.body.card === "object" ? req.body.card : null;
-  if (!aadObjectId || !isUuid(aadObjectId) || !tenantId || !isUuid(tenantId) || !text || text.length > 12000) {
+  const communicationId = req.body?.communicationId;
+  if ((communicationId !== undefined && !/^comm-[a-f0-9]{64}$/.test(communicationId)) || !aadObjectId || !isUuid(aadObjectId) || !tenantId || !isUuid(tenantId) || !text || text.length > 12000) {
     console.error(JSON.stringify({ event: "jason_teams_proactive_rejected", errorCode: "invalid_request", aadObjectId: aadObjectId ?? null }));
     res.status(400).json({ status: "rejected", error_code: "invalid_request" });
     return;
@@ -634,6 +700,14 @@ server.post("/internal/proactive/send", async (req, res) => {
   }
   console.log(JSON.stringify({ event: "jason_teams_proactive_preflight_passed", aadObjectId, hasStoredConversation: Boolean(record) }));
   try {
+    // A Teams provider message ID is not proof that an unlicensed privileged
+    // user can see a signed card. Check license before app bootstrap or send.
+    if (isProductionReleaseApprovalCard(card)) {
+      await assertTeamsApprovalRecipientReady({
+        aadObjectId, tenantId,
+        clientId: auth.clientId, clientSecret: auth.clientSecret,
+      });
+    }
     const bootstrap = await ensureTeamsUserBootstrap({
       aadObjectId,
       tenantId,
@@ -642,6 +716,15 @@ server.post("/internal/proactive/send", async (req, res) => {
       catalogAppId: TEAMS_CATALOG_APP_ID,
       acceptedCatalogAppIds: ACCEPTED_TEAMS_CATALOG_APP_IDS,
     });
+    if (communicationId !== undefined) {
+      const payloadDigest = createHash("sha256").update(JSON.stringify({ aadObjectId, tenantId, text, card })).digest("hex");
+      const claim = approvalDecisions.beginSend({ tenantId, aadObjectId, communicationId, payloadDigest });
+      if (!claim.accepted) {
+        if (claim.record.state === "provider_accepted") res.json(claim.record.result);
+        else res.status(409).json({ status:"blocked", error_code:"communication_reconciliation_required" });
+        return;
+      }
+    }
     let messageId;
     let evidenceType = null;
     let syntheticMessageId = false;
@@ -664,8 +747,10 @@ server.post("/internal/proactive/send", async (req, res) => {
       bootstrapCreated = true;
     }
     if (!messageId) throw new Error("Teams proactive send returned no delivery evidence");
+    if (!syntheticMessageId) recordIssuedApprovalCard({ store: approvalDecisions, card,
+      tenantId, aadObjectId, conversationId, messageId });
     console.log(JSON.stringify({ event: "jason_teams_proactive_sent", aadObjectId, conversationId, messageId, evidenceType, syntheticMessageId, bootstrapCreated }));
-    res.json({
+    const sendResult = {
       status: "succeeded",
       channel: "microsoft_teams",
       message_id: messageId,
@@ -674,7 +759,10 @@ server.post("/internal/proactive/send", async (req, res) => {
       conversation_id: conversationId,
       bootstrap_created: bootstrapCreated,
       app_installation: bootstrap.appInstallation,
-    });
+    };
+    if (communicationId !== undefined) approvalDecisions.completeSend({
+      tenantId, aadObjectId, communicationId, result:sendResult });
+    res.json(sendResult);
   } catch (error) {
     const bootstrapCode = error instanceof TeamsBootstrapError ? error.code : null;
     console.error(JSON.stringify({
@@ -685,9 +773,49 @@ server.post("/internal/proactive/send", async (req, res) => {
     }));
     const status = bootstrapCode === "identity_not_found" ? 404
       : bootstrapCode === "identity_not_authorized" ? 403
+      : bootstrapCode === "approver_teams_license_unavailable" ? 409
+      : bootstrapCode === "approver_readiness_unverifiable" ? 503
       : bootstrapCode === "conversation_pending" ? 503
       : 502;
     res.status(status).json({ status: "failed", error_code: bootstrapCode ?? "teams_send_failed" });
+  }
+});
+
+// Existing bot updates only its stored original cards after canonical consent.
+server.post("/internal/proactive/update-approval", async (req, res) => {
+  if (!PROACTIVE_TOKEN || req.get("authorization") !== `Bearer ${PROACTIVE_TOKEN}`) {
+    res.status(401).json({status:"rejected",error_code:"unauthorized"});return;
+  }
+  const {tenantId,aadObjectId,approvalId,decisionStatus,card}=req.body ?? {};
+  if (!isUuid(tenantId) || !isUuid(aadObjectId) || tenantId.toLowerCase() !== auth.tenantId.toLowerCase()
+      || !/^[A-Za-z0-9-]{1,128}$/.test(approvalId ?? "") || !["approved","denied","replaced"].includes(decisionStatus)) {
+    res.status(403).json({status:"rejected",error_code:"approval_update_scope_invalid"});return;
+  }
+  try {
+    const messageIds=await updateIssuedApprovalCards({adapter,store:approvalDecisions,
+      proactiveRecord:loadProactiveStore()[aadObjectId.toLowerCase()],
+      tenantId,aadObjectId,approvalId,status:decisionStatus,card});
+    res.json({status:"succeeded",message_ids:messageIds,approval_id:approvalId});
+  } catch {
+    res.status(503).json({status:"blocked",error_code:"approval_update_reconciliation_required"});
+  }
+});
+
+// Internal receipt reconciliation only; never casts a decision or resends.
+server.post("/internal/proactive/receipt", (req, res) => {
+  if (!PROACTIVE_TOKEN || req.get("authorization") !== `Bearer ${PROACTIVE_TOKEN}`) {
+    res.status(401).json({status:"rejected",error_code:"unauthorized"});return;
+  }
+  const {tenantId,aadObjectId,communicationId}=req.body ?? {};
+  if (!isUuid(tenantId) || !isUuid(aadObjectId) || tenantId.toLowerCase() !== auth.tenantId.toLowerCase()
+      || !/^comm-[a-f0-9]{64}$/.test(communicationId ?? "")) {
+    res.status(403).json({status:"rejected",error_code:"receipt_scope_invalid"});return;
+  }
+  try {
+    const record=approvalDecisions.sendReceipt({tenantId,aadObjectId,communicationId});
+    res.json({status:record?.state ?? "not_attempted",result:record?.result ?? null});
+  } catch {
+    res.status(503).json({status:"blocked",error_code:"receipt_unavailable"});
   }
 });
 

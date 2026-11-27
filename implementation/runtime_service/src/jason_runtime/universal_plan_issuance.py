@@ -34,12 +34,16 @@ class ExistingTeamsApprovalDelivery:
     bindings: Any
     sender_factory: Any = None
     clock: Callable[[],datetime] = lambda:datetime.now(timezone.utc)
+    workflow_configuration: Any = None
 
     def deliver(self, request: ApprovalRequest) -> ApprovalDeliveryReceipt:
         from .playbook_autonomy_review import TeamsGatewayPlaybookApprovalSender
         factory=self.sender_factory or TeamsGatewayPlaybookApprovalSender
+        configuration = ({"workflow_configuration": self.workflow_configuration}
+                         if self.workflow_configuration is not None else {})
         sender=factory(gateway_url=self.gateway_url,token_file=self.token_file,
-            bindings=self.bindings,owner_identity_ids=request.authorized_approver_ids)
+            bindings=self.bindings,owner_identity_ids=request.authorized_approver_ids,
+            **configuration)
         message_ids=sender.send(request)
         if not message_ids or len(message_ids)!=len(request.authorized_approver_ids):
             raise RuntimeError('approval delivery did not confirm every selected recipient')

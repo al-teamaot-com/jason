@@ -45,6 +45,32 @@ Proceed with work that has already been authorized; do not demand redundant appr
 - Prefer resolving questions independently from available authoritative evidence and existing decisions. Do not ask redundant questions, demand unnecessary approval, or use clarification as an excuse to halt work that can safely proceed. When uncertainty is noncritical, state the assumption and continue; when material, ask the smallest actionable question and explain why it matters.
 - Enforcement: qualitative review standard; assess in engineering reviews and retrospective evaluations, not by superficial word or sentiment checks.
 
+## JES-007 — Configurable shared notifications and approvals
+
+- **Owner direction, November 23, 2026:** Shared Teams communications and approval
+  flows are a core reusable capability. Operational settings, routing, business
+  calendars, thresholds, templates and supported existing-operation approval types
+  belong in validated versioned configuration/database records, not rebuilds or
+  new per-workflow bots, senders, schedulers or approval engines.
+- **User experience:** Show only decision-relevant facts in plain language, with
+  meaningful labels and no internal Jason jargon. Workflow-owned immutable facts
+  supply a shared configurable renderer. Preserve material cost, scope and impact;
+  hiding technical evidence must not hide the effect of approving.
+- **Authority:** Configuration selects presentation/routing inside already granted
+  permissions; it cannot grant itself capability/financial/production authority.
+  Existing authenticated identity, audience/client isolation, signed decisions,
+  one-use receipt, exact scope, disruption and release controls remain binding.
+- **Precedence:** Today's explicit Owner decisions supersede conflicting earlier
+  Teams UX/timing/recipient/sequencing requirements. Historical records remain
+  evidence; they do not silently override the current contract in
+  `docs/engineering/teams/Teams-Shared-Workflow-20261123.md`.
+- **Verification:** Prove a second existing approval type from configuration only,
+  safe reload and invalid-config rejection; business-calendar reminders/escalation,
+  both-party notifications without requester approval authority, durable duplicate
+  suppression and fail-closed partial delivery. Require real end-to-end acceptance
+  before reporting operational readiness. CI enforces source tests; production
+  adoption remains separately governed and unverified by this source record.
+
 ## Conflict and priority
 These standards do not replace existing human-governance, production-freeze, non-disruptive-operation or security requirements. More restrictive safeguards remain in force.
 

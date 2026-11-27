@@ -6,7 +6,7 @@ alone grants no spending authority or provider mutation.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
@@ -28,9 +28,17 @@ def money(value: Any) -> Decimal:
         amount=Decimal(str(value))
     except InvalidOperation as exc:
         raise SupervisorPolicyError('invalid monetary amount') from exc
-    if not amount.is_finite() or amount < 0 or amount.as_tuple().exponent < -2:
+    if not amount.is_finite() or amount < 0:
         raise SupervisorPolicyError('money requires nonnegative cents and finite value')
-    return amount.quantize(Decimal('0.01'))
+    try:
+        cents = amount.quantize(Decimal('0.01'))
+    except InvalidOperation as exc:
+        raise SupervisorPolicyError('money exceeds supported decimal bounds') from exc
+    # Autotask serializes numeric UDFs with four places, including .0000.
+    # Accept exact cents with trailing zeros; never round a fractional cent.
+    if cents != amount:
+        raise SupervisorPolicyError('money requires nonnegative cents and finite value')
+    return cents
 
 
 def identity(value: Any) -> str:
@@ -68,10 +76,15 @@ class SupervisorSpendingPolicy:
     canonical_digest: str
     policy_version: str
     role_memberships: tuple[tuple[str,tuple[str,...]],...]
+    source_path: Path | None = None
 
     @classmethod
     def load(cls, path: Path) -> 'SupervisorSpendingPolicy':
-        return cls.from_mapping(json.loads(path.read_text(encoding='utf-8')))
+        return replace(cls.from_mapping(json.loads(path.read_text(encoding='utf-8'))), source_path=path)
+
+    def current(self) -> 'SupervisorSpendingPolicy':
+        return (self.from_mapping(json.loads(self.source_path.read_text(encoding='utf-8')))
+                if self.source_path is not None else self)
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str,Any]) -> 'SupervisorSpendingPolicy':
@@ -128,11 +141,17 @@ class SupervisorSpendingPolicy:
         return cls(tuple(result),digest,raw['policy_version'],tuple(sorted(configured)))
 
     def roles_for(self, requester_id: str) -> tuple[str,...]:
+        if self.source_path is not None:
+            return self.current().roles_for(requester_id)
         requester_id=identity(requester_id)
         return tuple(role for role,members in self.role_memberships if requester_id in members)
 
     def decide_from_reviewed_identities(self, *, requester_id: str, purchase_type: str,
             amount: Decimal, autotask_contact_udf_limit: Decimal) -> SpendingDecision:
+        if self.source_path is not None:
+            return self.current().decide_from_reviewed_identities(requester_id=requester_id,
+                purchase_type=purchase_type, amount=amount,
+                autotask_contact_udf_limit=autotask_contact_udf_limit)
         # Roles are resolved only from reviewed canonical Jason identities.
         # Untrusted Teams card selections may never grant additional spending.
         return self.decide(requester_id=requester_id,
@@ -142,6 +161,8 @@ class SupervisorSpendingPolicy:
 
     @property
     def allowed_approver_ids(self) -> frozenset[str]:
+        if self.source_path is not None:
+            return self.current().allowed_approver_ids
         return frozenset(x for r in self.rules for x in r.designated_supervisor_ids+r.escalation_owner_ids)
 
     def decide(self, *, requester_id: str, authoritative_roles: tuple[str,...],
@@ -173,13 +194,15 @@ class SupervisorSpendingPolicy:
             owners if requires else (),selected.ttl_minutes)
 
     def revalidate(self, *, digest: str) -> None:
+        if self.source_path is not None:
+            return self.current().revalidate(digest=digest)
         if not isinstance(digest,str) or digest!=self.canonical_digest:
             raise PermissionError('supervisor policy changed; previous approval invalid')
 
 
 def require_signed_purchase_approval(*, service: Any, approval_id: str,
                                      submission: Mapping[str, Any]) -> Any:
-    """Reusable, canonical signed Teams approval receipt guard for PO/parts.
+    """Reusable canonical authenticated approval receipt guard for PO/parts.
 
     The same immutable ApprovalRequestService used for production-style cards
     is required. A bare approval ID or local record cannot grant write access.
@@ -203,7 +226,8 @@ def require_signed_purchase_approval(*, service: Any, approval_id: str,
             or receipt is None or receipt.status != 'approved'
             or receipt.decided_by == request.requested_by
             or receipt.decided_by not in request.authorized_approver_ids
-            or receipt.channel != 'microsoft_teams'
+            or receipt.channel not in ({'microsoft_teams', 'jason_mcp_entra'}
+                if submission.get('workflow_configuration_digest') else {'microsoft_teams'})
             or not receipt.authentication_evidence_hash):
         raise PermissionError('canonical signed Teams purchase approval receipt not verified')
     return receipt
