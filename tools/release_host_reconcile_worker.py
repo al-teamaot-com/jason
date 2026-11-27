@@ -65,6 +65,9 @@ CURRENT_LKG_FULL_EVIDENCE = Path("/var/lib/jason/openclaw/operational-full-healt
 CURRENT_LKG_EXEC_ROOT = Path("/usr/local/lib/jason/lkg-health-" + CURRENT_LKG_RECOVERY_SHA)
 MOBILE_APPROVAL_LEDGER = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
 ROOT_OWNER_PROOF_VERIFIER = Path("/usr/local/lib/jason/owner_signed_release.py")
+ROOT_OWNER_PROOF_SUCCESSOR = Path("/usr/local/lib/jason/owner_signed_release_v2.py")
+ROOT_RETIREMENT_POLICY = Path("/etc/jason-owner-release/normal-release-policy/production-freeze-retirement.json")
+ROOT_OWNER_PROOF_SUCCESSOR_SHA256 = "0b5bcf5ec9b888a487100cad90febe9a9193424b645fdf57c859b459562d58cc"
 ROOT_OWNER_TRUST_POLICY = Path("/etc/jason-owner-release/verified-owner-public-key.json")
 ROOT_OWNER_BINDINGS = Path("/var/lib/jason/governed-ticket-shared/teams-identity-bindings.sqlite3")
 ROOT_OWNER_AUTHORITY = Path("/var/lib/jason/authority/authority.sqlite3")
@@ -598,6 +601,49 @@ def _trusted_owner_proof_module():
     return module
 
 
+
+def _trusted_normal_owner_proof_module():
+    """Load only the independently installed, exact normal-mode successor.
+
+    Legacy bootstrap callers must keep using _trusted_owner_proof_module.
+    An inconsistent retirement record or successor denies normal mode;
+    it never permits falling back to a frozen exception.
+    """
+    try:
+        ROOT_RETIREMENT_POLICY.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise HostReconcileError("retirement policy custody unavailable") from exc
+    path = ROOT_OWNER_PROOF_SUCCESSOR
+    for parent in path.parents:
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise HostReconcileError("normal Owner verifier parent is untrusted")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or stat.S_IMODE(info.st_mode) not in (0o444, 0o644)
+                or info.st_nlink != 1 or not 0 < info.st_size <= 1000000):
+            raise HostReconcileError("normal Owner verifier is untrusted")
+        raw = os.read(fd, 1000001)
+        if (len(raw) != info.st_size or hashlib.sha256(raw).hexdigest()
+                != ROOT_OWNER_PROOF_SUCCESSOR_SHA256):
+            raise HostReconcileError("normal Owner verifier source digest changed")
+    finally:
+        os.close(fd)
+    # Execute exactly the immutable verified bytes, never reopen the file.
+    import types
+    module = types.ModuleType("jason_root_verified_owner_release_v2")
+    module.__file__ = str(path)
+    exec(compile(raw, str(path), "exec"), module.__dict__)
+    policy = module.read_retired_release_policy()
+    if policy is None:
+        raise HostReconcileError("normal Owner retirement policy disappeared")
+    return module, policy
+
+
 def _root_owner_identity_is_active(oid: str, subject: str) -> bool:
     """Recheck exact licensed/privileged Entra OAuth Owner subject binding."""
     tenant = "f7054323-d52b-4863-8c2f-1898f0b6077c"
@@ -681,13 +727,22 @@ def _signed_mcp_owner_release_authorized(
                 or len(raw) > 16384):
             return False
         request = json.loads(raw)
-        freeze_path = backup if not freeze.exists() else freeze
-        freeze_info = freeze_path.lstat()
-        if (freeze_path.is_symlink()
-                or not stat.S_ISREG(freeze_info.st_mode)
-                or freeze_info.st_uid != al
-                or stat.S_IMODE(freeze_info.st_mode) != 0o600):
-            return False
+        normal = _trusted_normal_owner_proof_module()
+        if normal is not None:
+            module, retired_policy = normal
+            module.require_retired_release_mode(RELEASE_STATE, retired_policy)
+            proof_binding = {"expected_release_policy_sha256": retired_policy}
+        else:
+            module = _trusted_owner_proof_module()
+            freeze_path = backup if not freeze.exists() else freeze
+            freeze_info = freeze_path.lstat()
+            if (freeze_path.is_symlink()
+                    or not stat.S_ISREG(freeze_info.st_mode)
+                    or freeze_info.st_uid != al
+                    or stat.S_IMODE(freeze_info.st_mode) != 0o600):
+                return False
+            proof_binding = {"expected_freeze_sha256": hashlib.sha256(
+                freeze_path.read_bytes()).hexdigest()}
         manifest = record.get("release_manifest") or {}
         review = record.get("manual_scope_review") or {}
         scope = str(review.get("scope_sha256") or "")
@@ -708,7 +763,6 @@ def _signed_mcp_owner_release_authorized(
                 }
                 or request.get("organization_id") != "aot"):
             return False
-        module = _trusted_owner_proof_module()
         public = module.read_pinned_root_owner_public_key(
             ROOT_OWNER_TRUST_POLICY,
         )
@@ -720,9 +774,7 @@ def _signed_mcp_owner_release_authorized(
             expected_release_id=release_id,
             expected_scope_sha256=scope,
             expected_manifest_sha256=manifest_digest,
-            expected_freeze_sha256=hashlib.sha256(
-                freeze_path.read_bytes()
-            ).hexdigest(),
+            **proof_binding,
             at=datetime.now(timezone.utc),
         )
         if (source != "authenticated_signed_mcp_owner:" + proof["approval_id"]

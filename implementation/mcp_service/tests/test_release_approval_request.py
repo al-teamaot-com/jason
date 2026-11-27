@@ -178,3 +178,58 @@ def test_stale_signed_request_is_not_overwritten_or_reissued(tmp_path):
         verified_token_claims=CLAIMS, service_signer=KEY,
     )
     assert second == first
+
+
+def test_retired_mode_issuer_uses_new_policy_and_rejects_stale_pending(tmp_path, monkeypatch):
+    from jason_mcp import release_approval_request as issuer
+    from hashlib import sha256
+    _record(tmp_path)
+    args = dict(state_root=tmp_path, release_id=RID, candidate_sha=SHA,
+                approved_by=PRINCIPAL, organization_id="aot",
+                verified_token_claims=CLAIMS, service_signer=KEY)
+    legacy = queue_release_approval_request(**args)
+    old_request = tmp_path / "owner-approval-requests" / (RID+".json")
+    (tmp_path/"production-deployment-freeze").unlink()
+    monkeypatch.setattr(issuer, "read_retired_release_policy", lambda: "9"*64)
+    with pytest.raises(PermissionError, match="MODE_MISMATCH"):
+        queue_release_approval_request(**args)
+    assert json.loads(old_request.read_text()) == legacy
+    old_request.unlink()  # disposable fixture only
+    normal = queue_release_approval_request(**args)
+    payload = normal["signed_owner_proof"]["payload"]
+    assert payload["schema_version"] == "2.0"
+    assert payload["release_policy_sha256"] == "9"*64
+    assert "freeze_sha256" not in payload
+    assert queue_release_approval_request(**args) == normal
+    (tmp_path/"production-deployment-freeze").write_text('{"status":"active"}')
+    with pytest.raises(PermissionError, match="MODE_CONFLICT"):
+        queue_release_approval_request(**args)
+
+
+def test_missing_freeze_is_not_retirement(tmp_path, monkeypatch):
+    from jason_mcp import release_approval_request as issuer
+    _record(tmp_path)
+    (tmp_path/"production-deployment-freeze").unlink()
+    monkeypatch.setattr(issuer, "read_retired_release_policy", lambda: None)
+    with pytest.raises(ValueError, match="FROZEN_TRANSACTION_REQUIRED"):
+        queue_release_approval_request(
+            state_root=tmp_path,release_id=RID,candidate_sha=SHA,
+            approved_by=PRINCIPAL,organization_id="aot",
+            verified_token_claims=CLAIMS,service_signer=KEY)
+    assert not (tmp_path/"owner-approval-requests").exists()
+
+
+def test_retired_mode_does_not_inherit_historical_approval(tmp_path, monkeypatch):
+    from jason_mcp import release_approval_request as issuer
+    _record(tmp_path)
+    (tmp_path/"production-deployment-freeze").unlink()
+    path=tmp_path/"records"/(RID+".json")
+    record=json.loads(path.read_text())
+    record["owner_approval"]={"approved":True,"candidate_sha":SHA}
+    path.write_text(json.dumps(record))
+    monkeypatch.setattr(issuer,"read_retired_release_policy",lambda:"9"*64)
+    with pytest.raises(ValueError,match="FRESH_RECORD_REQUIRED"):
+        queue_release_approval_request(
+            state_root=tmp_path,release_id=RID,candidate_sha=SHA,
+            approved_by=PRINCIPAL,organization_id="aot",
+            verified_token_claims=CLAIMS,service_signer=KEY)

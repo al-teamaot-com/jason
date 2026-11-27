@@ -577,6 +577,14 @@ def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None
             active.append((path, doc))
     if not active:
         return
+    module_root = Path(__file__).resolve().parents[1] / "implementation"
+    if str(module_root) not in sys.path:
+        sys.path.insert(0, str(module_root))
+    from kernel.signed_owner_release_v2 import read_retired_release_policy
+    if read_retired_release_policy() is not None:
+        # A historical receipt must never recreate a retired global hold.
+        # Preserve its evidence and deny the inconsistent transaction.
+        raise ReleaseManagerError("retired policy conflicts with unfinished legacy freeze transaction")
     if len(active) != 1:
         raise ReleaseManagerError("multiple unfinished production freeze exceptions require human review")
     receipt_path, receipt = active[0]
@@ -4196,9 +4204,10 @@ def verify_signed_mcp_owner_request(
     root = Path(__file__).resolve().parents[1] / "implementation"
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
-    from kernel.signed_owner_release import (
+    from kernel.signed_owner_release_v2 import (
         EXACT_OWNER_OAUTH_SUBJECTS, OwnerReleaseProofDenied,
-        verify_exact_owner_release,
+        verify_exact_owner_release, read_retired_release_policy,
+        require_retired_release_mode,
     )
     candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
     rollback = str(record.get("rollback_sha") or "")
@@ -4222,9 +4231,15 @@ def verify_signed_mcp_owner_request(
             or not isinstance(signed, Mapping)):
         raise ReleaseManagerError("signed MCP Owner request binding incomplete")
     try:
-        snapshot = _freeze_marker_snapshot(state_root)
-    except ReleaseManagerError as exc:
-        raise ReleaseManagerError("signed MCP Owner decision requires active freeze") from exc
+        retired_policy = read_retired_release_policy()
+        if retired_policy is not None:
+            require_retired_release_mode(state_root, retired_policy)
+            proof_binding = {"expected_release_policy_sha256": retired_policy}
+        else:
+            snapshot = _freeze_marker_snapshot(state_root)
+            proof_binding = {"expected_freeze_sha256": snapshot["sha256"]}
+    except (OSError, ReleaseManagerError, OwnerReleaseProofDenied) as exc:
+        raise ReleaseManagerError("signed MCP Owner decision requires verified release policy") from exc
     manifest_sha = hashlib.sha256(json.dumps(
         manifest, sort_keys=True, separators=(",", ":"),
         ensure_ascii=False,
@@ -4237,7 +4252,7 @@ def verify_signed_mcp_owner_request(
             expected_release_id=str(request["release_id"]),
             expected_scope_sha256=str(review.get("scope_sha256") or ""),
             expected_manifest_sha256=manifest_sha,
-            expected_freeze_sha256=snapshot["sha256"],
+            **proof_binding,
             at=at or datetime.now(timezone.utc),
         )
     except OwnerReleaseProofDenied as exc:
@@ -7041,6 +7056,51 @@ def require_pmv3_engineering_quiescent() -> None:
         )
 
 
+
+def require_retired_mode_approval(state_root: Path, record: Mapping[str, Any]) -> None:
+    """Require a fresh, independently signed exact normal-mode decision.
+
+    No historic approval boolean or legacy freeze proof can be reused.
+    The native root acceptance path must independently verify the same mode.
+    """
+    root = Path(__file__).resolve().parents[1] / "implementation"
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from kernel.signed_owner_release_v2 import (
+        read_retired_release_policy, require_retired_release_mode,
+        read_pinned_root_owner_public_key, OwnerReleaseProofDenied,
+    )
+    policy = read_retired_release_policy()
+    if policy is None:
+        raise ReleaseManagerError("unfrozen production requires root-attested retirement policy")
+    try:
+        require_retired_release_mode(state_root, policy)
+        release_id = str(record.get("release_id") or "")
+        candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+        if not SHA.fullmatch(candidate) or release_id != record_id(candidate):
+            raise ReleaseManagerError("retired-mode exact release identity missing")
+        p = state_root / "owner-approval-requests-processed" / (release_id + ".json")
+        meta = p.lstat()
+        if (p.is_symlink() or not stat.S_ISREG(meta.st_mode)
+                or meta.st_uid != os.geteuid() or stat.S_IMODE(meta.st_mode) != 0o600
+                or meta.st_nlink != 1 or not 0 < meta.st_size <= 16384):
+            raise ReleaseManagerError("retired-mode signed decision custody invalid")
+        request = json.loads(p.read_bytes())
+        key = read_pinned_root_owner_public_key(
+            Path("/etc/jason-owner-release/verified-owner-public-key.json"))
+        proof = verify_signed_mcp_owner_request(state_root, record, request, public_key=key)
+        owner = record.get("owner_approval") or {}
+        if (proof["schema_version"] != "2.0"
+                or proof["release_policy_sha256"] != policy
+                or owner.get("approved") is not True
+                or owner.get("candidate_sha") != candidate
+                or owner.get("source") != "authenticated_signed_mcp_owner:" + proof["approval_id"]):
+            raise ReleaseManagerError("retired-mode fresh exact Owner decision required")
+    except (OSError, ValueError, TypeError, KeyError, OwnerReleaseProofDenied) as exc:
+        raise ReleaseManagerError("retired-mode Owner authorization denied") from exc
+
+
+
 def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     # Freeze evaluation is serialized under the same production transaction
     # lock. This permits one exact signed recovery exception without creating a
@@ -7064,6 +7124,14 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                 marker = state_root / PRODUCTION_FREEZE_MARKER
                 freeze_active = marker.exists() or marker.is_symlink()
                 if freeze_active:
+                    # A retired policy must never coexist with an active
+                    # marker or permit fallback to a legacy exception.
+                    module_root = Path(__file__).resolve().parents[1] / "implementation"
+                    if str(module_root) not in sys.path:
+                        sys.path.insert(0, str(module_root))
+                    from kernel.signed_owner_release_v2 import read_retired_release_policy
+                    if read_retired_release_policy() is not None:
+                        raise ReleaseManagerError("retired release policy conflicts with active freeze")
                     # A frozen recovery is admitted only when the complete fresh drift
                     # set matches the reviewed recovery profile AND the already signed
                     # Teams release card bound the source-declared one-transaction
@@ -7111,6 +7179,7 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                     # bounded stopped-container retention may now run.
                     reconcile_stopped_rollback_retention()
                 else:
+                    require_retired_mode_approval(state_root, record)
                     # Ordinary unfrozen promotion preserves the historical ordering:
                     # retention first, then breaker revalidation.
                     reconcile_stopped_rollback_retention()
