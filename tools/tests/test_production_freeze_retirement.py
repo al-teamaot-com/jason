@@ -505,3 +505,85 @@ def test_repeated_activation_returns_historical_receipt_without_native_operation
     assert result["live_verification_required"] is True
     assert result["receipt"]["status"]=="global_production_freeze_retired"
     assert f.events==before
+
+
+def test_retained_manager_parent_scope_is_distinct_and_exact():
+    p=fixture_plan()
+    old=r.owner_scope(p)
+    p["retained_preparation"]={"fixture":"historical proof"}
+    p["installation_targets"]=["/fixture/pause.json"]
+    new=r.owner_scope(p)
+    assert "manager_preparation_and_retirement" not in new
+    assert new["retained_preparation_and_retirement"]==p
+    assert set(new["installation_targets"])=={"/fixture/pause.json","/fixture/policy.json"}
+    assert r.digest(r.canonical(old))!=r.digest(r.canonical(new))
+
+
+def test_retained_preparation_cannot_substitute_for_new_approval(tmp_path):
+    p=fixture_plan()
+    old=r.owner_scope(p)
+    p["retained_preparation"]={"fixture":"old approval and acceptance"}
+    a=fake_adapter(tmp_path,p,{"owner_scope_sha256":r.digest(r.canonical(old)),
+                              "owner_action":r.ACTION})
+    a.verify_retained_preparation_records=Mock()
+    with pytest.raises(PermissionError,match="PARENT_APPROVAL_BINDING"):
+        r.activate(a,{})
+    a.verify_retained_preparation_records.assert_not_called()
+    assert_no_operations(a)
+
+
+def test_retained_preparation_mismatch_denied_before_mutation(tmp_path):
+    p=fixture_plan()
+    p["retained_preparation"]={"fixture":"exact historical proof"}
+    a=fake_adapter(tmp_path,p,{"owner_scope_sha256":r.digest(r.canonical(r.owner_scope(p))),
+                              "owner_action":r.ACTION})
+    a.verify_retained_preparation_records=Mock(return_value={"fixture":"different history"})
+    with pytest.raises(PermissionError,match="RETAINED_PREPARATION_NOT_ACCEPTED"):
+        r.activate(a,{})
+    assert_no_operations(a)
+
+
+def test_native_reader_diagnostics_preserve_bounded_reason(monkeypatch):
+    import subprocess
+    import sys
+    monkeypatch.setattr(r,"installed_code",lambda _:(
+        "import json;\n"
+        "def fail(reason):\n raise PermissionError(reason)\n"))
+    adapter=SimpleNamespace(command=lambda args,timeout:subprocess.check_output(
+        [sys.executable,*args[1:]],timeout=timeout))
+    assert r.root_observation(adapter,"{'fixture': True}")=={"fixture":True}
+    with pytest.raises(PermissionError,match="COORDINATED_EFFECTIVE_APPROVAL_WATCH_DRIFT"):
+        r.root_observation(adapter,"fail('COORDINATED_EFFECTIVE_APPROVAL_WATCH_DRIFT')")
+    with pytest.raises(PermissionError,match="NATIVE_READER_EXCEPTION_PermissionError") as exc:
+        r.root_observation(adapter,"fail('fixture private output')")
+    assert "fixture private output" not in str(exc.value)
+
+
+def test_isolated_final_only_retry_does_not_fabricate_new_manager_acceptance(transaction_fixture):
+    f=transaction_fixture
+    original=(f.journal/"scheduled-acceptance.json").read_bytes()
+    proof={"fixture":"independently validated retained preparation"}
+    f.plan["retained_preparation"]=proof
+    f.adapter.verify_retained_preparation_records=lambda:proof
+    approval={"owner_scope_sha256":r.digest(r.canonical(r.owner_scope(f.plan))),
+              "owner_action":r.ACTION}
+    (f.journal/"approval.json").write_bytes(r.canonical(approval))
+    # No acceptance receipt in the new final-only journal is needed or written.
+    (f.journal/"scheduled-acceptance.json").unlink()
+    result=r.activate(f.adapter,f.ops)
+    assert result["status"]=="global_production_freeze_retired"
+    assert not (f.journal/"scheduled-acceptance.json").exists()
+    assert json.loads(original)["evidence"]["two_distinct_scheduled_cycles_verified"] is True
+
+
+def test_final_retirement_rollback_preserves_foreign_pause(transaction_fixture):
+    f=transaction_fixture
+    revalidate=f.adapter.native_revalidation
+    def foreign_pause():
+        revalidate()
+        f.files[f.pause_path]=f.ops["image"](b"fixture foreign pause",1000,0o600)
+    f.adapter.native_revalidation=foreign_pause
+    f.fail="preflight"
+    with pytest.raises(PermissionError,match="FOREIGN_RECOVERY_PAUSE"):
+        r.activate(f.adapter,f.ops)
+    assert f.files[f.pause_path][0]==b"fixture foreign pause"

@@ -984,3 +984,141 @@ def test_readback_wait_does_not_accept_failed_or_missing_fresh_evidence(monkeypa
     monkeypatch.setattr(m.time,"sleep",lambda _:None)
     with pytest.raises(PermissionError,match="PIPELINE_(FRESH_READBACK_UNAVAILABLE|READBACK_NOT_CLEAN|READBACK_TIME_INVALID)"):
         a.wait_for_fresh_pipeline_readback(attempts=2)
+
+
+def test_final_retirement_delta_is_exact_and_new():
+    git=Mock(return_value="\n".join(sorted(m.FINAL_RETIREMENT_DELTA)).encode())
+    m.verify_final_retry_delta(git,"a"*40)
+    git.assert_any_call("merge-base","--is-ancestor",m.FINAL_RETIREMENT_PREPARATION,"a"*40)
+    with pytest.raises(PermissionError,match="REQUIRES_NEW_CANDIDATE"):
+        m.verify_final_retry_delta(git,m.FINAL_RETIREMENT_PREPARATION)
+    git.return_value += b"\nconfig/fixture-expansion.json"
+    with pytest.raises(PermissionError,match="EXACT_SOURCE_DELTA"):
+        m.verify_final_retry_delta(git,"a"*40)
+
+
+@pytest.fixture
+def final_retry_plan_fixture(monkeypatch):
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from tools import production_freeze_retirement as r
+    a=object.__new__(m.FinalRetirementRetry)
+    a.candidate="a"*40
+    target=Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_coordinated_host.py")
+    a.code={"tools/scoped_backport_coordinated_host.py":b"fixture corrected parser"}
+    proof={"accepted_candidate_sha":m.FINAL_RETIREMENT_PREPARATION,
+           "manager_scope_sha256":"1"*64,"prior_parent_scope_sha256":"2"*64,
+           "history_sha256":dict(m.FINAL_RETIREMENT_HISTORY)}
+    a.verify_retained_preparation_records=Mock(return_value=proof)
+    old={
+        "action":r.ACTION,"candidate_sha":m.FINAL_RETIREMENT_PREPARATION,
+        "provider_writes":False,"standing_authority":False,
+        "rollback_authorized":True,
+        "configuration_after":{"schema_version":"1.0","production_freeze":False},
+        "new_files":{str(target):m.describe(m.image(b"fixture original parser",0,0o444))},
+        "installation_targets":[str(target)],"create_directories":{},
+    }
+    a.retained=SimpleNamespace(plan={"normal_retirement":old,"protected_health":{"fixture":"health"}})
+    a.retirement_helper=lambda:{"ACTION":r.ACTION,"owner_scope":r.owner_scope,
+                                "static_files":lambda *_:{target:m.image(a.code["tools/scoped_backport_coordinated_host.py"],0,0o444)}}
+    a.historical_rows={"approval.json":{"owner_oid":"a"*36}}
+    return a,deepcopy(old),proof
+
+
+def test_final_retry_scope_retains_preparation_without_reinstallation(final_retry_plan_fixture):
+    a,old,proof=final_retry_plan_fixture
+    p=a.expected_plan()
+    assert p["policy"]["candidate_sha"]==a.candidate
+    assert p["retained_preparation"]==proof
+    assert p["installation_targets"]==[str(m.PAUSE)]
+    assert p["normal_retirement"]["candidate_sha"]==a.candidate
+    assert p["normal_retirement"]["installation_targets"]==old["installation_targets"]
+    assert p["normal_retirement"]["new_files"]!=old["new_files"]
+    assert a.retained.plan["normal_retirement"]==old
+    assert "manager_preparation_and_retirement" not in a.owner_scope(p)
+
+
+def test_final_retry_needs_fresh_exact_authentication(final_retry_plan_fixture):
+    a,_,_=final_retry_plan_fixture
+    p=a.expected_plan()
+    exact=a.owner_scope(p)
+    a.n={"owner":Mock(side_effect=PermissionError("fixture owner denied")),
+         "locks":Mock(side_effect=AssertionError("must not lock before approval"))}
+    with pytest.raises(PermissionError,match="EXACT_SCOPE_REQUIRED"):
+        a.apply_final_retry(p,"0"*64)
+    a.n["owner"].assert_not_called()
+    with pytest.raises(PermissionError,match="fixture owner denied"):
+        a.apply_final_retry(p,m.digest(m.canon(exact)))
+    a.n["owner"].assert_called_once_with(exact)
+    a.n["locks"].assert_not_called()
+
+
+@pytest.mark.parametrize("change",["scope","parent","actor","old_candidate"])
+def test_final_retry_rejects_invalid_new_approval_record(final_retry_plan_fixture,tmp_path,change):
+    a,_,_=final_retry_plan_fixture
+    a.directory=tmp_path
+    p=a.expected_plan()
+    row={"scope":p,"scope_sha256":m.digest(m.canon(p)),"owner_oid":"a"*36,
+         "approved_at":"fixture","owner_scope_sha256":m.digest(m.canon(a.owner_scope(p))),
+         "owner_action":a.retirement_helper()["ACTION"]}
+    if change=="scope":row["scope_sha256"]="0"*64
+    elif change=="parent":row["owner_scope_sha256"]="0"*64
+    elif change=="actor":row["owner_oid"]="b"*36
+    else:row["scope"]["policy"]["candidate_sha"]=m.FINAL_RETIREMENT_PREPARATION
+    a.n={"directory":Mock(),"read":Mock(return_value=m.canon(row))}
+    with pytest.raises(PermissionError,match="NEW_APPROVAL_REQUIRED"):
+        a.load_record()
+
+
+@pytest.fixture
+def final_retry_history(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    a=object.__new__(m.FinalRetirementRetry)
+    history=tmp_path/m.FINAL_RETIREMENT_PREPARATION
+    history.mkdir()
+    monkeypatch.setattr(m,"STATE",tmp_path)
+    parent="1"*64
+    sha="2"*64
+    rows={
+        "approval.json":{"owner_scope_sha256":parent,"owner_oid":"fixture"},
+        "receipt-image.json":{"fixture":"receipt"},
+        "retirement-intent.json":{"parent_sha256":parent},
+        "retirement-policy-intent.json":{"parent_sha256":parent},
+        "retirement-rollback.json":{"status":"original_freeze_and_mcp_restored",
+                                    "parent_sha256":parent,"accepted_manager_preparation_retained":True},
+        "scheduled-cycle-1.json":{"fixture":"first"},
+        "scheduled-cycle-2.json":{"fixture":"second"},
+    }
+    rows["scheduled-acceptance.json"]={
+        "scope_sha256":sha,"status":"scheduled_engineering_acceptance_verified",
+        "evidence":{"two_distinct_scheduled_cycles_verified":True,
+                    "first_cycle_sha256":m.digest(m.canon(rows["scheduled-cycle-1.json"])),
+                    "second_cycle_sha256":m.digest(m.canon(rows["scheduled-cycle-2.json"]))}}
+    pins={k:m.digest(m.canon(rows[k])) for k in m.FINAL_RETIREMENT_HISTORY}
+    monkeypatch.setattr(m,"FINAL_RETIREMENT_HISTORY",pins)
+    for name in m.FINAL_RETIREMENT_RECORDS:
+        (history/name).write_bytes(m.canon(rows.get(name,{})))
+    a.n={"directory":Mock(),"read":lambda path,*args:path.read_bytes()}
+    a.retained=SimpleNamespace(load_record=Mock(return_value=sha),
+                               pause_image=m.image(b"fixture pause",1000,0o600))
+    return a,history,pins
+
+
+def test_final_retry_validates_immutable_history(final_retry_history):
+    a,history,pins=final_retry_history
+    before={p:p.read_bytes() for p in history.iterdir()}
+    proof=a.verify_retained_preparation_records()
+    assert proof["history_sha256"]==pins
+    assert proof["accepted_candidate_sha"]==m.FINAL_RETIREMENT_PREPARATION
+    assert proof["manager_scope_sha256"]=="2"*64
+    assert a.pause_image==a.retained.pause_image
+    assert {p:p.read_bytes() for p in history.iterdir()}==before
+
+
+@pytest.mark.parametrize("name",["approval.json","receipt-image.json","retirement-rollback.json",
+                                  "retirement-intent.json","scheduled-cycle-1.json","foreign.json"])
+def test_final_retry_rejects_changed_or_extra_history(final_retry_history,name):
+    a,history,_=final_retry_history
+    (history/name).write_bytes(b'{"fixture":"changed"}')
+    with pytest.raises(PermissionError,match="FINAL_RETRY_(HISTORICAL_RECORD|SCHEDULED_CYCLE)"):
+        a.verify_retained_preparation_records()

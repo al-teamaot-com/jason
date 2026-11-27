@@ -143,10 +143,26 @@ def verify_effective_schedule() -> None:
             deny("COORDINATED_EFFECTIVE_SCHEDULE_DRIFT")
     raw=run("systemctl","show","jason-scoped-backport-requests.path",
             "-p","DropInPaths","-p","Paths",timeout=12).stdout.decode()
-    values=dict(line.split("=",1) for line in raw.splitlines() if "=" in line)
-    if (values.get("DropInPaths","").split()!=[str(FILES["normal_approval_watch"])]
-            or "/var/lib/jason/authority/scoped-backport-release/requests" not in values.get("Paths","")
-            or "/var/lib/jason/authority/scoped-backport-release/owner-approvals" not in values.get("Paths","")):
+    # systemd 255 emits one Paths= property per path specification.
+    # Retain every row; require precisely the reviewed PathChanged watches.
+    values = {}
+    paths = []
+    for line in raw.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key == "Paths":
+            paths.append(value)
+        else:
+            if key in values:
+                deny("COORDINATED_EFFECTIVE_APPROVAL_WATCH_DRIFT")
+            values[key] = value
+    expected_paths = [
+        "/var/lib/jason/authority/scoped-backport-release/requests (PathChanged)",
+        "/var/lib/jason/authority/scoped-backport-release/owner-approvals (PathChanged)",
+    ]
+    if (values.get("DropInPaths","").split() != [str(FILES["normal_approval_watch"])]
+            or sorted(paths) != sorted(expected_paths)):
         deny("COORDINATED_EFFECTIVE_APPROVAL_WATCH_DRIFT")
     trusted_directory(READBACK.parent)
 

@@ -2525,6 +2525,175 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
         print("ENGINEERING_PIPELINE_FAILED_ACCEPTANCE_PAUSE_VERIFIED")
 
 
+# A reviewed terminal final-phase rollback may retain its independently
+# accepted manager. This records a NEW authenticated final-only transaction;
+# the old approval, acceptance, and terminal journal are never rewritten.
+FINAL_RETIREMENT_PREPARATION = "db14810b945a39546ef27d48dbe439b5e0ec4e80"
+FINAL_RETIREMENT_HISTORY = {
+    "approval.json":"6fdedf7e4f87ca70da020e3bb58b0fe3be116a39e2061d24d6ecc6157142ad2e",
+    "receipt-image.json":"1b534cac397aa26bab21258acedc25453546fd46cbfd912809701cb0ed85aea7",
+    "scheduled-acceptance.json":"e4303bc4a63321426b8f4351c873a0092ad6522025cd8120bbce82d5cbd4f228",
+    "retirement-intent.json":"c763b28fab4d857c801279a9fa31540ae1f87959be469d885289eb419c74f365",
+    "retirement-policy-intent.json":"8170be2a19c0dd8611aa613721b55e456dc7cd6b8c9da464c24982bd387bcf63",
+    "retirement-rollback.json":"75bfb80d240a02efebc53065029fcb777aabae82b9957c0e5adb9d93c4a3f8e1",
+}
+FINAL_RETIREMENT_DELTA = frozenset({
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/production_freeze_retirement.py",
+    "tools/scoped_backport_coordinated_host.py",
+    "tools/tests/test_production_freeze_retirement.py",
+    "tools/tests/test_scoped_backport_coordinated_host.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "docs/operations/Production-Freeze-Retirement-Source-Review-20261127.md",
+})
+FINAL_RETIREMENT_RECORDS = frozenset(FINAL_RETIREMENT_HISTORY) | {
+    "activation-attempt.json","activation.json","result.json",
+    "scheduled-cycle-1.json","scheduled-cycle-2.json",
+}
+
+
+def verify_final_retry_delta(git, candidate):
+    need(candidate != FINAL_RETIREMENT_PREPARATION,"FINAL_RETRY_REQUIRES_NEW_CANDIDATE")
+    git("merge-base","--is-ancestor",FINAL_RETIREMENT_PREPARATION,candidate)
+    changed = set(git("diff","--no-renames","--name-only",
+                      FINAL_RETIREMENT_PREPARATION,candidate).decode().splitlines())
+    need(changed == FINAL_RETIREMENT_DELTA,"FINAL_RETRY_EXACT_SOURCE_DELTA")
+
+
+class FinalRetirementRetry(PipelineSuccessor):
+    """A fresh exact decision for only the previously rolled-back final phase."""
+
+    def __init__(self,candidate,n,p,code):
+        super().__init__(candidate,n,p,code,predecessor=NORMAL_MANAGER_BASELINE)
+        self.retirement_requested=True
+        git=lambda *args:p["git"](REPO,*args)
+        verify_final_retry_delta(git,candidate)
+        history=STATE/FINAL_RETIREMENT_PREPARATION
+        n["directory"](history,0o700)
+        raw=n["read"](history/"approval.json",0,0o400,8_000_000)
+        need(digest(raw)==FINAL_RETIREMENT_HISTORY["approval.json"],
+             "FINAL_RETRY_HISTORICAL_APPROVAL_CHANGED")
+        original=json.loads(raw)
+        old_code={k:git("show",FINAL_RETIREMENT_PREPARATION+":"+k) for k in code}
+        need(original["scope"]["source_hashes"]=={k:digest(v) for k,v in old_code.items()},
+             "FINAL_RETRY_HISTORICAL_SOURCE_CHANGED")
+        self.retained=PipelineSuccessor(FINAL_RETIREMENT_PREPARATION,n,p,old_code,
+                                       predecessor=NORMAL_MANAGER_BASELINE)
+        self.retained.retirement_requested=True
+        self.verify_retained_preparation_records()
+
+    def verify_retained_preparation_records(self):
+        history=STATE/FINAL_RETIREMENT_PREPARATION
+        self.n["directory"](STATE,0o700); self.n["directory"](history,0o700)
+        need({p.name for p in history.iterdir()}==FINAL_RETIREMENT_RECORDS,
+             "FINAL_RETRY_HISTORICAL_RECORD_SET")
+        rows={}
+        for name,pin in FINAL_RETIREMENT_HISTORY.items():
+            raw=self.n["read"](history/name,0,0o400,8_000_000)
+            need(digest(raw)==pin,"FINAL_RETRY_HISTORICAL_RECORD_CHANGED:"+name)
+            rows[name]=json.loads(raw)
+        sha=self.retained.load_record()
+        approval=rows["approval.json"]
+        acceptance=rows["scheduled-acceptance.json"]
+        rollback=rows["retirement-rollback.json"]
+        parent=approval["owner_scope_sha256"]
+        need(acceptance["scope_sha256"]==sha
+             and acceptance["status"]=="scheduled_engineering_acceptance_verified"
+             and acceptance["evidence"].get("two_distinct_scheduled_cycles_verified") is True
+             and rollback=={"status":"original_freeze_and_mcp_restored","parent_sha256":parent,
+                            "accepted_manager_preparation_retained":True}
+             and all(rows[k]["parent_sha256"]==parent for k in
+                     ("retirement-intent.json","retirement-policy-intent.json")),
+             "FINAL_RETRY_TERMINAL_ROLLBACK_UNVERIFIED")
+        for i,label in ((1,"first"),(2,"second")):
+            raw=self.n["read"](history/("scheduled-cycle-"+str(i)+".json"),0,0o400)
+            need(digest(raw)==acceptance["evidence"][label+"_cycle_sha256"],
+                 "FINAL_RETRY_SCHEDULED_CYCLE_CHANGED")
+        self.pause_image=self.retained.pause_image
+        self.historical_rows=rows
+        return {"accepted_candidate_sha":FINAL_RETIREMENT_PREPARATION,
+                "manager_scope_sha256":sha,"prior_parent_scope_sha256":parent,
+                "history_sha256":dict(FINAL_RETIREMENT_HISTORY)}
+
+    def expected_plan(self):
+        proof=self.verify_retained_preparation_records()
+        helper=self.retirement_helper()
+        old=self.retained.plan["normal_retirement"]
+        final=json.loads(canon(old))
+        final["candidate_sha"]=self.candidate
+        files=helper["static_files"](self,globals())
+        new_files={str(k):describe(v) for k,v in files.items()}
+        changed={k for k in new_files if new_files[k]!=old["new_files"].get(k)}
+        target="/usr/local/lib/jason/scoped-backport/tools/scoped_backport_coordinated_host.py"
+        need(set(new_files)==set(old["new_files"]) and changed=={target}
+             and new_files[target]["mode"]==old["new_files"][target]["mode"],
+             "FINAL_RETRY_INSTALL_DELTA")
+        final["new_files"]=new_files
+        return {"schema_version":"1.0","action":helper["ACTION"],
+                "policy":{"candidate_sha":self.candidate,"rollback_sha":LKG},
+                "installation_targets":[str(PAUSE)],
+                "normal_retirement":final,"retained_preparation":proof,
+                "protected_health":self.retained.plan["protected_health"],
+                "source_hashes":{k:digest(v) for k,v in self.code.items()}}
+
+    def verify_successor_topology_and_source(self,*,resumed=False):
+        need(resumed,"FINAL_RETRY_REQUIRES_ACCEPTED_RESUMED_MANAGER")
+        self.verify_retained_preparation_records()
+        self.retained.verify_successor_topology_and_source(resumed=True)
+        helper=self.retirement_helper()
+        old_intent=self.historical_rows["retirement-intent.json"]
+        paths=set(helper["static_files"](self,globals()))|set(helper["DYNAMIC"])|{helper["FREEZE"],helper["BACKUP"]}
+        before=decode(old_intent["before"],paths)
+        need(all(snapshot(path)==value for path,value in before.items()),
+             "FINAL_RETRY_ORIGINAL_FILE_RESTORATION_CHANGED")
+        need(all(not os.path.lexists(path) for path in self.retained.plan["normal_retirement"]["create_directories"]),
+             "FINAL_RETRY_ROLLBACK_DIRECTORY_REMAINS")
+
+    def inspect_final_retry(self):
+        need(not os.path.lexists(self.directory),"FINAL_RETRY_NEW_JOURNAL_ALREADY_PRESENT")
+        plan=self.expected_plan()
+        self.verify_successor_topology_and_source(resumed=True)
+        actual=self.retirement_helper()["prepare"](self,plan,globals())
+        need(actual==plan["normal_retirement"],"FINAL_RETRY_LIVE_SCOPE_CHANGED")
+        return plan
+
+    def load_record(self,*,allow_unpublished=False):
+        need(not allow_unpublished,"FINAL_RETRY_UNPUBLISHED_RECORD_DENIED")
+        expected=self.expected_plan()
+        self.n["directory"](self.directory,0o700)
+        raw=self.n["read"](self.directory/"approval.json",0,0o400,8_000_000)
+        row=json.loads(raw)
+        need(set(row)=={"scope","scope_sha256","owner_oid","approved_at",
+                       "owner_scope_sha256","owner_action"}
+             and row["scope"]==expected
+             and row["scope_sha256"]==digest(canon(expected))
+             and row["owner_scope_sha256"]==digest(canon(self.owner_scope(expected)))
+             and row["owner_action"]==self.retirement_helper()["ACTION"]
+             and row["owner_oid"]==self.historical_rows["approval.json"]["owner_oid"],
+             "FINAL_RETRY_NEW_APPROVAL_REQUIRED")
+        self.plan=expected
+        return row["scope_sha256"]
+
+    def apply_final_retry(self,plan,sha):
+        exact=self.owner_scope(plan)
+        need(sha==digest(canon(exact)),"FINAL_RETRY_EXACT_SCOPE_REQUIRED")
+        actor=self.n["owner"](exact)
+        self.wait_for_fresh_pipeline_readback()
+        with self.n["locks"]():
+            need(source_review(self.candidate,self.p,baseline=self.predecessor,
+                               source_files=self.source_files,supporting_files=self.supporting_files)==self.code,
+                 "FINAL_RETRY_SOURCE_CHANGED")
+            need(self.inspect_final_retry()==plan,"FINAL_RETRY_APPROVED_SCOPE_CHANGED")
+            need(actor==self.historical_rows["approval.json"]["owner_oid"],"FINAL_RETRY_OWNER_CHANGED")
+            self.directory.mkdir(mode=0o700); self.n["sync_dir"](STATE)
+            self.n["write"](self.directory/"approval.json",canon({
+                "scope":plan,"scope_sha256":digest(canon(plan)),"owner_oid":actor,
+                "approved_at":stamp(),"owner_scope_sha256":sha,"owner_action":exact["action"],
+            }),0o400)
+        self.wait_for_fresh_pipeline_readback()
+        return self.retirement_helper()["activate"](self,globals())
+
+
 def main():
     cli = argparse.ArgumentParser()
     cli.add_argument("--candidate", required=True)
@@ -2538,6 +2707,7 @@ def main():
     successor.add_argument("--watchdog-recovery-successor",action="store_true")
     successor.add_argument("--normal-manager-successor",action="store_true")
     cli.add_argument("--retire-production-freeze",action="store_true")
+    cli.add_argument("--retry-retirement",action="store_true")
     choice=cli.add_mutually_exclusive_group()
     choice.add_argument("--apply", action="store_true")
     choice.add_argument("--recover",action="store_true")
@@ -2550,6 +2720,9 @@ def main():
     a = cli.parse_args()
     need(not (a.retire_production_freeze or a.activate_retirement or a.recover_retirement)
          or a.normal_manager_successor,"NORMAL_RETIREMENT_REQUIRES_NORMAL_SUCCESSOR")
+    need(not a.retry_retirement or (a.normal_manager_successor and a.retire_production_freeze
+         and not (a.resume or a.recover or a.verify_activation or a.restore_failed_activation)),
+         "FINAL_RETRY_REQUIRES_EXACT_RETIREMENT_CONTEXT")
     n,p = native()
     if (a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor
             or a.source_integration_successor or a.closed_loop_successor or a.breaker_custody_successor
@@ -2574,6 +2747,25 @@ def main():
         code = source_review(a.candidate,p,recovery=a.recover or a.verify_activation or a.restore_failed_activation
                              or a.recover_retirement,
                              baseline=predecessor,source_files=files,supporting_files=supporting)
+        if a.retry_retirement:
+            adapter = FinalRetirementRetry(a.candidate,n,p,code)
+            if a.activate_retirement or a.recover_retirement:
+                if not a.recover_retirement:
+                    adapter.wait_for_fresh_pipeline_readback()
+                print(json.dumps(adapter.retirement_helper()["activate"](
+                    adapter,globals(),recover=a.recover_retirement),sort_keys=True))
+                return
+            adapter.wait_for_fresh_pipeline_readback()
+            with n["locks"]():
+                plan=adapter.inspect_final_retry()
+            exact=adapter.owner_scope(plan)
+            sha=digest(canon(exact))
+            if not a.apply:
+                print(json.dumps({"status":"exact_final_retirement_retry_preflight_passed",
+                                  "scope_sha256":sha,"scope":exact},sort_keys=True))
+                return
+            print(json.dumps(adapter.apply_final_retry(plan,a.scope_sha),sort_keys=True))
+            return
         adapter = PipelineSuccessor(a.candidate,n,p,code,predecessor=predecessor)
         adapter.retirement_requested=a.retire_production_freeze
         if a.activate_retirement or a.recover_retirement:

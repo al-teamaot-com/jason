@@ -276,7 +276,7 @@ def test_effective_scheduler_binds_existing_units_and_narrow_write_scope(monkeyp
         elif unit.endswith("recovery.service"):
             field="normal_recovery_dispatch"; worker="scoped_backport_native_recovery.py"; action="recover-scheduled"; limit="30min"
         else:
-            return types.SimpleNamespace(stdout=("DropInPaths="+str(native.FILES["normal_approval_watch"])+"\nPaths=/var/lib/jason/authority/scoped-backport-release/requests (PathChanged) /var/lib/jason/authority/scoped-backport-release/owner-approvals (PathChanged)\n").encode())
+            return types.SimpleNamespace(stdout=("DropInPaths="+str(native.FILES["normal_approval_watch"])+"\nPaths=/var/lib/jason/authority/scoped-backport-release/requests (PathChanged)\nPaths=/var/lib/jason/authority/scoped-backport-release/owner-approvals (PathChanged)\n").encode())
         raw=(f"DropInPaths={native.FILES[field]}\nExecStart=/usr/local/lib/jason/scoped-backport/tools/{worker}\n"
              f"ExecStartPost=/usr/bin/python3 -I -B {entry_path} {action}\n"
              f"ReadWritePaths=/var/lib/jason-scoped-backport {native.READBACK.parent}\nTimeoutStartUSec={limit}\n")
@@ -291,6 +291,24 @@ def test_effective_scheduler_binds_existing_units_and_narrow_write_scope(monkeyp
     monkeypatch.setattr(native,"run",widened)
     with pytest.raises(ScopedBackportDenied,match="EFFECTIVE_SCHEDULE_DRIFT"):
         native.verify_effective_schedule()
+    # Reject missing, extra, duplicated or differently typed watches.
+    request = b"Paths=/var/lib/jason/authority/scoped-backport-release/requests (PathChanged)\n"
+    approval = b"Paths=/var/lib/jason/authority/scoped-backport-release/owner-approvals (PathChanged)\n"
+    for wrong in (b"", request, approval+approval, approval.replace(b"PathChanged",b"PathExists"),
+                  approval+b"Paths=/tmp/fixture-foreign (PathChanged)\n"):
+        def altered(*args, **kwargs):
+            result = show(*args, **kwargs)
+            result.stdout = result.stdout.replace(approval,wrong)
+            return result
+        monkeypatch.setattr(native,"run",altered)
+        with pytest.raises(ScopedBackportDenied,match="EFFECTIVE_APPROVAL_WATCH_DRIFT"):
+            native.verify_effective_schedule()
+    def reversed_order(*args, **kwargs):
+        result = show(*args, **kwargs)
+        result.stdout = result.stdout.replace(request+approval,approval+request)
+        return result
+    monkeypatch.setattr(native,"run",reversed_order)
+    native.verify_effective_schedule()
 
 
 def test_reusable_root_offer_stage_preserves_prior_evidence(monkeypatch,tmp_path):
