@@ -93,6 +93,54 @@ class ReleaseManagerError(RuntimeError):
     pass
 
 
+NATIVE_NORMAL_OWNER_PROOF = Path("/usr/local/lib/jason/owner_signed_release_v2.py")
+NATIVE_NORMAL_OWNER_PROOF_SHA256 = "0b5bcf5ec9b888a487100cad90febe9a9193424b645fdf57c859b459562d58cc"
+
+
+def _load_native_normal_owner_proof():
+    """The installed controller must not resolve a production verifier from
+    an operator checkout, an ambient PYTHONPATH, or a writable module cache.
+    """
+    from types import ModuleType
+    path = NATIVE_NORMAL_OWNER_PROOF
+    for parent in path.parents:
+        info = parent.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+                or info.st_mode & 0o022):
+            raise ReleaseManagerError("native normal Owner proof directory custody invalid")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or info.st_gid != 0 or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) not in (0o444, 0o644)
+                or not 0 < info.st_size <= 1000000):
+            raise ReleaseManagerError("native normal Owner proof file custody invalid")
+        raw = os.read(fd, 1000001)
+        if (len(raw) != info.st_size
+                or hashlib.sha256(raw).hexdigest() != NATIVE_NORMAL_OWNER_PROOF_SHA256):
+            raise ReleaseManagerError("native normal Owner proof source digest changed")
+    finally:
+        os.close(fd)
+    module = ModuleType("jason_verified_native_owner_release_v2")
+    module.__file__ = str(path)
+    exec(compile(raw, str(path), "exec"), module.__dict__)
+    return module
+
+
+def _normal_owner_proof(state_root: Path):
+    if state_root.resolve() == DEFAULT_STATE.resolve() or CONTROLLER_SOURCE == Path(
+            "/home/al/.local/lib/jason/release_manager_host_runner.py"):
+        return _load_native_normal_owner_proof()
+    # Nonproduction source fixtures use the reviewed source module. The
+    # production state and installed manager never take this branch.
+    root = Path(__file__).resolve().parents[1] / "implementation"
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from kernel import signed_owner_release_v2
+    return signed_owner_release_v2
+
+
 class ReleaseManagerBusy(ReleaseManagerError):
     pass
 
@@ -577,11 +625,7 @@ def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None
             active.append((path, doc))
     if not active:
         return
-    module_root = Path(__file__).resolve().parents[1] / "implementation"
-    if str(module_root) not in sys.path:
-        sys.path.insert(0, str(module_root))
-    from kernel.signed_owner_release_v2 import read_retired_release_policy
-    if read_retired_release_policy() is not None:
+    if _normal_owner_proof(state_root).read_retired_release_policy() is not None:
         # A historical receipt must never recreate a retired global hold.
         # Preserve its evidence and deny the inconsistent transaction.
         raise ReleaseManagerError("retired policy conflicts with unfinished legacy freeze transaction")
@@ -4201,14 +4245,12 @@ def verify_signed_mcp_owner_request(
     active global/root production controls. The verifier never fabricates
     authority, deploys, changes freeze or accepts an unsigned request.
     """
-    root = Path(__file__).resolve().parents[1] / "implementation"
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    from kernel.signed_owner_release_v2 import (
-        EXACT_OWNER_OAUTH_SUBJECTS, OwnerReleaseProofDenied,
-        verify_exact_owner_release, read_retired_release_policy,
-        require_retired_release_mode,
-    )
+    proof_module = _normal_owner_proof(state_root)
+    EXACT_OWNER_OAUTH_SUBJECTS = proof_module.EXACT_OWNER_OAUTH_SUBJECTS
+    OwnerReleaseProofDenied = proof_module.OwnerReleaseProofDenied
+    verify_exact_owner_release = proof_module.verify_exact_owner_release
+    read_retired_release_policy = proof_module.read_retired_release_policy
+    require_retired_release_mode = proof_module.require_retired_release_mode
     candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
     rollback = str(record.get("rollback_sha") or "")
     review = record.get("manual_scope_review") or {}
@@ -7063,13 +7105,11 @@ def require_retired_mode_approval(state_root: Path, record: Mapping[str, Any]) -
     No historic approval boolean or legacy freeze proof can be reused.
     The native root acceptance path must independently verify the same mode.
     """
-    root = Path(__file__).resolve().parents[1] / "implementation"
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    from kernel.signed_owner_release_v2 import (
-        read_retired_release_policy, require_retired_release_mode,
-        read_pinned_root_owner_public_key, OwnerReleaseProofDenied,
-    )
+    proof_module = _normal_owner_proof(state_root)
+    read_retired_release_policy = proof_module.read_retired_release_policy
+    require_retired_release_mode = proof_module.require_retired_release_mode
+    read_pinned_root_owner_public_key = proof_module.read_pinned_root_owner_public_key
+    OwnerReleaseProofDenied = proof_module.OwnerReleaseProofDenied
     policy = read_retired_release_policy()
     if policy is None:
         raise ReleaseManagerError("unfrozen production requires root-attested retirement policy")
@@ -7126,11 +7166,7 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                 if freeze_active:
                     # A retired policy must never coexist with an active
                     # marker or permit fallback to a legacy exception.
-                    module_root = Path(__file__).resolve().parents[1] / "implementation"
-                    if str(module_root) not in sys.path:
-                        sys.path.insert(0, str(module_root))
-                    from kernel.signed_owner_release_v2 import read_retired_release_policy
-                    if read_retired_release_policy() is not None:
+                    if _normal_owner_proof(state_root).read_retired_release_policy() is not None:
                         raise ReleaseManagerError("retired release policy conflicts with active freeze")
                     # A frozen recovery is admitted only when the complete fresh drift
                     # set matches the reviewed recovery profile AND the already signed

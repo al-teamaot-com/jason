@@ -356,3 +356,59 @@ def test_stale_normal_offer_cannot_mutate_after_active_pointer_switch(monkeypatc
         h._require_current_staged_scope()
     monkeypatch.setattr(native,"active_staged_offer",lambda:{"manifest":m,"profile":h.active_profile,"review_source_sha":h.active_review_sha})
     h._require_current_staged_scope()
+
+
+def test_reader_migration_checks_effective_manager_artifact_and_root_paths(monkeypatch, tmp_path):
+    from hashlib import sha256
+    watchdog = tmp_path / "attested" / "jason_self_heal_watchdog.py"
+    worker = tmp_path / "attested" / "owner_approved_development_worker.py"
+    guard = tmp_path / "native" / "pmv4_host_release_guard.py"
+    transition = tmp_path / "native" / "release_control_transition_worker.py"
+    for p in (watchdog, worker, guard, transition):
+        p.parent.mkdir(exist_ok=True)
+    watchdog.write_bytes(b"watchdog reviewed")
+    guard.write_bytes(b"guard reviewed")
+    transition.write_bytes(b"transition reviewed")
+    def h(p): return sha256(p.read_bytes()).hexdigest()
+    worker.write_text(f"NATIVE_HEALTH_GUARD = Path({str(guard)!r})\nNATIVE_HEALTH_GUARD_SHA256 = {h(guard)!r}\n")
+    monkeypatch.setitem(native.FILES, "host_guard", guard)
+    monkeypatch.setattr(native, "TRANSITION_SUCCESSOR", transition)
+    monkeypatch.setattr(native, "trusted_bytes", lambda p, **kw: p.read_bytes())
+    monkeypatch.setattr(native, "verified_manager_artifacts", lambda: {
+        watchdog.name: (watchdog, h(watchdog)), worker.name: (worker, h(worker))})
+    commands = []
+    monkeypatch.setattr(native, "effective_reader_command", lambda *a, **kw: commands.append((a, kw)))
+    scope = {"source_sha": "a"*40}
+    record = {"schema_version": "2.0", "source_sha": scope["source_sha"],
+              "native_readback_verified": True, "original_authority_preserved": True,
+              "installed_readers": [{"path": str(p), "sha256": h(p)}
+                                    for p in (watchdog, guard, transition)]}
+    native.verify_reader_migration(record, scope)
+    assert len(commands) == 2
+    foreign = tmp_path / "foreign" / watchdog.name
+    foreign.parent.mkdir()
+    foreign.write_bytes(watchdog.read_bytes())
+    changed = deepcopy(record)
+    changed["installed_readers"][0]["path"] = str(foreign)
+    with pytest.raises(ScopedBackportDenied, match="READER_INSTALLED_DRIFT"):
+        native.verify_reader_migration(changed, scope)
+    changed = deepcopy(record)
+    changed["installed_readers"].append(changed["installed_readers"][0])
+    with pytest.raises(ScopedBackportDenied, match="READER_INSTALLED_DRIFT"):
+        native.verify_reader_migration(changed, scope)
+    worker.write_text("NATIVE_HEALTH_GUARD = Path('/foreign.py')\nNATIVE_HEALTH_GUARD_SHA256 = 'bad'\n")
+    with pytest.raises(ScopedBackportDenied, match="DEVELOPMENT_GUARD_BINDING"):
+        native.verify_reader_migration(record, scope)
+
+
+def test_effective_reader_command_rejects_other_executable(monkeypatch):
+    from types import SimpleNamespace
+    argv = ["/usr/bin/python3", "-I", "-B", str(native.TRANSITION_SUCCESSOR)]
+    def report(args):
+        return SimpleNamespace(stdout=("User=root\nExecStart={ path=/usr/bin/python3 ; argv[]="
+                                          +" ".join(args)+" ; ignore_errors=no ; }\n").encode())
+    monkeypatch.setattr(native, "run", lambda *a, **kw: report(argv))
+    native.effective_reader_command("jason-release-control-transition.service", user="root", argv=argv)
+    monkeypatch.setattr(native, "run", lambda *a, **kw: report(argv + ["--foreign"]))
+    with pytest.raises(ScopedBackportDenied, match="EFFECTIVE_READER_COMMAND_DRIFT"):
+        native.effective_reader_command("jason-release-control-transition.service", user="root", argv=argv)

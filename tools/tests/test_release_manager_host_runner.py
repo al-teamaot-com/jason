@@ -6668,3 +6668,21 @@ def test_retired_policy_never_restores_legacy_freeze(tmp_path,monkeypatch):
         runner.restore_stranded_one_transaction_freeze_under_lock(tmp_path)
     assert not (tmp_path/"production-deployment-freeze").exists()
     assert json.loads(p.read_text())["freeze_restored"] is False
+
+
+def test_live_normal_owner_verifier_uses_only_native_pinned_module(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    sentinel = SimpleNamespace()
+    monkeypatch.setattr(runner, "DEFAULT_STATE", tmp_path / "live")
+    monkeypatch.setattr(runner, "_load_native_normal_owner_proof", lambda: sentinel)
+    assert runner._normal_owner_proof(tmp_path / "live") is sentinel
+    monkeypatch.setattr(runner, "CONTROLLER_SOURCE",
+                        Path("/home/al/.local/lib/jason/release_manager_host_runner.py"))
+    assert runner._normal_owner_proof(tmp_path / "fixture") is sentinel
+
+
+def test_native_normal_owner_verifier_pin_matches_reviewed_source():
+    from hashlib import sha256
+    root = Path(runner.__file__).resolve().parents[1]
+    source = root / "implementation/kernel/signed_owner_release_v2.py"
+    assert sha256(source.read_bytes()).hexdigest() == runner.NATIVE_NORMAL_OWNER_PROOF_SHA256

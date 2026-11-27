@@ -9,12 +9,14 @@ The original v1 request schema and authority remain unchanged.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import ast
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import stat
 import tempfile
 from typing import Mapping
@@ -93,6 +95,12 @@ REQUIRED_READERS = {
     "pmv4_host_release_guard.py", "jason_self_heal_watchdog.py",
     "release_control_transition_worker.py",
 }
+
+MANAGER_ROOT = Path("/usr/local/lib/jason/pmv4-e-engineering-manager")
+MANAGER_RECEIPT = Path("/etc/jason-owner-release/pmv4-e/engineering-manager-system-authorized.json")
+MANAGER_GUARD = MANAGER_ROOT / "manager_guard.py"
+WATCHDOG_LIVE = Path("/home/al/.local/lib/jason/jason_self_heal_watchdog.py")
+TRANSITION_SUCCESSOR = INSTALL / "tools/release_control_transition_worker.py"
 
 
 def trusted_directory(path: Path) -> None:
@@ -183,6 +191,109 @@ def active_staged_offer() -> dict | None:
     return offer
 
 
+def effective_reader_command(unit: str, *, user: str, argv: list[str]) -> None:
+    raw = run("systemctl", "show", unit, "-p", "User", "-p", "ExecStart",
+              timeout=12).stdout.decode()
+    rows = dict(line.split("=", 1) for line in raw.splitlines() if "=" in line)
+    # The effective command, not a similarly named installed file, is the
+    # trusted reader. Reject extra commands and unexpected interpreters.
+    commands = re.findall(r"argv\[\]=(.*?) ; ", rows.get("ExecStart", ""))
+    if (rows.get("User") != user or len(commands) != 1
+            or shlex.split(commands[0]) != argv):
+        deny("COORDINATED_EFFECTIVE_READER_COMMAND_DRIFT")
+
+
+def verified_manager_artifacts() -> dict:
+    # Reuse the existing independently installed manager receipt and guard.
+    # The active watchdog and development worker are UID1000 artifacts, not
+    # root-owned files. The guard verifies their bytes against the immutable
+    # root-owned copies and effective native unit topology.
+    receipt = json.loads(trusted_bytes(MANAGER_RECEIPT))
+    require_sha(receipt.get("candidate_sha"), "MANAGER_SOURCE")
+    require_hash(receipt.get("guard_sha256"), "MANAGER_GUARD")
+    if sha256(trusted_bytes(MANAGER_GUARD)).hexdigest() != receipt["guard_sha256"]:
+        deny("COORDINATED_MANAGER_GUARD_DRIFT")
+    result = run("runuser", "-u", "al", "--", "/usr/bin/python3", "-I", "-B",
+                 str(MANAGER_GUARD), "--status", timeout=130)
+    status = json.loads(result.stdout)
+    if (status.get("status") != "verified_system_manager"
+            or status.get("candidate_sha") != receipt["candidate_sha"]
+            or status.get("operational_ready") is not True
+            or status.get("production_authority") is not False):
+        deny("COORDINATED_MANAGER_READBACK_DENIED")
+    artifacts = status.get("artifact_sources")
+    if not isinstance(artifacts, dict):
+        deny("COORDINATED_MANAGER_ARTIFACTS_MISSING")
+    expected_root = MANAGER_ROOT / "releases" / receipt["candidate_sha"] / "tools"
+    checked = {}
+    for name in ("jason_self_heal_watchdog.py", "owner_approved_development_worker.py"):
+        row = artifacts.get(name)
+        expected = (receipt.get("artifact_sha256") or {}).get(name)
+        path = expected_root / name
+        if (not isinstance(row, dict) or row.get("source") != str(path)
+                or row.get("sha256") != expected
+                or sha256(trusted_bytes(path)).hexdigest() != expected):
+            deny("COORDINATED_MANAGER_ARTIFACT_DRIFT")
+        checked[name] = (path, expected)
+    return checked
+
+
+def verify_reader_migration(migration: Mapping, policy: Mapping) -> None:
+    if (set(migration) != MIGRATION_FIELDS or migration["schema_version"] != "2.0"
+            or migration["source_sha"] != policy["source_sha"]
+            or migration["native_readback_verified"] is not True
+            or migration["original_authority_preserved"] is not True
+            or not isinstance(migration["installed_readers"], list)):
+        deny("COORDINATED_READER_MIGRATION_UNVERIFIED")
+    artifacts = verified_manager_artifacts()
+    watchdog, watchdog_sha = artifacts["jason_self_heal_watchdog.py"]
+    worker, _ = artifacts["owner_approved_development_worker.py"]
+    # The existing development worker independently pins its effective root
+    # guard. Verify the reviewed static assignments in its attested source.
+    values = {}
+    for node in ast.parse(trusted_bytes(worker)).body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            key = node.targets[0].id
+            if key == "NATIVE_HEALTH_GUARD":
+                if (not isinstance(node.value, ast.Call) or not isinstance(node.value.func, ast.Name)
+                        or node.value.func.id != "Path" or len(node.value.args) != 1
+                        or node.value.keywords or key in values):
+                    deny("COORDINATED_DEVELOPMENT_GUARD_BINDING")
+                values[key] = ast.literal_eval(node.value.args[0])
+            elif key == "NATIVE_HEALTH_GUARD_SHA256":
+                if key in values:
+                    deny("COORDINATED_DEVELOPMENT_GUARD_BINDING")
+                values[key] = ast.literal_eval(node.value)
+    guard = FILES["host_guard"]
+    guard_sha = sha256(trusted_bytes(guard)).hexdigest()
+    if (values.get("NATIVE_HEALTH_GUARD") != str(guard)
+            or values.get("NATIVE_HEALTH_GUARD_SHA256") != guard_sha):
+        deny("COORDINATED_DEVELOPMENT_GUARD_BINDING")
+    expected = {
+        str(guard): guard_sha,
+        str(watchdog): watchdog_sha,
+        str(TRANSITION_SUCCESSOR): sha256(trusted_bytes(TRANSITION_SUCCESSOR)).hexdigest(),
+    }
+    seen = {}
+    for row in migration["installed_readers"]:
+        if (not isinstance(row, dict) or set(row) != {"path", "sha256"}
+                or row["path"] not in expected or row["path"] in seen
+                or row["sha256"] != expected[row["path"]]):
+            deny("COORDINATED_READER_INSTALLED_DRIFT")
+        seen[row["path"]] = row["sha256"]
+    if seen != expected:
+        deny("COORDINATED_READER_MIGRATION_INCOMPLETE")
+    effective_reader_command(
+        "jason-self-heal-watchdog.service", user="al",
+        argv=["/usr/bin/python3", "-B", str(WATCHDOG_LIVE), "--root",
+              "/var/lib/jason/openclaw/self-heal", "--max-attempts", "2"],
+    )
+    effective_reader_command(
+        "jason-release-control-transition.service", user="root",
+        argv=["/usr/bin/python3", "-I", "-B", str(TRANSITION_SUCCESSOR)],
+    )
+
+
 def verify_installed_policy(profile: Mapping | None = None) -> dict:
     if os.geteuid() != 0 or Path(__file__).resolve(strict=True) != INSTALLED:
         deny("COORDINATED_IMMUTABLE_ROOT_INSTALL_REQUIRED")
@@ -215,23 +326,7 @@ def verify_installed_policy(profile: Mapping | None = None) -> dict:
     if sha256(raw).hexdigest() != p["native_reader_migration_receipt_sha256"]:
         deny("COORDINATED_READER_MIGRATION_DRIFT")
     migration = json.loads(raw)
-    if (set(migration) != MIGRATION_FIELDS or migration["schema_version"] != "2.0"
-            or migration["source_sha"] != p["source_sha"]
-            or migration["native_readback_verified"] is not True
-            or migration["original_authority_preserved"] is not True
-            or not isinstance(migration["installed_readers"], list)):
-        deny("COORDINATED_READER_MIGRATION_UNVERIFIED")
-    names = set()
-    for row in migration["installed_readers"]:
-        if set(row) != {"path", "sha256"}:
-            deny("COORDINATED_READER_MIGRATION_SCHEMA")
-        path = Path(row["path"])
-        if (not path.is_absolute() or path.name not in REQUIRED_READERS
-                or sha256(trusted_bytes(path)).hexdigest() != row["sha256"]):
-            deny("COORDINATED_READER_INSTALLED_DRIFT")
-        names.add(path.name)
-    if names != REQUIRED_READERS:
-        deny("COORDINATED_READER_MIGRATION_INCOMPLETE")
+    verify_reader_migration(migration, p)
     for unit in ("jason-scoped-backport-recovery.timer", "jason-scoped-backport-requests.path"):
         for verb, value in (("is-enabled", b"enabled"), ("is-active", b"active")):
             if run("systemctl", verb, unit, timeout=12).stdout.strip() != value:
