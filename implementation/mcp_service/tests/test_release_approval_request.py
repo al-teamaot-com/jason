@@ -182,6 +182,8 @@ def test_stale_signed_request_is_not_overwritten_or_reissued(tmp_path):
 
 def test_retired_mode_issuer_uses_new_policy_and_rejects_stale_pending(tmp_path, monkeypatch):
     from jason_mcp import release_approval_request as issuer
+    from kernel import signed_owner_release_v2 as mode
+    monkeypatch.setattr(mode, "read_normal_deployment_freeze", lambda: False)
     from hashlib import sha256
     _record(tmp_path)
     args = dict(state_root=tmp_path, release_id=RID, candidate_sha=SHA,
@@ -221,6 +223,8 @@ def test_missing_freeze_is_not_retirement(tmp_path, monkeypatch):
 
 def test_retired_mode_does_not_inherit_historical_approval(tmp_path, monkeypatch):
     from jason_mcp import release_approval_request as issuer
+    from kernel import signed_owner_release_v2 as mode
+    monkeypatch.setattr(mode, "read_normal_deployment_freeze", lambda: False)
     _record(tmp_path)
     (tmp_path/"production-deployment-freeze").unlink()
     path=tmp_path/"records"/(RID+".json")
@@ -233,3 +237,46 @@ def test_retired_mode_does_not_inherit_historical_approval(tmp_path, monkeypatch
             state_root=tmp_path,release_id=RID,candidate_sha=SHA,
             approved_by=PRINCIPAL,organization_id="aot",
             verified_token_claims=CLAIMS,service_signer=KEY)
+
+
+def test_existing_owner_tool_routes_only_exact_normal_coordinated_offer(tmp_path, monkeypatch):
+    from jason_mcp import release_approval_request as issuer
+    from kernel import signed_owner_release_v2 as mode
+    monkeypatch.setattr(mode, "read_normal_deployment_freeze", lambda: False)
+    from kernel.signed_owner_release_v2 import verify_exact_owner_release
+    from datetime import datetime, timezone
+    policy = '9'*64
+    view = dict(schema_version='3.0',release_id=RID,candidate_sha=SHA,rollback_sha=PREV,
+        manifest_sha256='8'*64,scope_sha256=SCOPE,release_policy_sha256=policy,
+        status='native_coordinated_eligible_not_approved',production_mutations=False,
+        provider_writes=False,owner_approval_recorded=False,observed_at='2026-11-27T12:00:00Z')
+    spool=tmp_path/'proofs';spool.mkdir(mode=0o700)
+    monkeypatch.setattr(issuer,'COORDINATED_PROOFS',spool)
+    monkeypatch.setattr(issuer,'_coordinated_eligibility',lambda rid:dict(view))
+    monkeypatch.setattr(issuer,'read_retired_release_policy',lambda:policy)
+    args=dict(state_root=tmp_path,release_id=RID,candidate_sha=SHA,approved_by=PRINCIPAL,
+        organization_id='aot',verified_token_claims=CLAIMS,service_signer=KEY)
+    with pytest.raises(PermissionError,match='SIGNED_OWNER_EVIDENCE_REQUIRED'):
+        queue_release_approval_request(**dict(args,verified_token_claims={}))
+    view['release_policy_sha256']='7'*64
+    with pytest.raises(PermissionError,match='EXACT_ELIGIBILITY_REQUIRED'):
+        queue_release_approval_request(**args)
+    view['release_policy_sha256']=policy
+    (tmp_path/'production-deployment-freeze').write_text('active')
+    with pytest.raises(PermissionError,match='MODE_CONFLICT'):
+        queue_release_approval_request(**args)
+    (tmp_path/'production-deployment-freeze').unlink()
+    assert list(spool.iterdir())==[]
+    result=queue_release_approval_request(**args)
+    saved=json.loads((spool/(RID+'.json')).read_text())
+    assert result['approved_by']==PRINCIPAL
+    assert saved['standing_authority'] is False and saved['provider_mutations_approved'] is False
+    verify_exact_owner_release(saved['signed_owner_proof'],public_key=KEY.public_key(),
+        expected_candidate_sha=SHA,expected_rollback_sha=PREV,expected_release_id=RID,
+        expected_scope_sha256=SCOPE,expected_manifest_sha256='8'*64,
+        expected_release_policy_sha256=policy,at=datetime.now(timezone.utc))
+    with pytest.raises(PermissionError,match='PROOF_ALREADY_RECORDED'):
+        queue_release_approval_request(**args)
+    _record(tmp_path)
+    with pytest.raises(PermissionError,match='AMBIGUOUS_RELEASE_ROUTE'):
+        queue_release_approval_request(**args)

@@ -72,7 +72,8 @@ def test_quiesce_never_treats_running_or_failed_service_as_ready(monkeypatch):
 
 def test_durable_scope_guard_and_full_stage_acceptance_are_present():
     source=Path(m.__file__).read_text()
-    assert 'self.actor = self.n["owner"](plan)' in source
+    # Test the actual authorization call below rather than its spelling.
+    assert 'self.actor = self.n["owner"](' in source
     assert 'self.persist()' in source
     assert 'self.namespace_probe()' in source
     assert 'self.native_revalidation()' in source
@@ -658,3 +659,89 @@ def test_failed_manager_reporter_exit2_is_only_a_verified_derived_observation():
         m.verify_failed_manager_drift(control,drift,
             {**evaluated,"problems":[*evaluated["problems"],m.DRIFT_REPORTER_FAULT]},
             reporter=m.DRIFT_REPORTER_EXIT2)
+
+
+def normal_manager_plan():
+    p = breaker_custody_plan()
+    p.pop("breaker_custody_source_review")
+    p.update(predecessor_candidate_sha=m.NORMAL_MANAGER_BASELINE,
+             worker_replacements=sorted(m.NORMAL_MANAGER_WORKERS),
+             normal_manager_source_review={
+                 "baseline":m.NORMAL_MANAGER_BASELINE,
+                 "candidate":p["policy"]["candidate_sha"],
+                 "reviewed_source_paths":sorted(m.NORMAL_MANAGER_SCOPE_FILES),
+                 "excluded_source_paths":["docs/operations/unrelated.md"],
+             },
+             normal_manager_stage_targets=sorted(map(str,m.NORMAL_MANAGER_STAGE_FILES)),
+             normal_mode_activation=False)
+    return p
+
+
+@pytest.mark.parametrize("key,value", [
+    ("freeze_or_hold_change",True),
+    ("provider_writes",True),
+    ("production_authority",True),
+    ("runtime_or_mcp_restart_allowed",True),
+    ("normal_mode_activation",True),
+    ("normal_manager_stage_targets",["/etc/sudoers"]),
+    ("normal_manager_source_review",None),
+    ("worker_replacements",["foreign.py"]),
+    ("required_scheduled_cycles",1),
+])
+def test_normal_manager_stage_scope_keeps_production_authority_unchanged(key,value):
+    p=normal_manager_plan()
+    assert len(m.pipeline_scope_sha(p))==64
+    p[key]=value
+    with pytest.raises(PermissionError):
+        m.pipeline_scope_sha(p)
+
+
+def test_normal_manager_exact_targets_preserve_legacy_root_guard_and_application():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.NORMAL_MANAGER_BASELINE
+    a.changed_workers=m.NORMAL_MANAGER_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("f"*40)/"tools"
+    targets=a.approved_targets()
+    assert set(m.NORMAL_MANAGER_STAGE_FILES)<=targets
+    assert all(m.LIB/name in targets for name in m.NORMAL_MANAGER_WORKERS)
+    assert m.RECEIPT in targets and m.MANAGER_GUARD in targets
+    assert m.POLICY not in targets and m.ENV not in targets
+    assert not any(str(p).startswith("/opt/jason/") for p in targets)
+    assert not any(p.name in ("production-deployment-freeze","auto-promotion-incident-hold",
+                             "production-freeze-retirement.json","jason-runtime.service",
+                             "jason-pmv4-ticket-core.service") for p in targets)
+
+
+def test_normal_manager_source_projection_records_exclusions_and_denies_protected_drift():
+    candidate="a"*40
+    paths=set(m.NORMAL_MANAGER_SCOPE_FILES)|{"docs/operations/unrelated.md"}
+    def git(*args):
+        if args[0]=="merge-base":
+            assert args==("merge-base","--is-ancestor",m.NORMAL_MANAGER_BASELINE,candidate)
+            return b""
+        assert args==("diff","--no-renames","--name-only",m.NORMAL_MANAGER_BASELINE,candidate)
+        return "\n".join(sorted(paths)).encode()
+    row=m.review_normal_manager_delta(git,candidate)
+    assert row["excluded_source_paths"]==["docs/operations/unrelated.md"]
+    assert row["reviewed_source_paths"]==sorted(m.NORMAL_MANAGER_SCOPE_FILES)
+    paths.add("config/release-manager-policy.json")
+    with pytest.raises(PermissionError,match="UNREVIEWED_PROTECTED_SOURCE"):
+        m.review_normal_manager_delta(git,candidate)
+    paths.remove("config/release-manager-policy.json")
+    paths.remove("tools/pmv4_e_engineering_manager_install.py")
+    with pytest.raises(PermissionError,match="DELTA_INCOMPLETE"):
+        m.review_normal_manager_delta(git,candidate)
+
+
+def test_legacy_successor_passes_exact_scope_to_existing_authenticator():
+    a=object.__new__(m.PipelineSuccessor)
+    p=plan()
+    # Stop at the existing authenticator; no locks or production methods run.
+    a.n={"owner":Mock(side_effect=PermissionError("test authorization denied")),
+         "locks":Mock(side_effect=AssertionError("unexpected mutation"))}
+    with pytest.raises(PermissionError,match="test authorization denied"):
+        a.apply(p,m.pipeline_scope_sha(p))
+    a.n["owner"].assert_called_once_with(p)
+    a.n["locks"].assert_not_called()

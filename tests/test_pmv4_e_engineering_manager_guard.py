@@ -211,3 +211,28 @@ def test_local_reasoning_worker_pin_only_changes_for_exact_new_successor():
     with pytest.raises(g.Denied):g.validate_receipt(wrong)
     wrong=deepcopy(r);wrong["predecessor_candidate_sha"]=g.BREAKER_CUSTODY_PREDECESSOR
     with pytest.raises(g.Denied):g.validate_receipt(wrong)
+
+
+def test_normal_manager_receipt_preserves_prior_worker_pins():
+    old=receipt()
+    old.update(schema_version="1.1",action=g.PIPELINE_ACTION,
+               predecessor_candidate_sha=g.WATCHDOG_RECOVERY_PREDECESSOR,
+               predecessor_receipt_sha256="2"*64,engineering_source_sha=g.PIPELINE_SOURCE_SHA,
+               pipeline_artifact_sha256={name:"3"*64 for name in g.CLOSED_LOOP_PIPELINE_ARTIFACTS})
+    old["artifact_sha256"]["owner_approved_development_worker.py"]=g.LOCAL_REASONING_OWNER_WORKER_SHA256
+    assert g.validate_receipt(old)==old
+    normal=deepcopy(old)
+    normal["predecessor_candidate_sha"]=g.NORMAL_MANAGER_PREDECESSOR
+    normal["artifact_sha256"]["owner_approved_development_worker.py"]=g.NORMAL_MANAGER_OWNER_WORKER_SHA256
+    assert g.validate_receipt(normal)==normal
+    from hashlib import sha256
+    from tools import owner_approved_development_worker as worker
+    assert sha256(Path(worker.__file__).read_bytes()).hexdigest()==g.NORMAL_MANAGER_OWNER_WORKER_SHA256
+    native=Path(__file__).resolve().parents[1]/"tools/pmv4_host_release_guard.py"
+    assert worker.NATIVE_HEALTH_GUARD_SHA256==sha256(native.read_bytes()).hexdigest()
+    assert str(worker.NATIVE_HEALTH_GUARD)=="/usr/local/lib/jason/scoped-backport/tools/pmv4_host_release_guard.py"
+    for pin in (g.LOCAL_REASONING_OWNER_WORKER_SHA256,"0"*64):
+        bad=deepcopy(normal)
+        bad["artifact_sha256"]["owner_approved_development_worker.py"]=pin
+        with pytest.raises(g.Denied):
+            g.validate_receipt(bad)

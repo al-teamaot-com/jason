@@ -18,7 +18,7 @@ SYSTEMD = Path("/etc/systemd/system")
 LIB = Path("/usr/local/lib/jason")
 SPOOL = Path("/var/lib/jason/openclaw/release-manager/host-reconcile")
 NORMAL_POLICY_DIRECTORY = Path("/etc/jason-owner-release/normal-release-policy")
-NORMAL_VERIFIER_SHA256 = "0b5bcf5ec9b888a487100cad90febe9a9193424b645fdf57c859b459562d58cc"
+NORMAL_VERIFIER_SHA256 = "1200c5b6aedfeae55ceabd32d038c7cbdd1b9510ef9479c56af2107caeaf01f8"
 
 
 def install(source: Path, destination: Path, mode: int) -> None:

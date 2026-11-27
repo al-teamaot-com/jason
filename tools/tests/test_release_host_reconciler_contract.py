@@ -994,6 +994,7 @@ def test_root_verifies_retired_normal_proof_and_rejects_frozen_replay(tmp_path, 
     monkeypatch.setattr(worker,"_trusted_normal_owner_proof_module",lambda:(proof,policy))
     monkeypatch.setattr(worker,"_root_owner_identity_is_active",lambda oid,principal: oid==proof.OWNER_OID and principal==proof.OWNER_PRINCIPAL)
     monkeypatch.setattr(proof,"read_retired_release_policy",lambda:policy)
+    monkeypatch.setattr(proof,"read_normal_deployment_freeze",lambda:False)
     monkeypatch.setattr(proof,"read_pinned_root_owner_public_key",lambda _:key.public_key())
     def write(**binding):
         signed=proof.issue_exact_owner_release(approval_id=aid,release_id=rid,candidate_sha=candidate,
