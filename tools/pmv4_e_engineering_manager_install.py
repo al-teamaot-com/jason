@@ -309,6 +309,13 @@ def review_breaker_custody_delta(git, candidate):
 
 
 def reviewed_source_delta(git, baseline, candidate, source_files):
+    if baseline == WATCHDOG_RECOVERY_BASELINE:
+        need(set(source_files) == WATCHDOG_RECOVERY_SCOPE_FILES,
+             "WATCHDOG_RECOVERY_SOURCE_SCOPE_INVALID")
+        git("merge-base", "--is-ancestor", baseline, candidate)
+        need(set(git("diff","--no-renames","--name-only",baseline,candidate).decode().splitlines())
+             == WATCHDOG_RECOVERY_SCOPE_FILES, "WATCHDOG_RECOVERY_SOURCE_DELTA_CHANGED")
+        return
     if baseline == BREAKER_CUSTODY_BASELINE:
         need(set(source_files) == BREAKER_CUSTODY_SCOPE_FILES, "BREAKER_CUSTODY_SCOPE_INVALID")
         return review_breaker_custody_delta(git, candidate)
@@ -1123,8 +1130,67 @@ BREAKER_POLICY_SOURCE = {
     "revision": LKG,
     "policy_sha256": "aa50f13341b228344b4da3e153fd2102d88ef0ffe71d96bd213605b42f14ba2d",
 }
-SUCCESSOR_BASELINES = (PIPELINE_BASELINE, TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE,
-                       SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE)
+WATCHDOG_RECOVERY_BASELINE = "c4e78d700b7ac347e9dee50c750d5de99780e2a2"
+WATCHDOG_RECOVERY_WORKERS = frozenset({
+    "jason_self_heal_watchdog.py", "support_repair_host_worker.py",
+    "owner_approved_development_worker.py", "engineering_supervisor.py",
+})
+WATCHDOG_RECOVERY_SCOPE_FILES = {
+    ".github/workflows/conversation-experience.yml",
+    "docs/operations/PMv4-Watchdog-Failure-Recovery-20261127.md",
+    "implementation/orchestrator/model_runtime_adapter.py",
+    "implementation/orchestrator/ollama_reasoning.py",
+    "implementation/orchestrator/tests/test_model_runtime_adapter.py",
+    "implementation/orchestrator/tests/test_ollama_reasoning.py",
+    "implementation/runtime_service/src/jason_runtime/composition.py",
+    "implementation/runtime_service/src/jason_runtime/conversation_experience_cutover.py",
+    "implementation/runtime_service/src/jason_runtime/support_repair_reasoning.py",
+    "implementation/runtime_service/tests/test_conversation_experience_cutover.py",
+    "implementation/runtime_service/tests/test_support_repair_reasoning.py",
+    "tests/test_pmv4_e_engineering_manager_guard.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "tools/engineering_supervisor.py",
+    "tools/jason_self_heal_watchdog.py",
+    "tools/owner_approved_development_worker.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/support_repair_host_worker.py",
+    "tools/tests/test_engineering_supervisor.py",
+    "tools/tests/test_jason_self_heal_watchdog.py",
+    "tools/tests/test_owner_approved_development_worker.py",
+    "tools/tests/test_support_repair_host_worker.py",
+}
+WATCHDOG_RECOVERY_SUPPORTING_FILES = BREAKER_CUSTODY_SUPPORTING_FILES | {"tools/engineering_pipeline.py"}
+CLOSED_LOOP_BASELINES = (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE, WATCHDOG_RECOVERY_BASELINE)
+CUSTODY_BASELINES = (BREAKER_CUSTODY_BASELINE, WATCHDOG_RECOVERY_BASELINE)
+SOURCE_POLICY_BASELINES = (SOURCE_INTEGRATION_BASELINE, *CLOSED_LOOP_BASELINES)
+SCHEDULED_BASELINES = (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, *SOURCE_POLICY_BASELINES)
+SUCCESSOR_BASELINES = (PIPELINE_BASELINE, *SCHEDULED_BASELINES)
+WATCHDOG_RECOVERY_FAULTS = sorted(
+    ({"kind": "failed_system_unit", "state": "failed", "unit": n} for n in SERVICES),
+    key=lambda row: row["unit"],
+)
+
+def verify_failed_manager_drift(control, drift, evaluated):
+    """Exact failed-unit containment, not a waiver of native drift."""
+    breaker = control.get("circuit_breaker") or {}
+    need(breaker.get("state") == "open"
+         and breaker.get("source") == "production_drift_watchdog"
+         and breaker.get("reason") == "continuous_production_drift_detected"
+         and breaker.get("problem_count") == 2
+         and breaker.get("problem_kinds") == ["failed_system_unit"],
+         "WATCHDOG_RECOVERY_BREAKER_NOT_EXACT")
+    for row in (drift, evaluated):
+        need(row.get("status") == "drift_detected"
+             and sorted(row.get("problems") or [],key=lambda item:item.get("unit",""))
+                 == WATCHDOG_RECOVERY_FAULTS,
+             "WATCHDOG_RECOVERY_UNRELATED_DRIFT")
+        observed = datetime.fromisoformat(row["observed_at"])
+        need(observed.tzinfo is not None
+             and 0 <= (datetime.now(timezone.utc)-observed).total_seconds() <= 180,
+             "WATCHDOG_RECOVERY_STALE_DRIFT")
+    return list(WATCHDOG_RECOVERY_FAULTS)
+
 PIPELINE_UNIT = SYSTEM_UNITS / SERVICES[0]
 PIPELINE_PROGRAM = LIB / "engineering_pipeline.py"
 MANAGER_GUARD = ROOT / "manager_guard.py"
@@ -1206,6 +1272,23 @@ def pipeline_scope_sha(plan):
         if custody:
             need(plan.get("breaker_policy_source") == BREAKER_POLICY_SOURCE,
                  "BREAKER_CUSTODY_EXACT_POLICY_SOURCE_REQUIRED")
+    if plan["predecessor_candidate_sha"] == WATCHDOG_RECOVERY_BASELINE:
+        need(plan.get("worker_replacements") == sorted(WATCHDOG_RECOVERY_WORKERS)
+             and plan.get("required_scheduled_cycles") == 2
+             and plan.get("source_integration_policy") == "independent_source_v1"
+             and plan.get("production_transaction_mutex_preserved") is True
+             and plan.get("exact_native_release_records_unchanged") is True
+             and plan.get("source_merges_not_rolled_back") is True
+             and plan.get("release_gate_retry_budget_seconds") == 20
+             and plan.get("quarantine_existing_todo_identity") == "TODO-OPS-013"
+             and plan.get("conflicted_issues") == [1459,1500]
+             and plan.get("preserve_existing_issue_authority") is True
+             and plan.get("engineering_progress_detector_required") is True
+             and plan.get("breaker_policy_source") == BREAKER_POLICY_SOURCE
+             and plan.get("failed_unit_reset_scope") == list(SERVICES)
+             and plan.get("precutover_exact_faults") == WATCHDOG_RECOVERY_FAULTS
+             and plan.get("local_reasoning_runtime_activation") is False,
+             "WATCHDOG_RECOVERY_EXACT_SCOPE_INVALID")
     return digest(canon(plan))
 
 
@@ -1257,6 +1340,10 @@ class PipelineSuccessor(NativeAdapter):
             self.source_files = CLOSED_LOOP_SCOPE_FILES
             self.supporting_files = CLOSED_LOOP_SUPPORTING_FILES
             self.changed_workers = CLOSED_LOOP_WORKERS
+        elif predecessor == WATCHDOG_RECOVERY_BASELINE:
+            self.source_files = WATCHDOG_RECOVERY_SCOPE_FILES
+            self.supporting_files = WATCHDOG_RECOVERY_SUPPORTING_FILES
+            self.changed_workers = WATCHDOG_RECOVERY_WORKERS
         elif predecessor == BREAKER_CUSTODY_BASELINE:
             self.source_files = BREAKER_CUSTODY_SCOPE_FILES
             self.supporting_files = BREAKER_CUSTODY_SUPPORTING_FILES
@@ -1274,7 +1361,7 @@ class PipelineSuccessor(NativeAdapter):
 
     def pipeline_artifact_names(self):
         names = set(self.g["PIPELINE_ARTIFACTS"])
-        if self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in CLOSED_LOOP_BASELINES:
             names |= {"issue_resolution_engine.py"}
         return names
 
@@ -1294,7 +1381,27 @@ class PipelineSuccessor(NativeAdapter):
              "PIPELINE_NATIVE_MANAGER_GUARD")
         return row
 
-    def protected(self):
+    def attest_failed_predecessor(self):
+        need(self.predecessor == WATCHDOG_RECOVERY_BASELINE,
+             "WATCHDOG_RECOVERY_PREDECESSOR_REQUIRED")
+        raw = self.code["tools/pmv4_e_engineering_manager_guard.py"]
+        code = ("import hashlib,json,sys; b=sys.stdin.buffer.read(2000001);"
+                "assert hashlib.sha256(b).hexdigest()==sys.argv[1];"
+                "ns={'__name__':'reviewed_failed_manager_preflight','__file__':sys.argv[2]};"
+                "exec(compile(b,sys.argv[2],'exec'),ns);"
+                "print(json.dumps(ns['status'](attest_failed_predecessor=True)))")
+        row = json.loads(self.p["command"]([*self.p["USER"],"/usr/bin/python3","-I","-B",
+                         "-c",code,digest(raw),str(REPO/"tools/pmv4_e_engineering_manager_guard.py")],
+                         timeout=130,data=raw))
+        need(row.get("status") == "verified_failed_manager_integrity"
+             and row.get("candidate_sha") == self.predecessor
+             and row.get("operational_ready") is False
+             and row.get("production_authority") is False
+             and row.get("failed_peer") == sorted(SERVICES),
+             "WATCHDOG_RECOVERY_PREDECESSOR_INTEGRITY")
+        return row
+
+    def protected(self, *, failed_manager_recovery=False):
         p = self.p
         controls = {}
         for path in (self.n["FREEZE"], self.n["HOLD"]):
@@ -1306,23 +1413,69 @@ class PipelineSuccessor(NativeAdapter):
         need(manifest.get("complete") is True
              and all(manifest.get(k) == LKG for k in
                      ("revision", "runtime_revision", "mcp_revision", "host_revision"))
-             and control["circuit_breaker"]["state"] == "closed"
-             and control["circuit_breaker"]["revalidated_revision"] == LKG,
+             and (failed_manager_recovery or (
+                 control["circuit_breaker"]["state"] == "closed"
+                 and control["circuit_breaker"]["revalidated_revision"] == LKG)),
              "PIPELINE_PROTECTED_LKG_OR_BREAKER")
+        if failed_manager_recovery:
+            need(self.predecessor == WATCHDOG_RECOVERY_BASELINE,
+                 "WATCHDOG_RECOVERY_PROFILE_REQUIRED")
         guard = Path("/opt/jason/current/tools/production_drift_guard.py")
         need(digest(p["read"](guard,0)) == p["PINNED"][str(guard)],
              "NATIVE_DRIFT_CODE_CHANGED")
-        drift = json.loads(self.command(["/usr/bin/python3",str(guard),"--config",str(POLICY)],75))
-        need(drift.get("status") == "pass" and drift.get("problems") == [],
-             "PIPELINE_NATIVE_DRIFT")
-        probe = ("import sys,json;from pathlib import Path;"
-                 "sys.path[:0]=['/home/al/.local/lib/jason','/opt/jason/current/tools'];"
-                 "import owner_approved_development_worker as w;"
-                 "print(json.dumps(w.verified_development_health(Path('/var/lib/jason/openclaw/support-repair'))))")
-        health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",probe],130))
-        need(health.get("verified") is True and health.get("production_authority") is False
-             and health.get("production_revision") == LKG, "PIPELINE_NATIVE_CORE_HEALTH")
+        if failed_manager_recovery:
+            # The existing evaluator returns rc=2 for real drift. Read its
+            # result without invoking its output-writing CLI or changing the
+            # authoritative breaker. Only these two exact faults are admitted
+            # for this signed host repair, not for production promotion.
+            probe = ("import json,sys;from pathlib import Path;"
+                     "p=Path(sys.argv[1]);n={'__name__':'native_drift_preflight','__file__':str(p)};"
+                     "exec(compile(p.read_bytes(),str(p),'exec'),n);"
+                     "print(json.dumps(n['evaluate'](json.loads(Path(sys.argv[2]).read_text()))))")
+            evaluated = json.loads(self.command(["/usr/bin/python3","-I","-B","-c",probe,
+                                                  str(guard),str(POLICY)],75))
+            drift = json.loads(p["read"](MANAGER/"production-drift.json",0,0o600))
+            verify_failed_manager_drift(control,drift,evaluated)
+            need(p["forward_audit_accepted"](json.loads(p["read"](p["AUDIT"],0,0o444)))
+                 and p["audit_recovery_service_complete"](),
+                 "WATCHDOG_RECOVERY_AUDIT_NOT_ACCEPTED")
+            native_core = p["GUARD_PATH"]
+            need(digest(p["read"](native_core,0,0o444)) == p["GUARD_AFTER_SHA"],
+                 "WATCHDOG_RECOVERY_CORE_GUARD_CHANGED")
+            probe = ("import json,sys;from pathlib import Path;"
+                     "p=Path(sys.argv[1]);n={'__name__':'native_core_preflight','__file__':str(p)};"
+                     "exec(compile(p.read_bytes(),str(p),'exec'),n);"
+                     "print(json.dumps(n['IndependentHostGuard']().core_health_evidence()))")
+            health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",
+                                                probe,str(native_core)],130))
+            need(health.get("status") == "verified" and health.get("source_sha") == LKG
+                 and health.get("runtime_healthy") is True and health.get("mcp_running") is True
+                 and health.get("worker_scan_fresh") is True,
+                 "WATCHDOG_RECOVERY_CORE_HEALTH")
+        else:
+            drift = json.loads(self.command(["/usr/bin/python3",str(guard),"--config",str(POLICY)],75))
+            need(drift.get("status") == "pass" and drift.get("problems") == [],
+                 "PIPELINE_NATIVE_DRIFT")
+            probe = ("import sys,json;from pathlib import Path;"
+                     "sys.path[:0]=['/home/al/.local/lib/jason','/opt/jason/current/tools'];"
+                     "import owner_approved_development_worker as w;"
+                     "print(json.dumps(w.verified_development_health(Path('/var/lib/jason/openclaw/support-repair'))))")
+            health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",probe],130))
+            need(health.get("verified") is True and health.get("production_authority") is False
+                 and health.get("production_revision") == LKG, "PIPELINE_NATIVE_CORE_HEALTH")
         rows = json.loads(self.command(["/usr/bin/docker","inspect","--type","container",*p["PEERS"]]))
+        if self.predecessor == WATCHDOG_RECOVERY_BASELINE:
+            for x in rows:
+                if x["Name"].lstrip("/") not in ("jason-runtime","jason-mcp-pilot","jason-pmv4-ticket-core"):
+                    continue
+                env = dict(entry.split("=",1) for entry in x["Config"]["Env"])
+                need(all(env.get(key) == "false" for key in (
+                    "JASON_HOSTED_CONVERSATION_ENABLED","JASON_HOSTED_SEMANTICS_ENABLED"))
+                     and not any(env.get(key) for key in ("OPENAI_API_KEY","JASON_OPENAI_API_KEY",
+                                                         "OPENAI_API_TOKEN","JASON_OPENAI_API_TOKEN"))
+                     and not any("/openai/" in mount.get("Destination","") + "/"
+                                 for mount in x.get("Mounts",[])),
+                     "WATCHDOG_RECOVERY_PAID_AI_CONFIGURATION_DENIED")
         peers = {x["Name"].lstrip("/"):{"id":x["Id"],"image":x["Image"],
                   "started_at":x["State"]["StartedAt"]} for x in rows}
         need(set(peers) == set(p["PEERS"])
@@ -1433,8 +1586,12 @@ class PipelineSuccessor(NativeAdapter):
         need(activated.get("scope_sha256") == receipt["scope_sha256"]
              and activated.get("status") == "resumed_pending_scheduled_acceptance",
              "PIPELINE_PRIOR_ACTIVATION_NOT_VERIFIED")
-        self.read_guard(self.predecessor)
-        protected = self.protected()
+        fault_recovery = self.predecessor == WATCHDOG_RECOVERY_BASELINE
+        if fault_recovery:
+            self.attest_failed_predecessor()
+        else:
+            self.read_guard(self.predecessor)
+        protected = self.protected(failed_manager_recovery=True) if fault_recovery else self.protected()
         need(protected["effective_policy_sha256"] == receipt["effective_policy_sha256"],
              "PIPELINE_EFFECTIVE_POLICY_CHANGED")
         if self.predecessor == TODO_CONFLICT_BASELINE:
@@ -1454,10 +1611,10 @@ class PipelineSuccessor(NativeAdapter):
             need(snapshot(PAUSE) is None,"SOURCE_INTEGRATION_PREDECESSOR_PAUSED")
             self.verify_source_integration_predecessor(history,activated)
             encoded = old["after_images"][str(PAUSE)]
-        elif self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        elif self.predecessor in CLOSED_LOOP_BASELINES:
             need(snapshot(PAUSE) is None,"CLOSED_LOOP_PREDECESSOR_PAUSED")
             self.verify_closed_loop_predecessor(history,activated)
-            if self.predecessor == BREAKER_CUSTODY_BASELINE:
+            if self.predecessor in CUSTODY_BASELINES:
                 self.verify_breaker_policy_source()
             encoded = old["after_images"][str(PAUSE)]
         else:
@@ -1516,7 +1673,7 @@ class PipelineSuccessor(NativeAdapter):
         for name,pin in receipt["artifact_sha256"].items():
             raw = self.p["read"](LIB/name,1000)
             need(digest(raw) == pin, "PIPELINE_PREVIOUS_ARTIFACT_CHANGED:"+name)
-            if self.predecessor == CLOSED_LOOP_BASELINE and name in self.changed_workers:
+            if self.predecessor in (CLOSED_LOOP_BASELINE, WATCHDOG_RECOVERY_BASELINE) and name in self.changed_workers:
                 live = before[LIB/name]
                 need(live is not None and live[0] == raw and live[1] == live[2] == 1000,
                      "CLOSED_LOOP_WATCHDOG_CUSTODY")
@@ -1550,7 +1707,7 @@ class PipelineSuccessor(NativeAdapter):
                 "root_receipt_recipe":recipe,"protected_health":protected,
                 "source_hashes":{k:digest(v) for k,v in self.code.items()},
                 "rollback":"restore exact predecessor receipt and files; retain verified engineering pause; native revalidation only"}
-        if self.predecessor in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in SCHEDULED_BASELINES:
             plan.update(worker_replacements=sorted(self.changed_workers),
                         required_scheduled_cycles=2, quarantine_existing_todo_identity="TODO-OPS-013",
                         conflicted_issues=[1459,1500],preserve_existing_issue_authority=True)
@@ -1559,7 +1716,7 @@ class PipelineSuccessor(NativeAdapter):
                         retry_only_on_contention=True,legacy_release_guard_immediate=True,
                         preserve_predecessor_acceptance_requirements=True,
                         supersede_pending_only_before_first_worker_execution=True)
-        if self.predecessor in (SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in SOURCE_POLICY_BASELINES:
             plan.update(source_integration_policy="independent_source_v1",
                         production_transaction_mutex_preserved=True,
                         exact_native_release_records_unchanged=True,
@@ -1574,6 +1731,12 @@ class PipelineSuccessor(NativeAdapter):
                 lambda *args: self.p["git"](REPO,*args),self.candidate),
                 breaker_policy_source=self.verify_breaker_policy_source(),
                 engineering_progress_detector_required=True)
+        if self.predecessor == WATCHDOG_RECOVERY_BASELINE:
+            plan.update(breaker_policy_source=self.verify_breaker_policy_source(),
+                        engineering_progress_detector_required=True,
+                        failed_unit_reset_scope=list(SERVICES),
+                        precutover_exact_faults=list(WATCHDOG_RECOVERY_FAULTS),
+                        local_reasoning_runtime_activation=False)
         return plan,before,after
 
     def persist(self):
@@ -1649,7 +1812,7 @@ class PipelineSuccessor(NativeAdapter):
             need(snapshot(path) == (None if resumed and path == PAUSE else value),
                  "PIPELINE_INSTALLED_FILE_CHANGED:"+path.name)
         need(self.protected() == self.plan["protected_health"],"PIPELINE_PROTECTED_STATE_CHANGED")
-        if self.predecessor == BREAKER_CUSTODY_BASELINE:
+        if self.predecessor in CUSTODY_BASELINES:
             need(self.verify_breaker_policy_source() == self.plan["breaker_policy_source"],
                  "BREAKER_CUSTODY_APPROVED_POLICY_SOURCE_CHANGED")
 
@@ -1733,12 +1896,20 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
             again,self.before,self.after = self.inspect()
             need(again == plan,"PIPELINE_APPROVED_SCOPE_CHANGED")
             self.persist()
+        fault_recovery = self.predecessor == WATCHDOG_RECOVERY_BASELINE
+        mutation_started = not fault_recovery
         try:
-            with self.n["locks"](): self.pause()
-            self.quiesce((SERVICES[0],))
+            if not fault_recovery:
+                with self.n["locks"](): self.pause()
+                self.quiesce((SERVICES[0],))
             with self.n["locks"]():
-                need(self.protected() == plan["protected_health"],"PIPELINE_PRECUTOVER_HEALTH_CHANGED")
-                self.read_guard(self.predecessor)
+                protected = (self.protected(failed_manager_recovery=True)
+                             if fault_recovery else self.protected())
+                need(protected == plan["protected_health"],"PIPELINE_PRECUTOVER_HEALTH_CHANGED")
+                if fault_recovery:
+                    self.attest_failed_predecessor()
+                else:
+                    self.read_guard(self.predecessor)
                 if self.predecessor == RELEASE_RETRY_BASELINE:
                     history=STATE/self.predecessor
                     activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
@@ -1747,24 +1918,47 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                     history=STATE/self.predecessor
                     activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
                     self.verify_source_integration_predecessor(history,activated)
-                if self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+                if self.predecessor in CLOSED_LOOP_BASELINES:
                     history=STATE/self.predecessor
                     activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
                     self.verify_closed_loop_predecessor(history,activated)
-                    if self.predecessor == BREAKER_CUSTODY_BASELINE:
+                    if self.predecessor in CUSTODY_BASELINES:
                         need(self.verify_breaker_policy_source() == plan["breaker_policy_source"],
                              "BREAKER_CUSTODY_APPROVED_POLICY_SOURCE_CHANGED")
                 for path,old in self.before.items():
-                    need(snapshot(path) == (self.pause_image if path == PAUSE else old),
+                    need(snapshot(path) == (self.pause_image if path == PAUSE and not fault_recovery else old),
                          "PIPELINE_PRECUTOVER_FILE_CHANGED")
+                if fault_recovery:
+                    drift = json.loads(self.p["read"](MANAGER/"production-drift.json",0,0o600))
+                    control = json.loads(self.p["read"](MANAGER/"production-control-state.json",0,0o600))
+                    verify_failed_manager_drift(control,drift,drift)
+                    evidence = {name:self.properties(name,False) for name in SERVICES}
+                    need(all(row.get("ActiveState") == "failed" and row.get("MainPID") == "0"
+                             for row in evidence.values()),"WATCHDOG_RECOVERY_NOT_QUIESCENT")
+                    self.n["write"](self.directory/"precutover-fault.json",canon({
+                        "scope_sha256":sha,"observed_at":drift["observed_at"],
+                        "problems":drift["problems"],"breaker":control["circuit_breaker"],
+                        "services":evidence,"production_authority":False,
+                    }),0o400)
+                    mutation_started = True
                 self.systemctl(["stop",*TIMERS])
-                self.quiesce((SERVICES[1],),45)
+                if fault_recovery:
+                    self.pause()
+                    self.quiesce(SERVICES,45,rollback=True)
+                else:
+                    self.quiesce((SERVICES[1],),45)
                 self.release.parent.mkdir(mode=0o755); self.n["sync_dir"](self.release.parent.parent)
                 self.release.mkdir(mode=0o755); self.n["sync_dir"](self.release.parent)
                 for path,value in self.after.items():
                     if path not in (PAUSE,RECEIPT): self.change(path,self.before[path],value)
                 self.change(RECEIPT,self.before[RECEIPT],self.after[RECEIPT])
                 self.systemctl(["daemon-reload"])
+                if fault_recovery:
+                    for service in SERVICES:
+                        props = self.properties(service,False)
+                        need(props.get("ActiveState") == "failed" and props.get("MainPID") == "0",
+                             "WATCHDOG_RECOVERY_FAILED_STATE_CHANGED")
+                    self.systemctl(["reset-failed",*SERVICES])
                 self.systemctl(["start",*TIMERS])
                 self.read_guard(self.candidate)
                 self.namespace_probe()
@@ -1782,7 +1976,12 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                     "status":"resumed_pending_scheduled_acceptance","scope_sha256":sha,
                     "at":stamp(),"production_authority":False}),0o400)
         except BaseException:
-            self.restore()
+            if mutation_started:
+                self.restore()
+            elif fault_recovery:
+                self.n["write"](self.directory/"rollback.json",canon({
+                    "status":"no_mutation_after_durable_receipt",
+                    "scope_sha256":sha,"at":stamp(),"production_authority":False}),0o400)
             raise
         print("ENGINEERING_PIPELINE_SUCCESSOR_RESUMED_PENDING_SCHEDULED_ACCEPTANCE")
 
@@ -1825,7 +2024,7 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                 and watchdog.get("ExecMainStatus")=="0"):
             print("PIPELINE_SCHEDULED_WATCHDOG_ACCEPTANCE_PENDING")
             return False
-        if self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in CLOSED_LOOP_BASELINES:
             observed=json.loads(self.p["read"](MANAGER.parent/"self-heal/state.json",1000,0o600))
             probe=observed.get("engineering_progress")
             try:
@@ -1840,14 +2039,14 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
         return super().verify_activation()
 
     def record_scheduled_acceptance(self,sha,evidence,controller,pipeline,timer_at):
-        if self.predecessor not in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor not in SCHEDULED_BASELINES:
             return super().record_scheduled_acceptance(sha,evidence,controller,pipeline,timer_at)
-        if self.predecessor in (RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in (RELEASE_RETRY_BASELINE, *SOURCE_POLICY_BASELINES):
             need(controller.get("release_gate_status")=="allowed",
                  "RELEASE_RETRY_CONTROLLER_ADMISSION_NOT_VERIFIED")
             evidence={**evidence,"bounded_release_retry_policy_verified":True}
         state_dir=PAUSE.parent
-        if self.predecessor in (SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in SOURCE_POLICY_BASELINES:
             queue=json.loads(self.p["read"](state_dir/"pmv3-integration-queue-state.json",1000,0o600))
             view=controller.get("integration_queue") or {}
             backlog=queue.get("source_backlog") or {}
@@ -1866,7 +2065,7 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                  "SOURCE_INTEGRATION_SCHEDULED_POLICY_NOT_VERIFIED")
             evidence={**evidence,"independent_source_policy_verified":True,
                       "source_backlog_preserved":True,"native_production_unchanged":True}
-        if self.predecessor == BREAKER_CUSTODY_BASELINE:
+        if self.predecessor in CUSTODY_BASELINES:
             ledger=json.loads(self.p["read"](state_dir/"release-breaker-recovery-state.json",1000,0o600))
             route=verify_scheduled_breaker_policy_route(pipeline,ledger)
             need(self.verify_breaker_policy_source() == BREAKER_POLICY_SOURCE,
@@ -1977,6 +2176,7 @@ def main():
     successor.add_argument("--source-integration-successor",action="store_true")
     successor.add_argument("--closed-loop-successor",action="store_true")
     successor.add_argument("--breaker-custody-successor",action="store_true")
+    successor.add_argument("--watchdog-recovery-successor",action="store_true")
     choice=cli.add_mutually_exclusive_group()
     choice.add_argument("--apply", action="store_true")
     choice.add_argument("--recover",action="store_true")
@@ -1987,9 +2187,12 @@ def main():
     a = cli.parse_args()
     n,p = native()
     if (a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor
-            or a.source_integration_successor or a.closed_loop_successor or a.breaker_custody_successor):
+            or a.source_integration_successor or a.closed_loop_successor or a.breaker_custody_successor
+            or a.watchdog_recovery_successor):
         need(not a.resume,"PIPELINE_RESUME_REQUIRES_VERIFIED_TRANSACTION")
-        if a.breaker_custody_successor:
+        if a.watchdog_recovery_successor:
+            predecessor,files,supporting=WATCHDOG_RECOVERY_BASELINE,WATCHDOG_RECOVERY_SCOPE_FILES,WATCHDOG_RECOVERY_SUPPORTING_FILES
+        elif a.breaker_custody_successor:
             predecessor,files,supporting=BREAKER_CUSTODY_BASELINE,BREAKER_CUSTODY_SCOPE_FILES,BREAKER_CUSTODY_SUPPORTING_FILES
         elif a.closed_loop_successor:
             predecessor,files,supporting=CLOSED_LOOP_BASELINE,CLOSED_LOOP_SCOPE_FILES,CLOSED_LOOP_SUPPORTING_FILES
