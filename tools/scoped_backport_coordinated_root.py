@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 import pwd
 import sys
+import stat
+import tempfile
 
 INSTALL = Path("/usr/local/lib/jason/scoped-backport")
 ENTRY = INSTALL / "tools/scoped_backport_coordinated_root.py"
@@ -21,7 +23,7 @@ if os.geteuid() == 0 and Path(__file__).resolve() == ENTRY:
     sys.path.insert(0, str(INSTALL))
 
 from tools import scoped_backport_coordinated as co
-from tools.scoped_backport_coordinated_host import CoordinatedHost, MANIFEST, PROFILE, PRIVATE
+from tools.scoped_backport_coordinated_host import CoordinatedHost, MANIFEST, PROFILE, PRIVATE, trusted_directory
 from tools.scoped_backport_native_host import exact_file, root_json, atomic_root_json, utcnow
 from tools.scoped_backport_release import digest, deny
 
@@ -35,6 +37,32 @@ def load_installed():
     host = CoordinatedHost()
     host.enforce_installed_root_trust(profile)
     return host, co.validate_manifest(manifest), profile
+
+
+PUBLIC_VIEW = Path("/etc/jason-owner-release/normal-release-policy")
+
+
+def publish_normal_eligibility(record):
+    if record["schema_version"] != "3.0":
+        return
+    trusted_directory(PUBLIC_VIEW)
+    path = PUBLIC_VIEW / ("eligible-" + record["release_id"] + ".json")
+    raw = json.dumps(record,sort_keys=True,separators=(",", ":")).encode()+b"\n"
+    if path.exists() or path.is_symlink():
+        if exact_file(path,uid=0,mode=0o644,max_size=16384) != raw:
+            deny("COORDINATED_PUBLIC_ELIGIBILITY_DRIFT")
+        return
+    fd,temp = tempfile.mkstemp(prefix=".eligible-",dir=PUBLIC_VIEW)
+    try:
+        with os.fdopen(fd,"wb") as out:
+            out.write(raw);out.flush();os.fsync(out.fileno())
+        os.chown(temp,0,0);os.chmod(temp,0o644)
+        os.link(temp,path,follow_symlinks=False)
+    finally:
+        os.unlink(temp)
+    fd=os.open(PUBLIC_VIEW,os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(fd)
+    finally:os.close(fd)
 
 
 def stage(host, m):
@@ -58,8 +86,10 @@ def stage(host, m):
             existing = root_json(path)
             if any(existing.get(k) != v for k,v in record.items() if k != "observed_at"):
                 deny("COORDINATED_ELIGIBILITY_DRIFT")
+            publish_normal_eligibility(existing)
             return existing
         atomic_root_json(path, record)
+        publish_normal_eligibility(record)
         return record
 
 

@@ -213,3 +213,24 @@ def test_normal_native_mode_preserves_policy_and_marker_absence(monkeypatch,tmp_
     marker.unlink()
     monkeypatch.setattr(native,"read_retired_release_policy",lambda:None)
     with pytest.raises(ScopedBackportDenied,match="NORMAL_POLICY_DRIFT"):h._frozen(m)
+
+
+def test_normal_native_stage_projects_only_root_private_exact_offer(monkeypatch,tmp_path):
+    from tools.tests.test_scoped_backport_coordinated import normal_manifest
+    m=normal_manifest()
+    class Fake:
+        @contextmanager
+        def release_lock(self,m): yield
+        def freshly_validate_live_scope(self,m): pass
+        def ensure_breaker_closed_and_workers_quiescent(self): pass
+        def deny_unresolved_attempt(self,m): pass
+    monkeypatch.setattr(entry,'PRIVATE',tmp_path)
+    records=[];published=[]
+    monkeypatch.setattr(entry,'atomic_root_json',lambda p,record:records.append(record))
+    monkeypatch.setattr(entry,'publish_normal_eligibility',lambda record:published.append(record))
+    result=entry.stage(Fake(),m)
+    assert records==published==[result]
+    assert result['schema_version']=='3.0'
+    assert result['release_policy_sha256']==m['release_policy_sha256']
+    assert 'freeze_sha256' not in result
+    assert result['owner_approval_recorded'] is False and result['production_mutations'] is False

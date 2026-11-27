@@ -105,3 +105,7 @@ The exact private manifest remains legacy-mode until a root-authenticated
 retirement transaction and native migration have been accepted. Do not
 install the draft controller or mint a normal-mode eligibility receipt
 from this source evidence.
+
+## Existing Owner approval route
+
+Normal-mode native stage now publishes a root-owned, read-only exact eligibility projection. The existing authenticated MCP approve_release_candidate path selects this typed route only for a matching release identity and independently read retirement-policy digest. It refuses ambiguous ordinary/coordinated records, untrusted or changed eligibility, legacy mode, mismatched identity, and repeat proof issuance. The native controller independently verifies the private offer and signature and consumes the one-use decision. No new capability, authority grant or provider-write right was introduced. The root installer, effective scheduler and reader migration remain required before this source path may operate live.
