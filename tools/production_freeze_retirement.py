@@ -50,7 +50,7 @@ SOURCES = {
     INSTALL / "tools/scoped_backport_coordinated_root.py": "tools/scoped_backport_coordinated_root.py",
     INSTALL / "tools/coordinated_deploy_live_container.py": "tools/deploy_live_container.py",
     INSTALL / "tools/pmv4_mcp_projection.py": "tools/pmv4_mcp_projection.py",
-    INSTALL / "tools/release_control_transition_worker.py": "tools/release_control_transition_worker.py",
+    INSTALL / "tools/release_control_transition_worker.py": "tools/scoped_backport_release_control_transition_worker.py",
     INSTALL / "implementation/kernel/signed_owner_release_v2.py": "implementation/kernel/signed_owner_release_v2.py",
 }
 UNITS = Path("/etc/systemd/system")

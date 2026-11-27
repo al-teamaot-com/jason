@@ -174,3 +174,18 @@ read-only mount contract, rollback capacity, and 33-target live diagnostic
 scope were independently checked. Production has not changed. Native
 protected-main preflight, authenticated exact-scope authorization and real
 production acceptance remain mandatory.
+
+## Historical transition source custody correction
+
+The first protected-main audit migration check identified a real source
+compatibility issue: the legacy fixture and legacy host installation path
+consume tools/release_control_transition_worker.py, whose original
+02ce315d9e96e1e655c3465f5fc2761661f78e5ced5b13f849680a85f2a1ff7e
+digest is independently pinned by the installed audit controller. Keep that
+historical source byte-identical. Store the normal component-aware successor
+as tools/scoped_backport_release_control_transition_worker.py and materialize
+it only at the reviewed separate scoped-backport path. No historical audit
+pin, native fixture assertion, or legacy installer is relaxed. Run the
+original transition regression against both variants and the new
+component-reader denial checks. Trigger the audit workflow on either
+transition source change, before merge.

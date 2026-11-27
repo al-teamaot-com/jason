@@ -7,7 +7,6 @@ from __future__ import annotations
 import datetime
 import fcntl
 import json
-import importlib.util
 import os
 import pwd
 import re
@@ -35,31 +34,7 @@ PROTECTED_LKG_FIELDS=(
 )
 
 
-def coordinated_component_reader():
-    record = Path("/etc/jason-owner-release/coordinated-readback/component.json")
-    if not os.path.lexists(record) and not os.path.lexists("/etc/jason-owner-release/coordinated-component-readback.json"):
-        return None
-    helper = Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py")
-    for path in (helper, *helper.parents):
-        meta = path.lstat()
-        if meta.st_uid != 0 or meta.st_mode & 0o022 or path.is_symlink():
-            raise PermissionError("untrusted coordinated component reader")
-    spec = importlib.util.spec_from_file_location("jason_root_coordinated_reader", helper)
-    if spec is None or spec.loader is None:
-        raise PermissionError("missing coordinated component reader")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def verify_immutable_lkg_fingerprint(recorded: dict, observed: dict) -> None:
-    reader = coordinated_component_reader()
-    if reader is not None:
-        state = reader.verify_live()
-        if state is None:
-            raise ValueError("coordinated component state disappeared")
-        reader.verify_host_fingerprint(recorded, observed, state)
-        return
     if recorded.get('complete') is not True or observed.get('complete') is not True:
         raise ValueError('incomplete independent baseline verification')
     for key in PROTECTED_LKG_FIELDS:
@@ -105,20 +80,6 @@ def read_request(path: Path) -> dict:
 
 
 def verify_health(revision: str) -> dict:
-    reader = coordinated_component_reader()
-    if reader is not None:
-        state = reader.verify_live()
-        if state is None or state["host_revision"] != revision:
-            raise ValueError("coordinated component host anchor mismatch")
-        helper = "/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py"
-        result = subprocess.check_output(
-            ["runuser", "-u", "al", "--", "/usr/bin/python3", "-I", "-B",
-             helper, "--capture-native-health"], text=True, timeout=90)
-        observed = json.loads(result)
-        if (observed.get("revision") != revision or observed.get("complete") is not True
-                or observed.get("coordinated_readback_sha256") != reader.digest(state)):
-            raise ValueError("independent coordinated production health not verified")
-        return observed
     code='import json,sys;sys.path.insert(0,"/home/al/.local/lib/jason");import release_manager_host_runner as r;print(json.dumps(r.capture_production_manifest("'+revision+'")))'
     result=subprocess.check_output(['runuser','-u','al','--','python3','-c',code],text=True,timeout=70)
     manifest=json.loads(result)
@@ -214,8 +175,6 @@ def restore_previous_verified_lkg(req: dict, state: dict) -> dict:
     release record. Only the specific failed obsolete CCC oneshot is accepted
     as the live drift reason. The original LKG is retained as previous.
     """
-    if coordinated_component_reader() is not None:
-        raise ValueError('legacy prior-LKG recovery denied while coordinated component state is active')
     revision = req['revision']
     breaker = state.get('circuit_breaker') or {}
     if (breaker.get('state') != 'open'
@@ -274,8 +233,6 @@ def restore_previous_verified_lkg(req: dict, state: dict) -> dict:
 
 def apply_transition(req: dict, state: dict) -> dict:
     action=req['action'];revision=req['revision']
-    if action != 'open' and action != 'revalidate' and coordinated_component_reader() is not None:
-        raise ValueError('legacy promotion denied while coordinated component state is active')
     if action=='open':
         state['circuit_breaker']={'state':'open','reason':str(req.get('reason') or 'release_failure')[:300],
                                    'source':'root_governed_transition','updated_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}

@@ -1200,7 +1200,9 @@ NORMAL_MANAGER_SCOPE_FILES |= {
     "tools/scoped_backport_coordinated.py",
     "tools/scoped_backport_coordinated_host.py",
     "tools/scoped_backport_coordinated_root.py",
-    "tools/release_control_transition_worker.py",
+    "tools/scoped_backport_release_control_transition_worker.py",
+    "tools/tests/test_scoped_backport_release_control_transition_worker.py",
+    "tools/tests/test_release_control_transition_worker.py",
     "implementation/mcp_service/src/jason_mcp/release_approval_request.py",
     *("infrastructure/scoped-backport-release/" + unit +
       ".d/95-coordinated-normal-release.conf" for unit in (
@@ -1210,6 +1212,7 @@ NORMAL_MANAGER_SCOPE_FILES |= {
 }
 NORMAL_MANAGER_SUPPORTING_FILES = WATCHDOG_RECOVERY_SUPPORTING_FILES | {
     "tools/deploy_live_container.py", "tools/pmv4_mcp_projection.py",
+    "tools/release_control_transition_worker.py",
 }
 NORMAL_MANAGER_PROTECTED_PATHS = (
     CLOSED_LOOP_PROTECTED_PATHS | WATCHDOG_RECOVERY_SCOPE_FILES
