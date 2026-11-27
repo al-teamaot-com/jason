@@ -248,7 +248,9 @@ from .autonomous_repair_deployment import (
 from .autonomous_repair_maintenance import (
     build_autonomous_repair_deployment_maintenance,
 )
-from .support_repair_reasoning import build_support_repair_reasoning_maintenance
+from .support_repair_reasoning import (
+    LOCAL_ENGINEERING_MAX_PROMPT_BYTES, build_support_repair_reasoning_maintenance,
+)
 from .autotask_ticket_create import (
     build_autotask_ticket_create_invoker,
     register_autotask_ticket_create_invoker,
@@ -3184,6 +3186,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         structured_client=local_structured_client,
         fallback_structured_client=None,
         spool=settings.support_repair_spool,
+        local_prompt_max_bytes=LOCAL_ENGINEERING_MAX_PROMPT_BYTES,
     )
     autonomous_repair_deployment_maintenance = (
         build_autonomous_repair_deployment_maintenance(

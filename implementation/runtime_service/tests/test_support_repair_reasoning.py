@@ -493,3 +493,94 @@ def test_local_primary_engineering_request_uses_extended_bounded_contract(tmp_pa
     assert transport.calls[0]["url"]=="http://jason-ollama:11434/api/chat"
     assert transport.calls[0]["json"]["options"]["num_predict"]==4096
     assert transport.calls[0]["json"]["options"]["num_ctx"]==32768
+
+class LocalClient(Client):
+    def complete(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"summary":"need source", "edits":[], "test_paths":[],
+                "blocked_reason":None,
+                "evidence_requests":[{"tool":"search_source","query":"function_name","path":None}]}
+
+
+def test_bounded_local_projection_preserves_exact_original_request_and_authority(tmp_path):
+    from jason_runtime.support_repair_reasoning import LOCAL_ENGINEERING_MAX_PROMPT_BYTES
+    req=_request("edit_plan")
+    req["support_item"]="DEV-123"
+    req["context"]={
+        "work_class":"owner_approved_development",
+        "approval_source":"exact owner marker",
+        "approved_scope":{"paths":["implementation/example.py"]},
+        "pinned_source_revision":"a"*40,
+        "read_only_tool_receipts":[{"tool":"read_source","path":"implementation/example.py","sha256":"b"*64}],
+        "source_excerpts":[
+            {"path":"implementation/example.py","content":"a=1\\n"*1000},
+            {"path":"implementation/large.py","content":"# unicode é"*3000},
+            {"path":"implementation/tests/test_example.py","content":"assert a==1\\n"*100},
+        ],
+    }
+    req["request_id"]=_request_id(req)
+    original=json.dumps(req,sort_keys=True)
+    client=LocalClient()
+    m=SupportRepairReasoningMaintenance(structured_client=client,spool=tmp_path,
+        local_prompt_max_bytes=LOCAL_ENGINEERING_MAX_PROMPT_BYTES)
+    m._complete(m._validate_request(req))
+    assert json.dumps(req,sort_keys=True)==original
+    call=client.calls[0]
+    assert len(call["user"].encode("utf-8"))<=LOCAL_ENGINEERING_MAX_PROMPT_BYTES
+    context=json.loads(call["user"])["context"]
+    assert context["approved_scope"]==req["context"]["approved_scope"]
+    assert context["approval_source"]==req["context"]["approval_source"]
+    assert context["read_only_tool_receipts"]==req["context"]["read_only_tool_receipts"]
+    assert context["pinned_source_revision"]==req["context"]["pinned_source_revision"]
+    assert context["source_excerpts"]==[req["context"]["source_excerpts"][i] for i in (0,2)]
+    assert context["local_source_projection"]["omitted_source_paths"]==["implementation/large.py"]
+    assert "Never guess omitted code" in call["system"]
+    assert m.attempt_diagnostics["local_source_projection"]["original_request_unchanged"]
+    assert m.attempt_diagnostics["local_source_projection"]["omitted_source_count"]==1
+
+
+def test_local_projection_refuses_oversized_non_source_context_before_inference(tmp_path):
+    import pytest
+    req=_request("edit_plan")
+    req["context"]={"approved_scope":"A"*20000,
+                    "source_excerpts":[{"path":"implementation/example.py","content":"a=1"}]}
+    req["request_id"]=_request_id(req)
+    client=LocalClient()
+    m=SupportRepairReasoningMaintenance(structured_client=client,spool=tmp_path,
+        local_prompt_max_bytes=16000)
+    with pytest.raises(ValueError,match="bounded non-source context"):
+        m._complete(m._validate_request(req))
+    assert not client.calls
+
+
+def test_local_budget_never_enables_fallback_or_changes_small_requests(tmp_path):
+    import pytest
+    client=LocalClient()
+    with pytest.raises(ValueError,match="cannot use fallback"):
+        SupportRepairReasoningMaintenance(structured_client=client,
+            fallback_structured_client=LocalClient(),spool=tmp_path,local_prompt_max_bytes=16000)
+    req=_request("edit_plan")
+    m=SupportRepairReasoningMaintenance(structured_client=client,spool=tmp_path,
+        local_prompt_max_bytes=16000)
+    m._complete(m._validate_request(req))
+    assert json.loads(client.calls[0]["user"])["context"]=={}
+    assert m.attempt_diagnostics=={}
+
+def test_local_edit_contract_denies_ambiguous_or_mixed_tool_arguments(tmp_path):
+    from jason_runtime.support_repair_reasoning import _validate_local_edit_result
+    import pytest
+    base={"summary":"need source","edits":[],"test_paths":[],"blocked_reason":None}
+    for action in (
+        {"tool":"read_source","query":"implementation/example.py:func()","path":None},
+        {"tool":"read_source","query":"func()","path":"implementation/example.py"},
+        {"tool":"read_source","query":"func","path":"../private.py"},
+        {"tool":"read_source","query":"func","path":"/etc/example.py"},
+        {"tool":"search_source","query":"foo OR bar","path":None},
+        {"tool":"search_source","query":"foo","path":"implementation/example.py"},
+    ):
+        with pytest.raises(ValueError,match="local engineering"):
+            _validate_local_edit_result(dict(base,evidence_requests=[action]))
+    valid={"tool":"read_source","query":"func","path":"implementation/example.py"}
+    _validate_local_edit_result(dict(base,evidence_requests=[valid]))
+    with pytest.raises(ValueError,match="mixed"):
+        _validate_local_edit_result(dict(base,evidence_requests=[valid],blocked_reason="blocked"))
