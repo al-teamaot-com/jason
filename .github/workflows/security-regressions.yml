@@ -170,6 +170,8 @@ jobs:
             tools/tests/test_scoped_backport_component_readback.py \
             tools/tests/test_scoped_backport_coordinated_host.py \
             tools/tests/test_production_freeze_retirement.py \
+            tools/tests/test_release_control_transition_worker.py \
+            tools/tests/test_scoped_backport_release_control_transition_worker.py \
             tests/test_pmv4_host_release_guard.py
       - name: Microsoft group dormant and exact AOT activation composition
         run: |

@@ -10,6 +10,18 @@ m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 REV='a'*40
 
 
+@pytest.fixture(autouse=True, params=[
+    "release_control_transition_worker.py",
+    "scoped_backport_release_control_transition_worker.py",
+])
+def root_transition_variant(request, monkeypatch):
+    source = Path(__file__).resolve().parents[1] / request.param
+    spec = importlib.util.spec_from_file_location(source.stem, source)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    monkeypatch.setitem(globals(), "m", worker)
+
+
 def verified_lkg():
     return {
         'complete': True, 'revision': REV, 'runtime_revision': REV,
