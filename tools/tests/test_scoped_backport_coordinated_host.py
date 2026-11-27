@@ -385,7 +385,12 @@ def test_reader_migration_checks_effective_manager_artifact_and_root_paths(monke
               "installed_readers": [{"path": str(p), "sha256": h(p)}
                                     for p in (watchdog, guard, transition)]}
     native.verify_reader_migration(record, scope)
-    assert len(commands) == 2
+    assert len(commands) == 3
+    assert {args[0][0] for args in commands} == {
+        "jason-self-heal-watchdog.service",
+        "jason-release-control-transition.service",
+        "jason-pmv4-component-transition.service",
+    }
     foreign = tmp_path / "foreign" / watchdog.name
     foreign.parent.mkdir()
     foreign.write_bytes(watchdog.read_bytes())

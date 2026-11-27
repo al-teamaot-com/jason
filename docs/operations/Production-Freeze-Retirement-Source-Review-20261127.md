@@ -126,3 +126,20 @@ immutable retirement receipt digest or effective component identity.
 The existing protected transaction lock must serialize configuration writes
 with deployment. A native Owner-authenticated migration receipt uses its
 own owner-native reference namespace, not a fabricated MCP approval ID.
+
+## Combined migration draft and validation checkpoint
+
+The draft combines the authenticated manager-preparation scope and final
+retirement scope into one exact decision. The isolated transaction tests
+cover denial of missing or mismatched approval, incomplete preparation,
+preservation of non-target peers, successful simulated activation, four
+injected failure/rollback cases, and recovery of an interruption before
+cutover. Full affected local regression: 810 tests and five subtests passed.
+The migration-specific tests are included in security-regressions CI.
+
+These are source and simulated-host results, not production acceptance.
+The final phase still requires independent validation of effective native
+recovery, exact installed path/custody and systemd behavior, live component
+readback, and the approved rollback path. Do not merge or deploy the draft
+on the strength of fixture results. No production control or service was
+changed, and no new release authorization has been recorded.

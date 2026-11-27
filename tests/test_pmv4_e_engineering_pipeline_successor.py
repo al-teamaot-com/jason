@@ -72,7 +72,8 @@ def test_quiesce_never_treats_running_or_failed_service_as_ready(monkeypatch):
 
 def test_durable_scope_guard_and_full_stage_acceptance_are_present():
     source=Path(m.__file__).read_text()
-    assert 'self.actor = self.n["owner"](plan)' in source
+    # Test the actual authorization call below rather than its spelling.
+    assert 'self.actor = self.n["owner"](' in source
     assert 'self.persist()' in source
     assert 'self.namespace_probe()' in source
     assert 'self.native_revalidation()' in source
@@ -732,3 +733,15 @@ def test_normal_manager_source_projection_records_exclusions_and_denies_protecte
     paths.remove("tools/pmv4_e_engineering_manager_install.py")
     with pytest.raises(PermissionError,match="DELTA_INCOMPLETE"):
         m.review_normal_manager_delta(git,candidate)
+
+
+def test_legacy_successor_passes_exact_scope_to_existing_authenticator():
+    a=object.__new__(m.PipelineSuccessor)
+    p=plan()
+    # Stop at the existing authenticator; no locks or production methods run.
+    a.n={"owner":Mock(side_effect=PermissionError("test authorization denied")),
+         "locks":Mock(side_effect=AssertionError("unexpected mutation"))}
+    with pytest.raises(PermissionError,match="test authorization denied"):
+        a.apply(p,m.pipeline_scope_sha(p))
+    a.n["owner"].assert_called_once_with(p)
+    a.n["locks"].assert_not_called()

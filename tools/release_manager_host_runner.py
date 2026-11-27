@@ -8184,6 +8184,12 @@ def approval_only_while_promotion_held(repo: Path, state_root: Path) -> bool:
     """
     if Path(state_root).resolve() != DEFAULT_STATE.resolve():
         raise ReleaseManagerError("approval-only worker requires canonical live state")
+    # After retirement, the installed scoped root dispatcher consumes exact
+    # reviewed component offers. Keep the required legacy timer healthy but
+    # do not issue misleading whole-host approvals for mixed component SHAs.
+    if _normal_owner_proof(state_root).read_retired_release_policy() is not None:
+        print("RELEASE_APPROVAL_ONLY=COORDINATED_NORMAL_ROUTE", flush=True)
+        return False
     if not (state_root / "auto-promotion-incident-hold").is_file():
         print("RELEASE_APPROVAL_ONLY=HOLD_NOT_ACTIVE", flush=True)
         return False

@@ -1194,7 +1194,23 @@ NORMAL_MANAGER_SCOPE_FILES = {
     # it or any application artifact in this preparatory host transaction.
     "implementation/runtime_service/src/jason_runtime/composition.py",
 }
-NORMAL_MANAGER_SUPPORTING_FILES = WATCHDOG_RECOVERY_SUPPORTING_FILES
+NORMAL_MANAGER_SCOPE_FILES |= {
+    "tools/production_freeze_retirement.py",
+    "tools/tests/test_production_freeze_retirement.py",
+    "tools/scoped_backport_coordinated.py",
+    "tools/scoped_backport_coordinated_host.py",
+    "tools/scoped_backport_coordinated_root.py",
+    "tools/release_control_transition_worker.py",
+    "implementation/mcp_service/src/jason_mcp/release_approval_request.py",
+    *("infrastructure/scoped-backport-release/" + unit +
+      ".d/95-coordinated-normal-release.conf" for unit in (
+        "jason-scoped-backport-requests.service",
+        "jason-scoped-backport-requests.path",
+        "jason-scoped-backport-recovery.service")),
+}
+NORMAL_MANAGER_SUPPORTING_FILES = WATCHDOG_RECOVERY_SUPPORTING_FILES | {
+    "tools/deploy_live_container.py", "tools/pmv4_mcp_projection.py",
+}
 NORMAL_MANAGER_PROTECTED_PATHS = (
     CLOSED_LOOP_PROTECTED_PATHS | WATCHDOG_RECOVERY_SCOPE_FILES
     | NORMAL_MANAGER_SUPPORTING_FILES | {
@@ -1887,13 +1903,28 @@ class PipelineSuccessor(NativeAdapter):
                             "unit":DRIFT_REPORTER_UNIT,"pins":DRIFT_REPORTER_PINS,
                             "properties":DRIFT_REPORTER_EXIT2},
                         local_reasoning_runtime_activation=False)
+        if getattr(self,"retirement_requested",False):
+            plan["normal_retirement"] = self.retirement_helper()["prepare"](self,plan,globals())
         return plan,before,after
+
+    def retirement_helper(self):
+        need(self.predecessor == NORMAL_MANAGER_BASELINE, "NORMAL_RETIREMENT_PREDECESSOR")
+        return load(self.code["tools/production_freeze_retirement.py"],
+                    REPO/"tools/production_freeze_retirement.py")
+
+    def owner_scope(self, plan):
+        if "normal_retirement" not in plan:
+            return plan
+        return self.retirement_helper()["owner_scope"](plan)
 
     def persist(self):
         self.directory.mkdir(mode=0o700); self.n["sync_dir"](STATE)
         row = {"scope":self.plan,"scope_sha256":pipeline_scope_sha(self.plan),
                "owner_oid":self.actor,"approved_at":stamp(),
                "before_images":encode(self.before),"after_images":encode(self.after)}
+        if "normal_retirement" in self.plan:
+            exact = self.owner_scope(self.plan)
+            row.update(owner_scope_sha256=digest(canon(exact)),owner_action=exact["action"])
         raw = canon(row)
         self.n["write"](self.directory/"approval.json",raw,0o400)
         receipt = {**self.plan["root_receipt_recipe"],"candidate_sha":self.candidate,
@@ -1915,6 +1946,11 @@ class PipelineSuccessor(NativeAdapter):
              and set(self.plan["installation_targets"]) == {str(x) for x in self.approved_targets()}
              and re.fullmatch("[0-9a-f-]{36}",str(row.get("owner_oid",""))) is not None,
              "PIPELINE_APPROVAL_IDENTITY")
+        if "normal_retirement" in self.plan:
+            exact = self.owner_scope(self.plan)
+            need(row.get("owner_action")==exact["action"]
+                 and row.get("owner_scope_sha256")==digest(canon(exact)),
+                 "NORMAL_RETIREMENT_PARENT_APPROVAL_MISSING")
         self.before = decode(row["before_images"],self.approved_targets())
         self.after = decode(row["after_images"],self.approved_targets()-{RECEIPT})
         need(self.plan["before"] == {str(k):describe(v) for k,v in self.before.items()}
@@ -2036,8 +2072,11 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
             "production_authority":False}),0o400)
 
     def apply(self,plan,sha):
-        need(sha == pipeline_scope_sha(plan),"PIPELINE_EXACT_SCOPE_REQUIRED")
-        self.actor = self.n["owner"](plan)
+        manager_sha = pipeline_scope_sha(plan)
+        exact = self.owner_scope(plan)
+        need(sha == digest(canon(exact)),"PIPELINE_EXACT_SCOPE_REQUIRED")
+        self.actor = self.n["owner"](exact)
+        sha = manager_sha
         self.plan = plan
         with self.n["locks"]():
             need(source_review(self.candidate,self.p,baseline=self.predecessor,
@@ -2328,14 +2367,19 @@ def main():
     successor.add_argument("--breaker-custody-successor",action="store_true")
     successor.add_argument("--watchdog-recovery-successor",action="store_true")
     successor.add_argument("--normal-manager-successor",action="store_true")
+    cli.add_argument("--retire-production-freeze",action="store_true")
     choice=cli.add_mutually_exclusive_group()
     choice.add_argument("--apply", action="store_true")
     choice.add_argument("--recover",action="store_true")
     choice.add_argument("--resume",action="store_true")
     choice.add_argument("--verify-activation",action="store_true")
+    choice.add_argument("--activate-retirement",action="store_true")
+    choice.add_argument("--recover-retirement",action="store_true")
     choice.add_argument("--restore-failed-activation",action="store_true")
     cli.add_argument("--scope-sha")
     a = cli.parse_args()
+    need(not (a.retire_production_freeze or a.activate_retirement or a.recover_retirement)
+         or a.normal_manager_successor,"NORMAL_RETIREMENT_REQUIRES_NORMAL_SUCCESSOR")
     n,p = native()
     if (a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor
             or a.source_integration_successor or a.closed_loop_successor or a.breaker_custody_successor
@@ -2357,9 +2401,15 @@ def main():
             predecessor,files,supporting=TODO_CONFLICT_BASELINE,TODO_CONFLICT_SCOPE_FILES,TODO_CONFLICT_SUPPORTING_FILES
         else:
             predecessor,files,supporting=PIPELINE_BASELINE,PIPELINE_SCOPE_FILES,frozenset()
-        code = source_review(a.candidate,p,recovery=a.recover or a.verify_activation or a.restore_failed_activation,
+        code = source_review(a.candidate,p,recovery=a.recover or a.verify_activation or a.restore_failed_activation
+                             or a.activate_retirement or a.recover_retirement,
                              baseline=predecessor,source_files=files,supporting_files=supporting)
         adapter = PipelineSuccessor(a.candidate,n,p,code,predecessor=predecessor)
+        adapter.retirement_requested=a.retire_production_freeze
+        if a.activate_retirement or a.recover_retirement:
+            print(json.dumps(adapter.retirement_helper()["activate"](
+                adapter,globals(),recover=a.recover_retirement),sort_keys=True))
+            return
         if a.verify_activation:
             if not adapter.verify_activation(): raise SystemExit(2)
             return
@@ -2370,10 +2420,12 @@ def main():
             adapter.recover()
             return
         with n["locks"](): plan,_,_=adapter.inspect()
-        sha=pipeline_scope_sha(plan)
+        pipeline_scope_sha(plan)
+        exact = adapter.owner_scope(plan)
+        sha=digest(canon(exact))
         if not a.apply:
             print(json.dumps({"status":"exact_native_pipeline_successor_preflight_passed",
-                              "scope_sha256":sha,"scope":plan},sort_keys=True))
+                              "scope_sha256":sha,"scope":exact},sort_keys=True))
             return
         adapter.apply(plan,a.scope_sha)
         return

@@ -289,10 +289,12 @@ def verify_reader_migration(migration: Mapping, policy: Mapping) -> None:
         argv=["/usr/bin/python3", "-B", str(WATCHDOG_LIVE), "--root",
               "/var/lib/jason/openclaw/self-heal", "--max-attempts", "2"],
     )
-    effective_reader_command(
-        "jason-release-control-transition.service", user="root",
-        argv=["/usr/bin/python3", "-I", "-B", str(TRANSITION_SUCCESSOR)],
-    )
+    for unit in ("jason-release-control-transition.service",
+                 "jason-pmv4-component-transition.service"):
+        effective_reader_command(
+            unit, user="root",
+            argv=["/usr/bin/python3", "-I", "-B", str(TRANSITION_SUCCESSOR)],
+        )
 
 
 def verify_installed_policy(profile: Mapping | None = None) -> dict:
@@ -577,6 +579,23 @@ class CoordinatedHost(NativeScopedBackportHost):
         profile = self.active_profile
         if profile is None or self.active_review_sha is None:
             deny("COORDINATED_UNBOUND_REVIEW")
+        if manifest["schema_version"] == "3.0":
+            # A previous candidate's local cache must not make every later
+            # protected-main merge require another privileged installation.
+            trusted_directory(self.repo)
+            origin = co._git(self.repo, "remote", "get-url", "origin").decode().strip()
+            if origin != "https://github.com/al-teamaot-com/jason.git":
+                deny("COORDINATED_ROOT_CACHE_ORIGIN")
+            if co._git(self.repo, "rev-parse", "--is-bare-repository").strip() != b"true":
+                deny("COORDINATED_ROOT_CACHE_NOT_BARE")
+            refs = sorted({p["snapshot_ref"] for p in manifest["projections"].values()})
+            if any(not re.fullmatch(r"refs/heads/prep/[a-z0-9-]{5,100}", ref) for ref in refs):
+                deny("COORDINATED_ROOT_CACHE_REF")
+            run("/usr/bin/git", "-C", str(self.repo), "-c", "core.hooksPath=/dev/null",
+                "-c", "protocol.file.allow=never", "fetch", "--no-tags",
+                "--no-recurse-submodules", "origin",
+                "+refs/heads/main:refs/remotes/origin/main",
+                *["+"+ref+":"+ref for ref in refs], timeout=180)
         co.source_admission(self.repo, manifest, profile)
         # The root-pinned installation SHA and exact private manifest digest
         # must also have protected-main review, not just the feature projection.
