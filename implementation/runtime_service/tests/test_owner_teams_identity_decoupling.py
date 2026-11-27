@@ -23,24 +23,36 @@ from implementation.runtime_service.tests.test_admin_separated_release_roles imp
 from implementation.runtime_service.tests.test_mobile_release_approval import click
 
 
-def owner_teams_policy_file(tmp_path):
+def owner_teams_policy_file(tmp_path, version="4.1"):
     p = separated_policy_file(tmp_path)
     doc = json.loads(p.read_text())
-    doc["schema_version"] = "4.1"
+    doc["schema_version"] = version
+    if version == "3.2":
+        doc["policy_mode"] = "owner_reviewed"
+        doc["teams_owner_binding"] = doc.pop("regular_requester_binding")
+        doc.pop("admin_approver_binding")
+        doc["high_impact_review"] = {
+            "owner_exact_sha_required": True,
+            "authenticated_entra_owner_decision_required": True,
+            "signed_teams_owner_allowed": True,
+            "independent_native_release_health_required": True,
+            "protected_release_gates_unchanged": True,
+        }
     p.write_text(json.dumps(doc))
     p.chmod(0o600)
     return p
 
 
-def owner_flow(tmp_path, **kwargs):
-    p = owner_teams_policy_file(tmp_path)
+def owner_flow(tmp_path, version="4.1", **kwargs):
+    p = owner_teams_policy_file(tmp_path, version)
     flow, req, repo, record = new_flow(tmp_path, policy_path=p, **kwargs)
-    flow.required_policy_version = "4.1"
+    flow.required_policy_version = version
     return flow, req, repo, record
 
 
-def test_regular_licensed_owner_signed_release_approval_is_one_use(tmp_path):
-    flow, req, repo, original = owner_flow(tmp_path, object_id=REGULAR)
+@pytest.mark.parametrize("version", ["4.1", "3.2"])
+def test_regular_licensed_owner_signed_release_approval_is_one_use(tmp_path, version):
+    flow, req, repo, original = owner_flow(tmp_path, version=version, object_id=REGULAR)
     before = original.read_bytes()
     result = click(flow, req, microsoft_tenant_id=TENANT, microsoft_object_id=REGULAR)
     assert result["approval_status"] == "approved"
@@ -62,11 +74,12 @@ def test_regular_licensed_owner_signed_release_approval_is_one_use(tmp_path):
     (REGULAR, TENANT, binding(REGULAR, identity="person-al"), "human"),
     (REGULAR, TENANT, binding(REGULAR), "service"),
 ])
+@pytest.mark.parametrize("version", ["4.1", "3.2"])
 def test_wrong_or_privileged_actor_cannot_approve_owner_release(
-    tmp_path, object_id, tenant, active_binding, identity_type,
+    tmp_path, object_id, tenant, active_binding, identity_type, version,
 ):
     flow, req, repo, original = owner_flow(
-        tmp_path, object_id=object_id, tenant=tenant,
+        tmp_path, version=version, object_id=object_id, tenant=tenant,
         bound=active_binding, identity_type=identity_type,
     )
     before = original.read_bytes()
@@ -102,7 +115,8 @@ def test_regular_owner_card_routes_by_exact_object_id_not_email(tmp_path):
         sender_bad._binding_for_identity("person-al")
 
 
-def test_host_rechecks_exact_normal_owner_and_does_not_trust_mutable_email(tmp_path):
+@pytest.mark.parametrize("version", ["4.1", "3.2"])
+def test_host_rechecks_exact_normal_owner_and_does_not_trust_mutable_email(tmp_path, version):
     # The host source is not on the runtime-only CI PYTHONPATH.
     import sys
     from pathlib import Path
@@ -110,7 +124,7 @@ def test_host_rechecks_exact_normal_owner_and_does_not_trust_mutable_email(tmp_p
     if tools_dir not in sys.path:
         sys.path.insert(0, tools_dir)
     from release_mobile_approval_consumer import _authorized_policy_owner_identity
-    policy = read_mobile_release_policy(owner_teams_policy_file(tmp_path))
+    policy = read_mobile_release_policy(owner_teams_policy_file(tmp_path, version))
     regular = binding(REGULAR)
     regular.email_address = "changed-alias@teamaot.com"
     owner = SimpleNamespace(
@@ -140,11 +154,12 @@ def test_host_rechecks_exact_normal_owner_and_does_not_trust_mutable_email(tmp_p
         )
 
 
-def test_runtime_keeps_admin_grants_but_sends_to_regular_owner(tmp_path):
-    policy = owner_teams_policy_file(tmp_path)
+@pytest.mark.parametrize("version", ["4.1", "3.2"])
+def test_runtime_keeps_admin_grants_but_sends_to_regular_owner(tmp_path, version):
+    policy = owner_teams_policy_file(tmp_path, version)
     config = replace(
         _settings(tmp_path),
-        release_mobile_approval_mode="admin_approver_separated",
+        release_mobile_approval_mode="owner_reviewed" if version == "3.2" else "admin_approver_separated",
         release_mobile_approval_policy=policy,
         release_mobile_approval_db=tmp_path / "approval.sqlite3",
         release_mobile_state_root=tmp_path / "releases",
@@ -155,7 +170,7 @@ def test_runtime_keeps_admin_grants_but_sends_to_regular_owner(tmp_path):
         if isinstance(worker, MobileReleaseApprovalMaintenance)
     ]
     assert len(workers) == 1
-    assert workers[0].required_policy_version == "4.1"
+    assert workers[0].required_policy_version == version
     assert workers[0].sender.owner_identity_entra_bindings == {
         "person-al": (TENANT, REGULAR)
     }
@@ -185,3 +200,41 @@ def test_host_and_runtime_validate_same_policy_and_reject_mutation(tmp_path):
         read_mobile_release_policy(path)
     with pytest.raises(ReleaseManagerError):
         _validated_mobile_release_policy(path, source_v2_required=True)
+
+def test_optional_teams_policy_keeps_native_review_and_never_restores_admin_mode(tmp_path):
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[3]
+    for directory in (root, root / "tools"):
+        if str(directory) not in sys.path:
+            sys.path.insert(0, str(directory))
+    from tools.tests.test_admin_separated_deploy_contract import RUNTIME, run_validator
+    from release_manager_host_runner import (
+        _validated_mobile_release_policy, _reviewed_mobile_release_mode,
+        signed_owner_offer_purpose,
+    )
+    p = owner_teams_policy_file(tmp_path, "3.2")
+    policy = read_mobile_release_policy(p)
+    assert policy.teams_owner_binding == (TENANT, REGULAR)
+    assert policy.admin_approver_binding is None
+    assert _validated_mobile_release_policy(p, source_v2_required=True)["mode"] == "owner_reviewed"
+    assert _reviewed_mobile_release_mode(policy) == "owner_reviewed"
+    run = run_validator(RUNTIME, 'SOURCE_RELEASE_APPROVAL_MODE="$(python3', 'PY2', p)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.strip() == "owner_reviewed"
+    record = {"risk_profile": "production_control_core"}
+    assert signed_owner_offer_purpose(record, "a" * 40, policy, "owner_reviewed", ccc_root=tmp_path)
+    record["owner_approval"] = {"approved": True, "candidate_sha": "a" * 40}
+    assert signed_owner_offer_purpose(record, "a" * 40, policy, "owner_reviewed", ccc_root=tmp_path) is None
+    good = json.loads(p.read_text())
+    for field, value in (
+        ("teams_owner_binding", {"microsoft_tenant_id": TENANT, "microsoft_object_id": "wrong"}),
+        ("admin_approver_binding", role_binding(ADMIN)),
+        ("high_impact_review", {"signed_teams_owner_allowed": True}),
+    ):
+        p.write_text(json.dumps({**good, field:value}))
+        with pytest.raises(PermissionError):
+            read_mobile_release_policy(p)
+        with pytest.raises(Exception, match="policy|binding|role identity"):
+            _validated_mobile_release_policy(p, source_v2_required=True)
+        assert run_validator(RUNTIME, 'SOURCE_RELEASE_APPROVAL_MODE="$(python3', 'PY2', p).returncode != 0

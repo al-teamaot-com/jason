@@ -286,7 +286,14 @@ class TeamsGatewayPlaybookApprovalSender:
         adaptive = self._adaptive_card(card)
         configuration = self.workflow_configuration.load() if self.workflow_configuration else None
         if configuration is not None and configuration.enabled:
-            adaptive = configuration.render_approval(card) or adaptive
+            configured = configuration.render_approval(card)
+            if configured is not None:
+                # Presentation cannot alter the canonical decision choices or
+                # conceal the exact review material of a different capability.
+                if (card.capability, card.requested_mode) == ("procurement.submission.execute", "purchase"):
+                    adaptive = {**configured, "actions": adaptive["actions"]}
+                else:
+                    adaptive = {**adaptive, "body": configured["body"] + adaptive["body"]}
         # Every approval type uses one canonical card renderer + gateway.
         # Select recipients from the persisted immutable ApprovalRequest, not
         # from user-supplied Teams data or a separate procurement sender.

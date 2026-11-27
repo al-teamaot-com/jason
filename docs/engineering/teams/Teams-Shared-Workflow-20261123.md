@@ -186,3 +186,30 @@ for review; it must not quietly revert a configured approval to legacy authority
 
 Related existing work: #1440, #1566, #2043, #2165, #1306, #2015, #699, #1979.
 Do not duplicate these projects or close them based on this candidate.
+
+### November 27 shared producer and release-channel reconciliation
+
+The existing configuration is loaded once in runtime composition and reused by
+the existing purchase, playbook, universal-plan and release delivery adapters.
+Nonpurchase presentation must retain the entire canonical review and its exact
+decision choices. Configured purchase presentation retains canonical actions.
+
+A separately reviewed optional successor to the existing Owner-reviewed release
+policy (schema 3.2) permits signed Teams decisions for one exact configured
+licensed Entra Owner, alongside the already supported independently signed
+MCP Owner decision. It retains the normal/protected-core risk limits, native
+health, immutable SHA/manifest/scope, existing freeze transaction and rollback.
+It does not restore mandatory Teams, privileged admin Teams roles or a second
+CCC approval. The current source and live policy remain 3.1. No activation is
+authorized by these source changes. The protected-root policy migration remains
+at its separately reviewed contract; selecting or adopting schema 3.2 requires
+the existing independent material review and native policy adoption gate.
+
+If a signed Teams receipt arrives after the exact MCP approval was recorded,
+the host compares the complete candidate, rollback, manifest and scope binding.
+It retains the later receipt as immutable audit-only evidence and neither
+replaces the first grant nor creates another unfreeze. A later reconstruction
+must never treat audit-only evidence as a release grant. Changed scope or
+manifest fails closed. The existing source and live authority paths remain
+unchanged for current schema 3.1. This is source/fixture evidence, not a real
+Owner decision, live delivery, production release, or root policy adoption.

@@ -366,3 +366,40 @@ def test_interruption_after_replacement_persisted_reuses_same_nonce(tmp_path,mon
     assert store.get('s1')['approval_id']==replacement.approval_id
     assert svc.repository.get(replacement.approval_id).metadata['card_instance_challenge']==replacement.metadata['card_instance_challenge']
     assert len(svc.repository.list_all())==2 and len(sender.cards)==1
+
+
+def test_shared_sender_preserves_canonical_actions_and_review_for_other_capability(tmp_path, monkeypatch):
+    from connectors.microsoft_graph.teams_approval_channel import render_approval_card
+    from connectors.src.jason_connectors.approval_requests import ApprovalPresentation
+    from jason_runtime.playbook_autonomy_review import TeamsGatewayPlaybookApprovalSender
+    from jason_runtime.teams_communication_service import TeamsDeliveryReceipt
+    from jason_runtime.universal_plan_issuance import ExistingTeamsApprovalDelivery
+    _, svc, _, _, source = configured_maintenance(tmp_path)
+    original = svc.repository.get('procapproval-original')
+    req = replace(original, approval_id='planapproval-configured-device',
+                  capability='existing.device.action', requested_mode='review',
+                  presentation=ApprovalPresentation('Canonical objective', 'Exact reviewed scope',
+                      facts=(('Device', 'Test-01'), ('Scope fingerprint', 'immutable-scope'))))
+    raw = json.loads(json.dumps(source.load().raw))
+    raw['templates'].append(dict(capability=req.capability, mode=req.requested_mode,
+        title='Device change approval', explanation='Review the device.',
+        primary=[dict(source='Device', label='Computer', required=True)], details=[]))
+    source.path.write_text(json.dumps(raw))
+    binding = SimpleNamespace(jason_identity_id=req.authorized_approver_ids[0], status='active',
+                              microsoft_tenant_id='test-tenant')
+    bindings = SimpleNamespace(find_active_by_jason_identity=lambda **kw: binding)
+    calls = []
+    class Transport:
+        def send(self, **kwargs):
+            calls.append(kwargs)
+            return TeamsDeliveryReceipt('real-fixture-id', None, binding.jason_identity_id)
+    monkeypatch.setattr(TeamsGatewayPlaybookApprovalSender, '_existing_transport', lambda self: Transport())
+    canonical = TeamsGatewayPlaybookApprovalSender._adaptive_card(render_approval_card(req))
+    delivery = ExistingTeamsApprovalDelivery('https://unused.example.test', tmp_path/'unused',
+        bindings, workflow_configuration=source)
+    receipt = delivery.deliver(req)
+    assert calls[0]['card']['actions'] == canonical['actions']
+    assert calls[0]['card']['body'][-len(canonical['body']):] == canonical['body']
+    assert 'immutable-scope' in json.dumps(calls[0]['card'])
+    assert 'Device change approval' in json.dumps(calls[0]['card'])
+    assert receipt is not None
