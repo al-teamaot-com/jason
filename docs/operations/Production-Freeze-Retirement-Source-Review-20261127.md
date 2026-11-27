@@ -86,3 +86,7 @@ denial, legacy recovery conflict, and source/install/mount consistency.
 
 No production deployment, freeze retirement, or exact migration approval
 has been completed. Existing freeze and incident hold remain intact.
+
+## Concurrent source integration
+
+Integration coordination: #2766. Preserve both independent security-regression workflow steps. The isolated MCP image built from the exact live LKG plus the two issuer/proof source files passed unprivileged normal-proof issuance and cross-mode denial with a synthetic root-owned public policy in a disposable network-disabled container. No live signer, provider credentials, or production state were mounted. This evidence does not authorize a native install.
