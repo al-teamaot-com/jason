@@ -157,11 +157,20 @@ def test_fixed_deployment_argument_scope_has_no_provider_or_environment_changes(
 
 
 @pytest.fixture
-def transaction_fixture(tmp_path, monkeypatch):
+def transaction_fixture(tmp_path, monkeypatch, request):
     """Run existing orchestration against virtual files and a fake container engine."""
     from contextlib import contextmanager
     from pathlib import Path
     from tools import pmv4_e_engineering_manager_install as manager
+    import os
+    import stat
+    real_files = bool(getattr(request, "param", False))
+    if real_files:
+        if os.geteuid() != 0 or os.environ.get("JASON_DISPOSABLE_NATIVE_FIXTURE") != "1":
+            pytest.skip("requires an explicitly isolated root filesystem fixture")
+        assert tmp_path.resolve().is_relative_to(Path("/tmp"))
+        from tools import pmv4_e_dispatch_install as dispatch
+        from tools import parallel_development_install as parallel
 
     root = tmp_path / "sandbox"
     root.mkdir()
@@ -202,6 +211,16 @@ def transaction_fixture(tmp_path, monkeypatch):
     files = {r.FREEZE: original_freeze, r.BACKUP: original_freeze,
              r.HOLD: hold, guard: image(b"fixture guard",0,0o444)}
     initial_files = dict(files)
+    if real_files:
+        for path, (raw, uid, gid, mode) in initial_files.items():
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fchown(stream.fileno(), uid, gid)
+                os.fchmod(stream.fileno(), mode)
+                os.fsync(stream.fileno())
+            dispatch.sync_dir(path.parent)
 
     rows = {}
     for i, name in enumerate(r.PEERS):
@@ -226,8 +245,12 @@ def transaction_fixture(tmp_path, monkeypatch):
     acceptance = {"scope_sha256": "1"*64,
                   "status":"scheduled_engineering_acceptance_verified",
                   "evidence":{"two_distinct_scheduled_cycles_verified":True}}
-    (journal/"approval.json").write_bytes(r.canonical(approval))
-    (journal/"scheduled-acceptance.json").write_bytes(r.canonical(acceptance))
+    if real_files:
+        dispatch.write(journal/"approval.json",r.canonical(approval),0o400)
+        dispatch.write(journal/"scheduled-acceptance.json",r.canonical(acceptance),0o400)
+    else:
+        (journal/"approval.json").write_bytes(r.canonical(approval))
+        (journal/"scheduled-acceptance.json").write_bytes(r.canonical(acceptance))
     events = []
     fixture = SimpleNamespace(fail=None, lock=False, files=files, rows=rows,
         initial_files=initial_files, original_rows=original_rows, journal=journal,
@@ -250,25 +273,40 @@ def transaction_fixture(tmp_path, monkeypatch):
 
     def read(path, *args):
         assert path.is_relative_to(root)
+        if real_files and path in files:
+            st=path.lstat()
+            assert (st.st_uid,st.st_gid,stat.S_IMODE(st.st_mode)) == files[path][1:]
+            assert path.read_bytes()==files[path][0]
         return files[path][0] if path in files else path.read_bytes()
 
     def write(path, raw, mode):
         assert path.parent == journal and not path.exists()
-        path.write_bytes(raw)
+        if real_files:
+            dispatch.write(path,raw,mode)
+        else:
+            path.write_bytes(raw)
         event("record:"+path.name)
 
     def replace(path, before, after, unused=None):
         assert fixture.lock and path.is_relative_to(root)
         assert files.get(path) == before
+        if real_files:
+            manager.replace_exact(path,before,after,parallel.rename_noreplace)
         if after is None:
             files.pop(path, None)
         else:
             files[path] = after
         event("file:"+path.name)
+        if path==r.CONFIG and after is not None and json.loads(after[0])["production_freeze"] is False:
+            event("configuration_commit")
 
     def pause():
         assert fixture.lock
-        files[pause_path] = image(b"fixture pause",1000,0o600)
+        value=image(b"fixture pause",1000,0o600)
+        if real_files:
+            replace(pause_path,files.get(pause_path),value)
+        else:
+            files[pause_path] = value
         event("pause")
 
     def command(args, timeout):
@@ -350,10 +388,16 @@ def transaction_fixture(tmp_path, monkeypatch):
         quiesce=lambda names:event("quiesce"), command=command,
         systemctl=lambda args:event("reload"),
         native_revalidation=native_revalidation,
-        change=lambda p,b,a:replace(p,b,a))
-    ops = {"snapshot":files.get,"image":image,"replace_exact":replace,
+        change=lambda p,b,a:replace(p,b,a) if b!=a else None)
+    def snapshot(path):
+        value=files.get(path)
+        if real_files:
+            assert manager.snapshot(path)==value,str(path)
+        return value
+    ops = {"snapshot":snapshot,"image":image,"replace_exact":replace,
            "encode":manager.encode,"decode":manager.decode,
-           "cleanup_staged":lambda *args:None,"PAUSE":pause_path,"SERVICES":("fixture",)}
+           "cleanup_staged":manager.cleanup_staged if real_files else lambda *args:None,
+           "PAUSE":pause_path,"SERVICES":("fixture",)}
     fixture.adapter,fixture.ops = adapter,ops
     return fixture
 
@@ -397,3 +441,67 @@ def test_isolated_recovery_of_interruption_before_native_cutover(transaction_fix
     assert r.activate(f.adapter,f.ops,recover=True)["status"] == "original_freeze_and_mcp_restored"
     assert f.files == f.initial_files
     assert f.rows == f.original_rows
+
+
+@pytest.mark.parametrize("transaction_fixture", [True], indirect=True)
+@pytest.mark.parametrize("fault", [None, "deploy", "native_revalidation", "record:retirement-ready.json", "configuration_commit"])
+def test_disposable_native_filesystem_transaction(transaction_fixture, fault):
+    """Real before/after image publication and custody; Docker and systemd remain mocked."""
+    import stat
+    from tools import pmv4_e_engineering_manager_install as manager
+    f=transaction_fixture
+    f.fail=fault
+    if fault is None:
+        assert r.activate(f.adapter,f.ops)["status"]=="global_production_freeze_retired"
+    else:
+        with pytest.raises(RuntimeError,match="injected "+fault):
+            r.activate(f.adapter,f.ops)
+        if fault=="configuration_commit":
+            # A crash after the durable commit must not restore the old freeze.
+            assert not (f.journal/"retirement-complete.json").exists()
+            recovered=r.activate(f.adapter,f.ops,recover=True)
+            assert recovered["status"]=="retirement_commit_recovered"
+            assert recovered["live_verification_required"] is True
+            assert recovered["receipt"]["status"]=="global_production_freeze_retired"
+        else:
+            assert f.files==f.initial_files
+            assert f.rows==f.original_rows
+            assert (f.journal/"retirement-rollback.json").is_file()
+    if fault in (None,"configuration_commit"):
+        assert json.loads(r.CONFIG.read_bytes())["production_freeze"] is False
+        assert not r.FREEZE.exists() and not r.BACKUP.exists()
+        assert (f.journal/"retirement-complete.json").is_file()
+    else:
+        assert manager.snapshot(r.FREEZE)==f.initial_files[r.FREEZE]
+        assert manager.snapshot(r.BACKUP)==f.initial_files[r.BACKUP]
+        assert not r.CONFIG.exists()
+    assert r.HOLD.read_bytes()==f.initial_files[r.HOLD][0]
+    for path in f.journal.glob("*.json"):
+        st=path.lstat()
+        assert st.st_uid==st.st_gid==0 and stat.S_IMODE(st.st_mode)==0o400
+
+
+def test_concurrent_recovery_is_denied_while_activation_owns_intent(transaction_fixture):
+    f=transaction_fixture
+    original=f.adapter.native_revalidation
+    checked=[]
+    def readback():
+        with pytest.raises(PermissionError,match="TRANSACTION_ALREADY_ACTIVE"):
+            r.activate(f.adapter,f.ops,recover=True)
+        checked.append(True)
+        original()
+    f.adapter.native_revalidation=readback
+    assert r.activate(f.adapter,f.ops)["status"]=="global_production_freeze_retired"
+    assert checked==[True]
+    assert not (f.journal/"retirement-rollback.json").exists()
+
+
+def test_repeated_activation_returns_historical_receipt_without_native_operations(transaction_fixture):
+    f=transaction_fixture
+    assert r.activate(f.adapter,f.ops)["status"]=="global_production_freeze_retired"
+    before=list(f.events)
+    result=r.activate(f.adapter,f.ops)
+    assert result["status"]=="retirement_previously_committed"
+    assert result["live_verification_required"] is True
+    assert result["receipt"]["status"]=="global_production_freeze_retired"
+    assert f.events==before

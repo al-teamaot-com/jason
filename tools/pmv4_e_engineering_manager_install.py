@@ -2402,7 +2402,7 @@ def main():
         else:
             predecessor,files,supporting=PIPELINE_BASELINE,PIPELINE_SCOPE_FILES,frozenset()
         code = source_review(a.candidate,p,recovery=a.recover or a.verify_activation or a.restore_failed_activation
-                             or a.activate_retirement or a.recover_retirement,
+                             or a.recover_retirement,
                              baseline=predecessor,source_files=files,supporting_files=supporting)
         adapter = PipelineSuccessor(a.candidate,n,p,code,predecessor=predecessor)
         adapter.retirement_requested=a.retire_production_freeze

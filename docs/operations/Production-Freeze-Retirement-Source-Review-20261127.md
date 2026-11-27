@@ -143,3 +143,34 @@ recovery, exact installed path/custody and systemd behavior, live component
 readback, and the approved rollback path. Do not merge or deploy the draft
 on the strength of fixture results. No production control or service was
 changed, and no new release authorization has been recorded.
+
+## Serialized interruption recovery and native file rehearsal
+
+Activation and explicit interruption recovery now take a nonblocking lease
+on the existing root-owned immutable intent record while holding the shared
+production locks. The lease remains held across quiescence and native health
+revalidation, including their lock-release windows. No new lock file, root
+service, authorization channel, or standing privilege is introduced.
+Normal activation must pass the existing current protected-main source/CI
+review; historical source review is reserved for explicit recovery and
+historical acceptance. Previously committed and recovered commit receipts
+are labeled historical and require independent live verification.
+
+The one-time native migration uses the established native manager installer
+recovery pattern: failed acceptance rolls back automatically; a killed or
+interrupted installer can recover the exact approved journal via its bounded
+recovery entrypoint, without another business authorization. This is not a
+claim that the initial installer is an independently scheduled recovery
+daemon. Ordinary coordinated component transactions use their existing
+native scheduled recovery path after installation.
+
+Validation: 812 affected regression tests plus five subtests passed;
+five isolated-root cases skipped in the ordinary run passed in the
+disposable image. All 30 migration tests passed inside the network-disabled,
+read-only container using real root-owned before/after files, atomic rename,
+fsync and journal custody. Docker and systemd ports were simulated in those
+transaction tests; the actual MCP image, current live component identities,
+read-only mount contract, rollback capacity, and 33-target live diagnostic
+scope were independently checked. Production has not changed. Native
+protected-main preflight, authenticated exact-scope authorization and real
+production acceptance remain mandatory.

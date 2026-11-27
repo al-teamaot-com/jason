@@ -9,9 +9,11 @@ production locks, exact before images, and existing Docker/native health ports.
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import fcntl
 import os
 from pathlib import Path
 import stat
@@ -268,8 +270,34 @@ def verify_mcp(adapter, scope):
                "image_id":rows[n]["Image"],"container_id":rows[n]["Id"]} for n in COMPONENTS}
 
 
+def claim_existing_intent(adapter, path, lease):
+    """Serialize this exact journal without introducing a new lock file or authority."""
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    lease.callback(os.close,fd)
+    meta=os.fstat(fd)
+    need(stat.S_ISREG(meta.st_mode) and meta.st_nlink==1
+         and 0<meta.st_size<=8_000_000,"INTENT_FILE_CUSTODY")
+    try:
+        fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        raise PermissionError("FREEZE_RETIREMENT_TRANSACTION_ALREADY_ACTIVE") from exc
+    trusted=adapter.n["read"](path,0,0o400,8_000_000)
+    with os.fdopen(os.dup(fd),"rb") as stream:
+        raw=stream.read(8_000_001)
+    live=path.lstat()
+    need((meta.st_dev,meta.st_ino,meta.st_size,meta.st_mtime_ns)==
+         (live.st_dev,live.st_ino,live.st_size,live.st_mtime_ns)
+         and raw==trusted and len(raw)==meta.st_size,"INTENT_FILE_CHANGED")
+    return json.loads(raw)
+
+
 def activate(adapter, ops, *, recover=False):
     """Consume the already authenticated parent approval, not a second decision."""
+    with ExitStack() as lease:
+        return _activate(adapter,ops,lease,recover=recover)
+
+
+def _activate(adapter,ops,lease,*,recover=False):
     sha=adapter.load_record()
     scope=adapter.plan.get("normal_retirement")
     need(isinstance(scope,dict),"PARENT_APPROVAL_REQUIRED")
@@ -293,26 +321,35 @@ def activate(adapter, ops, *, recover=False):
     emit=lambda p,v: adapter.n["write"](p,canonical(v),0o400)
     frozen=image(canonical({"schema_version":"1.0","production_freeze":True}),0,0o644)
     unfrozen=image(canonical(scope["configuration_after"]),0,0o644)
-    if os.path.lexists(done_path):
-        return json.loads(adapter.n["read"](done_path,0,0o400))
-    need(not os.path.lexists(rolled_path),"ATTEMPT_ALREADY_ROLLED_BACK")
-    if recover:
-        intent=json.loads(adapter.n["read"](intent_path,0,0o400,8_000_000))
-        need(intent["parent_sha256"]==parent_sha,"RECOVERY_SCOPE")
-        before=ops["decode"](intent["before"],set(static_files(adapter,ops))|set(DYNAMIC)|{FREEZE,BACKUP})
-        after=ops["decode"](intent["after"],set(before))
-        if os.path.lexists(readback_path):
-            after[READBACK]=image(adapter.n["read"](readback_path,0,0o400),0,0o644)
-        if snap(CONFIG)==unfrozen and os.path.lexists(ready_path):
-            # The configuration flip is the commit point. Never reverse a
-            # successfully committed mode after a later authorized release.
-            ready=json.loads(adapter.n["read"](ready_path,0,0o400))
-            need(ready["parent_sha256"]==parent_sha,"COMMIT_SCOPE")
-            emit(done_path,ready)
-            return ready
-    else:
-        need(not os.path.lexists(intent_path),"RECOVERY_REQUIRED")
-        with adapter.n["locks"]():
+    with adapter.n["locks"]():
+        if os.path.lexists(done_path):
+            completed=json.loads(adapter.n["read"](done_path,0,0o400))
+            need(completed.get("parent_sha256")==parent_sha
+                 and completed.get("source_sha")==adapter.candidate,
+                 "HISTORICAL_COMPLETION_SCOPE")
+            return {"status":"retirement_previously_committed","receipt":completed,
+                    "live_verification_required":True}
+        need(not os.path.lexists(rolled_path),"ATTEMPT_ALREADY_ROLLED_BACK")
+        if recover:
+            intent=claim_existing_intent(adapter,intent_path,lease)
+            need(intent["parent_sha256"]==parent_sha,"RECOVERY_SCOPE")
+            before=ops["decode"](intent["before"],set(static_files(adapter,ops))|set(DYNAMIC)|{FREEZE,BACKUP})
+            after=ops["decode"](intent["after"],set(before))
+            if os.path.lexists(readback_path):
+                after[READBACK]=image(adapter.n["read"](readback_path,0,0o400),0,0o644)
+            if snap(CONFIG)==unfrozen and os.path.lexists(ready_path):
+                # This is historical commit recovery, not new live acceptance.
+                # Never reverse a committed transaction after a later release.
+                ready=json.loads(adapter.n["read"](ready_path,0,0o400))
+                need(ready.get("parent_sha256")==parent_sha
+                     and ready.get("source_sha")==adapter.candidate
+                     and ready.get("status")=="global_production_freeze_retired",
+                     "COMMIT_SCOPE")
+                emit(done_path,ready)
+                return {"status":"retirement_commit_recovered","receipt":ready,
+                        "live_verification_required":True}
+        else:
+            need(not os.path.lexists(intent_path),"RECOVERY_REQUIRED")
             adapter.verify_successor_topology_and_source(resumed=True)
             need(prepare(adapter,adapter.plan,ops)==scope,"APPROVED_RETIREMENT_SCOPE_CHANGED")
             before={p:snap(p) for p in (*static_files(adapter,ops),*DYNAMIC,FREEZE,BACKUP)}
@@ -324,6 +361,8 @@ def activate(adapter, ops, *, recover=False):
                    READBACK:None,MIGRATION:None,POLICY:None}
             # All original freeze bytes remain in this root-private evidence.
             emit(intent_path,{"parent_sha256":parent_sha,"before":ops["encode"](before),"after":ops["encode"](after)})
+            claimed=claim_existing_intent(adapter,intent_path,lease)
+            need(claimed["parent_sha256"]==parent_sha,"INTENT_SCOPE")
             adapter.pause()
     try:
         if recover:
