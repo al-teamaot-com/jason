@@ -283,8 +283,8 @@ def _sha256(path: Path) -> str | None:
 
 
 def coordinated_component_state():
-    record = Path("/etc/jason-owner-release/coordinated-component-readback.json")
-    if not os.path.lexists(record):
+    record = Path("/etc/jason-owner-release/coordinated-readback/component.json")
+    if not os.path.lexists(record) and not os.path.lexists("/etc/jason-owner-release/coordinated-component-readback.json"):
         return None
     helper = Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py")
     for path in (helper, *helper.parents):

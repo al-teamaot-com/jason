@@ -109,3 +109,16 @@ from this source evidence.
 ## Existing Owner approval route
 
 Normal-mode native stage now publishes a root-owned, read-only exact eligibility projection. The existing authenticated MCP approve_release_candidate path selects this typed route only for a matching release identity and independently read retirement-policy digest. It refuses ambiguous ordinary/coordinated records, untrusted or changed eligibility, legacy mode, mismatched identity, and repeat proof issuance. The native controller independently verifies the private offer and signature and consumes the one-use decision. No new capability, authority grant or provider-write right was introduced. The root installer, effective scheduler and reader migration remain required before this source path may operate live.
+
+## Existing native scheduler integration
+
+The existing v1 scoped request service and crash-recovery timer retain their
+original ExecStart and pinned source files. Reviewed drop-ins add only the
+fixed coordinated successor commands, an exact signed-approval directory
+watch, a narrowly writable dedicated component-readback directory and bounded
+unit timeouts. No private Owner-policy directory becomes writable. The
+scheduled promotion path does not select a release: it acts only on the
+already root-admitted exact normal offer and its explicit signed proof.
+An existing attempt cannot be re-promoted; interrupted attempts go only to
+the existing rollback path. An absent successor policy does not activate
+anything. This source is not a native installation or retirement decision.

@@ -234,3 +234,59 @@ def test_normal_native_stage_projects_only_root_private_exact_offer(monkeypatch,
     assert result['release_policy_sha256']==m['release_policy_sha256']
     assert 'freeze_sha256' not in result
     assert result['owner_approval_recorded'] is False and result['production_mutations'] is False
+
+
+def test_existing_scheduler_never_selects_or_retries_a_release(monkeypatch, tmp_path):
+    from tools.tests.test_scoped_backport_coordinated import normal_manifest, normal_profile
+    m=normal_manifest(); p=normal_profile(m)
+    journal=tmp_path/"journal.json"
+    proof_dir=tmp_path/"owner-approvals"; proof_dir.mkdir()
+    proof=proof_dir/(m["release_id"]+".json")
+    class Host:
+        def _journal_path(self, m): return journal
+    events=[]
+    monkeypatch.setattr(entry,"AUTH",tmp_path)
+    monkeypatch.setattr(entry,"promote",lambda host,m,p: events.append(m["release_id"]) or {"status":"exact_native_call"})
+    host=Host()
+    assert entry.scheduled_approved(host,m,p)["status"]=="exact_owner_decision_not_present"
+    assert events==[]
+    proof.touch()
+    assert entry.scheduled_approved(host,m,p)["status"]=="exact_native_call"
+    assert events==[m["release_id"]]
+    journal.write_text("{}")
+    monkeypatch.setattr(entry,"root_json",lambda path:{"manifest_sha256":digest(m),"scope_sha256":m["scope_sha256"],"outcome":"recovery_required"})
+    assert entry.scheduled_approved(host,m,p)["status"]=="interrupted_attempt_recovery_only"
+    monkeypatch.setattr(entry,"root_json",lambda path:{"manifest_sha256":digest(m),"scope_sha256":m["scope_sha256"],"outcome":"production_components_verified"})
+    assert entry.scheduled_approved(host,m,p)["status"]=="resolved_prior_attempt_no_action"
+    monkeypatch.setattr(entry,"root_json",lambda path:{"manifest_sha256":"bad","scope_sha256":m["scope_sha256"]})
+    with pytest.raises(ScopedBackportDenied,match="SCHEDULED_JOURNAL_SCOPE"):
+        entry.scheduled_approved(host,m,p)
+    assert entry.scheduled_approved(host,manifest(),profile(manifest()))["status"]=="legacy_offer_not_scheduled"
+    assert events==[m["release_id"]]
+
+
+def test_effective_scheduler_binds_existing_units_and_narrow_write_scope(monkeypatch):
+    import types
+    entry_path=str(native.FILES["dispatch"])
+    def show(*args, **kwargs):
+        unit=args[2]
+        if unit.endswith("requests.service"):
+            field="normal_request_dispatch"; worker="scoped_backport_native_root.py"; action="promote-approved"; limit="1h"
+        elif unit.endswith("recovery.service"):
+            field="normal_recovery_dispatch"; worker="scoped_backport_native_recovery.py"; action="recover-scheduled"; limit="30min"
+        else:
+            return types.SimpleNamespace(stdout=("DropInPaths="+str(native.FILES["normal_approval_watch"])+"\nPaths=/var/lib/jason/authority/scoped-backport-release/requests (PathChanged) /var/lib/jason/authority/scoped-backport-release/owner-approvals (PathChanged)\n").encode())
+        raw=(f"DropInPaths={native.FILES[field]}\nExecStart=/usr/local/lib/jason/scoped-backport/tools/{worker}\n"
+             f"ExecStartPost=/usr/bin/python3 -I -B {entry_path} {action}\n"
+             f"ReadWritePaths=/var/lib/jason-scoped-backport {native.READBACK.parent}\nTimeoutStartUSec={limit}\n")
+        return types.SimpleNamespace(stdout=raw.encode())
+    monkeypatch.setattr(native,"run",show)
+    monkeypatch.setattr(native,"trusted_directory",lambda _:None)
+    native.verify_effective_schedule()
+    def widened(*args, **kwargs):
+        result=show(*args,**kwargs)
+        result.stdout=result.stdout.replace(b"ReadWritePaths=",b"ReadWritePaths=/etc/jason-owner-release ")
+        return result
+    monkeypatch.setattr(native,"run",widened)
+    with pytest.raises(ScopedBackportDenied,match="EFFECTIVE_SCHEDULE_DRIFT"):
+        native.verify_effective_schedule()

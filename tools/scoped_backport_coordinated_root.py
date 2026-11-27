@@ -23,7 +23,7 @@ if os.geteuid() == 0 and Path(__file__).resolve() == ENTRY:
     sys.path.insert(0, str(INSTALL))
 
 from tools import scoped_backport_coordinated as co
-from tools.scoped_backport_coordinated_host import CoordinatedHost, MANIFEST, PROFILE, PRIVATE, trusted_directory
+from tools.scoped_backport_coordinated_host import CoordinatedHost, MANIFEST, PROFILE, PRIVATE, trusted_directory, POLICY, RESOLVED
 from tools.scoped_backport_native_host import exact_file, root_json, atomic_root_json, utcnow
 from tools.scoped_backport_release import digest, deny
 
@@ -121,10 +121,57 @@ def promote(host, m, profile):
     return co.governed_promote(m, profile, proof["signed_owner_proof"], host=host)
 
 
+def scheduled_approved(host, m, profile):
+    """Execute only the exact root-admitted offer with its existing explicit
+    signed Owner decision. Never select a candidate, issue approval, or retry
+    an interrupted mutation. The same native promotion function revalidates
+    source, proof, consumption, lock, breaker, drift and rollback.
+    """
+    if m["schema_version"] != "3.0":
+        return {"status": "legacy_offer_not_scheduled"}
+    journal = host._journal_path(m)
+    if os.path.lexists(journal):
+        prior = root_json(journal)
+        if (prior.get("manifest_sha256") != digest(m)
+                or prior.get("scope_sha256") != m["scope_sha256"]):
+            deny("COORDINATED_SCHEDULED_JOURNAL_SCOPE")
+        if prior.get("outcome") in RESOLVED:
+            return {"status": "resolved_prior_attempt_no_action"}
+        return {"status": "interrupted_attempt_recovery_only"}
+    proof = AUTH / "owner-approvals" / (m["release_id"] + ".json")
+    if not os.path.lexists(proof):
+        return {"status": "exact_owner_decision_not_present"}
+    return promote(host, m, profile)
+
+
+def run_scheduled(action):
+    # A missing successor policy is not an implicit authorization and must
+    # not interfere with the unchanged legacy v1 unit. Any present but
+    # invalid successor policy is a hard denial through load_installed().
+    if action not in ("promote-approved", "recover-scheduled"):
+        deny("COORDINATED_SCHEDULED_ACTION")
+    if os.geteuid() != 0 or not sys.flags.isolated or Path(__file__).resolve() != ENTRY:
+        deny("COORDINATED_INSTALLED_ROOT_ENTRY_REQUIRED")
+    try:
+        POLICY.lstat()
+    except FileNotFoundError:
+        return {"status": "coordinated_successor_not_installed"}
+    host,m,profile=load_installed()
+    if action == "promote-approved":
+        return scheduled_approved(host,m,profile)
+    if not os.path.lexists(host._journal_path(m)):
+        return {"status":"no_coordinated_journal"}
+    return host.recover(m)
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("action", choices=("stage", "promote", "recover"))
+    p.add_argument("action", choices=("stage", "promote", "recover",
+                                      "promote-approved", "recover-scheduled"))
     args = p.parse_args()
+    if args.action in ("promote-approved", "recover-scheduled"):
+        print(json.dumps(run_scheduled(args.action), sort_keys=True))
+        return 0
     host, m, profile = load_installed()
     if args.action == "stage":
         result = stage(host,m)

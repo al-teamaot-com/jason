@@ -16,7 +16,8 @@ import stat
 import subprocess
 from typing import Any, Mapping
 
-READBACK = Path("/etc/jason-owner-release/coordinated-component-readback.json")
+READBACK = Path("/etc/jason-owner-release/coordinated-readback/component.json")
+UNINSTALLED_DRAFT_READBACK = Path("/etc/jason-owner-release/coordinated-component-readback.json")
 FREEZE = Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
 NORMAL_POLICY = Path("/etc/jason-owner-release/normal-release-policy/production-freeze-retirement.json")
 HOST_CURRENT = Path("/opt/jason/current")
@@ -93,6 +94,7 @@ def _root_read(path: Path) -> bytes:
 def read() -> dict[str, Any] | None:
     # A missing file means legacy operation, not permission to accept mixed
     # live revisions. Any present malformed/untrusted file is a denial.
+    need(not os.path.lexists(UNINSTALLED_DRAFT_READBACK), "UNSUPPORTED_DRAFT_READBACK_PATH")
     if not os.path.lexists(READBACK):
         return None
     try:

@@ -71,6 +71,9 @@ FILES = {
     "request_service": Path("/etc/systemd/system/jason-scoped-backport-requests.service"),
     "request_path": Path("/etc/systemd/system/jason-scoped-backport-requests.path"),
     "desired_state": DESIRED,
+    "normal_request_dispatch": Path("/etc/systemd/system/jason-scoped-backport-requests.service.d/95-coordinated-normal-release.conf"),
+    "normal_approval_watch": Path("/etc/systemd/system/jason-scoped-backport-requests.path.d/95-coordinated-normal-release.conf"),
+    "normal_recovery_dispatch": Path("/etc/systemd/system/jason-scoped-backport-recovery.service.d/95-coordinated-normal-release.conf"),
 }
 POLICY_FIELDS = {
     "schema_version", "manifest_sha256", "profile_sha256", "source_sha",
@@ -99,6 +102,41 @@ def trusted_bytes(path: Path, *, max_size: int = 1_000_000) -> bytes:
     return exact_file(path, uid=0, max_size=max_size)
 
 
+def verify_effective_schedule() -> None:
+    """The existing units must execute the reviewed fixed successor, not
+    merely have installed source files. Preserve the original v1 ExecStart.
+    """
+    entry = str(FILES["dispatch"])
+    for unit, field, path, action, timeout_value in (
+        ("jason-scoped-backport-requests.service", "normal_request_dispatch",
+         "/usr/local/lib/jason/scoped-backport/tools/scoped_backport_native_root.py", "promote-approved", "1h"),
+        ("jason-scoped-backport-recovery.service", "normal_recovery_dispatch",
+         "/usr/local/lib/jason/scoped-backport/tools/scoped_backport_native_recovery.py", "recover-scheduled", "30min"),
+    ):
+        values = {}
+        raw = run("systemctl", "show", unit, "-p", "DropInPaths", "-p", "ExecStart",
+                  "-p", "ExecStartPost", "-p", "ReadWritePaths", "-p", "TimeoutStartUSec", timeout=12).stdout.decode()
+        for line in raw.splitlines():
+            if "=" in line:
+                k,v=line.split("=",1); values[k]=v
+        if (values.get("DropInPaths","").split() != [str(FILES[field])]
+                or path not in values.get("ExecStart","")
+                or f"/usr/bin/python3 -I -B {entry} {action}" not in values.get("ExecStartPost","")
+                or values.get("TimeoutStartUSec") != timeout_value
+                or str(READBACK.parent) not in values.get("ReadWritePaths","").split()
+                or "/etc/jason-owner-release" in values.get("ReadWritePaths","").split()
+                or "/etc/jason-owner-release/normal-release-policy" in values.get("ReadWritePaths","").split()):
+            deny("COORDINATED_EFFECTIVE_SCHEDULE_DRIFT")
+    raw=run("systemctl","show","jason-scoped-backport-requests.path",
+            "-p","DropInPaths","-p","Paths",timeout=12).stdout.decode()
+    values=dict(line.split("=",1) for line in raw.splitlines() if "=" in line)
+    if (values.get("DropInPaths","").split()!=[str(FILES["normal_approval_watch"])]
+            or "/var/lib/jason/authority/scoped-backport-release/requests" not in values.get("Paths","")
+            or "/var/lib/jason/authority/scoped-backport-release/owner-approvals" not in values.get("Paths","")):
+        deny("COORDINATED_EFFECTIVE_APPROVAL_WATCH_DRIFT")
+    trusted_directory(READBACK.parent)
+
+
 def verify_installed_policy(profile: Mapping) -> dict:
     if os.geteuid() != 0 or Path(__file__).resolve(strict=True) != INSTALLED:
         deny("COORDINATED_IMMUTABLE_ROOT_INSTALL_REQUIRED")
@@ -115,6 +153,7 @@ def verify_installed_policy(profile: Mapping) -> dict:
     for name, path in FILES.items():
         if sha256(trusted_bytes(path)).hexdigest() != p["file_sha256"][name]:
             deny("COORDINATED_INSTALLED_SOURCE_DRIFT")
+    verify_effective_schedule()
     raw = trusted_bytes(MIGRATION)
     if sha256(raw).hexdigest() != p["native_reader_migration_receipt_sha256"]:
         deny("COORDINATED_READER_MIGRATION_DRIFT")
