@@ -26,8 +26,10 @@ the manifest digest. Source-only admission is not production admission.
   legacy and PMv4 transaction locks, protected root breaker/drift evidence,
   and existing native container replacement helper.
 - Retain exact original container IDs, image digests and source revisions.
-  Preserve the existing global freeze bytes throughout an independently
-  authorized scoped transaction. Reverse rollback on failure; no automatic
+  Preserve the exact active freeze in legacy schema 2 transactions. Schema 3
+  instead binds the independently installed permanent-retirement policy and
+  verifies that no active freeze marker exists. Never cross-accept proofs or
+  allow a scoped transaction to retire or recreate the global marker. Reverse rollback on failure; no automatic
   re-promotion and no automatic breaker closure.
 - Separate root-owned component readback from the original host LKG. Require
   actual image, revision and container identity; reject unknown mixed states.
@@ -78,7 +80,7 @@ plane cannot run this extension. An independently authorized migration must:
    integration in isolated infrastructure. Obtain a separate exact signed
    Owner production decision before promotion.
 7. After any permitted promotion, verify the entire component/readback chain,
-   production peers, rollback retention, unchanged freeze and actual Teams
+   production peers, rollback retention, unchanged release-mode policy and actual Teams
    behavior. Policy activation requires its own approved scope.
 
 No production installation, stage eligibility, or Owner approval is claimed
@@ -86,3 +88,20 @@ by this document. The installation transaction and issuer/scheduler migration
 are separate remaining engineering work and must be reviewed before root
 execution. The draft source extension is not itself approval to merge or
 activate privileged code.
+
+## Retirement-policy reconciliation
+
+The reviewed integration with PR #2767 retains legacy schema 2 and adds
+schema 3 exact normal-policy binding for the manifest, profile, stage
+record, signed decision, native host gate and component readback. The
+versioned successor denies an old proof, wrong policy, replay, a missing
+retirement record or an unexpectedly present freeze. Existing tests
+continue to exercise the historical signature and reverse-order rollback.
+
+Verification: 159 scoped controller/host/readback/legacy tests and 89
+shared native guard, self-heal, transition and drift tests passed in the
+isolated engineering checkout. No production mode or state changed.
+The exact private manifest remains legacy-mode until a root-authenticated
+retirement transaction and native migration have been accepted. Do not
+install the draft controller or mint a normal-mode eligibility receipt
+from this source evidence.

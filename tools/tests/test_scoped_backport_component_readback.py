@@ -70,3 +70,14 @@ def test_native_host_revalidation_does_not_claim_common_revision():
         changed=deepcopy(current);changed[field]="foreign"
         with pytest.raises(r.ComponentReadbackDenied,match="HOST_FINGERPRINT_DRIFT"):
             r.verify_host_fingerprint(legacy,changed,s)
+
+
+def test_normal_readback_cannot_accept_freeze_binding_or_policy_drift():
+    s=state(); s["schema_version"]="3.0"
+    s["release_policy_sha256"]=s.pop("freeze_sha256")
+    actual=r.observed(inspect_rows(s))
+    assert r.verify(s,actual,host_revision=s["host_revision"],release_policy_sha256=s["release_policy_sha256"])==s
+    with pytest.raises(r.ComponentReadbackDenied,match="NORMAL_POLICY_DRIFT"):
+        r.verify(s,actual,host_revision=s["host_revision"],freeze_sha256=s["release_policy_sha256"])
+    with pytest.raises(r.ComponentReadbackDenied,match="NORMAL_POLICY_DRIFT"):
+        r.verify(s,actual,host_revision=s["host_revision"],release_policy_sha256="f"*64)

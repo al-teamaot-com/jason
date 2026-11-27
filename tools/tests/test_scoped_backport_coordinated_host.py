@@ -196,3 +196,20 @@ def test_candidate_image_label_alone_never_authorizes_removal(monkeypatch,record
     with pytest.raises(ScopedBackportDenied,match="REPLACEMENT_ID_DRIFT|INTERRUPTED_CANDIDATE_UNVERIFIED"):
         h.restore_exact_target(m,t)
     assert commands==[]
+
+
+def test_normal_native_mode_preserves_policy_and_marker_absence(monkeypatch,tmp_path):
+    from tools.tests.test_scoped_backport_coordinated import normal_manifest
+    from implementation.kernel.signed_owner_release_v2 import OwnerReleaseProofDenied
+    m=normal_manifest(); h=host_fixture(monkeypatch,m)
+    marker=tmp_path/"production-deployment-freeze"
+    monkeypatch.setattr(native,"FREEZE",marker)
+    monkeypatch.setattr(native,"read_retired_release_policy",lambda:m["release_policy_sha256"])
+    assert h._frozen(m)=={"release_policy_sha256":m["release_policy_sha256"]}
+    with pytest.raises(ScopedBackportDenied,match="LEGACY_SCOPE_AFTER_RETIREMENT"):
+        h._frozen(manifest())
+    marker.write_text("active")
+    with pytest.raises(OwnerReleaseProofDenied,match="MODE_CONFLICT"):h._frozen(m)
+    marker.unlink()
+    monkeypatch.setattr(native,"read_retired_release_policy",lambda:None)
+    with pytest.raises(ScopedBackportDenied,match="NORMAL_POLICY_DRIFT"):h._frozen(m)

@@ -43,10 +43,10 @@ def stage(host, m):
         host.ensure_breaker_closed_and_workers_quiescent()
         host.deny_unresolved_attempt(m)
         record = {
-            "schema_version":"2.0", "release_id":m["release_id"],
+            "schema_version":m["schema_version"], "release_id":m["release_id"],
             "candidate_sha":m["candidate_sha"], "rollback_sha":m["rollback_sha"],
             "manifest_sha256":digest(m), "scope_sha256":m["scope_sha256"],
-            "freeze_sha256":m["freeze_sha256"],
+            **co.binding(m),
             "status":"native_coordinated_eligible_not_approved",
             "production_mutations":False,"provider_writes":False,
             "owner_approval_recorded":False,"observed_at":utcnow(),
@@ -69,7 +69,9 @@ def promote(host, m, profile):
             or stage_record.get("release_id") != m["release_id"]
             or stage_record.get("manifest_sha256") != digest(m)
             or stage_record.get("scope_sha256") != m["scope_sha256"]
-            or stage_record.get("freeze_sha256") != m["freeze_sha256"]):
+            or stage_record.get("schema_version") != m["schema_version"]
+            or stage_record.get(co.binding_field(m)) != m[co.binding_field(m)]
+            or ("freeze_sha256" if m["schema_version"] == "3.0" else "release_policy_sha256") in stage_record):
         deny("COORDINATED_NATIVE_ELIGIBILITY_REQUIRED")
     # Read only this exact canonical proof envelope. The cryptographic binding,
     # actual Owner identity, expiry and one-use checks are in governed_promote.

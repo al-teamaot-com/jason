@@ -21,6 +21,9 @@ from typing import Mapping
 
 from tools import scoped_backport_coordinated as co
 from tools import scoped_backport_component_readback as readback
+from implementation.kernel.signed_owner_release_v2 import (
+    read_retired_release_policy, require_retired_release_mode,
+)
 from tools.pmv4_host_release_guard import IndependentHostGuard
 from tools.scoped_backport_native_host import (
     NativeScopedBackportHost, ROOT_STATE, CONTROL, DRIFT, FREEZE,
@@ -57,6 +60,7 @@ FILES = {
     "native_v1_host": INSTALL / "tools/scoped_backport_native_host.py",
     "native_v1_core": INSTALL / "tools/scoped_backport_release.py",
     "owner_proof": INSTALL / "implementation/kernel/signed_owner_release.py",
+    "normal_owner_proof": INSTALL / "implementation/kernel/signed_owner_release_v2.py",
     "native_deploy": NATIVE,
     "native_projection": INSTALL / "tools/pmv4_mcp_projection.py",
     "readback": CONTROL_HELPER,
@@ -325,6 +329,18 @@ class CoordinatedHost(NativeScopedBackportHost):
                 "--source-revision", m["projections"][t["projection"]]["candidate_sha"],
                 "--health-url", f"http://127.0.0.1:{port}/healthz", "--health-runtime", runtime]
 
+    def _frozen(self, manifest: Mapping) -> dict:
+        """Revalidate the exact current policy; never retire a marker here."""
+        policy = read_retired_release_policy()
+        if manifest["schema_version"] == "3.0":
+            if policy is None or policy != manifest["release_policy_sha256"]:
+                deny("COORDINATED_NORMAL_POLICY_DRIFT")
+            require_retired_release_mode(FREEZE.parent, policy)
+            return {"release_policy_sha256": policy}
+        if policy is not None:
+            deny("COORDINATED_LEGACY_SCOPE_AFTER_RETIREMENT")
+        return super()._frozen(manifest)
+
     def freshly_validate_live_scope(self, manifest: Mapping) -> None:
         self._bound(manifest)
         self._locked()
@@ -454,12 +470,14 @@ class CoordinatedHost(NativeScopedBackportHost):
         # A scoped signed exception uses the exact native helper under both
         # shared locks. The global freeze file stays active throughout; there
         # is no window in which legacy or another release becomes authorized.
-        self._journal_update(manifest, "exact_signed_scope_under_active_freeze")
+        self._journal_update(manifest, "exact_signed_normal_policy_scope" if manifest["schema_version"] == "3.0"
+                             else "exact_signed_scope_under_active_freeze")
         try:
             yield
         finally:
             self._frozen(manifest)
-            self._journal_update(manifest, "freeze_preserved_pending_verify")
+            self._journal_update(manifest, "normal_policy_preserved_pending_verify" if manifest["schema_version"] == "3.0"
+                                 else "freeze_preserved_pending_verify")
 
     def promote_exact_target(self, m: Mapping, t: Mapping) -> None:
         self._target(m, t)
@@ -503,10 +521,10 @@ class CoordinatedHost(NativeScopedBackportHost):
         self.verify_candidate_targets(m)
         journal = self._journal(m)
         value = readback.validate({
-            "schema_version":"2.0", "status":"verified_component_release",
+            "schema_version":m["schema_version"], "status":"verified_component_release",
             "host_revision":journal["host_anchor"], "release_id":m["release_id"],
             "manifest_sha256":digest(m), "scope_sha256":m["scope_sha256"],
-            "freeze_sha256":m["freeze_sha256"], "components":readback.inspect_components(),
+            **co.binding(m), "components":readback.inspect_components(),
         })
         # Record proposed readback durably BEFORE publication; recovery can
         # restore the exact prior state if interrupted during publication.
@@ -520,7 +538,7 @@ class CoordinatedHost(NativeScopedBackportHost):
         value = journal["proposed_readback"]
         readback.verify(value, readback.inspect_components(),
                         host_revision=readback.HOST_CURRENT.resolve(strict=True).name,
-                        freeze_sha256=m["freeze_sha256"])
+                        **co.binding(m))
         if frozen:
             publish_readback(value, journal["previous_readback"])
             if readback.verify_live() != value:
@@ -601,7 +619,8 @@ class CoordinatedHost(NativeScopedBackportHost):
     def verify_freeze_restored(self, manifest: Mapping) -> None:
         self._bound(manifest)
         self._frozen(manifest)
-        self._journal_update(manifest, "freeze_preserved_verified")
+        self._journal_update(manifest, "normal_policy_preserved_verified" if manifest["schema_version"] == "3.0"
+                             else "freeze_preserved_verified")
 
     def record_outcome(self, m: Mapping, outcome: str, error: str = "") -> None:
         self._bound(m)

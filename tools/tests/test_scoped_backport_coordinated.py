@@ -276,3 +276,69 @@ def test_source_admission_exact_git_evidence(monkeypatch):
     m["scope_sha256"]=digest(co._scope(m))
     with pytest.raises(ScopedBackportDenied,match="PROJECTION_SCOPE_DRIFT"):
         co.source_admission(Path("."),m,profile(m))
+
+
+def normal_manifest():
+    m=manifest(); m["schema_version"]="3.0"
+    m["release_policy_sha256"]=m.pop("freeze_sha256")
+    m["scope_sha256"]=digest(co._scope(m))
+    return m
+
+
+def normal_profile(m):
+    p=profile(m); p["schema_version"]="3.0"
+    p["preserve_release_policy"]=p.pop("preserve_freeze")
+    return p
+
+
+def normal_proof(m,key,**overrides):
+    from implementation.kernel.signed_owner_release_v2 import issue_exact_owner_release
+    oid,principal=next(iter(EXACT_OWNER_OAUTH_SUBJECTS.items()))
+    args=dict(approval_id="owner-mcp-"+"f"*32,release_id=m["release_id"],
+              candidate_sha=m["candidate_sha"],rollback_sha=m["rollback_sha"],
+              scope_sha256=m["scope_sha256"],manifest_sha256=digest(m),
+              release_policy_sha256=m["release_policy_sha256"],
+              verified_tenant_id=AOT_TENANT,verified_owner_oid=oid,
+              verified_principal=principal,verified_organization_id="aot",
+              confirmed_decision="approve",at=datetime.now(timezone.utc),private_key=key)
+    args.update(overrides)
+    return issue_exact_owner_release(**args)
+
+
+def test_normal_release_exact_policy_bound():
+    m=normal_manifest(); p=normal_profile(m)
+    assert co.validate_manifest(m)==m
+    assert co.validate_profile(p,m)==p
+    key=Ed25519PrivateKey.generate(); h=FakeHost(m,key)
+    assert co.governed_promote(m,p,normal_proof(m,key),host=h)["status"]=="production_components_verified"
+    assert h.outcomes==["production_components_verified"]
+    with pytest.raises(ScopedBackportDenied,match="OWNER_PROOF_REJECTED"):
+        co.governed_promote(m,p,normal_proof(m,key),host=h)
+
+
+@pytest.mark.parametrize("wrong",["policy","legacy","scope"])
+def test_normal_release_does_not_accept_old_or_wrong_proof(wrong):
+    m=normal_manifest(); key=Ed25519PrivateKey.generate(); h=FakeHost(m,key)
+    kw={}
+    if wrong=="policy":kw["release_policy_sha256"]="e"*64
+    if wrong=="scope":kw["scope_sha256"]="e"*64
+    if wrong=="legacy":kw.update(release_policy_sha256=None,freeze_sha256="5"*64)
+    with pytest.raises(ScopedBackportDenied,match="OWNER_PROOF_REJECTED"):
+        co.governed_promote(m,normal_profile(m),normal_proof(m,key,**kw),host=h)
+    assert "intent" not in h.events and not h.consumed
+
+
+def test_normal_release_rolls_back_all_targets():
+    m=normal_manifest(); key=Ed25519PrivateKey.generate()
+    h=FakeHost(m,key,["promote_jason-mcp-pilot"])
+    with pytest.raises(RuntimeError):
+        co.governed_promote(m,normal_profile(m),normal_proof(m,key),host=h)
+    assert h.live=={t["name"]:t["rollback_image"] for t in m["targets"]}
+    assert h.outcomes==["rollback_verified"]
+
+
+def test_normal_manifest_rejects_legacy_field_and_profile():
+    m=normal_manifest(); p=profile(m)
+    with pytest.raises(ScopedBackportDenied):co.validate_profile(p,m)
+    m["freeze_sha256"]="5"*64
+    with pytest.raises(ScopedBackportDenied):co.validate_manifest(m)

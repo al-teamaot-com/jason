@@ -15,7 +15,7 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Protocol
 
-from implementation.kernel.signed_owner_release import (
+from implementation.kernel.signed_owner_release_v2 import (
     OwnerReleaseProofDenied, verify_exact_owner_release,
 )
 from tools.scoped_backport_release import (
@@ -47,6 +47,8 @@ PROFILE_FIELDS = {
     "schema_version", "profile", "allowed_targets", "manifest_sha256",
     "root_signed_approval_required", "preserve_freeze",
 }
+NORMAL_MANIFEST_FIELDS = (MANIFEST_FIELDS - {"freeze_sha256"}) | {"release_policy_sha256"}
+NORMAL_PROFILE_FIELDS = (PROFILE_FIELDS - {"preserve_freeze"}) | {"preserve_release_policy"}
 _REF = re.compile(r"refs/heads/prep/[a-z0-9-]{5,100}\Z")
 _SLUG = re.compile(r"[a-z][a-z0-9-]{2,63}\Z")
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
@@ -57,10 +59,27 @@ def _exact(obj: Any, fields: set[str], code: str) -> None:
         deny(code)
 
 
+def binding_field(m: Mapping[str, Any]) -> str:
+    if m.get("schema_version") == "2.0":
+        return "freeze_sha256"
+    if m.get("schema_version") == "3.0":
+        return "release_policy_sha256"
+    deny("COORDINATED_BINDING_VERSION")
+
+
+def binding(m: Mapping[str, Any]) -> dict[str, str]:
+    field = binding_field(m)
+    return {field: m[field]}
+
+
+def proof_binding(m: Mapping[str, Any]) -> dict[str, str]:
+    field = binding_field(m)
+    return {"expected_" + field: m[field]}
+
+
 def _scope(m: Mapping[str, Any]) -> dict[str, Any]:
-    # Every source projection, live baseline identity, candidate artifact, and
-    # protected peer is in the signed scope. Freeze is separately signed too.
-    return {k: m[k] for k in MANIFEST_FIELDS - {"scope_sha256"}}
+    fields = NORMAL_MANIFEST_FIELDS if m.get("schema_version") == "3.0" else MANIFEST_FIELDS
+    return {k: m[k] for k in fields - {"scope_sha256"}}
 
 
 def _names(names: Any) -> tuple[str, ...]:
@@ -73,10 +92,11 @@ def _names(names: Any) -> tuple[str, ...]:
 
 
 def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
-    _exact(manifest, MANIFEST_FIELDS, "COORDINATED_MANIFEST_SCHEMA")
+    fields = NORMAL_MANIFEST_FIELDS if isinstance(manifest, Mapping) and manifest.get("schema_version") == "3.0" else MANIFEST_FIELDS
+    _exact(manifest, fields, "COORDINATED_MANIFEST_SCHEMA")
     m = dict(manifest)
     if (
-        m["schema_version"] != "2.0" or m["repository"] != REPO
+        m["schema_version"] not in ("2.0", "3.0") or m["repository"] != REPO
         or not isinstance(m["profile"], str) or not _SLUG.fullmatch(m["profile"])
         or m["provider_writes_allowed"] is not False
         or m["standing_authority"] is not False
@@ -88,7 +108,7 @@ def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
         deny("COORDINATED_SAME_REVISION")
     if m["release_id"] != "release-" + m["candidate_sha"][:16]:
         deny("COORDINATED_RELEASE_ID")
-    require_hash(m["freeze_sha256"], "FREEZE")
+    require_hash(m[binding_field(m)], "EXACT_RELEASE_POLICY_BINDING")
     require_hash(m["scope_sha256"], "SCOPE")
     projections = m["projections"]
     if not isinstance(projections, dict) or not 1 <= len(projections) <= len(TARGET_ORDER):
@@ -143,12 +163,13 @@ def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
 def validate_profile(profile: Mapping[str, Any], manifest: Mapping[str, Any]) -> dict[str, Any]:
     """Profile is independently root-pinned, never sourced from a request."""
     m = validate_manifest(manifest)
-    _exact(profile, PROFILE_FIELDS, "COORDINATED_PROFILE_SCHEMA")
+    normal = m["schema_version"] == "3.0"
+    _exact(profile, NORMAL_PROFILE_FIELDS if normal else PROFILE_FIELDS, "COORDINATED_PROFILE_SCHEMA")
     p = dict(profile)
-    if (p["schema_version"] != "2.0" or p["profile"] != m["profile"]
+    if (p["schema_version"] != m["schema_version"] or p["profile"] != m["profile"]
             or _names(p["allowed_targets"]) != tuple(t["name"] for t in m["targets"])
             or p["root_signed_approval_required"] is not True
-            or p["preserve_freeze"] is not True
+            or p["preserve_release_policy" if normal else "preserve_freeze"] is not True
             or p["manifest_sha256"] != digest(m)):
         deny("COORDINATED_ROOT_PROFILE_SCOPE")
     return p
@@ -256,7 +277,7 @@ def governed_promote(manifest: Mapping[str, Any], profile: Mapping[str, Any],
     """Generalized exact, serialized, one-use native scoped transaction.
 
     The root host independently verifies source, profile, signed intent,
-    baseline, every image, capacity, all native control readers and freeze.
+    baseline, every image, capacity, all native control readers and release mode.
     Nothing here grants authority or changes the current v1 release path.
     """
     m = validate_manifest(manifest)
@@ -274,7 +295,7 @@ def governed_promote(manifest: Mapping[str, Any], profile: Mapping[str, Any],
                 expected_release_id=m["release_id"],
                 expected_scope_sha256=m["scope_sha256"],
                 expected_manifest_sha256=digest(m),
-                expected_freeze_sha256=m["freeze_sha256"],
+                **proof_binding(m),
                 at=datetime.now(timezone.utc), consumed_ids=host.consumed_approvals(),
             )
         except OwnerReleaseProofDenied:
@@ -306,8 +327,8 @@ def governed_promote(manifest: Mapping[str, Any], profile: Mapping[str, Any],
                         host.record_outcome(m, "rollback_unverified", type(exc).__name__)
                         raise
                     raise
-            # Commit success only after the exact original freeze has been
-            # independently restored and the steady-state readers agree.
+            # Commit success only after the exact release mode has been
+            # independently reverified and the steady-state readers agree.
             host.verify_freeze_restored(m)
             host.verify_component_readback(m, frozen=True)
             host.verify_protected_unchanged(before)

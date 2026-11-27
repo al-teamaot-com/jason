@@ -18,6 +18,7 @@ from typing import Any, Mapping
 
 READBACK = Path("/etc/jason-owner-release/coordinated-component-readback.json")
 FREEZE = Path("/var/lib/jason/openclaw/release-manager/production-deployment-freeze")
+NORMAL_POLICY = Path("/etc/jason-owner-release/normal-release-policy/production-freeze-retirement.json")
 HOST_CURRENT = Path("/opt/jason/current")
 COMPONENTS = ("jason-runtime", "jason-mcp-pilot", "jason-teams-gateway")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -25,6 +26,7 @@ HEX = re.compile(r"[0-9a-f]{64}\Z")
 IMAGE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 FIELDS = frozenset(("schema_version", "status", "host_revision", "release_id",
                     "manifest_sha256", "scope_sha256", "freeze_sha256", "components"))
+NORMAL_FIELDS = (FIELDS - {"freeze_sha256"}) | {"release_policy_sha256"}
 ROW = frozenset(("revision", "image_id", "container_id"))
 
 
@@ -48,14 +50,16 @@ def valid(value: Any, expression: re.Pattern) -> bool:
 
 
 def validate(value: Mapping[str, Any]) -> dict[str, Any]:
-    need(isinstance(value, dict) and set(value) == FIELDS, "SCHEMA")
-    need(value["schema_version"] == "2.0"
+    normal = isinstance(value, dict) and value.get("schema_version") == "3.0"
+    need(isinstance(value, dict) and set(value) == (NORMAL_FIELDS if normal else FIELDS), "SCHEMA")
+    field = "release_policy_sha256" if normal else "freeze_sha256"
+    need(value["schema_version"] in ("2.0", "3.0")
          and value["status"] == "verified_component_release"
          and valid(value["host_revision"], SHA)
          and isinstance(value["release_id"], str)
          and re.fullmatch(r"release-[0-9a-f]{16}", value["release_id"]) is not None
          and all(valid(value[k], HEX) for k in
-                 ("manifest_sha256", "scope_sha256", "freeze_sha256")), "FIELDS")
+                 ("manifest_sha256", "scope_sha256", field)), "FIELDS")
     components = value["components"]
     need(isinstance(components, dict) and set(components) == set(COMPONENTS), "COMPONENT_SET")
     for row in components.values():
@@ -129,10 +133,16 @@ def inspect_components() -> dict[str, dict[str, str]]:
 
 
 def verify(value: Mapping[str, Any], actual: Mapping[str, Any], *,
-           host_revision: str, freeze_sha256: str) -> dict[str, Any]:
+           host_revision: str, freeze_sha256: str | None = None,
+           release_policy_sha256: str | None = None) -> dict[str, Any]:
     state = validate(value)
     need(state["host_revision"] == host_revision, "HOST_REVISION_DRIFT")
-    need(state["freeze_sha256"] == freeze_sha256, "FREEZE_DRIFT")
+    if state["schema_version"] == "3.0":
+        need(freeze_sha256 is None and valid(release_policy_sha256, HEX)
+             and state["release_policy_sha256"] == release_policy_sha256, "NORMAL_POLICY_DRIFT")
+    else:
+        need(release_policy_sha256 is None and valid(freeze_sha256, HEX)
+             and state["freeze_sha256"] == freeze_sha256, "FREEZE_DRIFT")
     need(state["components"] == actual, "COMPONENT_IDENTITY_DRIFT")
     return state
 
@@ -144,6 +154,22 @@ def verify_live() -> dict[str, Any] | None:
     need(HOST_CURRENT.is_symlink(), "HOST_POINTER")
     host = HOST_CURRENT.resolve(strict=True)
     need(host.parent == Path("/opt/jason/releases"), "HOST_SOURCE_CUSTODY")
+    if state["schema_version"] == "3.0":
+        try:
+            FREEZE.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            need(False, "NORMAL_POLICY_ACTIVE_FREEZE_CONFLICT")
+        raw = _root_read(NORMAL_POLICY)
+        return verify(state, inspect_components(), host_revision=host.name,
+                      release_policy_sha256=hashlib.sha256(raw).hexdigest())
+    try:
+        NORMAL_POLICY.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        need(False, "LEGACY_READBACK_AFTER_RETIREMENT")
     fd = os.open(FREEZE, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         meta = os.fstat(fd)
