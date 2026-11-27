@@ -84,6 +84,11 @@ MIGRATION_FIELDS = {
     "schema_version", "source_sha", "installed_readers", "native_readback_verified",
     "original_authority_preserved",
 }
+REUSABLE_POLICY_FIELDS = (POLICY_FIELDS - {"manifest_sha256", "profile_sha256"}) | {
+    "allowed_targets", "per_release_review_required",
+}
+ACTIVE_OFFER_FIELDS = {"schema_version", "release_id", "offer_sha256"}
+STAGED_OFFER_FIELDS = {"schema_version", "manifest", "profile", "review_source_sha", "eligibility"}
 REQUIRED_READERS = {
     "pmv4_host_release_guard.py", "jason_self_heal_watchdog.py",
     "release_control_transition_worker.py",
@@ -137,17 +142,69 @@ def verify_effective_schedule() -> None:
     trusted_directory(READBACK.parent)
 
 
-def verify_installed_policy(profile: Mapping) -> dict:
+def validate_staged_offer(value: Mapping) -> dict:
+    if not isinstance(value, dict) or set(value) != STAGED_OFFER_FIELDS or value["schema_version"] != "3.0":
+        deny("COORDINATED_STAGED_OFFER_SCHEMA")
+    m = co.validate_manifest(value["manifest"])
+    co.validate_profile(value["profile"], m)
+    require_sha(value["review_source_sha"], "REVIEW_SOURCE")
+    e = value["eligibility"]
+    expected = {
+        "schema_version": "3.0", "release_id": m["release_id"],
+        "candidate_sha": m["candidate_sha"], "rollback_sha": m["rollback_sha"],
+        "manifest_sha256": digest(m), "scope_sha256": m["scope_sha256"],
+        "release_policy_sha256": m.get("release_policy_sha256"),
+        "status": "native_coordinated_eligible_not_approved",
+        "production_mutations": False, "provider_writes": False, "owner_approval_recorded": False,
+    }
+    if (m["schema_version"] != "3.0" or not isinstance(e, dict)
+            or set(e) != set(expected) | {"observed_at"}
+            or any(e[k] != v for k,v in expected.items())
+            or not isinstance(e["observed_at"], str)):
+        deny("COORDINATED_STAGED_ELIGIBILITY_SCOPE")
+    return dict(value)
+
+
+def active_staged_offer() -> dict | None:
+    pointer = PRIVATE / "active-offer.json"
+    if not os.path.lexists(pointer):
+        return None
+    row = root_json(pointer)
+    if (set(row) != ACTIVE_OFFER_FIELDS or row["schema_version"] != "3.0"
+            or not isinstance(row["release_id"], str)
+            or not re.fullmatch(r"release-[0-9a-f]{16}", row["release_id"])):
+        deny("COORDINATED_ACTIVE_OFFER_POINTER")
+    require_hash(row["offer_sha256"], "ACTIVE_OFFER")
+    root_directory(PRIVATE / "offers")
+    offer = validate_staged_offer(root_json(PRIVATE / "offers" / (row["release_id"] + ".json"),
+                                            max_size=2_000_000))
+    if digest(offer) != row["offer_sha256"] or offer["manifest"]["release_id"] != row["release_id"]:
+        deny("COORDINATED_ACTIVE_OFFER_DRIFT")
+    return offer
+
+
+def verify_installed_policy(profile: Mapping | None = None) -> dict:
     if os.geteuid() != 0 or Path(__file__).resolve(strict=True) != INSTALLED:
         deny("COORDINATED_IMMUTABLE_ROOT_INSTALL_REQUIRED")
     p = root_json(POLICY)
-    if set(p) != POLICY_FIELDS or p["schema_version"] != "2.0":
+    if p.get("schema_version") == "2.0":
+        if set(p) != POLICY_FIELDS or profile is None:
+            deny("COORDINATED_ROOT_INSTALL_POLICY")
+        require_hash(p["manifest_sha256"], "ROOT_MANIFEST")
+        require_hash(p["profile_sha256"], "ROOT_PROFILE")
+        if digest(profile) != p["profile_sha256"]:
+            deny("COORDINATED_ROOT_PROFILE_DRIFT")
+    elif p.get("schema_version") == "3.0":
+        if (set(p) != REUSABLE_POLICY_FIELDS or p["allowed_targets"] != list(co.TARGET_ORDER)
+                or p["per_release_review_required"] is not True):
+            deny("COORDINATED_REUSABLE_INSTALL_POLICY")
+        if profile is not None and (profile.get("schema_version") != "3.0"
+                or not set(profile.get("allowed_targets", ())) <= set(p["allowed_targets"])):
+            deny("COORDINATED_NORMAL_PROFILE_REQUIRED")
+        root_directory(PRIVATE / "offers")
+    else:
         deny("COORDINATED_ROOT_INSTALL_POLICY")
     require_sha(p["source_sha"], "ROOT_SOURCE")
-    require_hash(p["manifest_sha256"], "ROOT_MANIFEST")
-    require_hash(p["profile_sha256"], "ROOT_PROFILE")
-    if digest(profile) != p["profile_sha256"]:
-        deny("COORDINATED_ROOT_PROFILE_DRIFT")
     if set(p["file_sha256"]) != set(FILES):
         deny("COORDINATED_INSTALL_CLOSURE")
     for name, path in FILES.items():
@@ -313,14 +370,42 @@ class CoordinatedHost(NativeScopedBackportHost):
     def __init__(self):
         super().__init__(repo=REPO, root=PRIVATE)
         self.guard = None
+        self.active_profile = None
+        self.active_review_sha = None
+        self._staging = False
 
     def enforce_installed_root_trust(self, profile: Mapping) -> None:
+        self._staging = False
         self.policy = verify_installed_policy(profile)
-        m = co.validate_manifest(root_json(MANIFEST))
-        co.validate_profile(profile, m)
-        if digest(m) != self.policy["manifest_sha256"]:
-            deny("COORDINATED_INSTALLED_MANIFEST_DRIFT")
+        if self.policy["schema_version"] == "3.0":
+            offer = active_staged_offer()
+            if offer is None or offer["profile"] != dict(profile):
+                deny("COORDINATED_ROOT_STAGED_OFFER_REQUIRED")
+            m = co.validate_manifest(offer["manifest"])
+            self.active_review_sha = offer["review_source_sha"]
+        else:
+            m = co.validate_manifest(root_json(MANIFEST))
+            if digest(m) != self.policy["manifest_sha256"]:
+                deny("COORDINATED_INSTALLED_MANIFEST_DRIFT")
+            self.active_review_sha = self.policy["source_sha"]
+        self.active_profile = co.validate_profile(profile, m)
         self.active_offer = m
+
+    def bind_for_stage(self, manifest: Mapping, profile: Mapping, review_source_sha: str) -> None:
+        # This is a read-only admission operation, not a promotion or a
+        # production authority grant. All new scope bytes are independently
+        # verified under the existing shared locks before eligibility exists.
+        self.policy = verify_installed_policy(profile)
+        if self.policy["schema_version"] != "3.0":
+            deny("COORDINATED_REUSABLE_NATIVE_INSTALL_REQUIRED")
+        m = co.validate_manifest(manifest)
+        if m["schema_version"] != "3.0":
+            deny("COORDINATED_NORMAL_PROFILE_REQUIRED")
+        require_sha(review_source_sha, "REVIEW_SOURCE")
+        self.active_offer = m
+        self.active_profile = co.validate_profile(profile, m)
+        self.active_review_sha = review_source_sha
+        self._staging = True
 
     def _require_root_trust(self) -> None:
         if (self.policy is None or os.geteuid() != 0
@@ -351,6 +436,15 @@ class CoordinatedHost(NativeScopedBackportHost):
         self._require_root_trust()
         if self.guard is None or not self.guard._held:
             deny("COORDINATED_SHARED_LOCK_REQUIRED")
+
+    def _require_current_staged_scope(self) -> None:
+        if (self.policy or {}).get("schema_version") != "3.0" or self._staging:
+            return
+        row = active_staged_offer()
+        if (row is None or row["manifest"] != self.active_offer
+                or row["profile"] != self.active_profile
+                or row["review_source_sha"] != self.active_review_sha):
+            deny("COORDINATED_ACTIVE_OFFER_CHANGED_UNDER_LOCK")
 
     def _args(self, m: Mapping, t: Mapping) -> list[str]:
         self._target(m, t)
@@ -383,18 +477,27 @@ class CoordinatedHost(NativeScopedBackportHost):
     def freshly_validate_live_scope(self, manifest: Mapping) -> None:
         self._bound(manifest)
         self._locked()
-        profile = root_json(PROFILE)
+        self._require_current_staged_scope()
+        profile = self.active_profile
+        if profile is None or self.active_review_sha is None:
+            deny("COORDINATED_UNBOUND_REVIEW")
         co.source_admission(self.repo, manifest, profile)
         # The root-pinned installation SHA and exact private manifest digest
         # must also have protected-main review, not just the feature projection.
         head = co._git(self.repo, "ls-remote", "origin", "refs/heads/main").decode().split()[0]
         if not co._ancestor(self.repo, self.policy["source_sha"], head):
             deny("COORDINATED_INSTALL_SOURCE_NOT_PROTECTED_MAIN")
-        review = json.loads(co._git(self.repo, "show", self.policy["source_sha"] +
+        if (not co._ancestor(self.repo, self.active_review_sha, head)
+                or not co._ancestor(self.repo, manifest["protected_main_sha"], self.active_review_sha)):
+            deny("COORDINATED_SCOPE_REVIEW_NOT_PROTECTED_MAIN")
+        review = json.loads(co._git(self.repo, "show", self.active_review_sha +
                                    ":config/coordinated-scoped-release-review.json"))
         if (review.get("manifest_sha256") != digest(manifest)
                 or review.get("scope_sha256") != manifest["scope_sha256"]
-                or review.get("profile") != manifest["profile"]):
+                or review.get("profile") != manifest["profile"]
+                or review.get("candidate_sha") != manifest["candidate_sha"]
+                or review.get("schema_version") != manifest["schema_version"]
+                or review.get("production_authority") is not False):
             deny("COORDINATED_PRIVATE_MANIFEST_NOT_REVIEWED")
         self.freeze_before = self._frozen(manifest)
         self.previous_readback = readback.verify_live()
@@ -672,6 +775,7 @@ class CoordinatedHost(NativeScopedBackportHost):
         """Crash recovery only; never promotes or closes a breaker."""
         self._bound(m)
         with self.release_lock(m):
+            self._require_current_staged_scope()
             journal = self._journal(m)
             if journal["manifest_sha256"] != digest(m) or journal["scope_sha256"] != m["scope_sha256"]:
                 deny("COORDINATED_RECOVERY_SCOPE")

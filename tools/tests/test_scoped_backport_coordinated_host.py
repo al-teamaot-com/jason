@@ -290,3 +290,69 @@ def test_effective_scheduler_binds_existing_units_and_narrow_write_scope(monkeyp
     monkeypatch.setattr(native,"run",widened)
     with pytest.raises(ScopedBackportDenied,match="EFFECTIVE_SCHEDULE_DRIFT"):
         native.verify_effective_schedule()
+
+
+def test_reusable_root_offer_stage_preserves_prior_evidence(monkeypatch,tmp_path):
+    from tools.tests.test_scoped_backport_coordinated import normal_manifest, normal_profile
+    m=normal_manifest(); p=normal_profile(m); review="8"*40
+    folder=tmp_path/"offers";folder.mkdir()
+    view=tmp_path/"projection";view.mkdir()
+    auth=tmp_path/"auth";(auth/"owner-approvals").mkdir(parents=True)
+    journals=tmp_path/"transactions";journals.mkdir()
+    monkeypatch.setattr(entry,"PRIVATE",tmp_path)
+    monkeypatch.setattr(native,"PRIVATE",tmp_path)
+    monkeypatch.setattr(entry,"PUBLIC_VIEW",view)
+    monkeypatch.setattr(entry,"AUTH",auth)
+    def write(path,row,replace=False):
+        assert replace or not path.exists()
+        path.write_text(json.dumps(row))
+    monkeypatch.setattr(entry,"atomic_root_json",write)
+    monkeypatch.setattr(entry,"root_json",lambda path,**kw:json.loads(path.read_text()))
+    monkeypatch.setattr(native,"root_json",lambda path,**kw:json.loads(path.read_text()))
+    monkeypatch.setattr(entry,"root_directory",lambda p:None)
+    monkeypatch.setattr(native,"root_directory",lambda p:None)
+    monkeypatch.setattr(entry,"publish_normal_eligibility",lambda row:write(view/("eligible-"+row["release_id"]+".json"),row,replace=True))
+    monkeypatch.setattr(entry,"exact_file",lambda path,**kw:path.read_bytes())
+    events=[]
+    class Host:
+        def bind_for_stage(self,m,p,review):events.append("bind")
+        @contextmanager
+        def release_lock(self,m):yield
+        def freshly_validate_live_scope(self,m):events.append("review")
+        def ensure_breaker_closed_and_workers_quiescent(self):pass
+        def deny_unresolved_attempt(self,m):pass
+        def _journal_path(self,m):return journals/(m["release_id"]+".json")
+    h=Host()
+    first=entry.persist_reviewed_offer(h,m,p,review)
+    original=folder/(m["release_id"]+".json")
+    before=original.read_bytes()
+    assert native.active_staged_offer()["eligibility"]==first
+    assert entry.persist_reviewed_offer(h,m,p,review)==first
+    second=deepcopy(m)
+    candidate="7"*40
+    anchor=second["targets"][0]["projection"]
+    second["projections"][anchor]["candidate_sha"]=candidate
+    second["candidate_sha"]=candidate;second["release_id"]="release-"+candidate[:16]
+    second["scope_sha256"]=digest(co._scope(second))
+    second_profile=normal_profile(second)
+    pending=auth/"owner-approvals"/(m["release_id"]+".json")
+    pending.touch()
+    with pytest.raises(ScopedBackportDenied,match="PRIOR_SIGNED_OFFER_PENDING"):
+        entry.persist_reviewed_offer(h,second,second_profile,review)
+    pending.unlink()
+    result=entry.persist_reviewed_offer(h,second,second_profile,review)
+    assert native.active_staged_offer()["eligibility"]==result
+    assert original.read_bytes()==before
+    assert not (view/("eligible-"+m["release_id"]+".json")).exists()
+    assert (view/("eligible-"+second["release_id"]+".json")).exists()
+
+
+def test_stale_normal_offer_cannot_mutate_after_active_pointer_switch(monkeypatch):
+    from tools.tests.test_scoped_backport_coordinated import normal_manifest, normal_profile
+    m=normal_manifest();h=host_fixture(monkeypatch,m)
+    h.policy={"schema_version":"3.0"};h.active_profile=normal_profile(m);h.active_review_sha="8"*40
+    monkeypatch.setattr(native,"active_staged_offer",lambda:None)
+    with pytest.raises(ScopedBackportDenied,match="ACTIVE_OFFER_CHANGED_UNDER_LOCK"):
+        h._require_current_staged_scope()
+    monkeypatch.setattr(native,"active_staged_offer",lambda:{"manifest":m,"profile":h.active_profile,"review_source_sha":h.active_review_sha})
+    h._require_current_staged_scope()

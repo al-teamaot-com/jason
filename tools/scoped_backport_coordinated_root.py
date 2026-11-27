@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import sys
 import stat
 import tempfile
@@ -23,8 +24,8 @@ if os.geteuid() == 0 and Path(__file__).resolve() == ENTRY:
     sys.path.insert(0, str(INSTALL))
 
 from tools import scoped_backport_coordinated as co
-from tools.scoped_backport_coordinated_host import CoordinatedHost, MANIFEST, PROFILE, PRIVATE, trusted_directory, POLICY, RESOLVED
-from tools.scoped_backport_native_host import exact_file, root_json, atomic_root_json, utcnow
+from tools.scoped_backport_coordinated_host import CoordinatedHost, MANIFEST, PROFILE, PRIVATE, trusted_directory, POLICY, RESOLVED, active_staged_offer, validate_staged_offer, verify_installed_policy
+from tools.scoped_backport_native_host import exact_file, root_json, atomic_root_json, root_directory, utcnow
 from tools.scoped_backport_release import digest, deny
 
 AUTH = Path("/var/lib/jason/authority/scoped-backport-release")
@@ -33,7 +34,14 @@ AUTH = Path("/var/lib/jason/authority/scoped-backport-release")
 def load_installed():
     if os.geteuid() != 0 or not sys.flags.isolated or Path(__file__).resolve() != ENTRY:
         deny("COORDINATED_INSTALLED_ROOT_ENTRY_REQUIRED")
-    profile, manifest = root_json(PROFILE), root_json(MANIFEST)
+    policy = root_json(POLICY)
+    if policy.get("schema_version") == "3.0":
+        offer = active_staged_offer()
+        if offer is None:
+            deny("COORDINATED_ROOT_STAGED_OFFER_REQUIRED")
+        profile, manifest = offer["profile"], offer["manifest"]
+    else:
+        profile, manifest = root_json(PROFILE), root_json(MANIFEST)
     host = CoordinatedHost()
     host.enforce_installed_root_trust(profile)
     return host, co.validate_manifest(manifest), profile
@@ -65,6 +73,100 @@ def publish_normal_eligibility(record):
     finally:os.close(fd)
 
 
+def eligibility_record(m):
+    return {
+        "schema_version": m["schema_version"], "release_id": m["release_id"],
+        "candidate_sha": m["candidate_sha"], "rollback_sha": m["rollback_sha"],
+        "manifest_sha256": digest(m), "scope_sha256": m["scope_sha256"],
+        **co.binding(m), "status": "native_coordinated_eligible_not_approved",
+        "production_mutations": False, "provider_writes": False,
+        "owner_approval_recorded": False, "observed_at": utcnow(),
+    }
+
+
+def exact_public_offer(release_id):
+    if not isinstance(release_id, str) or not re.fullmatch(r"release-[0-9a-f]{16}", release_id):
+        deny("COORDINATED_STAGE_RELEASE_ID")
+    folder = AUTH / "offers"
+    uid = pwd.getpwnam("al").pw_uid
+    meta = folder.lstat()
+    if folder.is_symlink() or not stat.S_ISDIR(meta.st_mode) or meta.st_uid != uid or stat.S_IMODE(meta.st_mode) != 0o700:
+        deny("COORDINATED_STAGE_OFFER_DIRECTORY")
+    data = json.loads(exact_file(folder / (release_id + ".json"), uid=uid, mode=0o600, max_size=2_000_000))
+    if not isinstance(data, dict) or set(data) != {"schema_version", "manifest", "profile", "review_source_sha"} or data["schema_version"] != "3.0":
+        deny("COORDINATED_STAGE_OFFER_SCHEMA")
+    m = co.validate_manifest(data["manifest"])
+    p = co.validate_profile(data["profile"], m)
+    if m["schema_version"] != "3.0" or m["release_id"] != release_id:
+        deny("COORDINATED_STAGE_OFFER_SCOPE")
+    return m, p, data["review_source_sha"]
+
+
+def persist_reviewed_offer(host, m, profile, review_source_sha):
+    # A static, independently installed code policy is reused for successive
+    # exact reviewed scopes. No caller-supplied path can select root code.
+    # Every active offer and historical receipt is private and root-owned.
+    host.bind_for_stage(m, profile, review_source_sha)
+    with host.release_lock(m):
+        host.freshly_validate_live_scope(m)
+        host.ensure_breaker_closed_and_workers_quiescent()
+        host.deny_unresolved_attempt(m)
+        prior = active_staged_offer()
+        if prior is not None and prior["manifest"]["release_id"] != m["release_id"]:
+            old = prior["manifest"]
+            journal = host._journal_path(old)
+            proof = AUTH / "owner-approvals" / (old["release_id"] + ".json")
+            if os.path.lexists(journal):
+                receipt = root_json(journal)
+                if (receipt.get("outcome") not in RESOLVED
+                        or receipt.get("manifest_sha256") != digest(old)
+                        or receipt.get("scope_sha256") != old["scope_sha256"]):
+                    deny("COORDINATED_PRIOR_OFFER_NOT_RESOLVED")
+            elif os.path.lexists(proof):
+                deny("COORDINATED_PRIOR_SIGNED_OFFER_PENDING")
+        folder = PRIVATE / "offers"
+        root_directory(folder)
+        path = folder / (m["release_id"] + ".json")
+        expected = validate_staged_offer({
+            "schema_version": "3.0", "manifest": m, "profile": profile,
+            "review_source_sha": review_source_sha, "eligibility": eligibility_record(m),
+        })
+        if os.path.lexists(path):
+            offer = validate_staged_offer(root_json(path, max_size=2_000_000))
+            if any(offer[k] != expected[k] for k in ("manifest", "profile", "review_source_sha")):
+                deny("COORDINATED_HISTORICAL_OFFER_CHANGED")
+        else:
+            offer = expected
+            atomic_root_json(path, offer)
+        if prior is not None and prior["manifest"]["release_id"] != m["release_id"]:
+            # Remove only the old read-only eligibility projection. The exact
+            # root-private offer and every signature/journal stay immutable.
+            old_view = PUBLIC_VIEW / ("eligible-" + prior["manifest"]["release_id"] + ".json")
+            if os.path.lexists(old_view):
+                projected = json.loads(exact_file(old_view, uid=0, mode=0o644, max_size=16384))
+                if projected != prior["eligibility"]:
+                    deny("COORDINATED_PRIOR_PUBLIC_ELIGIBILITY_CHANGED")
+                old_view.unlink()
+                fd = os.open(PUBLIC_VIEW, os.O_RDONLY | os.O_DIRECTORY)
+                try: os.fsync(fd)
+                finally: os.close(fd)
+        pointer = PRIVATE / "active-offer.json"
+        data = {"schema_version": "3.0", "release_id": m["release_id"], "offer_sha256": digest(offer)}
+        if not os.path.lexists(pointer):
+            atomic_root_json(pointer, data)
+        elif root_json(pointer) != data:
+            atomic_root_json(pointer, data, replace=True)
+        publish_normal_eligibility(offer["eligibility"])
+        return offer["eligibility"]
+
+
+def stage_reviewed_normal(release_id):
+    if os.geteuid() != 0 or not sys.flags.isolated or Path(__file__).resolve() != ENTRY:
+        deny("COORDINATED_INSTALLED_ROOT_ENTRY_REQUIRED")
+    m, profile, review_source_sha = exact_public_offer(release_id)
+    return persist_reviewed_offer(CoordinatedHost(), m, profile, review_source_sha)
+
+
 def stage(host, m):
     with host.release_lock(m):
         host.freshly_validate_live_scope(m)
@@ -94,7 +196,13 @@ def stage(host, m):
 
 
 def promote(host, m, profile):
-    stage_record = root_json(PRIVATE / "eligible.json")
+    if host is not None and getattr(host, "policy", {}).get("schema_version") == "3.0":
+        offer = active_staged_offer()
+        if offer is None or offer["manifest"] != m or offer["profile"] != profile:
+            deny("COORDINATED_ROOT_STAGED_OFFER_REQUIRED")
+        stage_record = offer["eligibility"]
+    else:
+        stage_record = root_json(PRIVATE / "eligible.json")
     if (stage_record.get("status") != "native_coordinated_eligible_not_approved"
             or stage_record.get("release_id") != m["release_id"]
             or stage_record.get("manifest_sha256") != digest(m)
@@ -156,6 +264,13 @@ def run_scheduled(action):
         POLICY.lstat()
     except FileNotFoundError:
         return {"status": "coordinated_successor_not_installed"}
+    policy = root_json(POLICY)
+    if policy.get("schema_version") == "3.0" and active_staged_offer() is None:
+        verify_installed_policy()
+        for journal in (PRIVATE / "transactions").glob("release-*.json"):
+            if root_json(journal).get("outcome") not in RESOLVED:
+                deny("COORDINATED_UNRESOLVED_JOURNAL_WITHOUT_ACTIVE_OFFER")
+        return {"status": "no_root_reviewed_active_offer"}
     host,m,profile=load_installed()
     if action == "promote-approved":
         return scheduled_approved(host,m,profile)
@@ -168,7 +283,13 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("action", choices=("stage", "promote", "recover",
                                       "promote-approved", "recover-scheduled"))
+    p.add_argument("--release-id")
     args = p.parse_args()
+    if args.release_id is not None:
+        if args.action != "stage":
+            p.error("--release-id is permitted only for exact native stage")
+        print(json.dumps(stage_reviewed_normal(args.release_id), sort_keys=True))
+        return 0
     if args.action in ("promote-approved", "recover-scheduled"):
         print(json.dumps(run_scheduled(args.action), sort_keys=True))
         return 0

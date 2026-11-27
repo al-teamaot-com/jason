@@ -122,3 +122,15 @@ already root-admitted exact normal offer and its explicit signed proof.
 An existing attempt cannot be re-promoted; interrupted attempts go only to
 the existing rollback path. An absent successor policy does not activate
 anything. This source is not a native installation or retirement decision.
+
+## Reusable native stage
+
+The normal-mode installed trust policy binds the reviewed controller and
+reader closure rather than a single release candidate. Each subsequent
+release must pass the existing root stage against its exact protected-main
+review, immutable image/source projections, current mode, rollback and live
+health. The private staged offer is immutable, the active pointer is
+root-owned, and promotion rechecks that pointer under both shared locks.
+A prior unresolved transaction or pending signed offer cannot be displaced.
+The scheduler remains idle until an exact root-reviewed offer exists.
+Source-only tests: 265 passed. This is not a native installation receipt.
