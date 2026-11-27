@@ -367,6 +367,7 @@ from .procurement_billing_audit_maintenance import (
 )
 from .procurement_supervisor_policy import SupervisorSpendingPolicy
 from .procurement_approval_maintenance import ProcurementApprovalMaintenance
+from .teams_workflow_configuration import TeamsWorkflowConfigurationFile
 from .parts_inventory_lifecycle import SQLitePartsLifecycleLedger
 from .procurement_inventory_billing import (
     HardwareBillingDispositionFlow,
@@ -2641,6 +2642,11 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     from .universal_teams_approval import build_universal_teams_approval_runtime
     trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)
     teams_authenticator = trusted_keys.build_authenticator()
+    workflow_policy_path = os.getenv('JASON_TEAMS_WORKFLOW_POLICY_PATH', '').strip()
+    workflow_configuration = (
+        TeamsWorkflowConfigurationFile(Path(workflow_policy_path)) if workflow_policy_path else None)
+    if workflow_configuration is not None:
+        workflow_configuration.load()  # explicit invalid configuration fails closed
     if universal_approval_handler is None:
         universal_approval_handler = build_universal_teams_approval_runtime(
             mode=settings.universal_approval_mode,
@@ -2669,6 +2675,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                     gateway_url=settings.teams_gateway_internal_url,
                     token_file=settings.teams_proactive_token_file,
                     bindings=durable_bindings,
+                    workflow_configuration=workflow_configuration,
                 ),
             ),
         )
@@ -2831,6 +2838,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                 token_file=settings.teams_proactive_token_file,
                 bindings=bindings,
                 owner_identity_ids=owner_ids,
+                workflow_configuration=workflow_configuration,
             )
             playbook_review_maintenance = PlaybookAutonomyReviewMaintenance(
                 enabled=True,
@@ -2890,6 +2898,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             token_file=settings.teams_proactive_token_file,
             bindings=bindings,
             owner_identity_ids=procurement_approval_recipient_ids,
+            workflow_configuration=workflow_configuration,
         )
         procurement_worker = ProcurementWorkerExecutor(
             authority=identity_authority,
@@ -2908,6 +2917,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             approval_sender=procurement_approval_sender,
             owner_ids=tuple(procurement_owner_ids),
             supervisor_policy=supervisor_policy,
+            workflow_configuration=workflow_configuration,
             parts_ledger=SQLitePartsLifecycleLedger(settings.procurement_parts_evidence_db),
             structured_client=hosted_conversation_client or ollama_client,
             inventory_location_id=settings.procurement_inventory_location_id,
@@ -2931,6 +2941,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             submissions=procurement_submission_store,
             processor=procurement_teams_flow,
             sender=procurement_approval_sender,
+            workflow_configuration=workflow_configuration,
         )
         billing_audit_store = SQLiteBillingLeakageStore(
             settings.procurement_billing_audit_db
@@ -2975,18 +2986,19 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         elif settings.release_mobile_approval_mode == "admin_approver_separated":
             if owner_policy.schema_version not in {"4.0", "4.1"}:
                 raise PermissionError("admin-separated release mode requires reviewed V4 policy")
-        elif owner_policy.schema_version not in {"2.0", "3.0", "3.1"}:
+        elif owner_policy.schema_version not in {"2.0", "3.0", "3.1", "3.2"}:
             raise PermissionError("active release approval mode and reviewed policy version do not match")
         expected_version = owner_policy.schema_version
         # V4/V4.1 never use mutable email or a symbolic Owner alias for
         # release decisions. Card delivery and the signed callback both bind
         # to the precise Entra object selected by the versioned policy.
-        exact_owner_binding = expected_version in {"4.0", "4.1"}
+        exact_owner_binding = expected_version in {"3.2", "4.0", "4.1"}
         owner_fallback = {} if exact_owner_binding else {"person-al": "al@teamaot.com"}
         # V4.1 delivers to the licensed Owner Teams account. The admin
         # remains independently privileged for administrative capabilities.
         target_binding = (
-            owner_policy.regular_requester_binding if expected_version == "4.1"
+            owner_policy.teams_owner_binding if expected_version == "3.2"
+            else owner_policy.regular_requester_binding if expected_version == "4.1"
             else owner_policy.admin_approver_binding
         )
         owner_entra_bindings = (
@@ -3008,7 +3020,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                 authenticator=teams_authenticator,
                 allowed_machine_identities=settings.allowed_machine_identities,
                 allowed_approval_prefixes=("relapproval-",),
-                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0", "4.0", "4.1"}
+                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version in {"2.0", "3.0", "3.2", "4.0", "4.1"}
                                         else frozenset()),
             ),
             signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),
@@ -3032,6 +3044,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                     owner_identity_ids=owner_policy.owner_identity_ids,
                     owner_identity_email_fallbacks=owner_fallback,
                     owner_identity_entra_bindings=owner_entra_bindings,
+                    workflow_configuration=workflow_configuration,
                 ),
                 interval_seconds=settings.release_mobile_interval_seconds,
                 required_policy_version=expected_version,

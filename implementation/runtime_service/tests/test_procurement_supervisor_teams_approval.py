@@ -184,3 +184,83 @@ def test_borrowed_or_replayed_card_nonce_is_not_accepted():
         flow.handle(**(kwargs|{'selections':{'card_challenge':'f'*48},
             'signed_envelope':{'card_challenge':'f'*48}}))
     assert calls==[] and not repo.decisions
+
+
+def test_changed_live_supervisor_route_rejected_before_recording_decision():
+    flow,repo,store,calls,kwargs=setup()
+    digest='c'*64
+    store.record['workflow_configuration_digest']=digest
+    request=repo.get('procapproval-test')
+    repo.put(replace(request,metadata=request.metadata|{'workflow_configuration_digest':digest}))
+    flow.processor.workflow_configuration=SimpleNamespace(load=lambda:SimpleNamespace(
+        enabled=True,approval_scope_digest=digest))
+    def changed(*args,**kwargs):
+        raise PermissionError('supervisor relationship changed')
+    flow.processor.revalidate_supervisor_contact_route=changed
+    with pytest.raises(PermissionError,match='supervisor relationship changed'):
+        flow.handle(**kwargs)
+    assert repo.get('procapproval-test').status is ApprovalRequestStatus.PENDING
+    assert not repo.accepted_decision('procapproval-test')
+    assert calls==[]
+
+
+def fallback_setup():
+    flow,repo,store,calls,_=setup()
+    digest='c'*64
+    store.record['workflow_configuration_digest']=digest
+    req=repo.get('procapproval-test')
+    repo.put(replace(req,metadata=req.metadata|{'workflow_configuration_digest':digest}))
+    flow.processor.workflow_configuration=SimpleNamespace(load=lambda:SimpleNamespace(
+        enabled=True,approval_scope_digest=digest))
+    flow.processor.revalidate_supervisor_contact_route=lambda *args,**kwargs:None
+    flow.processor.notify_approval_event=lambda *args,**kwargs:None
+    args=dict(approval_id=req.approval_id,decision='approve',reviewed_scope_sha256='a'*64,
+        principal_id='person-supervisor',organization_id='aot',assurance='entra-oauth-bearer',
+        microsoft_tenant_id='microsoft-tenant-aot',microsoft_object_id='valid-user',
+        authentication_evidence_hash='e'*64,channel_response_id='mcp-response',decided_at=NOW)
+    return flow,repo,store,calls,args
+
+
+def test_authenticated_fallback_uses_same_canonical_receipt_and_blocks_teams_replay():
+    from jason_runtime.procurement_supervisor_policy import require_signed_purchase_approval
+    flow,repo,store,calls,args=fallback_setup()
+    assert flow.handle_authenticated(**args)['status']=='completed'
+    receipt=require_signed_purchase_approval(service=flow.approval_service,
+        approval_id=args['approval_id'],submission=store.record)
+    assert receipt.channel=='jason_mcp_entra' and receipt.decided_by=='person-supervisor'
+    with pytest.raises(ValueError,match='no longer pending'):
+        flow.handle_authenticated(**args)
+    assert len(calls)==1
+    # The alternate receipt never enables legacy, non-configured purchases.
+    del store.record['workflow_configuration_digest']
+    with pytest.raises(PermissionError):
+        require_signed_purchase_approval(service=flow.approval_service,
+            approval_id=args['approval_id'],submission=store.record)
+
+
+@pytest.mark.parametrize('change',[
+    {'assurance':'chat_text'}, {'organization_id':'other'},
+    {'principal_id':'person-intruder'}, {'microsoft_object_id':'unbound'},
+    {'reviewed_scope_sha256':'b'*64}, {'authentication_evidence_hash':''},
+])
+def test_authenticated_fallback_denies_unverified_or_changed_scope(change):
+    flow,repo,store,calls,args=fallback_setup()
+    with pytest.raises(PermissionError):flow.handle_authenticated(**(args|change))
+    assert repo.get(args['approval_id']).status is ApprovalRequestStatus.PENDING
+    assert calls==[]
+
+
+def test_fallback_denial_and_teams_decision_compete_for_same_one_use_receipt():
+    flow,repo,store,calls,args=fallback_setup()
+    flow.handle_authenticated(**(args|{'decision':'deny'}))
+    assert repo.accepted_decision(args['approval_id']).status=='denied'
+    assert store.record['status']=='denied' and calls==[]
+
+
+def test_fallback_live_supervisor_drift_rejected_before_consent():
+    flow,repo,store,calls,args=fallback_setup()
+    def drift(*args,**kwargs):raise PermissionError('supervisor changed')
+    flow.processor.revalidate_supervisor_contact_route=drift
+    with pytest.raises(PermissionError,match='supervisor changed'):
+        flow.handle_authenticated(**args)
+    assert not repo.accepted_decision(args['approval_id']) and calls==[]
