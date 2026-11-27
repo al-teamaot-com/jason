@@ -28,7 +28,18 @@ def build_runtime_image(*, runner: Callable = subprocess.run) -> int:
             return 1
         output = (pull.stdout or '') + '\n' + (pull.stderr or '')
         if pull.returncode:
-            limited = bool(re.search(r'(?i)\b429\b|toomanyrequests|too many requests', output))
+            # ECR Public also reports its transfer quota as a bare registry
+            # error, without an HTTP status or the usual throttling wording.
+            # Match that exact observed terminal diagnostic; never rotate on
+            # arbitrary text mentioning a data limit or on security failures.
+            security_failure = bool(re.search(
+                r'(?i)\b(?:401|403)\b|unauthori[sz]ed|denied|certificate|'
+                r'\bx509\b|manifest unknown', output))
+            limited = not security_failure and (
+                bool(re.search(r'(?i)\b429\b|toomanyrequests|too many requests', output))
+                or bool(re.search(
+                    r'(?im)^Error response from daemon: error from registry: Data limit exceeded[ \t\r]*$',
+                    output)))
             # No registry rotation for denied credentials, certificate errors,
             # unknown images, or a failing application/package build.
             if index == 0 and limited:

@@ -907,3 +907,41 @@ def test_repeated_docker_probe_timeout_persists_inconclusive_failure(monkeypatch
     assert data['state'] != 'recovered'
     assert data['failures'] == ['docker_probe_timeout']
     assert data['last_recovery_actions'] == []
+
+
+def test_engineering_progress_requires_fresh_completed_evidence(tmp_path):
+    root = tmp_path / "self-heal"
+    spool = tmp_path / "support-repair"
+    root.mkdir()
+    spool.mkdir()
+    now_at = datetime(2026, 11, 26, 19, 46, tzinfo=timezone.utc)
+    def write(name, payload):
+        (spool / name).write_text(json.dumps(payload))
+    critical = {"reason": "critical_support_stalled", "blocked_count": 1, "unadmitted_count": 0,
+                "blocked_items": ["SUPPORT-OPS-054"], "unadmitted_items": []}
+    pipeline = {"status": "degraded", "started_at": (now_at - timedelta(minutes=2)).isoformat(),
+                "finished_at": now_at.isoformat(), "critical_support_blocker": critical,
+                "failed_work_stages": []}
+    supervisor = {"status": "degraded", "observed_at": now_at.isoformat(),
+                  "reason": "external_or_governed_gate", "active": 0, "unchanged_cycles": 153,
+                  "support_blocker_routes": {"SUPPORT-OPS-054": {"category": "recoverable_source"}}}
+    write("engineering-pipeline-state.json", pipeline)
+    write("engineering-supervisor-state.json", supervisor)
+    failures, evidence = module.engineering_progress_failures(root, observed_at=now_at)
+    assert failures == ["engineering_progress_critical_support_stalled"]
+    assert evidence["critical_support_ids"] == ["SUPPORT-OPS-054"]
+    (root / "state.json").write_text(json.dumps({"failures": failures}))
+    write("engineering-pipeline-state.json", {"status": "running", "started_at": now_at.isoformat()})
+    assert module.engineering_progress_failures(root, observed_at=now_at)[0] == failures
+    write("engineering-pipeline-state.json", pipeline)
+    supervisor["support_blocker_routes"]["SUPPORT-OPS-054"]["category"] = "human_authority"
+    write("engineering-supervisor-state.json", supervisor)
+    assert module.engineering_progress_failures(root, observed_at=now_at)[0] == []
+    assert module.engineering_progress_failures(root, observed_at=now_at + timedelta(minutes=16))[0] == [
+        "engineering_progress_evidence_unknown"]
+    write("engineering-pipeline-state.json", {"status": "running",
+          "started_at": (now_at - timedelta(minutes=21)).isoformat()})
+    assert module.engineering_progress_failures(root, observed_at=now_at)[0] == [
+        "engineering_progress_evidence_stale"]
+    (spool / "pmv3-engineering-owner-pause.json").write_text("{}")
+    assert module.engineering_progress_failures(root, observed_at=now_at)[0] == failures
