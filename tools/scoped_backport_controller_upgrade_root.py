@@ -91,8 +91,16 @@ def terminal_offer():
             "status": "resolved_prior_attempt_no_action"}:
         deny("CONTROLLER_UPGRADE_ACTIVE_RELEASE")
     journal = live.root_json(host._journal_path(manifest))
-    if journal.get("outcome") != "rollback_verified":
-        deny("CONTROLLER_UPGRADE_PRIOR_ROLLBACK_REQUIRED")
+    if journal.get("outcome") not in ("rollback_verified", "production_components_verified"):
+        deny("CONTROLLER_UPGRADE_PRIOR_VERIFIED_OUTCOME_REQUIRED")
+    # A successful scoped release must still be the root-verified live
+    # component baseline for this maintenance action.
+    if journal["outcome"] == "production_components_verified":
+        readback = live.readback.verify_live()
+        if (readback is None or readback["release_id"] != manifest["release_id"]
+                or readback["manifest_sha256"] != digest(manifest)
+                or readback["scope_sha256"] != manifest["scope_sha256"]):
+            deny("CONTROLLER_UPGRADE_PRIOR_READBACK_MISMATCH")
     if any((dispatcher.AUTH / "requests").glob("*.json")):
         deny("CONTROLLER_UPGRADE_PENDING_REQUESTS")
     return host, manifest

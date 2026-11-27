@@ -188,3 +188,33 @@ def test_removal_is_strictly_after_exact_approval_archive_and_fresh_identity(fix
         # without issuing a second removal.
         events.clear();invoke()
         assert events==["archive","inventory","readback","receipt"]
+
+
+def test_completed_active_offer_is_bound_without_removing_history(tmp_path):
+    from types import SimpleNamespace
+    from tools import rollback_retention_native as native
+
+    prior = "release-" + "a" * 16
+    next_release = "release-" + "b" * 16
+    manifest = {"release_id": prior, "scope_sha256": "a" * 64}
+    offer = {"manifest": manifest}
+    location = tmp_path / "transactions"
+    location.mkdir()
+    journal_path = location / (prior + ".json")
+    journal_path.write_text("{}")
+    journal = {"release_id": prior, "scope_sha256": "a" * 64,
+               "manifest_sha256": native.digest(manifest), "outcome": "production_components_verified"}
+    host = SimpleNamespace(active_staged_offer=lambda: offer, PRIVATE=tmp_path, root_json=lambda _: journal)
+    before = native.completed_active_offer(host, next_release)
+    assert before["outcome"] == "production_components_verified"
+    assert before["offer_sha256"] == native.digest(offer)
+    assert journal_path.is_file()
+    with pytest.raises(PermissionError, match="ACTIVE_OFFER_EXISTS"):
+        native.completed_active_offer(host, prior)
+    journal["outcome"] = "rollback_unverified"
+    with pytest.raises(PermissionError, match="ACTIVE_OFFER_UNRESOLVED"):
+        native.completed_active_offer(host, next_release)
+    journal["outcome"] = "rollback_verified"
+    journal["scope_sha256"] = "b" * 64
+    with pytest.raises(PermissionError, match="ACTIVE_OFFER_UNRESOLVED"):
+        native.completed_active_offer(host, next_release)

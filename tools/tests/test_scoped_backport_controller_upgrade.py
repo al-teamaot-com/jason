@@ -159,3 +159,31 @@ def test_root_adapter_checks_scope_and_restores_listeners(monkeypatch, tmp_path,
     assert listener == "active"
     assert consumed.exists() == (fault != "approval")
     assert all(contents[f.path] == (f.before if fault else f.after) for f in plan.files)
+
+
+def test_upgrade_recognizes_a_verified_completed_prior_release(monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+    from tools import scoped_backport_controller_upgrade_root as root
+
+    release = "release-" + "a" * 16
+    manifest = {"release_id": release, "scope_sha256": "e" * 64}
+    host = SimpleNamespace(_journal_path=lambda _: Path("/unused/journal"))
+    journal = {"outcome": "production_components_verified"}
+    readback = {"release_id": release, "manifest_sha256": root.digest(manifest),
+                "scope_sha256": manifest["scope_sha256"]}
+    monkeypatch.setattr(root.dispatcher, "load_installed", lambda: (host, manifest, {}))
+    monkeypatch.setattr(root.dispatcher, "scheduled_approved", lambda *_: {
+        "status": "resolved_prior_attempt_no_action"})
+    monkeypatch.setattr(root.dispatcher, "AUTH", Path("/unused"))
+    monkeypatch.setattr(root.live, "root_json", lambda _: journal)
+    monkeypatch.setattr(root.live.readback, "verify_live", lambda: readback)
+    assert root.terminal_offer() == (host, manifest)
+    readback["scope_sha256"] = "f" * 64
+    with pytest.raises(ScopedBackportDenied, match="PRIOR_READBACK_MISMATCH"):
+        root.terminal_offer()
+    journal["outcome"] = "rollback_verified"
+    assert root.terminal_offer() == (host, manifest)
+    journal["outcome"] = "rollback_unverified"
+    with pytest.raises(ScopedBackportDenied, match="PRIOR_VERIFIED_OUTCOME_REQUIRED"):
+        root.terminal_offer()
