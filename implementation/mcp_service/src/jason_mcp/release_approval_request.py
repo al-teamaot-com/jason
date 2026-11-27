@@ -11,7 +11,8 @@ from uuid import uuid4
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from kernel.signed_owner_release import (
     EXACT_OWNER_OAUTH_SUBJECTS, issue_exact_owner_release,
-    verify_exact_owner_release,
+    verify_exact_owner_release, read_retired_release_policy,
+    require_retired_release_mode,
 )
 from pathlib import Path
 
@@ -68,8 +69,15 @@ def queue_release_approval_request(
         raise ValueError('RELEASE_APPROVAL_CANDIDATE_METADATA_MISSING')
     if str(candidate.get('candidate_sha') or '').strip().casefold() != candidate_sha:
         raise ValueError('RELEASE_APPROVAL_RECORD_SHA_MISMATCH')
+    retired_policy = read_retired_release_policy()
+    if retired_policy is not None:
+        require_retired_release_mode(state_root, retired_policy)
     existing = record.get('owner_approval')
     if isinstance(existing, dict) and existing.get('approved') is True:
+        if retired_policy is not None:
+            # Pre-retirement approved booleans/records are never inherited.
+            # The native preparation path must create a fresh reviewed record.
+            raise ValueError('RELEASE_APPROVAL_RETIRED_MODE_FRESH_RECORD_REQUIRED')
         if str(existing.get('candidate_sha') or '').strip().casefold() != candidate_sha:
             raise ValueError('RELEASE_APPROVAL_EXISTING_SHA_MISMATCH')
         return {
@@ -101,10 +109,16 @@ def queue_release_approval_request(
             or manifest.get('rollback_sha') != rollback
             or len(scope_sha) != 64):
         raise ValueError('RELEASE_APPROVAL_EXACT_REVIEWED_SCOPE_REQUIRED')
-    freeze = state_root / 'production-deployment-freeze'
-    if not freeze.is_file() or freeze.is_symlink():
-        raise ValueError('RELEASE_APPROVAL_FROZEN_TRANSACTION_REQUIRED')
-    freeze_hash = hashlib.sha256(freeze.read_bytes()).hexdigest()
+    if retired_policy is not None:
+        issue_binding = {"release_policy_sha256": retired_policy}
+        verify_binding = {"expected_release_policy_sha256": retired_policy}
+    else:
+        freeze = state_root / 'production-deployment-freeze'
+        if not freeze.is_file() or freeze.is_symlink():
+            raise ValueError('RELEASE_APPROVAL_FROZEN_TRANSACTION_REQUIRED')
+        freeze_hash = hashlib.sha256(freeze.read_bytes()).hexdigest()
+        issue_binding = {"freeze_sha256": freeze_hash}
+        verify_binding = {"expected_freeze_sha256": freeze_hash}
     manifest_hash = hashlib.sha256(json.dumps(
         manifest, sort_keys=True, separators=(',', ':'),
         ensure_ascii=False,
@@ -116,7 +130,7 @@ def queue_release_approval_request(
         rollback_sha=rollback,
         scope_sha256=scope_sha,
         manifest_sha256=manifest_hash,
-        freeze_sha256=freeze_hash,
+        **issue_binding,
         verified_tenant_id=str(verified_token_claims['tid']),
         verified_owner_oid=str(verified_token_claims['oid']),
         verified_principal=approved_by,
@@ -134,7 +148,7 @@ def queue_release_approval_request(
         expected_release_id=release_id,
         expected_scope_sha256=scope_sha,
         expected_manifest_sha256=manifest_hash,
-        expected_freeze_sha256=freeze_hash,
+        **verify_binding,
         at=datetime.now(timezone.utc),
     )
     request_path = state_root / 'owner-approval-requests' / f'{release_id}.json'
@@ -159,6 +173,19 @@ def queue_release_approval_request(
         # be independently checked by the host consumer.
         if not isinstance(current.get('signed_owner_proof'), dict):
             raise ValueError('RELEASE_APPROVAL_EXISTING_REQUEST_UNSIGNED')
+        if retired_policy is not None:
+            # An old frozen-mode request or stale signature must not silently
+            # masquerade as the newly approved normal-mode request.
+            prior = verify_exact_owner_release(
+                current["signed_owner_proof"], public_key=service_signer.public_key(),
+                expected_candidate_sha=candidate_sha, expected_rollback_sha=rollback,
+                expected_release_id=release_id, expected_scope_sha256=scope_sha,
+                expected_manifest_sha256=manifest_hash, **verify_binding,
+                at=datetime.now(timezone.utc),
+            )
+            if (current.get("source") != "authenticated_jason_mcp_owner:" + prior["approval_id"]
+                    or prior["owner_principal"] != approved_by):
+                raise ValueError("RELEASE_APPROVAL_PENDING_REQUEST_CONFLICT")
         return dict(current)
     _atomic_json(request_path, payload)
     return payload

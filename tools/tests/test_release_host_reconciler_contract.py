@@ -963,3 +963,50 @@ def test_host_reconciler_requires_installed_worker_gate_alignment():
 ' in shell
     assert 'installed worker differs from production source' in shell
     assert shell.index('step_start protected_root_policy_stage') < shell.index('step_start user_worker_reconciliation')
+
+
+def test_root_verifies_retired_normal_proof_and_rejects_frozen_replay(tmp_path, monkeypatch):
+    import importlib.util
+    import json
+    import os
+    from datetime import datetime, timezone
+    from hashlib import sha256
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from kernel import signed_owner_release as proof
+    spec=importlib.util.spec_from_file_location("root_retired_mode_fixture", ROOT/"tools/release_host_reconcile_worker.py")
+    worker=importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    key=Ed25519PrivateKey.generate()
+    policy="9"*64
+    candidate,rollback,scope="a"*40,"b"*40,"c"*64
+    rid="release-"+candidate[:16]
+    aid="owner-mcp-"+"e"*32
+    manifest={"candidate_sha":candidate,"rollback_sha":rollback}
+    manifest_hash=sha256(json.dumps(manifest,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+    record={"release_id":rid,"release_candidate":{"candidate_sha":candidate},"rollback_sha":rollback,
+        "release_manifest":manifest,"manual_scope_review":{"candidate_sha":candidate,"baseline_sha":rollback,"scope_sha256":scope},
+        "owner_approval":{"approved":True,"candidate_sha":candidate,"source":"authenticated_signed_mcp_owner:"+aid,
+        "transaction_binding":{"candidate_sha":candidate,"rollback_sha":rollback,"scope_sha256":scope,"manifest_sha256":manifest_hash}}}
+    path=tmp_path/"owner-approval-requests-processed"/(rid+".json")
+    path.parent.mkdir()
+    monkeypatch.setattr(worker,"RELEASE_STATE",tmp_path)
+    monkeypatch.setattr(worker,"_host_operator_uid",os.geteuid)
+    monkeypatch.setattr(worker,"_trusted_owner_proof_module",lambda:proof)
+    monkeypatch.setattr(worker,"_root_owner_identity_is_active",lambda oid,principal: oid==proof.OWNER_OID and principal==proof.OWNER_PRINCIPAL)
+    monkeypatch.setattr(proof,"read_retired_release_policy",lambda:policy)
+    monkeypatch.setattr(proof,"read_pinned_root_owner_public_key",lambda _:key.public_key())
+    def write(**binding):
+        signed=proof.issue_exact_owner_release(approval_id=aid,release_id=rid,candidate_sha=candidate,
+            rollback_sha=rollback,scope_sha256=scope,manifest_sha256=manifest_hash,
+            verified_tenant_id=proof.TID,verified_owner_oid=proof.OWNER_OID,verified_principal=proof.OWNER_PRINCIPAL,
+            verified_organization_id="aot",confirmed_decision="approve",at=datetime.now(timezone.utc),private_key=key,**binding)
+        path.write_text(json.dumps({"release_id":rid,"candidate_sha":candidate,"approved_by":proof.OWNER_PRINCIPAL,
+            "organization_id":"aot","source":"authenticated_jason_mcp_owner:"+aid,"signed_owner_proof":signed}))
+        path.chmod(0o600)
+    write(release_policy_sha256=policy)
+    assert worker._signed_mcp_owner_release_authorized(candidate,rollback,record)
+    write(freeze_sha256=policy)
+    assert not worker._signed_mcp_owner_release_authorized(candidate,rollback,record)
+    write(release_policy_sha256=policy)
+    (tmp_path/"production-deployment-freeze").write_text("unexpected marker")
+    assert not worker._signed_mcp_owner_release_authorized(candidate,rollback,record)

@@ -681,13 +681,21 @@ def _signed_mcp_owner_release_authorized(
                 or len(raw) > 16384):
             return False
         request = json.loads(raw)
-        freeze_path = backup if not freeze.exists() else freeze
-        freeze_info = freeze_path.lstat()
-        if (freeze_path.is_symlink()
-                or not stat.S_ISREG(freeze_info.st_mode)
-                or freeze_info.st_uid != al
-                or stat.S_IMODE(freeze_info.st_mode) != 0o600):
-            return False
+        module = _trusted_owner_proof_module()
+        retired_policy = module.read_retired_release_policy()
+        if retired_policy is not None:
+            module.require_retired_release_mode(RELEASE_STATE, retired_policy)
+            proof_binding = {"expected_release_policy_sha256": retired_policy}
+        else:
+            freeze_path = backup if not freeze.exists() else freeze
+            freeze_info = freeze_path.lstat()
+            if (freeze_path.is_symlink()
+                    or not stat.S_ISREG(freeze_info.st_mode)
+                    or freeze_info.st_uid != al
+                    or stat.S_IMODE(freeze_info.st_mode) != 0o600):
+                return False
+            proof_binding = {"expected_freeze_sha256": hashlib.sha256(
+                freeze_path.read_bytes()).hexdigest()}
         manifest = record.get("release_manifest") or {}
         review = record.get("manual_scope_review") or {}
         scope = str(review.get("scope_sha256") or "")
@@ -708,7 +716,6 @@ def _signed_mcp_owner_release_authorized(
                 }
                 or request.get("organization_id") != "aot"):
             return False
-        module = _trusted_owner_proof_module()
         public = module.read_pinned_root_owner_public_key(
             ROOT_OWNER_TRUST_POLICY,
         )
@@ -720,9 +727,7 @@ def _signed_mcp_owner_release_authorized(
             expected_release_id=release_id,
             expected_scope_sha256=scope,
             expected_manifest_sha256=manifest_digest,
-            expected_freeze_sha256=hashlib.sha256(
-                freeze_path.read_bytes()
-            ).hexdigest(),
+            **proof_binding,
             at=datetime.now(timezone.utc),
         )
         if (source != "authenticated_signed_mcp_owner:" + proof["approval_id"]
