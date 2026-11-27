@@ -189,3 +189,79 @@ pin, native fixture assertion, or legacy installer is relaxed. Run the
 original transition regression against both variants and the new
 component-reader denial checks. Trigger the audit workflow on either
 transition source change, before merge.
+
+## Native preparation failure: exact guard mode and denial reporting
+
+The authenticated attempt on candidate 34f9fc7cd57adf9889ec0461e74e06ede1f36a64
+recorded the exact parent approval at 15:40:49 UTC on November 27 and
+terminated with a verified predecessor rollback at 15:41:49 UTC. The
+original engineering pause is retained. The former manager remains active;
+the production freeze, incident hold and protected application peers remain
+unchanged.
+
+The reviewed preparation after-image specifies mode 0644 for the new
+native health guard, whereas the existing independently pinned worker
+requires a root-owned, single-link regular file with exact mode 0444 and
+matching digest. This is a deterministic custody contract defect. An
+isolated, network-disabled, read-only container with synthetic ledger state
+reproduced rejection of the original 0644 image and acceptance of the
+corrected 0444 image with identical guard bytes. It did not exercise
+production acceptance or any provider. The earlier suspected readback
+freshness race alone cannot explain the later attempt. The original
+installer discarded the independent reader's precise denial reason, so
+the historical child result cannot be recovered.
+
+The source correction stages the guard with its existing required 0444
+mode and preserves all independent health and ownership assertions.
+Bounded diagnostic reporting retains known health denial reasons without
+echoing arbitrary child output. Local affected regression: 257 passed,
+5 isolated-root cases skipped in the ordinary run. The actual strict
+reader custody rehearsal passed separately.
+
+The failed attempt is terminal, not reusable authorization. A corrected
+release requires normal protected-main review and a fresh exact approval.
+The preserved pause is a rollback protection: the ordinary successor
+preflight requires an unpaused predecessor, and the existing resume route
+requires a verified non-rolled-back cutover. Do not remove that pause
+manually, overwrite the immutable failure record, or claim this source
+correction alone provides a supported recovery transition. Establish the
+applicable governed recovery scope and verify the restored predecessor
+before another production attempt.
+
+### Exact successor of the verified terminal rollback
+
+The corrected candidate may be considered while the predecessor is paused
+only for the combined retirement scope, with the existing authenticated
+Owner decision still required for the new candidate. The read-only
+predecessor proof binds the exact failed candidate, root-owned immutable
+approval, receipt-image and terminal rollback hashes; checks the
+historical exact scope and predecessor receipt; requires the exact
+three-record terminal history; and independently compares all original
+target bytes, ownership, modes and absent paths. The retained pause must
+match its approved bytes. The failed release directory must be absent.
+Other paused predecessor cases retain their ordinary denial.
+
+The new plan binds that evidence into its authenticated exact action.
+After authentication, the installer repeats the original protected-source
+and health checks, the rollback proof, and the before-image checks under
+the existing native locks. The old approval is not reused or overwritten.
+The pause remains in place until the existing successor cutover checks
+succeed; failed acceptance continues to restore the pause.
+
+Before the existing locked health checks, the combined retirement path now
+waits outside the locks for the scheduled protected readback publisher to
+provide clean evidence no more than 40 seconds old. This is a read-only
+starting prerequisite, not a new source of health or a waiver: all
+independent drift, breaker, core, image, audit, authority and ticket-scan
+checks, including their original 120-second freshness requirement, are
+unchanged. Unhealthy, future-dated or unavailable evidence fails closed.
+No production timer, health record, authority, or lock is changed by
+this wait.
+
+Validation of this source candidate: 949 affected regression tests and
+five subtests passed (five disposable-root tests excluded from the
+ordinary run). Synthetic tests reject an unrelated request, a foreign
+pause, changed records, extra history, changed restored files, and reuse
+of the failed candidate; the scope is still sent to the existing
+authenticator before locking or mutation. A protected-main native
+preflight and a new exact authenticated approval are required.

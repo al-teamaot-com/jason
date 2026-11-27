@@ -745,3 +745,242 @@ def test_legacy_successor_passes_exact_scope_to_existing_authenticator():
         a.apply(p,m.pipeline_scope_sha(p))
     a.n["owner"].assert_called_once_with(p)
     a.n["locks"].assert_not_called()
+
+
+@pytest.mark.parametrize("reason",sorted(m.PIPELINE_HEALTH_DENIAL_REASONS))
+def test_independent_health_denial_reason_preserved(reason):
+    with pytest.raises(PermissionError,match="PIPELINE_NATIVE_CORE_HEALTH:"+reason):
+        m.verify_pipeline_native_core_health({
+            "verified":False,"reason":reason,"production_authority":False})
+
+
+@pytest.mark.parametrize("invalid",[
+    None, [], {}, {"verified":1,"production_authority":False,"production_revision":m.LKG},
+    {"verified":True,"production_authority":0,"production_revision":m.LKG},
+    {"verified":True,"production_authority":True,"production_revision":m.LKG},
+    {"verified":True,"production_authority":False,"production_revision":"0"*40},
+    {"verified":False,"reason":"native_readback_live_core_and_authority_verified"},
+    {"verified":False,"reason":["unrecognized"]},
+])
+def test_health_diagnostics_never_turn_denial_into_acceptance(invalid):
+    with pytest.raises(PermissionError,match="PIPELINE_NATIVE_CORE_HEALTH"):
+        m.verify_pipeline_native_core_health(invalid)
+
+
+def test_health_diagnostic_does_not_echo_arbitrary_child_output():
+    with pytest.raises(PermissionError,match="invalid_or_unrecognized_result") as caught:
+        m.verify_pipeline_native_core_health({"verified":False,"reason":"fixture-private-output"})
+    assert "fixture-private-output" not in str(caught.value)
+
+
+def test_exact_native_health_still_requires_original_three_conditions():
+    assert m.verify_pipeline_native_core_health({
+        "verified":True,"production_authority":False,"production_revision":m.LKG}) is None
+
+
+
+def test_normal_manager_stage_images_bind_reader_custody():
+    from tools import owner_approved_development_worker as worker
+    code = {rel: (m.REPO / rel).read_bytes()
+            for rel in m.NORMAL_MANAGER_STAGE_FILES.values()}
+    images = m.normal_manager_stage_images(code)
+    assert set(images) == set(m.NORMAL_MANAGER_STAGE_FILES)
+    raw, uid, gid, mode = images[worker.NATIVE_HEALTH_GUARD]
+    assert (uid, gid, mode) == (0, 0, 0o444)
+    assert m.digest(raw) == worker.NATIVE_HEALTH_GUARD_SHA256
+    for path, value in images.items():
+        if path != worker.NATIVE_HEALTH_GUARD:
+            assert value[1:] == (0, 0, 0o644)
+
+
+def normal_rollback_plan():
+    p = normal_manager_plan()
+    p["normal_retirement"] = {
+        "action":"RETIRE-EXACT-GLOBAL-PRODUCTION-FREEZE",
+        "candidate_sha":p["policy"]["candidate_sha"],
+        "provider_writes":False, "standing_authority":False,
+        "rollback_authorized":True,
+        "configuration_after":{"schema_version":"1.0","production_freeze":False},
+        "installation_targets":["fixture-retirement-target"],
+    }
+    return p
+
+
+@pytest.mark.parametrize("mutation", [
+    "foreign_candidate","wrong_approval","wrong_receipt","wrong_rollback",
+    "same_candidate","missing_retirement","different_predecessor"
+])
+def test_rollback_predecessor_scope_rejects_unrelated_authority(mutation):
+    p = normal_rollback_plan()
+    p["normal_manager_rollback_predecessor"] = dict(m.NORMAL_MANAGER_ROLLBACK_EVIDENCE)
+    assert m.pipeline_scope_sha(p) == m.digest(m.canon(p))
+    if mutation == "foreign_candidate":
+        p["normal_manager_rollback_predecessor"]["failed_candidate_sha"] = "e"*40
+    elif mutation in ("wrong_approval","wrong_receipt","wrong_rollback"):
+        p["normal_manager_rollback_predecessor"][mutation[6:]+"_sha256"] = "0"*64
+    elif mutation == "same_candidate":
+        p["policy"]["candidate_sha"] = m.NORMAL_MANAGER_ROLLBACK_EVIDENCE["failed_candidate_sha"]
+        p["normal_manager_source_review"]["candidate"] = p["policy"]["candidate_sha"]
+        p["normal_retirement"]["candidate_sha"] = p["policy"]["candidate_sha"]
+    elif mutation == "missing_retirement":
+        del p["normal_retirement"]
+    else:
+        p["predecessor_candidate_sha"] = m.PIPELINE_BASELINE
+    with pytest.raises(PermissionError,match="NORMAL_MANAGER_ROLLBACK_SCOPE_INVALID"):
+        m.pipeline_scope_sha(p)
+
+
+@pytest.fixture
+def normal_rollback_history(tmp_path, monkeypatch):
+    """Synthetic immutable records and snapshots; no production paths touched."""
+    import os
+    from tools import production_freeze_retirement as retirement
+    failed = "b"*40
+    root = tmp_path/"manager"
+    state = tmp_path/"state"
+    history = state/failed
+    history.mkdir(parents=True,mode=0o700)
+    pause = m.image(b"fixture rollback pause",1000,0o600)
+    monkeypatch.setattr(m,"ROOT",root)
+    monkeypatch.setattr(m,"STATE",state)
+    monkeypatch.setitem(m.OLD,m.PAUSE,(1000,0o600,m.digest(pause[0])))
+    a = object.__new__(m.PipelineSuccessor)
+    a.predecessor = m.NORMAL_MANAGER_BASELINE
+    a.candidate = "a"*40
+    a.retirement_requested = True
+    a.release = root/"releases"/a.candidate/"tools"
+    a.g = {"validate_receipt":lambda row:row}
+    a.retirement_helper = lambda:{"owner_scope":retirement.owner_scope}
+    restored = root/"fixture-native-guard"
+    a.approved_targets = lambda:{m.PAUSE,m.RECEIPT,restored,a.release/"fixture.py"}
+    before = {m.PAUSE:None,m.RECEIPT:m.image(b"predecessor receipt",0,0o444),
+              restored:None,root/"releases"/failed/"tools"/"fixture.py":None}
+    after = {p:m.image(b"fixture successor",0,0o444)
+             for p in before if p!=m.RECEIPT}
+    after[m.PAUSE] = pause
+    scope = normal_rollback_plan()
+    scope["policy"]["candidate_sha"] = failed
+    scope["normal_manager_source_review"]["candidate"] = failed
+    scope["normal_retirement"]["candidate_sha"] = failed
+    scope["installation_targets"] = sorted(map(str,before))
+    scope["before"] = {str(p):m.describe(v) for p,v in before.items()}
+    scope["after"] = {str(p):m.describe(v) for p,v in after.items()}
+    sha = m.pipeline_scope_sha(scope)
+    approval = {"scope":scope,"scope_sha256":sha,"owner_action":scope["normal_retirement"]["action"],
+                "owner_scope_sha256":m.digest(m.canon(retirement.owner_scope(scope))),
+                "before_images":m.encode(before),"after_images":m.encode(after)}
+    raw = m.canon(approval)
+    receipt = m.canon({"candidate_sha":failed,"scope_sha256":sha,
+                      "approval_sha256":m.digest(raw),
+                      "predecessor_candidate_sha":a.predecessor})
+    rollback = m.canon({"status":"predecessor_restored_engineering_paused",
+                       "scope_sha256":sha,"production_authority":False})
+    records = {"approval.json":raw,"receipt-image.json":receipt,"rollback.json":rollback}
+    for name,data in records.items():
+        p=history/name
+        p.write_bytes(data)
+        p.chmod(0o400)
+    pins = {"failed_candidate_sha":failed,"approval_sha256":m.digest(raw),
+            "receipt_sha256":m.digest(receipt),"rollback_sha256":m.digest(rollback)}
+    monkeypatch.setattr(m,"NORMAL_MANAGER_ROLLBACK_EVIDENCE",pins)
+    # Only the synthetic history directory is assigned test root metadata.
+    real_lstat = Path.lstat
+    def lstat(path,*args,**kwargs):
+        row=real_lstat(path,*args,**kwargs)
+        if path==history:
+            values=list(row)
+            values[4]=values[5]=0
+            return os.stat_result(values)
+        return row
+    monkeypatch.setattr(Path,"lstat",lstat)
+    def read(path,uid,mode,maximum=2_000_000):
+        assert path.parent==history and uid==0 and mode==0o400
+        return path.read_bytes()
+    a.n={"read":read}
+    snapshots=dict(before)
+    snapshots[m.PAUSE]=pause
+    monkeypatch.setattr(m,"snapshot",snapshots.get)
+    return a,history,snapshots,pins,restored
+
+
+def test_exact_rollback_evidence_is_read_only(normal_rollback_history):
+    a,history,snapshots,pins,_=normal_rollback_history
+    before=dict(snapshots)
+    records={p:p.read_bytes() for p in history.iterdir()}
+    assert a.verify_normal_manager_rollback_predecessor()==pins
+    assert snapshots==before
+    assert {p:p.read_bytes() for p in history.iterdir()}==records
+
+
+@pytest.mark.parametrize("mutation",["foreign_pause","missing_pause","live_file",
+                                     "foreign_record","changed_record","same_candidate",
+                                     "unrelated_request","wrong_predecessor"])
+def test_rollback_evidence_fails_closed(normal_rollback_history,mutation):
+    a,history,snapshots,pins,restored=normal_rollback_history
+    if mutation=="foreign_pause":
+        snapshots[m.PAUSE]=m.image(b"foreign pause",1000,0o600)
+    elif mutation=="missing_pause":
+        snapshots[m.PAUSE]=None
+    elif mutation=="live_file":
+        snapshots[restored]=m.image(b"unexpected file",0,0o444)
+    elif mutation=="foreign_record":
+        (history/"activation.json").touch()
+    elif mutation=="changed_record":
+        path=history/"rollback.json"
+        path.chmod(0o600)
+        path.write_bytes(b"changed")
+    elif mutation=="same_candidate":
+        a.candidate=pins["failed_candidate_sha"]
+    elif mutation=="unrelated_request":
+        a.retirement_requested=False
+    else:
+        a.predecessor=m.PIPELINE_BASELINE
+    with pytest.raises(PermissionError,match="NORMAL_MANAGER_ROLLBACK"):
+        a.verify_normal_manager_rollback_predecessor()
+
+
+def test_recovery_proof_remains_inside_new_authenticated_scope():
+    from tools import production_freeze_retirement as retirement
+    p=normal_rollback_plan()
+    p["normal_manager_rollback_predecessor"]=dict(m.NORMAL_MANAGER_ROLLBACK_EVIDENCE)
+    a=object.__new__(m.PipelineSuccessor)
+    a.retirement_helper=lambda:{"owner_scope":retirement.owner_scope}
+    a.n={"owner":Mock(side_effect=PermissionError("fixture authorization denied")),
+         "locks":Mock(side_effect=AssertionError("mutation before authentication"))}
+    p["installation_targets"]=["fixture-preparation-target"]
+    exact=retirement.owner_scope(p)
+    with pytest.raises(PermissionError,match="fixture authorization denied"):
+        a.apply(p,m.digest(m.canon(exact)))
+    a.n["owner"].assert_called_once_with(exact)
+    a.n["locks"].assert_not_called()
+
+
+def test_readback_wait_uses_only_existing_publisher(monkeypatch):
+    from datetime import datetime,timezone,timedelta
+    a=object.__new__(m.PipelineSuccessor)
+    def row(age):
+        return m.canon({"schema_version":"1.0","status":"pass","problems":[],
+                       "observed_at":(datetime.now(timezone.utc)-timedelta(seconds=age)).isoformat()})
+    read=Mock(side_effect=[row(110),row(65),row(25)])
+    a.p={"read":read}
+    sleep=Mock()
+    monkeypatch.setattr(m.time,"sleep",sleep)
+    a.wait_for_fresh_pipeline_readback(attempts=4)
+    assert read.call_count==3
+    assert sleep.call_count==2
+    assert all(c.args==(m.MANAGER/"protected-readback/production-drift.json",1000,0o600)
+               for c in read.call_args_list)
+
+
+@pytest.mark.parametrize("fault",["stale","drift","future"])
+def test_readback_wait_does_not_accept_failed_or_missing_fresh_evidence(monkeypatch,fault):
+    from datetime import datetime,timezone,timedelta
+    a=object.__new__(m.PipelineSuccessor)
+    a.p={"read":Mock(return_value=m.canon({
+        "schema_version":"1.0","status":"drift_detected" if fault=="drift" else "pass",
+        "problems":[] if fault!="drift" else [{"kind":"fixture_drift"}],
+        "observed_at":(datetime.now(timezone.utc)-timedelta(seconds=-30 if fault=="future" else 180)).isoformat()
+    }))}
+    monkeypatch.setattr(m.time,"sleep",lambda _:None)
+    with pytest.raises(PermissionError,match="PIPELINE_(FRESH_READBACK_UNAVAILABLE|READBACK_NOT_CLEAN|READBACK_TIME_INVALID)"):
+        a.wait_for_fresh_pipeline_readback(attempts=2)

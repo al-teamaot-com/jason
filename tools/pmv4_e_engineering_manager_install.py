@@ -91,6 +91,44 @@ def need(ok, why):
         raise PermissionError("ENGINEERING_MANAGER_INSTALL_" + why)
 
 
+# Preserve a bounded diagnostic from the existing independent health reader.
+# This changes error reporting only; it never converts a denied check into PASS.
+PIPELINE_HEALTH_DENIAL_REASONS = frozenset({
+    "noncanonical_engineering_spool",
+    "audit_migration_not_accepted",
+    "audit_release_not_quiescent",
+    "audit_maintenance_not_active",
+    "audit_maintenance_not_verified",
+    "native_readback_schema_invalid",
+    "native_release_health_unverified",
+    "live_core_health_unverified",
+    "live_core_image_mismatch",
+    "authority_health_unverified",
+    "full_restore_proof_unverified",
+    "native_health_changed_during_probe",
+    "native_health_evidence_unavailable",
+    *("native_health_unit_not_successful:" + name for name in (
+        "jason-production-drift-watchdog.service",
+        "jason-pmv4-component-readback.service",
+        "jason-openclaw-authority-health.service",
+    )),
+})
+
+
+def verify_pipeline_native_core_health(health):
+    if isinstance(health, dict):
+        if (health.get("verified") is True
+                and health.get("production_authority") is False
+                and health.get("production_revision") == LKG):
+            return
+        reason = health.get("reason")
+        if isinstance(reason, str) and reason in PIPELINE_HEALTH_DENIAL_REASONS:
+            need(False, "PIPELINE_NATIVE_CORE_HEALTH:" + reason)
+        if health.get("verified") is True:
+            need(False, "PIPELINE_NATIVE_CORE_HEALTH:invalid_authority_or_revision")
+    need(False, "PIPELINE_NATIVE_CORE_HEALTH:invalid_or_unrecognized_result")
+
+
 def digest(raw):
     return sha256(raw).hexdigest()
 
@@ -1169,6 +1207,14 @@ WATCHDOG_RECOVERY_SUPPORTING_FILES = BREAKER_CUSTODY_SUPPORTING_FILES | {"tools/
 # deploy a container, grant provider rights, or activate a normal release.
 # Reuse the existing authenticated transaction and predecessor acceptance.
 NORMAL_MANAGER_BASELINE = "81ad19542cc8a720debb09d2ea7c511db6b9fc20"
+# Historical rollback evidence, not an approval token. The next candidate
+# must independently obtain its own authenticated exact-scope decision.
+NORMAL_MANAGER_ROLLBACK_EVIDENCE = {
+    "failed_candidate_sha": "34f9fc7cd57adf9889ec0461e74e06ede1f36a64",
+    "approval_sha256": "52bc6e0f4954d20a0b440d78f8255e45ee1ae6b845e480fa7720c228912f770f",
+    "receipt_sha256": "9dcb25de47df65bc962be27cc4d402010cbf52ccdb8e4fabd0cecf8e5ef8df76",
+    "rollback_sha256": "0f40843379602702add79992d6d4c0cb1ff90910e77ecd158576ff7e77c12ff6",
+}
 NORMAL_MANAGER_WORKERS = frozenset({
     "release_manager_host_runner.py", "jason_self_heal_watchdog.py",
     "owner_approved_development_worker.py",
@@ -1181,6 +1227,13 @@ NORMAL_MANAGER_STAGE_FILES = {
     Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py"):
         "tools/scoped_backport_component_readback.py",
 }
+def normal_manager_stage_images(code):
+    """Stage the native guard using the exact custody required by its reader."""
+    return {path: image(code[rel], 0,
+                        0o444 if rel == "tools/pmv4_host_release_guard.py" else 0o644)
+            for path, rel in NORMAL_MANAGER_STAGE_FILES.items()}
+
+
 NORMAL_MANAGER_SCOPE_FILES = {
     *(NORMAL_MANAGER_STAGE_FILES.values()),
     *("tools/" + name for name in NORMAL_MANAGER_WORKERS),
@@ -1425,6 +1478,16 @@ def pipeline_scope_sha(plan):
              and plan.get("conflicted_issues") == [1459,1500]
              and plan.get("preserve_existing_issue_authority") is True,
              "NORMAL_MANAGER_EXACT_SCOPE_INVALID")
+    if "normal_manager_rollback_predecessor" in plan:
+        proof = plan["normal_manager_rollback_predecessor"]
+        final = plan.get("normal_retirement")
+        need(plan["predecessor_candidate_sha"] == NORMAL_MANAGER_BASELINE
+             and proof == NORMAL_MANAGER_ROLLBACK_EVIDENCE
+             and isinstance(final, dict)
+             and final.get("action") == "RETIRE-EXACT-GLOBAL-PRODUCTION-FREEZE"
+             and final.get("candidate_sha") == plan["policy"]["candidate_sha"]
+             and plan["policy"]["candidate_sha"] != proof["failed_candidate_sha"],
+             "NORMAL_MANAGER_ROLLBACK_SCOPE_INVALID")
     return digest(canon(plan))
 
 
@@ -1612,8 +1675,7 @@ class PipelineSuccessor(NativeAdapter):
                      "import owner_approved_development_worker as w;"
                      "print(json.dumps(w.verified_development_health(Path('/var/lib/jason/openclaw/support-repair'))))")
             health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",probe],130))
-            need(health.get("verified") is True and health.get("production_authority") is False
-                 and health.get("production_revision") == LKG, "PIPELINE_NATIVE_CORE_HEALTH")
+            verify_pipeline_native_core_health(health)
         rows = json.loads(self.command(["/usr/bin/docker","inspect","--type","container",*p["PEERS"]]))
         if self.predecessor == WATCHDOG_RECOVERY_BASELINE:
             for x in rows:
@@ -1716,6 +1778,94 @@ class PipelineSuccessor(NativeAdapter):
              "BREAKER_CUSTODY_POLICY_SOURCE_MISMATCH")
         return dict(expected)
 
+    def wait_for_fresh_pipeline_readback(self, attempts=46):
+        """Wait outside the production locks for the existing trusted publisher.
+
+        This is a prerequisite, not native health acceptance. The actual
+        independent evaluator, 120-second freshness gate, breaker, source,
+        image, audit and ticket checks still run in protected().
+        """
+        path = MANAGER/"protected-readback/production-drift.json"
+        for attempt in range(attempts):
+            row = json.loads(self.p["read"](path,1000,0o600))
+            need(row.get("schema_version") == "1.0"
+                 and row.get("status") == "pass" and row.get("problems") == [],
+                 "PIPELINE_READBACK_NOT_CLEAN")
+            observed = datetime.fromisoformat(row["observed_at"])
+            age = (datetime.now(timezone.utc)-observed).total_seconds()
+            need(observed.utcoffset() is not None and age >= 0,
+                 "PIPELINE_READBACK_TIME_INVALID")
+            if age <= 40:
+                return
+            if attempt+1 < attempts:
+                time.sleep(2)
+        need(False,"PIPELINE_FRESH_READBACK_UNAVAILABLE")
+
+    def verify_normal_manager_rollback_predecessor(self):
+        """Read-only proof of the one reviewed terminal rollback.
+
+        The pause remains intact. A fresh candidate and the existing exact
+        authenticated Owner decision are still required before installation.
+        """
+        evidence = NORMAL_MANAGER_ROLLBACK_EVIDENCE
+        failed = evidence["failed_candidate_sha"]
+        need(self.predecessor == NORMAL_MANAGER_BASELINE
+             and getattr(self, "retirement_requested", False) is True
+             and self.candidate != failed,
+             "NORMAL_MANAGER_ROLLBACK_CONTEXT")
+        history = STATE / failed
+        meta = history.lstat()
+        need(stat.S_ISDIR(meta.st_mode) and meta.st_uid == meta.st_gid == 0
+             and stat.S_IMODE(meta.st_mode) == 0o700
+             and history.resolve(strict=True) == history
+             and {p.name for p in history.iterdir()} ==
+                 {"approval.json", "receipt-image.json", "rollback.json"},
+             "NORMAL_MANAGER_ROLLBACK_HISTORY_CUSTODY")
+        raw = self.n["read"](history/"approval.json",0,0o400,8_000_000)
+        receipt_raw = self.n["read"](history/"receipt-image.json",0,0o400)
+        rollback_raw = self.n["read"](history/"rollback.json",0,0o400)
+        need(digest(raw) == evidence["approval_sha256"]
+             and digest(receipt_raw) == evidence["receipt_sha256"]
+             and digest(rollback_raw) == evidence["rollback_sha256"],
+             "NORMAL_MANAGER_ROLLBACK_HISTORY_CHANGED")
+        approval, rollback = json.loads(raw), json.loads(rollback_raw)
+        scope = approval["scope"]
+        receipt = self.g["validate_receipt"](json.loads(receipt_raw))
+        sha = pipeline_scope_sha(scope)
+        need(scope["policy"]["candidate_sha"] == failed
+             and scope["predecessor_candidate_sha"] == self.predecessor
+             and approval["owner_action"] == "RETIRE-EXACT-GLOBAL-PRODUCTION-FREEZE"
+             and approval["owner_scope_sha256"] == digest(canon(self.owner_scope(scope)))
+             and approval["scope_sha256"] == sha
+             and receipt["candidate_sha"] == failed
+             and receipt["scope_sha256"] == sha
+             and receipt["approval_sha256"] == digest(raw)
+             and receipt["predecessor_candidate_sha"] == self.predecessor
+             and rollback["scope_sha256"] == sha
+             and rollback["status"] == "predecessor_restored_engineering_paused"
+             and rollback["production_authority"] is False,
+             "NORMAL_MANAGER_ROLLBACK_SCOPE_MISMATCH")
+        failed_release = ROOT/"releases"/failed
+        targets = {failed_release / p.relative_to(self.release.parent)
+                   if p.is_relative_to(self.release.parent) else p
+                   for p in self.approved_targets()}
+        need(scope["installation_targets"] == sorted(map(str,targets)),
+             "NORMAL_MANAGER_ROLLBACK_TARGETS_CHANGED")
+        before = decode(approval["before_images"],targets)
+        after = decode(approval["after_images"],targets-{RECEIPT})
+        need(scope["before"] == {str(k):describe(v) for k,v in before.items()}
+             and scope["after"] == {str(k):describe(v) for k,v in after.items()},
+             "NORMAL_MANAGER_ROLLBACK_IMAGES_CHANGED")
+        pause = after[PAUSE]
+        need(pause is not None and pause[1:] == (1000,1000,0o600)
+             and digest(pause[0]) == OLD[PAUSE][2]
+             and not os.path.lexists(failed_release),
+             "NORMAL_MANAGER_ROLLBACK_PAUSE_OR_RELEASE_CHANGED")
+        for path, value in before.items():
+            need(snapshot(path) == (pause if path == PAUSE else value),
+                 "NORMAL_MANAGER_ROLLBACK_LIVE_MISMATCH:"+path.name)
+        return dict(evidence)
+
     def inspect(self):
         need(not os.path.lexists(self.directory) and not os.path.lexists(self.release.parent),
              "PIPELINE_SUCCESSOR_ALREADY_PRESENT")
@@ -1745,6 +1895,7 @@ class PipelineSuccessor(NativeAdapter):
         protected = self.protected(failed_manager_recovery=True) if fault_recovery else self.protected()
         need(protected["effective_policy_sha256"] == receipt["effective_policy_sha256"],
              "PIPELINE_EFFECTIVE_POLICY_CHANGED")
+        rollback_predecessor = None
         if self.predecessor == TODO_CONFLICT_BASELINE:
             failed = json.loads(self.n["read"](history/"activation-rollback.json",0,0o400))
             need(failed.get("status") == "engineering_paused_after_failed_acceptance"
@@ -1763,8 +1914,12 @@ class PipelineSuccessor(NativeAdapter):
             self.verify_source_integration_predecessor(history,activated)
             encoded = old["after_images"][str(PAUSE)]
         elif self.predecessor in CLOSED_LOOP_BASELINES:
-            need(snapshot(PAUSE) is None,"CLOSED_LOOP_PREDECESSOR_PAUSED")
             self.verify_closed_loop_predecessor(history,activated)
+            if snapshot(PAUSE) is not None:
+                need(self.predecessor == NORMAL_MANAGER_BASELINE
+                     and getattr(self,"retirement_requested",False) is True,
+                     "CLOSED_LOOP_PREDECESSOR_PAUSED")
+                rollback_predecessor = self.verify_normal_manager_rollback_predecessor()
             if self.predecessor in CUSTODY_BASELINES:
                 self.verify_breaker_policy_source()
             encoded = old["after_images"][str(PAUSE)]
@@ -1800,13 +1955,13 @@ class PipelineSuccessor(NativeAdapter):
                  MANAGER_GUARD:image(self.code["tools/pmv4_e_engineering_manager_guard.py"],0,0o444),
                  PAUSE:pause,self.release.parent/"predecessor.json":image(prior[0],0,0o444)}
         if self.predecessor == NORMAL_MANAGER_BASELINE:
-            for path,rel in NORMAL_MANAGER_STAGE_FILES.items():
+            for path,value in normal_manager_stage_images(self.code).items():
                 # Never overwrite a different native generation or adopt an
                 # unrecorded existing artifact. All three files are absent in
                 # the accepted predecessor, and rollback removes only ours.
                 need(before[path] is None, "NORMAL_MANAGER_STAGE_TARGET_ALREADY_PRESENT")
                 self.n["directory"](path.parent,0o755)
-                after[path] = image(self.code[rel],0,0o644)
+                after[path] = value
         pipeline_hashes = {}
         for name in sorted(self.pipeline_artifact_names()):
             live = snapshot(LIB/name)
@@ -1906,6 +2061,8 @@ class PipelineSuccessor(NativeAdapter):
                             "unit":DRIFT_REPORTER_UNIT,"pins":DRIFT_REPORTER_PINS,
                             "properties":DRIFT_REPORTER_EXIT2},
                         local_reasoning_runtime_activation=False)
+        if rollback_predecessor is not None:
+            plan["normal_manager_rollback_predecessor"] = rollback_predecessor
         if getattr(self,"retirement_requested",False):
             plan["normal_retirement"] = self.retirement_helper()["prepare"](self,plan,globals())
         return plan,before,after
@@ -2081,6 +2238,8 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
         self.actor = self.n["owner"](exact)
         sha = manager_sha
         self.plan = plan
+        if "normal_retirement" in plan:
+            self.wait_for_fresh_pipeline_readback()
         with self.n["locks"]():
             need(source_review(self.candidate,self.p,baseline=self.predecessor,
                                source_files=self.source_files,supporting_files=self.supporting_files) == self.code,
@@ -2094,6 +2253,8 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
             if not fault_recovery:
                 with self.n["locks"](): self.pause()
                 self.quiesce((SERVICES[0],))
+            if "normal_retirement" in plan:
+                self.wait_for_fresh_pipeline_readback()
             with self.n["locks"]():
                 protected = (self.protected(failed_manager_recovery=True)
                              if fault_recovery else self.protected())
@@ -2117,6 +2278,10 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                     if self.predecessor in CUSTODY_BASELINES:
                         need(self.verify_breaker_policy_source() == plan["breaker_policy_source"],
                              "BREAKER_CUSTODY_APPROVED_POLICY_SOURCE_CHANGED")
+                if "normal_manager_rollback_predecessor" in plan:
+                    need(self.verify_normal_manager_rollback_predecessor()
+                         == plan["normal_manager_rollback_predecessor"],
+                         "NORMAL_MANAGER_ROLLBACK_PROOF_CHANGED")
                 for path,old in self.before.items():
                     need(snapshot(path) == (self.pause_image if path == PAUSE and not fault_recovery else old),
                          "PIPELINE_PRECUTOVER_FILE_CHANGED")
@@ -2155,6 +2320,8 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                 self.read_guard(self.candidate)
                 self.namespace_probe()
             self.native_revalidation()
+            if "normal_retirement" in plan:
+                self.wait_for_fresh_pipeline_readback()
             with self.n["locks"]():
                 self.verify_successor_topology_and_source()
                 self.n["write"](self.directory/"result.json",canon({
@@ -2422,6 +2589,8 @@ def main():
         if a.recover:
             adapter.recover()
             return
+        if a.retire_production_freeze:
+            adapter.wait_for_fresh_pipeline_readback()
         with n["locks"](): plan,_,_=adapter.inspect()
         pipeline_scope_sha(plan)
         exact = adapter.owner_scope(plan)
