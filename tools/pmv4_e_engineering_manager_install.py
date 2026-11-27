@@ -433,8 +433,17 @@ def reviewed_source_delta(git, baseline, candidate, source_files):
          "SOURCE_METADATA_MARKDOWN_UNREVIEWED_CHANGE")
 
 
+RETENTION_SOURCE_FILES = frozenset({
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/rollback_retention_plan.py",
+    "tools/rollback_retention_native.py",
+    "tools/production_freeze_retirement.py",
+    "config/operations/rollback-retention-v1.json",
+})
+
+
 def source_review(candidate, p, *, recovery=False, baseline=BASELINE, source_files=SOURCE_FILES,
-                  supporting_files=frozenset()):
+                  supporting_files=frozenset(), operation_profile=None):
     git = lambda *args: p["git"](REPO, *args)
     need(re.fullmatch("[0-9a-f]{40}", candidate) is not None and
          git("rev-parse", "HEAD").decode().strip() == candidate and
@@ -442,7 +451,16 @@ def source_review(candidate, p, *, recovery=False, baseline=BASELINE, source_fil
          git("remote", "get-url", "origin").decode().strip() == "https://github.com/al-teamaot-com/jason.git" and
          git("rev-parse", "--is-shallow-repository").decode().strip() == "false",
          "PROTECTED_CHECKOUT_NOT_EXACT")
-    reviewed_source_delta(git, baseline, candidate, source_files)
+    if operation_profile is None:
+        reviewed_source_delta(git, baseline, candidate, source_files)
+    else:
+        # Reusable fixed maintenance source closure, not a successor delta.
+        # Every operation still requires exact current protected main CI and
+        # hash-bound source, configuration and authenticated execution scope.
+        need(operation_profile == "rollback-retention-v1"
+             and set(source_files) == RETENTION_SOURCE_FILES
+             and not supporting_files and not recovery,
+             "RETENTION_SOURCE_PROFILE")
     if not recovery:
         helper_path = p["NATIVE"] / "pmv4_e_ci_refresh.py"
         helper = p["native_code"](helper_path, str(helper_path), 0, 0o444)
@@ -2909,6 +2927,8 @@ def main():
     successor.add_argument("--watchdog-recovery-successor",action="store_true")
     successor.add_argument("--normal-manager-successor",action="store_true")
     successor.add_argument("--post-retirement-manager-successor",action="store_true")
+    successor.add_argument("--rollback-retention",action="store_true")
+    cli.add_argument("--release-id")
     cli.add_argument("--retire-production-freeze",action="store_true")
     cli.add_argument("--retry-retirement",action="store_true")
     choice=cli.add_mutually_exclusive_group()
@@ -2927,6 +2947,29 @@ def main():
          and not (a.resume or a.recover or a.verify_activation or a.restore_failed_activation)),
          "FINAL_RETRY_REQUIRES_EXACT_RETIREMENT_CONTEXT")
     n,p = native()
+    if a.rollback_retention:
+        need(a.release_id is not None and not (a.retire_production_freeze
+             or a.retry_retirement or a.recover or a.verify_activation
+             or a.activate_retirement or a.recover_retirement or a.restore_failed_activation),
+             "RETENTION_TYPED_OPERATION_ONLY")
+        def reviewed_retention_source():
+            return source_review(a.candidate,p,source_files=RETENTION_SOURCE_FILES,
+                                 operation_profile="rollback-retention-v1")
+        code=reviewed_retention_source()
+        planner=load(code["tools/rollback_retention_plan.py"],REPO/"tools/rollback_retention_plan.py")
+        runner=load(code["tools/rollback_retention_native.py"],REPO/"tools/rollback_retention_native.py")
+        pending=load(code["tools/production_freeze_retirement.py"],REPO/"tools/production_freeze_retirement.py")
+        # Reuse the existing readback wait; it never refreshes, waives or
+        # rewrites native health or accepts synthetic production evidence.
+        class RetentionReadback:
+            pass
+        wait=RetentionReadback()
+        wait.p=p
+        runner["run_action"](a,n,p,code,planner,pending["check_pending"],
+                             reviewed_retention_source,
+                             lambda:PipelineSuccessor.wait_for_fresh_pipeline_readback(wait))
+        return
+    need(a.release_id is None,"RELEASE_ID_REQUIRES_RETENTION_PROFILE")
     if (a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor
             or a.source_integration_successor or a.closed_loop_successor or a.breaker_custody_successor
             or a.watchdog_recovery_successor or a.normal_manager_successor
