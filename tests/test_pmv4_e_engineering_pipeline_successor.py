@@ -1122,3 +1122,120 @@ def test_final_retry_rejects_changed_or_extra_history(final_retry_history,name):
     (history/name).write_bytes(b'{"fixture":"changed"}')
     with pytest.raises(PermissionError,match="FINAL_RETRY_(HISTORICAL_RECORD|SCHEDULED_CYCLE)"):
         a.verify_retained_preparation_records()
+
+
+def post_retirement_plan():
+    p=normal_manager_plan()
+    for key in ("normal_manager_source_review","normal_manager_stage_targets","normal_mode_activation"):
+        p.pop(key)
+    p.update(predecessor_candidate_sha=m.POST_RETIREMENT_MANAGER_BASELINE,
+             worker_replacements=sorted(m.POST_RETIREMENT_WORKERS),
+             temporary_timer_stops=list(m.TIMERS+m.POST_RETIREMENT_TRIGGERS),
+             post_retirement_reader_targets=sorted(map(str,m.POST_RETIREMENT_READER_TARGETS)),
+             post_retirement_source_baseline=m.POST_RETIREMENT_SOURCE_BASELINE,
+             preserve_retired_freeze_and_components=True,
+             installation_targets=sorted(map(str,m.POST_RETIREMENT_READER_TARGETS)))
+    return p
+
+
+@pytest.mark.parametrize("key,value",[
+    ("preserve_retired_freeze_and_components",False),
+    ("freeze_or_hold_change",True),("runtime_or_mcp_restart_allowed",True),
+    ("provider_writes",True),("production_authority",True),
+    ("required_scheduled_cycles",1),("post_retirement_reader_targets",[]),
+    ("temporary_timer_stops",list(m.TIMERS)),
+    ("post_retirement_source_baseline","a"*40),
+    ("worker_replacements",["foreign.py"]),
+])
+def test_post_retirement_scope_retains_existing_approval_and_safety(key,value):
+    p=post_retirement_plan()
+    assert m.pipeline_scope_sha(p)==m.digest(m.canon(p))
+    p[key]=value
+    with pytest.raises(PermissionError):
+        m.pipeline_scope_sha(p)
+
+
+def test_post_retirement_scope_excludes_immutable_controls():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.POST_RETIREMENT_MANAGER_BASELINE
+    a.changed_workers=m.POST_RETIREMENT_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("f"*40)/"tools"
+    t=a.approved_targets()
+    assert m.POST_RETIREMENT_READER_TARGETS<=t
+    assert not t.intersection({m.POST_RETIREMENT_CONFIG,m.POST_RETIREMENT_RECEIPT,
+                               m.POST_RETIREMENT_COMPONENTS,m.POLICY,m.ENV})
+    assert not any(p.name in ("production-deployment-freeze","auto-promotion-incident-hold")
+                   or str(p).startswith("/opt/jason/") for p in t)
+    assert a.transaction_triggers()==m.TIMERS+m.POST_RETIREMENT_TRIGGERS
+    assert a.transaction_reader_services()==(m.SERVICES[1],)+m.POST_RETIREMENT_SERVICES
+    p=post_retirement_plan()
+    p["installation_targets"].append(str(m.POST_RETIREMENT_CONFIG))
+    with pytest.raises(PermissionError):
+        m.pipeline_scope_sha(p)
+
+
+def test_post_retirement_source_review_excludes_unrelated_changes():
+    git=Mock(return_value="\n".join(sorted(m.POST_RETIREMENT_SCOPE_FILES)).encode())
+    m.reviewed_source_delta(git,m.POST_RETIREMENT_MANAGER_BASELINE,"a"*40,
+                            m.POST_RETIREMENT_SCOPE_FILES)
+    git.assert_any_call("merge-base","--is-ancestor",m.POST_RETIREMENT_MANAGER_BASELINE,
+                        m.POST_RETIREMENT_SOURCE_BASELINE)
+    git.return_value += b"\nconfig/production-desired-state.json"
+    with pytest.raises(PermissionError,match="POST_RETIREMENT_SOURCE_DELTA"):
+        m.reviewed_source_delta(git,m.POST_RETIREMENT_MANAGER_BASELINE,"a"*40,
+                                m.POST_RETIREMENT_SCOPE_FILES)
+
+
+@pytest.fixture
+def post_retirement_reader_fixture():
+    from copy import deepcopy
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.POST_RETIREMENT_MANAGER_BASELINE
+    a.candidate="a"*40
+    a.release=m.ROOT/"releases"/a.candidate/"tools"
+    old=m.ROOT/"releases"/a.predecessor/"tools"/"jason_self_heal_watchdog.py"
+    new=a.release/"jason_self_heal_watchdog.py"
+    raw=b"fixture unchanged watchdog source"
+    migration={"schema_version":"2.0","source_sha":m.POST_RETIREMENT_SOURCE_BASELINE,
+               "installed_readers":[{"path":str(old),"sha256":m.digest(raw)},
+                                    {"path":"/fixture/other","sha256":"a"*64}],
+               "native_readback_verified":True,"original_authority_preserved":True}
+    policy={"schema_version":"3.0","source_sha":m.POST_RETIREMENT_SOURCE_BASELINE,
+            "native_reader_migration_receipt_sha256":m.digest(m.canon(migration)),
+            "per_release_review_required":True,"file_sha256":{"fixture":"b"*64}}
+    before={m.POST_RETIREMENT_MIGRATION:m.image(m.canon(migration),0,0o600),
+            m.POST_RETIREMENT_POLICY:m.image(m.canon(policy),0,0o600)}
+    after={new:m.image(raw,0,0o444)}
+    a.p={"read":Mock(return_value=raw)}
+    return a,before,after,deepcopy(migration),deepcopy(policy)
+
+
+def test_post_retirement_rebind_changes_only_attested_watchdog_path_and_policy_digest(post_retirement_reader_fixture):
+    a,before,after,migration,policy=post_retirement_reader_fixture
+    result=a.post_retirement_reader_images(before,after)
+    assert set(result)==m.POST_RETIREMENT_READER_TARGETS
+    assert all(v[1:]==(0,0,0o600) for v in result.values())
+    updated=json.loads(result[m.POST_RETIREMENT_MIGRATION][0])
+    migration["installed_readers"][0]["path"]=str(a.release/"jason_self_heal_watchdog.py")
+    assert updated==migration
+    policy["native_reader_migration_receipt_sha256"]=m.digest(m.canon(migration))
+    assert json.loads(result[m.POST_RETIREMENT_POLICY][0])==policy
+
+
+@pytest.mark.parametrize("fault",["changed_watchdog","wrong_policy_digest","foreign_watchdog_path"])
+def test_post_retirement_reader_rebind_rejects_unrelated_change(post_retirement_reader_fixture,fault):
+    a,before,after,migration,policy=post_retirement_reader_fixture
+    if fault=="changed_watchdog":
+        after[a.release/"jason_self_heal_watchdog.py"]=m.image(b"foreign source",0,0o444)
+    elif fault=="wrong_policy_digest":
+        policy["native_reader_migration_receipt_sha256"]="0"*64
+        before[m.POST_RETIREMENT_POLICY]=m.image(m.canon(policy),0,0o600)
+    else:
+        migration["installed_readers"][0]["path"]="/fixture/foreign"
+        before[m.POST_RETIREMENT_MIGRATION]=m.image(m.canon(migration),0,0o600)
+        policy["native_reader_migration_receipt_sha256"]=m.digest(m.canon(migration))
+        before[m.POST_RETIREMENT_POLICY]=m.image(m.canon(policy),0,0o600)
+    with pytest.raises(PermissionError):
+        a.post_retirement_reader_images(before,after)

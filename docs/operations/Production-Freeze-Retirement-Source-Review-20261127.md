@@ -301,3 +301,58 @@ No old approval authorizes the corrected retry. The exact new source
 delta and all live original file, directory and protected-peer checks
 remain mandatory. A foreign engineering pause is never removed by
 rollback. Source/fixture evidence is not production acceptance.
+
+## Verified retirement and post-cutover engineering compatibility
+
+The independently authenticated final-only transaction on
+92719c6303f633879dbd384e06829b193dad20ea committed at 16:37:23 UTC.
+Root-private approval, intent, ready and completion records agree. The
+root-owned deployment configuration reports production_freeze=false, both
+legacy markers are absent, the original incident hold is byte-identical,
+and MCP serves its internal health endpoint with HTTP 200. Its original
+container remains stopped in exact rollback custody. Runtime, Teams,
+Ticket Core and OpenBao identities and start times are unchanged. The
+independent installed normal policy and component readback both verify,
+native drift passes and the breaker is closed.
+
+The post-cutover engineering worker nevertheless returned
+live_core_image_mismatch: its extra image check compared the current MCP
+against the legacy whole-host LKG image despite the independent native
+guard already validating the scoped component identities. The subsequent
+ordinary scheduled run confirmed that this stale comparison holds new
+features. It is not a production incident or a reason to reinstate the
+retired freeze. The correction uses the exact verified component reader
+loaded from the existing root-pinned guard; it retains the original LKG
+comparison only in genuine legacy mode. Missing, mismatched or changed
+coordinated evidence fails closed. A direct read-only evaluation of the
+corrected worker against actual production evidence passed, without
+installing anything or granting mutation authority.
+
+The same authenticated native manager successor transaction is extended
+to the accepted post-retirement component configuration. Its exact
+source review, prior immutable receipt, shared production locks, original
+host anchor, coordinated component identities, fresh independent health,
+rollback and two real scheduled acceptance cycles remain mandatory.
+The repaired worker must pass live read-only health before cutover and
+the actual installed worker must pass afterward. No application
+container, freeze configuration, retirement receipt, incident hold or
+provider is changed. The current root migration receipt is rebound only
+to the next independently attested immutable watchdog source path, with
+identical watchdog bytes; the existing coordinator policy's migration
+digest is updated atomically within the same approved transaction.
+The coordinator's two existing triggers are briefly quiesced with the
+engineering timers to prevent a reader from observing the intermediate
+receipt state; no pending coordinated or legacy release is admitted.
+This is a separate exact authenticated manager repair, not reuse of the
+retirement approval or modification of its historic completion record.
+
+The focused host regression passed 476 tests. The broader host run passed
+976 tests, with 21 legacy fixtures failing because their hard-coded
+production policy/readback now sees the actual retired state. The
+previously failing issuer and transition fixtures pass in the isolated
+environment; the three legacy crash-recovery fixtures also pass in an
+isolated container running with UID/GID 1000. The broader disposable
+image lacks Git and Docker executables and the host's filesystem
+capacity, so its unrelated environment-dependent failures are not
+reported as successful tests in that environment. Protected CI and
+native read-only admission remain mandatory.

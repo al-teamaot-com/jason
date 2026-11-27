@@ -51,6 +51,8 @@ BREAKER_CUSTODY_PREDECESSOR = "1c028724328e0a758a59f7a58478e242317b84b1"
 WATCHDOG_RECOVERY_PREDECESSOR = "c4e78d700b7ac347e9dee50c750d5de99780e2a2"
 NORMAL_MANAGER_PREDECESSOR = "81ad19542cc8a720debb09d2ea7c511db6b9fc20"
 NORMAL_MANAGER_OWNER_WORKER_SHA256 = "4a279d521a55e1ae1fe66f13b7dfd106fbda697c053ba42b2308cc19f1fc019e"
+POST_RETIREMENT_MANAGER_PREDECESSOR = "db14810b945a39546ef27d48dbe439b5e0ec4e80"
+POST_RETIREMENT_OWNER_WORKER_SHA256 = "cd09716a3941a941e7d19d5fda2aa4d9ce714933a8d6c3869356260ffe908f76"
 LOCAL_REASONING_OWNER_WORKER_SHA256 = "4d72d2db1ac01a37f20e6624cb11bd632eaf4d63acf61e2612bb549b7e415029"
 CLOSED_LOOP_PIPELINE_ARTIFACTS = PIPELINE_ARTIFACTS | {"issue_resolution_engine.py"}
 PIPELINE_SOURCE = Path("/home/al/.local/lib/jason/engineering-worker-source")
@@ -123,7 +125,7 @@ def validate_receipt(row):
                  CLOSED_LOOP_PIPELINE_ARTIFACTS
                  if row.get("predecessor_candidate_sha") in (
                      CLOSED_LOOP_PREDECESSOR, BREAKER_CUSTODY_PREDECESSOR, WATCHDOG_RECOVERY_PREDECESSOR,
-                     NORMAL_MANAGER_PREDECESSOR)
+                     NORMAL_MANAGER_PREDECESSOR, POST_RETIREMENT_MANAGER_PREDECESSOR)
                  else PIPELINE_ARTIFACTS)
              and all(exact(x, 64) for x in row["pipeline_artifact_sha256"].values()),
              "PIPELINE_SUCCESSOR_RECEIPT_INVALID")
@@ -145,6 +147,8 @@ def validate_receipt(row):
         pins["owner_approved_development_worker.py"] = LOCAL_REASONING_OWNER_WORKER_SHA256
     if successor and row["predecessor_candidate_sha"] == NORMAL_MANAGER_PREDECESSOR:
         pins["owner_approved_development_worker.py"] = NORMAL_MANAGER_OWNER_WORKER_SHA256
+    if successor and row["predecessor_candidate_sha"] == POST_RETIREMENT_MANAGER_PREDECESSOR:
+        pins["owner_approved_development_worker.py"] = POST_RETIREMENT_OWNER_WORKER_SHA256
     need(all(row["artifact_sha256"][name] == pin for name, pin in pins.items() if pin),
          "PARALLEL_APPROVED_ARTIFACT_CHANGED")
     when = datetime.fromisoformat(row["accepted_at"])

@@ -175,7 +175,8 @@ def test_no_authoritative_health_without_accepted_audit(monkeypatch):
 
 
 @pytest.fixture
-def health(monkeypatch):
+def health(monkeypatch,tmp_path):
+    monkeypatch.setattr(worker,"NORMAL_RETIREMENT_POLICY",tmp_path/"retired.json")
     docs = {
         'forward-release-status.json': {
           'schema_version':'1.0','action':install.FORWARD_ACTION,
@@ -205,7 +206,8 @@ def health(monkeypatch):
     guard._container=lambda name:{'Image':'runtime' if name=='jason-runtime' else 'mcp'}
     monkeypatch.setattr(worker,'_health_json',lambda path,*args:docs[path.name])
     monkeypatch.setattr(worker,'_health_unit',lambda name:units.get(name,{'ActiveState':'inactive','Result':'success','ExecMainStatus':'0'}))
-    monkeypatch.setattr(worker,'_native_health_guard',lambda:guard)
+    guard.read_components=lambda:None
+    monkeypatch.setattr(worker,'_native_health_guard',lambda:(guard,guard.read_components))
     return docs,units,guard
 
 
@@ -604,3 +606,86 @@ def test_real_root_entrypoint_reaches_pinned_issuer_only_after_forward_acceptanc
         RuntimeError('NEXT_TRUSTED_ISSUER_REACHED_WITH_NO_WRITES')))
     with pytest.raises(RuntimeError,match='NEXT_TRUSTED_ISSUER_REACHED_WITH_NO_WRITES'):
         install.main()
+
+
+@pytest.fixture
+def coordinated_health(health):
+    docs,units,guard=health
+    manifest=docs['production-control-state.json']['last_known_good']['manifest']
+    worker.NORMAL_RETIREMENT_POLICY.touch()
+    rows={
+        'jason-runtime':{'revision':install.ROLLBACK,'image_id':'runtime','container_id':'runtime-id'},
+        'jason-mcp-pilot':{'revision':'a'*40,'image_id':'mcp-new','container_id':'mcp-new-id'},
+    }
+    state={'schema_version':'3.0','status':'verified_component_release',
+           'host_revision':manifest['revision'],'components':rows}
+    def live(name):
+        row=rows[name]
+        return {'Image':row['image_id'],'Id':row['container_id'],
+                'Config':{'Labels':{'com.teamaot.jason.source_revision':row['revision']}}}
+    guard.read_components=lambda:state
+    guard._container=live
+    return guard,state
+
+
+def test_development_health_accepts_independently_verified_scoped_components(coordinated_health):
+    result=worker.verified_development_health(worker.DEFAULT_SPOOL)
+    assert result['verified'] is True
+    assert result['production_authority'] is False
+    assert result['production_revision']==install.ROLLBACK
+
+
+@pytest.mark.parametrize('field',['Image','Id','revision'])
+def test_scoped_development_health_rejects_unexpected_live_identity(coordinated_health,field):
+    guard,state=coordinated_health
+    original=guard._container
+    def live(name):
+        result=original(name)
+        if name=='jason-mcp-pilot':
+            if field=='revision':
+                result['Config']['Labels']['com.teamaot.jason.source_revision']='b'*40
+            else:
+                result[field]='different'
+        return result
+    guard._container=live
+    result=worker.verified_development_health(worker.DEFAULT_SPOOL)
+    assert result['verified'] is False
+    assert result['reason']=='live_core_image_mismatch'
+
+
+@pytest.mark.parametrize('key,value',[('host_revision','b'*40),('schema_version','1.0'),
+                                      ('status','unverified')])
+def test_scoped_health_rejects_unverified_anchor(coordinated_health,key,value):
+    guard,state=coordinated_health
+    state[key]=value
+    result=worker.verified_development_health(worker.DEFAULT_SPOOL)
+    assert result['verified'] is False
+    assert result['reason']=='live_core_component_anchor_mismatch'
+
+
+def test_scoped_health_does_not_fall_back_after_retirement(coordinated_health):
+    guard,state=coordinated_health
+    guard.read_components=lambda:None
+    result=worker.verified_development_health(worker.DEFAULT_SPOOL)
+    assert result['verified'] is False
+    assert result['reason']=='live_core_component_readback_missing'
+
+
+def test_scoped_health_rejects_changed_readback_during_probe(coordinated_health):
+    from copy import deepcopy
+    guard,state=coordinated_health
+    later=deepcopy(state)
+    later['components']['jason-mcp-pilot']['image_id']='different'
+    records=iter([state,later])
+    guard.read_components=lambda:next(records)
+    result=worker.verified_development_health(worker.DEFAULT_SPOOL)
+    assert result['verified'] is False
+    assert result['reason']=='native_health_changed_during_probe'
+
+
+def test_scoped_health_rejects_reader_failure(coordinated_health):
+    guard,_=coordinated_health
+    def denied():
+        raise PermissionError('independent readback denied')
+    guard.read_components=denied
+    assert worker.verified_development_health(worker.DEFAULT_SPOOL)['verified'] is False
