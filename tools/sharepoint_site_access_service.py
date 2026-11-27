@@ -45,6 +45,7 @@ def main() -> int:
     transport = UrlLibJsonHttpTransport()
     runtime = build_microsoft_sharepoint_runtime(
         boundary_db=boundary_db,
+        boundary_read_only=True,
         openbao_url=os.environ["JASON_OPENBAO_URL"],
         role_id_path=Path(os.environ["JASON_SHAREPOINT_OPENBAO_ROLE_ID_PATH"]),
         secret_id_path=Path(os.environ["JASON_SHAREPOINT_OPENBAO_SECRET_ID_PATH"]),
