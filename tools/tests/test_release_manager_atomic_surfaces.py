@@ -174,6 +174,9 @@ def atomic_release_sandbox(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "ensure_managed_host_source_revision", lambda *a: None)
     monkeypatch.setattr(runner, "require_current_protected_release_source", lambda *a: None)
     monkeypatch.setattr(runner, "require_current_manual_scope_review", lambda *a: None)
+    # The exact signed admission gate has separate direct negative tests;
+    # this harness injects failures after admission to exercise real rollback.
+    monkeypatch.setattr(runner, "require_retired_mode_approval", lambda *a, **k: None)
     monkeypatch.setattr(runner, "run_release_ccc_gate",
                         lambda *a, **k: {"status": "PASS",
                                         "mode": "candidate_transition" if k.get("before_mutation") else "live_certified"})

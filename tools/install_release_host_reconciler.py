@@ -7,6 +7,8 @@ import grp
 import os
 import pwd
 import shutil
+import stat
+import hashlib
 import subprocess
 import tempfile
 from pathlib import Path
@@ -15,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SYSTEMD = Path("/etc/systemd/system")
 LIB = Path("/usr/local/lib/jason")
 SPOOL = Path("/var/lib/jason/openclaw/release-manager/host-reconcile")
+NORMAL_POLICY_DIRECTORY = Path("/etc/jason-owner-release/normal-release-policy")
+NORMAL_VERIFIER_SHA256 = "1200c5b6aedfeae55ceabd32d038c7cbdd1b9510ef9479c56af2107caeaf01f8"
 
 
 def install(source: Path, destination: Path, mode: int) -> None:
@@ -37,6 +41,30 @@ def install(source: Path, destination: Path, mode: int) -> None:
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+
+def stage_normal_owner_verifier() -> None:
+    """Stage the exact successor and empty public projection, never authority."""
+    source = ROOT / "implementation" / "kernel" / "signed_owner_release_v2.py"
+    raw = source.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != NORMAL_VERIFIER_SHA256:
+        raise RuntimeError("normal Owner verifier does not match the reviewed source pin")
+    folder = NORMAL_POLICY_DIRECTORY
+    for parent in folder.parents:
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise RuntimeError("normal Owner policy parent custody invalid")
+    try:
+        folder.mkdir(mode=0o755)
+    except FileExistsError:
+        pass
+    info = folder.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+            or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o755):
+        raise RuntimeError("normal Owner policy projection custody invalid")
+    install(source, LIB / "owner_signed_release_v2.py", 0o644)
+
 
 
 def main(*, stage_only: bool = False) -> int:
@@ -67,6 +95,7 @@ def main(*, stage_only: bool = False) -> int:
         LIB / "owner_signed_release.py",
         0o644,
     )
+    stage_normal_owner_verifier()
     # The optional Stage A0 root installer is a reviewed source module,
     # not a second root daemon. It can only be invoked by the existing
     # root reconciler with a signed exact Owner request. Stage it before

@@ -274,6 +274,12 @@ elif version == "3.1":
     expected = {"schema_version", "organization_id", "policy_mode",
                 "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
                 "capability", "high_impact_review"}
+elif version == "3.2":
+    mode = "owner_reviewed"
+    risks = {"normal", "production_control_core"}
+    expected = {"schema_version", "organization_id", "policy_mode",
+                "owner_identity_ids", "allowed_risk_profiles", "ttl_seconds",
+                "capability", "high_impact_review", "teams_owner_binding"}
 elif version in {"4.0", "4.1"}:
     mode = "admin_approver_separated"
     risks = {"normal", "production_control_core"}
@@ -295,15 +301,17 @@ if (set(d) != expected or d.get("organization_id") != "aot"
         or d.get("high_impact_review") != {
             "owner_exact_sha_required": True,
             **({"authenticated_entra_owner_decision_required": True}
-               if version == "3.1"
+               if version == "3.1" else
+               {"authenticated_entra_owner_decision_required": True,
+                "signed_teams_owner_allowed": True} if version == "3.2"
                else {"signed_teams_identity_required": True}),
             **({"independent_native_release_health_required": True}
-                       if version == "3.1"
+                       if version in {"3.1", "3.2"}
                        else {"independent_ccc_required": True}),
             "protected_release_gates_unchanged": True,
         }):
     raise SystemExit("DENIED: source mobile release approval policy is invalid")
-if version in {"4.0", "4.1"}:
+if version in {"3.2", "4.0", "4.1"}:
     def exact_binding(field):
         binding=d.get(field)
         if not isinstance(binding, dict) or set(binding) != {
@@ -318,10 +326,13 @@ if version in {"4.0", "4.1"}:
                     or str(uuid.UUID(value)) != value):
                 raise SystemExit("DENIED: separated Entra binding is invalid")
         return tenant,oid
-    admin=exact_binding("admin_approver_binding")
-    regular=exact_binding("regular_requester_binding")
-    if admin[0] != regular[0] or admin[1] == regular[1]:
-        raise SystemExit("DENIED: approver cannot be normal requester")
+    if version == "3.2":
+        exact_binding("teams_owner_binding")
+    else:
+        admin=exact_binding("admin_approver_binding")
+        regular=exact_binding("regular_requester_binding")
+        if admin[0] != regular[0] or admin[1] == regular[1]:
+            raise SystemExit("DENIED: approver cannot be normal requester")
 print(mode)
 PY2
 )" || exit 2

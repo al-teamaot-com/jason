@@ -865,6 +865,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                patch.object(runner, 'require_current_manual_scope_review'), \
                patch.object(runner, 'require_current_protected_release_source'), \
                patch.object(runner, 'require_host_reconciler_ready'), \
+               patch.object(runner, 'require_retired_mode_approval'), \
                patch.object(runner, 'reconcile_stopped_rollback_retention', return_value=16):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, "forced failure"):
                     runner.deploy_production(ROOT, root, release)
@@ -1145,6 +1146,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 patch.object(runner, "require_current_manual_scope_review"),
                 patch.object(runner, "require_current_protected_release_source"),
                 patch.object(runner, "require_host_reconciler_ready"),
+                patch.object(runner, "require_retired_mode_approval"),
                 patch.object(runner, "ensure_managed_host_source_revision"),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(runner, "worktree", side_effect=runner.ReleaseManagerError("repo unavailable")),
@@ -1800,6 +1802,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 patch.object(runner, "CONTROLLER_RECOVERY_MANAGED_REPO", root / "managed"),
                 patch.object(runner, "CONTROLLER_RECOVERY_OWNER_REVIEW", review_path),
                 patch.object(runner, "_controller_recovery_old_source_verified", return_value=True),
+                patch.object(runner, "accepted_engineering_manager_routing", return_value=None),
                 patch.object(runner.subprocess, "check_output", side_effect=git_result),
             ):
                 pin = runner.controller_identity(new_root)
@@ -2010,7 +2013,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             )
             with patch.object(runner, "CONTROLLER_SOURCE", installed), patch.object(
                 runner.Path, "home", return_value=root
-            ):
+            ), patch.object(runner, "accepted_engineering_manager_routing", return_value=None):
                 with self.assertRaisesRegex(
                     runner.ReleaseManagerError, "controller recovery old source is not root immutable"
                 ):
@@ -2598,6 +2601,7 @@ def test_explicit_promotion_reserves_retention_before_breaker_and_deploy():
          patch.object(runner, 'require_current_manual_scope_review'), \
          patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready'), \
+         patch.object(runner, 'require_retired_mode_approval'), \
          patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: calls.append('unlock')), \
          patch.object(runner, 'reconcile_stopped_rollback_retention', side_effect=lambda: calls.append('retention')), \
          patch.object(runner, 'revalidate_circuit_breaker', side_effect=lambda root: calls.append('breaker')), \
@@ -2636,6 +2640,7 @@ def test_explicit_promotion_retention_failure_blocks_mutation():
          patch.object(runner, 'require_current_manual_scope_review'), \
          patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready'), \
+         patch.object(runner, 'require_retired_mode_approval'), \
          patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: calls.append('unlock')), \
          patch.object(runner, 'reconcile_stopped_rollback_retention', side_effect=runner.ReleaseManagerError('historical cleanup failed')), \
          patch.object(runner, 'revalidate_circuit_breaker') as breaker, \
@@ -4104,7 +4109,9 @@ def test_preprod_health_failure_still_removes_container_and_releases_lock(
 
 
 
-def test_held_owner_approval_only_publishes_once_never_promotes(tmp_path):
+def test_held_owner_approval_only_publishes_once_never_promotes(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(runner, "_normal_owner_proof", lambda _: SimpleNamespace(read_retired_release_policy=lambda: None))
     import json
     from types import SimpleNamespace
     from unittest.mock import patch
@@ -4168,7 +4175,9 @@ def test_held_owner_approval_only_publishes_once_never_promotes(tmp_path):
         deploy.assert_not_called()
 
 
-def test_held_owner_approval_only_rejects_unsafe_state_before_any_signed_consumption(tmp_path):
+def test_held_owner_approval_only_rejects_unsafe_state_before_any_signed_consumption(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(runner, "_normal_owner_proof", lambda _: SimpleNamespace(read_retired_release_policy=lambda: None))
     from types import SimpleNamespace
     from unittest.mock import patch
     import pytest
@@ -4231,7 +4240,9 @@ def test_approval_only_held_unit_does_not_disable_or_invoke_promotion():
     assert 'timers.append("jason-release-approval-only.timer")' in installer
 
 
-def test_held_offer_absent_owner_policy_never_reads_signed_decisions(tmp_path):
+def test_held_offer_absent_owner_policy_never_reads_signed_decisions(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(runner, "_normal_owner_proof", lambda _: SimpleNamespace(read_retired_release_policy=lambda: None))
     from unittest.mock import patch
     import release_mobile_approval_consumer as mobile_consumer
     (tmp_path / "auto-promotion-incident-hold").touch()
@@ -5485,7 +5496,9 @@ def test_freeze_exception_policy_is_production_control_core():
         "release_blocker", ["config/production-deployment-freeze-exception.json"]
     ) == "production_control_core"
 
-def test_approval_only_republishes_same_release_offer_when_manifest_changes(tmp_path):
+def test_approval_only_republishes_same_release_offer_when_manifest_changes(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(runner, "_normal_owner_proof", lambda _: SimpleNamespace(read_retired_release_policy=lambda: None))
     from types import SimpleNamespace
     from unittest.mock import patch
     import json
@@ -6605,3 +6618,91 @@ def test_v31_owner_release_mode_is_not_treated_as_legacy_teams_pilot():
     ) == "admin_approver_separated"
     with pytest.raises(runner.ReleaseManagerError):
         runner._reviewed_mobile_release_mode(SimpleNamespace(schema_version="9.0"))
+
+
+def test_retired_mode_exact_mcp_decision_required_before_mutation(tmp_path, monkeypatch):
+    import json
+    import pytest
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from kernel import signed_owner_release_v2 as owner
+    from jason_mcp.release_approval_request import queue_release_approval_request
+    from jason_mcp import release_approval_request as issuer
+    policy="9"*64
+    sha,rollback,scope="a"*40,"b"*40,"c"*64
+    rid=runner.record_id(sha)
+    record={"state":"production_eligible","release_id":rid,
+            "release_candidate":{"candidate_sha":sha},"rollback_sha":rollback,
+            "manual_scope_review":{"candidate_sha":sha,"baseline_sha":rollback,"scope_sha256":scope},
+            "release_manifest":{"candidate_sha":sha,"rollback_sha":rollback},
+            "owner_approval":{"approved":False}}
+    path=tmp_path/"records"/(rid+".json")
+    path.parent.mkdir()
+    path.write_text(json.dumps(record))
+    signer=Ed25519PrivateKey.generate()
+    monkeypatch.setattr(owner,"read_retired_release_policy",lambda:policy)
+    monkeypatch.setattr(owner,"read_normal_deployment_freeze",lambda:False)
+    monkeypatch.setattr(issuer,"read_retired_release_policy",lambda:policy)
+    monkeypatch.setattr(owner,"read_pinned_root_owner_public_key",lambda _:signer.public_key())
+    receipt=queue_release_approval_request(
+        state_root=tmp_path,release_id=rid,candidate_sha=sha,
+        approved_by=owner.OWNER_PRINCIPAL,organization_id="aot",
+        verified_token_claims={"tid":owner.TID,"oid":owner.OWNER_OID},service_signer=signer)
+    pending=tmp_path/"owner-approval-requests"/(rid+".json")
+    processed=tmp_path/"owner-approval-requests-processed"/(rid+".json")
+    processed.parent.mkdir()
+    pending.rename(processed)
+    record["owner_approval"]={"approved":True,"candidate_sha":sha,
+        "source":"authenticated_signed_mcp_owner:"+receipt["signed_owner_proof"]["payload"]["approval_id"]}
+    runner.require_retired_mode_approval(tmp_path,record)
+    record["owner_approval"]["source"]="explicit_owner_instruction"
+    with pytest.raises(runner.ReleaseManagerError,match="fresh exact Owner"):
+        runner.require_retired_mode_approval(tmp_path,record)
+    monkeypatch.setattr(owner,"read_retired_release_policy",lambda:None)
+    with pytest.raises(runner.ReleaseManagerError,match="root-attested retirement"):
+        runner.require_retired_mode_approval(tmp_path,record)
+
+
+def test_retired_policy_never_restores_legacy_freeze(tmp_path,monkeypatch):
+    import json
+    import pytest
+    from kernel import signed_owner_release_v2 as signed_owner_release
+    folder=tmp_path/"owner-unfreeze-receipts"
+    folder.mkdir()
+    p=folder/("release-"+"a"*16+".json")
+    p.write_text(json.dumps({"schema_version":"2.0",
+        "authorization":"authenticated_signed_mcp_owner_one_transaction_unfreeze",
+        "freeze_restored":False,"status":"unfrozen_active"}))
+    monkeypatch.setattr(signed_owner_release,"read_retired_release_policy",lambda:"9"*64)
+    with pytest.raises(runner.ReleaseManagerError,match="unfinished legacy freeze"):
+        runner.restore_stranded_one_transaction_freeze_under_lock(tmp_path)
+    assert not (tmp_path/"production-deployment-freeze").exists()
+    assert json.loads(p.read_text())["freeze_restored"] is False
+
+
+def test_live_normal_owner_verifier_uses_only_native_pinned_module(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    sentinel = SimpleNamespace()
+    monkeypatch.setattr(runner, "DEFAULT_STATE", tmp_path / "live")
+    monkeypatch.setattr(runner, "_load_native_normal_owner_proof", lambda: sentinel)
+    assert runner._normal_owner_proof(tmp_path / "live") is sentinel
+    monkeypatch.setattr(runner, "CONTROLLER_SOURCE",
+                        Path("/home/al/.local/lib/jason/release_manager_host_runner.py"))
+    assert runner._normal_owner_proof(tmp_path / "fixture") is sentinel
+
+
+def test_native_normal_owner_verifier_pin_matches_reviewed_source():
+    from hashlib import sha256
+    root = Path(runner.__file__).resolve().parents[1]
+    source = root / "implementation/kernel/signed_owner_release_v2.py"
+    assert sha256(source.read_bytes()).hexdigest() == runner.NATIVE_NORMAL_OWNER_PROOF_SHA256
+
+
+def test_retired_mode_legacy_approval_timer_idles_without_whole_host_gate(monkeypatch):
+    import pytest
+    from types import SimpleNamespace
+    monkeypatch.setattr(runner, "_normal_owner_proof", lambda _: SimpleNamespace(
+        read_retired_release_policy=lambda: "a"*64))
+    monkeypatch.setattr(runner, "approval_only_production_transaction_gate",
+                        lambda *_: pytest.fail("legacy gate invoked"))
+    assert runner.approval_only_while_promotion_held(
+        runner.DEFAULT_STATE, runner.DEFAULT_STATE) is False

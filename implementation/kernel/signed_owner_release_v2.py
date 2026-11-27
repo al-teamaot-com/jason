@@ -1,0 +1,442 @@
+"""Versioned successor for exact normal and legacy release decisions.
+
+The historical signed_owner_release.py remains immutable. This standalone
+successor is independently installed and pinned; existing legacy bootstrap
+and recovery consumers continue to use their original verifier.
+
+The service issuing this proof MUST already have authenticated the live Entra
+bearer token (signature, issuer, audience, expiry), resolved an active Jason
+Owner binding and received a fresh affirmative exact-release request. The
+root-host verifier independently checks the issuer's pinned Ed25519 public key
+and every immutable release/rollback/scope/manifest/freeze field. A mutable
+JSON file, an Owner email, a ChatGPT message, or an untrusted TLS header alone
+never supplies production authority.
+"""
+from __future__ import annotations
+
+import base64
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+import json
+import re
+from typing import Any, Mapping
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey, Ed25519PublicKey,
+)
+from cryptography.hazmat.primitives import serialization
+
+TID = "f7054323-d52b-4863-8c2f-1898f0b6077c"
+OWNER_OID = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+OWNER_PRINCIPAL = "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
+ADMIN_OWNER_OID = "c848022d-e13b-4457-84b0-e2f5c00dcaf6"
+ADMIN_OWNER_PRINCIPAL = "person-entra-c848022de13b445784b0e2f5c00dcaf6"
+EXACT_OWNER_OAUTH_SUBJECTS = {
+    OWNER_OID: OWNER_PRINCIPAL,
+    ADMIN_OWNER_OID: ADMIN_OWNER_PRINCIPAL,
+}
+ID_RE = re.compile(r"^owner-mcp-[0-9a-f]{32}$")
+SHA = re.compile(r"^[0-9a-f]{40}$")
+DIGEST = re.compile(r"^[0-9a-f]{64}$")
+SIGNATURE = re.compile(r"^[A-Za-z0-9_-]{86}$")
+MAX_AGE = timedelta(minutes=15)
+
+
+class OwnerReleaseProofDenied(PermissionError):
+    pass
+
+
+def canonical(value: Mapping[str, Any]) -> bytes:
+    return json.dumps(dict(value), sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False).encode("utf-8")
+
+
+def public_key_sha256(public_key: Ed25519PublicKey) -> str:
+    raw = public_key.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    return sha256(raw).hexdigest()
+
+
+def _fields(data: Mapping[str, Any]) -> None:
+    required = {
+        "schema_version", "authorization", "approval_id", "decision",
+        "tenant_id", "owner_oid", "owner_principal", "organization_id",
+        "authentication", "release_id", "candidate_sha", "rollback_sha",
+        "scope_sha256", "manifest_sha256",
+        "issued_at", "expires_at", "signer_public_key_sha256",
+        "standing_authority", "one_release_only",
+    }
+    if not isinstance(data, Mapping):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_PROOF_SCHEMA_INVALID")
+    normal = data.get("schema_version") == "2.0"
+    binding = "release_policy_sha256" if normal else "freeze_sha256"
+    required.add(binding)
+    if set(data) != required:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_PROOF_SCHEMA_INVALID")
+    if (data["schema_version"] not in ("1.0", "2.0")
+            or data["authorization"] != (
+                "authenticated_entra_owner_exact_normal_release" if normal else
+                "authenticated_entra_owner_exact_release")
+            or data["decision"] not in ("approve", "deny")
+            or not isinstance(data["approval_id"], str)
+            or ID_RE.fullmatch(data["approval_id"]) is None
+            or data["tenant_id"] != TID
+            or data["owner_oid"] not in EXACT_OWNER_OAUTH_SUBJECTS
+            or data["owner_principal"] != EXACT_OWNER_OAUTH_SUBJECTS.get(
+                data["owner_oid"])
+            or data["organization_id"] != "aot"
+            or data["authentication"] != "verified_entra_oauth_bearer"
+            or type(data["one_release_only"]) is not bool
+            or data["one_release_only"] is not True
+            or type(data["standing_authority"]) is not bool
+            or data["standing_authority"] is not False
+            or not isinstance(data["release_id"], str)
+            or not isinstance(data["candidate_sha"], str)
+            or not isinstance(data["rollback_sha"], str)
+            or not SHA.fullmatch(data["candidate_sha"])
+            or not SHA.fullmatch(data["rollback_sha"])
+            or data["release_id"] != "release-" + data["candidate_sha"][:16]
+            or any(not isinstance(data[k], str) or DIGEST.fullmatch(data[k]) is None
+                   for k in ("scope_sha256", "manifest_sha256", binding,
+                             "signer_public_key_sha256"))):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_PROOF_FIELDS_INVALID")
+
+
+def issue_exact_owner_release(
+    *, approval_id: str, release_id: str, candidate_sha: str,
+    rollback_sha: str, scope_sha256: str, manifest_sha256: str,
+    freeze_sha256: str | None = None, release_policy_sha256: str | None = None,
+    verified_tenant_id: str, verified_owner_oid: str,
+    verified_principal: str, verified_organization_id: str,
+    confirmed_decision: str, at: datetime, private_key: Ed25519PrivateKey,
+) -> dict[str, Any]:
+    if not isinstance(private_key, Ed25519PrivateKey):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_SIGNER_INVALID")
+    if at.tzinfo is None or at.utcoffset() is None:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_TIME_NOT_AWARE")
+    at = at.astimezone(timezone.utc)
+    if (freeze_sha256 is None) == (release_policy_sha256 is None):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_EXACT_MODE_BINDING_REQUIRED")
+    normal = release_policy_sha256 is not None
+    payload = {
+        "schema_version": "2.0" if normal else "1.0",
+        "authorization": ("authenticated_entra_owner_exact_normal_release" if normal
+                          else "authenticated_entra_owner_exact_release"),
+        "approval_id": approval_id,
+        "decision": confirmed_decision,
+        "tenant_id": verified_tenant_id,
+        "owner_oid": verified_owner_oid,
+        "owner_principal": verified_principal,
+        "organization_id": verified_organization_id,
+        "authentication": "verified_entra_oauth_bearer",
+        "release_id": release_id,
+        "candidate_sha": candidate_sha,
+        "rollback_sha": rollback_sha,
+        "scope_sha256": scope_sha256,
+        "manifest_sha256": manifest_sha256,
+        **({"release_policy_sha256": release_policy_sha256} if normal
+           else {"freeze_sha256": freeze_sha256}),
+        "issued_at": at.isoformat(),
+        "expires_at": (at + MAX_AGE).isoformat(),
+        "signer_public_key_sha256": public_key_sha256(private_key.public_key()),
+        "standing_authority": False,
+        "one_release_only": True,
+    }
+    _fields(payload)
+    signature = private_key.sign(canonical(payload))
+    return {
+        "payload": payload,
+        "signature_base64url": base64.urlsafe_b64encode(signature).decode().rstrip("="),
+    }
+
+
+def verify_exact_owner_release(
+    signed: Mapping[str, Any], *, public_key: Ed25519PublicKey,
+    expected_candidate_sha: str, expected_rollback_sha: str,
+    expected_release_id: str, expected_scope_sha256: str,
+    expected_manifest_sha256: str, expected_freeze_sha256: str | None = None,
+    expected_release_policy_sha256: str | None = None,
+    at: datetime, consumed_ids: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
+    if not isinstance(public_key, Ed25519PublicKey):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_ROOT_TRUST_KEY_UNAVAILABLE")
+    if (not isinstance(signed, Mapping)
+            or set(signed) != {"payload", "signature_base64url"}
+            or not isinstance(signed.get("payload"), Mapping)):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_ENVELOPE_INVALID")
+    payload = signed["payload"]
+    _fields(payload)
+    if (expected_freeze_sha256 is None) == (expected_release_policy_sha256 is None):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_EXACT_MODE_BINDING_REQUIRED")
+    normal = expected_release_policy_sha256 is not None
+    if payload["schema_version"] != ("2.0" if normal else "1.0"):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_TRANSACTION_MODE_MISMATCH")
+    binding = "release_policy_sha256" if normal else "freeze_sha256"
+    expected_binding = expected_release_policy_sha256 if normal else expected_freeze_sha256
+    encoded = signed["signature_base64url"]
+    if not isinstance(encoded, str) or SIGNATURE.fullmatch(encoded) is None:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_SIGNATURE_MALFORMED")
+    try:
+        signature = base64.urlsafe_b64decode(encoded + "==")
+        if len(signature) != 64:
+            raise ValueError("signature length")
+        public_key.verify(signature, canonical(payload))
+    except (InvalidSignature, TypeError, ValueError) as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_SIGNATURE_INVALID") from exc
+    if public_key_sha256(public_key) != payload["signer_public_key_sha256"]:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_PUBLIC_KEY_DRIFT")
+    try:
+        issued = datetime.fromisoformat(payload["issued_at"])
+        expires = datetime.fromisoformat(payload["expires_at"])
+    except (TypeError, ValueError) as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_TIMES_INVALID") from exc
+    if (at.tzinfo is None or issued.tzinfo is None or expires.tzinfo is None
+            or not issued <= at < expires
+            or expires - issued != MAX_AGE):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_EXPIRED_OR_FUTURE")
+    if any(payload[k] != expected for k, expected in (
+        ("candidate_sha", expected_candidate_sha),
+        ("rollback_sha", expected_rollback_sha),
+        ("release_id", expected_release_id),
+        ("scope_sha256", expected_scope_sha256),
+        ("manifest_sha256", expected_manifest_sha256),
+        (binding, expected_binding),
+    )):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_TRANSACTION_BINDING_MISMATCH")
+    if payload["approval_id"] in consumed_ids:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_ONE_USE_REPLAY")
+    if payload["decision"] != "approve":
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_DENIED")
+    return dict(payload)
+
+
+
+# A root-controlled, audited migration is the only writer of this record.
+# This is a durable release-policy identity, NOT an approval, a freeze
+# exception or standing authority. An absent freeze alone cannot imply it.
+RETIREMENT_POLICY_PATH = "/etc/jason-owner-release/normal-release-policy/production-freeze-retirement.json"
+DEPLOYMENT_CONFIG_PATH = "/etc/jason-owner-release/normal-release-policy/deployment.json"
+NATIVE_MIGRATION_APPROVAL = re.compile(r"^owner-native-[0-9a-f]{32}$")
+
+
+def read_retired_release_policy() -> str | None:
+    """Read the independently installed policy binding; never change state."""
+    import os
+    import stat
+    from pathlib import Path
+
+    path = Path(RETIREMENT_POLICY_PATH)
+    try:
+        meta = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_UNAVAILABLE") from exc
+    try:
+        for parent in path.parents:
+            info = parent.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+                    or info.st_mode & 0o022):
+                raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_CUSTODY")
+        if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0
+                or stat.S_IMODE(meta.st_mode) not in (0o444, 0o644)
+                or meta.st_nlink != 1 or not 0 < meta.st_size <= 4096):
+            raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_CUSTODY")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            opened = os.fstat(fd)
+            if (opened.st_dev, opened.st_ino, opened.st_uid, opened.st_mode,
+                    opened.st_nlink, opened.st_size) != (
+                    meta.st_dev, meta.st_ino, meta.st_uid, meta.st_mode,
+                    meta.st_nlink, meta.st_size):
+                raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_CHANGED")
+            raw = os.read(fd, 4097)
+            after = os.fstat(fd)
+            if len(raw) != meta.st_size or after.st_mtime_ns != meta.st_mtime_ns:
+                raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_CHANGED")
+        finally:
+            os.close(fd)
+        doc = json.loads(raw)
+        fields = {
+            "schema_version", "authorization", "retired_at",
+            "original_freeze_sha256", "migration_scope_sha256",
+            "owner_approval_reference", "exact_release_approval_required",
+            "standing_authority",
+        }
+        if (not isinstance(doc, dict) or set(doc) != fields
+                or doc["schema_version"] != "1.0"
+                or doc["authorization"] != "retire_global_production_freeze_only"
+                or doc["exact_release_approval_required"] is not True
+                or doc["standing_authority"] is not False
+                or not all(isinstance(doc[k], str) and DIGEST.fullmatch(doc[k])
+                           for k in ("original_freeze_sha256", "migration_scope_sha256"))
+                or not isinstance(doc["owner_approval_reference"], str)
+                or not (ID_RE.fullmatch(doc["owner_approval_reference"])
+                        or NATIVE_MIGRATION_APPROVAL.fullmatch(doc["owner_approval_reference"]))):
+            raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_INVALID")
+        retired = datetime.fromisoformat(doc["retired_at"])
+        if retired.tzinfo is None or retired > datetime.now(timezone.utc):
+            raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_TIME")
+        return sha256(raw).hexdigest()
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_INVALID") from exc
+
+
+def require_retired_release_mode(state_root: "Path", policy_sha256: str) -> None:
+    """No coexistence or temporary-absence interpretation of retired mode."""
+    from pathlib import Path
+
+    if not isinstance(policy_sha256, str) or not DIGEST.fullmatch(policy_sha256):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_MODE_CONFLICT")
+    try:
+        (Path(state_root) / "production-deployment-freeze").lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_MODE_UNVERIFIED") from exc
+    raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_MODE_CONFLICT")
+
+
+
+def _configured_freeze(raw: bytes) -> bool:
+    """A mutable operating setting, not part of immutable component identity."""
+    try:
+        doc = json.loads(raw)
+        if (not isinstance(doc, dict)
+                or set(doc) != {"schema_version", "production_freeze"}
+                or doc["schema_version"] != "1.0"
+                or type(doc["production_freeze"]) is not bool):
+            raise ValueError("invalid deployment configuration")
+        return doc["production_freeze"]
+    except (ValueError, TypeError, KeyError) as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_DEPLOYMENT_CONFIG_INVALID") from exc
+
+
+def read_normal_deployment_freeze() -> bool:
+    """Read on every new admission. Missing/invalid config is a hard denial.
+
+    The independently recorded retirement receipt is immutable. Changing this
+    setting never changes its digest, a component identity, or rollback proof.
+    Recovery and read-only verification deliberately do not use this gate.
+    """
+    import os
+    import stat
+    from pathlib import Path
+    path = Path(DEPLOYMENT_CONFIG_PATH)
+    try:
+        for parent in path.parents:
+            info = parent.lstat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise OwnerReleaseProofDenied("OWNER_RELEASE_DEPLOYMENT_CONFIG_CUSTODY")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            meta = os.fstat(fd)
+            if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0 or meta.st_gid != 0
+                    or stat.S_IMODE(meta.st_mode) not in (0o444, 0o644)
+                    or meta.st_nlink != 1 or not 0 < meta.st_size <= 4096):
+                raise OwnerReleaseProofDenied("OWNER_RELEASE_DEPLOYMENT_CONFIG_CUSTODY")
+            raw = os.read(fd, 4097)
+            after = os.fstat(fd)
+            current = path.lstat()
+            if (len(raw) != meta.st_size or after.st_mtime_ns != meta.st_mtime_ns
+                    or (current.st_dev, current.st_ino, current.st_mtime_ns)
+                        != (meta.st_dev, meta.st_ino, meta.st_mtime_ns)):
+                raise OwnerReleaseProofDenied("OWNER_RELEASE_DEPLOYMENT_CONFIG_CHANGED")
+        finally:
+            os.close(fd)
+        return _configured_freeze(raw)
+    except OSError as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_DEPLOYMENT_CONFIG_UNAVAILABLE") from exc
+
+
+def require_normal_deployment_enabled(state_root: "Path", policy_sha256: str) -> None:
+    require_retired_release_mode(state_root, policy_sha256)
+    if read_normal_deployment_freeze():
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_CONFIGURED_FREEZE_ACTIVE")
+
+
+def read_pinned_root_owner_public_key(
+    path: "Path", *, require_root_owned: bool = True,
+) -> Ed25519PublicKey:
+    """Read public-key policy; NEVER accept the signing key from a request.
+
+    In production the host OS must provision the policy under a root-owned
+    non-writable directory. Private signing material remains a separate
+    service secret. The independently pinned public key is intentionally
+    readable: it authenticates an Owner OAuth decision without a Teams card.
+    """
+    from pathlib import Path
+    import stat
+    p = Path(path)
+    try:
+        meta = p.lstat()
+        raw = p.read_bytes()
+        parent = p.parent.lstat()
+    except OSError as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_ROOT_TRUST_UNAVAILABLE") from exc
+    if (p.is_symlink() or not stat.S_ISREG(meta.st_mode)
+            or p.parent.is_symlink() or not stat.S_ISDIR(parent.st_mode)
+            or meta.st_mode & 0o022 or parent.st_mode & 0o022
+            or (require_root_owned and (meta.st_uid != 0 or parent.st_uid != 0))
+            or len(raw) > 4096):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_ROOT_TRUST_UNSAFE")
+    try:
+        doc = json.loads(raw)
+        expected = {
+            "schema_version", "authorization", "organization_id",
+            "tenant_id", "authorized_owner_subjects",
+            "public_key_base64", "public_key_sha256",
+            "standing_authority",
+        }
+        if not isinstance(doc, dict) or set(doc) != expected:
+            raise ValueError("schema")
+        if (doc["schema_version"] != "1.0"
+                or doc["authorization"] != "authenticated_entra_owner_exact_release"
+                or doc["organization_id"] != "aot"
+                or doc["tenant_id"] != TID
+                or doc["authorized_owner_subjects"] != [
+                    {"owner_oid": oid, "owner_principal": principal}
+                    for oid, principal in sorted(EXACT_OWNER_OAUTH_SUBJECTS.items())
+                ]
+                or doc["standing_authority"] is not False
+                or not isinstance(doc["public_key_base64"], str)
+                or not isinstance(doc["public_key_sha256"], str)
+                or DIGEST.fullmatch(doc["public_key_sha256"]) is None):
+            raise ValueError("identity")
+        key_bytes = base64.b64decode(doc["public_key_base64"], validate=True)
+        if len(key_bytes) != 32:
+            raise ValueError("public key length")
+        key = Ed25519PublicKey.from_public_bytes(key_bytes)
+        if public_key_sha256(key) != doc["public_key_sha256"]:
+            raise ValueError("trust digest")
+        return key
+    except (ValueError, TypeError, KeyError) as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_ROOT_TRUST_INVALID") from exc
+
+
+def read_service_owner_signing_key(path: "Path") -> Ed25519PrivateKey:
+    """Fetch a separately provisioned, private, non-symlink service key.
+
+    Nothing in source generation creates, enables, or rotates a live key;
+    provisioning requires an independently authorized root operation.
+    """
+    from pathlib import Path
+    import os
+    import stat
+    p = Path(path)
+    try:
+        meta = p.lstat()
+        raw = p.read_bytes()
+    except OSError as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_SERVICE_SIGNER_UNAVAILABLE") from exc
+    if (p.is_symlink() or not stat.S_ISREG(meta.st_mode)
+            or stat.S_IMODE(meta.st_mode) != 0o400
+            or meta.st_uid != os.geteuid() or len(raw) != 32):
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_SERVICE_SIGNER_UNSAFE")
+    try:
+        return Ed25519PrivateKey.from_private_bytes(raw)
+    except (ValueError, TypeError) as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_SERVICE_SIGNER_INVALID") from exc

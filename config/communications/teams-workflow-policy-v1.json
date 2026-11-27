@@ -1,0 +1,150 @@
+{
+  "schema_version": "1.0",
+  "policy_version": "aot-20261123-v1",
+  "enabled": false,
+  "calendar": {
+    "timezone": "America/New_York",
+    "weekdays": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "opens": "08:00",
+    "closes": "18:00",
+    "holidays": []
+  },
+  "reminder_business_minutes": 60,
+  "escalation_business_minutes": 600,
+  "fallback_email": "al@teamaot.com",
+  "events": {
+    "approval_required": {
+      "title": "Approval requested",
+      "message": "Waiting for the authorized approver."
+    },
+    "reminder": {
+      "title": "Approval reminder",
+      "message": "Waiting for the authorized approver."
+    },
+    "escalated": {
+      "title": "Approval escalated",
+      "message": "Waiting for the next authorized approver."
+    },
+    "completed": {
+      "title": "Request completed",
+      "message": "The requested work is complete and verified."
+    },
+    "blocked": {
+      "title": "Action required",
+      "message": "The request could not continue. Review the request for the next action."
+    },
+    "denied": {
+      "title": "Request declined",
+      "message": "No further action will be taken on this request."
+    },
+    "cancelled": {
+      "title": "Request cancelled",
+      "message": "No further action will be taken on this request."
+    },
+    "restored": {
+      "title": "Service restored",
+      "message": "The service has been checked and is working again."
+    },
+    "approved": {
+      "title": "Purchase approved",
+      "message": "The decision is recorded. The purchase can continue within the reviewed scope."
+    },
+    "approval_replaced": {
+      "title": "Approval link replaced",
+      "message": "This approval link is no longer active. Use the latest request when it arrives."
+    }
+  },
+  "templates": [
+    {
+      "capability": "procurement.submission.execute",
+      "mode": "purchase",
+      "title": "Purchase approval",
+      "explanation": "Review the purchase and total below. Approve to continue or deny to stop the purchase.",
+      "primary": [
+        {
+          "source": "Submitted by",
+          "label": "Requested by",
+          "required": true
+        },
+        {
+          "source": "Vendor",
+          "label": "Supplier",
+          "required": true
+        },
+        {
+          "source": "Product",
+          "label": "Item",
+          "required": true
+        },
+        {
+          "source": "Quantity",
+          "label": "Quantity",
+          "required": true
+        },
+        {
+          "source": "Total Commitment",
+          "label": "Total including tax and shipping",
+          "required": true
+        },
+        {
+          "source": "Customer",
+          "label": "Customer",
+          "required": false
+        },
+        {
+          "source": "Ticket",
+          "label": "Ticket",
+          "required": false
+        }
+      ],
+      "details": [
+        {
+          "source": "AOT Cost",
+          "label": "Cost per item",
+          "required": false
+        },
+        {
+          "source": "Freight / Shipping",
+          "label": "Shipping",
+          "required": false
+        },
+        {
+          "source": "Tax",
+          "label": "Tax",
+          "required": false
+        },
+        {
+          "source": "Fees",
+          "label": "Fees",
+          "required": false
+        },
+        {
+          "source": "Allocation",
+          "label": "Delivery allocation",
+          "required": false
+        },
+        {
+          "source": "Retail",
+          "label": "Price per item",
+          "required": false
+        },
+        {
+          "source": "Billing",
+          "label": "Billing treatment",
+          "required": false
+        },
+        {
+          "source": "Source",
+          "label": "Source",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

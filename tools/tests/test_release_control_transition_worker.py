@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import os
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 import pytest
@@ -8,6 +10,25 @@ p=Path(__file__).resolve().parents[1]/'release_control_transition_worker.py'
 s=importlib.util.spec_from_file_location('release_control_transition_worker',p)
 m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 REV='a'*40
+
+
+@pytest.fixture(autouse=True, params=[
+    "release_control_transition_worker.py",
+    "scoped_backport_release_control_transition_worker.py",
+])
+def root_transition_variant(request, monkeypatch):
+    source = Path(__file__).resolve().parents[1] / request.param
+    spec = importlib.util.spec_from_file_location(source.stem, source)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    monkeypatch.setitem(globals(), "m", worker)
+
+    # Fixture records are owned by the current test runner, not a host account.
+    # Keep production UID/mode validation intact and isolate the account lookup.
+    lookup = worker.pwd.getpwnam
+    monkeypatch.setattr(worker.pwd, "getpwnam", lambda name:
+        SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+        if name == "al" else lookup(name))
 
 
 def verified_lkg():
@@ -333,3 +354,15 @@ def test_prior_lkg_recovery_with_unrelated_drift_remains_denied(tmp_path):
          patch.object(m,"verify_health",return_value=observed.copy()):
         with pytest.raises(ValueError,match="independent PASS"):
             m.restore_previous_verified_lkg(request,state)
+
+
+def test_prior_lkg_recovery_denies_untrusted_record_owner(tmp_path):
+    request,state,drift,record,observed=_prior_recovery_fixture(tmp_path)
+    before=json.dumps(state,sort_keys=True)
+    with patch.object(m,'ROOT',tmp_path), \
+         patch.object(m,'protected_read',return_value=drift), \
+         patch.object(m,'verify_health',return_value=observed), \
+         patch.object(m.pwd,'getpwnam',return_value=SimpleNamespace(pw_uid=os.getuid()+1)):
+        with pytest.raises(PermissionError,match='record ownership invalid'):
+            m.restore_previous_verified_lkg(request,state)
+    assert json.dumps(state,sort_keys=True)==before

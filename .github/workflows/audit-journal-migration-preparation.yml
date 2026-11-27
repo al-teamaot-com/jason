@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - 'tools/audit_journal*.py'
+      - 'tools/release_control_transition_worker.py'
+      - 'tools/scoped_backport_release_control_transition_worker.py'
       - 'tools/tests/*audit_journal*.py'
       - 'tools/audit_journal_migration.py'
       - 'tools/tests/test_audit_journal_migration.py'

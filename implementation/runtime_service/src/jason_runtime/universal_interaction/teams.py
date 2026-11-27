@@ -7,6 +7,8 @@ This module never directly sends HTTP or opens a new approval callback.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
+from jason_runtime.teams_workflow_configuration import TeamsConfigurationError
 from typing import Any, Callable, Mapping
 
 from connectors.microsoft_graph.teams_approval_channel import render_approval_card
@@ -133,3 +135,61 @@ class ExistingTeamsInteractionAdapter:
             recipient_identity_id=route.recipient_identity_id,
             message_id=receipt.message_id,
         )
+
+
+def render_configured_approval(configuration, card: Any, *, actionable: bool = True) -> dict[str, Any] | None:
+    template = configuration.template(card.capability, card.requested_mode)
+    if not configuration.enabled or template is None:
+        return None
+    facts = dict(card.facts)
+    if len(facts) != len(card.facts):
+        raise TeamsConfigurationError("ambiguous persisted card facts")
+    groups = {}
+    for group in ("primary", "details"):
+        values = []
+        for field in template[group]:
+            value = facts.get(field["source"])
+            if value is None or not str(value).strip():
+                if field["required"]:
+                    raise TeamsConfigurationError("required persisted approval fact missing")
+                continue
+            values.append({"title": field["label"], "value": str(value)})
+        groups[group] = values
+    body = [
+        {"type": "TextBlock", "text": template["title"] if actionable else "Approval requested",
+         "weight": "Bolder", "size": "Medium", "wrap": True},
+        {"type": "TextBlock", "text": template["explanation"] if actionable else
+         "Your request is waiting for the authorized approver.", "wrap": True},
+        {"type": "FactSet", "facts": groups["primary"]},
+        {"type": "TextBlock", "text": "Review by: " + datetime.fromisoformat(
+            card.expires_at).astimezone(configuration.calendar.zone).strftime('%b %d, %Y %I:%M %p %Z'),
+            "wrap": True, "isSubtle": True},
+    ]
+    if groups["details"]:
+        body += [{"type": "ActionSet", "actions": [{"type": "Action.ToggleVisibility",
+                  "title": "View details", "targetElements": ["approval_details"]}]},
+                 {"type": "Container", "id": "approval_details", "isVisible": False,
+                  "items": [{"type": "FactSet", "facts": groups["details"]}]}]
+    data = {"approval_id": card.approval_id}
+    if card.card_instance_challenge is not None:
+        data["card_challenge"] = card.card_instance_challenge
+    return {"type": "AdaptiveCard", "version": "1.4", "body": body,
+            "actions": [{"type": "Action.Submit", "title": label,
+                         "data": {**data, "decision": decision}}
+                        for label, decision in (("Approve", "approve"), ("Deny", "deny"))]
+            if actionable else []}
+
+
+def render_configured_event(configuration, card: Any, *, event: str) -> dict[str, Any]:
+    """All event presentation remains in the existing canonical Teams adapter."""
+    template = configuration.raw['events'][event]
+    approved_layout = render_configured_approval(configuration, card, actionable=False)
+    facts = []
+    if approved_layout is not None:
+        facts = [block for block in approved_layout['body'] if block['type'] == 'FactSet']
+    return {'type': 'AdaptiveCard', 'version': '1.4', 'body': [
+        {'type': 'TextBlock', 'text': template['title'], 'weight': 'Bolder',
+         'size': 'Medium', 'wrap': True},
+        {'type': 'TextBlock', 'text': template['message'], 'wrap': True},
+        *facts,
+    ], 'actions': []}

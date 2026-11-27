@@ -91,6 +91,46 @@ def need(ok, why):
         raise PermissionError("ENGINEERING_MANAGER_INSTALL_" + why)
 
 
+# Preserve a bounded diagnostic from the existing independent health reader.
+# This changes error reporting only; it never converts a denied check into PASS.
+PIPELINE_HEALTH_DENIAL_REASONS = frozenset({
+    "noncanonical_engineering_spool",
+    "audit_migration_not_accepted",
+    "audit_release_not_quiescent",
+    "audit_maintenance_not_active",
+    "audit_maintenance_not_verified",
+    "native_readback_schema_invalid",
+    "native_release_health_unverified",
+    "live_core_health_unverified",
+    "live_core_image_mismatch",
+    "live_core_component_anchor_mismatch",
+    "live_core_component_readback_missing",
+    "authority_health_unverified",
+    "full_restore_proof_unverified",
+    "native_health_changed_during_probe",
+    "native_health_evidence_unavailable",
+    *("native_health_unit_not_successful:" + name for name in (
+        "jason-production-drift-watchdog.service",
+        "jason-pmv4-component-readback.service",
+        "jason-openclaw-authority-health.service",
+    )),
+})
+
+
+def verify_pipeline_native_core_health(health):
+    if isinstance(health, dict):
+        if (health.get("verified") is True
+                and health.get("production_authority") is False
+                and health.get("production_revision") == LKG):
+            return
+        reason = health.get("reason")
+        if isinstance(reason, str) and reason in PIPELINE_HEALTH_DENIAL_REASONS:
+            need(False, "PIPELINE_NATIVE_CORE_HEALTH:" + reason)
+        if health.get("verified") is True:
+            need(False, "PIPELINE_NATIVE_CORE_HEALTH:invalid_authority_or_revision")
+    need(False, "PIPELINE_NATIVE_CORE_HEALTH:invalid_or_unrecognized_result")
+
+
 def digest(raw):
     return sha256(raw).hexdigest()
 
@@ -309,6 +349,26 @@ def review_breaker_custody_delta(git, candidate):
 
 
 def reviewed_source_delta(git, baseline, candidate, source_files):
+    if baseline == POST_RETIREMENT_MANAGER_BASELINE:
+        need(set(source_files) == POST_RETIREMENT_SCOPE_FILES,
+             "POST_RETIREMENT_SOURCE_SCOPE_INVALID")
+        git("merge-base","--is-ancestor",baseline,POST_RETIREMENT_SOURCE_BASELINE)
+        git("merge-base","--is-ancestor",POST_RETIREMENT_SOURCE_BASELINE,candidate)
+        changed=set(git("diff","--no-renames","--name-only",
+                        POST_RETIREMENT_SOURCE_BASELINE,candidate).decode().splitlines())
+        need(changed==POST_RETIREMENT_SCOPE_FILES,"POST_RETIREMENT_SOURCE_DELTA")
+        return
+    if baseline == NORMAL_MANAGER_BASELINE:
+        need(set(source_files) == NORMAL_MANAGER_SCOPE_FILES,
+             "NORMAL_MANAGER_SOURCE_SCOPE_INVALID")
+        return review_normal_manager_delta(git, candidate)
+    if baseline == WATCHDOG_RECOVERY_BASELINE:
+        need(set(source_files) == WATCHDOG_RECOVERY_SCOPE_FILES,
+             "WATCHDOG_RECOVERY_SOURCE_SCOPE_INVALID")
+        git("merge-base", "--is-ancestor", baseline, candidate)
+        need(set(git("diff","--no-renames","--name-only",baseline,candidate).decode().splitlines())
+             == WATCHDOG_RECOVERY_SCOPE_FILES, "WATCHDOG_RECOVERY_SOURCE_DELTA_CHANGED")
+        return
     if baseline == BREAKER_CUSTODY_BASELINE:
         need(set(source_files) == BREAKER_CUSTODY_SCOPE_FILES, "BREAKER_CUSTODY_SCOPE_INVALID")
         return review_breaker_custody_delta(git, candidate)
@@ -399,7 +459,9 @@ def source_review(candidate, p, *, recovery=False, baseline=BASELINE, source_fil
     for name in sorted(set(source_files) | set(supporting_files)):
         raw = git("show", candidate + ":" + name)
         if name in supporting_files:
-            need(raw == git("show", baseline + ":" + name), "SUPPORTING_SOURCE_CHANGED")
+            supporting_baseline=(POST_RETIREMENT_SOURCE_BASELINE
+                                 if baseline==POST_RETIREMENT_MANAGER_BASELINE else baseline)
+            need(raw == git("show", supporting_baseline + ":" + name), "SUPPORTING_SOURCE_CHANGED")
         need(raw == p["read"](REPO / name, 1000, source=True), "SOURCE_BYTES_CHANGED")
         files[name] = raw
     need(files["tools/pmv4_e_engineering_manager_install.py"] == Path(__file__).read_bytes(),
@@ -905,9 +967,12 @@ class NativeAdapter:
         peers={r["Name"].lstrip("/"):{"id":r["Id"],"image":r["Image"],"started_at":r["State"]["StartedAt"]}
                for r in peer_rows}
         controls=self.plan["protected_health"]["controls"]
-        for path in (self.n["FREEZE"],self.n["HOLD"]):
-            uid,mode,pin=self.p["CONTROLS"][path]
-            need(digest(self.p["read"](path,uid,mode))==pin==controls[str(path)],"CONTROL_CHANGED")
+        if getattr(self,"predecessor",None)==POST_RETIREMENT_MANAGER_BASELINE:
+            need(self.retired_control_snapshot()==controls,"POST_RETIREMENT_CONTROL_CHANGED")
+        else:
+            for path in (self.n["FREEZE"],self.n["HOLD"]):
+                uid,mode,pin=self.p["CONTROLS"][path]
+                need(digest(self.p["read"](path,uid,mode))==pin==controls[str(path)],"CONTROL_CHANGED")
         evidence={
             "normal_timer_invocation":timer_at>=start and fresh(controller.get("started_at"))
                  and svc.get("ConditionResult")=="yes",
@@ -1123,8 +1188,211 @@ BREAKER_POLICY_SOURCE = {
     "revision": LKG,
     "policy_sha256": "aa50f13341b228344b4da3e153fd2102d88ef0ffe71d96bd213605b42f14ba2d",
 }
-SUCCESSOR_BASELINES = (PIPELINE_BASELINE, TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE,
-                       SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE)
+WATCHDOG_RECOVERY_BASELINE = "c4e78d700b7ac347e9dee50c750d5de99780e2a2"
+WATCHDOG_RECOVERY_WORKERS = frozenset({
+    "jason_self_heal_watchdog.py", "support_repair_host_worker.py",
+    "owner_approved_development_worker.py", "engineering_supervisor.py",
+})
+WATCHDOG_RECOVERY_SCOPE_FILES = {
+    ".github/workflows/conversation-experience.yml",
+    "docs/operations/PMv4-Watchdog-Failure-Recovery-20261127.md",
+    "implementation/orchestrator/model_runtime_adapter.py",
+    "implementation/orchestrator/ollama_reasoning.py",
+    "implementation/orchestrator/tests/test_model_runtime_adapter.py",
+    "implementation/orchestrator/tests/test_ollama_reasoning.py",
+    "implementation/runtime_service/src/jason_runtime/composition.py",
+    "implementation/runtime_service/src/jason_runtime/conversation_experience_cutover.py",
+    "implementation/runtime_service/src/jason_runtime/support_repair_reasoning.py",
+    "implementation/runtime_service/tests/test_conversation_experience_cutover.py",
+    "implementation/runtime_service/tests/test_support_repair_reasoning.py",
+    "tests/test_pmv4_e_engineering_manager_guard.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "tools/engineering_supervisor.py",
+    "tools/jason_self_heal_watchdog.py",
+    "tools/owner_approved_development_worker.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/support_repair_host_worker.py",
+    "tools/tests/test_engineering_supervisor.py",
+    "tools/tests/test_jason_self_heal_watchdog.py",
+    "tools/tests/test_owner_approved_development_worker.py",
+    "tools/tests/test_support_repair_host_worker.py",
+}
+WATCHDOG_RECOVERY_SUPPORTING_FILES = BREAKER_CUSTODY_SUPPORTING_FILES | {"tools/engineering_pipeline.py"}
+# This preparatory successor does NOT remove a freeze, change a hold,
+# deploy a container, grant provider rights, or activate a normal release.
+# Reuse the existing authenticated transaction and predecessor acceptance.
+NORMAL_MANAGER_BASELINE = "81ad19542cc8a720debb09d2ea7c511db6b9fc20"
+# Historical rollback evidence, not an approval token. The next candidate
+# must independently obtain its own authenticated exact-scope decision.
+NORMAL_MANAGER_ROLLBACK_EVIDENCE = {
+    "failed_candidate_sha": "34f9fc7cd57adf9889ec0461e74e06ede1f36a64",
+    "approval_sha256": "52bc6e0f4954d20a0b440d78f8255e45ee1ae6b845e480fa7720c228912f770f",
+    "receipt_sha256": "9dcb25de47df65bc962be27cc4d402010cbf52ccdb8e4fabd0cecf8e5ef8df76",
+    "rollback_sha256": "0f40843379602702add79992d6d4c0cb1ff90910e77ecd158576ff7e77c12ff6",
+}
+NORMAL_MANAGER_WORKERS = frozenset({
+    "release_manager_host_runner.py", "jason_self_heal_watchdog.py",
+    "owner_approved_development_worker.py",
+})
+NORMAL_MANAGER_STAGE_FILES = {
+    Path("/usr/local/lib/jason/owner_signed_release_v2.py"):
+        "implementation/kernel/signed_owner_release_v2.py",
+    Path("/usr/local/lib/jason/scoped-backport/tools/pmv4_host_release_guard.py"):
+        "tools/pmv4_host_release_guard.py",
+    Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py"):
+        "tools/scoped_backport_component_readback.py",
+}
+def normal_manager_stage_images(code):
+    """Stage the native guard using the exact custody required by its reader."""
+    return {path: image(code[rel], 0,
+                        0o444 if rel == "tools/pmv4_host_release_guard.py" else 0o644)
+            for path, rel in NORMAL_MANAGER_STAGE_FILES.items()}
+
+
+NORMAL_MANAGER_SCOPE_FILES = {
+    *(NORMAL_MANAGER_STAGE_FILES.values()),
+    *("tools/" + name for name in NORMAL_MANAGER_WORKERS),
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "tests/test_pmv4_e_engineering_manager_guard.py",
+    "docs/operations/Production-Freeze-Retirement-Source-Review-20261127.md",
+    # The concurrently reviewed composition source changed since the installed
+    # manager. Include its exact bytes in source review, but never materialize
+    # it or any application artifact in this preparatory host transaction.
+    "implementation/runtime_service/src/jason_runtime/composition.py",
+}
+NORMAL_MANAGER_SCOPE_FILES |= {
+    "tools/production_freeze_retirement.py",
+    "tools/tests/test_production_freeze_retirement.py",
+    "tools/scoped_backport_coordinated.py",
+    "tools/scoped_backport_coordinated_host.py",
+    "tools/scoped_backport_coordinated_root.py",
+    "tools/scoped_backport_release_control_transition_worker.py",
+    "tools/tests/test_scoped_backport_release_control_transition_worker.py",
+    "tools/tests/test_release_control_transition_worker.py",
+    "implementation/mcp_service/src/jason_mcp/release_approval_request.py",
+    *("infrastructure/scoped-backport-release/" + unit +
+      ".d/95-coordinated-normal-release.conf" for unit in (
+        "jason-scoped-backport-requests.service",
+        "jason-scoped-backport-requests.path",
+        "jason-scoped-backport-recovery.service")),
+}
+NORMAL_MANAGER_SUPPORTING_FILES = WATCHDOG_RECOVERY_SUPPORTING_FILES | {
+    "tools/deploy_live_container.py", "tools/pmv4_mcp_projection.py",
+    "tools/release_control_transition_worker.py",
+}
+NORMAL_MANAGER_PROTECTED_PATHS = (
+    CLOSED_LOOP_PROTECTED_PATHS | WATCHDOG_RECOVERY_SCOPE_FILES
+    | NORMAL_MANAGER_SUPPORTING_FILES | {
+        "tools/pmv4_e_engineering_manager_transaction.py",
+        "tools/pmv4_e_engineering_manager_relocation.py",
+        "tools/pmv4_e_unit_admission.py",
+        "config/release-breaker-self-recovery-policy.json",
+    }
+) - NORMAL_MANAGER_SCOPE_FILES
+
+def review_normal_manager_delta(git, candidate):
+    # Independently CI-attest the complete protected-main commit using the
+    # existing source_review() gate. Project only these exact reviewed files
+    # onto the installed receipt; enumerate, but NEVER install unrelated work.
+    git("merge-base", "--is-ancestor", NORMAL_MANAGER_BASELINE, candidate)
+    changed = set(git("diff", "--no-renames", "--name-only",
+                      NORMAL_MANAGER_BASELINE, candidate).decode().splitlines())
+    need(NORMAL_MANAGER_SCOPE_FILES <= changed, "NORMAL_MANAGER_SOURCE_DELTA_INCOMPLETE")
+    excluded = changed - NORMAL_MANAGER_SCOPE_FILES
+    need(not (excluded & NORMAL_MANAGER_PROTECTED_PATHS)
+         and not any(path.startswith(("infrastructure/pmv4-e-engineering-manager/",
+                                      "tools/pmv4_e_")) for path in excluded),
+         "NORMAL_MANAGER_UNREVIEWED_PROTECTED_SOURCE")
+    return {"baseline": NORMAL_MANAGER_BASELINE, "candidate": candidate,
+            "reviewed_source_paths": sorted(NORMAL_MANAGER_SCOPE_FILES),
+            "excluded_source_paths": sorted(excluded)}
+
+# Reuse the signed native manager successor transaction in the retired
+# configuration. The accepted host rollback anchor and live component
+# identities are distinct, and the migrated watchdog receipt must follow
+# the newly attested manager copy without changing watchdog bytes.
+POST_RETIREMENT_MANAGER_BASELINE = "db14810b945a39546ef27d48dbe439b5e0ec4e80"
+POST_RETIREMENT_SOURCE_BASELINE = "92719c6303f633879dbd384e06829b193dad20ea"
+POST_RETIREMENT_WORKERS = frozenset({"owner_approved_development_worker.py"})
+POST_RETIREMENT_SCOPE_FILES = frozenset({
+    "tools/owner_approved_development_worker.py",
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+    "tools/tests/test_parallel_development_install.py",
+    "tests/test_pmv4_e_engineering_manager_guard.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "docs/operations/Production-Freeze-Retirement-Source-Review-20261127.md",
+})
+POST_RETIREMENT_SUPPORTING_FILES = frozenset(CLOSED_LOOP_SUPPORTING_FILES | {
+    "tools/production_freeze_retirement.py",
+})
+POST_RETIREMENT_PUB = Path("/etc/jason-owner-release/normal-release-policy")
+POST_RETIREMENT_CONFIG = POST_RETIREMENT_PUB/"deployment.json"
+POST_RETIREMENT_RECEIPT = POST_RETIREMENT_PUB/"production-freeze-retirement.json"
+POST_RETIREMENT_COMPONENTS = Path("/etc/jason-owner-release/coordinated-readback/component.json")
+POST_RETIREMENT_MIGRATION = Path("/etc/jason-owner-release/coordinated-reader-migration.json")
+POST_RETIREMENT_POLICY = Path("/etc/jason-owner-release/scoped-backport-coordinated-installed.json")
+POST_RETIREMENT_READER_TARGETS = frozenset({POST_RETIREMENT_MIGRATION,POST_RETIREMENT_POLICY})
+POST_RETIREMENT_TRIGGERS = ("jason-scoped-backport-recovery.timer","jason-scoped-backport-requests.path")
+POST_RETIREMENT_SERVICES = ("jason-scoped-backport-recovery.service","jason-scoped-backport-requests.service")
+CLOSED_LOOP_BASELINES = (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE, WATCHDOG_RECOVERY_BASELINE, NORMAL_MANAGER_BASELINE, POST_RETIREMENT_MANAGER_BASELINE)
+CUSTODY_BASELINES = (BREAKER_CUSTODY_BASELINE, WATCHDOG_RECOVERY_BASELINE, NORMAL_MANAGER_BASELINE, POST_RETIREMENT_MANAGER_BASELINE)
+SOURCE_POLICY_BASELINES = (SOURCE_INTEGRATION_BASELINE, *CLOSED_LOOP_BASELINES)
+SCHEDULED_BASELINES = (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, *SOURCE_POLICY_BASELINES)
+SUCCESSOR_BASELINES = (PIPELINE_BASELINE, *SCHEDULED_BASELINES)
+WATCHDOG_RECOVERY_FAULTS = sorted(
+    ({"kind": "failed_system_unit", "state": "failed", "unit": n} for n in SERVICES),
+    key=lambda row: row["unit"],
+)
+
+DRIFT_REPORTER_UNIT = "jason-production-drift-watchdog.service"
+DRIFT_REPORTER_FAULT = {"kind":"failed_system_unit","state":"failed","unit":DRIFT_REPORTER_UNIT}
+DRIFT_REPORTER_PINS = {
+    "/opt/jason/current/tools/production_drift_watchdog.py":
+        "b6c53a7c015b83fccc5f2fd8c123e7a676ef212a9dd9800811db1ac5a1da7d8f",
+    "/etc/systemd/system/jason-production-drift-watchdog.service":
+        "c5ad8d61dedc7a31b417754c9122bff576648fb1650783644d52166fb9a8b5b6",
+    "/etc/systemd/system/jason-production-drift-watchdog.service.d/10-readback-recovery.conf":
+        "6ab206d2775324bd24ff86446d5f7e427f7e248dcebe010d6de59449215b2790",
+}
+DRIFT_REPORTER_EXIT2 = {
+    "LoadState":"loaded","ActiveState":"failed","MainPID":"0",
+    "Result":"exit-code","ExecMainCode":"1","ExecMainStatus":"2",
+    "FragmentPath":"/etc/systemd/system/jason-production-drift-watchdog.service",
+    "DropInPaths":"/etc/systemd/system/jason-production-drift-watchdog.service.d/10-readback-recovery.conf",
+}
+
+def verify_failed_manager_drift(control, drift, evaluated, *, reporter=None):
+    """Exact failed-unit containment, not a waiver of native drift."""
+    breaker = control.get("circuit_breaker") or {}
+    need(breaker.get("state") == "open"
+         and breaker.get("source") == "production_drift_watchdog"
+         and breaker.get("reason") == "continuous_production_drift_detected"
+         and breaker.get("problem_count") == 2
+         and breaker.get("problem_kinds") == ["failed_system_unit"],
+         "WATCHDOG_RECOVERY_BREAKER_NOT_EXACT")
+    # The pinned drift reporter returns 2 after recording the actual pair.
+    # Its *own* later failed-unit record is a derived symptom, not a third
+    # independent fault. The authoritative recorded list must still be the
+    # exact pair; allow the derived record only in a fresh external evaluation
+    # with verified reporter custody and exact systemd exit-status evidence.
+    for row, external in ((drift,False),(evaluated,True)):
+        problems = sorted(row.get("problems") or [],key=lambda item:item.get("unit",""))
+        allowed = problems == WATCHDOG_RECOVERY_FAULTS
+        if external and reporter == DRIFT_REPORTER_EXIT2:
+            allowed = allowed or problems == sorted(
+                [*WATCHDOG_RECOVERY_FAULTS,DRIFT_REPORTER_FAULT],key=lambda item:item["unit"])
+        need(row.get("status") == "drift_detected" and allowed,
+             "WATCHDOG_RECOVERY_UNRELATED_DRIFT")
+        observed = datetime.fromisoformat(row["observed_at"])
+        need(observed.tzinfo is not None
+             and 0 <= (datetime.now(timezone.utc)-observed).total_seconds() <= 180,
+             "WATCHDOG_RECOVERY_STALE_DRIFT")
+    return list(WATCHDOG_RECOVERY_FAULTS)
+
 PIPELINE_UNIT = SYSTEM_UNITS / SERVICES[0]
 PIPELINE_PROGRAM = LIB / "engineering_pipeline.py"
 MANAGER_GUARD = ROOT / "manager_guard.py"
@@ -1137,7 +1405,9 @@ def pipeline_scope_sha(plan):
          and re.fullmatch("[0-9a-f]{40}", str(plan.get("policy", {}).get("candidate_sha", "")))
          and plan["policy"]["candidate_sha"] not in (LKG, *SUCCESSOR_BASELINES)
          and plan.get("queue_cutover") is False
-         and plan.get("temporary_timer_stops") == list(TIMERS)
+         and plan.get("temporary_timer_stops") == list(
+             TIMERS + (POST_RETIREMENT_TRIGGERS
+                       if plan.get("predecessor_candidate_sha")==POST_RETIREMENT_MANAGER_BASELINE else ()))
          and plan.get("resume_after_verified_cutover") is True
          and plan.get("restore_pause_on_completed_work_stage_failure") is True
          and plan.get("restore_pause_on_failed_scheduled_acceptance") is True
@@ -1206,6 +1476,84 @@ def pipeline_scope_sha(plan):
         if custody:
             need(plan.get("breaker_policy_source") == BREAKER_POLICY_SOURCE,
                  "BREAKER_CUSTODY_EXACT_POLICY_SOURCE_REQUIRED")
+    if plan["predecessor_candidate_sha"] == WATCHDOG_RECOVERY_BASELINE:
+        need(plan.get("worker_replacements") == sorted(WATCHDOG_RECOVERY_WORKERS)
+             and plan.get("required_scheduled_cycles") == 2
+             and plan.get("source_integration_policy") == "independent_source_v1"
+             and plan.get("production_transaction_mutex_preserved") is True
+             and plan.get("exact_native_release_records_unchanged") is True
+             and plan.get("source_merges_not_rolled_back") is True
+             and plan.get("release_gate_retry_budget_seconds") == 20
+             and plan.get("quarantine_existing_todo_identity") == "TODO-OPS-013"
+             and plan.get("conflicted_issues") == [1459,1500]
+             and plan.get("preserve_existing_issue_authority") is True
+             and plan.get("engineering_progress_detector_required") is True
+             and plan.get("breaker_policy_source") == BREAKER_POLICY_SOURCE
+             and plan.get("failed_unit_reset_scope") == list(SERVICES)
+             and plan.get("precutover_exact_faults") == WATCHDOG_RECOVERY_FAULTS
+             and plan.get("derived_reporter_exit2_only") == {
+                 "unit":DRIFT_REPORTER_UNIT,"pins":DRIFT_REPORTER_PINS,
+                 "properties":DRIFT_REPORTER_EXIT2}
+             and plan.get("local_reasoning_runtime_activation") is False,
+             "WATCHDOG_RECOVERY_EXACT_SCOPE_INVALID")
+    if plan["predecessor_candidate_sha"] == NORMAL_MANAGER_BASELINE:
+        source = plan.get("normal_manager_source_review")
+        need(isinstance(source, dict) and set(source) == {
+                "baseline", "candidate", "reviewed_source_paths", "excluded_source_paths"}
+             and source["baseline"] == NORMAL_MANAGER_BASELINE
+             and source["candidate"] == plan["policy"]["candidate_sha"]
+             and source["reviewed_source_paths"] == sorted(NORMAL_MANAGER_SCOPE_FILES)
+             and isinstance(source["excluded_source_paths"], list)
+             and all(isinstance(x,str) for x in source["excluded_source_paths"])
+             and source["excluded_source_paths"] == sorted(set(source["excluded_source_paths"]))
+             and not set(source["excluded_source_paths"]) & (NORMAL_MANAGER_SCOPE_FILES | NORMAL_MANAGER_PROTECTED_PATHS)
+             and not any(x.startswith(("infrastructure/pmv4-e-engineering-manager/","tools/pmv4_e_"))
+                         for x in source["excluded_source_paths"])
+             and plan.get("worker_replacements") == sorted(NORMAL_MANAGER_WORKERS)
+             and plan.get("normal_manager_stage_targets") == sorted(map(str,NORMAL_MANAGER_STAGE_FILES))
+             and plan.get("normal_mode_activation") is False
+             and plan.get("required_scheduled_cycles") == 2
+             and plan.get("engineering_progress_detector_required") is True
+             and plan.get("breaker_policy_source") == BREAKER_POLICY_SOURCE
+             and plan.get("source_integration_policy") == "independent_source_v1"
+             and plan.get("production_transaction_mutex_preserved") is True
+             and plan.get("exact_native_release_records_unchanged") is True
+             and plan.get("source_merges_not_rolled_back") is True
+             and plan.get("release_gate_retry_budget_seconds") == 20
+             and plan.get("quarantine_existing_todo_identity") == "TODO-OPS-013"
+             and plan.get("conflicted_issues") == [1459,1500]
+             and plan.get("preserve_existing_issue_authority") is True,
+             "NORMAL_MANAGER_EXACT_SCOPE_INVALID")
+    if plan["predecessor_candidate_sha"] == POST_RETIREMENT_MANAGER_BASELINE:
+        need(plan.get("worker_replacements")==sorted(POST_RETIREMENT_WORKERS)
+             and plan.get("required_scheduled_cycles")==2
+             and plan.get("source_integration_policy")=="independent_source_v1"
+             and plan.get("production_transaction_mutex_preserved") is True
+             and plan.get("exact_native_release_records_unchanged") is True
+             and plan.get("source_merges_not_rolled_back") is True
+             and plan.get("release_gate_retry_budget_seconds")==20
+             and plan.get("quarantine_existing_todo_identity")=="TODO-OPS-013"
+             and plan.get("conflicted_issues")==[1459,1500]
+             and plan.get("preserve_existing_issue_authority") is True
+             and plan.get("engineering_progress_detector_required") is True
+             and plan.get("breaker_policy_source")==BREAKER_POLICY_SOURCE
+             and plan.get("post_retirement_reader_targets")==sorted(map(str,POST_RETIREMENT_READER_TARGETS))
+             and plan.get("post_retirement_source_baseline")==POST_RETIREMENT_SOURCE_BASELINE
+             and plan.get("preserve_retired_freeze_and_components") is True
+             and set(map(str,POST_RETIREMENT_READER_TARGETS)) <= set(plan.get("installation_targets",()))
+             and not any(str(path) in plan["installation_targets"] for path in
+                         (POST_RETIREMENT_CONFIG,POST_RETIREMENT_RECEIPT,POST_RETIREMENT_COMPONENTS)),
+             "POST_RETIREMENT_EXACT_SCOPE_INVALID")
+    if "normal_manager_rollback_predecessor" in plan:
+        proof = plan["normal_manager_rollback_predecessor"]
+        final = plan.get("normal_retirement")
+        need(plan["predecessor_candidate_sha"] == NORMAL_MANAGER_BASELINE
+             and proof == NORMAL_MANAGER_ROLLBACK_EVIDENCE
+             and isinstance(final, dict)
+             and final.get("action") == "RETIRE-EXACT-GLOBAL-PRODUCTION-FREEZE"
+             and final.get("candidate_sha") == plan["policy"]["candidate_sha"]
+             and plan["policy"]["candidate_sha"] != proof["failed_candidate_sha"],
+             "NORMAL_MANAGER_ROLLBACK_SCOPE_INVALID")
     return digest(canon(plan))
 
 
@@ -1257,6 +1605,18 @@ class PipelineSuccessor(NativeAdapter):
             self.source_files = CLOSED_LOOP_SCOPE_FILES
             self.supporting_files = CLOSED_LOOP_SUPPORTING_FILES
             self.changed_workers = CLOSED_LOOP_WORKERS
+        elif predecessor == POST_RETIREMENT_MANAGER_BASELINE:
+            self.source_files = POST_RETIREMENT_SCOPE_FILES
+            self.supporting_files = POST_RETIREMENT_SUPPORTING_FILES
+            self.changed_workers = POST_RETIREMENT_WORKERS
+        elif predecessor == NORMAL_MANAGER_BASELINE:
+            self.source_files = NORMAL_MANAGER_SCOPE_FILES
+            self.supporting_files = NORMAL_MANAGER_SUPPORTING_FILES
+            self.changed_workers = NORMAL_MANAGER_WORKERS
+        elif predecessor == WATCHDOG_RECOVERY_BASELINE:
+            self.source_files = WATCHDOG_RECOVERY_SCOPE_FILES
+            self.supporting_files = WATCHDOG_RECOVERY_SUPPORTING_FILES
+            self.changed_workers = WATCHDOG_RECOVERY_WORKERS
         elif predecessor == BREAKER_CUSTODY_BASELINE:
             self.source_files = BREAKER_CUSTODY_SCOPE_FILES
             self.supporting_files = BREAKER_CUSTODY_SUPPORTING_FILES
@@ -1274,16 +1634,21 @@ class PipelineSuccessor(NativeAdapter):
 
     def pipeline_artifact_names(self):
         names = set(self.g["PIPELINE_ARTIFACTS"])
-        if self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in CLOSED_LOOP_BASELINES:
             names |= {"issue_resolution_engine.py"}
         return names
 
     def approved_targets(self):
         names = set(self.g["ARTIFACTS"]) | self.pipeline_artifact_names()
-        return {PIPELINE_UNIT, PIPELINE_PROGRAM, MANAGER_GUARD, RECEIPT, PAUSE,
-                *(LIB / name for name in self.changed_workers),
-                self.release.parent / "predecessor.json",
-                *(self.release / name for name in names)}
+        targets = {PIPELINE_UNIT, PIPELINE_PROGRAM, MANAGER_GUARD, RECEIPT, PAUSE,
+                   *(LIB / name for name in self.changed_workers),
+                   self.release.parent / "predecessor.json",
+                   *(self.release / name for name in names)}
+        if self.predecessor == NORMAL_MANAGER_BASELINE:
+            targets.update(NORMAL_MANAGER_STAGE_FILES)
+        if self.predecessor == POST_RETIREMENT_MANAGER_BASELINE:
+            targets.update(POST_RETIREMENT_READER_TARGETS)
+        return targets
 
     def read_guard(self, candidate):
         row = json.loads(self.command([*self.p["USER"], "/usr/bin/python3", "-I", "-B",
@@ -1294,7 +1659,127 @@ class PipelineSuccessor(NativeAdapter):
              "PIPELINE_NATIVE_MANAGER_GUARD")
         return row
 
-    def protected(self):
+    def attest_failed_predecessor(self):
+        need(self.predecessor == WATCHDOG_RECOVERY_BASELINE,
+             "WATCHDOG_RECOVERY_PREDECESSOR_REQUIRED")
+        raw = self.code["tools/pmv4_e_engineering_manager_guard.py"]
+        code = ("import hashlib,json,sys; b=sys.stdin.buffer.read(2000001);"
+                "assert hashlib.sha256(b).hexdigest()==sys.argv[1];"
+                "ns={'__name__':'reviewed_failed_manager_preflight','__file__':sys.argv[2]};"
+                "exec(compile(b,sys.argv[2],'exec'),ns);"
+                "print(json.dumps(ns['status'](attest_failed_predecessor=True)))")
+        row = json.loads(self.p["command"]([*self.p["USER"],"/usr/bin/python3","-I","-B",
+                         "-c",code,digest(raw),str(REPO/"tools/pmv4_e_engineering_manager_guard.py")],
+                         timeout=130,data=raw))
+        need(row.get("status") == "verified_failed_manager_integrity"
+             and row.get("candidate_sha") == self.predecessor
+             and row.get("operational_ready") is False
+             and row.get("production_authority") is False
+             and row.get("failed_peer") == sorted(SERVICES),
+             "WATCHDOG_RECOVERY_PREDECESSOR_INTEGRITY")
+        return row
+
+    def transaction_triggers(self):
+        return TIMERS + (POST_RETIREMENT_TRIGGERS
+                         if self.predecessor==POST_RETIREMENT_MANAGER_BASELINE else ())
+
+    def transaction_reader_services(self):
+        return (SERVICES[1],) + (POST_RETIREMENT_SERVICES
+                                if self.predecessor==POST_RETIREMENT_MANAGER_BASELINE else ())
+
+    def retired_control_snapshot(self):
+        p=self.p
+        need(not os.path.lexists(self.n["FREEZE"])
+             and not os.path.lexists(Path(str(self.n["FREEZE"])+".pmv3-one-release-backup")),
+             "POST_RETIREMENT_LEGACY_FREEZE_CONFLICT")
+        hold=self.n["HOLD"]
+        uid,mode,pin=p["CONTROLS"][hold]
+        need(digest(p["read"](hold,uid,mode))==pin,"POST_RETIREMENT_INCIDENT_HOLD_CHANGED")
+        config=p["read"](POST_RETIREMENT_CONFIG,0,0o644)
+        need(json.loads(config)=={"schema_version":"1.0","production_freeze":False},
+             "POST_RETIREMENT_CONFIG_CHANGED")
+        return {str(hold):pin, str(POST_RETIREMENT_CONFIG):digest(config),
+                str(POST_RETIREMENT_RECEIPT):digest(p["read"](POST_RETIREMENT_RECEIPT,0,0o644)),
+                str(POST_RETIREMENT_COMPONENTS):digest(p["read"](POST_RETIREMENT_COMPONENTS,0,0o644))}
+
+    def component_aware_protected(self):
+        p=self.p
+        controls=self.retired_control_snapshot()
+        # Use the installed independent root policy and live component reader.
+        # No historical LKG image is rewritten or substituted.
+        probe=("import json,sys;sys.path.insert(0,'/usr/local/lib/jason/scoped-backport');"
+               "from tools import scoped_backport_coordinated_host as h;"
+               "from tools import scoped_backport_component_readback as r;"
+               "p=h.verify_installed_policy();s=r.verify_live();"
+               "assert h.active_staged_offer() is None;"
+               "assert all(h.root_json(x).get('outcome') in h.RESOLVED "
+               "for x in (h.PRIVATE/'transactions').glob('release-*.json'));"
+               "print(json.dumps({'policy_source':p['source_sha'],'schema':p['schema_version'],"
+               "'review_required':p['per_release_review_required'],'state':s}))")
+        native=json.loads(self.command(["/usr/bin/python3","-I","-B","-c",probe],180))
+        state=native["state"]
+        need(native["policy_source"]==POST_RETIREMENT_SOURCE_BASELINE and native["schema"]=="3.0"
+             and native["review_required"] is True
+             and state["schema_version"]=="3.0" and state["host_revision"]==LKG
+             and state["release_policy_sha256"]==controls[str(POST_RETIREMENT_RECEIPT)],
+             "POST_RETIREMENT_NATIVE_POLICY_CHANGED")
+        load(self.code["tools/production_freeze_retirement.py"],
+             REPO/"tools/production_freeze_retirement.py")["check_pending"](self)
+        control=json.loads(p["read"](MANAGER/"production-control-state.json",0,0o600))
+        manifest=control["last_known_good"]["manifest"]
+        need(manifest.get("complete") is True and all(manifest.get(k)==LKG for k in
+             ("revision","runtime_revision","mcp_revision","host_revision"))
+             and control["circuit_breaker"]["state"]=="closed"
+             and control["circuit_breaker"]["revalidated_revision"]==LKG,
+             "POST_RETIREMENT_HOST_ANCHOR_OR_BREAKER")
+        guard=Path("/opt/jason/current/tools/production_drift_guard.py")
+        need(digest(p["read"](guard,0))==p["PINNED"][str(guard)],"NATIVE_DRIFT_CODE_CHANGED")
+        drift=json.loads(self.command(["/usr/bin/python3",str(guard),"--config",str(POLICY)],75))
+        need(drift.get("status")=="pass" and drift.get("problems")==[],"PIPELINE_NATIVE_DRIFT")
+        worker=LIB/"owner_approved_development_worker.py"
+        raw=p["read"](worker,1000)
+        corrected=self.code["tools/owner_approved_development_worker.py"]
+        actual_probe=("import sys,json;from pathlib import Path;"
+                      "sys.path[:0]=['/home/al/.local/lib/jason','/opt/jason/current/tools'];"
+                      "import owner_approved_development_worker as w;"
+                      "print(json.dumps(w.verified_development_health(Path('/var/lib/jason/openclaw/support-repair'))))")
+        actual=json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",actual_probe],130))
+        if raw==corrected:
+            verify_pipeline_native_core_health(actual)
+        else:
+            need(digest(raw)==self.g["NORMAL_MANAGER_OWNER_WORKER_SHA256"]
+                 and actual.get("verified") is False and actual.get("production_authority") is False
+                 and actual.get("reason")=="live_core_image_mismatch",
+                 "POST_RETIREMENT_UNRELATED_PREDECESSOR_HEALTH")
+            # Evaluate reviewed candidate bytes only as the existing
+            # unprivileged service account; never import them into root.
+            candidate_probe=("import hashlib,sys,json;from pathlib import Path;"
+                "b=sys.stdin.buffer.read(2000001);assert hashlib.sha256(b).hexdigest()==sys.argv[1];"
+                "sys.path[:0]=['/home/al/.local/lib/jason','/opt/jason/current/tools'];"
+                "n={'__name__':'reviewed_readonly_development_health','__file__':sys.argv[2]};"
+                "exec(compile(b,sys.argv[2],'exec'),n);"
+                "print(json.dumps(n['verified_development_health'](n['DEFAULT_SPOOL'])))")
+            health=json.loads(p["command"]([*p["USER"],"/usr/bin/python3","-I","-B","-c",
+                     candidate_probe,digest(corrected),str(worker)],timeout=130,data=corrected))
+            verify_pipeline_native_core_health(health)
+        rows=json.loads(self.command(["/usr/bin/docker","inspect","--type","container",*p["PEERS"]]))
+        peers={x["Name"].lstrip("/") : {"id":x["Id"],"image":x["Image"],
+               "started_at":x["State"]["StartedAt"]} for x in rows}
+        need(set(peers)==set(p["PEERS"]) and all(
+             x["State"]["Running"] is True and
+             (x["State"].get("Health") or {}).get("Status") in ("healthy",None) for x in rows),
+             "POST_RETIREMENT_PROTECTED_PEERS_UNHEALTHY")
+        for name,row in state["components"].items():
+            need(peers[name]["id"]==row["container_id"] and peers[name]["image"]==row["image_id"],
+                 "POST_RETIREMENT_COMPONENT_IDENTITY_CHANGED")
+        need(self.retired_control_snapshot()==controls,"POST_RETIREMENT_CONTROLS_CHANGED")
+        return {"controls":controls,"protected_peers":peers,"runtime_revision":LKG,
+                "effective_policy_sha256":digest(p["read"](POLICY,0,0o600))}
+
+    def protected(self, *, failed_manager_recovery=False):
+        if self.predecessor==POST_RETIREMENT_MANAGER_BASELINE:
+            need(not failed_manager_recovery,"POST_RETIREMENT_WRONG_RECOVERY_MODE")
+            return self.component_aware_protected()
         p = self.p
         controls = {}
         for path in (self.n["FREEZE"], self.n["HOLD"]):
@@ -1306,23 +1791,76 @@ class PipelineSuccessor(NativeAdapter):
         need(manifest.get("complete") is True
              and all(manifest.get(k) == LKG for k in
                      ("revision", "runtime_revision", "mcp_revision", "host_revision"))
-             and control["circuit_breaker"]["state"] == "closed"
-             and control["circuit_breaker"]["revalidated_revision"] == LKG,
+             and (failed_manager_recovery or (
+                 control["circuit_breaker"]["state"] == "closed"
+                 and control["circuit_breaker"]["revalidated_revision"] == LKG)),
              "PIPELINE_PROTECTED_LKG_OR_BREAKER")
+        if failed_manager_recovery:
+            need(self.predecessor == WATCHDOG_RECOVERY_BASELINE,
+                 "WATCHDOG_RECOVERY_PROFILE_REQUIRED")
         guard = Path("/opt/jason/current/tools/production_drift_guard.py")
         need(digest(p["read"](guard,0)) == p["PINNED"][str(guard)],
              "NATIVE_DRIFT_CODE_CHANGED")
-        drift = json.loads(self.command(["/usr/bin/python3",str(guard),"--config",str(POLICY)],75))
-        need(drift.get("status") == "pass" and drift.get("problems") == [],
-             "PIPELINE_NATIVE_DRIFT")
-        probe = ("import sys,json;from pathlib import Path;"
-                 "sys.path[:0]=['/home/al/.local/lib/jason','/opt/jason/current/tools'];"
-                 "import owner_approved_development_worker as w;"
-                 "print(json.dumps(w.verified_development_health(Path('/var/lib/jason/openclaw/support-repair'))))")
-        health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",probe],130))
-        need(health.get("verified") is True and health.get("production_authority") is False
-             and health.get("production_revision") == LKG, "PIPELINE_NATIVE_CORE_HEALTH")
+        if failed_manager_recovery:
+            # The existing evaluator returns rc=2 for real drift. Read its
+            # result without invoking its output-writing CLI or changing the
+            # authoritative breaker. Only these two exact faults are admitted
+            # for this signed host repair, not for production promotion.
+            probe = ("import json,sys;from pathlib import Path;"
+                     "p=Path(sys.argv[1]);n={'__name__':'native_drift_preflight','__file__':str(p)};"
+                     "exec(compile(p.read_bytes(),str(p),'exec'),n);"
+                     "print(json.dumps(n['evaluate'](json.loads(Path(sys.argv[2]).read_text()))))")
+            evaluated = json.loads(self.command(["/usr/bin/python3","-I","-B","-c",probe,
+                                                  str(guard),str(POLICY)],75))
+            drift = json.loads(p["read"](MANAGER/"production-drift.json",0,0o600))
+            reporter = None
+            if DRIFT_REPORTER_FAULT in evaluated.get("problems",[]):
+                for path,pin in DRIFT_REPORTER_PINS.items():
+                    need(digest(p["read"](Path(path),0)) == pin,
+                         "WATCHDOG_RECOVERY_REPORTER_CUSTODY")
+                show = self.systemctl(["show",DRIFT_REPORTER_UNIT,
+                                       *["-p"+k for k in DRIFT_REPORTER_EXIT2]]).decode()
+                reporter = dict(line.split("=",1) for line in show.splitlines() if "=" in line)
+            verify_failed_manager_drift(control,drift,evaluated,reporter=reporter)
+            need(p["forward_audit_accepted"](json.loads(p["read"](p["AUDIT"],0,0o444)))
+                 and p["audit_recovery_service_complete"](),
+                 "WATCHDOG_RECOVERY_AUDIT_NOT_ACCEPTED")
+            native_core = p["GUARD_PATH"]
+            need(digest(p["read"](native_core,0,0o444)) == p["GUARD_AFTER_SHA"],
+                 "WATCHDOG_RECOVERY_CORE_GUARD_CHANGED")
+            probe = ("import json,sys;from pathlib import Path;"
+                     "p=Path(sys.argv[1]);n={'__name__':'native_core_preflight','__file__':str(p)};"
+                     "exec(compile(p.read_bytes(),str(p),'exec'),n);"
+                     "print(json.dumps(n['IndependentHostGuard']().core_health_evidence()))")
+            health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",
+                                                probe,str(native_core)],130))
+            need(health.get("status") == "verified" and health.get("source_sha") == LKG
+                 and health.get("runtime_healthy") is True and health.get("mcp_running") is True
+                 and health.get("worker_scan_fresh") is True,
+                 "WATCHDOG_RECOVERY_CORE_HEALTH")
+        else:
+            drift = json.loads(self.command(["/usr/bin/python3",str(guard),"--config",str(POLICY)],75))
+            need(drift.get("status") == "pass" and drift.get("problems") == [],
+                 "PIPELINE_NATIVE_DRIFT")
+            probe = ("import sys,json;from pathlib import Path;"
+                     "sys.path[:0]=['/home/al/.local/lib/jason','/opt/jason/current/tools'];"
+                     "import owner_approved_development_worker as w;"
+                     "print(json.dumps(w.verified_development_health(Path('/var/lib/jason/openclaw/support-repair'))))")
+            health = json.loads(self.command([*p["USER"],"/usr/bin/python3","-I","-B","-c",probe],130))
+            verify_pipeline_native_core_health(health)
         rows = json.loads(self.command(["/usr/bin/docker","inspect","--type","container",*p["PEERS"]]))
+        if self.predecessor == WATCHDOG_RECOVERY_BASELINE:
+            for x in rows:
+                if x["Name"].lstrip("/") not in ("jason-runtime","jason-mcp-pilot","jason-pmv4-ticket-core"):
+                    continue
+                env = dict(entry.split("=",1) for entry in x["Config"]["Env"])
+                need(all(env.get(key) == "false" for key in (
+                    "JASON_HOSTED_CONVERSATION_ENABLED","JASON_HOSTED_SEMANTICS_ENABLED"))
+                     and not any(env.get(key) for key in ("OPENAI_API_KEY","JASON_OPENAI_API_KEY",
+                                                         "OPENAI_API_TOKEN","JASON_OPENAI_API_TOKEN"))
+                     and not any("/openai/" in mount.get("Destination","") + "/"
+                                 for mount in x.get("Mounts",[])),
+                     "WATCHDOG_RECOVERY_PAID_AI_CONFIGURATION_DENIED")
         peers = {x["Name"].lstrip("/"):{"id":x["Id"],"image":x["Image"],
                   "started_at":x["State"]["StartedAt"]} for x in rows}
         need(set(peers) == set(p["PEERS"])
@@ -1412,6 +1950,116 @@ class PipelineSuccessor(NativeAdapter):
              "BREAKER_CUSTODY_POLICY_SOURCE_MISMATCH")
         return dict(expected)
 
+    def wait_for_fresh_pipeline_readback(self, attempts=46):
+        """Wait outside the production locks for the existing trusted publisher.
+
+        This is a prerequisite, not native health acceptance. The actual
+        independent evaluator, 120-second freshness gate, breaker, source,
+        image, audit and ticket checks still run in protected().
+        """
+        path = MANAGER/"protected-readback/production-drift.json"
+        for attempt in range(attempts):
+            row = json.loads(self.p["read"](path,1000,0o600))
+            need(row.get("schema_version") == "1.0"
+                 and row.get("status") == "pass" and row.get("problems") == [],
+                 "PIPELINE_READBACK_NOT_CLEAN")
+            observed = datetime.fromisoformat(row["observed_at"])
+            age = (datetime.now(timezone.utc)-observed).total_seconds()
+            need(observed.utcoffset() is not None and age >= 0,
+                 "PIPELINE_READBACK_TIME_INVALID")
+            if age <= 40:
+                return
+            if attempt+1 < attempts:
+                time.sleep(2)
+        need(False,"PIPELINE_FRESH_READBACK_UNAVAILABLE")
+
+    def verify_normal_manager_rollback_predecessor(self):
+        """Read-only proof of the one reviewed terminal rollback.
+
+        The pause remains intact. A fresh candidate and the existing exact
+        authenticated Owner decision are still required before installation.
+        """
+        evidence = NORMAL_MANAGER_ROLLBACK_EVIDENCE
+        failed = evidence["failed_candidate_sha"]
+        need(self.predecessor == NORMAL_MANAGER_BASELINE
+             and getattr(self, "retirement_requested", False) is True
+             and self.candidate != failed,
+             "NORMAL_MANAGER_ROLLBACK_CONTEXT")
+        history = STATE / failed
+        meta = history.lstat()
+        need(stat.S_ISDIR(meta.st_mode) and meta.st_uid == meta.st_gid == 0
+             and stat.S_IMODE(meta.st_mode) == 0o700
+             and history.resolve(strict=True) == history
+             and {p.name for p in history.iterdir()} ==
+                 {"approval.json", "receipt-image.json", "rollback.json"},
+             "NORMAL_MANAGER_ROLLBACK_HISTORY_CUSTODY")
+        raw = self.n["read"](history/"approval.json",0,0o400,8_000_000)
+        receipt_raw = self.n["read"](history/"receipt-image.json",0,0o400)
+        rollback_raw = self.n["read"](history/"rollback.json",0,0o400)
+        need(digest(raw) == evidence["approval_sha256"]
+             and digest(receipt_raw) == evidence["receipt_sha256"]
+             and digest(rollback_raw) == evidence["rollback_sha256"],
+             "NORMAL_MANAGER_ROLLBACK_HISTORY_CHANGED")
+        approval, rollback = json.loads(raw), json.loads(rollback_raw)
+        scope = approval["scope"]
+        receipt = self.g["validate_receipt"](json.loads(receipt_raw))
+        sha = pipeline_scope_sha(scope)
+        need(scope["policy"]["candidate_sha"] == failed
+             and scope["predecessor_candidate_sha"] == self.predecessor
+             and approval["owner_action"] == "RETIRE-EXACT-GLOBAL-PRODUCTION-FREEZE"
+             and approval["owner_scope_sha256"] == digest(canon(self.owner_scope(scope)))
+             and approval["scope_sha256"] == sha
+             and receipt["candidate_sha"] == failed
+             and receipt["scope_sha256"] == sha
+             and receipt["approval_sha256"] == digest(raw)
+             and receipt["predecessor_candidate_sha"] == self.predecessor
+             and rollback["scope_sha256"] == sha
+             and rollback["status"] == "predecessor_restored_engineering_paused"
+             and rollback["production_authority"] is False,
+             "NORMAL_MANAGER_ROLLBACK_SCOPE_MISMATCH")
+        failed_release = ROOT/"releases"/failed
+        targets = {failed_release / p.relative_to(self.release.parent)
+                   if p.is_relative_to(self.release.parent) else p
+                   for p in self.approved_targets()}
+        need(scope["installation_targets"] == sorted(map(str,targets)),
+             "NORMAL_MANAGER_ROLLBACK_TARGETS_CHANGED")
+        before = decode(approval["before_images"],targets)
+        after = decode(approval["after_images"],targets-{RECEIPT})
+        need(scope["before"] == {str(k):describe(v) for k,v in before.items()}
+             and scope["after"] == {str(k):describe(v) for k,v in after.items()},
+             "NORMAL_MANAGER_ROLLBACK_IMAGES_CHANGED")
+        pause = after[PAUSE]
+        need(pause is not None and pause[1:] == (1000,1000,0o600)
+             and digest(pause[0]) == OLD[PAUSE][2]
+             and not os.path.lexists(failed_release),
+             "NORMAL_MANAGER_ROLLBACK_PAUSE_OR_RELEASE_CHANGED")
+        for path, value in before.items():
+            need(snapshot(path) == (pause if path == PAUSE else value),
+                 "NORMAL_MANAGER_ROLLBACK_LIVE_MISMATCH:"+path.name)
+        return dict(evidence)
+
+    def post_retirement_reader_images(self,before,after):
+        migration,policy=(before[p] for p in (POST_RETIREMENT_MIGRATION,POST_RETIREMENT_POLICY))
+        need(migration is not None and policy is not None
+             and migration[1:]==policy[1:]==(0,0,0o600),"POST_RETIREMENT_READER_CUSTODY")
+        m,q=json.loads(migration[0]),json.loads(policy[0])
+        need(m["source_sha"]==q["source_sha"]==POST_RETIREMENT_SOURCE_BASELINE
+             and m["schema_version"]=="2.0" and q["schema_version"]=="3.0"
+             and q["native_reader_migration_receipt_sha256"]==digest(migration[0])
+             and q["per_release_review_required"] is True,"POST_RETIREMENT_READER_POLICY")
+        old_path=ROOT/"releases"/self.predecessor/"tools"/"jason_self_heal_watchdog.py"
+        new_path=self.release/"jason_self_heal_watchdog.py"
+        old=self.p["read"](old_path,0,0o444)
+        new=after[new_path]
+        matches=[row for row in m["installed_readers"] if row["path"]==str(old_path)]
+        need(len(matches)==1 and new==image(old,0,0o444)
+             and matches[0]["sha256"]==digest(old),"POST_RETIREMENT_WATCHDOG_REBIND")
+        matches[0]["path"]=str(new_path)
+        updated=canon(m)
+        q["native_reader_migration_receipt_sha256"]=digest(updated)
+        return {POST_RETIREMENT_MIGRATION:image(updated,0,0o600),
+                POST_RETIREMENT_POLICY:image(canon(q),0,0o600)}
+
     def inspect(self):
         need(not os.path.lexists(self.directory) and not os.path.lexists(self.release.parent),
              "PIPELINE_SUCCESSOR_ALREADY_PRESENT")
@@ -1433,10 +2081,15 @@ class PipelineSuccessor(NativeAdapter):
         need(activated.get("scope_sha256") == receipt["scope_sha256"]
              and activated.get("status") == "resumed_pending_scheduled_acceptance",
              "PIPELINE_PRIOR_ACTIVATION_NOT_VERIFIED")
-        self.read_guard(self.predecessor)
-        protected = self.protected()
+        fault_recovery = self.predecessor == WATCHDOG_RECOVERY_BASELINE
+        if fault_recovery:
+            self.attest_failed_predecessor()
+        else:
+            self.read_guard(self.predecessor)
+        protected = self.protected(failed_manager_recovery=True) if fault_recovery else self.protected()
         need(protected["effective_policy_sha256"] == receipt["effective_policy_sha256"],
              "PIPELINE_EFFECTIVE_POLICY_CHANGED")
+        rollback_predecessor = None
         if self.predecessor == TODO_CONFLICT_BASELINE:
             failed = json.loads(self.n["read"](history/"activation-rollback.json",0,0o400))
             need(failed.get("status") == "engineering_paused_after_failed_acceptance"
@@ -1454,10 +2107,14 @@ class PipelineSuccessor(NativeAdapter):
             need(snapshot(PAUSE) is None,"SOURCE_INTEGRATION_PREDECESSOR_PAUSED")
             self.verify_source_integration_predecessor(history,activated)
             encoded = old["after_images"][str(PAUSE)]
-        elif self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
-            need(snapshot(PAUSE) is None,"CLOSED_LOOP_PREDECESSOR_PAUSED")
+        elif self.predecessor in CLOSED_LOOP_BASELINES:
             self.verify_closed_loop_predecessor(history,activated)
-            if self.predecessor == BREAKER_CUSTODY_BASELINE:
+            if snapshot(PAUSE) is not None:
+                need(self.predecessor == NORMAL_MANAGER_BASELINE
+                     and getattr(self,"retirement_requested",False) is True,
+                     "CLOSED_LOOP_PREDECESSOR_PAUSED")
+                rollback_predecessor = self.verify_normal_manager_rollback_predecessor()
+            if self.predecessor in CUSTODY_BASELINES:
                 self.verify_breaker_policy_source()
             encoded = old["after_images"][str(PAUSE)]
         else:
@@ -1491,6 +2148,14 @@ class PipelineSuccessor(NativeAdapter):
         after = {PIPELINE_UNIT:image(new_unit,0,0o644),
                  MANAGER_GUARD:image(self.code["tools/pmv4_e_engineering_manager_guard.py"],0,0o444),
                  PAUSE:pause,self.release.parent/"predecessor.json":image(prior[0],0,0o444)}
+        if self.predecessor == NORMAL_MANAGER_BASELINE:
+            for path,value in normal_manager_stage_images(self.code).items():
+                # Never overwrite a different native generation or adopt an
+                # unrecorded existing artifact. All three files are absent in
+                # the accepted predecessor, and rollback removes only ours.
+                need(before[path] is None, "NORMAL_MANAGER_STAGE_TARGET_ALREADY_PRESENT")
+                self.n["directory"](path.parent,0o755)
+                after[path] = value
         pipeline_hashes = {}
         for name in sorted(self.pipeline_artifact_names()):
             live = snapshot(LIB/name)
@@ -1516,7 +2181,7 @@ class PipelineSuccessor(NativeAdapter):
         for name,pin in receipt["artifact_sha256"].items():
             raw = self.p["read"](LIB/name,1000)
             need(digest(raw) == pin, "PIPELINE_PREVIOUS_ARTIFACT_CHANGED:"+name)
-            if self.predecessor == CLOSED_LOOP_BASELINE and name in self.changed_workers:
+            if self.predecessor in (CLOSED_LOOP_BASELINE, WATCHDOG_RECOVERY_BASELINE, NORMAL_MANAGER_BASELINE, POST_RETIREMENT_MANAGER_BASELINE) and name in self.changed_workers:
                 live = before[LIB/name]
                 need(live is not None and live[0] == raw and live[1] == live[2] == 1000,
                      "CLOSED_LOOP_WATCHDOG_CUSTODY")
@@ -1524,6 +2189,8 @@ class PipelineSuccessor(NativeAdapter):
                 after[LIB/name] = (raw,*live[1:])
             after[self.release/name] = image(raw,0,0o444)
             artifact_hashes[name] = digest(raw)
+        if self.predecessor==POST_RETIREMENT_MANAGER_BASELINE:
+            after.update(self.post_retirement_reader_images(before,after))
         recipe = {k:v for k,v in receipt.items() if k not in
                   ("candidate_sha","scope_sha256","approval_sha256","accepted_at",
                    "schema_version","action","guard_sha256","unit_sha256")}
@@ -1541,7 +2208,7 @@ class PipelineSuccessor(NativeAdapter):
                 "runtime_or_mcp_restart_allowed":False,"freeze_or_hold_change":False,
                 "rollback_authorized":True,"restore_pause_on_failed_scheduled_acceptance":True,
                 "restore_pause_on_completed_work_stage_failure":True,
-                "resume_after_verified_cutover":True,"temporary_timer_stops":list(TIMERS),
+                "resume_after_verified_cutover":True,"temporary_timer_stops":list(self.transaction_triggers()),
                 "readonly_systemd_acceptance_probe":"jason-engineering-pipeline-contract-acceptance",
                 "temporary_probe_write_paths":[self.m["LIFECYCLE_EVENTS"],self.m["SUPPORT_CLOSURE"]],
                 "installation_targets":sorted(str(x) for x in before),
@@ -1550,7 +2217,7 @@ class PipelineSuccessor(NativeAdapter):
                 "root_receipt_recipe":recipe,"protected_health":protected,
                 "source_hashes":{k:digest(v) for k,v in self.code.items()},
                 "rollback":"restore exact predecessor receipt and files; retain verified engineering pause; native revalidation only"}
-        if self.predecessor in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in SCHEDULED_BASELINES:
             plan.update(worker_replacements=sorted(self.changed_workers),
                         required_scheduled_cycles=2, quarantine_existing_todo_identity="TODO-OPS-013",
                         conflicted_issues=[1459,1500],preserve_existing_issue_authority=True)
@@ -1559,7 +2226,7 @@ class PipelineSuccessor(NativeAdapter):
                         retry_only_on_contention=True,legacy_release_guard_immediate=True,
                         preserve_predecessor_acceptance_requirements=True,
                         supersede_pending_only_before_first_worker_execution=True)
-        if self.predecessor in (SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in SOURCE_POLICY_BASELINES:
             plan.update(source_integration_policy="independent_source_v1",
                         production_transaction_mutex_preserved=True,
                         exact_native_release_records_unchanged=True,
@@ -1574,13 +2241,52 @@ class PipelineSuccessor(NativeAdapter):
                 lambda *args: self.p["git"](REPO,*args),self.candidate),
                 breaker_policy_source=self.verify_breaker_policy_source(),
                 engineering_progress_detector_required=True)
+        if self.predecessor == NORMAL_MANAGER_BASELINE:
+            plan.update(normal_manager_source_review=review_normal_manager_delta(
+                            lambda *args:self.p["git"](REPO,*args),self.candidate),
+                        normal_manager_stage_targets=sorted(map(str,NORMAL_MANAGER_STAGE_FILES)),
+                        normal_mode_activation=False,
+                        breaker_policy_source=self.verify_breaker_policy_source(),
+                        engineering_progress_detector_required=True)
+        if self.predecessor == WATCHDOG_RECOVERY_BASELINE:
+            plan.update(breaker_policy_source=self.verify_breaker_policy_source(),
+                        engineering_progress_detector_required=True,
+                        failed_unit_reset_scope=list(SERVICES),
+                        precutover_exact_faults=list(WATCHDOG_RECOVERY_FAULTS),
+                        derived_reporter_exit2_only={
+                            "unit":DRIFT_REPORTER_UNIT,"pins":DRIFT_REPORTER_PINS,
+                            "properties":DRIFT_REPORTER_EXIT2},
+                        local_reasoning_runtime_activation=False)
+        if self.predecessor==POST_RETIREMENT_MANAGER_BASELINE:
+            plan.update(post_retirement_reader_targets=sorted(map(str,POST_RETIREMENT_READER_TARGETS)),
+                        post_retirement_source_baseline=POST_RETIREMENT_SOURCE_BASELINE,
+                        preserve_retired_freeze_and_components=True,
+                        breaker_policy_source=self.verify_breaker_policy_source(),
+                        engineering_progress_detector_required=True)
+        if rollback_predecessor is not None:
+            plan["normal_manager_rollback_predecessor"] = rollback_predecessor
+        if getattr(self,"retirement_requested",False):
+            plan["normal_retirement"] = self.retirement_helper()["prepare"](self,plan,globals())
         return plan,before,after
+
+    def retirement_helper(self):
+        need(self.predecessor == NORMAL_MANAGER_BASELINE, "NORMAL_RETIREMENT_PREDECESSOR")
+        return load(self.code["tools/production_freeze_retirement.py"],
+                    REPO/"tools/production_freeze_retirement.py")
+
+    def owner_scope(self, plan):
+        if "normal_retirement" not in plan:
+            return plan
+        return self.retirement_helper()["owner_scope"](plan)
 
     def persist(self):
         self.directory.mkdir(mode=0o700); self.n["sync_dir"](STATE)
         row = {"scope":self.plan,"scope_sha256":pipeline_scope_sha(self.plan),
                "owner_oid":self.actor,"approved_at":stamp(),
                "before_images":encode(self.before),"after_images":encode(self.after)}
+        if "normal_retirement" in self.plan:
+            exact = self.owner_scope(self.plan)
+            row.update(owner_scope_sha256=digest(canon(exact)),owner_action=exact["action"])
         raw = canon(row)
         self.n["write"](self.directory/"approval.json",raw,0o400)
         receipt = {**self.plan["root_receipt_recipe"],"candidate_sha":self.candidate,
@@ -1602,6 +2308,11 @@ class PipelineSuccessor(NativeAdapter):
              and set(self.plan["installation_targets"]) == {str(x) for x in self.approved_targets()}
              and re.fullmatch("[0-9a-f-]{36}",str(row.get("owner_oid",""))) is not None,
              "PIPELINE_APPROVAL_IDENTITY")
+        if "normal_retirement" in self.plan:
+            exact = self.owner_scope(self.plan)
+            need(row.get("owner_action")==exact["action"]
+                 and row.get("owner_scope_sha256")==digest(canon(exact)),
+                 "NORMAL_RETIREMENT_PARENT_APPROVAL_MISSING")
         self.before = decode(row["before_images"],self.approved_targets())
         self.after = decode(row["after_images"],self.approved_targets()-{RECEIPT})
         need(self.plan["before"] == {str(k):describe(v) for k,v in self.before.items()}
@@ -1649,7 +2360,7 @@ class PipelineSuccessor(NativeAdapter):
             need(snapshot(path) == (None if resumed and path == PAUSE else value),
                  "PIPELINE_INSTALLED_FILE_CHANGED:"+path.name)
         need(self.protected() == self.plan["protected_health"],"PIPELINE_PROTECTED_STATE_CHANGED")
-        if self.predecessor == BREAKER_CUSTODY_BASELINE:
+        if self.predecessor in CUSTODY_BASELINES:
             need(self.verify_breaker_policy_source() == self.plan["breaker_policy_source"],
                  "BREAKER_CUSTODY_APPROVED_POLICY_SOURCE_CHANGED")
 
@@ -1699,8 +2410,8 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                     need(snapshot(path) in (old,self.after[path]),
                          "PIPELINE_FOREIGN_ROLLBACK_FILE:"+path.name)
                     cleanup_staged(path,(old,self.after[path]))
-            self.systemctl(["stop",*TIMERS])
-            self.quiesce((SERVICES[1],),45,rollback=True)
+            self.systemctl(["stop",*self.transaction_triggers()])
+            self.quiesce(self.transaction_reader_services(),45,rollback=True)
             for path in [x for x in reversed(sorted(self.after)) if x not in (PAUSE,RECEIPT)] + [RECEIPT]:
                 current=snapshot(path)
                 need(current in (self.before[path],self.after[path]),"PIPELINE_ROLLBACK_FILE_CHANGED")
@@ -1711,7 +2422,7 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
             for service in SERVICES:
                 if self.properties(service,False).get("ActiveState")=="failed":
                     self.systemctl(["reset-failed",service])
-            self.systemctl(["start",*TIMERS])
+            self.systemctl(["start",*self.transaction_triggers()])
         self.native_revalidation()
         self.read_guard(self.predecessor)
         need(self.protected() == self.plan["protected_health"]
@@ -1723,9 +2434,14 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
             "production_authority":False}),0o400)
 
     def apply(self,plan,sha):
-        need(sha == pipeline_scope_sha(plan),"PIPELINE_EXACT_SCOPE_REQUIRED")
-        self.actor = self.n["owner"](plan)
+        manager_sha = pipeline_scope_sha(plan)
+        exact = self.owner_scope(plan)
+        need(sha == digest(canon(exact)),"PIPELINE_EXACT_SCOPE_REQUIRED")
+        self.actor = self.n["owner"](exact)
+        sha = manager_sha
         self.plan = plan
+        if "normal_retirement" in plan or self.predecessor==POST_RETIREMENT_MANAGER_BASELINE:
+            self.wait_for_fresh_pipeline_readback()
         with self.n["locks"]():
             need(source_review(self.candidate,self.p,baseline=self.predecessor,
                                source_files=self.source_files,supporting_files=self.supporting_files) == self.code,
@@ -1733,12 +2449,22 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
             again,self.before,self.after = self.inspect()
             need(again == plan,"PIPELINE_APPROVED_SCOPE_CHANGED")
             self.persist()
+        fault_recovery = self.predecessor == WATCHDOG_RECOVERY_BASELINE
+        mutation_started = not fault_recovery
         try:
-            with self.n["locks"](): self.pause()
-            self.quiesce((SERVICES[0],))
+            if not fault_recovery:
+                with self.n["locks"](): self.pause()
+                self.quiesce((SERVICES[0],))
+            if "normal_retirement" in plan or self.predecessor==POST_RETIREMENT_MANAGER_BASELINE:
+                self.wait_for_fresh_pipeline_readback()
             with self.n["locks"]():
-                need(self.protected() == plan["protected_health"],"PIPELINE_PRECUTOVER_HEALTH_CHANGED")
-                self.read_guard(self.predecessor)
+                protected = (self.protected(failed_manager_recovery=True)
+                             if fault_recovery else self.protected())
+                need(protected == plan["protected_health"],"PIPELINE_PRECUTOVER_HEALTH_CHANGED")
+                if fault_recovery:
+                    self.attest_failed_predecessor()
+                else:
+                    self.read_guard(self.predecessor)
                 if self.predecessor == RELEASE_RETRY_BASELINE:
                     history=STATE/self.predecessor
                     activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
@@ -1747,28 +2473,57 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                     history=STATE/self.predecessor
                     activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
                     self.verify_source_integration_predecessor(history,activated)
-                if self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+                if self.predecessor in CLOSED_LOOP_BASELINES:
                     history=STATE/self.predecessor
                     activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
                     self.verify_closed_loop_predecessor(history,activated)
-                    if self.predecessor == BREAKER_CUSTODY_BASELINE:
+                    if self.predecessor in CUSTODY_BASELINES:
                         need(self.verify_breaker_policy_source() == plan["breaker_policy_source"],
                              "BREAKER_CUSTODY_APPROVED_POLICY_SOURCE_CHANGED")
+                if "normal_manager_rollback_predecessor" in plan:
+                    need(self.verify_normal_manager_rollback_predecessor()
+                         == plan["normal_manager_rollback_predecessor"],
+                         "NORMAL_MANAGER_ROLLBACK_PROOF_CHANGED")
                 for path,old in self.before.items():
-                    need(snapshot(path) == (self.pause_image if path == PAUSE else old),
+                    need(snapshot(path) == (self.pause_image if path == PAUSE and not fault_recovery else old),
                          "PIPELINE_PRECUTOVER_FILE_CHANGED")
-                self.systemctl(["stop",*TIMERS])
-                self.quiesce((SERVICES[1],),45)
+                if fault_recovery:
+                    drift = json.loads(self.p["read"](MANAGER/"production-drift.json",0,0o600))
+                    control = json.loads(self.p["read"](MANAGER/"production-control-state.json",0,0o600))
+                    verify_failed_manager_drift(control,drift,drift)
+                    evidence = {name:self.properties(name,False) for name in SERVICES}
+                    need(all(row.get("ActiveState") == "failed" and row.get("MainPID") == "0"
+                             for row in evidence.values()),"WATCHDOG_RECOVERY_NOT_QUIESCENT")
+                    self.n["write"](self.directory/"precutover-fault.json",canon({
+                        "scope_sha256":sha,"observed_at":drift["observed_at"],
+                        "problems":drift["problems"],"breaker":control["circuit_breaker"],
+                        "services":evidence,"production_authority":False,
+                    }),0o400)
+                    mutation_started = True
+                self.systemctl(["stop",*self.transaction_triggers()])
+                if fault_recovery:
+                    self.pause()
+                    self.quiesce(SERVICES,45,rollback=True)
+                else:
+                    self.quiesce(self.transaction_reader_services(),45)
                 self.release.parent.mkdir(mode=0o755); self.n["sync_dir"](self.release.parent.parent)
                 self.release.mkdir(mode=0o755); self.n["sync_dir"](self.release.parent)
                 for path,value in self.after.items():
                     if path not in (PAUSE,RECEIPT): self.change(path,self.before[path],value)
                 self.change(RECEIPT,self.before[RECEIPT],self.after[RECEIPT])
                 self.systemctl(["daemon-reload"])
-                self.systemctl(["start",*TIMERS])
+                if fault_recovery:
+                    for service in SERVICES:
+                        props = self.properties(service,False)
+                        need(props.get("ActiveState") == "failed" and props.get("MainPID") == "0",
+                             "WATCHDOG_RECOVERY_FAILED_STATE_CHANGED")
+                    self.systemctl(["reset-failed",*SERVICES])
+                self.systemctl(["start",*self.transaction_triggers()])
                 self.read_guard(self.candidate)
                 self.namespace_probe()
             self.native_revalidation()
+            if "normal_retirement" in plan or self.predecessor==POST_RETIREMENT_MANAGER_BASELINE:
+                self.wait_for_fresh_pipeline_readback()
             with self.n["locks"]():
                 self.verify_successor_topology_and_source()
                 self.n["write"](self.directory/"result.json",canon({
@@ -1782,7 +2537,12 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                     "status":"resumed_pending_scheduled_acceptance","scope_sha256":sha,
                     "at":stamp(),"production_authority":False}),0o400)
         except BaseException:
-            self.restore()
+            if mutation_started:
+                self.restore()
+            elif fault_recovery:
+                self.n["write"](self.directory/"rollback.json",canon({
+                    "status":"no_mutation_after_durable_receipt",
+                    "scope_sha256":sha,"at":stamp(),"production_authority":False}),0o400)
             raise
         print("ENGINEERING_PIPELINE_SUCCESSOR_RESUMED_PENDING_SCHEDULED_ACCEPTANCE")
 
@@ -1825,7 +2585,7 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                 and watchdog.get("ExecMainStatus")=="0"):
             print("PIPELINE_SCHEDULED_WATCHDOG_ACCEPTANCE_PENDING")
             return False
-        if self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in CLOSED_LOOP_BASELINES:
             observed=json.loads(self.p["read"](MANAGER.parent/"self-heal/state.json",1000,0o600))
             probe=observed.get("engineering_progress")
             try:
@@ -1840,14 +2600,14 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
         return super().verify_activation()
 
     def record_scheduled_acceptance(self,sha,evidence,controller,pipeline,timer_at):
-        if self.predecessor not in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor not in SCHEDULED_BASELINES:
             return super().record_scheduled_acceptance(sha,evidence,controller,pipeline,timer_at)
-        if self.predecessor in (RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in (RELEASE_RETRY_BASELINE, *SOURCE_POLICY_BASELINES):
             need(controller.get("release_gate_status")=="allowed",
                  "RELEASE_RETRY_CONTROLLER_ADMISSION_NOT_VERIFIED")
             evidence={**evidence,"bounded_release_retry_policy_verified":True}
         state_dir=PAUSE.parent
-        if self.predecessor in (SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        if self.predecessor in SOURCE_POLICY_BASELINES:
             queue=json.loads(self.p["read"](state_dir/"pmv3-integration-queue-state.json",1000,0o600))
             view=controller.get("integration_queue") or {}
             backlog=queue.get("source_backlog") or {}
@@ -1866,7 +2626,7 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                  "SOURCE_INTEGRATION_SCHEDULED_POLICY_NOT_VERIFIED")
             evidence={**evidence,"independent_source_policy_verified":True,
                       "source_backlog_preserved":True,"native_production_unchanged":True}
-        if self.predecessor == BREAKER_CUSTODY_BASELINE:
+        if self.predecessor in CUSTODY_BASELINES:
             ledger=json.loads(self.p["read"](state_dir/"release-breaker-recovery-state.json",1000,0o600))
             route=verify_scheduled_breaker_policy_route(pipeline,ledger)
             need(self.verify_breaker_policy_source() == BREAKER_POLICY_SOURCE,
@@ -1967,6 +2727,175 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
         print("ENGINEERING_PIPELINE_FAILED_ACCEPTANCE_PAUSE_VERIFIED")
 
 
+# A reviewed terminal final-phase rollback may retain its independently
+# accepted manager. This records a NEW authenticated final-only transaction;
+# the old approval, acceptance, and terminal journal are never rewritten.
+FINAL_RETIREMENT_PREPARATION = "db14810b945a39546ef27d48dbe439b5e0ec4e80"
+FINAL_RETIREMENT_HISTORY = {
+    "approval.json":"6fdedf7e4f87ca70da020e3bb58b0fe3be116a39e2061d24d6ecc6157142ad2e",
+    "receipt-image.json":"1b534cac397aa26bab21258acedc25453546fd46cbfd912809701cb0ed85aea7",
+    "scheduled-acceptance.json":"e4303bc4a63321426b8f4351c873a0092ad6522025cd8120bbce82d5cbd4f228",
+    "retirement-intent.json":"c763b28fab4d857c801279a9fa31540ae1f87959be469d885289eb419c74f365",
+    "retirement-policy-intent.json":"8170be2a19c0dd8611aa613721b55e456dc7cd6b8c9da464c24982bd387bcf63",
+    "retirement-rollback.json":"75bfb80d240a02efebc53065029fcb777aabae82b9957c0e5adb9d93c4a3f8e1",
+}
+FINAL_RETIREMENT_DELTA = frozenset({
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/production_freeze_retirement.py",
+    "tools/scoped_backport_coordinated_host.py",
+    "tools/tests/test_production_freeze_retirement.py",
+    "tools/tests/test_scoped_backport_coordinated_host.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "docs/operations/Production-Freeze-Retirement-Source-Review-20261127.md",
+})
+FINAL_RETIREMENT_RECORDS = frozenset(FINAL_RETIREMENT_HISTORY) | {
+    "activation-attempt.json","activation.json","result.json",
+    "scheduled-cycle-1.json","scheduled-cycle-2.json",
+}
+
+
+def verify_final_retry_delta(git, candidate):
+    need(candidate != FINAL_RETIREMENT_PREPARATION,"FINAL_RETRY_REQUIRES_NEW_CANDIDATE")
+    git("merge-base","--is-ancestor",FINAL_RETIREMENT_PREPARATION,candidate)
+    changed = set(git("diff","--no-renames","--name-only",
+                      FINAL_RETIREMENT_PREPARATION,candidate).decode().splitlines())
+    need(changed == FINAL_RETIREMENT_DELTA,"FINAL_RETRY_EXACT_SOURCE_DELTA")
+
+
+class FinalRetirementRetry(PipelineSuccessor):
+    """A fresh exact decision for only the previously rolled-back final phase."""
+
+    def __init__(self,candidate,n,p,code):
+        super().__init__(candidate,n,p,code,predecessor=NORMAL_MANAGER_BASELINE)
+        self.retirement_requested=True
+        git=lambda *args:p["git"](REPO,*args)
+        verify_final_retry_delta(git,candidate)
+        history=STATE/FINAL_RETIREMENT_PREPARATION
+        n["directory"](history,0o700)
+        raw=n["read"](history/"approval.json",0,0o400,8_000_000)
+        need(digest(raw)==FINAL_RETIREMENT_HISTORY["approval.json"],
+             "FINAL_RETRY_HISTORICAL_APPROVAL_CHANGED")
+        original=json.loads(raw)
+        old_code={k:git("show",FINAL_RETIREMENT_PREPARATION+":"+k) for k in code}
+        need(original["scope"]["source_hashes"]=={k:digest(v) for k,v in old_code.items()},
+             "FINAL_RETRY_HISTORICAL_SOURCE_CHANGED")
+        self.retained=PipelineSuccessor(FINAL_RETIREMENT_PREPARATION,n,p,old_code,
+                                       predecessor=NORMAL_MANAGER_BASELINE)
+        self.retained.retirement_requested=True
+        self.verify_retained_preparation_records()
+
+    def verify_retained_preparation_records(self):
+        history=STATE/FINAL_RETIREMENT_PREPARATION
+        self.n["directory"](STATE,0o700); self.n["directory"](history,0o700)
+        need({p.name for p in history.iterdir()}==FINAL_RETIREMENT_RECORDS,
+             "FINAL_RETRY_HISTORICAL_RECORD_SET")
+        rows={}
+        for name,pin in FINAL_RETIREMENT_HISTORY.items():
+            raw=self.n["read"](history/name,0,0o400,8_000_000)
+            need(digest(raw)==pin,"FINAL_RETRY_HISTORICAL_RECORD_CHANGED:"+name)
+            rows[name]=json.loads(raw)
+        sha=self.retained.load_record()
+        approval=rows["approval.json"]
+        acceptance=rows["scheduled-acceptance.json"]
+        rollback=rows["retirement-rollback.json"]
+        parent=approval["owner_scope_sha256"]
+        need(acceptance["scope_sha256"]==sha
+             and acceptance["status"]=="scheduled_engineering_acceptance_verified"
+             and acceptance["evidence"].get("two_distinct_scheduled_cycles_verified") is True
+             and rollback=={"status":"original_freeze_and_mcp_restored","parent_sha256":parent,
+                            "accepted_manager_preparation_retained":True}
+             and all(rows[k]["parent_sha256"]==parent for k in
+                     ("retirement-intent.json","retirement-policy-intent.json")),
+             "FINAL_RETRY_TERMINAL_ROLLBACK_UNVERIFIED")
+        for i,label in ((1,"first"),(2,"second")):
+            raw=self.n["read"](history/("scheduled-cycle-"+str(i)+".json"),0,0o400)
+            need(digest(raw)==acceptance["evidence"][label+"_cycle_sha256"],
+                 "FINAL_RETRY_SCHEDULED_CYCLE_CHANGED")
+        self.pause_image=self.retained.pause_image
+        self.historical_rows=rows
+        return {"accepted_candidate_sha":FINAL_RETIREMENT_PREPARATION,
+                "manager_scope_sha256":sha,"prior_parent_scope_sha256":parent,
+                "history_sha256":dict(FINAL_RETIREMENT_HISTORY)}
+
+    def expected_plan(self):
+        proof=self.verify_retained_preparation_records()
+        helper=self.retirement_helper()
+        old=self.retained.plan["normal_retirement"]
+        final=json.loads(canon(old))
+        final["candidate_sha"]=self.candidate
+        files=helper["static_files"](self,globals())
+        new_files={str(k):describe(v) for k,v in files.items()}
+        changed={k for k in new_files if new_files[k]!=old["new_files"].get(k)}
+        target="/usr/local/lib/jason/scoped-backport/tools/scoped_backport_coordinated_host.py"
+        need(set(new_files)==set(old["new_files"]) and changed=={target}
+             and new_files[target]["mode"]==old["new_files"][target]["mode"],
+             "FINAL_RETRY_INSTALL_DELTA")
+        final["new_files"]=new_files
+        return {"schema_version":"1.0","action":helper["ACTION"],
+                "policy":{"candidate_sha":self.candidate,"rollback_sha":LKG},
+                "installation_targets":[str(PAUSE)],
+                "normal_retirement":final,"retained_preparation":proof,
+                "protected_health":self.retained.plan["protected_health"],
+                "source_hashes":{k:digest(v) for k,v in self.code.items()}}
+
+    def verify_successor_topology_and_source(self,*,resumed=False):
+        need(resumed,"FINAL_RETRY_REQUIRES_ACCEPTED_RESUMED_MANAGER")
+        self.verify_retained_preparation_records()
+        self.retained.verify_successor_topology_and_source(resumed=True)
+        helper=self.retirement_helper()
+        old_intent=self.historical_rows["retirement-intent.json"]
+        paths=set(helper["static_files"](self,globals()))|set(helper["DYNAMIC"])|{helper["FREEZE"],helper["BACKUP"]}
+        before=decode(old_intent["before"],paths)
+        need(all(snapshot(path)==value for path,value in before.items()),
+             "FINAL_RETRY_ORIGINAL_FILE_RESTORATION_CHANGED")
+        need(all(not os.path.lexists(path) for path in self.retained.plan["normal_retirement"]["create_directories"]),
+             "FINAL_RETRY_ROLLBACK_DIRECTORY_REMAINS")
+
+    def inspect_final_retry(self):
+        need(not os.path.lexists(self.directory),"FINAL_RETRY_NEW_JOURNAL_ALREADY_PRESENT")
+        plan=self.expected_plan()
+        self.verify_successor_topology_and_source(resumed=True)
+        actual=self.retirement_helper()["prepare"](self,plan,globals())
+        need(actual==plan["normal_retirement"],"FINAL_RETRY_LIVE_SCOPE_CHANGED")
+        return plan
+
+    def load_record(self,*,allow_unpublished=False):
+        need(not allow_unpublished,"FINAL_RETRY_UNPUBLISHED_RECORD_DENIED")
+        expected=self.expected_plan()
+        self.n["directory"](self.directory,0o700)
+        raw=self.n["read"](self.directory/"approval.json",0,0o400,8_000_000)
+        row=json.loads(raw)
+        need(set(row)=={"scope","scope_sha256","owner_oid","approved_at",
+                       "owner_scope_sha256","owner_action"}
+             and row["scope"]==expected
+             and row["scope_sha256"]==digest(canon(expected))
+             and row["owner_scope_sha256"]==digest(canon(self.owner_scope(expected)))
+             and row["owner_action"]==self.retirement_helper()["ACTION"]
+             and row["owner_oid"]==self.historical_rows["approval.json"]["owner_oid"],
+             "FINAL_RETRY_NEW_APPROVAL_REQUIRED")
+        self.plan=expected
+        return row["scope_sha256"]
+
+    def apply_final_retry(self,plan,sha):
+        exact=self.owner_scope(plan)
+        need(sha==digest(canon(exact)),"FINAL_RETRY_EXACT_SCOPE_REQUIRED")
+        actor=self.n["owner"](exact)
+        self.wait_for_fresh_pipeline_readback()
+        with self.n["locks"]():
+            need(source_review(self.candidate,self.p,baseline=self.predecessor,
+                               source_files=self.source_files,supporting_files=self.supporting_files)==self.code,
+                 "FINAL_RETRY_SOURCE_CHANGED")
+            need(self.inspect_final_retry()==plan,"FINAL_RETRY_APPROVED_SCOPE_CHANGED")
+            need(actor==self.historical_rows["approval.json"]["owner_oid"],"FINAL_RETRY_OWNER_CHANGED")
+            self.directory.mkdir(mode=0o700); self.n["sync_dir"](STATE)
+            self.n["write"](self.directory/"approval.json",canon({
+                "scope":plan,"scope_sha256":digest(canon(plan)),"owner_oid":actor,
+                "approved_at":stamp(),"owner_scope_sha256":sha,"owner_action":exact["action"],
+            }),0o400)
+        self.wait_for_fresh_pipeline_readback()
+        return self.retirement_helper()["activate"](self,globals())
+
+
 def main():
     cli = argparse.ArgumentParser()
     cli.add_argument("--candidate", required=True)
@@ -1977,19 +2906,39 @@ def main():
     successor.add_argument("--source-integration-successor",action="store_true")
     successor.add_argument("--closed-loop-successor",action="store_true")
     successor.add_argument("--breaker-custody-successor",action="store_true")
+    successor.add_argument("--watchdog-recovery-successor",action="store_true")
+    successor.add_argument("--normal-manager-successor",action="store_true")
+    successor.add_argument("--post-retirement-manager-successor",action="store_true")
+    cli.add_argument("--retire-production-freeze",action="store_true")
+    cli.add_argument("--retry-retirement",action="store_true")
     choice=cli.add_mutually_exclusive_group()
     choice.add_argument("--apply", action="store_true")
     choice.add_argument("--recover",action="store_true")
     choice.add_argument("--resume",action="store_true")
     choice.add_argument("--verify-activation",action="store_true")
+    choice.add_argument("--activate-retirement",action="store_true")
+    choice.add_argument("--recover-retirement",action="store_true")
     choice.add_argument("--restore-failed-activation",action="store_true")
     cli.add_argument("--scope-sha")
     a = cli.parse_args()
+    need(not (a.retire_production_freeze or a.activate_retirement or a.recover_retirement)
+         or a.normal_manager_successor,"NORMAL_RETIREMENT_REQUIRES_NORMAL_SUCCESSOR")
+    need(not a.retry_retirement or (a.normal_manager_successor and a.retire_production_freeze
+         and not (a.resume or a.recover or a.verify_activation or a.restore_failed_activation)),
+         "FINAL_RETRY_REQUIRES_EXACT_RETIREMENT_CONTEXT")
     n,p = native()
     if (a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor
-            or a.source_integration_successor or a.closed_loop_successor or a.breaker_custody_successor):
+            or a.source_integration_successor or a.closed_loop_successor or a.breaker_custody_successor
+            or a.watchdog_recovery_successor or a.normal_manager_successor
+            or a.post_retirement_manager_successor):
         need(not a.resume,"PIPELINE_RESUME_REQUIRES_VERIFIED_TRANSACTION")
-        if a.breaker_custody_successor:
+        if a.post_retirement_manager_successor:
+            predecessor,files,supporting=POST_RETIREMENT_MANAGER_BASELINE,POST_RETIREMENT_SCOPE_FILES,POST_RETIREMENT_SUPPORTING_FILES
+        elif a.normal_manager_successor:
+            predecessor,files,supporting=NORMAL_MANAGER_BASELINE,NORMAL_MANAGER_SCOPE_FILES,NORMAL_MANAGER_SUPPORTING_FILES
+        elif a.watchdog_recovery_successor:
+            predecessor,files,supporting=WATCHDOG_RECOVERY_BASELINE,WATCHDOG_RECOVERY_SCOPE_FILES,WATCHDOG_RECOVERY_SUPPORTING_FILES
+        elif a.breaker_custody_successor:
             predecessor,files,supporting=BREAKER_CUSTODY_BASELINE,BREAKER_CUSTODY_SCOPE_FILES,BREAKER_CUSTODY_SUPPORTING_FILES
         elif a.closed_loop_successor:
             predecessor,files,supporting=CLOSED_LOOP_BASELINE,CLOSED_LOOP_SCOPE_FILES,CLOSED_LOOP_SUPPORTING_FILES
@@ -2001,9 +2950,34 @@ def main():
             predecessor,files,supporting=TODO_CONFLICT_BASELINE,TODO_CONFLICT_SCOPE_FILES,TODO_CONFLICT_SUPPORTING_FILES
         else:
             predecessor,files,supporting=PIPELINE_BASELINE,PIPELINE_SCOPE_FILES,frozenset()
-        code = source_review(a.candidate,p,recovery=a.recover or a.verify_activation or a.restore_failed_activation,
+        code = source_review(a.candidate,p,recovery=a.recover or a.verify_activation or a.restore_failed_activation
+                             or a.recover_retirement,
                              baseline=predecessor,source_files=files,supporting_files=supporting)
+        if a.retry_retirement:
+            adapter = FinalRetirementRetry(a.candidate,n,p,code)
+            if a.activate_retirement or a.recover_retirement:
+                if not a.recover_retirement:
+                    adapter.wait_for_fresh_pipeline_readback()
+                print(json.dumps(adapter.retirement_helper()["activate"](
+                    adapter,globals(),recover=a.recover_retirement),sort_keys=True))
+                return
+            adapter.wait_for_fresh_pipeline_readback()
+            with n["locks"]():
+                plan=adapter.inspect_final_retry()
+            exact=adapter.owner_scope(plan)
+            sha=digest(canon(exact))
+            if not a.apply:
+                print(json.dumps({"status":"exact_final_retirement_retry_preflight_passed",
+                                  "scope_sha256":sha,"scope":exact},sort_keys=True))
+                return
+            print(json.dumps(adapter.apply_final_retry(plan,a.scope_sha),sort_keys=True))
+            return
         adapter = PipelineSuccessor(a.candidate,n,p,code,predecessor=predecessor)
+        adapter.retirement_requested=a.retire_production_freeze
+        if a.activate_retirement or a.recover_retirement:
+            print(json.dumps(adapter.retirement_helper()["activate"](
+                adapter,globals(),recover=a.recover_retirement),sort_keys=True))
+            return
         if a.verify_activation:
             if not adapter.verify_activation(): raise SystemExit(2)
             return
@@ -2013,11 +2987,15 @@ def main():
         if a.recover:
             adapter.recover()
             return
+        if a.retire_production_freeze or a.post_retirement_manager_successor:
+            adapter.wait_for_fresh_pipeline_readback()
         with n["locks"](): plan,_,_=adapter.inspect()
-        sha=pipeline_scope_sha(plan)
+        pipeline_scope_sha(plan)
+        exact = adapter.owner_scope(plan)
+        sha=digest(canon(exact))
         if not a.apply:
             print(json.dumps({"status":"exact_native_pipeline_successor_preflight_passed",
-                              "scope_sha256":sha,"scope":plan},sort_keys=True))
+                              "scope_sha256":sha,"scope":exact},sort_keys=True))
             return
         adapter.apply(plan,a.scope_sha)
         return

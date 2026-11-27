@@ -1,0 +1,353 @@
+#!/usr/bin/env python3
+"""Root-only bounded circuit breaker transition processor.
+
+The caller requests an intent, never an arbitrary replacement JSON document.
+"""
+from __future__ import annotations
+import datetime
+import fcntl
+import json
+import importlib.util
+import os
+import pwd
+import re
+import stat
+import subprocess
+import tempfile
+from pathlib import Path
+
+ROOT=Path('/var/lib/jason/openclaw/release-manager')
+REQUESTS=ROOT/'protected-transitions'/'requests'
+RESULTS=ROOT/'protected-transitions'/'results'
+CONTROL=ROOT/'production-control-state.json'
+DRIFT=ROOT/'production-drift.json'
+LOCK=ROOT/'protected-transitions'/'root-control.lock'
+DRIFT_CONFIG=Path('/etc/jason/release-readback-recovery/production-desired-state.json')
+DRIFT_EVALUATOR=Path('/opt/jason/current/tools/production_drift_guard.py')
+SHA=re.compile(r'[0-9a-f]{40}\Z')
+RID=re.compile(r'[0-9a-f]{32}\Z')
+PROTECTED_LKG_FIELDS=(
+    'revision', 'runtime_revision', 'runtime_image_id',
+    'mcp_revision', 'mcp_image_id', 'host_revision', 'host_release',
+    'release_manager_source_revision', 'desired_state_policy_digest',
+    'mobile_release_approval_policy_digest', 'mobile_release_approval_mode',
+    'scheduled_control_units',
+)
+
+
+def coordinated_component_reader():
+    record = Path("/etc/jason-owner-release/coordinated-readback/component.json")
+    if not os.path.lexists(record) and not os.path.lexists("/etc/jason-owner-release/coordinated-component-readback.json"):
+        return None
+    helper = Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py")
+    for path in (helper, *helper.parents):
+        meta = path.lstat()
+        if meta.st_uid != 0 or meta.st_mode & 0o022 or path.is_symlink():
+            raise PermissionError("untrusted coordinated component reader")
+    spec = importlib.util.spec_from_file_location("jason_root_coordinated_reader", helper)
+    if spec is None or spec.loader is None:
+        raise PermissionError("missing coordinated component reader")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def verify_immutable_lkg_fingerprint(recorded: dict, observed: dict) -> None:
+    reader = coordinated_component_reader()
+    if reader is not None:
+        state = reader.verify_live()
+        if state is None:
+            raise ValueError("coordinated component state disappeared")
+        reader.verify_host_fingerprint(recorded, observed, state)
+        return
+    if recorded.get('complete') is not True or observed.get('complete') is not True:
+        raise ValueError('incomplete independent baseline verification')
+    for key in PROTECTED_LKG_FIELDS:
+        left, right = recorded.get(key), observed.get(key)
+        if left is None or right is None or left != right:
+            raise ValueError('immutable last-known-good mismatch: ' + key)
+
+
+
+
+def protected_read(path: Path) -> dict:
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+    try:
+        st=os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid!=0 or st.st_mode&0o077:
+            raise PermissionError('root-only mode-0600 file required')
+        with os.fdopen(fd,'r',closefd=False) as f: data=json.load(f)
+    finally:os.close(fd)
+    if not isinstance(data,dict) or data.get('schema_version')!='1.0':
+        raise ValueError('protected evidence schema invalid')
+    return data
+
+
+def read_request(path: Path) -> dict:
+    if not RID.fullmatch(path.stem) or path.suffix!='.json':
+        raise ValueError('invalid request filename')
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+    try:
+        st=os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid!=pwd.getpwnam('al').pw_uid or st.st_mode&0o077:
+            raise PermissionError('invalid requester ownership')
+        with os.fdopen(fd,'r',closefd=False) as f:req=json.load(f)
+    finally:os.close(fd)
+    if not isinstance(req,dict) or req.get('request_id')!=path.stem:
+        raise ValueError('request id mismatch')
+    if set(req)-{'request_id','action','revision','release_id','reason'}:
+        raise ValueError('unsupported request fields')
+    if req.get('action') not in {'open','revalidate','set_last_known_good'}:
+        raise ValueError('unsupported transition')
+    if not SHA.fullmatch(str(req.get('revision') or '')):
+        raise ValueError('exact revision required')
+    return req
+
+
+def verify_health(revision: str) -> dict:
+    reader = coordinated_component_reader()
+    if reader is not None:
+        state = reader.verify_live()
+        if state is None or state["host_revision"] != revision:
+            raise ValueError("coordinated component host anchor mismatch")
+        helper = "/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py"
+        result = subprocess.check_output(
+            ["runuser", "-u", "al", "--", "/usr/bin/python3", "-I", "-B",
+             helper, "--capture-native-health"], text=True, timeout=90)
+        observed = json.loads(result)
+        if (observed.get("revision") != revision or observed.get("complete") is not True
+                or observed.get("coordinated_readback_sha256") != reader.digest(state)):
+            raise ValueError("independent coordinated production health not verified")
+        return observed
+    code='import json,sys;sys.path.insert(0,"/home/al/.local/lib/jason");import release_manager_host_runner as r;print(json.dumps(r.capture_production_manifest("'+revision+'")))'
+    result=subprocess.check_output(['runuser','-u','al','--','python3','-c',code],text=True,timeout=70)
+    manifest=json.loads(result)
+    if manifest.get('revision')!=revision or manifest.get('complete') is not True:
+        raise ValueError('independent production health not verified')
+    return manifest
+
+
+def _bounded_drift_denial(raw: str) -> str:
+    """Surface only bounded non-secret issue identity from the root evaluator.
+
+    Never print raw stdout/stderr, arbitrary property values or command lines
+    from protected drift evidence into unprivileged release error messages.
+    """
+    if not isinstance(raw, str) or len(raw) > 131072:
+        return ""
+    try:
+        report = json.loads(raw)
+    except (ValueError, TypeError):
+        return ""
+    if (not isinstance(report, dict) or report.get('schema_version') != '1.0'
+            or report.get('status') != 'drift_detected'
+            or not isinstance(report.get('problems'), list)):
+        return ""
+    reasons = []
+    for entry in report['problems'][:6]:
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get('kind') or '')
+        if not re.fullmatch(r'[a-z][a-z0-9_]{0,62}', kind):
+            continue
+        unit = str(entry.get('unit') or '')
+        if re.fullmatch(r'jason-[a-z0-9_.@-]{1,120}', unit):
+            reasons.append(kind + ':' + unit)
+        else:
+            reasons.append(kind)
+    return ','.join(reasons[:6])
+
+
+def refresh_stale_drift() -> None:
+    """Regenerate drift from the independent policy while transaction lock is held.
+
+    The normal watchdog defers under the production transaction lock. Never
+    extend the 180-second validity window or trust caller-provided evidence:
+    run the immutable production guard against the root-controlled policy,
+    require a clean result, and atomically persist root-owned evidence.
+    """
+    for path in (DRIFT_CONFIG, DRIFT_EVALUATOR):
+        info=path.stat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or (info.st_mode & 0o002):
+            raise PermissionError('root-owned drift evaluator and policy required')
+    try:
+        result=subprocess.run(
+            ['/usr/bin/python3',str(DRIFT_EVALUATOR),'--config',str(DRIFT_CONFIG)],
+            capture_output=True,text=True,timeout=70,check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError('independent production drift refresh timed out within root boundary') from exc
+    if result.returncode!=0:
+        detail = _bounded_drift_denial(result.stdout)
+        raise ValueError('independent production drift refresh did not pass'
+                         + (': ' + detail if detail else ' (no bounded drift detail available)'))
+    payload=json.loads(result.stdout)
+    if (payload.get('schema_version')!='1.0' or payload.get('status')!='pass'
+            or payload.get('problems') or not payload.get('observed_at')):
+        raise ValueError('independent drift refresh failed closed')
+    # Persist only validated, independently generated root-owned evidence.
+    write_json(DRIFT,payload,0,0)
+
+
+def verify_drift() -> None:
+    drift=protected_read(DRIFT)
+    if drift.get('status')!='pass' or drift.get('problems'):
+        raise ValueError('production drift is not clean')
+    observed=datetime.datetime.fromisoformat(drift['observed_at'].replace('Z','+00:00'))
+    age=(datetime.datetime.now(datetime.timezone.utc)-observed).total_seconds()
+    if not -10 <= age <= 180:
+        refresh_stale_drift()
+        drift=protected_read(DRIFT)
+        if drift.get('status')!='pass' or drift.get('problems'):
+            raise ValueError('independent drift refresh did not pass')
+        observed=datetime.datetime.fromisoformat(drift['observed_at'].replace('Z','+00:00'))
+        age=(datetime.datetime.now(datetime.timezone.utc)-observed).total_seconds()
+        if not -10 <= age <= 180:
+            raise ValueError('root-owned drift evidence is stale after independent refresh')
+
+
+def restore_previous_verified_lkg(req: dict, state: dict) -> dict:
+    """Recover the root-attested prior LKG after an incomplete later rollback.
+
+    Do not clear the breaker or waive drift. The prior immutable manifest must
+    match the actual live host/runtime/MCP and a closed, approved historic
+    release record. Only the specific failed obsolete CCC oneshot is accepted
+    as the live drift reason. The original LKG is retained as previous.
+    """
+    if coordinated_component_reader() is not None:
+        raise ValueError('legacy prior-LKG recovery denied while coordinated component state is active')
+    revision = req['revision']
+    breaker = state.get('circuit_breaker') or {}
+    if (breaker.get('state') != 'open'
+            or breaker.get('source') != 'production_drift_watchdog'
+            or breaker.get('reason') != 'continuous_production_drift_detected'):
+        raise ValueError('root prior-LKG recovery requires an open CCC drift breaker')
+    drift = protected_read(DRIFT)
+    # Following approved CCC retirement, the independent evaluator may have
+    # already cleared the exact obsolete-unit failure. Retain the previously
+    # reviewed CCC-only incident case, but also accept a real root-owned PASS.
+    # Never accept any other failed, stale, or caller-provided drift report.
+    clean = drift.get('status') == 'pass' and drift.get('problems') == []
+    historical_ccc = (drift.get('status') == 'drift_detected'
+        and drift.get('problems') == [
+            {'kind':'failed_system_unit','state':'failed','unit':'jason-ccc.service'}
+        ])
+    if not (clean or historical_ccc):
+        raise ValueError('root prior-LKG recovery requires independent PASS or exact legacy CCC-only failure')
+    previous = state.get('previous_last_known_good') or {}
+    current = state.get('last_known_good') or {}
+    prior_manifest = previous.get('manifest') or {}
+    newer_manifest = current.get('manifest') or {}
+    if (prior_manifest.get('revision') != revision
+            or prior_manifest.get('complete') is not True
+            or newer_manifest.get('complete') is not True
+            or newer_manifest.get('revision') == revision):
+        raise ValueError('root prior-LKG recovery requires two distinct complete protected LKGs')
+    release_id = 'release-' + revision[:16]
+    if (req.get('release_id') != release_id
+            or previous.get('release_id') != release_id):
+        raise ValueError('root prior-LKG recovery historical release identity mismatch')
+    path = ROOT / 'records' / (release_id + '.json')
+    info = path.lstat()
+    if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != pwd.getpwnam('al').pw_uid
+            or info.st_mode & 0o077):
+        raise PermissionError('root prior-LKG recovery record ownership invalid')
+    record = json.loads(path.read_text(encoding='utf-8'))
+    production = record.get('production') or {}
+    approval = record.get('owner_approval') or {}
+    if (record.get('state') != 'closed'
+            or (record.get('release_candidate') or {}).get('candidate_sha') != revision
+            or approval.get('approved') is not True
+            or approval.get('candidate_sha') != revision
+            or production.get('live_sha') != revision
+            or not production.get('verified_at')):
+        raise ValueError('root prior-LKG recovery previous release lacks verified approval')
+    observed = verify_health(revision)
+    verify_immutable_lkg_fingerprint(prior_manifest, observed)
+    # Preserve the existing open breaker and original root-evidenced LKG.
+    state['last_known_good'] = previous
+    state['previous_last_known_good'] = current
+    state['last_revalidation'] = observed
+    return state
+
+
+def apply_transition(req: dict, state: dict) -> dict:
+    action=req['action'];revision=req['revision']
+    if action != 'open' and action != 'revalidate' and coordinated_component_reader() is not None:
+        raise ValueError('legacy promotion denied while coordinated component state is active')
+    if action=='open':
+        state['circuit_breaker']={'state':'open','reason':str(req.get('reason') or 'release_failure')[:300],
+                                   'source':'root_governed_transition','updated_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+        return state
+    verify_drift()
+    if action=='revalidate':
+        last=state.get('last_known_good') or {}
+        if last.get('manifest',{}).get('revision')!=revision:
+            raise ValueError('last known good revision mismatch')
+        manifest=verify_health(revision)
+        verify_immutable_lkg_fingerprint(last['manifest'],manifest)
+        state['last_revalidation']=manifest
+    else:
+        release_id=str(req.get('release_id') or '')
+        base_id='release-'+revision[:16]
+        if release_id != base_id and not re.fullmatch(re.escape(base_id)+r'-retry-[1-9][0-9]{0,2}',release_id):
+            raise ValueError('release identity mismatch')
+        path=ROOT/'records'/(release_id+'.json')
+        record=json.loads(path.read_text())
+        if release_id != base_id:
+            historical=json.loads((ROOT/'records'/(base_id+'.json')).read_text())
+            if historical.get('state')!='rolled_back' or (historical.get('failure') or {}).get('rollback_verified') is not True:
+                raise ValueError('retry historical rollback is not verified')
+            if (historical.get('release_candidate') or {}).get('candidate_sha')!=revision:
+                raise ValueError('retry historical candidate mismatch')
+            if record.get('reissued_from')!=base_id or (record.get('release_candidate') or {}).get('candidate_sha')!=revision:
+                raise ValueError('retry release candidate linkage mismatch')
+        if record.get('state') not in {'production','closed'} or record.get('owner_approval',{}).get('approved') is not True or record['owner_approval'].get('candidate_sha')!=revision:
+            raise ValueError('record lacks exact production approval')
+        manifest=verify_health(revision)
+        # Preserve the independently root-verified previous LKG in the same
+        # root-owned atomic control record. An open breaker must be able to
+        # restore this EXACT prior revision, not an arbitrary ancestor.
+        previous=state.get('last_known_good')
+        old_manifest=(previous or {}).get('manifest') or {}
+        if (isinstance(previous,dict) and old_manifest.get('complete') is True
+                and isinstance(old_manifest.get('revision'),str)
+                and old_manifest['revision']!=revision):
+            state['previous_last_known_good']=previous
+        state['last_known_good']={'release_id':release_id,'manifest':manifest,'recorded_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+    state['circuit_breaker']={'state':'closed','reason':'root_verified_'+action,'revalidated_revision':revision,
+                              'updated_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+    return state
+
+
+def write_json(path:Path, value:dict, owner_uid:int, owner_gid:int) -> None:
+    fd,name=tempfile.mkstemp(prefix='.transition-',dir=path.parent)
+    try:
+        with os.fdopen(fd,'w') as f:
+            json.dump(value,f,indent=2,sort_keys=True);f.write('\n');f.flush();os.fsync(f.fileno())
+        os.chown(name,owner_uid,owner_gid);os.chmod(name,0o600)
+        os.replace(name,path)
+    finally:
+        if os.path.exists(name):os.unlink(name)
+
+
+def process() -> None:
+    if os.geteuid()!=0:raise PermissionError('root only')
+    al=pwd.getpwnam('al')
+    with LOCK.open('a+') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        for path in sorted(REQUESTS.glob('*.json')):
+            try:
+                req=read_request(path)
+                state=protected_read(CONTROL)
+                result=apply_transition(req,state)
+                write_json(CONTROL,result,0,0)
+                assert protected_read(CONTROL)['circuit_breaker']==result['circuit_breaker']
+                response={'request_id':req['request_id'],'success':True,'action':req['action'],'revision':req['revision']}
+            except Exception as ex:
+                response={'request_id':path.stem,'success':False,'detail':type(ex).__name__+': '+str(ex)[:250]}
+            write_json(RESULTS/(path.stem+'.json'),response,al.pw_uid,al.pw_gid)
+            path.unlink()
+
+if __name__=='__main__':process()

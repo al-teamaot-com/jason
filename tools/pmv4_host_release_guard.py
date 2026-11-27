@@ -39,6 +39,27 @@ SHA = re.compile(r"\A[0-9a-f]{40}\Z")
 LEGACY_MANAGER_UID = 1000
 
 
+def coordinated_component_state():
+    record = Path("/etc/jason-owner-release/coordinated-readback/component.json")
+    if not os.path.lexists(record) and not os.path.lexists("/etc/jason-owner-release/coordinated-component-readback.json"):
+        return None
+    helper = Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py")
+    for path in (helper, *helper.parents):
+        meta = path.lstat()
+        if meta.st_uid != 0 or meta.st_mode & 0o022 or path.is_symlink():
+            raise PermissionError("COORDINATED_READBACK_HELPER_UNTRUSTED")
+    result = subprocess.run(
+        ["/usr/bin/python3", "-I", "-B", str(helper)],
+        capture_output=True, text=True, timeout=35, check=False,
+    )
+    if result.returncode or len(result.stdout) > 65536:
+        raise PermissionError("COORDINATED_READBACK_NOT_VERIFIED")
+    data = json.loads(result.stdout)
+    if data.get("status") != "verified" or not isinstance(data.get("state"), dict):
+        raise PermissionError("COORDINATED_READBACK_NOT_VERIFIED")
+    return data["state"]
+
+
 class HostGateDenied(PermissionError):
     pass
 
@@ -238,6 +259,12 @@ class IndependentHostGuard:
             or manifest.get("complete") is not True
         ):
             raise HostGateDenied("PMV4_ROOT_LAST_KNOWN_GOOD_NOT_VERIFIED")
+        try:
+            scoped = coordinated_component_state() if self.production else None
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
+            raise HostGateDenied("PMV4_COORDINATED_READBACK_DENIED") from exc
+        if scoped is not None and scoped.get("host_revision") != source:
+            raise HostGateDenied("PMV4_COORDINATED_HOST_ANCHOR_DRIFT")
         if (
             breaker.get("state") != "closed"
             or breaker.get("revalidated_revision") != source
@@ -337,6 +364,12 @@ class IndependentHostGuard:
 
     def core_health_evidence(self) -> dict[str, Any]:
         revision = self._source_sha()
+        try:
+            scoped = coordinated_component_state() if self.production else None
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
+            raise HostGateDenied("PMV4_COORDINATED_READBACK_DENIED") from exc
+        if scoped is not None and scoped.get("host_revision") != revision:
+            raise HostGateDenied("PMV4_COORDINATED_HOST_ANCHOR_DRIFT")
         for name in ("jason-runtime", "jason-mcp-pilot"):
             data = self._container(name)
             labels = (data.get("Config") or {}).get("Labels")
@@ -344,7 +377,11 @@ class IndependentHostGuard:
             if (data.get("Name") != "/" + name
                 or not isinstance(state, dict) or state.get("Running") is not True
                 or not isinstance(labels, dict)
-                or labels.get("com.teamaot.jason.source_revision") != revision):
+                or labels.get("com.teamaot.jason.source_revision") != (
+                    scoped["components"][name]["revision"] if scoped else revision)
+                or (scoped is not None and (
+                    data.get("Image") != scoped["components"][name]["image_id"]
+                    or data.get("Id") != scoped["components"][name]["container_id"]))):
                 raise HostGateDenied("PMV4_PROTECTED_CORE_SOURCE_OR_LIVENESS_MISMATCH")
             if name == "jason-runtime":
                 health = state.get("Health")

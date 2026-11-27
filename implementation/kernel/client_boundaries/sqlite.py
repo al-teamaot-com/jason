@@ -79,8 +79,26 @@ class SQLiteClientBoundaryStore:
     It never stores provider credentials, access tokens, certificates, or secret material.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, read_only: bool = False) -> None:
         self.path = Path(path)
+        if read_only:
+            # Reader processes must not create, migrate or chmod authority
+            # state. Never use immutable=1: subsequent revocations must
+            # remain visible through the live database connection.
+            if self.path.is_symlink() or not self.path.is_file():
+                raise PermissionError("READ_ONLY_BOUNDARY_DATABASE_NOT_REGULAR")
+            self.connection = sqlite3.connect(
+                self.path.absolute().as_uri() + "?mode=ro",
+                uri=True, check_same_thread=False,
+            )
+            try:
+                self.connection.execute("PRAGMA query_only = ON")
+                self.connection.execute("PRAGMA foreign_keys = ON")
+                self._validate_read_only_schema()
+            except BaseException:
+                self.connection.close()
+                raise
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # MCP synchronous tools are dispatched through worker threads while
         # the runtime is process-cached. Allow this durable connection to be
@@ -95,6 +113,34 @@ class SQLiteClientBoundaryStore:
         self._migrate_schema()
         self.connection.commit()
         os.chmod(self.path, 0o600)
+
+    def _validate_read_only_schema(self) -> None:
+        # Positional row decoders depend on the established column order.
+        # A stale schema is a release/authority-owner problem, not permission
+        # for a read-only consumer to perform an implicit migration.
+        expected = {
+            "client_boundaries": (
+                "id", "client_id", "provider", "external_tenant_id",
+                "primary_domain", "profile", "application_id", "status",
+                "consent_transaction_id", "created_at", "consented_at",
+                "validated_at", "service_principal_id", "last_error_code",
+                "offboarded_at", "external_scope_ids",
+            ),
+            "onboarding_transactions": (
+                "id", "client_id", "provider", "primary_domain", "profile",
+                "application_id", "correlation_id", "nonce", "status",
+                "created_at", "expires_at", "completed_at",
+                "external_tenant_id", "last_error_code",
+            ),
+        }
+        for table, names in expected.items():
+            actual = tuple(
+                str(row[1]) for row in self.connection.execute(
+                    "PRAGMA table_info(" + table + ")"
+                )
+            )
+            if actual != names:
+                raise PermissionError("READ_ONLY_BOUNDARY_SCHEMA_NOT_CURRENT")
 
     def _migrate_schema(self) -> None:
         columns = {

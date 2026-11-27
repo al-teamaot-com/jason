@@ -72,7 +72,8 @@ def test_quiesce_never_treats_running_or_failed_service_as_ready(monkeypatch):
 
 def test_durable_scope_guard_and_full_stage_acceptance_are_present():
     source=Path(m.__file__).read_text()
-    assert 'self.actor = self.n["owner"](plan)' in source
+    # Test the actual authorization call below rather than its spelling.
+    assert 'self.actor = self.n["owner"](' in source
     assert 'self.persist()' in source
     assert 'self.namespace_probe()' in source
     assert 'self.native_revalidation()' in source
@@ -565,3 +566,676 @@ def test_breaker_scheduled_route_requires_fresh_native_ledger(fault):
     else:ledger.pop("observed_at")
     with pytest.raises(PermissionError,match="SCHEDULED_POLICY_ROUTE_NOT_VERIFIED"):
         m.verify_scheduled_breaker_policy_route(pipeline,ledger)
+
+def watchdog_recovery_plan():
+    p=breaker_custody_plan()
+    p.pop("breaker_custody_source_review",None)
+    p.update(predecessor_candidate_sha=m.WATCHDOG_RECOVERY_BASELINE,
+             worker_replacements=sorted(m.WATCHDOG_RECOVERY_WORKERS),
+             failed_unit_reset_scope=list(m.SERVICES),
+             precutover_exact_faults=list(m.WATCHDOG_RECOVERY_FAULTS),
+             derived_reporter_exit2_only={"unit":m.DRIFT_REPORTER_UNIT,
+                                         "pins":m.DRIFT_REPORTER_PINS,
+                                         "properties":m.DRIFT_REPORTER_EXIT2},
+             local_reasoning_runtime_activation=False)
+    return p
+
+
+@pytest.mark.parametrize("key,value", [
+    ("failed_unit_reset_scope",["jason-runtime.service"]),
+    ("failed_unit_reset_scope",list(m.SERVICES)+["extra.service"]),
+    ("precutover_exact_faults",[]),
+    ("derived_reporter_exit2_only",{}),
+    ("local_reasoning_runtime_activation",True),
+    ("runtime_or_mcp_restart_allowed",True),
+    ("production_authority",True),
+    ("provider_writes",True),
+    ("freeze_or_hold_change",True),
+    ("worker_replacements",["jason_self_heal_watchdog.py"]),
+])
+def test_watchdog_recovery_exact_scope_denies_expansion(key,value):
+    p=watchdog_recovery_plan()
+    assert len(m.pipeline_scope_sha(p))==64
+    p[key]=value
+    with pytest.raises(PermissionError):m.pipeline_scope_sha(p)
+
+
+def test_failed_manager_preflight_rejects_unrelated_duplicate_or_stale_drift():
+    from copy import deepcopy
+    from datetime import datetime,timezone,timedelta
+    control={"circuit_breaker":{"state":"open","source":"production_drift_watchdog",
+             "reason":"continuous_production_drift_detected","problem_count":2,
+             "problem_kinds":["failed_system_unit"]}}
+    drift={"status":"drift_detected","problems":deepcopy(m.WATCHDOG_RECOVERY_FAULTS),
+           "observed_at":datetime.now(timezone.utc).isoformat()}
+    assert m.verify_failed_manager_drift(control,drift,deepcopy(drift))==m.WATCHDOG_RECOVERY_FAULTS
+    for changed in ([],drift["problems"]+[{"kind":"failed_system_unit","state":"failed","unit":"openbao.service"}],
+                    [drift["problems"][0]]*2):
+        bad={**drift,"problems":changed}
+        with pytest.raises(PermissionError):m.verify_failed_manager_drift(control,drift,bad)
+    bad={**drift,"observed_at":(datetime.now(timezone.utc)-timedelta(minutes=10)).isoformat()}
+    with pytest.raises(PermissionError):m.verify_failed_manager_drift(control,bad,drift)
+    bad=deepcopy(control);bad["circuit_breaker"]["reason"]="manual_hold"
+    with pytest.raises(PermissionError):m.verify_failed_manager_drift(bad,drift,drift)
+
+
+def test_watchdog_recovery_root_target_set_excludes_runtime_and_other_units():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.WATCHDOG_RECOVERY_BASELINE
+    a.changed_workers=m.WATCHDOG_RECOVERY_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("f"*40)/"tools"
+    targets=a.approved_targets()
+    assert all(m.LIB/name in targets for name in m.WATCHDOG_RECOVERY_WORKERS)
+    assert m.MANAGER_GUARD in targets and m.RECEIPT in targets
+    assert m.POLICY not in targets and m.ENV not in targets
+    assert all(not str(x).startswith("/opt/jason/") for x in targets)
+    assert not any(x.name in {"jason-runtime.service","jason-pmv4-ticket-core.service"} for x in targets)
+
+
+def test_failed_manager_reporter_exit2_is_only_a_verified_derived_observation():
+    from copy import deepcopy
+    from datetime import datetime,timezone
+    control={"circuit_breaker":{"state":"open","source":"production_drift_watchdog",
+             "reason":"continuous_production_drift_detected","problem_count":2,
+             "problem_kinds":["failed_system_unit"]}}
+    drift={"status":"drift_detected","problems":deepcopy(m.WATCHDOG_RECOVERY_FAULTS),
+           "observed_at":datetime.now(timezone.utc).isoformat()}
+    evaluated={**drift,"problems":[*drift["problems"],m.DRIFT_REPORTER_FAULT]}
+    assert m.verify_failed_manager_drift(control,drift,evaluated,
+        reporter=m.DRIFT_REPORTER_EXIT2)==m.WATCHDOG_RECOVERY_FAULTS
+    for key,value in (("ExecMainStatus","1"),("MainPID","123"),
+                      ("Result","timeout"),("DropInPaths","/tmp/foreign")):
+        with pytest.raises(PermissionError):
+            m.verify_failed_manager_drift(control,drift,evaluated,
+                reporter={**m.DRIFT_REPORTER_EXIT2,key:value})
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,drift,evaluated)
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,evaluated,evaluated,
+            reporter=m.DRIFT_REPORTER_EXIT2)
+    with pytest.raises(PermissionError):
+        m.verify_failed_manager_drift(control,drift,
+            {**evaluated,"problems":[*evaluated["problems"],m.DRIFT_REPORTER_FAULT]},
+            reporter=m.DRIFT_REPORTER_EXIT2)
+
+
+def normal_manager_plan():
+    p = breaker_custody_plan()
+    p.pop("breaker_custody_source_review")
+    p.update(predecessor_candidate_sha=m.NORMAL_MANAGER_BASELINE,
+             worker_replacements=sorted(m.NORMAL_MANAGER_WORKERS),
+             normal_manager_source_review={
+                 "baseline":m.NORMAL_MANAGER_BASELINE,
+                 "candidate":p["policy"]["candidate_sha"],
+                 "reviewed_source_paths":sorted(m.NORMAL_MANAGER_SCOPE_FILES),
+                 "excluded_source_paths":["docs/operations/unrelated.md"],
+             },
+             normal_manager_stage_targets=sorted(map(str,m.NORMAL_MANAGER_STAGE_FILES)),
+             normal_mode_activation=False)
+    return p
+
+
+@pytest.mark.parametrize("key,value", [
+    ("freeze_or_hold_change",True),
+    ("provider_writes",True),
+    ("production_authority",True),
+    ("runtime_or_mcp_restart_allowed",True),
+    ("normal_mode_activation",True),
+    ("normal_manager_stage_targets",["/etc/sudoers"]),
+    ("normal_manager_source_review",None),
+    ("worker_replacements",["foreign.py"]),
+    ("required_scheduled_cycles",1),
+])
+def test_normal_manager_stage_scope_keeps_production_authority_unchanged(key,value):
+    p=normal_manager_plan()
+    assert len(m.pipeline_scope_sha(p))==64
+    p[key]=value
+    with pytest.raises(PermissionError):
+        m.pipeline_scope_sha(p)
+
+
+def test_normal_manager_exact_targets_preserve_legacy_root_guard_and_application():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.NORMAL_MANAGER_BASELINE
+    a.changed_workers=m.NORMAL_MANAGER_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("f"*40)/"tools"
+    targets=a.approved_targets()
+    assert set(m.NORMAL_MANAGER_STAGE_FILES)<=targets
+    assert all(m.LIB/name in targets for name in m.NORMAL_MANAGER_WORKERS)
+    assert m.RECEIPT in targets and m.MANAGER_GUARD in targets
+    assert m.POLICY not in targets and m.ENV not in targets
+    assert not any(str(p).startswith("/opt/jason/") for p in targets)
+    assert not any(p.name in ("production-deployment-freeze","auto-promotion-incident-hold",
+                             "production-freeze-retirement.json","jason-runtime.service",
+                             "jason-pmv4-ticket-core.service") for p in targets)
+
+
+def test_normal_manager_source_projection_records_exclusions_and_denies_protected_drift():
+    candidate="a"*40
+    paths=set(m.NORMAL_MANAGER_SCOPE_FILES)|{"docs/operations/unrelated.md"}
+    def git(*args):
+        if args[0]=="merge-base":
+            assert args==("merge-base","--is-ancestor",m.NORMAL_MANAGER_BASELINE,candidate)
+            return b""
+        assert args==("diff","--no-renames","--name-only",m.NORMAL_MANAGER_BASELINE,candidate)
+        return "\n".join(sorted(paths)).encode()
+    row=m.review_normal_manager_delta(git,candidate)
+    assert row["excluded_source_paths"]==["docs/operations/unrelated.md"]
+    assert row["reviewed_source_paths"]==sorted(m.NORMAL_MANAGER_SCOPE_FILES)
+    paths.add("config/release-manager-policy.json")
+    with pytest.raises(PermissionError,match="UNREVIEWED_PROTECTED_SOURCE"):
+        m.review_normal_manager_delta(git,candidate)
+    paths.remove("config/release-manager-policy.json")
+    paths.remove("tools/pmv4_e_engineering_manager_install.py")
+    with pytest.raises(PermissionError,match="DELTA_INCOMPLETE"):
+        m.review_normal_manager_delta(git,candidate)
+
+
+def test_legacy_successor_passes_exact_scope_to_existing_authenticator():
+    a=object.__new__(m.PipelineSuccessor)
+    p=plan()
+    # Stop at the existing authenticator; no locks or production methods run.
+    a.n={"owner":Mock(side_effect=PermissionError("test authorization denied")),
+         "locks":Mock(side_effect=AssertionError("unexpected mutation"))}
+    with pytest.raises(PermissionError,match="test authorization denied"):
+        a.apply(p,m.pipeline_scope_sha(p))
+    a.n["owner"].assert_called_once_with(p)
+    a.n["locks"].assert_not_called()
+
+
+@pytest.mark.parametrize("reason",sorted(m.PIPELINE_HEALTH_DENIAL_REASONS))
+def test_independent_health_denial_reason_preserved(reason):
+    with pytest.raises(PermissionError,match="PIPELINE_NATIVE_CORE_HEALTH:"+reason):
+        m.verify_pipeline_native_core_health({
+            "verified":False,"reason":reason,"production_authority":False})
+
+
+@pytest.mark.parametrize("invalid",[
+    None, [], {}, {"verified":1,"production_authority":False,"production_revision":m.LKG},
+    {"verified":True,"production_authority":0,"production_revision":m.LKG},
+    {"verified":True,"production_authority":True,"production_revision":m.LKG},
+    {"verified":True,"production_authority":False,"production_revision":"0"*40},
+    {"verified":False,"reason":"native_readback_live_core_and_authority_verified"},
+    {"verified":False,"reason":["unrecognized"]},
+])
+def test_health_diagnostics_never_turn_denial_into_acceptance(invalid):
+    with pytest.raises(PermissionError,match="PIPELINE_NATIVE_CORE_HEALTH"):
+        m.verify_pipeline_native_core_health(invalid)
+
+
+def test_health_diagnostic_does_not_echo_arbitrary_child_output():
+    with pytest.raises(PermissionError,match="invalid_or_unrecognized_result") as caught:
+        m.verify_pipeline_native_core_health({"verified":False,"reason":"fixture-private-output"})
+    assert "fixture-private-output" not in str(caught.value)
+
+
+def test_exact_native_health_still_requires_original_three_conditions():
+    assert m.verify_pipeline_native_core_health({
+        "verified":True,"production_authority":False,"production_revision":m.LKG}) is None
+
+
+
+def test_normal_manager_stage_images_bind_reader_custody():
+    from tools import owner_approved_development_worker as worker
+    code = {rel: (m.REPO / rel).read_bytes()
+            for rel in m.NORMAL_MANAGER_STAGE_FILES.values()}
+    images = m.normal_manager_stage_images(code)
+    assert set(images) == set(m.NORMAL_MANAGER_STAGE_FILES)
+    raw, uid, gid, mode = images[worker.NATIVE_HEALTH_GUARD]
+    assert (uid, gid, mode) == (0, 0, 0o444)
+    assert m.digest(raw) == worker.NATIVE_HEALTH_GUARD_SHA256
+    for path, value in images.items():
+        if path != worker.NATIVE_HEALTH_GUARD:
+            assert value[1:] == (0, 0, 0o644)
+
+
+def normal_rollback_plan():
+    p = normal_manager_plan()
+    p["normal_retirement"] = {
+        "action":"RETIRE-EXACT-GLOBAL-PRODUCTION-FREEZE",
+        "candidate_sha":p["policy"]["candidate_sha"],
+        "provider_writes":False, "standing_authority":False,
+        "rollback_authorized":True,
+        "configuration_after":{"schema_version":"1.0","production_freeze":False},
+        "installation_targets":["fixture-retirement-target"],
+    }
+    return p
+
+
+@pytest.mark.parametrize("mutation", [
+    "foreign_candidate","wrong_approval","wrong_receipt","wrong_rollback",
+    "same_candidate","missing_retirement","different_predecessor"
+])
+def test_rollback_predecessor_scope_rejects_unrelated_authority(mutation):
+    p = normal_rollback_plan()
+    p["normal_manager_rollback_predecessor"] = dict(m.NORMAL_MANAGER_ROLLBACK_EVIDENCE)
+    assert m.pipeline_scope_sha(p) == m.digest(m.canon(p))
+    if mutation == "foreign_candidate":
+        p["normal_manager_rollback_predecessor"]["failed_candidate_sha"] = "e"*40
+    elif mutation in ("wrong_approval","wrong_receipt","wrong_rollback"):
+        p["normal_manager_rollback_predecessor"][mutation[6:]+"_sha256"] = "0"*64
+    elif mutation == "same_candidate":
+        p["policy"]["candidate_sha"] = m.NORMAL_MANAGER_ROLLBACK_EVIDENCE["failed_candidate_sha"]
+        p["normal_manager_source_review"]["candidate"] = p["policy"]["candidate_sha"]
+        p["normal_retirement"]["candidate_sha"] = p["policy"]["candidate_sha"]
+    elif mutation == "missing_retirement":
+        del p["normal_retirement"]
+    else:
+        p["predecessor_candidate_sha"] = m.PIPELINE_BASELINE
+    with pytest.raises(PermissionError,match="NORMAL_MANAGER_ROLLBACK_SCOPE_INVALID"):
+        m.pipeline_scope_sha(p)
+
+
+@pytest.fixture
+def normal_rollback_history(tmp_path, monkeypatch):
+    """Synthetic immutable records and snapshots; no production paths touched."""
+    import os
+    from tools import production_freeze_retirement as retirement
+    failed = "b"*40
+    root = tmp_path/"manager"
+    state = tmp_path/"state"
+    history = state/failed
+    history.mkdir(parents=True,mode=0o700)
+    pause = m.image(b"fixture rollback pause",1000,0o600)
+    monkeypatch.setattr(m,"ROOT",root)
+    monkeypatch.setattr(m,"STATE",state)
+    monkeypatch.setitem(m.OLD,m.PAUSE,(1000,0o600,m.digest(pause[0])))
+    a = object.__new__(m.PipelineSuccessor)
+    a.predecessor = m.NORMAL_MANAGER_BASELINE
+    a.candidate = "a"*40
+    a.retirement_requested = True
+    a.release = root/"releases"/a.candidate/"tools"
+    a.g = {"validate_receipt":lambda row:row}
+    a.retirement_helper = lambda:{"owner_scope":retirement.owner_scope}
+    restored = root/"fixture-native-guard"
+    a.approved_targets = lambda:{m.PAUSE,m.RECEIPT,restored,a.release/"fixture.py"}
+    before = {m.PAUSE:None,m.RECEIPT:m.image(b"predecessor receipt",0,0o444),
+              restored:None,root/"releases"/failed/"tools"/"fixture.py":None}
+    after = {p:m.image(b"fixture successor",0,0o444)
+             for p in before if p!=m.RECEIPT}
+    after[m.PAUSE] = pause
+    scope = normal_rollback_plan()
+    scope["policy"]["candidate_sha"] = failed
+    scope["normal_manager_source_review"]["candidate"] = failed
+    scope["normal_retirement"]["candidate_sha"] = failed
+    scope["installation_targets"] = sorted(map(str,before))
+    scope["before"] = {str(p):m.describe(v) for p,v in before.items()}
+    scope["after"] = {str(p):m.describe(v) for p,v in after.items()}
+    sha = m.pipeline_scope_sha(scope)
+    approval = {"scope":scope,"scope_sha256":sha,"owner_action":scope["normal_retirement"]["action"],
+                "owner_scope_sha256":m.digest(m.canon(retirement.owner_scope(scope))),
+                "before_images":m.encode(before),"after_images":m.encode(after)}
+    raw = m.canon(approval)
+    receipt = m.canon({"candidate_sha":failed,"scope_sha256":sha,
+                      "approval_sha256":m.digest(raw),
+                      "predecessor_candidate_sha":a.predecessor})
+    rollback = m.canon({"status":"predecessor_restored_engineering_paused",
+                       "scope_sha256":sha,"production_authority":False})
+    records = {"approval.json":raw,"receipt-image.json":receipt,"rollback.json":rollback}
+    for name,data in records.items():
+        p=history/name
+        p.write_bytes(data)
+        p.chmod(0o400)
+    pins = {"failed_candidate_sha":failed,"approval_sha256":m.digest(raw),
+            "receipt_sha256":m.digest(receipt),"rollback_sha256":m.digest(rollback)}
+    monkeypatch.setattr(m,"NORMAL_MANAGER_ROLLBACK_EVIDENCE",pins)
+    # Only the synthetic history directory is assigned test root metadata.
+    real_lstat = Path.lstat
+    def lstat(path,*args,**kwargs):
+        row=real_lstat(path,*args,**kwargs)
+        if path==history:
+            values=list(row)
+            values[4]=values[5]=0
+            return os.stat_result(values)
+        return row
+    monkeypatch.setattr(Path,"lstat",lstat)
+    def read(path,uid,mode,maximum=2_000_000):
+        assert path.parent==history and uid==0 and mode==0o400
+        return path.read_bytes()
+    a.n={"read":read}
+    snapshots=dict(before)
+    snapshots[m.PAUSE]=pause
+    monkeypatch.setattr(m,"snapshot",snapshots.get)
+    return a,history,snapshots,pins,restored
+
+
+def test_exact_rollback_evidence_is_read_only(normal_rollback_history):
+    a,history,snapshots,pins,_=normal_rollback_history
+    before=dict(snapshots)
+    records={p:p.read_bytes() for p in history.iterdir()}
+    assert a.verify_normal_manager_rollback_predecessor()==pins
+    assert snapshots==before
+    assert {p:p.read_bytes() for p in history.iterdir()}==records
+
+
+@pytest.mark.parametrize("mutation",["foreign_pause","missing_pause","live_file",
+                                     "foreign_record","changed_record","same_candidate",
+                                     "unrelated_request","wrong_predecessor"])
+def test_rollback_evidence_fails_closed(normal_rollback_history,mutation):
+    a,history,snapshots,pins,restored=normal_rollback_history
+    if mutation=="foreign_pause":
+        snapshots[m.PAUSE]=m.image(b"foreign pause",1000,0o600)
+    elif mutation=="missing_pause":
+        snapshots[m.PAUSE]=None
+    elif mutation=="live_file":
+        snapshots[restored]=m.image(b"unexpected file",0,0o444)
+    elif mutation=="foreign_record":
+        (history/"activation.json").touch()
+    elif mutation=="changed_record":
+        path=history/"rollback.json"
+        path.chmod(0o600)
+        path.write_bytes(b"changed")
+    elif mutation=="same_candidate":
+        a.candidate=pins["failed_candidate_sha"]
+    elif mutation=="unrelated_request":
+        a.retirement_requested=False
+    else:
+        a.predecessor=m.PIPELINE_BASELINE
+    with pytest.raises(PermissionError,match="NORMAL_MANAGER_ROLLBACK"):
+        a.verify_normal_manager_rollback_predecessor()
+
+
+def test_recovery_proof_remains_inside_new_authenticated_scope():
+    from tools import production_freeze_retirement as retirement
+    p=normal_rollback_plan()
+    p["normal_manager_rollback_predecessor"]=dict(m.NORMAL_MANAGER_ROLLBACK_EVIDENCE)
+    a=object.__new__(m.PipelineSuccessor)
+    a.retirement_helper=lambda:{"owner_scope":retirement.owner_scope}
+    a.n={"owner":Mock(side_effect=PermissionError("fixture authorization denied")),
+         "locks":Mock(side_effect=AssertionError("mutation before authentication"))}
+    p["installation_targets"]=["fixture-preparation-target"]
+    exact=retirement.owner_scope(p)
+    with pytest.raises(PermissionError,match="fixture authorization denied"):
+        a.apply(p,m.digest(m.canon(exact)))
+    a.n["owner"].assert_called_once_with(exact)
+    a.n["locks"].assert_not_called()
+
+
+def test_readback_wait_uses_only_existing_publisher(monkeypatch):
+    from datetime import datetime,timezone,timedelta
+    a=object.__new__(m.PipelineSuccessor)
+    def row(age):
+        return m.canon({"schema_version":"1.0","status":"pass","problems":[],
+                       "observed_at":(datetime.now(timezone.utc)-timedelta(seconds=age)).isoformat()})
+    read=Mock(side_effect=[row(110),row(65),row(25)])
+    a.p={"read":read}
+    sleep=Mock()
+    monkeypatch.setattr(m.time,"sleep",sleep)
+    a.wait_for_fresh_pipeline_readback(attempts=4)
+    assert read.call_count==3
+    assert sleep.call_count==2
+    assert all(c.args==(m.MANAGER/"protected-readback/production-drift.json",1000,0o600)
+               for c in read.call_args_list)
+
+
+@pytest.mark.parametrize("fault",["stale","drift","future"])
+def test_readback_wait_does_not_accept_failed_or_missing_fresh_evidence(monkeypatch,fault):
+    from datetime import datetime,timezone,timedelta
+    a=object.__new__(m.PipelineSuccessor)
+    a.p={"read":Mock(return_value=m.canon({
+        "schema_version":"1.0","status":"drift_detected" if fault=="drift" else "pass",
+        "problems":[] if fault!="drift" else [{"kind":"fixture_drift"}],
+        "observed_at":(datetime.now(timezone.utc)-timedelta(seconds=-30 if fault=="future" else 180)).isoformat()
+    }))}
+    monkeypatch.setattr(m.time,"sleep",lambda _:None)
+    with pytest.raises(PermissionError,match="PIPELINE_(FRESH_READBACK_UNAVAILABLE|READBACK_NOT_CLEAN|READBACK_TIME_INVALID)"):
+        a.wait_for_fresh_pipeline_readback(attempts=2)
+
+
+def test_final_retirement_delta_is_exact_and_new():
+    git=Mock(return_value="\n".join(sorted(m.FINAL_RETIREMENT_DELTA)).encode())
+    m.verify_final_retry_delta(git,"a"*40)
+    git.assert_any_call("merge-base","--is-ancestor",m.FINAL_RETIREMENT_PREPARATION,"a"*40)
+    with pytest.raises(PermissionError,match="REQUIRES_NEW_CANDIDATE"):
+        m.verify_final_retry_delta(git,m.FINAL_RETIREMENT_PREPARATION)
+    git.return_value += b"\nconfig/fixture-expansion.json"
+    with pytest.raises(PermissionError,match="EXACT_SOURCE_DELTA"):
+        m.verify_final_retry_delta(git,"a"*40)
+
+
+@pytest.fixture
+def final_retry_plan_fixture(monkeypatch):
+    from copy import deepcopy
+    from types import SimpleNamespace
+    from tools import production_freeze_retirement as r
+    a=object.__new__(m.FinalRetirementRetry)
+    a.candidate="a"*40
+    target=Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_coordinated_host.py")
+    a.code={"tools/scoped_backport_coordinated_host.py":b"fixture corrected parser"}
+    proof={"accepted_candidate_sha":m.FINAL_RETIREMENT_PREPARATION,
+           "manager_scope_sha256":"1"*64,"prior_parent_scope_sha256":"2"*64,
+           "history_sha256":dict(m.FINAL_RETIREMENT_HISTORY)}
+    a.verify_retained_preparation_records=Mock(return_value=proof)
+    old={
+        "action":r.ACTION,"candidate_sha":m.FINAL_RETIREMENT_PREPARATION,
+        "provider_writes":False,"standing_authority":False,
+        "rollback_authorized":True,
+        "configuration_after":{"schema_version":"1.0","production_freeze":False},
+        "new_files":{str(target):m.describe(m.image(b"fixture original parser",0,0o444))},
+        "installation_targets":[str(target)],"create_directories":{},
+    }
+    a.retained=SimpleNamespace(plan={"normal_retirement":old,"protected_health":{"fixture":"health"}})
+    a.retirement_helper=lambda:{"ACTION":r.ACTION,"owner_scope":r.owner_scope,
+                                "static_files":lambda *_:{target:m.image(a.code["tools/scoped_backport_coordinated_host.py"],0,0o444)}}
+    a.historical_rows={"approval.json":{"owner_oid":"a"*36}}
+    return a,deepcopy(old),proof
+
+
+def test_final_retry_scope_retains_preparation_without_reinstallation(final_retry_plan_fixture):
+    a,old,proof=final_retry_plan_fixture
+    p=a.expected_plan()
+    assert p["policy"]["candidate_sha"]==a.candidate
+    assert p["retained_preparation"]==proof
+    assert p["installation_targets"]==[str(m.PAUSE)]
+    assert p["normal_retirement"]["candidate_sha"]==a.candidate
+    assert p["normal_retirement"]["installation_targets"]==old["installation_targets"]
+    assert p["normal_retirement"]["new_files"]!=old["new_files"]
+    assert a.retained.plan["normal_retirement"]==old
+    assert "manager_preparation_and_retirement" not in a.owner_scope(p)
+
+
+def test_final_retry_needs_fresh_exact_authentication(final_retry_plan_fixture):
+    a,_,_=final_retry_plan_fixture
+    p=a.expected_plan()
+    exact=a.owner_scope(p)
+    a.n={"owner":Mock(side_effect=PermissionError("fixture owner denied")),
+         "locks":Mock(side_effect=AssertionError("must not lock before approval"))}
+    with pytest.raises(PermissionError,match="EXACT_SCOPE_REQUIRED"):
+        a.apply_final_retry(p,"0"*64)
+    a.n["owner"].assert_not_called()
+    with pytest.raises(PermissionError,match="fixture owner denied"):
+        a.apply_final_retry(p,m.digest(m.canon(exact)))
+    a.n["owner"].assert_called_once_with(exact)
+    a.n["locks"].assert_not_called()
+
+
+@pytest.mark.parametrize("change",["scope","parent","actor","old_candidate"])
+def test_final_retry_rejects_invalid_new_approval_record(final_retry_plan_fixture,tmp_path,change):
+    a,_,_=final_retry_plan_fixture
+    a.directory=tmp_path
+    p=a.expected_plan()
+    row={"scope":p,"scope_sha256":m.digest(m.canon(p)),"owner_oid":"a"*36,
+         "approved_at":"fixture","owner_scope_sha256":m.digest(m.canon(a.owner_scope(p))),
+         "owner_action":a.retirement_helper()["ACTION"]}
+    if change=="scope":row["scope_sha256"]="0"*64
+    elif change=="parent":row["owner_scope_sha256"]="0"*64
+    elif change=="actor":row["owner_oid"]="b"*36
+    else:row["scope"]["policy"]["candidate_sha"]=m.FINAL_RETIREMENT_PREPARATION
+    a.n={"directory":Mock(),"read":Mock(return_value=m.canon(row))}
+    with pytest.raises(PermissionError,match="NEW_APPROVAL_REQUIRED"):
+        a.load_record()
+
+
+@pytest.fixture
+def final_retry_history(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    a=object.__new__(m.FinalRetirementRetry)
+    history=tmp_path/m.FINAL_RETIREMENT_PREPARATION
+    history.mkdir()
+    monkeypatch.setattr(m,"STATE",tmp_path)
+    parent="1"*64
+    sha="2"*64
+    rows={
+        "approval.json":{"owner_scope_sha256":parent,"owner_oid":"fixture"},
+        "receipt-image.json":{"fixture":"receipt"},
+        "retirement-intent.json":{"parent_sha256":parent},
+        "retirement-policy-intent.json":{"parent_sha256":parent},
+        "retirement-rollback.json":{"status":"original_freeze_and_mcp_restored",
+                                    "parent_sha256":parent,"accepted_manager_preparation_retained":True},
+        "scheduled-cycle-1.json":{"fixture":"first"},
+        "scheduled-cycle-2.json":{"fixture":"second"},
+    }
+    rows["scheduled-acceptance.json"]={
+        "scope_sha256":sha,"status":"scheduled_engineering_acceptance_verified",
+        "evidence":{"two_distinct_scheduled_cycles_verified":True,
+                    "first_cycle_sha256":m.digest(m.canon(rows["scheduled-cycle-1.json"])),
+                    "second_cycle_sha256":m.digest(m.canon(rows["scheduled-cycle-2.json"]))}}
+    pins={k:m.digest(m.canon(rows[k])) for k in m.FINAL_RETIREMENT_HISTORY}
+    monkeypatch.setattr(m,"FINAL_RETIREMENT_HISTORY",pins)
+    for name in m.FINAL_RETIREMENT_RECORDS:
+        (history/name).write_bytes(m.canon(rows.get(name,{})))
+    a.n={"directory":Mock(),"read":lambda path,*args:path.read_bytes()}
+    a.retained=SimpleNamespace(load_record=Mock(return_value=sha),
+                               pause_image=m.image(b"fixture pause",1000,0o600))
+    return a,history,pins
+
+
+def test_final_retry_validates_immutable_history(final_retry_history):
+    a,history,pins=final_retry_history
+    before={p:p.read_bytes() for p in history.iterdir()}
+    proof=a.verify_retained_preparation_records()
+    assert proof["history_sha256"]==pins
+    assert proof["accepted_candidate_sha"]==m.FINAL_RETIREMENT_PREPARATION
+    assert proof["manager_scope_sha256"]=="2"*64
+    assert a.pause_image==a.retained.pause_image
+    assert {p:p.read_bytes() for p in history.iterdir()}==before
+
+
+@pytest.mark.parametrize("name",["approval.json","receipt-image.json","retirement-rollback.json",
+                                  "retirement-intent.json","scheduled-cycle-1.json","foreign.json"])
+def test_final_retry_rejects_changed_or_extra_history(final_retry_history,name):
+    a,history,_=final_retry_history
+    (history/name).write_bytes(b'{"fixture":"changed"}')
+    with pytest.raises(PermissionError,match="FINAL_RETRY_(HISTORICAL_RECORD|SCHEDULED_CYCLE)"):
+        a.verify_retained_preparation_records()
+
+
+def post_retirement_plan():
+    p=normal_manager_plan()
+    for key in ("normal_manager_source_review","normal_manager_stage_targets","normal_mode_activation"):
+        p.pop(key)
+    p.update(predecessor_candidate_sha=m.POST_RETIREMENT_MANAGER_BASELINE,
+             worker_replacements=sorted(m.POST_RETIREMENT_WORKERS),
+             temporary_timer_stops=list(m.TIMERS+m.POST_RETIREMENT_TRIGGERS),
+             post_retirement_reader_targets=sorted(map(str,m.POST_RETIREMENT_READER_TARGETS)),
+             post_retirement_source_baseline=m.POST_RETIREMENT_SOURCE_BASELINE,
+             preserve_retired_freeze_and_components=True,
+             installation_targets=sorted(map(str,m.POST_RETIREMENT_READER_TARGETS)))
+    return p
+
+
+@pytest.mark.parametrize("key,value",[
+    ("preserve_retired_freeze_and_components",False),
+    ("freeze_or_hold_change",True),("runtime_or_mcp_restart_allowed",True),
+    ("provider_writes",True),("production_authority",True),
+    ("required_scheduled_cycles",1),("post_retirement_reader_targets",[]),
+    ("temporary_timer_stops",list(m.TIMERS)),
+    ("post_retirement_source_baseline","a"*40),
+    ("worker_replacements",["foreign.py"]),
+])
+def test_post_retirement_scope_retains_existing_approval_and_safety(key,value):
+    p=post_retirement_plan()
+    assert m.pipeline_scope_sha(p)==m.digest(m.canon(p))
+    p[key]=value
+    with pytest.raises(PermissionError):
+        m.pipeline_scope_sha(p)
+
+
+def test_post_retirement_scope_excludes_immutable_controls():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.POST_RETIREMENT_MANAGER_BASELINE
+    a.changed_workers=m.POST_RETIREMENT_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("f"*40)/"tools"
+    t=a.approved_targets()
+    assert m.POST_RETIREMENT_READER_TARGETS<=t
+    assert not t.intersection({m.POST_RETIREMENT_CONFIG,m.POST_RETIREMENT_RECEIPT,
+                               m.POST_RETIREMENT_COMPONENTS,m.POLICY,m.ENV})
+    assert not any(p.name in ("production-deployment-freeze","auto-promotion-incident-hold")
+                   or str(p).startswith("/opt/jason/") for p in t)
+    assert a.transaction_triggers()==m.TIMERS+m.POST_RETIREMENT_TRIGGERS
+    assert a.transaction_reader_services()==(m.SERVICES[1],)+m.POST_RETIREMENT_SERVICES
+    p=post_retirement_plan()
+    p["installation_targets"].append(str(m.POST_RETIREMENT_CONFIG))
+    with pytest.raises(PermissionError):
+        m.pipeline_scope_sha(p)
+
+
+def test_post_retirement_source_review_excludes_unrelated_changes():
+    git=Mock(return_value="\n".join(sorted(m.POST_RETIREMENT_SCOPE_FILES)).encode())
+    m.reviewed_source_delta(git,m.POST_RETIREMENT_MANAGER_BASELINE,"a"*40,
+                            m.POST_RETIREMENT_SCOPE_FILES)
+    git.assert_any_call("merge-base","--is-ancestor",m.POST_RETIREMENT_MANAGER_BASELINE,
+                        m.POST_RETIREMENT_SOURCE_BASELINE)
+    git.return_value += b"\nconfig/production-desired-state.json"
+    with pytest.raises(PermissionError,match="POST_RETIREMENT_SOURCE_DELTA"):
+        m.reviewed_source_delta(git,m.POST_RETIREMENT_MANAGER_BASELINE,"a"*40,
+                                m.POST_RETIREMENT_SCOPE_FILES)
+
+
+@pytest.fixture
+def post_retirement_reader_fixture():
+    from copy import deepcopy
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.POST_RETIREMENT_MANAGER_BASELINE
+    a.candidate="a"*40
+    a.release=m.ROOT/"releases"/a.candidate/"tools"
+    old=m.ROOT/"releases"/a.predecessor/"tools"/"jason_self_heal_watchdog.py"
+    new=a.release/"jason_self_heal_watchdog.py"
+    raw=b"fixture unchanged watchdog source"
+    migration={"schema_version":"2.0","source_sha":m.POST_RETIREMENT_SOURCE_BASELINE,
+               "installed_readers":[{"path":str(old),"sha256":m.digest(raw)},
+                                    {"path":"/fixture/other","sha256":"a"*64}],
+               "native_readback_verified":True,"original_authority_preserved":True}
+    policy={"schema_version":"3.0","source_sha":m.POST_RETIREMENT_SOURCE_BASELINE,
+            "native_reader_migration_receipt_sha256":m.digest(m.canon(migration)),
+            "per_release_review_required":True,"file_sha256":{"fixture":"b"*64}}
+    before={m.POST_RETIREMENT_MIGRATION:m.image(m.canon(migration),0,0o600),
+            m.POST_RETIREMENT_POLICY:m.image(m.canon(policy),0,0o600)}
+    after={new:m.image(raw,0,0o444)}
+    a.p={"read":Mock(return_value=raw)}
+    return a,before,after,deepcopy(migration),deepcopy(policy)
+
+
+def test_post_retirement_rebind_changes_only_attested_watchdog_path_and_policy_digest(post_retirement_reader_fixture):
+    a,before,after,migration,policy=post_retirement_reader_fixture
+    result=a.post_retirement_reader_images(before,after)
+    assert set(result)==m.POST_RETIREMENT_READER_TARGETS
+    assert all(v[1:]==(0,0,0o600) for v in result.values())
+    updated=json.loads(result[m.POST_RETIREMENT_MIGRATION][0])
+    migration["installed_readers"][0]["path"]=str(a.release/"jason_self_heal_watchdog.py")
+    assert updated==migration
+    policy["native_reader_migration_receipt_sha256"]=m.digest(m.canon(migration))
+    assert json.loads(result[m.POST_RETIREMENT_POLICY][0])==policy
+
+
+@pytest.mark.parametrize("fault",["changed_watchdog","wrong_policy_digest","foreign_watchdog_path"])
+def test_post_retirement_reader_rebind_rejects_unrelated_change(post_retirement_reader_fixture,fault):
+    a,before,after,migration,policy=post_retirement_reader_fixture
+    if fault=="changed_watchdog":
+        after[a.release/"jason_self_heal_watchdog.py"]=m.image(b"foreign source",0,0o444)
+    elif fault=="wrong_policy_digest":
+        policy["native_reader_migration_receipt_sha256"]="0"*64
+        before[m.POST_RETIREMENT_POLICY]=m.image(m.canon(policy),0,0o600)
+    else:
+        migration["installed_readers"][0]["path"]="/fixture/foreign"
+        before[m.POST_RETIREMENT_MIGRATION]=m.image(m.canon(migration),0,0o600)
+        policy["native_reader_migration_receipt_sha256"]=m.digest(m.canon(migration))
+        before[m.POST_RETIREMENT_POLICY]=m.image(m.canon(policy),0,0o600)
+    with pytest.raises(PermissionError):
+        a.post_retirement_reader_images(before,after)
