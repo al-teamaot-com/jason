@@ -101,6 +101,7 @@ def _state(tmp_path, monkeypatch):
     monkeypatch.setattr(root, "_trusted_owner_proof_module", lambda: SimpleNamespace(
         read_pinned_root_owner_public_key=lambda path: key.public_key(),
         verify_exact_owner_release=signature.verify_exact_owner_release,
+        read_retired_release_policy=lambda: None,
     ))
     return key, record, request_path, freeze
 
