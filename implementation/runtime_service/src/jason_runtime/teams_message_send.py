@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 from kernel.capabilities import CapabilityApproval, CapabilityDefinition, CapabilityEvidence, CapabilityLifecycle, CapabilityRisk, CapabilityStewardship, IdempotencyBehavior
 from kernel.identity_authority import AuthorityGrant, PermissionMode
 from kernel.execution_deadline import bounded_execution_timeout
@@ -59,7 +60,7 @@ class _PreparedTeamsMessageSend:
 
 def post_existing_teams_gateway(
     *, gateway_url: str, token: str, payload: dict,
-    timeout_seconds: float = 20,
+    timeout_seconds: float = 20, operation: str = 'send',
 ) -> dict:
     """One production transport for every approved Teams sender.
 
@@ -71,18 +72,33 @@ def post_existing_teams_gateway(
             or not isinstance(token, str) or not token.strip()
             or not isinstance(payload, dict)):
         raise PermissionError("configured Teams transport unavailable")
+    if operation not in {'send', 'update-approval', 'receipt'}:
+        raise ValueError('unsupported existing Teams gateway operation')
+    route = {'send': "/internal/proactive/send", 'update-approval': "/internal/proactive/update-approval",
+             'receipt': "/internal/proactive/receipt"}[operation]
     body = json.dumps(payload, sort_keys=True, separators=(",", ":"),
                       allow_nan=False).encode("utf-8")
     if len(body) > 65536:
         raise ValueError("Teams gateway payload exceeds bound")
     req = Request(
-        gateway_url.rstrip("/") + "/internal/proactive/send",
+        gateway_url.rstrip("/") + route,
         data=body, method="POST",
         headers={"Authorization": "Bearer " + token,
                  "Content-Type": "application/json"},
     )
     with urlopen(req, timeout=bounded_execution_timeout(timeout_seconds)) as response:
         result = json.loads(response.read().decode("utf-8"))
+    if operation == 'receipt':
+        if not isinstance(result, dict) or result.get('status') not in {'not_attempted', 'processing', 'provider_accepted'}:
+            raise RuntimeError('Teams communication receipt unavailable')
+        return result
+    if operation == 'update-approval':
+        if (not isinstance(result, dict) or result.get('status') != 'succeeded'
+                or result.get('approval_id') != payload.get('approvalId')
+                or not isinstance(result.get('message_ids'), list) or not result['message_ids']
+                or any(not isinstance(x, str) or not x or x.startswith('accepted:') for x in result['message_ids'])):
+            raise RuntimeError('Teams original card update unverified')
+        return result
     if (not isinstance(result, dict) or result.get("status") != "succeeded"
             or not isinstance(result.get("message_id"), str)
             or not result["message_id"].strip()):
@@ -110,6 +126,53 @@ def post_existing_teams_gateway(
         "message_id_synthetic": synthetic,
         "delivery_evidence_type": evidence_type,
     }
+
+
+def check_existing_teams_gateway_approver_readiness(
+    *, gateway_url: str, token: str, aad_object_id: str,
+    tenant_id: str, timeout_seconds: float = 20,
+) -> None:
+    """Fail-closed licensed Teams approver preflight; no message created.
+
+    The same authenticated gateway/provider identity path as the existing
+    sender. No approval ledger mutation or retry is authorized by this read.
+    """
+    if (not isinstance(gateway_url, str) or not gateway_url.strip()
+            or not isinstance(token, str) or not token.strip()
+            or not isinstance(aad_object_id, str) or not aad_object_id.strip()
+            or not isinstance(tenant_id, str) or not tenant_id.strip()):
+        raise PermissionError("Teams release approver readiness unavailable")
+    body = json.dumps({
+        "aadObjectId": aad_object_id, "tenantId": tenant_id,
+    }, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    request = Request(
+        gateway_url.rstrip("/") + "/internal/proactive/approver-readiness",
+        data=body, method="POST",
+        headers={"Authorization": "Bearer " + token,
+                 "Content-Type": "application/json"},
+    )
+    try:
+        with urlopen(request, timeout=bounded_execution_timeout(timeout_seconds)) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        try:
+            reason = json.loads(exc.read(4096).decode("utf-8")).get("error_code")
+        except (ValueError, TypeError, UnicodeDecodeError):
+            reason = None
+        allowed = {
+            "approver_teams_license_unavailable",
+            "approver_readiness_unverifiable",
+            "identity_not_found", "identity_not_authorized",
+        }
+        raise PermissionError(
+            "Teams release approver is not reachable: "
+            + (reason if reason in allowed else "approver_readiness_unverifiable")
+        ) from None
+    except (OSError, TimeoutError, ValueError, UnicodeDecodeError) as exc:
+        raise PermissionError("Teams release approver readiness unverifiable") from exc
+    if (not isinstance(result, dict) or result.get("status") != "ready"
+            or result.get("check") != "teams_assigned_plan"):
+        raise PermissionError("Teams release approver readiness unverifiable")
 
 
 @dataclass

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -121,5 +121,39 @@ test("release refuses a mismatched sender or decision", () => {
     }), /scope mismatch/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('communication receipts survive restart and suppress duplicate provider sends',()=>{
+  const {path,store}=fixture();
+  const scope={tenantId:'tenant-a',aadObjectId:'user-a',communicationId:'comm-'+ 'a'.repeat(64),payloadDigest:'b'.repeat(64)};
+  assert.equal(store.beginSend(scope).accepted,true);
+  const result={status:'succeeded',message_id:'real-provider-id',message_id_synthetic:false};
+  store.completeSend({...scope,result});
+  const recovered=createApprovalDecisionStore({path});
+  assert.equal(recovered.beginSend(scope).accepted,false);
+  assert.deepEqual(recovered.sendReceipt(scope).result,result);
+  assert.throws(()=>recovered.beginSend({...scope,payloadDigest:'c'.repeat(64)}),/scope changed/);
+  assert.equal(recovered.sendReceipt({...scope,aadObjectId:'different-user'}),null);
+});
+
+test('unknown interrupted provider attempt remains blocked without a made-up receipt',()=>{
+  const {path,store}=fixture();
+  const scope={tenantId:'tenant-a',aadObjectId:'user-a',communicationId:'comm-'+ 'c'.repeat(64),payloadDigest:'b'.repeat(64)};
+  assert.equal(store.beginSend(scope).accepted,true);
+  const recovered=createApprovalDecisionStore({path});
+  const retry=recovered.beginSend(scope);
+  assert.equal(retry.accepted,false);
+  assert.equal(retry.record.state,'processing');
+  assert.equal(recovered.sendReceipt(scope).result,undefined);
+});
+
+
+test('corrupted valid-JSON store shape never becomes an empty retry ledger',()=>{
+  const {path,store}=fixture();
+  for (const invalid of ['[]','null','0','"invalid"']) {
+    writeFileSync(path,invalid);
+    assert.throws(()=>store.beginSend({tenantId:'tenant-a',aadObjectId:'user-a',
+      communicationId:'comm-'+'d'.repeat(64),payloadDigest:'e'.repeat(64)}),/unreadable/);
   }
 });
