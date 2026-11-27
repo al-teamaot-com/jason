@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from kernel.signed_owner_release_v2 import (
     EXACT_OWNER_OAUTH_SUBJECTS, issue_exact_owner_release,
     verify_exact_owner_release, read_retired_release_policy,
-    require_retired_release_mode,
+    require_normal_deployment_enabled,
 )
 from pathlib import Path
 
@@ -83,7 +83,7 @@ def _queue_coordinated(*, state_root, view, policy, release_id, candidate_sha,
             or policy is None or view["release_policy_sha256"] != policy
             or any(view[k] is not False for k in ("production_mutations", "provider_writes", "owner_approval_recorded"))):
         raise PermissionError("RELEASE_APPROVAL_COORDINATED_EXACT_ELIGIBILITY_REQUIRED")
-    require_retired_release_mode(state_root, policy)
+    require_normal_deployment_enabled(state_root, policy)
     if (not isinstance(verified_token_claims, Mapping)
             or not isinstance(service_signer, Ed25519PrivateKey)
             or verified_token_claims.get("tid") != "f7054323-d52b-4863-8c2f-1898f0b6077c"
@@ -112,7 +112,7 @@ def _queue_coordinated(*, state_root, view, policy, release_id, candidate_sha,
         expected_release_policy_sha256=policy,at=datetime.now(timezone.utc))
     if _coordinated_eligibility(release_id) != view or read_retired_release_policy() != policy:
         raise PermissionError("RELEASE_APPROVAL_COORDINATED_ELIGIBILITY_CHANGED")
-    require_retired_release_mode(state_root, policy)
+    require_normal_deployment_enabled(state_root, policy)
     payload = {"schema_version":"1.0","release_id":release_id,"candidate_sha":candidate_sha,
         "manifest_sha256":view["manifest_sha256"],"standing_authority":False,
         "provider_mutations_approved":False,"signed_owner_proof":proof}
@@ -170,7 +170,7 @@ def queue_release_approval_request(
         raise ValueError('RELEASE_APPROVAL_RECORD_SHA_MISMATCH')
     retired_policy = read_retired_release_policy()
     if retired_policy is not None:
-        require_retired_release_mode(state_root, retired_policy)
+        require_normal_deployment_enabled(state_root, retired_policy)
     existing = record.get('owner_approval')
     if isinstance(existing, dict) and existing.get('approved') is True:
         if retired_policy is not None:

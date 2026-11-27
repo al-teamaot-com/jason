@@ -6632,6 +6632,7 @@ def test_retired_mode_exact_mcp_decision_required_before_mutation(tmp_path, monk
     path.write_text(json.dumps(record))
     signer=Ed25519PrivateKey.generate()
     monkeypatch.setattr(owner,"read_retired_release_policy",lambda:policy)
+    monkeypatch.setattr(owner,"read_normal_deployment_freeze",lambda:False)
     monkeypatch.setattr(issuer,"read_retired_release_policy",lambda:policy)
     monkeypatch.setattr(owner,"read_pinned_root_owner_public_key",lambda _:signer.public_key())
     receipt=queue_release_approval_request(

@@ -218,6 +218,8 @@ def verify_exact_owner_release(
 # This is a durable release-policy identity, NOT an approval, a freeze
 # exception or standing authority. An absent freeze alone cannot imply it.
 RETIREMENT_POLICY_PATH = "/etc/jason-owner-release/normal-release-policy/production-freeze-retirement.json"
+DEPLOYMENT_CONFIG_PATH = "/etc/jason-owner-release/normal-release-policy/deployment.json"
+NATIVE_MIGRATION_APPROVAL = re.compile(r"^owner-native-[0-9a-f]{32}$")
 
 
 def read_retired_release_policy() -> str | None:
@@ -272,7 +274,8 @@ def read_retired_release_policy() -> str | None:
                 or not all(isinstance(doc[k], str) and DIGEST.fullmatch(doc[k])
                            for k in ("original_freeze_sha256", "migration_scope_sha256"))
                 or not isinstance(doc["owner_approval_reference"], str)
-                or not ID_RE.fullmatch(doc["owner_approval_reference"])):
+                or not (ID_RE.fullmatch(doc["owner_approval_reference"])
+                        or NATIVE_MIGRATION_APPROVAL.fullmatch(doc["owner_approval_reference"]))):
             raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_INVALID")
         retired = datetime.fromisoformat(doc["retired_at"])
         if retired.tzinfo is None or retired > datetime.now(timezone.utc):
@@ -296,6 +299,63 @@ def require_retired_release_mode(state_root: "Path", policy_sha256: str) -> None
         raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_MODE_UNVERIFIED") from exc
     raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_MODE_CONFLICT")
 
+
+
+def _configured_freeze(raw: bytes) -> bool:
+    """A mutable operating setting, not part of immutable component identity."""
+    try:
+        doc = json.loads(raw)
+        if (not isinstance(doc, dict)
+                or set(doc) != {"schema_version", "production_freeze"}
+                or doc["schema_version"] != "1.0"
+                or type(doc["production_freeze"]) is not bool):
+            raise ValueError("invalid deployment configuration")
+        return doc["production_freeze"]
+    except (ValueError, TypeError, KeyError) as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_DEPLOYMENT_CONFIG_INVALID") from exc
+
+
+def read_normal_deployment_freeze() -> bool:
+    """Read on every new admission. Missing/invalid config is a hard denial.
+
+    The independently recorded retirement receipt is immutable. Changing this
+    setting never changes its digest, a component identity, or rollback proof.
+    Recovery and read-only verification deliberately do not use this gate.
+    """
+    import os
+    import stat
+    from pathlib import Path
+    path = Path(DEPLOYMENT_CONFIG_PATH)
+    try:
+        for parent in path.parents:
+            info = parent.lstat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise OwnerReleaseProofDenied("OWNER_RELEASE_DEPLOYMENT_CONFIG_CUSTODY")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            meta = os.fstat(fd)
+            if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0 or meta.st_gid != 0
+                    or stat.S_IMODE(meta.st_mode) not in (0o444, 0o644)
+                    or meta.st_nlink != 1 or not 0 < meta.st_size <= 4096):
+                raise OwnerReleaseProofDenied("OWNER_RELEASE_DEPLOYMENT_CONFIG_CUSTODY")
+            raw = os.read(fd, 4097)
+            after = os.fstat(fd)
+            current = path.lstat()
+            if (len(raw) != meta.st_size or after.st_mtime_ns != meta.st_mtime_ns
+                    or (current.st_dev, current.st_ino, current.st_mtime_ns)
+                        != (meta.st_dev, meta.st_ino, meta.st_mtime_ns)):
+                raise OwnerReleaseProofDenied("OWNER_RELEASE_DEPLOYMENT_CONFIG_CHANGED")
+        finally:
+            os.close(fd)
+        return _configured_freeze(raw)
+    except OSError as exc:
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_DEPLOYMENT_CONFIG_UNAVAILABLE") from exc
+
+
+def require_normal_deployment_enabled(state_root: "Path", policy_sha256: str) -> None:
+    require_retired_release_mode(state_root, policy_sha256)
+    if read_normal_deployment_freeze():
+        raise OwnerReleaseProofDenied("OWNER_RELEASE_CONFIGURED_FREEZE_ACTIVE")
 
 
 def read_pinned_root_owner_public_key(

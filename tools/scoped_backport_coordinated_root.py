@@ -27,6 +27,7 @@ from tools import scoped_backport_coordinated as co
 from tools.scoped_backport_coordinated_host import CoordinatedHost, MANIFEST, PROFILE, PRIVATE, trusted_directory, POLICY, RESOLVED, active_staged_offer, validate_staged_offer, verify_installed_policy
 from tools.scoped_backport_native_host import exact_file, root_json, atomic_root_json, root_directory, utcnow
 from tools.scoped_backport_release import digest, deny
+from implementation.kernel.signed_owner_release_v2 import read_normal_deployment_freeze
 
 AUTH = Path("/var/lib/jason/authority/scoped-backport-release")
 
@@ -237,6 +238,8 @@ def scheduled_approved(host, m, profile):
     """
     if m["schema_version"] != "3.0":
         return {"status": "legacy_offer_not_scheduled"}
+    if read_normal_deployment_freeze():
+        return {"status": "configured_production_freeze_active"}
     journal = host._journal_path(m)
     if os.path.lexists(journal):
         prior = root_json(journal)

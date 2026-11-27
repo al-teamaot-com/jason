@@ -25,6 +25,7 @@ from tools import scoped_backport_coordinated as co
 from tools import scoped_backport_component_readback as readback
 from implementation.kernel.signed_owner_release_v2 import (
     read_retired_release_policy, require_retired_release_mode,
+    require_normal_deployment_enabled,
 )
 from tools.pmv4_host_release_guard import IndependentHostGuard
 from tools.scoped_backport_native_host import (
@@ -595,6 +596,8 @@ class CoordinatedHost(NativeScopedBackportHost):
                 or review.get("production_authority") is not False):
             deny("COORDINATED_PRIVATE_MANIFEST_NOT_REVIEWED")
         self.freeze_before = self._frozen(manifest)
+        if manifest["schema_version"] == "3.0":
+            require_normal_deployment_enabled(FREEZE.parent, manifest["release_policy_sha256"])
         self.previous_readback = readback.verify_live()
         self.original_components = readback.inspect_components()
         self.original_configs = {}
@@ -704,6 +707,8 @@ class CoordinatedHost(NativeScopedBackportHost):
         self._locked()
         if decision["approval_id"] not in self.consumed_approvals() or self._frozen(manifest) != self.freeze_before:
             deny("COORDINATED_FROZEN_TRANSACTION_NOT_AUTHORIZED")
+        if manifest["schema_version"] == "3.0":
+            require_normal_deployment_enabled(FREEZE.parent, manifest["release_policy_sha256"])
         # A scoped signed exception uses the exact native helper under both
         # shared locks. The global freeze file stays active throughout; there
         # is no window in which legacy or another release becomes authorized.
@@ -720,6 +725,8 @@ class CoordinatedHost(NativeScopedBackportHost):
         self._target(m, t)
         self._locked()
         self._frozen(m)
+        if m["schema_version"] == "3.0":
+            require_normal_deployment_enabled(FREEZE.parent, m["release_policy_sha256"])
         journal = self._journal(m)
         if (journal["approval_id"] not in self.consumed_approvals()
                 or not exact_original(required_container(t["name"]), t)

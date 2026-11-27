@@ -94,7 +94,7 @@ class ReleaseManagerError(RuntimeError):
 
 
 NATIVE_NORMAL_OWNER_PROOF = Path("/usr/local/lib/jason/owner_signed_release_v2.py")
-NATIVE_NORMAL_OWNER_PROOF_SHA256 = "0b5bcf5ec9b888a487100cad90febe9a9193424b645fdf57c859b459562d58cc"
+NATIVE_NORMAL_OWNER_PROOF_SHA256 = "1200c5b6aedfeae55ceabd32d038c7cbdd1b9510ef9479c56af2107caeaf01f8"
 
 
 def _load_native_normal_owner_proof():
@@ -7107,14 +7107,14 @@ def require_retired_mode_approval(state_root: Path, record: Mapping[str, Any]) -
     """
     proof_module = _normal_owner_proof(state_root)
     read_retired_release_policy = proof_module.read_retired_release_policy
-    require_retired_release_mode = proof_module.require_retired_release_mode
+    require_normal_deployment_enabled = proof_module.require_normal_deployment_enabled
     read_pinned_root_owner_public_key = proof_module.read_pinned_root_owner_public_key
     OwnerReleaseProofDenied = proof_module.OwnerReleaseProofDenied
     policy = read_retired_release_policy()
     if policy is None:
         raise ReleaseManagerError("unfrozen production requires root-attested retirement policy")
     try:
-        require_retired_release_mode(state_root, policy)
+        require_normal_deployment_enabled(state_root, policy)
         release_id = str(record.get("release_id") or "")
         candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
         if not SHA.fullmatch(candidate) or release_id != record_id(candidate):

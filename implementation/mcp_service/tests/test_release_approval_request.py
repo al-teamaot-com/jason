@@ -182,6 +182,8 @@ def test_stale_signed_request_is_not_overwritten_or_reissued(tmp_path):
 
 def test_retired_mode_issuer_uses_new_policy_and_rejects_stale_pending(tmp_path, monkeypatch):
     from jason_mcp import release_approval_request as issuer
+    from kernel import signed_owner_release_v2 as mode
+    monkeypatch.setattr(mode, "read_normal_deployment_freeze", lambda: False)
     from hashlib import sha256
     _record(tmp_path)
     args = dict(state_root=tmp_path, release_id=RID, candidate_sha=SHA,
@@ -221,6 +223,8 @@ def test_missing_freeze_is_not_retirement(tmp_path, monkeypatch):
 
 def test_retired_mode_does_not_inherit_historical_approval(tmp_path, monkeypatch):
     from jason_mcp import release_approval_request as issuer
+    from kernel import signed_owner_release_v2 as mode
+    monkeypatch.setattr(mode, "read_normal_deployment_freeze", lambda: False)
     _record(tmp_path)
     (tmp_path/"production-deployment-freeze").unlink()
     path=tmp_path/"records"/(RID+".json")
@@ -237,6 +241,8 @@ def test_retired_mode_does_not_inherit_historical_approval(tmp_path, monkeypatch
 
 def test_existing_owner_tool_routes_only_exact_normal_coordinated_offer(tmp_path, monkeypatch):
     from jason_mcp import release_approval_request as issuer
+    from kernel import signed_owner_release_v2 as mode
+    monkeypatch.setattr(mode, "read_normal_deployment_freeze", lambda: False)
     from kernel.signed_owner_release_v2 import verify_exact_owner_release
     from datetime import datetime, timezone
     policy = '9'*64

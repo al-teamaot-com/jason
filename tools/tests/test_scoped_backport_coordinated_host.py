@@ -237,6 +237,7 @@ def test_normal_native_stage_projects_only_root_private_exact_offer(monkeypatch,
 
 
 def test_existing_scheduler_never_selects_or_retries_a_release(monkeypatch, tmp_path):
+    monkeypatch.setattr(entry,"read_normal_deployment_freeze",lambda:False)
     from tools.tests.test_scoped_backport_coordinated import normal_manifest, normal_profile
     m=normal_manifest(); p=normal_profile(m)
     journal=tmp_path/"journal.json"

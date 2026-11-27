@@ -219,3 +219,37 @@ def test_explicit_mode_binding_required_and_tampering_denied():
     with pytest.raises(m.OwnerReleaseProofDenied, match="SIGNATURE_INVALID"):
         _verify(normal, signer.public_key(), expected_freeze_sha256=None,
                 expected_release_policy_sha256="0" * 64)
+
+
+@pytest.mark.parametrize("raw", [
+    b'{}', b'null', b'{"schema_version":"1.0","production_freeze":"false"}',
+    b'{"schema_version":"1.0","production_freeze":0}',
+    b'{"schema_version":"9.0","production_freeze":false}',
+    b'{"schema_version":"1.0","production_freeze":false,"override_owner":true}',
+])
+def test_normal_operating_setting_rejects_non_boolean_or_expanded_authority(raw):
+    with pytest.raises(m.OwnerReleaseProofDenied, match="DEPLOYMENT_CONFIG_INVALID"):
+        m._configured_freeze(raw)
+
+
+def test_configured_freeze_is_independent_from_proof_and_recovery(tmp_path,monkeypatch):
+    policy="9"*64
+    setting={"raw":b'{"schema_version":"1.0","production_freeze":false}'}
+    monkeypatch.setattr(m,"read_normal_deployment_freeze",
+                        lambda:m._configured_freeze(setting["raw"]))
+    m.require_normal_deployment_enabled(tmp_path,policy)
+    signer=Ed25519PrivateKey.generate()
+    proof=_sign(signer,freeze_sha256=None,release_policy_sha256=policy)
+    assert _verify(proof,signer.public_key(),expected_freeze_sha256=None,
+                   expected_release_policy_sha256=policy)["release_policy_sha256"]==policy
+    setting["raw"]=b'{"schema_version":"1.0","production_freeze":true}'
+    with pytest.raises(m.OwnerReleaseProofDenied,match="CONFIGURED_FREEZE_ACTIVE"):
+        m.require_normal_deployment_enabled(tmp_path,policy)
+    # Switching the operating flag does not invalidate the historical
+    # signature or turn a recovery-only action into a promotion.
+    m.require_retired_release_mode(tmp_path,policy)
+    _verify(proof,signer.public_key(),expected_freeze_sha256=None,
+            expected_release_policy_sha256=policy)
+    setting["raw"]=b'{"schema_version":"1.0","production_freeze":false}'
+    m.require_normal_deployment_enabled(tmp_path,policy)
+    assert not (tmp_path/"production-deployment-freeze").exists()

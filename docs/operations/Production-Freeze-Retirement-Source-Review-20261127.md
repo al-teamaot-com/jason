@@ -112,3 +112,17 @@ acceptance cycles. It requires the freeze and incident hold to be
 unchanged. It neither restarts application containers nor grants
 production/provider authority. Its own preflight, exact native installation
 and scheduled acceptance remain necessary; it is not a retirement receipt.
+
+## Configurable production restriction
+
+The retired-mode policy projection includes a distinct root-managed operating
+configuration, deployment.json, with exactly schema_version "1.0" and the
+boolean production_freeze. Normal admission, signed decision issuance and
+native promotion reread this setting. Missing or malformed settings deny
+promotion. A true setting blocks new promotions without replacing any
+container or rebuilding code. Recovery and independent readback remain
+available while frozen. The mutable flag is deliberately not part of the
+immutable retirement receipt digest or effective component identity.
+The existing protected transaction lock must serialize configuration writes
+with deployment. A native Owner-authenticated migration receipt uses its
+own owner-native reference namespace, not a fabricated MCP approval ID.

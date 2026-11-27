@@ -67,7 +67,7 @@ MOBILE_APPROVAL_LEDGER = Path("/var/lib/jason/openclaw/mobile-release-approvals.
 ROOT_OWNER_PROOF_VERIFIER = Path("/usr/local/lib/jason/owner_signed_release.py")
 ROOT_OWNER_PROOF_SUCCESSOR = Path("/usr/local/lib/jason/owner_signed_release_v2.py")
 ROOT_RETIREMENT_POLICY = Path("/etc/jason-owner-release/normal-release-policy/production-freeze-retirement.json")
-ROOT_OWNER_PROOF_SUCCESSOR_SHA256 = "0b5bcf5ec9b888a487100cad90febe9a9193424b645fdf57c859b459562d58cc"
+ROOT_OWNER_PROOF_SUCCESSOR_SHA256 = "1200c5b6aedfeae55ceabd32d038c7cbdd1b9510ef9479c56af2107caeaf01f8"
 ROOT_OWNER_TRUST_POLICY = Path("/etc/jason-owner-release/verified-owner-public-key.json")
 ROOT_OWNER_BINDINGS = Path("/var/lib/jason/governed-ticket-shared/teams-identity-bindings.sqlite3")
 ROOT_OWNER_AUTHORITY = Path("/var/lib/jason/authority/authority.sqlite3")
@@ -730,7 +730,7 @@ def _signed_mcp_owner_release_authorized(
         normal = _trusted_normal_owner_proof_module()
         if normal is not None:
             module, retired_policy = normal
-            module.require_retired_release_mode(RELEASE_STATE, retired_policy)
+            module.require_normal_deployment_enabled(RELEASE_STATE, retired_policy)
             proof_binding = {"expected_release_policy_sha256": retired_policy}
         else:
             module = _trusted_owner_proof_module()
