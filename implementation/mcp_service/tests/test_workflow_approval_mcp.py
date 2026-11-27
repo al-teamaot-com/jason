@@ -125,3 +125,33 @@ def test_mcp_decision_updates_existing_card_without_sending_new_approval(monkeyp
     assert result['original_card_state']=='provider_updated'
     assert len(updates)==1 and updates[0][1]['status']=='approved'
     assert updates[0][1]['card']['actions']==[] and len(calls)==1
+
+
+def test_authenticated_owner_fallback_reuses_existing_workflow_tool(monkeypatch):
+    from jason_runtime.universal_interaction.owner_uat import (
+        APPROVAL_PREFIX, OWNER, OwnerUatAuthority, OwnerUatDecisionFlow, create_nonexecuting_approval,
+    )
+
+    _, _, purchase_calls, audit, token = wire(monkeypatch)
+    now = datetime.now(timezone.utc)
+    repo = InMemoryApprovalRequestRepository()
+    service = ApprovalRequestService(repo, OwnerUatAuthority())
+    request = create_nonexecuting_approval(session_id="ConfigCanary.fallback", now=now)
+    service.create(request, now=now)
+    flow = OwnerUatDecisionFlow(
+        approvals=service, signed_verifier=None, enabled=True, chatgpt_ready=lambda: True,
+        bindings=NS(find=lambda **ids: NS(status="active", jason_identity_id=OWNER)
+                    if ids["microsoft_object_id"] == "fixture-oid" else None),
+        identities=NS(get=lambda _: NS(status="active", organization_id="aot", identity_id=OWNER)),
+    )
+    server._runtime().ingress = NS(ingress=NS(approval_flow=NS(workflow_routes={APPROVAL_PREFIX: flow})))
+    monkeypatch.setattr(server, "_authenticated_identity", lambda: (OWNER, "aot", "entra-oauth-bearer", None))
+    preview = server.workflow_approval(request.approval_id)
+    assert preview["test_only"] and preview["expected_decision"] == "deny"
+    assert server.workflow_approval(request.approval_id, "approve", preview["reviewed_scope_sha256"])["status"] == "denied"
+    result = server.workflow_approval(request.approval_id, "deny", preview["reviewed_scope_sha256"])
+    assert result["status"] == "completed" and not result["executed"]
+    assert repo.accepted_decision(request.approval_id).channel == "jason_mcp_entra"
+    assert purchase_calls == [] and len(audit) == 1 and token.token not in json.dumps(audit)
+    assert server.workflow_approval(request.approval_id, "deny", preview["reviewed_scope_sha256"])["status"] == "denied"
+    assert len(audit) == 1

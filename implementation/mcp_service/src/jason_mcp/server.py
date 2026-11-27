@@ -7906,16 +7906,70 @@ def _runtime_procurement_approval_flow():
     return handler
 
 
+def _audit_workflow_decision(token, claims, principal, organization, assurance, request,
+                             decision, reviewed_scope_sha256):
+    now = datetime.now(timezone.utc)
+    approval_id = request.approval_id
+    if not isinstance(getattr(token, "token", None), str) or not token.token:
+        raise PermissionError("MCP_WORKFLOW_APPROVAL_BEARER_EVIDENCE_MISSING")
+    response_id = "mcp-approval-" + uuid4().hex
+    evidence = {"assurance": assurance, "principal": principal,
+                "tenant": claims["tid"], "object": claims["oid"],
+                "bearer_sha256": hashlib.sha256(token.token.encode()).hexdigest(),
+                "approval_id": approval_id, "decision": decision,
+                "reviewed_scope_sha256": reviewed_scope_sha256,
+                "response_id": response_id, "at": now.isoformat()}
+    evidence_hash = hashlib.sha256(json.dumps(evidence, sort_keys=True,
+                                separators=(",", ":")).encode()).hexdigest()
+    audit = _runtime().identity_authority.audit
+    if audit is None:
+        raise PermissionError("MCP_WORKFLOW_APPROVAL_AUDIT_UNAVAILABLE")
+    audit.append_authority_audit(event_type="workflow.approval.authenticated",
+        correlation_id=response_id, principal_id=principal, organization_id=organization,
+        capability=request.capability, outcome="verified_identity_decision_attempt",
+        reason_codes=(evidence_hash, json.dumps(evidence, sort_keys=True,
+                                               separators=(",", ":"))))
+    return now, response_id, evidence_hash
+
+
+def _owner_uat_workflow_decision(approval_id, decision, reviewed_scope_sha256, token, claims,
+                                 principal, organization, assurance):
+    from jason_runtime.universal_interaction.owner_uat import APPROVAL_PREFIX, expected_owner_uat_decision
+
+    governed = getattr(getattr(_runtime(), "ingress", None), "ingress", None)
+    dispatcher = getattr(governed, "approval_flow", None)
+    flow = (getattr(dispatcher, "workflow_routes", None) or {}).get(APPROVAL_PREFIX)
+    if flow is None:
+        raise PermissionError("MCP_OWNER_UAT_UNAVAILABLE")
+    actor = {"principal_id": principal, "tenant_id": claims["tid"], "object_id": claims["oid"]}
+    request, digest = flow.chatgpt_review(approval_id=approval_id, **actor)
+    expected = expected_owner_uat_decision(request)
+    if decision == "review":
+        return {"status": "pending", "approval_id": approval_id, "test_only": True,
+                "executed": False, "reviewed_scope_sha256": digest,
+                "expires_at": request.expires_at.isoformat(), "expected_decision": expected,
+                "review": {"title": request.presentation.title, "summary": request.presentation.summary,
+                           "facts": dict(request.presentation.facts)}}
+    if reviewed_scope_sha256 != digest or decision != expected:
+        raise PermissionError("MCP_OWNER_UAT_EXACT_SCOPE_REQUIRED")
+    _, response_id, evidence_hash = _audit_workflow_decision(
+        token, claims, principal, organization, assurance, request, decision, reviewed_scope_sha256)
+    return flow.handle_authenticated(
+        approval_id=approval_id, decision=decision, reviewed_scope_sha256=reviewed_scope_sha256,
+        channel_response_id=response_id, authentication_evidence_hash=evidence_hash, **actor)
+
+
 @mcp.tool()
 def workflow_approval(approval_id: str, decision: str = "review",
                       reviewed_scope_sha256: str = "") -> dict[str, Any]:
-    """Review or decide an existing configured purchase approval in Jason.
+    """Review or decide an existing configured purchase or Owner acceptance test in Jason.
 
     Review first and show the actual purchase facts to the human. Approve/deny
     only on an explicit human decision, using that exact reviewed scope digest.
     Identity comes exclusively from validated Entra OAuth, never input text.
     This reuses existing purchase authority, receipt and one-use execution.
-    No release, role grant or other workflow is authorized by this tool.
+    An Owner acceptance test records a decision without any execution. No
+    release or role grant is authorized by this tool.
     """
     try:
         principal, organization, assurance, client_id = _authenticated_identity()
@@ -7925,9 +7979,13 @@ def workflow_approval(approval_id: str, decision: str = "review",
                 or client_id is not None or token is None
                 or claims.get("tid") != JASON_ENTRA_TENANT_ID
                 or not isinstance(claims.get("oid"), str)
-                or not re.fullmatch(r"procapproval-[A-Za-z0-9-]{1,100}", approval_id)
+                or not re.fullmatch(r"(?:procapproval-[A-Za-z0-9-]{1,100}|owneruatapproval-[0-9a-f]{32})",
+                                    approval_id)
                 or decision not in {"review", "approve", "deny"}):
             raise PermissionError("MCP_WORKFLOW_APPROVAL_IDENTITY_OR_SCOPE_INVALID")
+        if approval_id.startswith("owneruatapproval-"):
+            return _owner_uat_workflow_decision(approval_id, decision, reviewed_scope_sha256, token, claims,
+                                                principal, organization, assurance)
         handler = _runtime_procurement_approval_flow()
         request = handler.approval_service.repository.get(approval_id)
         if (request is None or request.organization_id != organization
@@ -7962,25 +8020,8 @@ def workflow_approval(approval_id: str, decision: str = "review",
                         and principal != request.requested_by
                         and request.status.value == "pending" and now < request.expires_at),
                     "review": card}
-        if not isinstance(getattr(token, "token", None), str) or not token.token:
-            raise PermissionError("MCP_WORKFLOW_APPROVAL_BEARER_EVIDENCE_MISSING")
-        response_id = "mcp-approval-" + uuid4().hex
-        evidence = {"assurance": assurance, "principal": principal,
-                    "tenant": claims["tid"], "object": claims["oid"],
-                    "bearer_sha256": hashlib.sha256(token.token.encode()).hexdigest(),
-                    "approval_id": approval_id, "decision": decision,
-                    "reviewed_scope_sha256": reviewed_scope_sha256,
-                    "response_id": response_id, "at": now.isoformat()}
-        evidence_hash = hashlib.sha256(json.dumps(evidence, sort_keys=True,
-                                    separators=(",", ":")).encode()).hexdigest()
-        audit = _runtime().identity_authority.audit
-        if audit is None:
-            raise PermissionError("MCP_WORKFLOW_APPROVAL_AUDIT_UNAVAILABLE")
-        audit.append_authority_audit(event_type="workflow.approval.authenticated",
-            correlation_id=response_id, principal_id=principal, organization_id=organization,
-            capability=request.capability, outcome="verified_identity_decision_attempt",
-            reason_codes=(evidence_hash, json.dumps(evidence, sort_keys=True,
-                                                   separators=(",", ":"))))
+        now, response_id, evidence_hash = _audit_workflow_decision(
+            token, claims, principal, organization, assurance, request, decision, reviewed_scope_sha256)
         result = dict(handler.handle_authenticated(approval_id=approval_id, decision=decision,
             reviewed_scope_sha256=reviewed_scope_sha256, principal_id=principal,
             organization_id=organization, assurance=assurance,
