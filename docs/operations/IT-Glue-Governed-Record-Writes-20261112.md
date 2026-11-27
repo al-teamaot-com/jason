@@ -75,3 +75,28 @@ PR #2454 adds Microsoft Graph group-read/group-write OpenBao mappings and provid
 The exact installed rollback baseline must be re-read at release preparation; the former 690250b4 source has already been superseded in production by signed release d1b8c196. No code or production activation follows from this documentation acknowledgement.
 
 CI event binding: The reviewed unified Integration coordination line must be present in the PR description before the source synchronization event. Re-running a job from a prior event may retain the earlier PR-body snapshot; the post-review CI run must assess the final overlap set. This does not waive any repository-hygiene check.
+
+## November 27 — AOT controlled acceptance target and initial credential custody
+
+The requesting Owner designated IT Glue organization 5710249, Atlantic Office
+Technologies - AOT, for controlled write testing. This is a scope decision,
+not an independently authenticated exact production-release receipt. AOT is a
+real organization, not a disposable whole organization. Only newly designated
+non-restricted synthetic test records may be created or updated in this
+acceptance run; all pre-existing records, credential records, ACLs, deletes and
+cross-client writes remain excluded. Verify the exact organization and a
+validated client boundary through provider-backed evidence before any write.
+The read-only live boundary inventory contains no IT Glue mapping for this
+organization and the live governed organization capability is not registered.
+Do not infer a client ID from the supplied vendor organization ID.
+
+Root custody inspection found the existing separate IT Glue read and
+configuration-notes-write identities, but no general-write AppRole. The
+general-write secret must be newly supplied at a local masked credential
+prompt using a distinct vendor write key; never collect it in chat or reuse a
+read/notes key. The existing provisioner now applies its create-only CAS=0
+contract to this exact write secret path. Do not rotate or overwrite an
+existing credential on a failed first provisioning attempt. Protected source
+review, exact native provisioning authorization and verified readback remain
+required before use. No live provisioning or provider write occurred in this
+review.

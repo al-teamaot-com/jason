@@ -99,6 +99,9 @@ PROVIDERS: dict[str, dict[str, object]] = {
         ),
     },
     "it_glue_write": {
+        # Initial creation only. The protected shared KV-v2 mount requires CAS.
+        # Never overwrite an existing service credential during onboarding.
+        "create_only_secret": True,
         "logical_name": "it_glue.readwrite",
         "secret_path": "secret/data/connectors/it-glue/production/write",
         "fields": ("api_key",),

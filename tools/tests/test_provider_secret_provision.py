@@ -493,3 +493,19 @@ def test_microsoft_sharepoint_write_contract_is_isolated_and_site_scoped_by_desi
     )
     assert sharepoint["secret_path"] != directory["secret_path"]
     assert sharepoint["role_name"] != directory["role_name"]
+
+def test_it_glue_general_write_credential_is_distinct_and_create_only(monkeypatch):
+    import tools.provider_secret_provision as module
+    spec=module.PROVIDERS["it_glue_write"]
+    read=module.PROVIDERS["it_glue"]
+    assert spec["create_only_secret"] is True
+    for name in ("secret_path","logical_name","policy_name","role_name","credential_dir"):
+        assert spec[name]!=read[name]
+    calls=[]
+    monkeypatch.setattr(module,"api_request",lambda *a,**kw:calls.append((a,kw)) or {})
+    module.write_provider_secret(address="http://unused.invalid",admin_token="test-only",
+        provider="it_glue_write",values={"api_key":"synthetic-not-a-credential"})
+    assert len(calls)==1
+    assert calls[0][0][1]=="secret/data/connectors/it-glue/production/write"
+    assert calls[0][1]["method"]=="POST"
+    assert calls[0][1]["payload"]=={"data":{"api_key":"synthetic-not-a-credential"},"options":{"cas":0}}
