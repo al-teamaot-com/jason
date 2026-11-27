@@ -35,6 +35,7 @@ ORGANIZATION = "aot"
 OWNER = "person-al"
 SESSION_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{4,100}$")
 TTL_SECONDS = 600
+COORDINATED_READBACK = Path("/etc/jason-owner-release/coordinated-readback/component.json")
 
 
 @dataclass(frozen=True)
@@ -67,7 +68,8 @@ def create_nonexecuting_approval(
         ("owner-acceptance:1:" + session_id).encode("utf-8")
     ).hexdigest()[:32]
     followup = session_id.endswith(".approve")
-    phase = "2/2: APPROVE" if followup else "1/2: DENY"
+    fallback = session_id.endswith(".fallback")
+    phase = "ChatGPT fallback: DENY" if fallback else ("2/2: APPROVE" if followup else "1/2: DENY")
     return ApprovalRequest(
         approval_id=approval_id,
         request_id="owner-uat:" + session_id,
@@ -90,7 +92,9 @@ def create_nonexecuting_approval(
                 ("Session", session_id),
                 ("Impact", "None: records one test approval decision"),
                 ("Expires", (now + timedelta(seconds=TTL_SECONDS)).isoformat()),
-                ("Next action", "Click APPROVE (test only)" if followup else "Click DENY (test only)"),
+                ("Next action", "Review this approval in ChatGPT (test only)" if fallback else
+                 ("Click APPROVE (test only)" if followup else "Click DENY (test only)")),
+                *((("Approval ID", approval_id),) if fallback else ()),
             ),
         ),
         metadata={"test_only": "true", "execution_permitted": "false"},
@@ -160,6 +164,65 @@ class OwnerUatDecisionFlow:
     enabled: bool = False
     owner_identity_id: str = OWNER
     clock: Any = lambda: datetime.now(timezone.utc)
+    chatgpt_ready: Any | None = None
+
+    def pending_request(self, approval_id: str) -> ApprovalRequest:
+        request = self.approvals.repository.get(approval_id)
+        if (not self.enabled or request is None or request.status != ApprovalRequestStatus.PENDING
+                or request.organization_id != ORGANIZATION or request.client_id is not None
+                or request.requested_by != REQUESTER or request.capability != CAPABILITY
+                or request.requested_mode != MODE
+                or request.authorized_approver_ids != (self.owner_identity_id,)
+                or request.metadata != {"test_only": "true", "execution_permitted": "false"}):
+            raise PermissionError("not a pending, immutable nonexecuting UAT request")
+        expected_owner_uat_decision(request)
+        return request
+
+    def active_owner(self, tenant_id: str, object_id: str) -> Any:
+        binding = self.bindings.find(microsoft_tenant_id=tenant_id, microsoft_object_id=object_id)
+        if (binding is None or binding.status != "active"
+                or binding.jason_identity_id != self.owner_identity_id):
+            raise PermissionError("UAT decision is not from the active owner")
+        identity = self.identities.get(binding.jason_identity_id)
+        if (identity is None or identity.status != "active"
+                or identity.organization_id != ORGANIZATION
+                or identity.identity_id != self.owner_identity_id):
+            raise PermissionError("UAT owner identity is not active")
+        return identity
+
+    def chatgpt_review(self, *, approval_id: str, principal_id: str, tenant_id: str,
+                      object_id: str) -> tuple[ApprovalRequest, str]:
+        if self.chatgpt_ready is None or not self.chatgpt_ready() or principal_id != self.owner_identity_id:
+            raise PermissionError("Owner UAT ChatGPT fallback is disabled or unauthorized")
+        self.active_owner(tenant_id, object_id)
+        request = self.pending_request(approval_id)
+        if not request.request_id.endswith(".fallback") or self.clock() >= request.expires_at:
+            raise PermissionError("only the dedicated nonexecuting fallback phase is eligible")
+        scope = {
+            "approval_id": request.approval_id, "request_id": request.request_id,
+            "capability": request.capability, "mode": request.requested_mode,
+            "owner": principal_id, "organization": request.organization_id,
+            "expires_at": request.expires_at.isoformat(), "decision": expected_owner_uat_decision(request),
+        }
+        digest = hashlib.sha256(json.dumps(scope, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return request, digest
+
+    def handle_authenticated(self, *, approval_id: str, decision: str, reviewed_scope_sha256: str,
+                             principal_id: str, tenant_id: str, object_id: str,
+                             channel_response_id: str, authentication_evidence_hash: str) -> dict[str, Any]:
+        request, digest = self.chatgpt_review(
+            approval_id=approval_id, principal_id=principal_id, tenant_id=tenant_id, object_id=object_id)
+        if digest != reviewed_scope_sha256 or decision != expected_owner_uat_decision(request):
+            raise PermissionError("Owner UAT requires the exact reviewed fallback decision")
+        now = self.clock()
+        receipt = self.approvals.accept_response(ApprovalResponse(
+            approval_id=approval_id, organization_id=ORGANIZATION,
+            approver_identity_id=principal_id, decision=ApprovalDecision(decision), decided_at=now,
+            channel="jason_mcp_entra", channel_response_id=channel_response_id,
+            authentication_evidence_hash=authentication_evidence_hash,
+        ), now=now)
+        return {"status": "completed", "approval_id": approval_id,
+                "approval_status": receipt.status, "executed": False}
 
     def handle(
         self, *, approval_id: str, decision: str,
@@ -191,31 +254,8 @@ class OwnerUatDecisionFlow:
                 or parsed.documents):
             raise PermissionError("signed UAT decision does not match callback")
         principal = self.signed_verifier.verify(token)
-        binding = self.bindings.find(
-            microsoft_tenant_id=principal.tenant_id,
-            microsoft_object_id=principal.object_id,
-        )
-        if (binding is None or binding.status != "active"
-                or binding.jason_identity_id != self.owner_identity_id):
-            raise PermissionError("UAT click is not from the active owner")
-        identity = self.identities.get(binding.jason_identity_id)
-        if (identity is None or identity.status != "active"
-                or identity.organization_id != ORGANIZATION
-                or identity.identity_id != self.owner_identity_id):
-            raise PermissionError("UAT owner identity is not active")
-        request = self.approvals.repository.get(approval_id)
-        if (request is None or request.status != ApprovalRequestStatus.PENDING
-                or request.organization_id != ORGANIZATION
-                or request.client_id is not None
-                or request.requested_by != REQUESTER
-                or request.capability != CAPABILITY
-                or request.requested_mode != MODE
-                or request.authorized_approver_ids != (self.owner_identity_id,)
-                or request.metadata != {
-                    "test_only": "true",
-                    "execution_permitted": "false",
-                }):
-            raise PermissionError("not a pending, immutable nonexecuting UAT request")
+        identity = self.active_owner(principal.tenant_id, principal.object_id)
+        request = self.pending_request(approval_id)
         expected_decision = expected_owner_uat_decision(request)
         if decision != expected_decision:
             # This is a signed, correctly authenticated Owner click, but the
@@ -307,6 +347,9 @@ class OwnerUatReleaseGate:
     """
     state_root: Path
     source_revision: str
+    coordinated_release_id: str = ""
+    component: str = "jason-runtime"
+    campaign_expires_at: str = ""
 
     @staticmethod
     def _private_json(path: Path, *, owner_uid: int) -> dict[str, Any]:
@@ -320,10 +363,74 @@ class OwnerUatReleaseGate:
             raise ValueError("Owner UAT release proof is malformed")
         return data
 
+    @staticmethod
+    def read_coordinated_receipt() -> dict[str, Any]:
+        path = COORDINATED_READBACK
+        for parent in (path.parent, *path.parent.parents):
+            info = parent.lstat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise PermissionError("untrusted coordinated readback directory")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                    or stat.S_IMODE(info.st_mode) not in (0o444, 0o644)
+                    or info.st_nlink != 1 or not 0 < info.st_size <= 65536):
+                raise PermissionError("untrusted coordinated readback file")
+            raw = stream.read(65537)
+            if len(raw) != info.st_size:
+                raise PermissionError("coordinated readback changed during read")
+        receipt = json.loads(raw)
+        if not isinstance(receipt, dict):
+            raise ValueError("invalid coordinated readback")
+        return receipt
+
+    def coordinated_ready(self) -> bool:
+        try:
+            now = datetime.now(timezone.utc)
+            expires = datetime.fromisoformat(self.campaign_expires_at)
+            if (self.component not in {"jason-runtime", "jason-mcp-pilot"}
+                    or not re.fullmatch(r"release-[0-9a-f]{16}", self.coordinated_release_id)
+                    or expires.utcoffset() != timedelta(0)
+                    or not timedelta(0) < expires - now <= timedelta(hours=48)):
+                return False
+            receipt = self.read_coordinated_receipt()
+            protected = self._private_json(
+                self.state_root / "protected-readback" / "production-control-state.json",
+                owner_uid=os.getuid())
+            drift = self._private_json(
+                self.state_root / "protected-readback" / "production-drift.json",
+                owner_uid=os.getuid())
+            lkg = protected["last_known_good"]["manifest"]
+            components = receipt["components"]
+            return (
+                receipt.get("schema_version") == "3.0"
+                and receipt.get("status") == "verified_component_release"
+                and receipt.get("release_id") == self.coordinated_release_id
+                and all(re.fullmatch(r"[0-9a-f]{64}", receipt[k]) is not None for k in
+                        ("manifest_sha256", "scope_sha256", "release_policy_sha256"))
+                and set(components) == {"jason-runtime", "jason-mcp-pilot", "jason-teams-gateway"}
+                and all(re.fullmatch(r"[0-9a-f]{40}", row["revision"]) is not None
+                        and re.fullmatch(r"sha256:[0-9a-f]{64}", row["image_id"]) is not None
+                        and re.fullmatch(r"[0-9a-f]{64}", row["container_id"]) is not None
+                        for row in components.values())
+                and components[self.component]["revision"] == self.source_revision
+                and protected.get("schema_version") == "1.0"
+                and protected["circuit_breaker"]["state"] == "closed"
+                and lkg.get("complete") is True and lkg["revision"] == receipt["host_revision"]
+                and drift.get("status") == "pass" and drift.get("problems") == []
+                and timedelta(seconds=-5) <= now - datetime.fromisoformat(drift["observed_at"])
+                    <= timedelta(minutes=3)
+            )
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            return False
+
     def ready(self) -> bool:
         sha = self.source_revision
         if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
             return False
+        if self.coordinated_release_id:
+            return self.coordinated_ready()
         try:
             uid = os.getuid()
             release = self._private_json(
@@ -375,6 +482,7 @@ class OwnerUatMaintenance:
     session_id: str
     enabled: bool = False
     release_ready: Any = lambda: False
+    include_chatgpt_fallback: bool = False
 
     def tick(self) -> bool:
         if not self.enabled or not self.release_ready():
@@ -397,7 +505,15 @@ class OwnerUatMaintenance:
         followup = create_nonexecuting_approval(
             session_id=followup_session, now=self.issuer.clock()
         )
-        if self.issuer.requests.repository.get(followup.approval_id) is not None:
+        second = self.issuer.requests.repository.get(followup.approval_id)
+        if second is None:
+            self.issuer.issue(session_id=followup_session)
+            return True
+        if not self.include_chatgpt_fallback or second.status != ApprovalRequestStatus.APPROVED:
             return False
-        self.issuer.issue(session_id=followup_session)
+        fallback_session = self.session_id + ".fallback"
+        fallback = create_nonexecuting_approval(session_id=fallback_session, now=self.issuer.clock())
+        if self.issuer.requests.repository.get(fallback.approval_id) is not None:
+            return False
+        self.issuer.issue(session_id=fallback_session)
         return True

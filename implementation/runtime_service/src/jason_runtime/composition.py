@@ -684,6 +684,9 @@ class RuntimeSettings:
     owner_uat_mode: str = "off"
     owner_uat_worker_enabled: bool = False
     owner_uat_session_id: str = ""
+    owner_uat_coordinated_release_id: str = ""
+    owner_uat_component: str = "jason-runtime"
+    owner_uat_campaign_expires_at: str = ""
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -1211,6 +1214,9 @@ class RuntimeSettings:
                 "JASON_OWNER_UAT_WORKER_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
             owner_uat_session_id=os.getenv("JASON_OWNER_UAT_SESSION_ID", "").strip(),
+            owner_uat_coordinated_release_id=os.getenv("JASON_OWNER_UAT_COORDINATED_RELEASE_ID", "").strip(),
+            owner_uat_component=os.getenv("JASON_OWNER_UAT_COMPONENT", "jason-runtime").strip(),
+            owner_uat_campaign_expires_at=os.getenv("JASON_OWNER_UAT_CAMPAIGN_EXPIRES_AT", "").strip(),
             procurement_inventory_location_id=int(
                 os.getenv("JASON_PROCUREMENT_INVENTORY_LOCATION_ID", "1")
             ),
@@ -1237,6 +1243,8 @@ class RuntimeSettings:
             raise ValueError("mobile release approval scans require at least a 60-second interval")
         if self.owner_uat_mode not in {"off", "nonexecuting_test_only"}:
             raise ValueError("JASON_OWNER_UAT_MODE must be off or nonexecuting_test_only")
+        if self.owner_uat_coordinated_release_id and self.owner_uat_worker_enabled and self.owner_uat_component != "jason-runtime":
+            raise ValueError("only Runtime may issue coordinated Owner UAT requests")
         if self.owner_uat_worker_enabled and self.owner_uat_mode != "nonexecuting_test_only":
             raise ValueError("owner UAT worker requires test-only mode")
         if self.owner_uat_mode == "nonexecuting_test_only":
@@ -3081,6 +3089,13 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         owner_uat_approval_service = ApprovalRequestService(
             owner_uat_repository, OwnerUatAuthority(),
         )
+        owner_uat_release_gate = OwnerUatReleaseGate(
+            state_root=Path("/var/lib/jason/openclaw/release-manager"),
+            source_revision=os.getenv("JASON_SOURCE_REVISION", ""),
+            coordinated_release_id=settings.owner_uat_coordinated_release_id,
+            component=settings.owner_uat_component,
+            campaign_expires_at=settings.owner_uat_campaign_expires_at,
+        )
         owner_uat_flow = OwnerUatDecisionFlow(
             approvals=owner_uat_approval_service,
             signed_verifier=SignedTeamsApprovalEvidenceVerifier(
@@ -3091,6 +3106,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             bindings=durable_bindings,
             identities=SQLiteIdentityRepository(authority_store),
             enabled=True,
+            chatgpt_ready=(owner_uat_release_gate.ready
+                           if settings.owner_uat_coordinated_release_id
+                           and settings.owner_uat_component == "jason-mcp-pilot" else None),
         )
         workflow_approval_routes[OWNER_UAT_PREFIX] = owner_uat_flow
         owner_uat_sender = JasonTeamsCommunicationService(
@@ -3123,10 +3141,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                 ),
                 session_id=settings.owner_uat_session_id,
                 enabled=True,
-                release_ready=OwnerUatReleaseGate(
-                    state_root=Path("/var/lib/jason/openclaw/release-manager"),
-                    source_revision=os.getenv("JASON_SOURCE_REVISION", ""),
-                ).ready,
+                release_ready=owner_uat_release_gate.ready,
+                include_chatgpt_fallback=bool(settings.owner_uat_coordinated_release_id),
             )
 
     approval_interaction_flow = ApprovalInteractionDispatcher(
