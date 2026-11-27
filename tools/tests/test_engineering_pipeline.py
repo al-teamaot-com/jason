@@ -271,6 +271,7 @@ class PipelineTests(unittest.TestCase):
             release_state=self.base / "releases", runner=runner,
         )
         self.assertEqual(state["status"], "healthy")
+        self.assertEqual(state["stages"]["release_breaker_recovery"]["policy_repository"], str(policy_source))
         for name, argv, _ in self.calls:
             expected = policy_source if name == "release_breaker_recovery_manager" else worker_source
             self.assertEqual(argv[argv.index("--repo")+1], str(expected))

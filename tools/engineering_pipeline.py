@@ -206,9 +206,10 @@ def run_pipeline(
                 "checked_at": now(),
             }
         else:
+            selected_repo = stage_repository(stage, scripts, repo)
             command = [
                 sys.executable, str(scripts / stage.script),
-                "--repo", str(stage_repository(stage, scripts, repo)),
+                "--repo", str(selected_repo),
                 "--spool", str(spool), *stage.args,
             ]
             if stage.name in {"integration", "release_bridge", "release_breaker_recovery"}:
@@ -228,6 +229,8 @@ def run_pipeline(
                 item = {"status": "failed", "reason": "stage_timeout", "checked_at": now()}
             except OSError:
                 item = {"status": "failed", "reason": "stage_process_launch_failed", "checked_at": now()}
+            if stage.name == "release_breaker_recovery":
+                item["policy_repository"] = str(selected_repo)
         state["stages"][stage.name] = item
         atomic_json(output, state)
         print(f"ENGINEERING_STAGE_END name={stage.name} status={item['status']}", flush=True)

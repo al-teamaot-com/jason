@@ -25,3 +25,23 @@ its exact candidate unchanged. Review and release this small successor
 through the existing governed engineering-manager lane only after the
 pending predecessor is operationally accepted. No provider or runtime
 deployment authority is conveyed.
+
+## Native acceptance of the correction
+
+The successor is restricted to the independently accepted engineering manager
+at revision 1c028724328e0a758a59f7a58478e242317b84b1. The existing
+signed PipelineSuccessor mechanism, protected CI, release mutex, native
+health checks, predecessor receipt and rollback remain mandatory. Only the
+pipeline program and its root-owned guard/receipt are changed; the full
+closed-loop artifact inventory, including the issue-resolution engine,
+remains pinned. Neither runtime nor MCP nor ticket processing is restarted.
+
+The scope binds the established policy repository, exact production LKG
+revision and immutable policy SHA-256. Native preflight compares the clean
+policy checkout to the root-owned protected release bytes. The same check is
+repeated under the existing transaction lock. Two distinct normal scheduled
+cycles must record that exact repository for the recovery stage and provide
+fresh native closed-breaker evidence for the correct LKG. This demonstrates
+the routing correction without deliberately opening the production breaker.
+Existing watchdog, quarantine and independent-source acceptance checks remain
+required. Any failure uses the existing exact predecessor rollback.

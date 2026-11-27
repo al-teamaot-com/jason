@@ -47,6 +47,7 @@ PIPELINE_ARTIFACTS = frozenset({
     "change_integration_gate.py", "documentation_impact_gate.py",
 })
 CLOSED_LOOP_PREDECESSOR = "9b69aa8e2cdc7c9a037d044a5ac9d00cfcc2870f"
+BREAKER_CUSTODY_PREDECESSOR = "1c028724328e0a758a59f7a58478e242317b84b1"
 CLOSED_LOOP_PIPELINE_ARTIFACTS = PIPELINE_ARTIFACTS | {"issue_resolution_engine.py"}
 PIPELINE_SOURCE = Path("/home/al/.local/lib/jason/engineering-worker-source")
 PIPELINE_SOURCE_SHA = "1a7e7c1b03fce7dffa3ac6aab26480d614327e69"
@@ -116,7 +117,7 @@ def validate_receipt(row):
              and isinstance(row.get("pipeline_artifact_sha256"), dict)
              and set(row["pipeline_artifact_sha256"]) == (
                  CLOSED_LOOP_PIPELINE_ARTIFACTS
-                 if row.get("predecessor_candidate_sha") == CLOSED_LOOP_PREDECESSOR
+                 if row.get("predecessor_candidate_sha") in (CLOSED_LOOP_PREDECESSOR, BREAKER_CUSTODY_PREDECESSOR)
                  else PIPELINE_ARTIFACTS)
              and all(exact(x, 64) for x in row["pipeline_artifact_sha256"].values()),
              "PIPELINE_SUCCESSOR_RECEIPT_INVALID")
