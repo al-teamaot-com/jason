@@ -6,7 +6,7 @@
   "retention_days": 30,
   "timestamp_field": "orchestration_events.occurred_at",
   "timestamp_semantics": "timezone-aware UTC at exact governed cutover",
-  "expiry_predicate": "occurred_at < cutoff_utc",
+  "expiry_predicate": "occurred_at < cutoff_utc AND independently_verified_eligible_nonprotected_event",
   "targets": [
     "canonical_active_orchestration_events",
     "all_root_sealed_orchestration_history_segments",
@@ -17,7 +17,9 @@
     "signed_approval_evidence_and_provenance",
     "other_service_and_client_databases",
     "external_provider_data",
-    "unrelated_backup_and_security_records"
+    "unrelated_backup_and_security_records",
+    "protected_approval_security_customer_evidence_in_orchestration_events",
+    "unresolved_or_protected_execution_correlation_evidence"
   ],
   "requires_governance_exception_to": [
     "Jason_Canon_audit_permanent_record",
@@ -33,5 +35,16 @@
   "require_exact_signed_licensed_owner_and_one_use_Root_grant": true,
   "require_actual_space_reclamation_and_next_daily_expiry": true,
   "rollback_before_accepted_purge": "restore_current_original_archive_and_catalog_exact_before_image_without_resuming_old_provider_calls",
-  "rollback_after_accepted_purge": "preserve_approved_retained_events_and_immutable_approval_receipt_no_expired_restoration"
+  "rollback_after_accepted_purge": "preserve_approved_recent_and_protected_events_and_immutable_approval_receipt_no_expired_restoration",
+  "owner_policy_direction": {
+    "recorded_on": "2026-11-27",
+    "retention_days": 30,
+    "permanent_expiry_requested": true,
+    "protected_approval_security_customer_records_preserved": true,
+    "independent_authenticated_exact_release_required": true,
+    "source_only_record_not_execution_grant": true
+  },
+  "require_protected_old_rows_preserved": true,
+  "require_positive_event_and_correlation_classification": true,
+  "unknown_or_ambiguous_old_rows": "retain"
 }

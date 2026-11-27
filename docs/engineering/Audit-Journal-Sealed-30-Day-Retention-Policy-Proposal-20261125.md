@@ -54,3 +54,37 @@ disk has recovered from its earlier critical pressure. Permanent expiry remains
 disabled pending the explicit governance exception, independently verified
 segment data, and separate destructive release approval. Do not scan or rewrite
 the entire historical database solely to prepare a policy proposal.
+
+## November 27 — recorded Owner policy direction and protected-event boundary
+
+The requesting Owner explicitly authorized permanent deletion of orchestration
+events older than 30 days while preserving protected approval, security and
+customer records. Record that policy direction in the existing disabled
+proposal. Do not treat the chat statement as an independently authenticated
+exact root release receipt or as activation of the destructive executor.
+
+The actual canonical event schema carries organization, principal, capability,
+execution and correlation IDs and immutable payload. The current emitter
+includes approval_id, authority_context_id, idempotency_key and policy or
+information-release evidence. Thus event age and table name alone cannot
+distinguish ordinary expired lifecycle telemetry from protected evidence.
+This is a material limitation of the older age-only staging/maintenance
+tools: do not deploy them to live data under this approval.
+
+Each segment must now have a positively established partition of recent,
+protected-old and eligible-old rows, with a bound classification proof.
+All unknown/ambiguous events and required protected or unresolved execution/
+correlation evidence must be retained, even if older than 30 days. Preserve
+full retained row identity and payload parity across active and sealed
+segments, not only a count. A mixed archive with any protected-old rows may
+never be deleted as a whole. The proof producer and native transaction must
+derive eligibility independently from authenticated current sources; an
+untrusted developer-supplied digest or count is not proof. The revised
+planner is still source-only and cannot authorize anything.
+
+Current root readback: segmented catalog generation 8, four sealed segments,
+no-restore maintenance successful, native breaker closed and drift passing.
+No archive deletion, catalog mutation, policy activation, or service stop
+was performed. Native destructive executor, independent protected-record
+classification evidence, protected release and recurring maintenance
+acceptance remain mandatory.

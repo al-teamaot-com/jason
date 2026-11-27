@@ -59,21 +59,28 @@ def draft_segment_plan(*,catalog,statistics,now,source_main_sha,prior_catalog_sh
         seen.add(name)
         actual=statistics.get(name)
         need(isinstance(actual,dict) and
-             set(actual)=={"retained","expired","file_sha256"}
+             set(actual)=={"recent","protected_old","eligible_old","file_sha256","classification_sha256"}
              and actual["file_sha256"]==digest
-             and type(actual["retained"]) is int and type(actual["expired"]) is int
-             and actual["retained"]>=0 and actual["expired"]>=0
-             and actual["retained"]+actual["expired"]==expected,
-             "UNTRUSTED_EVENT_COUNT_OR_HASH")
+             and isinstance(actual["classification_sha256"],str)
+             and re.fullmatch("[0-9a-f]{64}",actual["classification_sha256"]) is not None
+             and all(type(actual[k]) is int and actual[k]>=0
+                     for k in ("recent","protected_old","eligible_old"))
+             and sum(actual[k] for k in ("recent","protected_old","eligible_old"))==expected,
+             "UNTRUSTED_PROTECTED_PARTITION_OR_HASH")
+        retained=actual["recent"]+actual["protected_old"]
         rows.append({
             "segment_id":name,"original_file_sha256":digest,
-            "catalog_events":expected,"estimated_expired":actual["expired"],
-            "estimated_retained":actual["retained"],
+            "catalog_events":expected,
+            "classification_sha256":actual["classification_sha256"],
+            "estimated_recent":actual["recent"],
+            "estimated_protected_old":actual["protected_old"],
+            "estimated_expired":actual["eligible_old"],
+            "estimated_retained":retained,
             "required_action":(
-                "stage_verified_recent_only_copy_then_root_seal_swap"
-                if actual["retained"]>0 and actual["expired"]>0
+                "stage_verified_retained_copy_then_root_seal_swap"
+                if retained>0 and actual["eligible_old"]>0
                 else "root_remove_only_after_exact_accepted_proof"
-                if actual["expired"]>0
+                if actual["eligible_old"]>0
                 else "retain_original_unchanged"
             ),
         })
@@ -89,6 +96,7 @@ def draft_segment_plan(*,catalog,statistics,now,source_main_sha,prior_catalog_sh
         "cutoff_utc":cutoff(now),
         "retention_days":30,
         "target_table":"orchestration_events",
+        "age_alone_never_authorizes_expiration":True,
         "source_statistics_are_untrusted_until_independently_verified_by_Root":True,
         "archives":rows,
         "pre_reclaim_gates":[
@@ -96,13 +104,16 @@ def draft_segment_plan(*,catalog,statistics,now,source_main_sha,prior_catalog_sh
             "new_exact_independently_authenticated_licensed_Owner_signature",
             "verified_production_freeze_and_breaker_and_drift",
             "exact_hash_and_count_readback_from_each_sealed_archive",
-            "all_recent_rows_preserved_with_proven_event_id_parity",
+            "independent_positive_nonprotected_event_and_correlation_classification",
+            "unknown_or_ambiguous_old_events_retained",
+            "all_recent_and_protected_rows_preserved_with_proven_event_id_parity",
             "no_any_open_archive_handles_or_uncommitted_writes",
             "atomic_catalog_generation_and_recovery_receipt",
             "independent_native_health_and_actual_free_blocks",
         ],
         "out_of_scope":["other_databases","root_approval_ledgers","provider_actions",
-                        "unrelated_security_audit_records","network_or_reboot"],
+                        "protected_approval_security_customer_evidence_in_any_segment",
+                        "unresolved_or_protected_execution_correlation_evidence","network_or_reboot"],
         "approved":False,"production_changed":False,
         "expired_records_deleted":False,
     }
@@ -114,6 +125,7 @@ def verify_draft(result):
     need(sha256(canonical(p)).hexdigest()==result["proposal_sha256"],
          "PROPOSAL_CHANGED")
     need(p["action"]==ACTION and p["not_combined_with"]==READER_ACTION
+         and p["age_alone_never_authorizes_expiration"] is True
          and p["approved"] is False and p["production_changed"] is False
          and p["expired_records_deleted"] is False
          and p["source_statistics_are_untrusted_until_independently_verified_by_Root"] is True,
