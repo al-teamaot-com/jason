@@ -2532,3 +2532,22 @@ def test_evidence_recovery_requires_protected_recent_release_readbacks(tmp_path,
     assert not module.verified_live_evidence_recovery_release(spool,sha,current)
     drift.chmod(0o600)
     assert module.verified_live_evidence_recovery_release(spool,sha,current)
+
+def test_development_local_readmission_preserves_owner_scope_and_restarts_search(tmp_path,monkeypatch):
+    state,item,context,rid,failure=_credit_failure_case(tmp_path,monkeypatch,kind='edit_plan')
+    proof={'request_id':'a'*64,'model':'qwen3.5:4b','completed_at':'2026-11-27T06:00:00+00:00'}
+    monkeypatch.setattr(module.support,'verified_later_local_reasoning_success',
+                        lambda *a,**kw: proof if kw['kind']=='search_plan' else None)
+    def denied(*a,**kw):raise AssertionError('paid receipt path prohibited')
+    monkeypatch.setattr(module.support,'verified_credit_reload_receipt',denied)
+    calls=[]
+    monkeypatch.setattr(module,'queue_reasoning',lambda spool,**kw:calls.append(kw) or 'b'*64)
+    assert module.readmit_development_after_verified_local_reasoning(
+        state,[dict(item,body=item['body']+' changed')],tmp_path,max_active=1)==[]
+    assert module.readmit_development_after_verified_local_reasoning(state,[item],tmp_path,max_active=1)==[item['id']]
+    assert calls[0]['kind']=='search_plan'
+    assert calls[0]['context']['approved_scope']==context['approved_scope']
+    assert calls[0]['context']['approval_source']==context['approval_source']
+    assert calls[0]['context']['verified_local_recovery']['failed_request_id']==rid
+    assert failure['status']=='failed'
+    assert state['items'][item['id']]['local_reasoning_requeue_id']=='b'*64
