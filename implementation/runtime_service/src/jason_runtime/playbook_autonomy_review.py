@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
+from hashlib import sha256
 from pathlib import Path
 import os
 import re
@@ -182,10 +183,12 @@ class TeamsGatewayPlaybookApprovalSender:
         owner_identity_ids,
         owner_identity_email_fallbacks: Mapping[str, str] | None = None,
         owner_identity_entra_bindings: Mapping[str, tuple[str, str]] | None = None,
+        workflow_configuration=None,
     ) -> None:
         self.gateway_url = str(gateway_url).rstrip("/")
         self.token_file = Path(token_file)
         self.bindings = bindings
+        self.workflow_configuration = workflow_configuration
         self.owner_identity_ids = tuple(sorted(str(x).strip() for x in owner_identity_ids if str(x).strip()))
         self.owner_identity_email_fallbacks = {
             str(identity).strip(): str(email).strip().casefold()
@@ -281,6 +284,16 @@ class TeamsGatewayPlaybookApprovalSender:
     def send(self, request: ApprovalRequest) -> tuple[str, ...]:
         card = render_approval_card(request)
         adaptive = self._adaptive_card(card)
+        configuration = self.workflow_configuration.load() if self.workflow_configuration else None
+        if configuration is not None and configuration.enabled:
+            configured = configuration.render_approval(card)
+            if configured is not None:
+                # Presentation cannot alter the canonical decision choices or
+                # conceal the exact review material of a different capability.
+                if (card.capability, card.requested_mode) == ("procurement.submission.execute", "purchase"):
+                    adaptive = {**configured, "actions": adaptive["actions"]}
+                else:
+                    adaptive = {**adaptive, "body": configured["body"] + adaptive["body"]}
         # Every approval type uses one canonical card renderer + gateway.
         # Select recipients from the persisted immutable ApprovalRequest, not
         # from user-supplied Teams data or a separate procurement sender.
@@ -300,9 +313,67 @@ class TeamsGatewayPlaybookApprovalSender:
                     f"authorized Microsoft identity binding unavailable: {identity}")
             bindings.append(binding)
         transport = self._existing_transport()
-        return tuple(transport.send(binding=binding, text=card.summary,
-                                    card=adaptive).message_id
-                     for binding in bindings)
+        receipts = []
+        for binding in bindings:
+            delivery = {}
+            if configuration is not None and configuration.enabled:
+                delivery['communication_id'] = 'comm-' + sha256(
+                    (request.approval_id + ':initial_card:' + binding.jason_identity_id).encode()).hexdigest()
+            receipt = transport.send(binding=binding, text=card.summary, card=adaptive, **delivery)
+            if configuration is not None and configuration.enabled and (
+                    receipt.message_id_synthetic or not receipt.message_id):
+                raise RuntimeError("approval delivery unverified; reconciliation required")
+            receipts.append(receipt.message_id)
+        return tuple(receipts)
+
+    def send_event(self, request: ApprovalRequest, *, event: str,
+                   requester_only: bool = False, event_key: str | None = None) -> tuple[str, ...]:
+        """Inform requester and current approvers; copies never carry buttons."""
+        configuration = self.workflow_configuration.load() if self.workflow_configuration else None
+        if configuration is None or not configuration.enabled or event not in configuration.raw['events']:
+            return ()
+        template = configuration.raw['events'][event]
+        facts = dict(request.presentation.facts if request.presentation else ())
+        text = template['title'] + '. ' + str(facts.get('Product') or (
+            request.presentation.title if request.presentation else 'Request'))
+        if facts.get('Total Commitment'):
+            text += ' — ' + facts['Total Commitment']
+        text += '. ' + template['message']
+        from .universal_interaction.teams import render_configured_event
+        status_card = render_configured_event(configuration, render_approval_card(request), event=event)
+        if any(identity not in self.owner_identity_ids for identity in request.authorized_approver_ids):
+            raise PermissionError('notification approver is outside approved audience')
+        recipients = (request.requested_by,) if requester_only else tuple(
+            dict.fromkeys((request.requested_by, *request.authorized_approver_ids)))
+        bindings = [self._binding_for_identity(identity) for identity in recipients]
+        if any(binding is None or binding.status != 'active' for binding in bindings):
+            raise PermissionError('notification recipient binding unavailable')
+        if len({binding.microsoft_tenant_id for binding in bindings}) != 1:
+            raise PermissionError('notification recipients cross tenant boundary')
+        transport = self._existing_transport()
+        receipts = []
+        for binding in bindings:
+            communication_id = 'comm-' + sha256((request.approval_id + ':' + (event_key or event)
+                                             + ':' + binding.jason_identity_id).encode()).hexdigest()
+            receipt = transport.send(binding=binding, text=text, card=status_card,
+                                     communication_id=communication_id)
+            if receipt.message_id_synthetic or not receipt.message_id:
+                raise RuntimeError('notification delivery unverified; reconciliation required')
+            receipts.append(receipt.message_id)
+        return tuple(receipts)
+
+    def update_decision(self, request: ApprovalRequest, *, status: str, card) -> tuple[str, ...]:
+        if status not in {'approved', 'denied', 'replaced'} or card is None:
+            raise PermissionError('canonical terminal card required')
+        if any(identity not in self.owner_identity_ids for identity in request.authorized_approver_ids):
+            raise PermissionError('terminal approval recipient outside approved audience')
+        transport = self._existing_transport()
+        receipts = []
+        for identity in request.authorized_approver_ids:
+            binding = self._binding_for_identity(identity)
+            receipts.extend(transport.update_approval(binding=binding, approval_id=request.approval_id,
+                                                     status=status, card=card))
+        return tuple(receipts)
 
     def send_status(self, *, text: str) -> tuple[str, ...]:
         """Existing governed owner status messaging, no approval implied."""

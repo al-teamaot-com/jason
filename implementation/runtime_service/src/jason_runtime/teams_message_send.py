@@ -60,7 +60,7 @@ class _PreparedTeamsMessageSend:
 
 def post_existing_teams_gateway(
     *, gateway_url: str, token: str, payload: dict,
-    timeout_seconds: float = 20,
+    timeout_seconds: float = 20, operation: str = 'send',
 ) -> dict:
     """One production transport for every approved Teams sender.
 
@@ -72,18 +72,33 @@ def post_existing_teams_gateway(
             or not isinstance(token, str) or not token.strip()
             or not isinstance(payload, dict)):
         raise PermissionError("configured Teams transport unavailable")
+    if operation not in {'send', 'update-approval', 'receipt'}:
+        raise ValueError('unsupported existing Teams gateway operation')
+    route = {'send': "/internal/proactive/send", 'update-approval': "/internal/proactive/update-approval",
+             'receipt': "/internal/proactive/receipt"}[operation]
     body = json.dumps(payload, sort_keys=True, separators=(",", ":"),
                       allow_nan=False).encode("utf-8")
     if len(body) > 65536:
         raise ValueError("Teams gateway payload exceeds bound")
     req = Request(
-        gateway_url.rstrip("/") + "/internal/proactive/send",
+        gateway_url.rstrip("/") + route,
         data=body, method="POST",
         headers={"Authorization": "Bearer " + token,
                  "Content-Type": "application/json"},
     )
     with urlopen(req, timeout=bounded_execution_timeout(timeout_seconds)) as response:
         result = json.loads(response.read().decode("utf-8"))
+    if operation == 'receipt':
+        if not isinstance(result, dict) or result.get('status') not in {'not_attempted', 'processing', 'provider_accepted'}:
+            raise RuntimeError('Teams communication receipt unavailable')
+        return result
+    if operation == 'update-approval':
+        if (not isinstance(result, dict) or result.get('status') != 'succeeded'
+                or result.get('approval_id') != payload.get('approvalId')
+                or not isinstance(result.get('message_ids'), list) or not result['message_ids']
+                or any(not isinstance(x, str) or not x or x.startswith('accepted:') for x in result['message_ids'])):
+            raise RuntimeError('Teams original card update unverified')
+        return result
     if (not isinstance(result, dict) or result.get("status") != "succeeded"
             or not isinstance(result.get("message_id"), str)
             or not result["message_id"].strip()):

@@ -1800,6 +1800,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 patch.object(runner, "CONTROLLER_RECOVERY_MANAGED_REPO", root / "managed"),
                 patch.object(runner, "CONTROLLER_RECOVERY_OWNER_REVIEW", review_path),
                 patch.object(runner, "_controller_recovery_old_source_verified", return_value=True),
+                patch.object(runner, "accepted_engineering_manager_routing", return_value=None),
                 patch.object(runner.subprocess, "check_output", side_effect=git_result),
             ):
                 pin = runner.controller_identity(new_root)
@@ -2010,7 +2011,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             )
             with patch.object(runner, "CONTROLLER_SOURCE", installed), patch.object(
                 runner.Path, "home", return_value=root
-            ):
+            ), patch.object(runner, "accepted_engineering_manager_routing", return_value=None):
                 with self.assertRaisesRegex(
                     runner.ReleaseManagerError, "controller recovery old source is not root immutable"
                 ):
