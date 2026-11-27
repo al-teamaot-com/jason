@@ -68,8 +68,8 @@ def reviewed_claim_scope_path(repo: Path) -> Path:
 # Its root-owned readback is mirrored for the unprivileged engineering worker;
 # this observation NEVER grants production authority. Root release checks read
 # the original protected files independently.
-NATIVE_HEALTH_GUARD = Path('/opt/jason/independent-component-release/trusted/tools/pmv4_host_release_guard.py')
-NATIVE_HEALTH_GUARD_SHA256 = '378239512b4da241adb027e7c88f5067c68388904b4b936eed10b3883e95dc22'
+NATIVE_HEALTH_GUARD = Path('/usr/local/lib/jason/scoped-backport/tools/pmv4_host_release_guard.py')
+NATIVE_HEALTH_GUARD_SHA256 = '0e4935d40037b694dd1dbbfcc894e2db891e60db83f62d49a4803be44034e3e4'
 NATIVE_JOURNAL_STATUS = Path('/var/lib/jason-audit-journal/control/forward-release-status.json')
 FORWARD_SCOPE_SHA256 = '697210854d0a0140d3a672750ad84d043e5ac99db117abd6043469312d017fb7'
 FORWARD_ACTION = 'RECOVER-SEGMENTED-AUDIT-WITHOUT-LEGACY-REBUILD'
@@ -2145,6 +2145,116 @@ def readmit_development_after_verified_credit_replenishment(
 
 
 
+
+def readmit_development_after_verified_local_reasoning(
+    state: dict[str, Any], admitted: list[dict[str, Any]], spool: Path,
+    *, max_active: int,
+) -> list[str]:
+    """One bounded same-approved-scope request after real local readiness.
+
+    Never consult a paid usage ledger, overwrite historical failures, or
+    admit a new issue, authority, retry budget or provider action.
+    """
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    active = sum(
+        1 for record in records.values()
+        if isinstance(record, Mapping) and record.get('phase') in ACTIVE_PHASES
+    )
+    slots = max(0, max(1, int(max_active)) - active_support_count(spool) - active)
+    resumed: list[str] = []
+    for item in admitted:
+        if not slots:
+            break
+        record = records.get(item['id'])
+        if (not isinstance(record, dict) or record.get('phase') != 'blocked'
+                or record.get('local_reasoning_requeue_id') or record.get('pr_number')
+                or record.get('blocker_class') in {'blocked_by_dependency','external_authority','internal_retry_exhausted'}
+                or (isinstance(record.get('recovery_handoff_intake'), Mapping)
+                    and record['recovery_handoff_intake'].get('status') == 'awaiting_governed_repair')):
+            continue
+        reason = str(record.get('reason') or '')
+        if reason.startswith('development reasoning failed: Hosted reasoning blocked: credit_balance_exhausted'):
+            kind, phase = 'search_plan', 'diagnosing'
+        elif reason.startswith('development edit reasoning failed: Hosted reasoning blocked: credit_balance_exhausted'):
+            kind, phase = 'edit_plan', 'implementing'
+        else:
+            continue
+        failed_id = str(record.get('reasoning_request_id') or '')
+        if re.fullmatch(r'[a-f0-9]{64}', failed_id) is None:
+            continue
+        req_path = spool / 'reasoning' / 'requests' / (failed_id + '.json')
+        try:
+            if not req_path.is_file() or req_path.stat().st_size > 200000:
+                continue
+            request = json.loads(req_path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        context = request.get('context') if isinstance(request, Mapping) else None
+        if (not isinstance(request, Mapping)
+                or request.get('request_id') != failed_id
+                or support.request_id(request) != failed_id
+                or request.get('kind') != kind
+                or request.get('support_item') != item['id']
+                or not isinstance(context, dict)
+                or context.get('work_class') != 'owner_approved_development'
+                or context.get('approval_source') != item.get('approval_source')
+                or context.get('approved_scope') != approved_scope(item)
+                or 'verified_local_recovery' in context):
+            continue
+        failure = support.reasoning_response(spool, failed_id)
+        if (not isinstance(failure, Mapping)
+                or failure.get('request_id') != failed_id
+                or failure.get('status') != 'failed'
+                or failure.get('primary_provider_error_code') != 'credit_balance_exhausted'
+                or failure.get('required_owner_action') != 'restore_provider_credits'
+                or failure.get('primary_http_status') != 429
+                or failure.get('retryable') is not False):
+            continue
+        try:
+            failed_at = datetime.fromisoformat(
+                str(failure.get('completed_at') or '').replace('Z', '+00:00')
+            )
+            receipt = support.verified_later_local_reasoning_success(
+                spool, failed_rid=failed_id, failed_at=failed_at, kind='search_plan'
+            )
+        except (ValueError, TypeError, OSError):
+            continue
+        if not isinstance(receipt, Mapping) or not receipt.get('request_id'):
+            continue
+        if any(request.get(k) != item.get(k) for k in ('title','evidence','acceptance')):
+            continue
+        renewed_context = {
+            'work_class': context['work_class'],
+            'approval_source': context['approval_source'],
+            'approved_scope': context['approved_scope'],
+        }
+        renewed_context['verified_local_recovery'] = {
+            'failed_request_id': failed_id,
+            'local_proof_request_id': str(receipt['request_id']),
+            'local_model': str(receipt.get('model') or ''),
+            'retry_limit': 1,
+            'purpose': 'same_approved_scope_after_local_reasoning_recovery',
+        }
+        new_id = queue_reasoning(
+            spool, kind='search_plan', item=item, context=renewed_context
+        )
+        if new_id == failed_id:
+            continue
+        record.update({
+            'phase': 'diagnosing',
+            'reason': 'One bounded development reasoning request after verified local reasoning readiness.',
+            'local_reasoning_original_failure_id': failed_id,
+            'local_reasoning_proof_id': str(receipt['request_id']),
+            'local_reasoning_requeue_id': new_id,
+            'reasoning_request_id': new_id,
+            'updated_at': now(),
+        })
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
+
 def blocked_work_next_action(reason: str) -> dict[str, str]:
     text = str(reason or "").casefold()
     if any(x in text for x in ("approval", "authorization", "credential")):
@@ -2362,7 +2472,7 @@ def _run_main() -> int:
     readmit_development_after_verified_transport_recovery(
         state, admitted, spool, max_active=max(1, int(args.max_active)),
     )
-    readmit_development_after_verified_credit_replenishment(
+    readmit_development_after_verified_local_reasoning(
         state, admitted, spool, max_active=max(1, int(args.max_active)),
     )
     readmit_stale_clean_development_source(

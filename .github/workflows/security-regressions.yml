@@ -48,6 +48,13 @@ jobs:
             tools/tests/test_pmv4_e_signed_bootstrap_phase.py \
             tools/tests/test_pmv4_e_signed_native_ledger.py \
             tools/tests/test_pmv4_e_native_root_entry.py
+      - name: Exact normal-release successor and original Owner-proof compatibility
+        run: |
+          python -m pytest -q \
+            implementation/kernel/tests/test_signed_owner_release.py \
+            implementation/kernel/tests/test_signed_owner_release_v2.py \
+            implementation/mcp_service/tests/test_release_approval_request.py \
+            tools/tests/test_release_host_reconciler_contract.py
       - name: Autotask catalog source-only Production Manager admission security
         run: |
           python -m pytest -q tools/tests/test_catalog_scoped_release_admission.py
@@ -156,6 +163,16 @@ jobs:
             tools/tests/test_scoped_backport_owner_local_approval.py \
             tools/tests/test_scoped_backport_four_unit_drift_reconcile.py \
             tools/tests/test_scoped_backport_projection_helper_repair.py
+      - name: Coordinated exact component release and native readback regressions
+        run: |
+          python -m pytest -q \
+            tools/tests/test_scoped_backport_coordinated.py \
+            tools/tests/test_scoped_backport_component_readback.py \
+            tools/tests/test_scoped_backport_coordinated_host.py \
+            tools/tests/test_production_freeze_retirement.py \
+            tools/tests/test_release_control_transition_worker.py \
+            tools/tests/test_scoped_backport_release_control_transition_worker.py \
+            tests/test_pmv4_host_release_guard.py
       - name: Microsoft group dormant and exact AOT activation composition
         run: |
           python -m pytest -q implementation/runtime_service/tests/test_composition.py -k group_admin

@@ -282,6 +282,27 @@ def _sha256(path: Path) -> str | None:
     return digest.hexdigest()
 
 
+def coordinated_component_state():
+    record = Path("/etc/jason-owner-release/coordinated-readback/component.json")
+    if not os.path.lexists(record) and not os.path.lexists("/etc/jason-owner-release/coordinated-component-readback.json"):
+        return None
+    helper = Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py")
+    for path in (helper, *helper.parents):
+        meta = path.lstat()
+        if meta.st_uid != 0 or meta.st_mode & 0o022 or path.is_symlink():
+            raise PermissionError("COORDINATED_READBACK_HELPER_UNTRUSTED")
+    result = subprocess.run(
+        ["/usr/bin/python3", "-I", "-B", str(helper)],
+        capture_output=True, text=True, timeout=35, check=False,
+    )
+    if result.returncode or len(result.stdout) > 65536:
+        raise PermissionError("COORDINATED_READBACK_NOT_VERIFIED")
+    data = json.loads(result.stdout)
+    if data.get("status") != "verified" or not isinstance(data.get("state"), dict):
+        raise PermissionError("COORDINATED_READBACK_NOT_VERIFIED")
+    return data["state"]
+
+
 def production_convergence_failures(
     *,
     release_manager_source_link: Path = RELEASE_MANAGER_SOURCE_LINK,
@@ -320,15 +341,31 @@ def production_convergence_failures(
     if runtime_revision is None or mcp_revision is None:
         failures.append("production_convergence_revision_unavailable")
         return failures, evidence
-    if runtime_revision != mcp_revision:
+    # A root-authorized component release may legitimately have different
+    # revisions. Verify every actual component before using the independent
+    # legacy host anchor for the unchanged PMV4 controlplane source checks.
+    try:
+        scoped = coordinated_component_state() if releases_root is None else None
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return ["production_convergence_coordinated_readback_denied"], evidence
+    baseline_revision = runtime_revision
+    if scoped is not None:
+        components = scoped["components"]
+        if (components["jason-runtime"]["revision"] != runtime_revision
+                or components["jason-mcp-pilot"]["revision"] != mcp_revision):
+            return ["production_convergence_coordinated_source_drift"], evidence
+        baseline_revision = scoped["host_revision"]
+        evidence["coordinated_release_id"] = scoped["release_id"]
+        evidence["coordinated_host_revision"] = baseline_revision
+    elif runtime_revision != mcp_revision:
         failures.append("production_convergence_revision_mismatch:runtime_mcp")
         return failures, evidence
 
     accepted = (pmv4_e_accepted_source_identity()
                 if control_mode=="replacement" else None)
     desired_revision = choose_pmv4_e_convergence_source(
-        mode=control_mode, runtime_revision=runtime_revision,
-        mcp_revision=mcp_revision, accepted=accepted,
+        mode=control_mode, runtime_revision=baseline_revision,
+        mcp_revision=baseline_revision, accepted=accepted,
     )
     if desired_revision is None:
         failures.append("production_convergence_pmv4_e_exact_source_or_rollback_drift")
@@ -343,7 +380,7 @@ def production_convergence_failures(
     release_dir = release_root / desired_revision
     evidence["desired_revision"] = desired_revision
     evidence["release_dir"] = str(release_dir)
-    baseline_dir = (releases_root or Path("/opt/jason/releases")) / runtime_revision
+    baseline_dir = (releases_root or Path("/opt/jason/releases")) / baseline_revision
     if not release_dir.is_dir() or not baseline_dir.is_dir():
         failures.append("production_convergence_release_source_missing")
         return failures, evidence
@@ -411,7 +448,7 @@ def production_convergence_failures(
                 "git","-C",str(engineering_source),"merge-base",
                 "--is-ancestor",desired_revision,engineering_revision,
             ],timeout=10)
-            clean=run(["git","-C",str(engineering_source),"status","--porcelain"],timeout=10)
+            clean=run(["git","--no-optional-locks","-C",str(engineering_source),"status","--porcelain"],timeout=10)
             engineering_matches=(ancestry.returncode==0 and clean.returncode==0
                                  and not clean.stdout.strip())
         else:
@@ -1112,7 +1149,20 @@ def request_engineering_worker() -> str:
                 else "systemd_start_failed_rc_" + str(result.returncode))
 
 
+def recovery_evidence_ready(failures: list[str]) -> bool:
+    # Missing/invalid manager routing or source evidence is not a verified
+    # recoverable container failure. Retain all detected symptoms, but do not
+    # mutate host services or storage while the exact control plane is unknown.
+    return not any(f in {
+        "production_convergence_engineering_manager_successor_invalid",
+        "production_convergence_engineering_source_probe_timeout",
+        "production_convergence_pmv4_e_acceptance_invalid",
+    } for f in failures)
+
+
 def bounded_recovery(failures: list[str]) -> list[str]:
+    if not recovery_evidence_ready(failures):
+        return []
     with non_disruptive_release_guard() as admitted:
         if not admitted:
             return []
@@ -1258,11 +1308,26 @@ def bounded_detect(root: Path) -> tuple[list[str], dict[str, Any]]:
         return detect(root)
     except subprocess.TimeoutExpired as exc:
         command = list(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else [str(exc.cmd)]
-        if len(command) < 2 or command[0] != 'docker' or command[1] not in ('inspect', 'exec'):
-            raise
-        return ['docker_probe_timeout'], {
+        if len(command) >= 2 and command[0] == 'docker' and command[1] in ('inspect', 'exec'):
+            failure = 'docker_probe_timeout'
+            probe = command[:3]
+        else:
+            # Only the exact, nonmutating convergence Git probes may be
+            # classified as uncertain. Never swallow a fetch, checkout,
+            # reset, write or another unexpected subprocess failure.
+            git_args = command[1:] if command and command[0] == 'git' else []
+            if git_args and git_args[0] == '--no-optional-locks':
+                git_args = git_args[1:]
+            tail = git_args[2:] if len(git_args) >= 3 and git_args[0] == '-C' else []
+            if not (tail in (['rev-parse', 'HEAD'], ['status', '--porcelain'])
+                    or (len(tail) == 4 and tail[:2] == ['merge-base', '--is-ancestor']
+                        and all(SHA_RE.fullmatch(x) for x in tail[2:]))):
+                raise
+            failure = 'production_convergence_engineering_source_probe_timeout'
+            probe = ['git', tail[0]]
+        return [failure], {
             'probe_status': 'inconclusive',
-            'probe_command': command[:3],
+            'probe_command': probe,
             'timeout_seconds': exc.timeout,
             'observed_at': now(),
         }
@@ -1285,8 +1350,8 @@ def main() -> int:
     # This executes only in the installed production watchdog, never tests or
     # arbitrary local roots, and never manipulates live audit/SQLite services.
     storage_repair = None
-    if root == DEFAULT_ROOT and any(
-            f.startswith('host_storage_capacity_') for f in failures):
+    if (root == DEFAULT_ROOT and recovery_evidence_ready(failures)
+            and any(f.startswith('host_storage_capacity_') for f in failures)):
         try:
             from jason_storage_autorepair import repair as bounded_storage_repair
             storage_repair = bounded_storage_repair()

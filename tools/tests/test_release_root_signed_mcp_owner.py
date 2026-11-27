@@ -98,6 +98,7 @@ def _state(tmp_path, monkeypatch):
     monkeypatch.setattr(root, "RELEASE_STATE", tmp_path)
     monkeypatch.setattr(root, "_host_operator_uid", lambda: request_path.stat().st_uid)
     monkeypatch.setattr(root, "_root_owner_identity_is_active", lambda oid, principal: True)
+    monkeypatch.setattr(root, "_trusted_normal_owner_proof_module", lambda: None)
     monkeypatch.setattr(root, "_trusted_owner_proof_module", lambda: SimpleNamespace(
         read_pinned_root_owner_public_key=lambda path: key.public_key(),
         verify_exact_owner_release=signature.verify_exact_owner_release,
