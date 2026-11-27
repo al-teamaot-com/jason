@@ -282,6 +282,27 @@ def _sha256(path: Path) -> str | None:
     return digest.hexdigest()
 
 
+def coordinated_component_state():
+    record = Path("/etc/jason-owner-release/coordinated-component-readback.json")
+    if not os.path.lexists(record):
+        return None
+    helper = Path("/usr/local/lib/jason/scoped-backport/tools/scoped_backport_component_readback.py")
+    for path in (helper, *helper.parents):
+        meta = path.lstat()
+        if meta.st_uid != 0 or meta.st_mode & 0o022 or path.is_symlink():
+            raise PermissionError("COORDINATED_READBACK_HELPER_UNTRUSTED")
+    result = subprocess.run(
+        ["/usr/bin/python3", "-I", "-B", str(helper)],
+        capture_output=True, text=True, timeout=35, check=False,
+    )
+    if result.returncode or len(result.stdout) > 65536:
+        raise PermissionError("COORDINATED_READBACK_NOT_VERIFIED")
+    data = json.loads(result.stdout)
+    if data.get("status") != "verified" or not isinstance(data.get("state"), dict):
+        raise PermissionError("COORDINATED_READBACK_NOT_VERIFIED")
+    return data["state"]
+
+
 def production_convergence_failures(
     *,
     release_manager_source_link: Path = RELEASE_MANAGER_SOURCE_LINK,
@@ -320,15 +341,31 @@ def production_convergence_failures(
     if runtime_revision is None or mcp_revision is None:
         failures.append("production_convergence_revision_unavailable")
         return failures, evidence
-    if runtime_revision != mcp_revision:
+    # A root-authorized component release may legitimately have different
+    # revisions. Verify every actual component before using the independent
+    # legacy host anchor for the unchanged PMV4 controlplane source checks.
+    try:
+        scoped = coordinated_component_state() if releases_root is None else None
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return ["production_convergence_coordinated_readback_denied"], evidence
+    baseline_revision = runtime_revision
+    if scoped is not None:
+        components = scoped["components"]
+        if (components["jason-runtime"]["revision"] != runtime_revision
+                or components["jason-mcp-pilot"]["revision"] != mcp_revision):
+            return ["production_convergence_coordinated_source_drift"], evidence
+        baseline_revision = scoped["host_revision"]
+        evidence["coordinated_release_id"] = scoped["release_id"]
+        evidence["coordinated_host_revision"] = baseline_revision
+    elif runtime_revision != mcp_revision:
         failures.append("production_convergence_revision_mismatch:runtime_mcp")
         return failures, evidence
 
     accepted = (pmv4_e_accepted_source_identity()
                 if control_mode=="replacement" else None)
     desired_revision = choose_pmv4_e_convergence_source(
-        mode=control_mode, runtime_revision=runtime_revision,
-        mcp_revision=mcp_revision, accepted=accepted,
+        mode=control_mode, runtime_revision=baseline_revision,
+        mcp_revision=baseline_revision, accepted=accepted,
     )
     if desired_revision is None:
         failures.append("production_convergence_pmv4_e_exact_source_or_rollback_drift")
@@ -343,7 +380,7 @@ def production_convergence_failures(
     release_dir = release_root / desired_revision
     evidence["desired_revision"] = desired_revision
     evidence["release_dir"] = str(release_dir)
-    baseline_dir = (releases_root or Path("/opt/jason/releases")) / runtime_revision
+    baseline_dir = (releases_root or Path("/opt/jason/releases")) / baseline_revision
     if not release_dir.is_dir() or not baseline_dir.is_dir():
         failures.append("production_convergence_release_source_missing")
         return failures, evidence
