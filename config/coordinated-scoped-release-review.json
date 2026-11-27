@@ -1,8 +1,8 @@
 {
-  "schema_version": "2.0",
+  "schema_version": "3.0",
   "profile": "coordinated-core-release",
-  "manifest_sha256": "a52e3c1948abc6699ef9ceadee1dbce150c83a3f34a5b3049b7f82e5d863acdf",
-  "scope_sha256": "be1fced362e08da53d6f0832aa11a972975d0cec51600ebe2def6430420cd5f2",
+  "manifest_sha256": "caeda524e17d49d208b4957c7176ddf2a9616d037d041c5bdd8c099d7e307eb5",
+  "scope_sha256": "9f0055873a28620b67d18ebf40e60abf69fb2b5fded167b7daf5ab0dd809f62b",
   "candidate_sha": "0f5fbcf4682af0cb6b93e9150a4062aee395509e",
   "production_authority": false
 }
