@@ -120,3 +120,34 @@ def test_sharepoint_site_management_uses_isolated_app_token_source(tmp_path: Pat
     with pytest.raises(PermissionError):
         manager.site_access.require_site_access(
             tenant_id=AOT_TENANT, site_id="unknown-site")
+
+
+def test_sharepoint_readonly_boundary_runtime_observes_live_revocation(tmp_path):
+    from kernel.client_boundaries import SQLiteClientBoundaryStore, SQLiteClientBoundaryRepository
+    db = tmp_path / "boundaries.sqlite3"
+    writer = SQLiteClientBoundaryStore(db)
+    repository = SQLiteClientBoundaryRepository(writer)
+    entry = sample_approved_boundary()
+    repository.add(entry)
+    runtime = build_microsoft_sharepoint_runtime(
+        boundary_db=db, boundary_read_only=True,
+        openbao_url="https://openbao.invalid",
+        role_id_path=tmp_path / "role-id",
+        secret_id_path=tmp_path / "secret-id",
+        transport=object(),
+    )
+    try:
+        assert runtime.store.connection.execute("PRAGMA query_only").fetchone() == (1,)
+        read_repository = SQLiteClientBoundaryRepository(runtime.store)
+        def check():
+            require_validated_sharepoint_service_boundary(
+                boundaries=read_repository, tenant_id=AOT_TENANT,
+                expected_client_id=AOT_CLIENT, expected_domain="teamaot.com")
+        check()
+        repository.replace(replace(entry, status=BoundaryStatus.REVOKED))
+        with pytest.raises(PermissionError, match="Dedicated validated"):
+            check()
+        assert runtime.reader.tokens.tokens._applications == {}
+    finally:
+        runtime.store.close()
+        writer.close()
