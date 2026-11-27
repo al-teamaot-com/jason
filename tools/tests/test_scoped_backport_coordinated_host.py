@@ -67,6 +67,50 @@ def host_fixture(monkeypatch,m):
     return h
 
 
+@pytest.mark.parametrize(
+    ("transition", "error"),
+    [
+        ("healthy", None),
+        ("unhealthy", "COORDINATED_TARGET_UNHEALTHY"),
+        ("starting", "COORDINATED_CANDIDATE_READINESS_TIMEOUT"),
+        ("changed_id", "COORDINATED_CANDIDATE_OR_CONFIGURATION_DRIFT"),
+        ("restarted", "COORDINATED_CANDIDATE_RESTARTED_DURING_READINESS"),
+    ],
+)
+def test_candidate_readiness_waits_only_for_exact_starting_container(monkeypatch, transition, error):
+    m = manifest()
+    h = host_fixture(monkeypatch, m)
+    target = m["targets"][0]
+    name = target["name"]
+    revision = m["projections"][target["projection"]]["candidate_sha"]
+    starting = container(name, target["candidate_image"], revision, "candidate")
+    starting["State"]["Health"]["Status"] = "starting"
+    observed = deepcopy(starting)
+    if transition == "changed_id":
+        observed["Id"] = "foreign"
+    elif transition == "restarted":
+        observed["State"]["StartedAt"] = "2026-01-01T00:00:01Z"
+    else:
+        observed["State"]["Health"]["Status"] = transition
+    journal = {
+        "candidate_ids": {name: "candidate"},
+        "original_configs": {name: native.config_fingerprint(starting)},
+    }
+    monkeypatch.setattr(h, "_journal", lambda _: journal)
+    monkeypatch.setattr(native, "required_container", lambda _: observed)
+    ticks = iter([0, 0, 60])
+    monkeypatch.setattr(native.time, "monotonic", lambda: next(ticks))
+    delays = []
+    monkeypatch.setattr(native.time, "sleep", delays.append)
+
+    if error:
+        with pytest.raises(ScopedBackportDenied, match=error):
+            h._wait_candidate_ready(m, target, starting)
+    else:
+        h._wait_candidate_ready(m, target, starting)
+    assert delays == [2]
+
+
 def test_native_helper_has_no_unreviewed_arguments(monkeypatch):
     m=manifest()
     h=host_fixture(monkeypatch,m)

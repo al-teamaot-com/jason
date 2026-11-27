@@ -19,6 +19,7 @@ import re
 import shlex
 import stat
 import tempfile
+import time
 from typing import Mapping
 
 from tools import scoped_backport_coordinated as co
@@ -780,15 +781,41 @@ class CoordinatedHost(NativeScopedBackportHost):
         ids = dict(self._journal(m).get("candidate_ids", {}))
         ids[t["name"]] = item["Id"]
         self._journal_update(m, "candidate_identity_durable", candidate_ids=ids)
-        self._verify_candidate(m, t, item)
+        self._wait_candidate_ready(m, t, item)
         self._journal_update(m, "component_replacement_verified")
 
-    def _verify_candidate(self, m: Mapping, t: Mapping, item: Mapping) -> None:
-        assert_healthy(item, t["name"])
-        if (item["Image"] != t["candidate_image"]
+    def _verify_candidate_identity(self, m: Mapping, t: Mapping, item: Mapping) -> None:
+        name = t["name"]
+        journal = self._journal(m)
+        if (item["Id"] != journal["candidate_ids"].get(name)
+                or item["Image"] != t["candidate_image"]
                 or source(item) != m["projections"][t["projection"]]["candidate_sha"]
-                or config_fingerprint(item) != self._journal(m)["original_configs"][t["name"]]):
+                or config_fingerprint(item) != journal["original_configs"][name]):
             deny("COORDINATED_CANDIDATE_OR_CONFIGURATION_DRIFT")
+
+    def _wait_candidate_ready(self, m: Mapping, t: Mapping, item: Mapping) -> None:
+        # The deploy helper has passed the HTTP health probe. Docker's own
+        # health check runs on a separate schedule and can still be starting.
+        started_at = item["State"]["StartedAt"]
+        deadline = time.monotonic() + 60
+        while True:
+            self._verify_candidate_identity(m, t, item)
+            state = item["State"]
+            if state["StartedAt"] != started_at:
+                deny("COORDINATED_CANDIDATE_RESTARTED_DURING_READINESS")
+            health = (state.get("Health") or {}).get("Status")
+            if not (state["Running"] and state["Status"] == "running" and health == "starting"):
+                assert_healthy(item, t["name"])
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                deny("COORDINATED_CANDIDATE_READINESS_TIMEOUT")
+            time.sleep(min(2, remaining))
+            item = required_container(t["name"])
+
+    def _verify_candidate(self, m: Mapping, t: Mapping, item: Mapping) -> None:
+        self._verify_candidate_identity(m, t, item)
+        assert_healthy(item, t["name"])
 
     def verify_candidate_targets(self, m: Mapping) -> None:
         for t in m["targets"]:
@@ -873,7 +900,6 @@ class CoordinatedHost(NativeScopedBackportHost):
             else:
                 code = "fetch('http://127.0.0.1:%d/healthz',{signal:AbortSignal.timeout(3000)}).then(r=>{if(r.status!==200)process.exit(1)}).catch(()=>process.exit(1))" % port
                 probe = ["node", "-e", code]
-            import time
             for _ in range(30):
                 if run("docker", "exec", t["name"], *probe, timeout=8, allow_failure=True).returncode == 0:
                     try:
