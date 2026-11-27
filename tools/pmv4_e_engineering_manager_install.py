@@ -259,44 +259,59 @@ SOURCE_METADATA_PATHS = frozenset({
 })
 
 
-def review_closed_loop_delta(git, candidate):
+def review_exact_successor_delta(git, candidate, baseline, scope_files, protected_paths, label):
     """Bind the exact squash-integrated change and inventory every excluded path.
 
     The candidate itself still must be current protected main with native CI.
     Other source-only work is never installed; intervening changes to any
     scoped worker, dependency, unit or native control deny this transaction.
     """
-    need(re.fullmatch(r"[0-9a-f]{40}", candidate) is not None, "CLOSED_LOOP_CANDIDATE")
-    git("merge-base", "--is-ancestor", CLOSED_LOOP_BASELINE, candidate)
+    need(re.fullmatch(r"[0-9a-f]{40}", candidate) is not None, label + "_CANDIDATE")
+    git("merge-base", "--is-ancestor", baseline, candidate)
     anchor = git("log", "--first-parent", "-1", "--format=%H",
-                 CLOSED_LOOP_BASELINE + ".." + candidate, "--",
+                 baseline + ".." + candidate, "--",
                  "tools/pmv4_e_engineering_manager_install.py").decode().strip()
-    need(re.fullmatch(r"[0-9a-f]{40}", anchor) is not None, "CLOSED_LOOP_SCOPE_COMMIT")
+    need(re.fullmatch(r"[0-9a-f]{40}", anchor) is not None, label + "_SCOPE_COMMIT")
     parents = git("rev-list", "--parents", "-n", "1", anchor).decode().split()
     need(len(parents) == 2 and parents[0] == anchor
          and re.fullmatch(r"[0-9a-f]{40}", parents[1]) is not None,
-         "CLOSED_LOOP_SINGLE_REVIEWED_COMMIT_REQUIRED")
+         label + "_SINGLE_REVIEWED_COMMIT_REQUIRED")
     parent = parents[1]
-    git("merge-base", "--is-ancestor", CLOSED_LOOP_BASELINE, parent)
+    git("merge-base", "--is-ancestor", baseline, parent)
     git("merge-base", "--is-ancestor", anchor, candidate)
     changed = set(git("diff", "--no-renames", "--name-only", parent, anchor).decode().splitlines())
-    need(changed == CLOSED_LOOP_SCOPE_FILES, "CLOSED_LOOP_REVIEWED_PATHS_CHANGED")
+    need(changed == scope_files, label + "_REVIEWED_PATHS_CHANGED")
     before = git("log", "--format=", "--name-only", "--no-renames",
-                 CLOSED_LOOP_BASELINE + ".." + parent).decode().splitlines()
+                 baseline + ".." + parent).decode().splitlines()
     after = git("log", "--format=", "--name-only", "--no-renames",
                 anchor + ".." + candidate).decode().splitlines()
     excluded = {path for path in before + after if path}
-    need(not (excluded & CLOSED_LOOP_PROTECTED_PATHS)
+    need(not (excluded & protected_paths)
          and not any(path.startswith(("infrastructure/pmv4-e-engineering-manager/",
                                       "tools/pmv4_e_", "config/")) for path in excluded),
-         "CLOSED_LOOP_INTERVENING_PROTECTED_SOURCE_CHANGE")
+         label + "_INTERVENING_PROTECTED_SOURCE_CHANGE")
     need(set(git("diff", "--no-renames", "--name-only", parent, candidate).decode().splitlines())
-         <= CLOSED_LOOP_SCOPE_FILES | excluded, "CLOSED_LOOP_SOURCE_INVENTORY_INCOMPLETE")
+         <= scope_files | excluded, label + "_SOURCE_INVENTORY_INCOMPLETE")
     return {"scope_commit": anchor, "scope_parent": parent,
             "excluded_source_paths": sorted(excluded)}
 
 
+def review_closed_loop_delta(git, candidate):
+    return review_exact_successor_delta(
+        git, candidate, CLOSED_LOOP_BASELINE, CLOSED_LOOP_SCOPE_FILES,
+        CLOSED_LOOP_PROTECTED_PATHS, "CLOSED_LOOP")
+
+
+def review_breaker_custody_delta(git, candidate):
+    return review_exact_successor_delta(
+        git, candidate, BREAKER_CUSTODY_BASELINE, BREAKER_CUSTODY_SCOPE_FILES,
+        BREAKER_CUSTODY_PROTECTED_PATHS, "BREAKER_CUSTODY")
+
+
 def reviewed_source_delta(git, baseline, candidate, source_files):
+    if baseline == BREAKER_CUSTODY_BASELINE:
+        need(set(source_files) == BREAKER_CUSTODY_SCOPE_FILES, "BREAKER_CUSTODY_SCOPE_INVALID")
+        return review_breaker_custody_delta(git, candidate)
     if baseline == CLOSED_LOOP_BASELINE:
         need(set(source_files) == CLOSED_LOOP_SCOPE_FILES, "CLOSED_LOOP_SCOPE_INVALID")
         return review_closed_loop_delta(git, candidate)
@@ -1085,8 +1100,31 @@ CLOSED_LOOP_PROTECTED_PATHS = {
     "tools/documentation_impact_gate.py", "tools/production_drift_guard.py",
     "config/release-manager-policy.json", "config/production-desired-state.json",
 }
+# Reuse the existing signed transaction for the exact accepted predecessor.
+BREAKER_CUSTODY_BASELINE = "1c028724328e0a758a59f7a58478e242317b84b1"
+BREAKER_CUSTODY_WORKERS = frozenset({"engineering_pipeline.py"})
+BREAKER_CUSTODY_SCOPE_FILES = {
+    "docs/operations/PMV4-Breaker-Recovery-Policy-Custody-20261125.md",
+    "tools/engineering_pipeline.py",
+    "tools/tests/test_engineering_pipeline.py",
+    "tools/pmv4_e_engineering_manager_install.py",
+    "tools/pmv4_e_engineering_manager_guard.py",
+    "tests/test_pmv4_e_engineering_pipeline_successor.py",
+    "tests/test_pmv4_e_engineering_manager_guard.py",
+}
+BREAKER_CUSTODY_SUPPORTING_FILES = CLOSED_LOOP_SUPPORTING_FILES - {"tools/engineering_pipeline.py"}
+# Exclude only the already-reviewed weekly reconciliation documentation.
+BREAKER_CUSTODY_PROTECTED_PATHS = (
+    CLOSED_LOOP_PROTECTED_PATHS | BREAKER_CUSTODY_SCOPE_FILES
+) - {"docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md"}
+BREAKER_POLICY_REL = "config/release-breaker-self-recovery-policy.json"
+BREAKER_POLICY_SOURCE = {
+    "repository": str(LIB / "engineering-source-repo"),
+    "revision": LKG,
+    "policy_sha256": "aa50f13341b228344b4da3e153fd2102d88ef0ffe71d96bd213605b42f14ba2d",
+}
 SUCCESSOR_BASELINES = (PIPELINE_BASELINE, TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE,
-                       SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE)
+                       SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE)
 PIPELINE_UNIT = SYSTEM_UNITS / SERVICES[0]
 PIPELINE_PROGRAM = LIB / "engineering_pipeline.py"
 MANAGER_GUARD = ROOT / "manager_guard.py"
@@ -1137,11 +1175,14 @@ def pipeline_scope_sha(plan):
              and plan.get("source_merges_not_rolled_back") is True
              and plan.get("release_gate_retry_budget_seconds") == 20,
              "SOURCE_INTEGRATION_EXACT_SCOPE_INVALID")
-    if plan["predecessor_candidate_sha"] == CLOSED_LOOP_BASELINE:
-        source = plan.get("closed_loop_source_review")
+    if plan["predecessor_candidate_sha"] in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
+        custody = plan["predecessor_candidate_sha"] == BREAKER_CUSTODY_BASELINE
+        workers = BREAKER_CUSTODY_WORKERS if custody else CLOSED_LOOP_WORKERS
+        protected_paths = BREAKER_CUSTODY_PROTECTED_PATHS if custody else CLOSED_LOOP_PROTECTED_PATHS
+        source = plan.get("breaker_custody_source_review" if custody else "closed_loop_source_review")
         need(isinstance(source, dict), "CLOSED_LOOP_SOURCE_REVIEW_MISSING")
         excluded = source.get("excluded_source_paths")
-        need(plan.get("worker_replacements") == sorted(CLOSED_LOOP_WORKERS)
+        need(plan.get("worker_replacements") == sorted(workers)
              and plan.get("required_scheduled_cycles") == 2
              and plan.get("source_integration_policy") == "independent_source_v1"
              and plan.get("production_transaction_mutex_preserved") is True
@@ -1158,11 +1199,35 @@ def pipeline_scope_sha(plan):
                      for k in ("scope_commit", "scope_parent"))
              and isinstance(excluded, list) and all(isinstance(x,str) for x in excluded)
              and excluded == sorted(set(excluded))
-             and not (set(excluded) & CLOSED_LOOP_PROTECTED_PATHS)
+             and not (set(excluded) & protected_paths)
              and not any(x.startswith(("infrastructure/pmv4-e-engineering-manager/",
                                        "tools/pmv4_e_", "config/")) for x in excluded),
              "CLOSED_LOOP_EXACT_SCOPE_INVALID")
+        if custody:
+            need(plan.get("breaker_policy_source") == BREAKER_POLICY_SOURCE,
+                 "BREAKER_CUSTODY_EXACT_POLICY_SOURCE_REQUIRED")
     return digest(canon(plan))
+
+
+def verify_scheduled_breaker_policy_route(pipeline, ledger):
+    stage = pipeline.get("stages", {}).get("release_breaker_recovery", {})
+    try:
+        observed = datetime.fromisoformat(ledger["observed_at"])
+        start = datetime.fromisoformat(pipeline["started_at"])
+        finish = datetime.fromisoformat(pipeline["finished_at"])
+        # The pipeline stores timestamps at second precision.
+        fresh = all(x.utcoffset() is not None for x in (observed,start,finish)) and (
+            int(start.timestamp()) <= int(observed.timestamp()) <= int(finish.timestamp()))
+    except (TypeError,ValueError,KeyError,OverflowError):
+        fresh = False
+    need(stage.get("status") == "succeeded"
+         and stage.get("policy_repository") == BREAKER_POLICY_SOURCE["repository"]
+         and fresh and ledger.get("lkg_revision") == LKG
+         and ledger.get("breaker_state") == "closed"
+         and ledger.get("status") in ("already_closed","root_verified_closed")
+         and ledger.get("next_action") == "none",
+         "BREAKER_CUSTODY_SCHEDULED_POLICY_ROUTE_NOT_VERIFIED")
+    return dict(BREAKER_POLICY_SOURCE)
 
 
 class PipelineSuccessor(NativeAdapter):
@@ -1192,6 +1257,10 @@ class PipelineSuccessor(NativeAdapter):
             self.source_files = CLOSED_LOOP_SCOPE_FILES
             self.supporting_files = CLOSED_LOOP_SUPPORTING_FILES
             self.changed_workers = CLOSED_LOOP_WORKERS
+        elif predecessor == BREAKER_CUSTODY_BASELINE:
+            self.source_files = BREAKER_CUSTODY_SCOPE_FILES
+            self.supporting_files = BREAKER_CUSTODY_SUPPORTING_FILES
+            self.changed_workers = BREAKER_CUSTODY_WORKERS
         self.candidate, self.n, self.p, self.code = candidate, n, p, code
         self.g = load(code["tools/pmv4_e_engineering_manager_guard.py"],
                       REPO / "tools/pmv4_e_engineering_manager_guard.py")
@@ -1205,7 +1274,7 @@ class PipelineSuccessor(NativeAdapter):
 
     def pipeline_artifact_names(self):
         names = set(self.g["PIPELINE_ARTIFACTS"])
-        if self.predecessor == CLOSED_LOOP_BASELINE:
+        if self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
             names |= {"issue_resolution_engine.py"}
         return names
 
@@ -1326,6 +1395,23 @@ class PipelineSuccessor(NativeAdapter):
         need(accepted.get("evidence",{}).get("independent_source_policy_verified") is True,
              "CLOSED_LOOP_PREDECESSOR_SOURCE_POLICY_NOT_ACCEPTED")
 
+    def verify_breaker_policy_source(self):
+        expected = BREAKER_POLICY_SOURCE
+        repo = Path(expected["repository"])
+        need(repo.resolve(strict=True) == repo, "BREAKER_CUSTODY_POLICY_REPOSITORY_ALIAS")
+        info = repo.lstat()
+        need(stat.S_ISDIR(info.st_mode) and info.st_uid == info.st_gid == 1000
+             and not info.st_mode & 0o022, "BREAKER_CUSTODY_POLICY_REPOSITORY_CUSTODY")
+        git = self.p["git"]
+        need(git(repo, "rev-parse", "HEAD").decode().strip() == expected["revision"]
+             and not git(repo, "status", "--porcelain", "--untracked-files=all").strip(),
+             "BREAKER_CUSTODY_POLICY_REPOSITORY_REVISION")
+        raw = git(repo, "show", expected["revision"] + ":" + BREAKER_POLICY_REL)
+        protected = self.p["read"](Path("/opt/jason/releases") / LKG / BREAKER_POLICY_REL, 0)
+        need(raw == protected and digest(raw) == expected["policy_sha256"],
+             "BREAKER_CUSTODY_POLICY_SOURCE_MISMATCH")
+        return dict(expected)
+
     def inspect(self):
         need(not os.path.lexists(self.directory) and not os.path.lexists(self.release.parent),
              "PIPELINE_SUCCESSOR_ALREADY_PRESENT")
@@ -1368,9 +1454,11 @@ class PipelineSuccessor(NativeAdapter):
             need(snapshot(PAUSE) is None,"SOURCE_INTEGRATION_PREDECESSOR_PAUSED")
             self.verify_source_integration_predecessor(history,activated)
             encoded = old["after_images"][str(PAUSE)]
-        elif self.predecessor == CLOSED_LOOP_BASELINE:
+        elif self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
             need(snapshot(PAUSE) is None,"CLOSED_LOOP_PREDECESSOR_PAUSED")
             self.verify_closed_loop_predecessor(history,activated)
+            if self.predecessor == BREAKER_CUSTODY_BASELINE:
+                self.verify_breaker_policy_source()
             encoded = old["after_images"][str(PAUSE)]
         else:
             encoded = old["before_images"][str(PAUSE)]
@@ -1462,7 +1550,7 @@ class PipelineSuccessor(NativeAdapter):
                 "root_receipt_recipe":recipe,"protected_health":protected,
                 "source_hashes":{k:digest(v) for k,v in self.code.items()},
                 "rollback":"restore exact predecessor receipt and files; retain verified engineering pause; native revalidation only"}
-        if self.predecessor in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE):
+        if self.predecessor in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
             plan.update(worker_replacements=sorted(self.changed_workers),
                         required_scheduled_cycles=2, quarantine_existing_todo_identity="TODO-OPS-013",
                         conflicted_issues=[1459,1500],preserve_existing_issue_authority=True)
@@ -1471,7 +1559,7 @@ class PipelineSuccessor(NativeAdapter):
                         retry_only_on_contention=True,legacy_release_guard_immediate=True,
                         preserve_predecessor_acceptance_requirements=True,
                         supersede_pending_only_before_first_worker_execution=True)
-        if self.predecessor in (SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE):
+        if self.predecessor in (SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
             plan.update(source_integration_policy="independent_source_v1",
                         production_transaction_mutex_preserved=True,
                         exact_native_release_records_unchanged=True,
@@ -1480,6 +1568,11 @@ class PipelineSuccessor(NativeAdapter):
         if self.predecessor == CLOSED_LOOP_BASELINE:
             plan.update(closed_loop_source_review=review_closed_loop_delta(
                 lambda *args: self.p["git"](REPO,*args),self.candidate),
+                engineering_progress_detector_required=True)
+        if self.predecessor == BREAKER_CUSTODY_BASELINE:
+            plan.update(breaker_custody_source_review=review_breaker_custody_delta(
+                lambda *args: self.p["git"](REPO,*args),self.candidate),
+                breaker_policy_source=self.verify_breaker_policy_source(),
                 engineering_progress_detector_required=True)
         return plan,before,after
 
@@ -1556,6 +1649,9 @@ class PipelineSuccessor(NativeAdapter):
             need(snapshot(path) == (None if resumed and path == PAUSE else value),
                  "PIPELINE_INSTALLED_FILE_CHANGED:"+path.name)
         need(self.protected() == self.plan["protected_health"],"PIPELINE_PROTECTED_STATE_CHANGED")
+        if self.predecessor == BREAKER_CUSTODY_BASELINE:
+            need(self.verify_breaker_policy_source() == self.plan["breaker_policy_source"],
+                 "BREAKER_CUSTODY_APPROVED_POLICY_SOURCE_CHANGED")
 
     def namespace_probe(self):
         # No real work item is run. The exact system-manager sandbox is tested
@@ -1651,10 +1747,13 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                     history=STATE/self.predecessor
                     activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
                     self.verify_source_integration_predecessor(history,activated)
-                if self.predecessor == CLOSED_LOOP_BASELINE:
+                if self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
                     history=STATE/self.predecessor
                     activated=json.loads(self.n["read"](history/"activation.json",0,0o400))
                     self.verify_closed_loop_predecessor(history,activated)
+                    if self.predecessor == BREAKER_CUSTODY_BASELINE:
+                        need(self.verify_breaker_policy_source() == plan["breaker_policy_source"],
+                             "BREAKER_CUSTODY_APPROVED_POLICY_SOURCE_CHANGED")
                 for path,old in self.before.items():
                     need(snapshot(path) == (self.pause_image if path == PAUSE else old),
                          "PIPELINE_PRECUTOVER_FILE_CHANGED")
@@ -1726,7 +1825,7 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                 and watchdog.get("ExecMainStatus")=="0"):
             print("PIPELINE_SCHEDULED_WATCHDOG_ACCEPTANCE_PENDING")
             return False
-        if self.predecessor == CLOSED_LOOP_BASELINE:
+        if self.predecessor in (CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
             observed=json.loads(self.p["read"](MANAGER.parent/"self-heal/state.json",1000,0o600))
             probe=observed.get("engineering_progress")
             try:
@@ -1741,14 +1840,14 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
         return super().verify_activation()
 
     def record_scheduled_acceptance(self,sha,evidence,controller,pipeline,timer_at):
-        if self.predecessor not in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE):
+        if self.predecessor not in (TODO_CONFLICT_BASELINE, RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
             return super().record_scheduled_acceptance(sha,evidence,controller,pipeline,timer_at)
-        if self.predecessor in (RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE):
+        if self.predecessor in (RELEASE_RETRY_BASELINE, SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
             need(controller.get("release_gate_status")=="allowed",
                  "RELEASE_RETRY_CONTROLLER_ADMISSION_NOT_VERIFIED")
             evidence={**evidence,"bounded_release_retry_policy_verified":True}
         state_dir=PAUSE.parent
-        if self.predecessor in (SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE):
+        if self.predecessor in (SOURCE_INTEGRATION_BASELINE, CLOSED_LOOP_BASELINE, BREAKER_CUSTODY_BASELINE):
             queue=json.loads(self.p["read"](state_dir/"pmv3-integration-queue-state.json",1000,0o600))
             view=controller.get("integration_queue") or {}
             backlog=queue.get("source_backlog") or {}
@@ -1767,6 +1866,13 @@ print('PIPELINE_NAMESPACE_CONTRACT_VERIFIED')
                  "SOURCE_INTEGRATION_SCHEDULED_POLICY_NOT_VERIFIED")
             evidence={**evidence,"independent_source_policy_verified":True,
                       "source_backlog_preserved":True,"native_production_unchanged":True}
+        if self.predecessor == BREAKER_CUSTODY_BASELINE:
+            ledger=json.loads(self.p["read"](state_dir/"release-breaker-recovery-state.json",1000,0o600))
+            route=verify_scheduled_breaker_policy_route(pipeline,ledger)
+            need(self.verify_breaker_policy_source() == BREAKER_POLICY_SOURCE,
+                 "BREAKER_CUSTODY_SCHEDULED_POLICY_SOURCE_CHANGED")
+            evidence={**evidence,"breaker_policy_route_verified":True,
+                      "breaker_policy_source":route}
         intake=json.loads(self.p["read"](state_dir/"todo-intake-state.json",1000,0o600))
         supervisor=json.loads(self.p["read"](state_dir/"engineering-supervisor-state.json",1000,0o600))
         conflict=(intake.get("identity_conflicts") or {}).get("TODO-OPS-013",{})
@@ -1870,6 +1976,7 @@ def main():
     successor.add_argument("--release-retry-successor",action="store_true")
     successor.add_argument("--source-integration-successor",action="store_true")
     successor.add_argument("--closed-loop-successor",action="store_true")
+    successor.add_argument("--breaker-custody-successor",action="store_true")
     choice=cli.add_mutually_exclusive_group()
     choice.add_argument("--apply", action="store_true")
     choice.add_argument("--recover",action="store_true")
@@ -1879,9 +1986,12 @@ def main():
     cli.add_argument("--scope-sha")
     a = cli.parse_args()
     n,p = native()
-    if a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor or a.source_integration_successor or a.closed_loop_successor:
+    if (a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor
+            or a.source_integration_successor or a.closed_loop_successor or a.breaker_custody_successor):
         need(not a.resume,"PIPELINE_RESUME_REQUIRES_VERIFIED_TRANSACTION")
-        if a.closed_loop_successor:
+        if a.breaker_custody_successor:
+            predecessor,files,supporting=BREAKER_CUSTODY_BASELINE,BREAKER_CUSTODY_SCOPE_FILES,BREAKER_CUSTODY_SUPPORTING_FILES
+        elif a.closed_loop_successor:
             predecessor,files,supporting=CLOSED_LOOP_BASELINE,CLOSED_LOOP_SCOPE_FILES,CLOSED_LOOP_SUPPORTING_FILES
         elif a.source_integration_successor:
             predecessor,files,supporting=SOURCE_INTEGRATION_BASELINE,SOURCE_INTEGRATION_SCOPE_FILES,SOURCE_INTEGRATION_SUPPORTING_FILES
