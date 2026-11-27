@@ -6616,7 +6616,7 @@ def test_retired_mode_exact_mcp_decision_required_before_mutation(tmp_path, monk
     import json
     import pytest
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from kernel import signed_owner_release as owner
+    from kernel import signed_owner_release_v2 as owner
     from jason_mcp.release_approval_request import queue_release_approval_request
     from jason_mcp import release_approval_request as issuer
     policy="9"*64
@@ -6656,7 +6656,7 @@ def test_retired_mode_exact_mcp_decision_required_before_mutation(tmp_path, monk
 def test_retired_policy_never_restores_legacy_freeze(tmp_path,monkeypatch):
     import json
     import pytest
-    from kernel import signed_owner_release
+    from kernel import signed_owner_release_v2 as signed_owner_release
     folder=tmp_path/"owner-unfreeze-receipts"
     folder.mkdir()
     p=folder/("release-"+"a"*16+".json")

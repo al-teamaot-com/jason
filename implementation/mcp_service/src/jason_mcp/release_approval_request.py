@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from kernel.signed_owner_release import (
+from kernel.signed_owner_release_v2 import (
     EXACT_OWNER_OAUTH_SUBJECTS, issue_exact_owner_release,
     verify_exact_owner_release, read_retired_release_policy,
     require_retired_release_mode,

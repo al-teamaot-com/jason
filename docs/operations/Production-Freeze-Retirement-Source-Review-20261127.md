@@ -24,7 +24,13 @@ the November 10 normal-release governance contract.
 
 Extend the existing exact Owner proof with a distinct version-2 normal
 release binding to the root-attested policy recording permanent retirement.
-Version 1 remains cryptographically unchanged and cannot satisfy version 2.
+The original implementation and historical SHA-256 pins are byte-identical.
+A separate, independently pinned successor is used by the updated ordinary
+issuer and verifier. Legacy bootstrap and recovery still use the original.
+The root installer stages only the exact successor and a dedicated empty
+public policy directory; the MCP deployment projects only that directory
+read-only, never the private Owner trust/control directory. These are
+preparatory changes and cannot themselves retire the freeze.
 The normal issuer and both verification paths require the independently
 installed policy, an absent active marker, current exact candidate, rollback,
 scope, manifest, authenticated identity, signature and expiry. Legacy
@@ -37,9 +43,10 @@ standing approval, new deployment hold, or per-release human decision. No
 source code in this change creates it or removes the freeze. Missing
 policy evidence cannot authorize the new normal deployment path.
 
-Local regression: 371 tests and five subtests passed, including the
-existing frozen-proof path, isolated normal-mode issuer and native
-verification, wrong-mode denial and legacy recovery conflict.
+Local regression: 541 tests and five subtests passed, including historical
+bootstrap pin integrity, original and successor proof vectors, native rollback
+admission, isolated normal-mode issuer and root verification, wrong-mode
+denial, legacy recovery conflict, and source/install/mount consistency.
 
 ## Unresolved before production eligibility
 
@@ -47,7 +54,13 @@ verification, wrong-mode denial and legacy recovery conflict.
 2. Integrate the existing mobile/Teams release-approval channel with the
    normal release policy without adding a second Owner decision. The
    current normal-mode candidate admits only the signed MCP route.
-3. Reconcile active independent-component, catalog and scoped-backport
+3. The actual live root reconciler is wrapped by the independently adopted
+   audit-journal controller. Its legacy worker is immutably pinned, and its
+   compatible_host_releases list is empty. Do not overwrite the pinned
+   worker, change the journal policy, or bypass the wrapper. The exact
+   installed successor needs a separately reviewed native migration that
+   preserves the audit-journal guarantees and the original rollback path.
+   Reconcile active independent-component, catalog and scoped-backport
    release/recovery routes against the shared policy; retire only obsolete
    one-use routes and preserve all historical signed evidence. Reconcile
    draft PR #2766 against this target rather than deploying a new

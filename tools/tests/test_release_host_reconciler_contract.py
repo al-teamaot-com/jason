@@ -972,7 +972,7 @@ def test_root_verifies_retired_normal_proof_and_rejects_frozen_replay(tmp_path, 
     from datetime import datetime, timezone
     from hashlib import sha256
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from kernel import signed_owner_release as proof
+    from kernel import signed_owner_release_v2 as proof
     spec=importlib.util.spec_from_file_location("root_retired_mode_fixture", ROOT/"tools/release_host_reconcile_worker.py")
     worker=importlib.util.module_from_spec(spec)
     spec.loader.exec_module(worker)
@@ -991,7 +991,7 @@ def test_root_verifies_retired_normal_proof_and_rejects_frozen_replay(tmp_path, 
     path.parent.mkdir()
     monkeypatch.setattr(worker,"RELEASE_STATE",tmp_path)
     monkeypatch.setattr(worker,"_host_operator_uid",os.geteuid)
-    monkeypatch.setattr(worker,"_trusted_owner_proof_module",lambda:proof)
+    monkeypatch.setattr(worker,"_trusted_normal_owner_proof_module",lambda:(proof,policy))
     monkeypatch.setattr(worker,"_root_owner_identity_is_active",lambda oid,principal: oid==proof.OWNER_OID and principal==proof.OWNER_PRINCIPAL)
     monkeypatch.setattr(proof,"read_retired_release_policy",lambda:policy)
     monkeypatch.setattr(proof,"read_pinned_root_owner_public_key",lambda _:key.public_key())
@@ -1010,3 +1010,45 @@ def test_root_verifies_retired_normal_proof_and_rejects_frozen_replay(tmp_path, 
     write(release_policy_sha256=policy)
     (tmp_path/"production-deployment-freeze").write_text("unexpected marker")
     assert not worker._signed_mcp_owner_release_authorized(candidate,rollback,record)
+
+
+def test_normal_owner_successor_keeps_legacy_pins_and_stages_public_mount_only():
+    import hashlib
+    import re
+    legacy = ROOT / "implementation/kernel/signed_owner_release.py"
+    successor = ROOT / "implementation/kernel/signed_owner_release_v2.py"
+    legacy_pin = "f50eea90102d9a1de82b3753ec8d0cd225280d385ac7a658ae2c2a303934a0e3"
+    assert hashlib.sha256(legacy.read_bytes()).hexdigest() == legacy_pin
+    pin = hashlib.sha256(successor.read_bytes()).hexdigest()
+    worker = (ROOT/"tools/release_host_reconcile_worker.py").read_text()
+    installer = (ROOT/"tools/install_release_host_reconciler.py").read_text()
+    deploy = (ROOT/"infrastructure/jason-mcp/production-deploy.sh").read_text()
+    assert f'ROOT_OWNER_PROOF_SUCCESSOR_SHA256 = "{pin}"' in worker
+    assert f'NORMAL_VERIFIER_SHA256 = "{pin}"' in installer
+    assert 'LIB / "owner_signed_release.py"' in installer
+    assert 'LIB / "owner_signed_release_v2.py"' in installer
+    assert 'stage_normal_owner_verifier()' in installer
+    assert 'exec(compile(raw, str(path), "exec"), module.__dict__)' in worker
+    directory="/etc/jason-owner-release/normal-release-policy"
+    assert directory in worker and directory in installer and directory in deploy
+    assert directory+"/production-freeze-retirement.json" in successor.read_text()
+    assert '--add-readonly-bind "$NORMAL_RELEASE_POLICY_DIR:$NORMAL_RELEASE_POLICY_DIR"' in deploy
+    assert '"\x24{NORMAL_RELEASE_POLICY_ARGS[@]}"' in deploy
+    assert '--add-readonly-bind "/etc/jason-owner-release:/etc/jason-owner-release"' not in deploy
+
+
+def test_normal_root_loader_absence_is_legacy_but_present_untrusted_code_denies(tmp_path,monkeypatch):
+    import importlib.util
+    import pytest
+    spec = importlib.util.spec_from_file_location("test_normal_owner_root_loader", ROOT/"tools/release_host_reconcile_worker.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    policy = tmp_path/"retirement.json"
+    successor=tmp_path/"successor.py"
+    monkeypatch.setattr(module,"ROOT_RETIREMENT_POLICY",policy)
+    monkeypatch.setattr(module,"ROOT_OWNER_PROOF_SUCCESSOR",successor)
+    assert module._trusted_normal_owner_proof_module() is None
+    policy.write_text("{}")
+    successor.write_text("raise RuntimeError('must not execute untrusted code')")
+    with pytest.raises(module.HostReconcileError,match="untrusted|digest changed"):
+        module._trusted_normal_owner_proof_module()

@@ -35,6 +35,7 @@ def test_stage_only_installs_exact_rollback_files_before_reviewed_policy(
     tools.mkdir(parents=True)
     (tools / "protected_root_policy_migration.py").write_text("trusted migration helper")
     (tools / "release_host_reconcile_worker.py").write_text("trusted root worker")
+    (tools / "pmv4_stage_a_native_install.py").write_text("trusted Stage A helper")
     kernel = source / "implementation" / "kernel"
     kernel.mkdir(parents=True)
     (kernel / "signed_owner_release.py").write_text("trusted Owner verifier")
@@ -71,6 +72,7 @@ def test_stage_only_installs_exact_rollback_files_before_reviewed_policy(
         stage_for_candidate=stage,
     )
     monkeypatch.setitem(sys.modules, "protected_root_policy_migration", fake_migration)
+    monkeypatch.setattr(installer, "stage_normal_owner_verifier", lambda: None)
     monkeypatch.setattr(installer, "ROOT", source)
     monkeypatch.setattr(installer, "LIB", dest)
     monkeypatch.setattr(installer, "SPOOL", spool)
@@ -99,6 +101,7 @@ def test_stage_only_does_not_mutate_root_policy_for_no_new_required_timer(
     (candidate / "tools").mkdir(parents=True)
     (candidate / "tools" / "protected_root_policy_migration.py").write_text("fixed helper")
     (candidate / "tools" / "release_host_reconcile_worker.py").write_text("fixed worker")
+    (candidate / "tools" / "pmv4_stage_a_native_install.py").write_text("fixed Stage A helper")
     kernel = candidate / "implementation" / "kernel"
     kernel.mkdir(parents=True)
     (kernel / "signed_owner_release.py").write_text("fixed Owner verifier")
@@ -124,6 +127,7 @@ def test_stage_only_does_not_mutate_root_policy_for_no_new_required_timer(
         stage_for_candidate=lambda *args: checks.append(args),
     )
     monkeypatch.setitem(sys.modules, "protected_root_policy_migration", fake)
+    monkeypatch.setattr(installer, "stage_normal_owner_verifier", lambda: None)
     monkeypatch.setattr(installer, "ROOT", candidate)
     monkeypatch.setattr(installer, "LIB", tmp_path / "lib")
     monkeypatch.setattr(installer, "SPOOL", tmp_path / "spool")

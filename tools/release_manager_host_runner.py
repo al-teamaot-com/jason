@@ -580,7 +580,7 @@ def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None
     module_root = Path(__file__).resolve().parents[1] / "implementation"
     if str(module_root) not in sys.path:
         sys.path.insert(0, str(module_root))
-    from kernel.signed_owner_release import read_retired_release_policy
+    from kernel.signed_owner_release_v2 import read_retired_release_policy
     if read_retired_release_policy() is not None:
         # A historical receipt must never recreate a retired global hold.
         # Preserve its evidence and deny the inconsistent transaction.
@@ -4204,7 +4204,7 @@ def verify_signed_mcp_owner_request(
     root = Path(__file__).resolve().parents[1] / "implementation"
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
-    from kernel.signed_owner_release import (
+    from kernel.signed_owner_release_v2 import (
         EXACT_OWNER_OAUTH_SUBJECTS, OwnerReleaseProofDenied,
         verify_exact_owner_release, read_retired_release_policy,
         require_retired_release_mode,
@@ -7066,7 +7066,7 @@ def require_retired_mode_approval(state_root: Path, record: Mapping[str, Any]) -
     root = Path(__file__).resolve().parents[1] / "implementation"
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
-    from kernel.signed_owner_release import (
+    from kernel.signed_owner_release_v2 import (
         read_retired_release_policy, require_retired_release_mode,
         read_pinned_root_owner_public_key, OwnerReleaseProofDenied,
     )
@@ -7129,7 +7129,7 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                     module_root = Path(__file__).resolve().parents[1] / "implementation"
                     if str(module_root) not in sys.path:
                         sys.path.insert(0, str(module_root))
-                    from kernel.signed_owner_release import read_retired_release_policy
+                    from kernel.signed_owner_release_v2 import read_retired_release_policy
                     if read_retired_release_policy() is not None:
                         raise ReleaseManagerError("retired release policy conflicts with active freeze")
                     # A frozen recovery is admitted only when the complete fresh drift

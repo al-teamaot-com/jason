@@ -61,21 +61,14 @@ def _fields(data: Mapping[str, Any]) -> None:
         "schema_version", "authorization", "approval_id", "decision",
         "tenant_id", "owner_oid", "owner_principal", "organization_id",
         "authentication", "release_id", "candidate_sha", "rollback_sha",
-        "scope_sha256", "manifest_sha256",
+        "scope_sha256", "manifest_sha256", "freeze_sha256",
         "issued_at", "expires_at", "signer_public_key_sha256",
         "standing_authority", "one_release_only",
     }
-    if not isinstance(data, Mapping):
+    if not isinstance(data, Mapping) or set(data) != required:
         raise OwnerReleaseProofDenied("OWNER_RELEASE_PROOF_SCHEMA_INVALID")
-    normal = data.get("schema_version") == "2.0"
-    binding = "release_policy_sha256" if normal else "freeze_sha256"
-    required.add(binding)
-    if set(data) != required:
-        raise OwnerReleaseProofDenied("OWNER_RELEASE_PROOF_SCHEMA_INVALID")
-    if (data["schema_version"] not in ("1.0", "2.0")
-            or data["authorization"] != (
-                "authenticated_entra_owner_exact_normal_release" if normal else
-                "authenticated_entra_owner_exact_release")
+    if (data["schema_version"] != "1.0"
+            or data["authorization"] != "authenticated_entra_owner_exact_release"
             or data["decision"] not in ("approve", "deny")
             or not isinstance(data["approval_id"], str)
             or ID_RE.fullmatch(data["approval_id"]) is None
@@ -96,7 +89,7 @@ def _fields(data: Mapping[str, Any]) -> None:
             or not SHA.fullmatch(data["rollback_sha"])
             or data["release_id"] != "release-" + data["candidate_sha"][:16]
             or any(not isinstance(data[k], str) or DIGEST.fullmatch(data[k]) is None
-                   for k in ("scope_sha256", "manifest_sha256", binding,
+                   for k in ("scope_sha256", "manifest_sha256", "freeze_sha256",
                              "signer_public_key_sha256"))):
         raise OwnerReleaseProofDenied("OWNER_RELEASE_PROOF_FIELDS_INVALID")
 
@@ -104,8 +97,7 @@ def _fields(data: Mapping[str, Any]) -> None:
 def issue_exact_owner_release(
     *, approval_id: str, release_id: str, candidate_sha: str,
     rollback_sha: str, scope_sha256: str, manifest_sha256: str,
-    freeze_sha256: str | None = None, release_policy_sha256: str | None = None,
-    verified_tenant_id: str, verified_owner_oid: str,
+    freeze_sha256: str, verified_tenant_id: str, verified_owner_oid: str,
     verified_principal: str, verified_organization_id: str,
     confirmed_decision: str, at: datetime, private_key: Ed25519PrivateKey,
 ) -> dict[str, Any]:
@@ -114,13 +106,9 @@ def issue_exact_owner_release(
     if at.tzinfo is None or at.utcoffset() is None:
         raise OwnerReleaseProofDenied("OWNER_RELEASE_TIME_NOT_AWARE")
     at = at.astimezone(timezone.utc)
-    if (freeze_sha256 is None) == (release_policy_sha256 is None):
-        raise OwnerReleaseProofDenied("OWNER_RELEASE_EXACT_MODE_BINDING_REQUIRED")
-    normal = release_policy_sha256 is not None
     payload = {
-        "schema_version": "2.0" if normal else "1.0",
-        "authorization": ("authenticated_entra_owner_exact_normal_release" if normal
-                          else "authenticated_entra_owner_exact_release"),
+        "schema_version": "1.0",
+        "authorization": "authenticated_entra_owner_exact_release",
         "approval_id": approval_id,
         "decision": confirmed_decision,
         "tenant_id": verified_tenant_id,
@@ -133,8 +121,7 @@ def issue_exact_owner_release(
         "rollback_sha": rollback_sha,
         "scope_sha256": scope_sha256,
         "manifest_sha256": manifest_sha256,
-        **({"release_policy_sha256": release_policy_sha256} if normal
-           else {"freeze_sha256": freeze_sha256}),
+        "freeze_sha256": freeze_sha256,
         "issued_at": at.isoformat(),
         "expires_at": (at + MAX_AGE).isoformat(),
         "signer_public_key_sha256": public_key_sha256(private_key.public_key()),
@@ -153,8 +140,7 @@ def verify_exact_owner_release(
     signed: Mapping[str, Any], *, public_key: Ed25519PublicKey,
     expected_candidate_sha: str, expected_rollback_sha: str,
     expected_release_id: str, expected_scope_sha256: str,
-    expected_manifest_sha256: str, expected_freeze_sha256: str | None = None,
-    expected_release_policy_sha256: str | None = None,
+    expected_manifest_sha256: str, expected_freeze_sha256: str,
     at: datetime, consumed_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     if not isinstance(public_key, Ed25519PublicKey):
@@ -165,13 +151,6 @@ def verify_exact_owner_release(
         raise OwnerReleaseProofDenied("OWNER_RELEASE_ENVELOPE_INVALID")
     payload = signed["payload"]
     _fields(payload)
-    if (expected_freeze_sha256 is None) == (expected_release_policy_sha256 is None):
-        raise OwnerReleaseProofDenied("OWNER_RELEASE_EXACT_MODE_BINDING_REQUIRED")
-    normal = expected_release_policy_sha256 is not None
-    if payload["schema_version"] != ("2.0" if normal else "1.0"):
-        raise OwnerReleaseProofDenied("OWNER_RELEASE_TRANSACTION_MODE_MISMATCH")
-    binding = "release_policy_sha256" if normal else "freeze_sha256"
-    expected_binding = expected_release_policy_sha256 if normal else expected_freeze_sha256
     encoded = signed["signature_base64url"]
     if not isinstance(encoded, str) or SIGNATURE.fullmatch(encoded) is None:
         raise OwnerReleaseProofDenied("OWNER_RELEASE_SIGNATURE_MALFORMED")
@@ -199,7 +178,7 @@ def verify_exact_owner_release(
         ("release_id", expected_release_id),
         ("scope_sha256", expected_scope_sha256),
         ("manifest_sha256", expected_manifest_sha256),
-        (binding, expected_binding),
+        ("freeze_sha256", expected_freeze_sha256),
     )):
         raise OwnerReleaseProofDenied("OWNER_RELEASE_TRANSACTION_BINDING_MISMATCH")
     if payload["approval_id"] in consumed_ids:
@@ -207,91 +186,6 @@ def verify_exact_owner_release(
     if payload["decision"] != "approve":
         raise OwnerReleaseProofDenied("OWNER_RELEASE_DENIED")
     return dict(payload)
-
-
-
-# A root-controlled, audited migration is the only writer of this record.
-# This is a durable release-policy identity, NOT an approval, a freeze
-# exception or standing authority. An absent freeze alone cannot imply it.
-RETIREMENT_POLICY_PATH = "/etc/jason-owner-release/production-freeze-retirement.json"
-
-
-def read_retired_release_policy() -> str | None:
-    """Read the independently installed policy binding; never change state."""
-    import os
-    import stat
-    from pathlib import Path
-
-    path = Path(RETIREMENT_POLICY_PATH)
-    try:
-        meta = path.lstat()
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_UNAVAILABLE") from exc
-    try:
-        for parent in path.parents:
-            info = parent.lstat()
-            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
-                    or info.st_mode & 0o022):
-                raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_CUSTODY")
-        if (not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0
-                or stat.S_IMODE(meta.st_mode) not in (0o444, 0o644)
-                or meta.st_nlink != 1 or not 0 < meta.st_size <= 4096):
-            raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_CUSTODY")
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        try:
-            opened = os.fstat(fd)
-            if (opened.st_dev, opened.st_ino, opened.st_uid, opened.st_mode,
-                    opened.st_nlink, opened.st_size) != (
-                    meta.st_dev, meta.st_ino, meta.st_uid, meta.st_mode,
-                    meta.st_nlink, meta.st_size):
-                raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_CHANGED")
-            raw = os.read(fd, 4097)
-            after = os.fstat(fd)
-            if len(raw) != meta.st_size or after.st_mtime_ns != meta.st_mtime_ns:
-                raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_CHANGED")
-        finally:
-            os.close(fd)
-        doc = json.loads(raw)
-        fields = {
-            "schema_version", "authorization", "retired_at",
-            "original_freeze_sha256", "migration_scope_sha256",
-            "owner_approval_reference", "exact_release_approval_required",
-            "standing_authority",
-        }
-        if (not isinstance(doc, dict) or set(doc) != fields
-                or doc["schema_version"] != "1.0"
-                or doc["authorization"] != "retire_global_production_freeze_only"
-                or doc["exact_release_approval_required"] is not True
-                or doc["standing_authority"] is not False
-                or not all(isinstance(doc[k], str) and DIGEST.fullmatch(doc[k])
-                           for k in ("original_freeze_sha256", "migration_scope_sha256"))
-                or not isinstance(doc["owner_approval_reference"], str)
-                or not ID_RE.fullmatch(doc["owner_approval_reference"])):
-            raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_INVALID")
-        retired = datetime.fromisoformat(doc["retired_at"])
-        if retired.tzinfo is None or retired > datetime.now(timezone.utc):
-            raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_TIME")
-        return sha256(raw).hexdigest()
-    except (OSError, ValueError, TypeError, KeyError) as exc:
-        raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_POLICY_INVALID") from exc
-
-
-def require_retired_release_mode(state_root: "Path", policy_sha256: str) -> None:
-    """No coexistence or temporary-absence interpretation of retired mode."""
-    from pathlib import Path
-
-    if not isinstance(policy_sha256, str) or not DIGEST.fullmatch(policy_sha256):
-        raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_MODE_CONFLICT")
-    try:
-        (Path(state_root) / "production-deployment-freeze").lstat()
-    except FileNotFoundError:
-        return
-    except OSError as exc:
-        raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_MODE_UNVERIFIED") from exc
-    raise OwnerReleaseProofDenied("OWNER_RELEASE_RETIREMENT_MODE_CONFLICT")
-
 
 
 def read_pinned_root_owner_public_key(
