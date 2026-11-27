@@ -66,6 +66,7 @@ def write_provider_secret_cas(
     provider: str,
     values: Mapping[str, str],
 ) -> int:
+    base.require_secret_value_mutation_allowed(provider)
     spec = base.PROVIDERS[provider]
     expected = tuple(spec["fields"])
     required = tuple(spec.get("required_fields", expected))
@@ -106,7 +107,10 @@ def main() -> int:
                     "secret_path": spec["secret_path"],
                     "fields": list(spec["fields"]),
                     "required_fields": list(spec.get("required_fields", spec["fields"])),
-                    "write_semantics": "kv_v2_compare_and_set",
+                    "write_semantics": (
+                        "shared_secret_value_mutation_denied"
+                        if spec.get("shared_secret_provider") else "kv_v2_compare_and_set"
+                    ),
                     "network_contacted": False,
                     "secret_entered": False,
                     "status": "pass",
@@ -119,6 +123,11 @@ def main() -> int:
 
     if base.os.geteuid() != 0:
         raise SystemExit("DENIED: provisioning must run as root")
+
+    try:
+        base.require_secret_value_mutation_allowed(args.provider)
+    except base.ProvisionError as exc:
+        raise SystemExit(f"DENIED: {exc}") from None
 
     admin_password = getpass.getpass(
         f"OpenBao password for {args.admin_username}: "

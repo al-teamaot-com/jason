@@ -184,6 +184,14 @@ def test_explicit_write_separate_secret_factory_and_scoped_canonical_map(monkeyp
     assert set(connector.capabilities) == set(CANONICAL_CAPABILITIES.values())
     assert str(connector.credentials.role_id_path) == str(role)
     assert str(connector.credentials.secret_id_path) == str(secret)
+    from connectors.core.openbao_secrets import (
+        IT_GLUE_WRITE_SHARED_MAPPINGS, IT_GLUE_WRITE_SHARED_FIELDS,
+        OpenBaoSecretResolutionError,
+    )
+    assert connector.credentials._mappings == IT_GLUE_WRITE_SHARED_MAPPINGS
+    assert connector.credentials._allowed_fields == IT_GLUE_WRITE_SHARED_FIELDS
+    with pytest.raises(OpenBaoSecretResolutionError,match="not configured"):
+        connector.credentials.resolve("it_glue.readonly",context())
 
 
 def test_all_canonical_operations_are_explicit_approved_names():

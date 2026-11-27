@@ -99,11 +99,11 @@ PROVIDERS: dict[str, dict[str, object]] = {
         ),
     },
     "it_glue_write": {
-        # Initial creation only. The protected shared KV-v2 mount requires CAS.
-        # Never overwrite an existing service credential during onboarding.
-        "create_only_secret": True,
+        # Owner-approved shared vendor credential, separate AppRole only.
+        # Never collect, create, rotate or update the underlying key here.
+        "shared_secret_provider": "it_glue",
         "logical_name": "it_glue.readwrite",
-        "secret_path": "secret/data/connectors/it-glue/production/write",
+        "secret_path": "secret/data/connectors/it-glue/production/read-only",
         "fields": ("api_key",),
         "required_fields": ("api_key",),
         "policy_name": "jason-itglue-write-secret-read",
@@ -477,7 +477,17 @@ def _collect_microsoft_graph_values() -> dict[str, str]:
     }
 
 
+def require_secret_value_mutation_allowed(provider: str) -> None:
+    """An identity alias cannot change the canonical provider credential."""
+    if PROVIDERS[provider].get("shared_secret_provider"):
+        raise ProvisionError(
+            "SHARED_PROVIDER_SECRET_VALUE_MUTATION_DENIED: use the canonical "
+            "credential lifecycle; activate this identity with lifecycle reactivate"
+        )
+
+
 def collect_values(provider: str) -> dict[str, str]:
+    require_secret_value_mutation_allowed(provider)
     if provider in {"microsoft_graph", "microsoft_graph_mail",
                     "microsoft_graph_group_read", "microsoft_graph_group_write",
                     "microsoft_graph_sharepoint_write", "microsoft_graph_sharepoint"}:
@@ -694,6 +704,7 @@ def write_provider_secret(
     provider: str,
     values: Mapping[str, str],
 ) -> None:
+    require_secret_value_mutation_allowed(provider)
     spec = PROVIDERS[provider]
     expected = tuple(spec["fields"])
     required = tuple(spec.get("required_fields", expected))
@@ -775,6 +786,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "role_name": spec["role_name"],
                     "credential_dir": str(spec["credential_dir"]),
                     "runtime_authentication": "approle",
+                    "shared_secret_provider": spec.get("shared_secret_provider"),
+                    "secret_value_mutation_allowed": not bool(spec.get("shared_secret_provider")),
                     "runtime_token_persisted": False,
                     "network_contacted": False,
                     "secret_entered": False,
@@ -788,6 +801,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if os.geteuid() != 0:
         raise SystemExit("DENIED: provisioning must run as root")
+
+    # Reject the legacy create/overwrite workflow before password prompt,
+    # admin login, policy edits or provider credential collection.
+    try:
+        require_secret_value_mutation_allowed(args.provider)
+    except ProvisionError as exc:
+        raise SystemExit(f"DENIED: {exc}") from None
 
     admin_password = getpass.getpass(
         f"OpenBao password for {args.admin_username}: "

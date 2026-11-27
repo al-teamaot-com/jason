@@ -253,13 +253,26 @@ def reactivate(*, address: str, admin_token: str, provider: str) -> dict[str, An
         admin_token,
     )
     if version < 1:
+        if base.PROVIDERS[provider].get("shared_secret_provider"):
+            raise LifecycleError("Canonical shared provider secret does not exist; alias cannot create it.")
         raise LifecycleError("Provider secret does not exist; use create instead.")
+    shared = base.PROVIDERS[provider].get("shared_secret_provider")
+    if shared:
+        spec = base.PROVIDERS[provider]
+        if (provider != "it_glue_write" or shared != "it_glue"
+                or spec["secret_path"] != base.PROVIDERS[shared]["secret_path"]
+                or any(spec[k] == base.PROVIDERS[shared][k]
+                       for k in ("role_name","policy_name","credential_dir"))
+                or address.rstrip("/") != base.DEFAULT_ADDRESS.rstrip("/")):
+            raise LifecycleError("Unreviewed shared provider credential identity.")
+        if verify(str(shared)).get("status") != "pass":
+            raise LifecycleError("Canonical shared provider secret verification failed.")
     identity = base.configure_read_approle(
         address=address,
         admin_token=admin_token,
         provider=provider,
     )
-    return {
+    result = {
         "provider": provider,
         "action": "reactivate",
         "runtime_access_active": True,
@@ -268,21 +281,42 @@ def reactivate(*, address: str, admin_token: str, provider: str) -> dict[str, An
         "provider_secret_reentered": False,
         "status": "pass",
     }
+    if shared:
+        written = verify(provider)
+        canonical = verify(str(shared))
+        after = kv.current_version(address, str(base.PROVIDERS[provider]["secret_path"]), admin_token)
+        if written.get("status") != "pass" or canonical.get("status") != "pass" or after != version:
+            raise LifecycleError("Shared provider credential identity readback failed.")
+        result.update(shared_secret_provider=shared, shared_kv_version_unchanged=True,
+                      canonical_identity_verified=True, alias_identity_verified=True)
+    return result
 
 
 def verify(provider: str) -> dict[str, Any]:
     from connectors.core.contracts import ConnectorContext
-    from connectors.core.openbao_secrets import OpenBaoSecretResolver
+    from connectors.core.openbao_secrets import (
+        OpenBaoSecretResolver, IT_GLUE_WRITE_SHARED_MAPPINGS, IT_GLUE_WRITE_SHARED_FIELDS,
+    )
 
     spec = base.PROVIDERS[provider]
     directory = Path(spec["credential_dir"])
     state = _credential_state(provider)
     if not state["artifacts_complete"]:
         raise LifecycleError("Provider AppRole artifacts are incomplete or inactive.")
+    alias_options = {}
+    if spec.get("shared_secret_provider"):
+        if (provider != "it_glue_write"
+                or spec["shared_secret_provider"] != "it_glue"
+                or spec["secret_path"] != base.PROVIDERS["it_glue"]["secret_path"]
+                or IT_GLUE_WRITE_SHARED_MAPPINGS != {spec["logical_name"]: spec["secret_path"]}):
+            raise LifecycleError("Unreviewed shared provider credential alias.")
+        alias_options = {"mappings": IT_GLUE_WRITE_SHARED_MAPPINGS,
+                         "allowed_fields": IT_GLUE_WRITE_SHARED_FIELDS}
     resolver = OpenBaoSecretResolver(
         base_url=base.DEFAULT_ADDRESS,
         role_id_path=directory / "role-id",
         secret_id_path=directory / "secret-id",
+        **alias_options,
     )
     context = ConnectorContext(
         correlation_id=f"provider-secret-verify-{provider}",
@@ -336,6 +370,10 @@ def status(*, address: str, admin_token: str, provider: str) -> dict[str, Any]:
 def create_or_update(
     *, address: str, admin_token: str, provider: str, action: str
 ) -> dict[str, Any]:
+    try:
+        base.require_secret_value_mutation_allowed(provider)
+    except base.ProvisionError as exc:
+        raise LifecycleError(str(exc)) from None
     current = kv.current_version(
         address,
         str(base.PROVIDERS[provider]["secret_path"]),
@@ -392,7 +430,11 @@ def _check_only(action: str, provider: str) -> dict[str, Any]:
         "logical_name": spec["logical_name"],
         "secret_path": spec["secret_path"],
         "runtime_authentication": "approle",
-        "kv_write_semantics": "kv_v2_compare_and_set",
+        "kv_write_semantics": (
+            "shared_secret_value_mutation_denied"
+            if spec.get("shared_secret_provider") else "kv_v2_compare_and_set"
+        ),
+        "shared_secret_provider": spec.get("shared_secret_provider"),
         "deactivation_semantics": "revoke_runtime_identity_preserve_kv_history",
         "runtime_token_persisted": False,
         "network_contacted": False,
@@ -408,6 +450,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if os.geteuid() != 0:
         raise SystemExit("DENIED: provider secret lifecycle operations must run as root")
+    if args.action in {"create", "update"}:
+        try:
+            base.require_secret_value_mutation_allowed(args.provider)
+        except base.ProvisionError as exc:
+            raise SystemExit(f"DENIED: {exc}") from None
     if args.action == "verify":
         print(json.dumps(verify(args.provider), indent=2, sort_keys=True))
         return 0

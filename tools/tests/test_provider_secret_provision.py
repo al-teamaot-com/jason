@@ -494,18 +494,112 @@ def test_microsoft_sharepoint_write_contract_is_isolated_and_site_scoped_by_desi
     assert sharepoint["secret_path"] != directory["secret_path"]
     assert sharepoint["role_name"] != directory["role_name"]
 
-def test_it_glue_general_write_credential_is_distinct_and_create_only(monkeypatch):
-    import tools.provider_secret_provision as module
+def test_it_glue_shared_key_requires_distinct_role_and_denies_value_mutation(monkeypatch):
+    import pytest
+    from tools import provider_secret_provision as module
+    from tools import provider_secret_kv_write as kv
+    from tools import provider_secret_lifecycle as lifecycle
     spec=module.PROVIDERS["it_glue_write"]
     read=module.PROVIDERS["it_glue"]
-    assert spec["create_only_secret"] is True
-    for name in ("secret_path","logical_name","policy_name","role_name","credential_dir"):
+    assert spec["shared_secret_provider"] == "it_glue"
+    assert spec["secret_path"] == read["secret_path"]
+    for name in ("logical_name","policy_name","role_name","credential_dir","connector_identity"):
         assert spec[name]!=read[name]
+    assert module.provider_policy_text("it_glue_write")==module.provider_policy_text("it_glue")
+    def unexpected(*a,**kw): raise AssertionError("no prompt, network, or role mutation")
+    monkeypatch.setattr(module,"api_request",unexpected)
+    monkeypatch.setattr(module.getpass,"getpass",unexpected)
+    monkeypatch.setattr(kv,"current_version",unexpected)
+    monkeypatch.setattr(module,"configure_read_approle",unexpected)
+    monkeypatch.setattr(module.os,"geteuid",lambda:0)
+    with pytest.raises(module.ProvisionError,match="SHARED_PROVIDER_SECRET_VALUE_MUTATION_DENIED"):
+        module.collect_values("it_glue_write")
+    with pytest.raises(module.ProvisionError,match="SHARED_PROVIDER_SECRET_VALUE_MUTATION_DENIED"):
+        module.write_provider_secret(address="http://unused.invalid",admin_token="test-only",
+            provider="it_glue_write",values={"api_key":"synthetic"})
+    with pytest.raises(module.ProvisionError,match="SHARED_PROVIDER_SECRET_VALUE_MUTATION_DENIED"):
+        kv.write_provider_secret_cas(address="http://unused.invalid",admin_token="test-only",
+            provider="it_glue_write",values={"api_key":"synthetic"})
+    with pytest.raises(SystemExit,match="SHARED_PROVIDER_SECRET_VALUE_MUTATION_DENIED"):
+        module.main(["it_glue_write"])
+    for action in ("create","update"):
+        with pytest.raises(lifecycle.LifecycleError,match="SHARED_PROVIDER_SECRET_VALUE_MUTATION_DENIED"):
+            lifecycle.create_or_update(address="http://unused.invalid",admin_token="test-only",
+                provider="it_glue_write",action=action)
+        with pytest.raises(SystemExit,match="SHARED_PROVIDER_SECRET_VALUE_MUTATION_DENIED"):
+            lifecycle.main([action,"it_glue_write"])
+
+
+def test_it_glue_alias_reactivate_only_binds_existing_key(monkeypatch,tmp_path):
+    from tools import provider_secret_lifecycle as lifecycle
+    from tools import provider_secret_provision as base
+    import pytest
+    spec=dict(base.PROVIDERS["it_glue_write"],credential_dir=tmp_path/"write")
+    monkeypatch.setitem(base.PROVIDERS,"it_glue_write",spec)
     calls=[]
-    monkeypatch.setattr(module,"api_request",lambda *a,**kw:calls.append((a,kw)) or {})
-    module.write_provider_secret(address="http://unused.invalid",admin_token="test-only",
-        provider="it_glue_write",values={"api_key":"synthetic-not-a-credential"})
-    assert len(calls)==1
-    assert calls[0][0][1]=="secret/data/connectors/it-glue/production/write"
-    assert calls[0][1]["method"]=="POST"
-    assert calls[0][1]["payload"]=={"data":{"api_key":"synthetic-not-a-credential"},"options":{"cas":0}}
+    def version(address,path,token):
+        assert path==base.PROVIDERS["it_glue"]["secret_path"]
+        return 4
+    monkeypatch.setattr(lifecycle.kv,"current_version",version)
+    monkeypatch.setattr(base,"configure_read_approle",
+        lambda **kw: calls.append(kw["provider"]) or {"credential_dir":str(spec["credential_dir"])})
+    def forbidden(*a,**kw): raise AssertionError("shared key must remain unchanged")
+    monkeypatch.setattr(base,"collect_values",forbidden)
+    monkeypatch.setattr(lifecycle.kv,"write_provider_secret_cas",forbidden)
+    verified=[]
+    monkeypatch.setattr(lifecycle,"verify",
+        lambda provider: verified.append(provider) or {"status":"pass"})
+    result=lifecycle.reactivate(address=base.DEFAULT_ADDRESS,admin_token="test",
+        provider="it_glue_write")
+    assert result["kv_version"]==4 and result["provider_secret_reentered"] is False
+    assert result["shared_kv_version_unchanged"] and result["canonical_identity_verified"] and result["alias_identity_verified"]
+    assert verified==["it_glue","it_glue_write","it_glue"]
+    assert calls==["it_glue_write"]
+    monkeypatch.setattr(lifecycle.kv,"current_version",lambda *a:0)
+    with pytest.raises(lifecycle.LifecycleError,match="alias cannot create"):
+        lifecycle.reactivate(address=base.DEFAULT_ADDRESS,admin_token="test",provider="it_glue_write")
+    assert calls==["it_glue_write"]
+    monkeypatch.setattr(lifecycle.kv,"current_version",version)
+    monkeypatch.setattr(lifecycle,"verify",lambda provider:{"status":"failed"})
+    with pytest.raises(lifecycle.LifecycleError,match="Canonical shared provider secret verification failed"):
+        lifecycle.reactivate(address=base.DEFAULT_ADDRESS,admin_token="test",provider="it_glue_write")
+    assert calls==["it_glue_write"]
+
+def test_it_glue_write_identity_verify_maps_only_the_alias(monkeypatch,tmp_path):
+    from tools import provider_secret_lifecycle as lifecycle
+    from tools import provider_secret_provision as base
+    from connectors.core.openbao_secrets import OpenBaoSecretResolver
+    spec=dict(base.PROVIDERS["it_glue_write"],credential_dir=tmp_path/"write")
+    monkeypatch.setitem(base.PROVIDERS,"it_glue_write",spec)
+    d=spec["credential_dir"];d.mkdir()
+    for name in ("role-id","secret-id","credential-metadata.json"):
+        (d/name).write_text("synthetic-test-only")
+    def resolve(self,logical,context):
+        assert self.role_id_path==d/"role-id" and self.secret_id_path==d/"secret-id"
+        assert logical=="it_glue.readwrite"
+        assert self._mappings=={logical:base.PROVIDERS["it_glue"]["secret_path"]}
+        assert self._allowed_fields=={logical:frozenset({"api_key"})}
+        return {"api_key":"synthetic-test-only"}
+    monkeypatch.setattr(OpenBaoSecretResolver,"resolve",resolve)
+    assert lifecycle.verify("it_glue_write")["status"]=="pass"
+
+
+def test_it_glue_write_deactivation_never_removes_canonical_key_or_read_identity(monkeypatch,tmp_path):
+    from tools import provider_secret_lifecycle as lifecycle
+    from tools import provider_secret_provision as base
+    for profile in ("it_glue","it_glue_write"):
+        spec=dict(base.PROVIDERS[profile],credential_dir=tmp_path/profile)
+        monkeypatch.setitem(base.PROVIDERS,profile,spec)
+        d=spec["credential_dir"];d.mkdir()
+        for name,value in (("role-id","fake-role"),("secret-id","fake-secret"),
+                           ("credential-metadata.json",'{"secret_id_accessor":"synthetic-accessor"}')):
+            (d/name).write_text(value)
+    calls=[]
+    monkeypatch.setattr(base,"api_request",lambda address,path,**kw:calls.append((path,kw["method"])) or {})
+    monkeypatch.setattr(lifecycle,"_revoke_secret_id_accessor",lambda **kw:None)
+    result=lifecycle.deactivate(address=base.DEFAULT_ADDRESS,admin_token="test",provider="it_glue_write")
+    assert result["provider_secret_destroyed"] is False and result["kv_history_preserved"]
+    assert calls==[("auth/approle/role/"+base.PROVIDERS["it_glue_write"]["role_name"],"DELETE")]
+    assert (tmp_path/"it_glue"/"role-id").is_file()
+    assert (tmp_path/"it_glue"/"secret-id").is_file()
+    assert not (tmp_path/"it_glue_write").exists()

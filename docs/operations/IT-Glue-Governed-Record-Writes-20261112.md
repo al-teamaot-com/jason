@@ -100,3 +100,70 @@ existing credential on a failed first provisioning attempt. Protected source
 review, exact native provisioning authorization and verified readback remain
 required before use. No live provisioning or provider write occurred in this
 review.
+
+## November 27 — Owner-directed shared vendor-key successor
+
+The Owner selected reuse of the already provisioned IT Glue API key for both
+read and write while retaining distinct Jason authorization, client boundaries
+and auditing. This explicitly supersedes the earlier requirement for a second
+vendor key and a separate stored copy of that key for this IT Glue integration
+only. It is a policy/design direction, not an authenticated exact deployment
+or credential-mutation receipt.
+
+Independent live verification resolved the existing it_glue.readonly credential
+with its existing read AppRole, without disclosing a value. The historical
+configuration-notes-write identity could not resolve the proposed separate
+production/write secret (HTTP 403). The new general-write role does not yet
+exist. Vendor write permission of the existing key has NOT been demonstrated
+by a provider mutation.
+
+Keep the existing canonical KV path and read AppRole unchanged. The dedicated
+write AppRole receives read access to that exact existing KV record, with its
+own policy, role, staging directory and runtime mount. Only the dedicated
+writer receives the explicit it_glue.readwrite logical mapping; the default
+resolver does not expose that alias. There is no fallback from the write
+resolver to the read runtime identity. Use the existing governed
+provider-secret lifecycle reactivate action to bind an identity to an existing
+credential. Both ordinary provisioning entrypoints and direct lifecycle/CAS
+value mutations fail closed for the alias; key lifecycle remains under the
+canonical it_glue profile. Deactivating the write identity preserves the
+canonical record and existing read identity. No second API key, key re-entry,
+copy, rotation or deletion is needed. Existing active read behavior is
+unchanged. Keep default production write activation disabled.
+
+This is authorization isolation inside Jason, not separate vendor credentials:
+the vendor sees the same integration key, its rights are shared and rotating
+or revoking that key affects both routes. Provider-native per-technician
+credential attribution remains unverified; ADR-014 continues to prohibit
+credential disclosure, creation and updates. Retain J-102 exact-plan,
+requester binding, validated forward/reverse client mapping, restricted-record
+denials, one-shot claim and independent readback. AOT 5710249 remains the only
+designated test organization; do not modify existing records. Actual vendor
+write rights, exact client mapping and authorized test-record acceptance
+remain to be verified. Source review does not grant production access.
+
+### Independently verified AOT target and remaining gates
+
+2026-11-27 governed live documentation.organization.read succeeded for
+5710249 (correlation corr_mcp_e4b4d34aad6c4606adb6be019bbf554c); exact
+name Atlantic Office Technologies - AOT, status Active, short-name 250.
+This also proves live read access works. A matching Autotask search
+(correlation corr_mcp_afa7118f76144eecba3981ca7b3ef33a) found the exact name
+and companyNumber 250 at company 1156, but that PSA record has isActive=false
+and the IT Glue organization reports orphaned PSA integration. Do not infer
+a live PSA relationship or substitute the different active child test company.
+Existing validated Microsoft boundaries and the canonical pilot documents
+identify client-aot-internal as AOT's internal client. Propose that exact
+internal client for the authorized IT Glue test, subject to the existing
+governed boundary bootstrap and independent security review. No IT Glue
+client-boundary entry currently exists; a successful vendor read does not
+write or validate the boundary ledger.
+
+The lifecycle reactivate path verifies the canonical read identity before
+granting the dedicated write identity access. It verifies both identities
+after configuration and rejects a changed canonical KV version. The
+operation never writes the key. Production activation is not established;
+independent review is required for credential and client-boundary changes.
+If write-role verification fails, use only governed write-identity
+deactivation/rollback; never rotate, remove, or overwrite the canonical
+credential to recover the write profile.

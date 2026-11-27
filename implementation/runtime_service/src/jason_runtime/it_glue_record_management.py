@@ -15,7 +15,9 @@ from pathlib import Path
 from connectors.core.contracts import (
     AuditSink, ConnectorAuthorizationError, ConnectorContext, HttpTransport,
 )
-from connectors.core.openbao_secrets import OpenBaoSecretResolver
+from connectors.core.openbao_secrets import (
+    OpenBaoSecretResolver, IT_GLUE_WRITE_SHARED_MAPPINGS, IT_GLUE_WRITE_SHARED_FIELDS,
+)
 from connectors.it_glue.create_claim_store import SQLiteItGlueCreationClaimStore
 from connectors.it_glue.governed_record_write import (
     CAPABILITIES as PROVIDER_CAPABILITIES,
@@ -122,7 +124,7 @@ def _definition(*, now: datetime, name: str):
     metadata.update({
         "pilot_provider": "it_glue",
         "provider_native_impersonation_required": "false",
-        "provider_identity_type": "separate_it_glue_api_key",
+        "provider_identity_type": "shared_it_glue_service_key_separate_write_approle",
         "mcp_action_enabled": "true",
         "mcp_tool_name": "execute_governed_capability",
         "activation_state": "source_only_disabled_by_default",
@@ -230,7 +232,9 @@ def build_it_glue_write_invoker(*, openbao_url: str,
         raise ItGlueWriteActivationError("IT_GLUE_WRITE_APPROLE_UNPROVISIONED")
     secret_resolver = OpenBaoSecretResolver(
         base_url=openbao_url, role_id_path=role_id_path,
-        secret_id_path=secret_id_path)
+        secret_id_path=secret_id_path,
+        mappings=IT_GLUE_WRITE_SHARED_MAPPINGS,
+        allowed_fields=IT_GLUE_WRITE_SHARED_FIELDS)
     connector = ItGlueGovernedRecordWriter(
         transport=transport, credentials=secret_resolver,
         authorization=ValidatedClientItGlueWriteAuthority(
