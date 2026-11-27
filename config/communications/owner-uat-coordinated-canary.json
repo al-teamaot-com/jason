@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "purpose": "owner_teams_nonexecuting_uat",
+  "organization_id": "aot",
+  "recipient": "person-al",
+  "capability": "interaction.owner.acceptance.record",
+  "execution_permitted": false,
+  "session_id": "OwnerTeamsCanary20261127",
+  "expires_at": "2026-11-28T23:00:00+00:00"
+}
