@@ -227,3 +227,41 @@ manually, overwrite the immutable failure record, or claim this source
 correction alone provides a supported recovery transition. Establish the
 applicable governed recovery scope and verify the restored predecessor
 before another production attempt.
+
+### Exact successor of the verified terminal rollback
+
+The corrected candidate may be considered while the predecessor is paused
+only for the combined retirement scope, with the existing authenticated
+Owner decision still required for the new candidate. The read-only
+predecessor proof binds the exact failed candidate, root-owned immutable
+approval, receipt-image and terminal rollback hashes; checks the
+historical exact scope and predecessor receipt; requires the exact
+three-record terminal history; and independently compares all original
+target bytes, ownership, modes and absent paths. The retained pause must
+match its approved bytes. The failed release directory must be absent.
+Other paused predecessor cases retain their ordinary denial.
+
+The new plan binds that evidence into its authenticated exact action.
+After authentication, the installer repeats the original protected-source
+and health checks, the rollback proof, and the before-image checks under
+the existing native locks. The old approval is not reused or overwritten.
+The pause remains in place until the existing successor cutover checks
+succeed; failed acceptance continues to restore the pause.
+
+Before the existing locked health checks, the combined retirement path now
+waits outside the locks for the scheduled protected readback publisher to
+provide clean evidence no more than 40 seconds old. This is a read-only
+starting prerequisite, not a new source of health or a waiver: all
+independent drift, breaker, core, image, audit, authority and ticket-scan
+checks, including their original 120-second freshness requirement, are
+unchanged. Unhealthy, future-dated or unavailable evidence fails closed.
+No production timer, health record, authority, or lock is changed by
+this wait.
+
+Validation of this source candidate: 949 affected regression tests and
+five subtests passed (five disposable-root tests excluded from the
+ordinary run). Synthetic tests reject an unrelated request, a foreign
+pause, changed records, extra history, changed restored files, and reuse
+of the failed candidate; the scope is still sent to the existing
+authenticator before locking or mutation. A protected-main native
+preflight and a new exact authenticated approval are required.
