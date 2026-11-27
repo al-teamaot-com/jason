@@ -43,6 +43,10 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
                 "normal", "production_control_core", "production_repair",
             ],
         )
+    elif reviewed and reviewed_version == "3.2":
+        from implementation.runtime_service.tests.test_owner_teams_identity_decoupling import owner_teams_policy_file
+        policy_path = owner_teams_policy_file(tmp_path, "3.2")
+        canonical_owner = True
     else:
         policy_path = reviewed_policy_file(tmp_path) if reviewed else policy_file(tmp_path)
     root, release_path = release_record(tmp_path)
@@ -280,8 +284,9 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
         "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
         if canonical_owner else "person-al"
     )
+    tenant = policy.teams_owner_binding[0] if reviewed_version == "3.2" else "tenant-a"
     bindings.put(MicrosoftIdentityBinding(
-        "tenant-a", microsoft_object_id, bound_identity,
+        tenant, microsoft_object_id, bound_identity,
         email_address=("al@teamaot.com" if canonical_owner else None),
     ))
     authority_db = tmp_path / "authority.sqlite3"
@@ -306,7 +311,7 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
         "channel": "msteams",
         "text": "Mobile production release review",
         "transport_identity": {
-            "microsoft_tenant_id": "tenant-a", "microsoft_object_id": microsoft_object_id,
+            "microsoft_tenant_id": tenant, "microsoft_object_id": microsoft_object_id,
             "authentication_assurance": "botframework-authenticated",
         },
         "conversation_id": "teams-owner-chat",
@@ -326,7 +331,7 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
     envelope["signature"] = base64.b64encode(private.sign(canonical_signed_payload(envelope))).decode()
     args = {
         "approval_id": request.approval_id, "decision": decision,
-        "microsoft_tenant_id": "tenant-a", "microsoft_object_id": microsoft_object_id,
+        "microsoft_tenant_id": tenant, "microsoft_object_id": microsoft_object_id,
         "conversation_id": "teams-owner-chat", "channel_response_id": "teams-response-1",
         "decided_at": NOW, "signed_envelope": envelope,
         "selections": envelope["interaction"]["selections"],
@@ -625,6 +630,55 @@ def test_redundant_signed_full_release_decision_preserves_explicit_owner_grant(t
     assert not (
         opts["ccc_root"] / ("material-review-" + SHA[:16] + ".json")
     ).exists()
+
+
+@pytest.mark.parametrize("tamper", [None, "scope", "rollback", "manifest", "candidate"])
+@pytest.mark.parametrize("version", ["2.0", "3.2"])
+def test_redundant_teams_decision_after_mcp_is_audit_only(tmp_path, tamper, version):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, initial_freeze=True, reviewed_version=version,
+    )
+    flow.handle(**args)
+    release = json.loads(release_path.read_text(encoding="utf-8"))
+    binding = {
+        "candidate_sha": SHA, "rollback_sha": ROLLBACK,
+        "scope_sha256": "d" * 64,
+        "manifest_sha256": request.metadata["manifest_sha256"],
+    }
+    release["manual_scope_review"].update(candidate_sha=SHA, baseline_sha=ROLLBACK)
+    release["owner_approval"] = {
+        "approved": True, "candidate_sha": SHA,
+        "source": "authenticated_signed_mcp_owner:owner-mcp-" + "a" * 32,
+        "recorded_at": NOW.isoformat(), "transaction_binding": dict(binding),
+    }
+    if tamper:
+        field = {"scope": "scope_sha256", "rollback": "rollback_sha",
+                 "manifest": "manifest_sha256", "candidate": "candidate_sha"}[tamper]
+        release["owner_approval"]["transaction_binding"][field] = "f" * len(binding[field])
+    release_path.write_text(json.dumps(release), encoding="utf-8")
+    before = release_path.read_bytes()
+    opts["approve_release"] = lambda *_args, **_kwargs: pytest.fail(
+        "a second channel must never materialize approval authority")
+    marker = opts["state_root"] / "mobile-release-decisions-processed" / (request.approval_id + ".json")
+    if tamper:
+        with pytest.raises(PermissionError, match="does not match"):
+            consume_mobile_release_decisions(**opts)
+        assert not marker.exists()
+    else:
+        assert consume_mobile_release_decisions(**opts) == 0
+        evidence = json.loads(marker.read_text(encoding="utf-8"))
+        assert evidence["recovery"] == "redundant_signed_teams_decision_preserved_mcp_owner_approval"
+        assert evidence["authority_mutated"] is False
+        assert release_path.read_bytes() == before
+        # Even if the release record is subsequently rebuilt, audit-only
+        # receipts cannot reconstruct the first channel's lost authority.
+        release.pop("owner_approval")
+        release["created_at"] = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
+        release_path.write_text(json.dumps(release), encoding="utf-8")
+        rebuilt = release_path.read_bytes()
+        assert consume_mobile_release_decisions(**opts) == 0
+        assert release_path.read_bytes() == rebuilt
+    assert not (opts["ccc_root"] / ("material-review-" + SHA[:16] + ".json")).exists()
 
 
 def test_redundant_signed_decision_rejects_mismatched_explicit_owner_grant(tmp_path):
@@ -1391,9 +1445,10 @@ def test_pmv32_one_signed_card_authorizes_both_separate_receipts_without_second_
     assert json.loads(processed.read_text())["release_transaction_authority"] == "owner_exact_release_approval"
 
 
-def test_pmv32_frozen_card_needs_no_second_receipt_consumer(tmp_path):
+@pytest.mark.parametrize("version", ["2.0", "3.2"])
+def test_pmv32_frozen_card_needs_no_second_receipt_consumer(tmp_path, version):
     flow, repo, release_path, request, args, opts, identities, bindings = fixture(
-        tmp_path, reviewed=True, initial_freeze=True,
+        tmp_path, reviewed=True, initial_freeze=True, reviewed_version=version,
     )
     assert flow.handle(**args)["approval_status"] == "approved"
     calls = []

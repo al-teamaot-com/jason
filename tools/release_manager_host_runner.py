@@ -1128,6 +1128,9 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
     elif version in {"2.0", "3.0", "3.1"}:
         expected = shared | {"high_impact_review"}
         mode = "owner_reviewed"
+    elif version == "3.2":
+        expected = shared | {"high_impact_review", "teams_owner_binding"}
+        mode = "owner_reviewed"
     elif version in {"4.0", "4.1"}:
         expected = shared | {
             "high_impact_review", "admin_approver_binding",
@@ -1136,7 +1139,7 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
         mode = "admin_approver_separated"
     else:
         raise ReleaseManagerError("mobile release approval policy version is unsupported")
-    if source_v2_required and version not in {"2.0", "3.0", "3.1", "4.0", "4.1"}:
+    if source_v2_required and version not in {"2.0", "3.0", "3.1", "3.2", "4.0", "4.1"}:
         raise ReleaseManagerError("candidate source must declare an owner-reviewed release policy")
     risks = doc.get("allowed_risk_profiles")
     ttl = doc.get("ttl_seconds")
@@ -1152,7 +1155,7 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
             raise ReleaseManagerError("V1 release approval policy must remain normal-risk only")
     else:
         exact_risks = (
-            {"normal", "production_control_core"} if version in {"2.0", "3.1", "4.0", "4.1"}
+            {"normal", "production_control_core"} if version in {"2.0", "3.1", "3.2", "4.0", "4.1"}
             else {"normal", "production_control_core", "production_repair"}
         )
         if (set(risks) != exact_risks
@@ -1160,15 +1163,17 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
                 or doc.get("high_impact_review") != {
                     "owner_exact_sha_required": True,
                     **({"authenticated_entra_owner_decision_required": True}
-                       if version == "3.1"
+                       if version == "3.1" else
+                       {"authenticated_entra_owner_decision_required": True,
+                        "signed_teams_owner_allowed": True} if version == "3.2"
                        else {"signed_teams_identity_required": True}),
                     **({"independent_native_release_health_required": True}
-                       if version == "3.1"
+                       if version in {"3.1", "3.2"}
                        else {"independent_ccc_required": True}),
                     "protected_release_gates_unchanged": True,
                 }):
             raise ReleaseManagerError("reviewed high-impact release policy is invalid")
-    if version in {"4.0", "4.1"}:
+    if version in {"3.2", "4.0", "4.1"}:
         def exact_enrolled_user(field):
             role = doc.get(field)
             if not isinstance(role, dict) or set(role) != {
@@ -1184,10 +1189,13 @@ def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = F
             ):
                 raise ReleaseManagerError("versioned administrative role identity invalid")
             return values
-        admin = exact_enrolled_user("admin_approver_binding")
-        regular = exact_enrolled_user("regular_requester_binding")
-        if admin[0] != regular[0] or admin[1] == regular[1]:
-            raise ReleaseManagerError("administrative approver cannot be normal requester")
+        if version == "3.2":
+            exact_enrolled_user("teams_owner_binding")
+        else:
+            admin = exact_enrolled_user("admin_approver_binding")
+            regular = exact_enrolled_user("regular_requester_binding")
+            if admin[0] != regular[0] or admin[1] == regular[1]:
+                raise ReleaseManagerError("administrative approver cannot be normal requester")
     return {
         "schema_version": version, "mode": mode, "risks": sorted(risks),
         "ttl_seconds": ttl, "raw": raw,
@@ -7810,7 +7818,7 @@ def _reviewed_mobile_release_mode(policy: Any) -> str:
         return "owner_only_pilot"
     if policy.schema_version in {"4.0", "4.1"}:
         return "admin_approver_separated"
-    if policy.schema_version in {"2.0", "3.0", "3.1"}:
+    if policy.schema_version in {"2.0", "3.0", "3.1", "3.2"}:
         return "owner_reviewed"
     raise ReleaseManagerError("unreviewed Teams Owner release policy mode")
 
@@ -8078,7 +8086,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
     initial_freeze_binding = None
     if (ordinary_safe and not review_only_offer and not replacement_offer
             and (state_root / PRODUCTION_FREEZE_MARKER).exists()):
-        if reviewed_policy.schema_version not in {"2.0", "3.0", "4.0", "4.1"}:
+        if reviewed_policy.schema_version not in {"2.0", "3.0", "3.2", "4.0", "4.1"}:
             print("RELEASE_APPROVAL_ONLY=FROZEN_RELEASE_REQUIRES_REVIEWED_OWNER_MODE", flush=True)
             return False
         try:

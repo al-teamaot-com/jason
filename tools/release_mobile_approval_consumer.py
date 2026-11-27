@@ -99,15 +99,17 @@ def _authorized_policy_owner_identity(*, binding, owner, policy, receipt_identit
     if (owner is None or owner.status != "active"
             or owner.organization_id != policy.organization_id):
         raise PermissionError("mobile release approval has no active independent Jason owner identity")
-    if policy.schema_version in {"4.0", "4.1"}:
+    if policy.schema_version in {"3.2", "4.0", "4.1"}:
         # Independently attest the exact Teams actor again at the host.
         # The transport recipient is the regular licensed Owner for V4.1;
         # only administrative provider/grant operations require admin OID.
-        expected = (policy.regular_requester_binding if policy.schema_version == "4.1"
+        expected = (policy.teams_owner_binding if policy.schema_version == "3.2"
+                    else policy.regular_requester_binding if policy.schema_version == "4.1"
                     else policy.admin_approver_binding)
-        other = (policy.admin_approver_binding if policy.schema_version == "4.1"
+        other = (None if policy.schema_version == "3.2"
+                 else policy.admin_approver_binding if policy.schema_version == "4.1"
                  else policy.regular_requester_binding)
-        if expected is None or other is None:
+        if expected is None or (policy.schema_version != "3.2" and other is None):
             raise PermissionError("separated release identity policy is incomplete")
         try:
             expected_identity = "person-entra-" + uuid.UUID(expected[1]).hex
@@ -295,7 +297,8 @@ def consume_mobile_release_decisions(
         if (stored.get("approval_id") != approval_id
                 or stored.get("signed_evidence_sha256") != evidence_sha):
             raise PermissionError("processed mobile decision marker has conflicting evidence")
-        if stored.get("decision") != "approve" or stored.get("review_only") is True:
+        if (stored.get("decision") != "approve" or stored.get("review_only") is True
+                or stored.get("authority_mutated") is False):
             return False
         release_id = str(stored.get("release_id") or "")
         candidate_sha = str(stored.get("candidate_sha") or "")
@@ -391,7 +394,7 @@ def consume_mobile_release_decisions(
             authenticator=key_auth, allowed_machine_identities=frozenset({"svc-openclaw-gateway"}),
             allowed_approval_prefixes=(REQUEST_PREFIX,), clock=lambda: timestamp,
             allowed_selection_keys=(frozenset({"card_challenge"})
-                                    if policy.schema_version in {"2.0", "3.0", "4.0", "4.1"} else frozenset()),
+                                    if policy.schema_version in {"2.0", "3.0", "3.2", "4.0", "4.1"} else frozenset()),
         )
         token = json.dumps(signed, separators=(",", ":"), ensure_ascii=False)
         _, original = verifier.parse(token)
@@ -403,7 +406,7 @@ def consume_mobile_release_decisions(
                 or original.documents
                 or principal.authentication_evidence_hash != evidence_sha):
             raise PermissionError("original signed Teams evidence does not match decision receipt")
-        if policy.schema_version in {"2.0", "3.0", "4.0", "4.1"}:
+        if policy.schema_version in {"2.0", "3.0", "3.2", "4.0", "4.1"}:
             proof = request.metadata.get("card_instance_challenge")
             if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
                     or hashlib.sha256(proof.encode("ascii")).hexdigest()
@@ -594,6 +597,44 @@ def consume_mobile_release_decisions(
         if prior_approval.get("approved") is True and not review_only:
             manifest = raw_release.get("release_manifest") or {}
             prior_source = str(prior_approval.get("source") or "")
+            if re.fullmatch(r"authenticated_signed_mcp_owner:owner-mcp-[0-9a-f]{32}", prior_source):
+                # The authenticated MCP decision won the release transaction.
+                # A later independently signed Teams receipt is evidence only,
+                # never a replacement grant or another unfreeze authorization.
+                scope = raw_release.get("manual_scope_review") or {}
+                expected_binding = {
+                    "candidate_sha": request.metadata["candidate_sha"],
+                    "rollback_sha": request.metadata["rollback_sha"],
+                    "scope_sha256": scope.get("scope_sha256"),
+                    "manifest_sha256": request.metadata["manifest_sha256"],
+                }
+                frozen_binding = request.metadata.get("initial_freeze_binding")
+                if (prior_approval.get("candidate_sha") != expected_binding["candidate_sha"]
+                        or (raw_release.get("release_candidate") or {}).get("candidate_sha")
+                            != expected_binding["candidate_sha"]
+                        or raw_release.get("rollback_sha") != expected_binding["rollback_sha"]
+                        or scope.get("candidate_sha") != expected_binding["candidate_sha"]
+                        or scope.get("baseline_sha") != expected_binding["rollback_sha"]
+                        or not re.fullmatch(r"[0-9a-f]{64}", str(expected_binding["scope_sha256"] or ""))
+                        or digest(manifest) != expected_binding["manifest_sha256"]
+                        or prior_approval.get("transaction_binding") != expected_binding
+                        or (frozen_binding is not None
+                            and (not isinstance(frozen_binding, dict)
+                                 or any(frozen_binding.get(k) != v for k, v in expected_binding.items())))):
+                    raise PermissionError("existing MCP owner approval does not match signed Teams release subject")
+                _private_atomic(marker, {
+                    "schema_version": "1.0", "approval_id": approval_id,
+                    "release_id": release_id,
+                    "candidate_sha": request.metadata["candidate_sha"],
+                    "manifest_sha256": request.metadata["manifest_sha256"],
+                    "mobile_policy_sha256": policy.policy_sha256,
+                    "signed_evidence_sha256": evidence_sha,
+                    "decision": "approve",
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "recovery": "redundant_signed_teams_decision_preserved_mcp_owner_approval",
+                    "authority_mutated": False,
+                })
+                continue
             if prior_source == "explicit_owner_instruction":
                 if request.metadata.get("initial_freeze_binding") is not None:
                     raise PermissionError("single Teams frozen release cannot inherit a prior shell approval")
@@ -675,7 +716,7 @@ def consume_mobile_release_decisions(
         expected = create_mobile_release_request(
             candidate, policy, now=request.requested_at,
             card_challenge=(request.metadata.get("card_instance_challenge")
-                            if policy.schema_version in {"2.0", "3.0", "4.0", "4.1"} else None),
+                            if policy.schema_version in {"2.0", "3.0", "3.2", "4.0", "4.1"} else None),
             renewed_from=renewed_from, renewal_nonce=renewal_nonce,
         )
         if (request.metadata != {**expected.metadata, **{
