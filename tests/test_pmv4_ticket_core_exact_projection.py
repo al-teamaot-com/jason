@@ -15,7 +15,7 @@ def test_exact_reviewed_state_and_individual_credentials_only():
     assert result=={
         "mount_shape":"reviewed_exact_v1",
         "state_mount_count":5,
-        "credential_mount_count":31,
+        "credential_mount_count":29,
         "provider_requests_executed":False,
         "root_owner_release_verified":False,
     }
@@ -102,3 +102,11 @@ def test_readonly_attestation_does_not_issue_authority_or_infer_release():
     expected=gate.validate_exact_settings(settings())
     assert expected["external_worker_ready"] is False
     assert expected["production_mutations"] is False
+
+def test_future_ticket_core_projection_excludes_paid_ai_credentials():
+    mounts = list(gate.expected_docker_mounts())
+    assert not any("/openbao/openai/" in m["Destination"] for m in mounts)
+    mounts.append({"Type":"bind", "Source":"/tmp/old-role",
+                   "Destination":"/run/jason-secrets/openbao/openai/role_id", "RW":False})
+    with pytest.raises(gate.ProjectionDenied, match="CORE_EXACT_"):
+        gate.validate_exact_mounts(mounts)

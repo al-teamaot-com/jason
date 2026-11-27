@@ -129,6 +129,7 @@ def test_ticket_settings_forbid_unrelated_schedulers_but_preserve_providers(tmp_
         backup_net_enabled=True,
         dnsfilter_enabled=True,
         hosted_conversation_enabled=True,
+        hosted_semantics_enabled=True,
     )
     scoped=ticket_worker_runtime_settings(configured)
     assert scoped.autonomy_worker_enabled is True
@@ -146,7 +147,7 @@ def test_ticket_settings_forbid_unrelated_schedulers_but_preserve_providers(tmp_
     assert scoped.owner_uat_mode == "off"
     assert scoped.backup_net_enabled is True
     assert scoped.dnsfilter_enabled is True
-    assert scoped.hosted_semantics_enabled == configured.hosted_semantics_enabled
+    assert scoped.hosted_semantics_enabled is False
     assert scoped.hosted_conversation_enabled is False
     scoped.validate()
 

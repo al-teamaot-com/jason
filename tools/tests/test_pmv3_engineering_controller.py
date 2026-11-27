@@ -306,3 +306,31 @@ def test_opt_in_controller_fails_closed_on_missing_lock_and_pause(tmp_path):
             retry_release_contention=True)
         assert state["status"]=="deferred" and state["release_gate_status"]==expected
         assert state["pass_count"]==0
+
+
+def test_unrelated_authority_hold_does_not_mask_critical_internal_work(tmp_path):
+    spool = tmp_path / "spool"
+    critical = {"reason": "critical_support_stalled", "blocked_count": 1, "unadmitted_count": 0,
+                "blocked_items": ["SUPPORT-OPS-054"], "unadmitted_items": []}
+    pipeline = {"status": "degraded", "failed_control_stages": [], "failed_work_stages": [],
+                "critical_support_blocker": critical}
+    supervisor = {"status": "degraded", "reason": "external_or_governed_gate",
+                  "category_counts": {"human_authority": 1, "recoverable_source": 100},
+                  "support_blocker_routes": {"SUPPORT-OPS-054": {"category": "recoverable_source"}},
+                  "unchanged_cycles": 3, "disposition_sha256": "same"}
+    runner, calls = runner_for(spool, [{"pipeline": pipeline, "supervisor": supervisor}])
+    result = module.controller_run(scripts=tmp_path, repo=tmp_path, spool=spool,
+                                   release_state=tmp_path, runner=runner,
+                                   integration_reconciler=idle_integration_queue)
+    assert result["status"] == "bounded_stall"
+    assert result["reason"] == "critical_support_repair_handoff"
+    assert calls["n"] == 1
+    assert module.service_exit_code(result) == 0
+    supervisor["unchanged_cycles"] = 0
+    assert module.classify(pipeline, supervisor) == ("recoverable", "critical_support_recoverable")
+    supervisor["support_blocker_routes"]["SUPPORT-OPS-054"]["category"] = "human_authority"
+    assert module.classify(pipeline, supervisor)[0] == "waiting_external"
+    pipeline["failed_work_stages"] = ["development"]
+    assert module.classify(pipeline, supervisor) == ("recoverable", "work_stage_failed")
+    pipeline["failed_control_stages"] = ["engineering_supervisor"]
+    assert module.classify(pipeline, supervisor) == ("control_failure", "control_plane_failure")

@@ -43,10 +43,12 @@ Jason does not publish port 8080 to the host. The runtime joins only the existin
 - Only active public keys from the governed trusted-key registry authenticate OpenClaw machine envelopes.
 - OpenBao AppRole credential files are mounted read-only and used only by the applicable provider secret resolver.
 - Datto, Microsoft, AWS, IT Glue, Autotask, and OpenAI credential values and access tokens are not exposed to the reasoning layer.
-- Hosted conversation rollout is independently controlled by
-  `JASON_HOSTED_CONVERSATION_ENABLED`; the initial model is selected through
-  `JASON_OPENAI_CONVERSATION_MODEL` and every hosted attempt is written to the
-  durable model-usage ledger at `JASON_MODEL_USAGE_DB`.
+- The Owner's November 11, 2026 no-paid-AI policy, reaffirmed November 26,
+  prohibits direct paid API reasoning. Both legacy hosted flags must be false;
+  runtime validation denies attempts to enable either before credential resolution.
+  The HTTP runtime no longer mounts the dedicated paid AI AppRole files.
+  Historical usage records are retained. A separately reviewed subscription-only
+  adapter is not interchangeable with these flags.
 - Ollama receives provider-neutral planning metadata or provider evidence only for bounded structured interpretation. It cannot select providers, invoke connectors, or assert final evidence values.
 - The System Registry query provider is deterministic and read-only. It cannot mutate declared state, lifecycle history, production services, governance, or secret values.
 - Central Orchestrator and JKD-001 remain the execution and identity-authority boundaries.
@@ -62,8 +64,6 @@ The compose deployment requires the following host-side environment variables be
 - `JASON_SES_OPENBAO_SECRET_ID_HOST_PATH` — host path to the AWS SES AppRole SecretID file.
 - `JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH` — host path to the Microsoft Graph AppRole RoleID file.
 - `JASON_MICROSOFT_OPENBAO_SECRET_ID_HOST_PATH` — host path to the Microsoft Graph AppRole SecretID file.
-- `JASON_OPENAI_OPENBAO_ROLE_ID_HOST_PATH` — host path to the OpenAI AppRole RoleID file.
-- `JASON_OPENAI_OPENBAO_SECRET_ID_HOST_PATH` — host path to the OpenAI AppRole SecretID file.
 - `JASON_IT_GLUE_OPENBAO_ROLE_ID_HOST_PATH` — host path to the IT Glue read-only AppRole RoleID runtime file.
 - `JASON_IT_GLUE_OPENBAO_SECRET_ID_HOST_PATH` — host path to the IT Glue read-only AppRole SecretID runtime file.
 - `JASON_AUTOTASK_OPENBAO_ROLE_ID_HOST_PATH` — host path to the Autotask read-only AppRole RoleID runtime file.

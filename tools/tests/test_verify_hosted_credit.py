@@ -13,55 +13,15 @@ def load_module():
     return mod
 
 
-def test_missing_model_denies_without_provider(monkeypatch, capsys):
+def test_retired_diagnostic_denies_even_with_legacy_paid_config(monkeypatch, capsys):
     mod = load_module()
-    monkeypatch.delenv('JASON_OPENAI_CONVERSATION_MODEL', raising=False)
+    monkeypatch.setenv("JASON_OPENAI_CONVERSATION_MODEL", "gpt-5.4-mini")
+    monkeypatch.setenv("JASON_HOSTED_CONVERSATION_ENABLED", "true")
+    monkeypatch.setenv("JASON_OPENAI_API_FALLBACK_ENABLED", "true")
     assert mod.run() == 2
-    assert 'configured conversation model' in capsys.readouterr().out
-
-
-def test_diagnostic_calls_existing_ledger_with_attribution(monkeypatch, capsys):
-    mod = load_module()
-    monkeypatch.setenv('JASON_OPENAI_CONVERSATION_MODEL', 'gpt-5.4-mini')
-    observed = {}
-    class Resolver:
-        def __init__(self, **kwargs):
-            observed['secret_paths'] = (str(kwargs['role_id_path']), str(kwargs['secret_id_path']))
-        def resolve(self, name, context):
-            assert name == 'openai.semantic_intent'
-            assert context.mode == 'observe'
-            return {'api_key': 'test-only'}
-    class Client:
-        def __init__(self, **kwargs):
-            observed['client'] = kwargs
-        def complete(self, **kwargs):
-            from usage_ledger.runtime_context import new_attempt_context
-            observed['context'] = new_attempt_context()
-            return {'ok': True}
-    monkeypatch.setattr(mod, 'OpenBaoSecretResolver', Resolver)
-    monkeypatch.setattr(mod, 'OpenAIStructuredJsonClient', Client)
-    monkeypatch.setattr(mod, 'SQLiteUsageLedger', lambda path: SimpleNamespace(path=path))
-    monkeypatch.setattr(mod, 'metered_receipt', lambda path, rid: True)
-    assert mod.run() == 0
-    assert observed['context'].workflow_id == 'provider-credit-verify'
-    assert observed['context'].routing_profile == 'operator-authorized-diagnostic'
-    assert observed['client']['model'] == 'gpt-5.4-mini'
-    assert observed['client']['reasoning_effort'] == 'low'
-    assert observed['client']['api_key'] == 'test-only'
-    assert 'test-only' not in capsys.readouterr().out
-
-
-def test_error_does_not_leak_secret(monkeypatch, capsys):
-    mod = load_module()
-    monkeypatch.setenv('JASON_OPENAI_CONVERSATION_MODEL', 'gpt-5.4-mini')
-    class Resolver:
-        def __init__(self, **kwargs): pass
-        def resolve(self, *args): raise RuntimeError('sensitive-private-token')
-    monkeypatch.setattr(mod, 'OpenBaoSecretResolver', Resolver)
-    assert mod.run() == 4
-    output = capsys.readouterr().out
-    assert 'RuntimeError' in output
-    assert 'sensitive-private-token' not in output
+    assert "PAID_AI_API_PROHIBITED" in capsys.readouterr().out
+    assert not hasattr(mod, "OpenBaoSecretResolver")
+    assert not hasattr(mod, "OpenAIStructuredJsonClient")
 
 
 def test_metered_receipt_rejects_other_request_and_unmetered(tmp_path):
@@ -87,62 +47,3 @@ def test_metered_receipt_rejects_other_request_and_unmetered(tmp_path):
     db.commit()
     assert mod.metered_receipt(path, 'correct') is True
     db.close()
-
-
-def test_diagnostic_rejects_success_without_metered_receipt(monkeypatch, capsys):
-    mod = load_module()
-    monkeypatch.setenv('JASON_OPENAI_CONVERSATION_MODEL', 'gpt-5.4-mini')
-    class Resolver:
-        def __init__(self, **kwargs): pass
-        def resolve(self, *args): return {'api_key':'test-only'}
-    class Client:
-        def __init__(self, **kwargs): pass
-        def complete(self, **kwargs): return {'ok':True}
-    monkeypatch.setattr(mod, 'OpenBaoSecretResolver', Resolver)
-    monkeypatch.setattr(mod, 'OpenAIStructuredJsonClient', Client)
-    monkeypatch.setattr(mod, 'SQLiteUsageLedger', lambda path: SimpleNamespace(path=path))
-    monkeypatch.setattr(mod, 'metered_receipt', lambda path, rid: False)
-    assert mod.run() == 3
-    assert 'no matching provider-reported metered completion' in capsys.readouterr().out
-
-
-def test_transport_status_reported_without_secret_message(monkeypatch, capsys):
-    from connectors.core.contracts import ConnectorTransportError
-    mod = load_module()
-    monkeypatch.setenv('JASON_OPENAI_CONVERSATION_MODEL', 'gpt-5.4-mini')
-    class Resolver:
-        def __init__(self, **kwargs): pass
-        def resolve(self, *args): return {'api_key':'private-api-key'}
-    class Client:
-        def __init__(self, **kwargs): pass
-        def complete(self, **kwargs):
-            raise ConnectorTransportError('private-api-key sensitive provider response',
-                                          status_code=429,provider_error_code='credit_balance_exhausted')
-    monkeypatch.setattr(mod, 'OpenBaoSecretResolver', Resolver)
-    monkeypatch.setattr(mod, 'OpenAIStructuredJsonClient', Client)
-    monkeypatch.setattr(mod, 'SQLiteUsageLedger', lambda path: SimpleNamespace(path=path))
-    assert mod.run() == 4
-    output = capsys.readouterr().out
-    assert 'http_status=429' in output and 'code=credit_balance_exhausted' in output
-    assert 'private-api-key' not in output and 'sensitive provider response' not in output
-
-
-def test_unrecognized_provider_code_is_never_printed(monkeypatch, capsys):
-    from connectors.core.contracts import ConnectorTransportError
-    mod = load_module()
-    monkeypatch.setenv('JASON_OPENAI_CONVERSATION_MODEL', 'gpt-5.4-mini')
-    class Resolver:
-        def __init__(self, **kwargs): pass
-        def resolve(self, *args): return {'api_key':'private-api-key'}
-    class Client:
-        def __init__(self, **kwargs): pass
-        def complete(self, **kwargs):
-            raise ConnectorTransportError('sensitive text',status_code=400,
-                provider_error_code='sensitive-unknown-provider-code')
-    monkeypatch.setattr(mod, 'OpenBaoSecretResolver', Resolver)
-    monkeypatch.setattr(mod, 'OpenAIStructuredJsonClient', Client)
-    monkeypatch.setattr(mod, 'SQLiteUsageLedger', lambda path: SimpleNamespace(path=path))
-    assert mod.run() == 4
-    output = capsys.readouterr().out
-    assert 'http_status=400' in output and 'code=unclassified' in output
-    assert 'sensitive' not in output
