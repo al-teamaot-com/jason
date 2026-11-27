@@ -90,6 +90,29 @@ Proceed with work that has already been authorized; do not demand redundant appr
   before reporting operational readiness. CI enforces source tests; production
   adoption remains separately governed and unverified by this source record.
 
+## JES-008 — Configuration-first operational design
+
+- **Owner direction, November 27, 2026:** Represent operational policy, limits,
+  retention, schedules, routing, mappings, workflow definitions, and durable
+  execution/verification state as validated versioned configuration or
+  established database records. Reuse the existing Jason worker, policy,
+  approval, and audit interfaces rather than producing one-off scripts for
+  individual incidents, releases, providers, or clients.
+- Keep the mechanism generic and typed; new code is appropriate when an
+  existing mechanism cannot perform the required operation safely. Do not
+  encode individual live target IDs, one-time thresholds, or workflow-specific
+  decisions in reusable worker code. Exact targets belong in the reviewed
+  execution scope/record, and operational limits belong in configuration.
+- Changes to operational settings inside an approved safety envelope must not
+  require a source-code rebuild. Configuration and database updates cannot
+  themselves bypass identity, client scope, protected-source, production,
+  financial, disruption, or approval controls. Changes outside the approved
+  envelope require normal governed review and authorization.
+- Verify invalid/missing/stale configuration fails closed, actual effective
+  settings match the approved record, and a second supported operation works
+  without a custom script. Retain immutable before/after, audit, and rollback
+  evidence. No additional approval engine, scheduler, or broad root executor.
+
 ## Conflict and priority
 These standards do not replace existing human-governance, production-freeze, non-disruptive-operation or security requirements. More restrictive safeguards remain in force.
 
