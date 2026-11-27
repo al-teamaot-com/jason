@@ -15,6 +15,7 @@ from hashlib import sha256
 import json
 import fcntl
 import os
+import re
 from pathlib import Path
 import stat
 import shutil
@@ -225,9 +226,11 @@ def owner_scope(plan):
          and final["rollback_authorized"] is True
          and final["configuration_after"]=={"schema_version":"1.0","production_freeze":False},
          "EXACT_PARENT_SCOPE")
+    key = ("retained_preparation_and_retirement" if "retained_preparation" in plan
+           else "manager_preparation_and_retirement")
     return {"action":ACTION,"policy":plan["policy"],"queue_cutover":False,
             "installation_targets":sorted(set(plan["installation_targets"])|set(final["installation_targets"])),
-            "manager_preparation_and_retirement":plan}
+            key:plan}
 
 
 def installed_code(adapter):
@@ -240,8 +243,27 @@ def installed_code(adapter):
 
 
 def root_observation(adapter, expression):
-    return json.loads(adapter.command(["/usr/bin/python3","-I","-B","-c",
-        installed_code(adapter)+"print(json.dumps("+expression+",sort_keys=True))"],180))
+    # Never echo arbitrary child output or exception text. Preserve the
+    # recognized bounded denial code from the independently installed reader.
+    code = (installed_code(adapter) + "import re\ntry:\n"
+            " value="+expression+"\n"
+            " print(json.dumps({'status':'ok','value':value},sort_keys=True))\n"
+            "except Exception as exc:\n"
+            " reason=str(exc)\n"
+            " if not re.fullmatch(r'(?:COORDINATED_|SCOPED_BACKPORT_|OWNER_RELEASE_)[A-Z0-9_]{1,100}',reason):\n"
+            "  reason='NATIVE_READER_EXCEPTION_'+type(exc).__name__\n"
+            " print(json.dumps({'status':'denied','reason':reason},sort_keys=True))")
+    # installed_code ends with a semicolon, not a newline; the import re
+    # statement above completes that line before the try suite.
+    row=json.loads(adapter.command(["/usr/bin/python3","-I","-B","-c",code],180))
+    if row.get("status")=="denied":
+        reason=row.get("reason")
+        if not isinstance(reason,str) or not re.fullmatch(
+                r"(?:COORDINATED_|SCOPED_BACKPORT_|OWNER_RELEASE_|NATIVE_READER_EXCEPTION_)[A-Za-z0-9_]{1,100}",reason):
+            reason="NATIVE_READER_UNKNOWN_DENIAL"
+        need(False,"NATIVE_READER:"+reason)
+    need(set(row)=={"status","value"} and row["status"]=="ok","NATIVE_READER_RESULT")
+    return row["value"]
 
 
 def deploy_args():
@@ -306,9 +328,13 @@ def _activate(adapter,ops,lease,*,recover=False):
     parent_sha=digest(canonical(owner_scope(adapter.plan)))
     need(approval.get("owner_scope_sha256")==parent_sha and
          approval.get("owner_action")==ACTION,"PARENT_APPROVAL_BINDING")
-    accepted=json.loads(adapter.n["read"](adapter.directory/"scheduled-acceptance.json",0,0o400))
-    need(accepted["scope_sha256"]==sha and accepted["status"]=="scheduled_engineering_acceptance_verified"
-         and accepted["evidence"].get("two_distinct_scheduled_cycles_verified") is True,"PREPARATION_NOT_ACCEPTED")
+    if "retained_preparation" in adapter.plan:
+        need(adapter.verify_retained_preparation_records()==adapter.plan["retained_preparation"],
+             "RETAINED_PREPARATION_NOT_ACCEPTED")
+    else:
+        accepted=json.loads(adapter.n["read"](adapter.directory/"scheduled-acceptance.json",0,0o400))
+        need(accepted["scope_sha256"]==sha and accepted["status"]=="scheduled_engineering_acceptance_verified"
+             and accepted["evidence"].get("two_distinct_scheduled_cycles_verified") is True,"PREPARATION_NOT_ACCEPTED")
     # No caller-defined paths or commands. Durable exact before/after images
     # are recorded once. A failed process can only recover this approved plan.
     intent_path=adapter.directory/"retirement-intent.json"
@@ -474,7 +500,10 @@ def _activate(adapter,ops,lease,*,recover=False):
             adapter.systemctl(["daemon-reload"])
         adapter.native_revalidation()
         with adapter.n["locks"]():
-            adapter.change(ops["PAUSE"],snap(ops["PAUSE"]),None)
+            current_pause=snap(ops["PAUSE"])
+            need(current_pause in (None,adapter.pause_image),"FOREIGN_RECOVERY_PAUSE")
+            if current_pause is not None:
+                adapter.change(ops["PAUSE"],adapter.pause_image,None)
             emit(rolled_path,{"status":"original_freeze_and_mcp_restored","parent_sha256":parent_sha,
                               "accepted_manager_preparation_retained":True})
         if recover:

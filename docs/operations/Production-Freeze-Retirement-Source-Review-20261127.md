@@ -265,3 +265,39 @@ pause, changed records, extra history, changed restored files, and reuse
 of the failed candidate; the scope is still sent to the existing
 authenticator before locking or mutation. A protected-main native
 preflight and a new exact authenticated approval are required.
+
+## Accepted preparation and terminal final-phase rollback
+
+The manager preparation on db14810b945a39546ef27d48dbe439b5e0ec4e80
+was authenticated and installed. The actual 11:15 and 11:20 EST timer
+cycles completed all seven stages and the native verifier recorded
+two distinct accepted scheduled cycles. Final activation stopped before
+replacing MCP, with a generic child-process denial. The existing exact
+rollback completed at 16:22:18 UTC: the original freeze and incident
+hold were restored, all five protected container identities, images,
+and start times remained unchanged, and independent native health passed.
+The accepted manager is still running and engineering is not paused.
+
+The historical stderr was not retained, so the exact child denial cannot
+be recovered. An independently reproduced deterministic defect explains
+why the installed-policy validator cannot accept the proposed two-watch
+configuration on systemd 255. Systemd's actual Paths property printer
+emits one line per watch; the validator converted these lines into a
+dictionary, discarding the earlier path. Correct the parser to require
+exactly both PathChanged entries without extra, duplicate, missing or
+different watch types. Preserve bounded native-reader denial codes instead
+of dropping them into the generic command failure. Do not relax custody,
+health, source, provider, approval or recovery criteria.
+
+The final-only retry uses a new exact protected-main candidate and new
+authenticated Owner decision, with the immutable historical approval,
+receipt, scheduled acceptance, two cycle digests, final intent, policy
+intent and terminal rollback independently verified. It retains the
+accepted manager preparation, does not reinstall it, does not fabricate
+another scheduled acceptance, and does not modify historical evidence.
+Its final install plan must match the previous final scope exactly
+apart from the candidate and corrected coordinator host source bytes.
+No old approval authorizes the corrected retry. The exact new source
+delta and all live original file, directory and protected-peer checks
+remain mandatory. A foreign engineering pause is never removed by
+rollback. Source/fixture evidence is not production acceptance.
