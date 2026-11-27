@@ -148,3 +148,18 @@ def test_closed_loop_receipt_requires_exact_resolver_pin_and_preserves_old_recei
     bad["pipeline_artifact_sha256"]["issue_resolution_engine.py"] = "4"*64
     with pytest.raises(g.Denied):
         g.validate_receipt(bad)
+
+
+def test_breaker_custody_successor_keeps_the_complete_closed_loop_inventory():
+    row = receipt()
+    row.update(schema_version="1.1", action=g.PIPELINE_ACTION,
+               predecessor_candidate_sha=g.BREAKER_CUSTODY_PREDECESSOR,
+               predecessor_receipt_sha256="2"*64,
+               engineering_source_sha=g.PIPELINE_SOURCE_SHA,
+               pipeline_artifact_sha256={name:"3"*64 for name in g.CLOSED_LOOP_PIPELINE_ARTIFACTS})
+    assert g.validate_receipt(row) == row
+    for name in ("issue_resolution_engine.py", "release_breaker_recovery_manager.py"):
+        bad = deepcopy(row)
+        del bad["pipeline_artifact_sha256"][name]
+        with pytest.raises(g.Denied):
+            g.validate_receipt(bad)

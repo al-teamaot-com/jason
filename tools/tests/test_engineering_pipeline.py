@@ -255,6 +255,34 @@ class PipelineTests(unittest.TestCase):
         recovery = next(call[1] for call in self.calls if call[0] == "release_breaker_recovery_manager")
         self.assertEqual(recovery[recovery.index("--release-state")+1], str(self.base / "releases"))
 
+    def test_relocated_engineering_preserves_native_lkg_policy_repository(self):
+        scripts = self.base / "installed-workers"
+        scripts.mkdir()
+        worker_source = self.base / "sealed-worker-source"
+        worker_source.mkdir()
+        policy_source = scripts / "engineering-source-repo"
+        policy_source.mkdir()
+        (scripts / "engineering-worker-source").symlink_to(worker_source, target_is_directory=True)
+        def runner(argv, **kwargs):
+            self.calls.append((Path(argv[1]).stem, list(argv), kwargs))
+            return subprocess.CompletedProcess(argv, 0)
+        state = pipeline.run_pipeline(
+            scripts=scripts, repo=worker_source, spool=self.spool,
+            release_state=self.base / "releases", runner=runner,
+        )
+        self.assertEqual(state["status"], "healthy")
+        self.assertEqual(state["stages"]["release_breaker_recovery"]["policy_repository"], str(policy_source))
+        for name, argv, _ in self.calls:
+            expected = policy_source if name == "release_breaker_recovery_manager" else worker_source
+            self.assertEqual(argv[argv.index("--repo")+1], str(expected))
+        # A missing or inaccessible policy source is NOT replaced with the
+        # engineering candidate. The unchanged native manager fails closed.
+        policy_source.rmdir()
+        recovery = next(stage for stage in pipeline.STAGES if stage.name == "release_breaker_recovery")
+        self.assertEqual(pipeline.stage_repository(recovery, scripts, worker_source), policy_source)
+        other_repo = self.base / "ordinary-source"
+        self.assertEqual(pipeline.stage_repository(recovery, scripts, other_repo), other_repo)
+
     def test_integration_only_reads_the_canonical_queue(self):
         self.execute()
         integration = next(
