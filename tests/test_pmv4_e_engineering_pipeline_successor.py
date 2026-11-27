@@ -499,3 +499,69 @@ def test_closed_loop_exact_git_scope_and_intervening_changes(tmp_path,monkeypatc
     reverted=commit("revert protected control",{"tools/pmv3_integration_queue.py":"old"})
     with pytest.raises(PermissionError,match="INTERVENING_PROTECTED_SOURCE_CHANGE"):
         m.review_closed_loop_delta(git,reverted)
+
+
+def breaker_custody_plan():
+    p = source_integration_plan()
+    p.update(predecessor_candidate_sha=m.BREAKER_CUSTODY_BASELINE,
+             worker_replacements=sorted(m.BREAKER_CUSTODY_WORKERS),
+             engineering_progress_detector_required=True,
+             breaker_custody_source_review={
+                 "scope_commit":"7"*40,"scope_parent":"8"*40,
+                 "excluded_source_paths":["docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md"],
+             },
+             breaker_policy_source=dict(m.BREAKER_POLICY_SOURCE))
+    return p
+
+
+@pytest.mark.parametrize("key,value", [
+    ("worker_replacements",["release_manager_host_runner.py"]),
+    ("provider_writes",True), ("production_authority",True),
+    ("freeze_or_hold_change",True), ("runtime_or_mcp_restart_allowed",True),
+    ("engineering_progress_detector_required",False),
+    ("required_scheduled_cycles",1),
+    ("breaker_policy_source",{"repository":"/tmp/untrusted","revision":"0"*40}),
+    ("breaker_custody_source_review",{"scope_commit":"7"*40,"scope_parent":"8"*40,
+                                    "excluded_source_paths":["tools/pmv3_integration_queue.py"]}),
+])
+def test_breaker_custody_scope_preserves_existing_authority(key,value):
+    p=breaker_custody_plan()
+    assert m.pipeline_scope_sha(p)==m.digest(m.canon(p))
+    p[key]=value
+    with pytest.raises(PermissionError):
+        m.pipeline_scope_sha(p)
+
+
+def test_breaker_custody_only_replaces_pipeline_and_preserves_resolver_pin():
+    from tools import pmv4_e_engineering_manager_guard as g
+    a=object.__new__(m.PipelineSuccessor)
+    a.predecessor=m.BREAKER_CUSTODY_BASELINE
+    a.changed_workers=m.BREAKER_CUSTODY_WORKERS
+    a.g={"ARTIFACTS":g.ARTIFACTS,"PIPELINE_ARTIFACTS":g.PIPELINE_ARTIFACTS}
+    a.release=m.ROOT/"releases"/("a"*40)/"tools"
+    targets=a.approved_targets()
+    assert {p.name for p in targets if p.parent==m.LIB}=={"engineering_pipeline.py"}
+    assert {x.name for x in targets if x.parent==a.release} == (
+        set(g.ARTIFACTS)|set(g.CLOSED_LOOP_PIPELINE_ARTIFACTS))
+    assert m.POLICY not in targets and m.ENV not in targets
+
+
+@pytest.mark.parametrize("fault", ["wrong_repo","wrong_revision","stale","open","pending","missing","failed"])
+def test_breaker_scheduled_route_requires_fresh_native_ledger(fault):
+    pipeline={"started_at":"2026-11-27T06:00:00+00:00",
+              "finished_at":"2026-11-27T06:01:00+00:00",
+              "stages":{"release_breaker_recovery":{
+                  "status":"succeeded","policy_repository":m.BREAKER_POLICY_SOURCE["repository"]}}}
+    ledger={"observed_at":"2026-11-27T06:01:00.100000+00:00",
+            "status":"already_closed","lkg_revision":m.LKG,
+            "breaker_state":"closed","next_action":"none"}
+    assert m.verify_scheduled_breaker_policy_route(pipeline,ledger)==m.BREAKER_POLICY_SOURCE
+    if fault=="wrong_repo":pipeline["stages"]["release_breaker_recovery"]["policy_repository"]="/tmp/other"
+    elif fault=="wrong_revision":ledger["lkg_revision"]="0"*40
+    elif fault=="stale":ledger["observed_at"]="2026-11-27T05:59:59+00:00"
+    elif fault=="open":ledger["breaker_state"]="open"
+    elif fault=="pending":ledger["status"]="pending_root_verification"
+    elif fault=="failed":pipeline["stages"]["release_breaker_recovery"]["status"]="failed"
+    else:ledger.pop("observed_at")
+    with pytest.raises(PermissionError,match="SCHEDULED_POLICY_ROUTE_NOT_VERIFIED"):
+        m.verify_scheduled_breaker_policy_route(pipeline,ledger)
