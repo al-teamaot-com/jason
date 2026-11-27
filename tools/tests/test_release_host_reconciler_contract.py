@@ -963,3 +963,92 @@ def test_host_reconciler_requires_installed_worker_gate_alignment():
 ' in shell
     assert 'installed worker differs from production source' in shell
     assert shell.index('step_start protected_root_policy_stage') < shell.index('step_start user_worker_reconciliation')
+
+
+def test_root_verifies_retired_normal_proof_and_rejects_frozen_replay(tmp_path, monkeypatch):
+    import importlib.util
+    import json
+    import os
+    from datetime import datetime, timezone
+    from hashlib import sha256
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from kernel import signed_owner_release_v2 as proof
+    spec=importlib.util.spec_from_file_location("root_retired_mode_fixture", ROOT/"tools/release_host_reconcile_worker.py")
+    worker=importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    key=Ed25519PrivateKey.generate()
+    policy="9"*64
+    candidate,rollback,scope="a"*40,"b"*40,"c"*64
+    rid="release-"+candidate[:16]
+    aid="owner-mcp-"+"e"*32
+    manifest={"candidate_sha":candidate,"rollback_sha":rollback}
+    manifest_hash=sha256(json.dumps(manifest,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+    record={"release_id":rid,"release_candidate":{"candidate_sha":candidate},"rollback_sha":rollback,
+        "release_manifest":manifest,"manual_scope_review":{"candidate_sha":candidate,"baseline_sha":rollback,"scope_sha256":scope},
+        "owner_approval":{"approved":True,"candidate_sha":candidate,"source":"authenticated_signed_mcp_owner:"+aid,
+        "transaction_binding":{"candidate_sha":candidate,"rollback_sha":rollback,"scope_sha256":scope,"manifest_sha256":manifest_hash}}}
+    path=tmp_path/"owner-approval-requests-processed"/(rid+".json")
+    path.parent.mkdir()
+    monkeypatch.setattr(worker,"RELEASE_STATE",tmp_path)
+    monkeypatch.setattr(worker,"_host_operator_uid",os.geteuid)
+    monkeypatch.setattr(worker,"_trusted_normal_owner_proof_module",lambda:(proof,policy))
+    monkeypatch.setattr(worker,"_root_owner_identity_is_active",lambda oid,principal: oid==proof.OWNER_OID and principal==proof.OWNER_PRINCIPAL)
+    monkeypatch.setattr(proof,"read_retired_release_policy",lambda:policy)
+    monkeypatch.setattr(proof,"read_pinned_root_owner_public_key",lambda _:key.public_key())
+    def write(**binding):
+        signed=proof.issue_exact_owner_release(approval_id=aid,release_id=rid,candidate_sha=candidate,
+            rollback_sha=rollback,scope_sha256=scope,manifest_sha256=manifest_hash,
+            verified_tenant_id=proof.TID,verified_owner_oid=proof.OWNER_OID,verified_principal=proof.OWNER_PRINCIPAL,
+            verified_organization_id="aot",confirmed_decision="approve",at=datetime.now(timezone.utc),private_key=key,**binding)
+        path.write_text(json.dumps({"release_id":rid,"candidate_sha":candidate,"approved_by":proof.OWNER_PRINCIPAL,
+            "organization_id":"aot","source":"authenticated_jason_mcp_owner:"+aid,"signed_owner_proof":signed}))
+        path.chmod(0o600)
+    write(release_policy_sha256=policy)
+    assert worker._signed_mcp_owner_release_authorized(candidate,rollback,record)
+    write(freeze_sha256=policy)
+    assert not worker._signed_mcp_owner_release_authorized(candidate,rollback,record)
+    write(release_policy_sha256=policy)
+    (tmp_path/"production-deployment-freeze").write_text("unexpected marker")
+    assert not worker._signed_mcp_owner_release_authorized(candidate,rollback,record)
+
+
+def test_normal_owner_successor_keeps_legacy_pins_and_stages_public_mount_only():
+    import hashlib
+    import re
+    legacy = ROOT / "implementation/kernel/signed_owner_release.py"
+    successor = ROOT / "implementation/kernel/signed_owner_release_v2.py"
+    legacy_pin = "f50eea90102d9a1de82b3753ec8d0cd225280d385ac7a658ae2c2a303934a0e3"
+    assert hashlib.sha256(legacy.read_bytes()).hexdigest() == legacy_pin
+    pin = hashlib.sha256(successor.read_bytes()).hexdigest()
+    worker = (ROOT/"tools/release_host_reconcile_worker.py").read_text()
+    installer = (ROOT/"tools/install_release_host_reconciler.py").read_text()
+    deploy = (ROOT/"infrastructure/jason-mcp/production-deploy.sh").read_text()
+    assert f'ROOT_OWNER_PROOF_SUCCESSOR_SHA256 = "{pin}"' in worker
+    assert f'NORMAL_VERIFIER_SHA256 = "{pin}"' in installer
+    assert 'LIB / "owner_signed_release.py"' in installer
+    assert 'LIB / "owner_signed_release_v2.py"' in installer
+    assert 'stage_normal_owner_verifier()' in installer
+    assert 'exec(compile(raw, str(path), "exec"), module.__dict__)' in worker
+    directory="/etc/jason-owner-release/normal-release-policy"
+    assert directory in worker and directory in installer and directory in deploy
+    assert directory+"/production-freeze-retirement.json" in successor.read_text()
+    assert '--add-readonly-bind "$NORMAL_RELEASE_POLICY_DIR:$NORMAL_RELEASE_POLICY_DIR"' in deploy
+    assert '"\x24{NORMAL_RELEASE_POLICY_ARGS[@]}"' in deploy
+    assert '--add-readonly-bind "/etc/jason-owner-release:/etc/jason-owner-release"' not in deploy
+
+
+def test_normal_root_loader_absence_is_legacy_but_present_untrusted_code_denies(tmp_path,monkeypatch):
+    import importlib.util
+    import pytest
+    spec = importlib.util.spec_from_file_location("test_normal_owner_root_loader", ROOT/"tools/release_host_reconcile_worker.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    policy = tmp_path/"retirement.json"
+    successor=tmp_path/"successor.py"
+    monkeypatch.setattr(module,"ROOT_RETIREMENT_POLICY",policy)
+    monkeypatch.setattr(module,"ROOT_OWNER_PROOF_SUCCESSOR",successor)
+    assert module._trusted_normal_owner_proof_module() is None
+    policy.write_text("{}")
+    successor.write_text("raise RuntimeError('must not execute untrusted code')")
+    with pytest.raises(module.HostReconcileError,match="untrusted|digest changed"):
+        module._trusted_normal_owner_proof_module()

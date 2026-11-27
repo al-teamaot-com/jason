@@ -258,6 +258,27 @@ PY_OWNER_SIGNER
   )
 fi
 
+# Only the dedicated public policy projection is mounted, never the
+# private Owner-control directory. Retiring the global marker requires a
+# subsequent exact native transaction that verifies this mount is present
+# and read-only. An absent projection during legacy staging grants nothing.
+NORMAL_RELEASE_POLICY_ARGS=()
+NORMAL_RELEASE_POLICY_DIR=/etc/jason-owner-release/normal-release-policy
+if [ -e "$NORMAL_RELEASE_POLICY_DIR" ] || [ -L "$NORMAL_RELEASE_POLICY_DIR" ]; then
+  python3 - "$NORMAL_RELEASE_POLICY_DIR" <<'PY_NORMAL_POLICY'
+import os, stat, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+for path in (p, *p.parents):
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise SystemExit("DENIED: normal release policy directory custody invalid")
+if stat.S_IMODE(p.lstat().st_mode) != 0o755 or p.lstat().st_gid != 0:
+    raise SystemExit("DENIED: normal release policy projection mode invalid")
+PY_NORMAL_POLICY
+  NORMAL_RELEASE_POLICY_ARGS=(--add-readonly-bind "$NORMAL_RELEASE_POLICY_DIR:$NORMAL_RELEASE_POLICY_DIR")
+fi
+
 # PMv4 Owner shadow issuer is OFF until a reviewed exact source release
 # explicitly enables its host projection. Read source only; never trust a
 # free-form host environment variable for authority or an alternate mount.
@@ -388,6 +409,7 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --add-readonly-bind "$QBO_DEV_SECRET_HOST:/run/jason-secrets/openbao/quickbooks-development/secret_id" \
   "${QBO_PROD_ARGS[@]}" \
   "${OWNER_SIGNER_ARGS[@]}" \
+  "${NORMAL_RELEASE_POLICY_ARGS[@]}" \
   "${PMV4_OWNER_ARGS[@]}" \
   "${PMV4_STAGE_A0_ARGS[@]}" \
   "${PMV4_STAGE_E_ARGS[@]}" \
