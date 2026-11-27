@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import ast
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 import os
@@ -54,6 +54,11 @@ HEALTH = {
     "jason-teams-gateway": (3979, "node"),
 }
 RESOLVED = {"production_components_verified", "rollback_verified", "failed_before_mutation"}
+OWNER_UAT_SOURCE = "config/communications/owner-uat-coordinated-canary.json"
+OWNER_UAT_COMPONENTS = ("jason-runtime", "jason-mcp-pilot")
+OWNER_UAT_READBACK_DIRECTORY = "/etc/jason-owner-release/coordinated-readback"
+OWNER_UAT_BIND = ("bind", OWNER_UAT_READBACK_DIRECTORY, OWNER_UAT_READBACK_DIRECTORY, False)
+
 
 # These exact paths are part of the independently reviewed installation.
 # In particular, an installed host adapter without a native recovery dispatcher
@@ -384,7 +389,8 @@ def required_container(name: str) -> dict:
     return item
 
 
-def config_fingerprint(item: Mapping) -> str:
+def config_fingerprint(item: Mapping, *, environment: Mapping | None = None,
+                       extra_mount: tuple | None = None) -> str:
     """Compare configuration without writing environment secrets to receipts."""
     c, h = item["Config"], item["HostConfig"]
     values = {}
@@ -394,6 +400,13 @@ def config_fingerprint(item: Mapping) -> str:
             deny("COORDINATED_ENVIRONMENT_AMBIGUOUS")
         values[key] = value
     values.pop("JASON_SOURCE_REVISION", None)
+    values.update(environment or {})
+    mounts = [(m["Type"], m["Source"], m["Destination"], m["RW"])
+              for m in item.get("Mounts") or []]
+    if extra_mount is not None:
+        if any(m[2] == extra_mount[2] for m in mounts):
+            deny("COORDINATED_OWNER_UAT_MOUNT_ALREADY_PRESENT")
+        mounts.append(extra_mount)
     # Retain the prior security settings, identities, networks and all mounts.
     return digest({
         "environment": values,
@@ -401,10 +414,53 @@ def config_fingerprint(item: Mapping) -> str:
         "host": {k:h.get(k) for k in ("ReadonlyRootfs","Privileged","CapDrop","CapAdd",
                    "SecurityOpt","Memory","NanoCpus","PidsLimit","NetworkMode","RestartPolicy",
                    "PortBindings","Devices","Tmpfs","PidMode","IpcMode")},
-        "mounts": sorted((m["Type"], m["Source"], m["Destination"], m["RW"])
-                         for m in item.get("Mounts") or []),
+        "mounts": sorted(mounts),
         "networks": sorted(item.get("NetworkSettings", {}).get("Networks", {})),
     })
+
+
+def owner_uat_environment(repo: Path, manifest: Mapping, *, now: datetime) -> dict[str, dict[str, str]]:
+    """Admit only the source-pinned nonexecuting canary, never arbitrary env or mounts."""
+    projections = manifest["projections"]
+    opted_in = [p for p in projections.values() if OWNER_UAT_SOURCE in p["changed_files"]]
+    if not opted_in:
+        return {}
+    targets = tuple(t["name"] for t in manifest["targets"])
+    if (manifest["schema_version"] != "3.0" or targets != OWNER_UAT_COMPONENTS
+            or len(opted_in) != len(projections)):
+        deny("COORDINATED_OWNER_UAT_TARGET_SCOPE")
+    blobs = [co._git(repo, "show", p["candidate_sha"] + ":" + OWNER_UAT_SOURCE) for p in opted_in]
+    if not 0 < len(blobs[0]) <= 4096 or any(raw != blobs[0] for raw in blobs):
+        deny("COORDINATED_OWNER_UAT_SOURCE_DIFFERS")
+    try:
+        campaign = json.loads(blobs[0])
+        expires = datetime.fromisoformat(campaign["expires_at"])
+        if (
+            set(campaign) != {"schema_version", "purpose", "organization_id", "recipient",
+                              "capability", "execution_permitted", "session_id", "expires_at"}
+            or campaign["schema_version"] != "1.0"
+            or campaign["purpose"] != "owner_teams_nonexecuting_uat"
+            or campaign["organization_id"] != "aot"
+            or campaign["recipient"] != "person-al"
+            or campaign["capability"] != "interaction.owner.acceptance.record"
+            or campaign["execution_permitted"] is not False
+            or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_:-]{4,87}", campaign["session_id"])
+            or expires.utcoffset() != timedelta(0) or not timedelta(0) < expires - now <= timedelta(hours=48)
+        ):
+            deny("COORDINATED_OWNER_UAT_CONFIGURATION")
+    except (ValueError, TypeError, KeyError):
+        deny("COORDINATED_OWNER_UAT_CONFIGURATION")
+    return {
+        name: {
+            "JASON_OWNER_UAT_MODE": "nonexecuting_test_only",
+            "JASON_OWNER_UAT_WORKER_ENABLED": "true" if name == "jason-runtime" else "false",
+            "JASON_OWNER_UAT_SESSION_ID": campaign["session_id"],
+            "JASON_OWNER_UAT_COORDINATED_RELEASE_ID": manifest["release_id"],
+            "JASON_OWNER_UAT_COMPONENT": name,
+            "JASON_OWNER_UAT_CAMPAIGN_EXPIRES_AT": expires.isoformat(),
+        } for name in targets
+    }
+
 
 
 def exact_original(item: Mapping, target: Mapping) -> bool:
@@ -488,6 +544,8 @@ class CoordinatedHost(NativeScopedBackportHost):
         self.active_profile = None
         self.active_review_sha = None
         self._staging = False
+        self.canary_environment: dict[str, dict[str, str]] = {}
+        self.candidate_configs: dict[str, str] = {}
 
     def enforce_installed_root_trust(self, profile: Mapping) -> None:
         self._staging = False
@@ -571,11 +629,17 @@ class CoordinatedHost(NativeScopedBackportHost):
         bootstrap = ("import runpy,sys;sys.path.insert(0,"
                      + repr(str(INSTALL)) + ");"
                      "runpy.run_module('tools.coordinated_deploy_live_container',run_name='__main__')")
-        return ["/usr/bin/python3", "-I", "-B", "-c", bootstrap, "--live", name,
+        args = ["/usr/bin/python3", "-I", "-B", "-c", bootstrap, "--live", name,
                 "--image", t["candidate_image"],
                 "--rollback", self._rollback_name(name, m),
                 "--source-revision", m["projections"][t["projection"]]["candidate_sha"],
                 "--health-url", f"http://127.0.0.1:{port}/healthz", "--health-runtime", runtime]
+        environment = self.canary_environment.get(name)
+        if environment:
+            for key, value in sorted(environment.items()):
+                args.extend(("--set-env", key + "=" + value))
+            args.extend(("--add-readonly-bind", OWNER_UAT_READBACK_DIRECTORY + ":" + OWNER_UAT_READBACK_DIRECTORY))
+        return args
 
     def _frozen(self, manifest: Mapping) -> dict:
         """Revalidate the exact current policy; never retire a marker here."""
@@ -637,6 +701,10 @@ class CoordinatedHost(NativeScopedBackportHost):
         self.previous_readback = readback.verify_live()
         self.original_components = readback.inspect_components()
         self.original_configs = {}
+        self.candidate_configs = {}
+        self.canary_environment = owner_uat_environment(self.repo, manifest, now=datetime.now(timezone.utc))
+        if self.canary_environment:
+            trusted_directory(Path(OWNER_UAT_READBACK_DIRECTORY))
         for t in manifest["targets"]:
             name = t["name"]
             item = required_container(name)
@@ -644,6 +712,9 @@ class CoordinatedHost(NativeScopedBackportHost):
                 deny("COORDINATED_ORIGINAL_IDENTITY_OR_RETAINED_NAME")
             assert_healthy(item, name)
             self.original_configs[name] = config_fingerprint(item)
+            environment = self.canary_environment.get(name)
+            self.candidate_configs[name] = config_fingerprint(
+                item, environment=environment, extra_mount=OWNER_UAT_BIND if environment else None)
             for key, rev in (("candidate_image", manifest["projections"][t["projection"]]["candidate_sha"]),
                              ("rollback_image", t["rollback_revision"])):
                 image = json.loads(run("docker", "image", "inspect", t[key], timeout=15).stdout)
@@ -733,6 +804,7 @@ class CoordinatedHost(NativeScopedBackportHost):
             "release_id":manifest["release_id"], "scope_sha256":manifest["scope_sha256"],
             "approval_id":decision["approval_id"], "protected_before":protected,
             "original_configs":self.original_configs, "original_components":self.original_components,
+            "candidate_configs":self.candidate_configs,
             "previous_readback":self.previous_readback, "host_anchor":self.host_anchor,
             "mutation_attempted":False, "status":"intent_durable_no_mutation", "created_at":utcnow(),
         })
@@ -790,7 +862,7 @@ class CoordinatedHost(NativeScopedBackportHost):
         if (item["Id"] != journal["candidate_ids"].get(name)
                 or item["Image"] != t["candidate_image"]
                 or source(item) != m["projections"][t["projection"]]["candidate_sha"]
-                or config_fingerprint(item) != journal["original_configs"][name]):
+                or config_fingerprint(item) != journal.get("candidate_configs", journal["original_configs"])[name]):
             deny("COORDINATED_CANDIDATE_OR_CONFIGURATION_DRIFT")
 
     def _wait_candidate_ready(self, m: Mapping, t: Mapping, item: Mapping) -> None:
@@ -879,7 +951,7 @@ class CoordinatedHost(NativeScopedBackportHost):
             if expected_id is not None:
                 if current["Id"] != expected_id:
                     deny("COORDINATED_REPLACEMENT_ID_DRIFT")
-            elif config_fingerprint(current) != journal["original_configs"][name]:
+            elif config_fingerprint(current) != journal.get("candidate_configs", journal["original_configs"])[name]:
                 deny("COORDINATED_INTERRUPTED_CANDIDATE_UNVERIFIED")
             run("docker", "rm", "-f", name, timeout=90)
         run("docker", "rename", retained_name, name, timeout=30)

@@ -480,3 +480,46 @@ def test_effective_reader_command_rejects_other_executable(monkeypatch):
     monkeypatch.setattr(native, "run", lambda *a, **kw: report(argv + ["--foreign"]))
     with pytest.raises(ScopedBackportDenied, match="EFFECTIVE_READER_COMMAND_DRIFT"):
         native.effective_reader_command("jason-release-control-transition.service", user="root", argv=argv)
+
+
+def test_owner_uat_configuration_is_losslessly_bound_to_exact_container_delta(monkeypatch):
+    from datetime import datetime, timezone
+
+    m = {
+        "schema_version": "3.0", "release_id": "release-" + "a" * 16,
+        "targets": [{"name": name} for name in native.OWNER_UAT_COMPONENTS],
+        "projections": {name: {"candidate_sha": digit * 40, "changed_files": [native.OWNER_UAT_SOURCE]}
+                        for name, digit in zip(native.OWNER_UAT_COMPONENTS, ("a", "b"))},
+    }
+    campaign = {
+        "schema_version": "1.0", "purpose": "owner_teams_nonexecuting_uat",
+        "organization_id": "aot", "recipient": "person-al",
+        "capability": "interaction.owner.acceptance.record", "execution_permitted": False,
+        "session_id": "CanaryTest", "expires_at": "2026-11-28T23:00:00+00:00",
+    }
+    monkeypatch.setattr(native.co, "_git", lambda *_: json.dumps(campaign).encode())
+    now = datetime(2026, 11, 27, 20, tzinfo=timezone.utc)
+    env = native.owner_uat_environment(Path("/unused"), m, now=now)
+    assert env["jason-runtime"]["JASON_OWNER_UAT_WORKER_ENABLED"] == "true"
+    assert env["jason-mcp-pilot"]["JASON_OWNER_UAT_WORKER_ENABLED"] == "false"
+    assert all(not any("PROCUREMENT" in key for key in values) for values in env.values())
+
+    original = container("jason-runtime", "a", "b", "c")
+    original["Config"]["Env"].append("JASON_OWNER_UAT_MODE=off")
+    replacement = deepcopy(original)
+    values = dict(x.split("=", 1) for x in replacement["Config"]["Env"])
+    values.update(env["jason-runtime"])
+    replacement["Config"]["Env"] = [k + "=" + v for k, v in values.items()]
+    k, src, dest, rw = native.OWNER_UAT_BIND
+    replacement["Mounts"].append({"Type": k, "Source": src, "Destination": dest, "RW": rw})
+    candidate = native.config_fingerprint(
+        original, environment=env["jason-runtime"], extra_mount=native.OWNER_UAT_BIND)
+    assert candidate == native.config_fingerprint(replacement)
+    assert candidate != native.config_fingerprint(original)
+    replacement["Mounts"][0]["RW"] = True
+    assert candidate != native.config_fingerprint(replacement)
+    campaign["execution_permitted"] = True
+    with pytest.raises(ScopedBackportDenied, match="OWNER_UAT_CONFIGURATION"):
+        native.owner_uat_environment(Path("/unused"), m, now=now)
+    with pytest.raises(ScopedBackportDenied, match="OWNER_UAT_TARGET_SCOPE"):
+        native.owner_uat_environment(Path("/unused"), dict(m, targets=m["targets"][:1]), now=now)
