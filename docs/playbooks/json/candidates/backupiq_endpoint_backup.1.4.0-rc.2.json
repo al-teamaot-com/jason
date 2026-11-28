@@ -1,0 +1,2332 @@
+{
+  "autonomy": {
+    "activation": "shadow",
+    "allowed_capabilities": [
+      "automation.component.execute",
+      "automation.job.read",
+      "backup.backupiq.alert.search",
+      "backup.endpoint.asset.read",
+      "backup.endpoint.asset.search",
+      "endpoint.device.read",
+      "service.ticket.note.create",
+      "service.ticket.notes.search",
+      "service.ticket.read",
+      "service.ticket.update",
+      "automation.job.output.read"
+    ],
+    "approval_bound_branches": [
+      "reinstall_agent",
+      "create_note",
+      "complete_ticket",
+      "diagnose_endpoint",
+      "repair_endpoint",
+      "request_backup"
+    ],
+    "disruptive_branches": [
+      "repair_endpoint"
+    ]
+  },
+  "completion": {
+    "terminal_disposition": "verified recovered backup/ticket Complete or waiting true offline / Human Review"
+  },
+  "expected_state": {
+    "fresh_successful_backup_within_original_threshold": true,
+    "exact_provider_asset_and_DRMM_device_verified": true,
+    "backup_enabled": true,
+    "no_conflicting_duplicate_assets": true
+  },
+  "migration": {
+    "source_conversion": "original_DEB_exact_asset_classifier_and_source_only_json_action_candidate",
+    "legacy_source_blob_sha": "9dde241866ddca31f9640d3deb1e0b3ed5a19228",
+    "legacy_registry_version": "1.3.0",
+    "source_map": "docs/playbooks/json/migration/source_maps/backupiq_endpoint_backup.source-map.json",
+    "missing_or_unimplemented_parity": [
+      "OpenBao-backed verified backup_net customer-to-Autotask company binding and zero-asset customer proof not yet connected to JSON runtime",
+      "Original provider asset, backup success and alert result parser normalization, existing agent components/site variable reads and linked job output not fully wired",
+      "Durable one-reinstall job and 1-hour/10-day waiting state and reverse-recheck/readback continuation must be proven",
+      "Exact one authorized reinstall and post-install new backup/current alert verification plus ticket note/provider readback not accepted in isolated preproduction",
+      "Potential BackupIQ false-positive provider statuses and protected asset exceptions need independent synthetic/live acceptance",
+      "New diagnostic/repair/backup-now components must be registered with exact UID, version, content hash, input schema, output parser, and approval binding; none is implemented or standing-approved by this JSON.",
+      "Source alias fix and service-start correction have been proven on VZ-51624 only; the shared vendor installer component has not been modified or published.",
+      "New trusted fact adapters, bounded scheduler continuation, negative tests, same-client provider recovery-point readback and terminal PSA readback require governed runtime acceptance.",
+      "Exact company-scoped asset read and alert read are live-proven. Detailed backup-history search returned PROVIDER_TRANSPORT_FAILURE and is optional, not a mandatory resolution dependency when a fresh authoritative asset timestamp and cleared alert suffice."
+    ],
+    "accepted_for_execution": false,
+    "production_activation_authorized": false
+  },
+  "playbook": {
+    "id": "backupiq_endpoint_backup",
+    "lifecycle": "draft",
+    "name": "Jason - BackupIQ Datto Endpoint Backup",
+    "owner": "AOT",
+    "source": "docs/playbooks/Jason-BackupIQ-Datto-Endpoint-Backup.md",
+    "target_type": "endpoint",
+    "version": "1.4.0-rc.2"
+  },
+  "schema_version": 1,
+  "scope": {
+    "direct_provider_access": false,
+    "no_backup_delete_or_restore": true,
+    "no_retention_policy_change": true,
+    "company_id_zero_permitted": true,
+    "only_one_agent_reinstall_per_incident": true,
+    "no_unapproved_security_archive_deletion": true,
+    "no_vss_reset_or_shadow_deletion": true,
+    "no_automatic_reboot": true,
+    "no_secure_repair_policy_bypass": true
+  },
+  "state_model": {
+    "entry_step": "read_ticket",
+    "persist": [
+      "ticket_id",
+      "client_id",
+      "device_uid",
+      "asset_id",
+      "provider_customer_id_verified",
+      "classification",
+      "last_successful_backup",
+      "provider_status",
+      "evidence_sha256",
+      "reinstall_attempted",
+      "component_uid",
+      "job_uid",
+      "job_output_sha",
+      "next_recheck_at",
+      "remediation_baseline_utc",
+      "backup_id",
+      "backup_request_accepted",
+      "original_agent_id",
+      "original_tenant_id",
+      "msi_source_filename",
+      "msi_sha256",
+      "repair_profile_fingerprint",
+      "approval_evidence_id",
+      "archive_manifest_sha256",
+      "original_msi_logging_policy",
+      "last_backup_progress_at",
+      "last_backup_bytes_sent",
+      "verification_deadline_utc",
+      "last_ticket_documentation_fingerprint"
+    ],
+    "cadence_seconds": 3600,
+    "stale_days": 10,
+    "no_reinstall_retry_on_uncertain_job": true
+  },
+  "steps": [
+    {
+      "id": "read_ticket",
+      "type": "diagnostic",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_gate"
+    },
+    {
+      "id": "ticket_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_ticket_company_and_device_proven",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_endpoint"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_endpoint",
+      "type": "diagnostic",
+      "capability": "endpoint.device.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "device_uid"
+        }
+      },
+      "next": "endpoint_gate"
+    },
+    {
+      "id": "endpoint_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_endpoint_uid_hostname_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "provider_customer_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "provider_customer_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "governed_backup_net_same_company_customer_boundary_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_assets"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_assets",
+      "type": "diagnostic",
+      "capability": "backup.endpoint.asset.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "read_alerts"
+    },
+    {
+      "id": "read_alerts",
+      "type": "diagnostic",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "classification_gate"
+    },
+    {
+      "id": "classification_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "verified_backupiq_disposition",
+            "operator": "eq",
+            "value": "stale_or_recovered_alert"
+          },
+          "next": "recovered_gate"
+        },
+        {
+          "when": {
+            "fact": "verified_backupiq_disposition",
+            "operator": "eq",
+            "value": "true_offline_both_sources"
+          },
+          "next": "wait_device"
+        },
+        {
+          "when": {
+            "fact": "verified_backupiq_disposition",
+            "operator": "eq",
+            "value": "backup_agent_connectivity_failure"
+          },
+          "next": "lower_impact_gate"
+        },
+        {
+          "when": {
+            "fact": "verified_backupiq_disposition",
+            "operator": "eq",
+            "value": "persistent_backupiq_condition_after_success"
+          },
+          "next": "lower_impact_gate"
+        },
+        {
+          "when": {
+            "fact": "verified_backupiq_disposition",
+            "operator": "eq",
+            "value": "backup_failure_or_stale_success"
+          },
+          "next": "lower_impact_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "recovered_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_and_original_alert_cleared_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "lower_impact_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_same_client_diagnostic_component_and_grant_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "diagnose_endpoint"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "diagnose_endpoint",
+      "type": "remediation",
+      "capability": "automation.component.execute",
+      "arguments": {
+        "$fact": "trusted_exact_deb_diagnostic_component_arguments"
+      },
+      "approval_classification": "read_only",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "read_diagnostic_job"
+    },
+    {
+      "id": "read_diagnostic_job",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_diagnostic_job_read_arguments"
+      },
+      "next": "diagnostic_job_gate"
+    },
+    {
+      "id": "diagnostic_job_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "diagnostic_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_diagnostic_output"
+        },
+        {
+          "when": {
+            "fact": "diagnostic_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "diagnostic_job_wait_1"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_diagnostic_output",
+      "type": "diagnostic",
+      "capability": "automation.job.output.read",
+      "arguments": {
+        "$fact": "trusted_exact_diagnostic_output_read_arguments"
+      },
+      "next": "lower_impact_classification"
+    },
+    {
+      "id": "lower_impact_classification",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "trusted_deb_root_cause",
+            "operator": "eq",
+            "value": "msi_source_name_mismatch"
+          },
+          "next": "repair_authority_gate"
+        },
+        {
+          "when": {
+            "fact": "trusted_deb_root_cause",
+            "operator": "eq",
+            "value": "vss_storage_limit_confirmed"
+          },
+          "next": "repair_authority_gate"
+        },
+        {
+          "when": {
+            "fact": "trusted_deb_root_cause",
+            "operator": "eq",
+            "value": "disk_space_exhausted"
+          },
+          "next": "repair_authority_gate"
+        },
+        {
+          "when": {
+            "fact": "trusted_deb_root_cause",
+            "operator": "eq",
+            "value": "agent_stopped_after_successful_msi"
+          },
+          "next": "repair_authority_gate"
+        },
+        {
+          "when": {
+            "fact": "trusted_deb_root_cause",
+            "operator": "eq",
+            "value": "no_exact_lower_impact_fix"
+          },
+          "next": "legacy_reinstall_gate"
+        },
+        {
+          "when": {
+            "fact": "trusted_deb_root_cause",
+            "operator": "eq",
+            "value": "backup_already_running"
+          },
+          "next": "wait_backup"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "repair_authority_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_evidence_bound_repair_profile_approved_and_no_conflicting_backup",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "repair_endpoint"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "repair_endpoint",
+      "type": "remediation",
+      "capability": "automation.component.execute",
+      "arguments": {
+        "$fact": "trusted_exact_deb_repair_component_arguments"
+      },
+      "approval_classification": "disruptive",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "read_repair_job"
+    },
+    {
+      "id": "read_repair_job",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_repair_job_read_arguments"
+      },
+      "next": "repair_job_gate"
+    },
+    {
+      "id": "repair_job_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "repair_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_repair_output"
+        },
+        {
+          "when": {
+            "fact": "repair_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "repair_job_wait_1"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_repair_output",
+      "type": "diagnostic",
+      "capability": "automation.job.output.read",
+      "arguments": {
+        "$fact": "trusted_exact_repair_output_read_arguments"
+      },
+      "next": "repair_health_gate"
+    },
+    {
+      "id": "repair_health_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "agent_running_original_registration_and_cause_corrected",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_request_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_request_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "same_asset_idle_and_exact_backup_request_grant_unused",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "request_backup"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "request_backup",
+      "type": "remediation",
+      "capability": "automation.component.execute",
+      "arguments": {
+        "$fact": "trusted_exact_deb_backup_request_component_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "read_backup_request_job"
+    },
+    {
+      "id": "read_backup_request_job",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_backup_request_job_read_arguments"
+      },
+      "next": "backup_request_job_gate"
+    },
+    {
+      "id": "backup_request_job_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "backup_request_job_same_device_terminal",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_backup_request_output"
+        },
+        {
+          "when": {
+            "fact": "backup_request_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_request_job_wait_1"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "read_backup_request_output",
+      "type": "diagnostic",
+      "capability": "automation.job.output.read",
+      "arguments": {
+        "$fact": "trusted_exact_backup_request_output_read_arguments"
+      },
+      "next": "backup_accepted_gate"
+    },
+    {
+      "id": "backup_accepted_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "new_backup_id_and_log_baseline_prove_request_accepted",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "verify_asset"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "wait_backup",
+      "type": "wait",
+      "seconds": 300,
+      "resume": "verify_asset"
+    },
+    {
+      "id": "legacy_reinstall_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_one_reinstall_component_owner_grant_and_no_prior_attempt",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "reinstall_agent"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "reinstall_agent",
+      "type": "remediation",
+      "capability": "automation.component.execute",
+      "arguments": {
+        "$fact": "trusted_exact_backupiq_reinstall_component_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_job"
+    },
+    {
+      "id": "verify_job",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_existing_job_read_arguments"
+      },
+      "next": "job_gate"
+    },
+    {
+      "id": "job_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "same_device_job_terminal_and_component_completed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "verify_asset"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "verify_asset",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "resource_id": {
+          "$fact": "asset_id"
+        },
+        "company_id": {
+          "$fact": "company_id"
+        }
+      },
+      "next": "verify_current_alerts"
+    },
+    {
+      "id": "backup_success_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_01"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "note_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_internal_note_and_owner_promotion",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "create_note"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "create_note",
+      "type": "remediation",
+      "capability": "service.ticket.note.create",
+      "arguments": {
+        "$fact": "trusted_exact_internal_note_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_note"
+    },
+    {
+      "id": "verify_note",
+      "type": "verification",
+      "capability": "service.ticket.notes.search",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "note_readback_gate"
+    },
+    {
+      "id": "note_readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_jason_internal_note_readback",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "complete_ticket"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "complete_ticket",
+      "type": "remediation",
+      "capability": "service.ticket.update",
+      "arguments": {
+        "$fact": "trusted_exact_complete_ticket_arguments"
+      },
+      "approval_classification": "modifying",
+      "approval_required": true,
+      "retry": {
+        "max_attempts": 1
+      },
+      "verification_step": "verify_ticket"
+    },
+    {
+      "id": "verify_ticket",
+      "type": "verification",
+      "capability": "service.ticket.read",
+      "arguments": {
+        "ticket_id": {
+          "$fact": "target_id"
+        }
+      },
+      "next": "ticket_readback_gate"
+    },
+    {
+      "id": "ticket_readback_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_complete_ticket_provider_readback",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "complete"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "wait_device",
+      "type": "wait",
+      "seconds": 3600,
+      "resume": "human_review"
+    },
+    {
+      "id": "complete",
+      "type": "complete"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    },
+    {
+      "id": "verify_current_alerts",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_success_gate"
+    },
+    {
+      "id": "backup_wait_01",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_01"
+    },
+    {
+      "id": "asset_recheck_01",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_01"
+    },
+    {
+      "id": "alert_recheck_01",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_01"
+    },
+    {
+      "id": "backup_recheck_gate_01",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_02"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_wait_02",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_02"
+    },
+    {
+      "id": "asset_recheck_02",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_02"
+    },
+    {
+      "id": "alert_recheck_02",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_02"
+    },
+    {
+      "id": "backup_recheck_gate_02",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_03"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_wait_03",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_03"
+    },
+    {
+      "id": "asset_recheck_03",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_03"
+    },
+    {
+      "id": "alert_recheck_03",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_03"
+    },
+    {
+      "id": "backup_recheck_gate_03",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_04"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_wait_04",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_04"
+    },
+    {
+      "id": "asset_recheck_04",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_04"
+    },
+    {
+      "id": "alert_recheck_04",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_04"
+    },
+    {
+      "id": "backup_recheck_gate_04",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_05"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_wait_05",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_05"
+    },
+    {
+      "id": "asset_recheck_05",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_05"
+    },
+    {
+      "id": "alert_recheck_05",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_05"
+    },
+    {
+      "id": "backup_recheck_gate_05",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_06"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_wait_06",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_06"
+    },
+    {
+      "id": "asset_recheck_06",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_06"
+    },
+    {
+      "id": "alert_recheck_06",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_06"
+    },
+    {
+      "id": "backup_recheck_gate_06",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_07"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_wait_07",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_07"
+    },
+    {
+      "id": "asset_recheck_07",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_07"
+    },
+    {
+      "id": "alert_recheck_07",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_07"
+    },
+    {
+      "id": "backup_recheck_gate_07",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_08"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_wait_08",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_08"
+    },
+    {
+      "id": "asset_recheck_08",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_08"
+    },
+    {
+      "id": "alert_recheck_08",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_08"
+    },
+    {
+      "id": "backup_recheck_gate_08",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_09"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_wait_09",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_09"
+    },
+    {
+      "id": "asset_recheck_09",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_09"
+    },
+    {
+      "id": "alert_recheck_09",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_09"
+    },
+    {
+      "id": "backup_recheck_gate_09",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_10"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_wait_10",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_10"
+    },
+    {
+      "id": "asset_recheck_10",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_10"
+    },
+    {
+      "id": "alert_recheck_10",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_10"
+    },
+    {
+      "id": "backup_recheck_gate_10",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_11"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_wait_11",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_11"
+    },
+    {
+      "id": "asset_recheck_11",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_11"
+    },
+    {
+      "id": "alert_recheck_11",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_11"
+    },
+    {
+      "id": "backup_recheck_gate_11",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        },
+        {
+          "when": {
+            "fact": "backup_verification_wait_allowed",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_wait_12"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_wait_12",
+      "type": "wait",
+      "seconds": 900,
+      "resume": "asset_recheck_12"
+    },
+    {
+      "id": "asset_recheck_12",
+      "type": "verification",
+      "capability": "backup.endpoint.asset.read",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "resource_id": {
+          "$fact": "asset_id"
+        }
+      },
+      "next": "alert_recheck_12"
+    },
+    {
+      "id": "alert_recheck_12",
+      "type": "verification",
+      "capability": "backup.backupiq.alert.search",
+      "arguments": {
+        "company_id": {
+          "$fact": "company_id"
+        },
+        "asset_name": {
+          "$fact": "hostname"
+        },
+        "page_size": 100
+      },
+      "next": "backup_recheck_gate_12"
+    },
+    {
+      "id": "backup_recheck_gate_12",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "fresh_backup_after_remediation_and_no_current_alert",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "note_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "diagnostic_job_wait_1",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "diagnostic_job_poll_1"
+    },
+    {
+      "id": "diagnostic_job_poll_1",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_diagnostic_job_read_arguments"
+      },
+      "next": "diagnostic_job_poll_gate_1"
+    },
+    {
+      "id": "diagnostic_job_poll_gate_1",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "diagnostic_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_diagnostic_output"
+        },
+        {
+          "when": {
+            "fact": "diagnostic_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "diagnostic_job_wait_2"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "diagnostic_job_wait_2",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "diagnostic_job_poll_2"
+    },
+    {
+      "id": "diagnostic_job_poll_2",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_diagnostic_job_read_arguments"
+      },
+      "next": "diagnostic_job_poll_gate_2"
+    },
+    {
+      "id": "diagnostic_job_poll_gate_2",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "diagnostic_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_diagnostic_output"
+        },
+        {
+          "when": {
+            "fact": "diagnostic_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "diagnostic_job_wait_3"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "diagnostic_job_wait_3",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "diagnostic_job_poll_3"
+    },
+    {
+      "id": "diagnostic_job_poll_3",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_diagnostic_job_read_arguments"
+      },
+      "next": "diagnostic_job_poll_gate_3"
+    },
+    {
+      "id": "diagnostic_job_poll_gate_3",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "diagnostic_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_diagnostic_output"
+        },
+        {
+          "when": {
+            "fact": "diagnostic_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "diagnostic_job_wait_4"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "diagnostic_job_wait_4",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "diagnostic_job_poll_4"
+    },
+    {
+      "id": "diagnostic_job_poll_4",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_diagnostic_job_read_arguments"
+      },
+      "next": "diagnostic_job_poll_gate_4"
+    },
+    {
+      "id": "diagnostic_job_poll_gate_4",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "diagnostic_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_diagnostic_output"
+        },
+        {
+          "when": {
+            "fact": "diagnostic_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "diagnostic_job_wait_5"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "diagnostic_job_wait_5",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "diagnostic_job_poll_5"
+    },
+    {
+      "id": "diagnostic_job_poll_5",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_diagnostic_job_read_arguments"
+      },
+      "next": "diagnostic_job_poll_gate_5"
+    },
+    {
+      "id": "diagnostic_job_poll_gate_5",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "diagnostic_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_diagnostic_output"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "repair_job_wait_1",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "repair_job_poll_1"
+    },
+    {
+      "id": "repair_job_poll_1",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_repair_job_read_arguments"
+      },
+      "next": "repair_job_poll_gate_1"
+    },
+    {
+      "id": "repair_job_poll_gate_1",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "repair_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_repair_output"
+        },
+        {
+          "when": {
+            "fact": "repair_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "repair_job_wait_2"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "repair_job_wait_2",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "repair_job_poll_2"
+    },
+    {
+      "id": "repair_job_poll_2",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_repair_job_read_arguments"
+      },
+      "next": "repair_job_poll_gate_2"
+    },
+    {
+      "id": "repair_job_poll_gate_2",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "repair_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_repair_output"
+        },
+        {
+          "when": {
+            "fact": "repair_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "repair_job_wait_3"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "repair_job_wait_3",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "repair_job_poll_3"
+    },
+    {
+      "id": "repair_job_poll_3",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_repair_job_read_arguments"
+      },
+      "next": "repair_job_poll_gate_3"
+    },
+    {
+      "id": "repair_job_poll_gate_3",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "repair_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_repair_output"
+        },
+        {
+          "when": {
+            "fact": "repair_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "repair_job_wait_4"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "repair_job_wait_4",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "repair_job_poll_4"
+    },
+    {
+      "id": "repair_job_poll_4",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_repair_job_read_arguments"
+      },
+      "next": "repair_job_poll_gate_4"
+    },
+    {
+      "id": "repair_job_poll_gate_4",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "repair_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_repair_output"
+        },
+        {
+          "when": {
+            "fact": "repair_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "repair_job_wait_5"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "repair_job_wait_5",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "repair_job_poll_5"
+    },
+    {
+      "id": "repair_job_poll_5",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_repair_job_read_arguments"
+      },
+      "next": "repair_job_poll_gate_5"
+    },
+    {
+      "id": "repair_job_poll_gate_5",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "repair_job_same_device_terminal_success",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_repair_output"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_request_job_wait_1",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "backup_request_job_poll_1"
+    },
+    {
+      "id": "backup_request_job_poll_1",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_backup_request_job_read_arguments"
+      },
+      "next": "backup_request_job_poll_gate_1"
+    },
+    {
+      "id": "backup_request_job_poll_gate_1",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "backup_request_job_same_device_terminal",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_backup_request_output"
+        },
+        {
+          "when": {
+            "fact": "backup_request_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_request_job_wait_2"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_request_job_wait_2",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "backup_request_job_poll_2"
+    },
+    {
+      "id": "backup_request_job_poll_2",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_backup_request_job_read_arguments"
+      },
+      "next": "backup_request_job_poll_gate_2"
+    },
+    {
+      "id": "backup_request_job_poll_gate_2",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "backup_request_job_same_device_terminal",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_backup_request_output"
+        },
+        {
+          "when": {
+            "fact": "backup_request_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_request_job_wait_3"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_request_job_wait_3",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "backup_request_job_poll_3"
+    },
+    {
+      "id": "backup_request_job_poll_3",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_backup_request_job_read_arguments"
+      },
+      "next": "backup_request_job_poll_gate_3"
+    },
+    {
+      "id": "backup_request_job_poll_gate_3",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "backup_request_job_same_device_terminal",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_backup_request_output"
+        },
+        {
+          "when": {
+            "fact": "backup_request_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_request_job_wait_4"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_request_job_wait_4",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "backup_request_job_poll_4"
+    },
+    {
+      "id": "backup_request_job_poll_4",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_backup_request_job_read_arguments"
+      },
+      "next": "backup_request_job_poll_gate_4"
+    },
+    {
+      "id": "backup_request_job_poll_gate_4",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "backup_request_job_same_device_terminal",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_backup_request_output"
+        },
+        {
+          "when": {
+            "fact": "backup_request_job_running_same_device_before_deadline",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "backup_request_job_wait_5"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "backup_request_job_wait_5",
+      "type": "wait",
+      "seconds": 60,
+      "resume": "backup_request_job_poll_5"
+    },
+    {
+      "id": "backup_request_job_poll_5",
+      "type": "verification",
+      "capability": "automation.job.read",
+      "arguments": {
+        "$fact": "trusted_exact_backup_request_job_read_arguments"
+      },
+      "next": "backup_request_job_poll_gate_5"
+    },
+    {
+      "id": "backup_request_job_poll_gate_5",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "backup_request_job_same_device_terminal",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "read_backup_request_output"
+        }
+      ],
+      "default": "human_review"
+    }
+  ],
+  "trigger": {
+    "provider": "Autotask / BackupIQ",
+    "title_prefix": "BackupIQ:",
+    "exact_same_company_backup_net_customer_boundary": true
+  },
+  "verification": {
+    "authoritative_source": "exact backup_net customer-bound UniView asset, BackupIQ alert, backup success, DRMM endpoint, Autotask note/ticket",
+    "success_condition": "Matching same-client provider asset online and backup enabled; new successful recovery point after remediation baseline; related alert no longer current; no degraded snapshot evidence; documented exclusions reviewed; independent ticket terminal readback. MSI 0, service Running or local Backup completed alone cannot close the incident."
+  },
+  "change_control": {
+    "supersedes": "1.4.0-rc.1",
+    "superseded_fingerprint": "c561535cd11b95b3b850e67a3bfc54afd89543a522022ccb5bbbda0441ce1529",
+    "request": "Owner requested updating the existing backup playbook from VZ-51624 diagnostic evidence, 2026-11-23",
+    "activation_authorized": false,
+    "acceptance_status": "design_candidate_not_runtime_accepted",
+    "canonical_template_sections": 23
+  },
+  "endpoint_recovery": {
+    "trusted_fact_contract": "Only Central Orchestrator-verified component results and server-owned same-client bindings may populate action arguments or gate facts. Caller-supplied booleans never authorize execution. Missing adapters or uncertain job state route to Human Review.",
+    "diagnosis": {
+      "required_evidence": [
+        "free bytes and volume size",
+        "installed product and version, service state/start mode/account",
+        "original agent and tenant ID",
+        "native status CLI help/status/registration",
+        "sanitized MSI verbose error context and expected source filename",
+        "MSI ProductCode/PackageCode and cached installed identity",
+        "Authenticode and equal source/alias SHA256",
+        "Volsnap events since failure baseline and VSS storage configuration",
+        "current backup ID, start timestamp, progress and degraded status"
+      ],
+      "forbidden": [
+        "Win32_Product inventory",
+        "reading unrelated secrets",
+        "retaining registration token or encryption key values",
+        "copying tokens from logs into reusable playbook state"
+      ]
+    },
+    "repair_profiles": {
+      "msi_source_name_mismatch": {
+        "requires": [
+          "MSI verbose error 1316/2203 or secure repair source failure specifically names missing expected MSI file",
+          "same product/package/version and valid vendor signature",
+          "expected source filename derived from registered MSI source rather than assumed for all devices",
+          "expected sibling file absent; any existing differing file blocks",
+          "downloaded and proposed alias hashes identical",
+          "approved maintenance window and no active backup"
+        ],
+        "action": "Create expected sibling source filename from identical signed MSI, then one normal governed installer run using server-held site inputs. Preserve registration and optional encryption settings. Start the existing service if installation left it stopped, wait boundedly for Running, and verify original agent/tenant pairing before native registration check.",
+        "verify": [
+          "MSI exit 0, or explicit reboot-required disposition for 3010 without rebooting",
+          "service Running before registration check",
+          "same original agent/tenant ID",
+          "component output differentiates installer exit from post-install check"
+        ],
+        "never": [
+          "CLEAN_INSTALL",
+          "uninstall/reset database",
+          "SecureRepairPolicy bypass",
+          "cross-client token",
+          "automatic reboot"
+        ]
+      },
+      "vss_storage_limit_confirmed": {
+        "requires": [
+          "current Volsnap 36 or equivalent exact storage-cap evidence",
+          "readback of current association",
+          "sufficient free-space budget after proposed cap and client-approved setting",
+          "no active conflicting backup/snapshot operation"
+        ],
+        "action": "Resize only the affected volume's existing association to approved bounded cap; VZ-51624 approved value was 10%, not a universal mandatory setting.",
+        "verify": [
+          "readback of new maximum",
+          "fresh snapshot remains available during new backup",
+          "no new cap-abort event after baseline"
+        ],
+        "never": [
+          "delete shadows",
+          "vss reset",
+          "writer/service restarts without approval"
+        ]
+      },
+      "disk_space_exhausted": {
+        "requires": [
+          "scoped size evidence; separate logical totals from physical allocation/hardlink duplication",
+          "security archive retention/hold requirements checked",
+          "exact approved file manifest, full paths, timestamps, hashes/fingerprint, count and byte ceiling",
+          "each file revalidated immediately before deletion"
+        ],
+        "action": "Use separately approved low-disk/security-log dependency branch. This incident's older-than-30-days selection and 120+579 file deletion grants do not create future or fleet-wide retention authority.",
+        "never": [
+          "active Security.evtx deletion or clearing",
+          "blanket winevt/Logs deletion",
+          "Installer/WinSxS manual deletion",
+          "change audit policy to reduce logging",
+          "assume Sysmon caused Archive-Security files"
+        ]
+      },
+      "agent_stopped_after_successful_msi": {
+        "requires": [
+          "MSI success established independently",
+          "service exists and original identity known",
+          "no active backup and exact service action approved"
+        ],
+        "action": "Start the existing DattoBackupAgentService if stopped. Restart only with separate exact disruption approval. Wait at most 30 seconds, verify Running and original registration.",
+        "verify": [
+          "Running",
+          "original registration",
+          "native status accessible"
+        ]
+      }
+    },
+    "backup_request": {
+      "method": "Use installed DattoBackupAgentStatus.exe backup-now only after installed help confirms support; capture output via a waiting stdout mechanism.",
+      "idempotency": "Persist request baseline and accepted backup ID. An EOF warning is inconclusive: check agent log and provider state before any retry. Never duplicate an accepted/running backup.",
+      "completion": "Observe final statistics, degraded state and exclusions, then independently confirm same-asset provider recovery point after baseline."
+    },
+    "diagnostic_logging": {
+      "action": "Only if necessary and authorized, enable verbose MSI logging for one bounded diagnostic run. Secure logs as they may contain site secrets. Record and restore original policy value/existence, including failure paths.",
+      "output": "Return selected sanitized error context only; never publish complete verbose logs.",
+      "status": "No new logging policy action in this candidate; an approved dedicated diagnostic component must implement any future temporary logging with finally restoration."
+    },
+    "shared_component_followup": {
+      "component_uid": "f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967",
+      "required_changes": [
+        "preserve/resolve installed expected MSI source filename in same-version maintenance",
+        "start and await existing service before get-registration",
+        "return separate installer and postcheck results",
+        "preserve original agent and encryption state"
+      ],
+      "status": "required_not_implemented_not_published"
+    },
+    "retry": {
+      "diagnostic_component_attempts": 1,
+      "repair_component_attempts": 1,
+      "backup_request_attempts": 1,
+      "no_redispatch_on_output_read_failure": true,
+      "uncertain_job": "read existing durable job; never submit replacement blindly",
+      "asynchronous_job_poll": "Five one-minute bounded polls of the existing job, resuming durable state. Unknown/failed/device-mismatched or expired evidence routes to Human Review without redispatch."
+    },
+    "recheck": {
+      "interval_seconds": 900,
+      "ordinary_verification_deadline_seconds": 10800,
+      "absolute_grace_seconds": 604800,
+      "progress_stall_seconds": 43200,
+      "grace_condition": "Existing full-backup exception only when documented numeric provider percentage advances; local sent bytes alone cannot grant automatic grace.",
+      "scheduler": "Canonical v1 acyclic graph has twelve bounded fifteen-minute provider rechecks, persisted by existing shared wait/resume support. Three-hour baseline deadline must be derived from trusted runtime time, not client-provided facts. Native mutation runner/worker binding remains an acceptance gap."
+    }
+  },
+  "standard_sections": [
+    {
+      "number": 1,
+      "title": "Section Goal",
+      "content": "Diagnose BackupIQ/DEB failures, prefer an evidence-matched lower-impact repair over reinstall, preserve pairing, and require a fresh authoritative successful recovery point before incident completion."
+    },
+    {
+      "number": 2,
+      "title": "Trigger",
+      "content": "Existing open actionable same-client BackupIQ ticket. MSI1603, low space and VSS errors are diagnostic branches within that incident, not authority to scan or change unrelated devices."
+    },
+    {
+      "number": 3,
+      "title": "Scope and Boundaries",
+      "content": "Inherit exact requester grants, Central Orchestrator and direct_provider_access=false. No clean install, restore, provider-asset deletion, retention/encryption/audit-policy change, reboot, blanket cleanup or security-policy bypass."
+    },
+    {
+      "number": 4,
+      "title": "Initial Identification",
+      "content": "Shared runtime must uniquely bind ticket/company/active CI/DRMM device/provider asset, preserving a correct existing CI. Before substantive work, verify Jason/In Progress/Remote Support by PSA readback. Ambiguity blocks action. This runtime wiring remains an inherited acceptance gap."
+    },
+    {
+      "number": 5,
+      "title": "Expected State",
+      "content": "Backup enabled; same original agent/tenant registration; service Running; sufficient free volume space; working VSS snapshot; exact provider asset online; fresh nondegraded successful backup and no current alert."
+    },
+    {
+      "number": 6,
+      "title": "State Model",
+      "content": "Inherit durable detected/owned/identified/diagnosing/classified/remediating/verifying/waiting/blocked/Human Review/complete lifecycle. Persist action nonce, exact component hash, approval evidence, job/output IDs, baseline and backup ID. Missing durable continuation prevents activation."
+    },
+    {
+      "number": 7,
+      "title": "Diagnostic Workflow",
+      "content": "Read same-client provider state and endpoint availability independently. For online backup failure, collect MSI source/identity/signature evidence, service and native registration, physical free space, per-folder usage, Volsnap cap events, shadow association, current backup and sanitized logs through a governed diagnostic component. Interpret 1603 as generic until source evidence establishes its cause."
+    },
+    {
+      "number": 8,
+      "title": "Decision Gates",
+      "content": "Every new component requires exact trusted registry binding and live action authority. Caller-supplied facts cannot grant permission. No repair while backup active. An unknown diagnosis routes to Human Review; only proven no_exact_lower_impact_fix reaches existing one-reinstall gate."
+    },
+    {
+      "number": 9,
+      "title": "Remediation",
+      "content": "Endpoint recovery profiles define source-name alias repair, stopped-service recovery, VSS cap adjustment and separately approved cleanup. Each modifying profile requires exact-action approval and readback. One repair per incident invocation; multiple independent causes require reevaluation and separate bound actions. Shared installer remains unchanged."
+    },
+    {
+      "number": 10,
+      "title": "Retry Policy",
+      "content": "One diagnostic job, one repair job, one backup-now submission and the existing one-reinstall ceiling. Read the existing job on output errors rather than resubmitting. An accepted backup ID forbids another backup request; inconclusive EOF alone is not failure."
+    },
+    {
+      "number": 11,
+      "title": "Periodic Rechecks",
+      "content": "Shared scheduler: normal offline hourly, postrepair backup every fifteen minutes within original three-hour deadline. Persist baseline and release active slot while waiting. No duplicate jobs/notes. Existing seven-day full-backup grace requires documented advancing provider percentage; local bytes do not silently extend deadline."
+    },
+    {
+      "number": 12,
+      "title": "Aging / Stale Condition",
+      "content": "Offline over ten days enters stale-asset review. Postrepair timeouts and twelve-hour progress stalls require review. Time is measured from original baseline, surviving resume/restarts."
+    },
+    {
+      "number": 13,
+      "title": "Dependency Handling",
+      "content": "Preserve server-held per-client token/encryption dependencies. Reuse low_disk_space and security_log_self_heal as governed dependency candidates, not automatically approved cleanup. Deduplicate dependency issues and block when profiles, credentials, parser, scheduler or provider access are unavailable."
+    },
+    {
+      "number": 14,
+      "title": "Documentation Requirements",
+      "content": "Internal case notes only for meaningful transitions: STATUS, NEXT STEP/ACTION REQUIRED, WHEN, KEY EVIDENCE, WHAT JASON DID, CHANGES MADE, JASON STATE. Normalize note fingerprints across origins. No secrets, complete verbose MSI logs or raw Security event payloads."
+    },
+    {
+      "number": 15,
+      "title": "Failure Handling",
+      "content": "Distinguish provider authorization denial from authoritative empty inventory. Preserve raw MSI exit independently of RMM postcheck. Service stopped after MSI0 is not another MSI failure. Restore temporary logging policy on every exit. Unknown job results, missing output selectors and inconsistent pairing fail closed."
+    },
+    {
+      "number": 16,
+      "title": "Escalation Criteria",
+      "content": "Human Review for identity ambiguity, failed exact repair, missing capabilities/authority, snapshot cap not supported by evidence, policy or retention decision, duplicate/new asset, 3010 requiring reboot, failed provider read or missing fresh recovery point. Preserve original Help Desk I/Human Review readback rules."
+    },
+    {
+      "number": 17,
+      "title": "Verification",
+      "content": "Require fresh same-client recovery point after baseline, provider online/enabled, current alert resolved, and no degraded snapshot result. Review omissions/exclusions. Local completion, MSI0, Running service or progressing byte counter alone cannot complete a ticket."
+    },
+    {
+      "number": 18,
+      "title": "Completion Criteria",
+      "content": "Correct mapping, diagnosed cause, approved successful repair, fresh provider health, documented action/evidence and independently read-back terminal PSA state. Draft validation/staging is not runtime acceptance."
+    },
+    {
+      "number": 19,
+      "title": "Final Resolution Note",
+      "content": "Record original condition, proven cause, device/client, free-space and VSS changes, installer/source evidence, original pairing, attempts/job IDs, new recovery point/time, exclusions and verified final disposition. State pending evidence explicitly."
+    },
+    {
+      "number": 20,
+      "title": "Required Capabilities",
+      "content": "Existing exact provider/ticket/device reads, governed component execution and job status; add automation.job.output.read only. New component UIDs/content hashes and trusted output normalization remain explicit implementation gaps. No broad shell or direct-provider facility is embedded."
+    },
+    {
+      "number": 21,
+      "title": "Acceptance Test",
+      "content": "Use VZ-51624 as manual reference evidence only. Require controlled governed runtime tests for all new branches, dry-run approval denials, wrong-client rejection, existing differing alias rejection, running-backup rejection, logging rollback, registration preservation, uncertain job output, EOF accepted/nonaccepted cases, service-before-registration order, resume/no duplicate jobs or notes, provider auth failure and final PSA readback."
+    },
+    {
+      "number": 22,
+      "title": "Section Goal Closure",
+      "content": "Pending exact component integration/publication and governed mutation runtime acceptance. Asset and alert reads now work when bound to verified company scope; the incident recovery point and empty current-alert result are live-proven. Local branch tests are pre-activation engineering evidence, not production acceptance."
+    },
+    {
+      "number": 23,
+      "title": "Autonomous Execution Eligibility and Owner Review",
+      "content": "Shadow draft only, no new standing authority. Exact version/fingerprint/component/capability acceptance and durable Owner promotion are required before unattended execution. Authenticated Owner approval is permitted under Mandatory Execution Rules; Teams is not required. Existing production freeze and unrelated releases remain protected."
+    }
+  ],
+  "acceptance": {
+    "schema_and_semantic_validation": "Passed live Jason validation and local schema/semantic checks; external receipt is authoritative.",
+    "manual_reference": {
+      "installer_source_cause": "proven",
+      "same_signed_hash_alias": "proven",
+      "msi_exit_zero": "proven",
+      "service_and_pairing_preserved": "proven",
+      "vss_cap_resize_readback": "proven",
+      "fresh_backup_running_nondegraded": "proven",
+      "fresh_backup_completed": "provider-confirmed 2026-11-23T12:53:16.476Z",
+      "provider_recovery_point_after_baseline": "live company-scoped governed asset.read plus empty same-company current alert search"
+    },
+    "governed_runtime_new_branch_tests": "not_run",
+    "required_negative_tests": [
+      "wrong client/device/asset",
+      "untrusted facts",
+      "missing exact action approval",
+      "missing component UID/hash",
+      "changed existing alias hash",
+      "active backup rejects repair",
+      "temporary logging restores prior state",
+      "EOF with accepted backup does not retrigger",
+      "uncertain job output does not redispatch",
+      "MSI0/service stopped does not trigger duplicate installer",
+      "provider denial cannot become empty asset or success",
+      "old recovery point cannot resolve new incident",
+      "resume preserves attempts, baseline, next wake and note fingerprint"
+    ],
+    "deployment_authorized": false
+  },
+  "engineering_readiness": {
+    "activation_allowed": false,
+    "vendor_component_definition_reviewed": true,
+    "vendor_component_modified": false,
+    "original_helpers": "components/deb-recovery/RecoveryPrimitives.ps1",
+    "helper_native_windows_acceptance": false,
+    "governed_provider_reads_proven": true,
+    "new_component_catalog_bindings_proven": false,
+    "mutation_runtime_acceptance_proven": false,
+    "deployment_or_activation_performed": false
+  }
+}

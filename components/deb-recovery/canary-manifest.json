@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "name": "AOT DEB Recovery - Native Read-Only Canary [WIN]",
+  "status": "unpublished_candidate",
+  "runtime": "Windows PowerShell 5.1",
+  "run_as": "SYSTEM",
+  "timeout_seconds": 300,
+  "component_uid": null,
+  "playbook_activation_authorized": false,
+  "standing_approval_created": false,
+  "side_effect_ceiling": {
+    "installer_runs": 0,
+    "service_starts": 0,
+    "service_restarts": 0,
+    "backup_requests": 0,
+    "file_deletions": 0,
+    "policy_changes": 0,
+    "reboots": 0
+  },
+  "input_variables": [
+    {
+      "name": "AOTDebCanaryProfile",
+      "type": "string",
+      "secret": false,
+      "purpose": "Exact reviewed device/MSI/original pairing evidence only; no commands or credentials"
+    }
+  ],
+  "global_or_site_variables": "none",
+  "files": [
+    {
+      "path": "components/deb-recovery/NativeReadOnlyCanary.ps1",
+      "sha256": "e9ed79af4294f9f0bf707586cbe8774966dec0f9e5138c42af1e84343957453b"
+    },
+    {
+      "path": "components/deb-recovery/RecoveryPrimitives.ps1",
+      "sha256": "a03857b45cd92391272daf5af341535ec9778c0ef19ebb200e2a502080e93a46"
+    }
+  ],
+  "required_acceptance": [
+    "script parses and executes under native Windows PowerShell 5.1",
+    "Windows Installer COM opens expected signed/hash-matched MSI read-only",
+    "existing source alias is equal or missing, never overwritten",
+    "already-running service original agent/tenant identity verified",
+    "stdout redacted and zero mutations verified",
+    "new RMM component UID and full file hashes bound by existing approval service"
+  ],
+  "activation_blockers": [
+    "No published candidate component or verified native Windows acceptance",
+    "No trusted runtime binding for new diagnostic/repair/backup-request profiles",
+    "Production JSON component-mutation dispatcher remains unaccepted; existing narrow bridge does not cover DEB",
+    "Any modifying canary/release requires its own reviewed exact action; current package canary is read-only only"
+  ]
+}
