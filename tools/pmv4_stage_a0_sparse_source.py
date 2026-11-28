@@ -35,6 +35,7 @@ REQUIRED = (
     "implementation/kernel/__init__.py",
     "implementation/kernel/signed_owner_release.py",
     "tools/install_release_host_reconciler.py",
+    "tools/pmv4_host_install_contract.py",
     "tools/pmv4_host_release_guard.py",
     "tools/pmv4_shadow_ci.py",
     "tools/pmv4_shadow_docker_adapter.py",
