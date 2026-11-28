@@ -169,6 +169,9 @@ jobs:
             tools/tests/test_scoped_backport_coordinated.py \
             tools/tests/test_scoped_backport_component_readback.py \
             tools/tests/test_scoped_backport_coordinated_host.py \
+            tools/tests/test_scoped_backport_boot_readback_reconcile.py \
+            tools/tests/test_jason_boot_recovery.py \
+            tools/tests/test_postboot_recovery.py \
             tools/tests/test_production_freeze_retirement.py \
             tools/tests/test_rollback_retention_plan.py \
             tools/tests/test_rollback_retention_native.py \
