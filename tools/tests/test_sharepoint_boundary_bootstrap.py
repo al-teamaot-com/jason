@@ -59,19 +59,16 @@ def test_token_claims_reject_wrong_identity_or_missing_role(field, value):
         )
 
 
-def test_persist_creates_validated_boundary_through_onboarding_services(tmp_path, monkeypatch):
+def test_persist_creates_validated_boundary_through_onboarding_services(tmp_path):
     db = tmp_path / "boundaries.sqlite3"
     db.touch(mode=0o600)
-    monkeypatch.setattr(bootstrap.os, "geteuid", lambda: 0)
-    monkeypatch.setenv("SUDO_USER", "al")
-    result = bootstrap._persist(
+    result = bootstrap._persist_binding(
         db_path=db,
         tenant="11111111-1111-1111-1111-111111111111",
         app="22222222-2222-2222-2222-222222222222",
         service_principal="33333333-3333-3333-3333-333333333333",
         domain="teamaot.com",
         client="client-aot-internal",
-        approval_reference=bootstrap.APPROVAL_SCOPE,
     )
     assert result == "created_and_validated"
     store = SQLiteClientBoundaryStore(db)
@@ -86,11 +83,9 @@ def test_persist_creates_validated_boundary_through_onboarding_services(tmp_path
     store.close()
 
 
-def test_persist_is_idempotent_for_same_validated_binding(tmp_path, monkeypatch):
+def test_persist_is_idempotent_for_same_validated_binding(tmp_path):
     db = tmp_path / "boundaries.sqlite3"
     db.touch(mode=0o600)
-    monkeypatch.setattr(bootstrap.os, "geteuid", lambda: 0)
-    monkeypatch.setenv("SUDO_USER", "al")
     arguments = dict(
         db_path=db,
         tenant="11111111-1111-1111-1111-111111111111",
@@ -98,10 +93,9 @@ def test_persist_is_idempotent_for_same_validated_binding(tmp_path, monkeypatch)
         service_principal="33333333-3333-3333-3333-333333333333",
         domain="teamaot.com",
         client="client-aot-internal",
-        approval_reference=bootstrap.APPROVAL_SCOPE,
     )
-    assert bootstrap._persist(**arguments) == "created_and_validated"
-    assert bootstrap._persist(**arguments) == "already_validated"
+    assert bootstrap._persist_binding(**arguments) == "created_and_validated"
+    assert bootstrap._persist_binding(**arguments) == "already_validated"
 
 
 def test_persist_refuses_an_unapproved_scope(tmp_path, monkeypatch):
@@ -119,3 +113,25 @@ def test_persist_refuses_an_unapproved_scope(tmp_path, monkeypatch):
             client="client-aot-internal",
             approval_reference="unrelated-scope",
         )
+
+
+def test_runtime_writer_drops_groups_before_opening_sqlite(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    monkeypatch.setattr(bootstrap.os, "fork", lambda: 0)
+    for name in ("setgroups", "setgid", "setuid", "closerange"):
+        monkeypatch.setattr(bootstrap.os, name, lambda *args, name=name: calls.append((name, args)))
+    monkeypatch.setattr(bootstrap, "_persist_binding",
+                        lambda **kwargs: calls.append(("write", kwargs)) or "created_and_validated")
+    class ExitChild(BaseException):
+        pass
+    # In a real child _exit never returns. Capture the order outside the handler.
+    def finish(code):
+        calls.append(("exit", code))
+        raise ExitChild()
+    monkeypatch.setattr(bootstrap.os, "_exit", finish)
+    with pytest.raises(ExitChild):
+        bootstrap._persist_as_runtime_owner(SimpleNamespace(pw_uid=1000, pw_gid=1001), {})
+    assert calls[:3] == [("setgroups", ([],)), ("setgid", (1001,)), ("setuid", (1000,))]
+    assert calls[3][0] == "closerange"
+    assert calls[4:6] == [("write", {}), ("exit", 40)]
