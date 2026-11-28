@@ -342,7 +342,7 @@ def test_binding_image_replaces_only_exact_desired_policy_hash():
         with pytest.raises(PermissionError):n.capacity_binding_image(n.canonical(bad),before,after)
 
 
-@pytest.mark.parametrize("fault",["none","wrong-scope","wrong-owner","foreign-pin","unrelated-drift","bad-result","stale-approval","changed-live","postflight-drift","resume-before","resume-after"])
+@pytest.mark.parametrize("fault",["none","wrong-scope","wrong-owner","foreign-pin","unrelated-drift","bad-result","stale-approval","changed-live","postflight-drift","resume-before","resume-after","recovery","recovery-native-fails","recovery-resume"])
 def test_legacy_binding_requires_separate_exact_approval_and_preserves_capacity(tmp_path,monkeypatch,capsys,fault):
     from contextlib import nullcontext
     from datetime import timedelta
@@ -368,17 +368,22 @@ def test_legacy_binding_requires_separate_exact_approval_and_preserves_capacity(
     def predecessor(h,pin,hashes):
         if fault=="unrelated-drift":raise PermissionError("unrelated hash mismatch")
         assert hashes=={n.digest(before),n.digest(after)}
-    def live(*a):
+    def live(*a,**kw):
         if fault=="changed-live" and "owner" in calls:raise PermissionError("live changed")
     monkeypatch.setattr(n,"verify_binding_predecessor",predecessor);monkeypatch.setattr(n,"verify_binding_live",live)
     def verify():assert binding_path.read_bytes()==pin_after and desired_path.read_bytes()==after
     h=SimpleNamespace(IndependentHostGuard=lambda:SimpleNamespace(host_release_transaction=lambda:nullcontext()),verify_installed_policy=lambda profile:verify())
     args=SimpleNamespace(candidate=current,reservation_source=source,release_id=m["release_id"],apply=False,resume=False,scope_sha=None)
+    args.recover_binding_fault=fault.startswith("recovery")
     code={"fixture":b"source"}
     def owner(scope):calls.append("owner");return "wrong" if fault=="wrong-owner" else a["owner_oid"]
     def replace(old,new):assert binding_path.read_bytes()==old;calls.append("replace");binding_path.write_bytes(new)
     def command(a):return n.canonical({"status":"drift_detected" if fault=="postflight-drift" else "pass","problems":[]})
-    def run():return n.reconcile_binding(args,{"owner":owner,"write":write},{"read":lambda path,*a:path.read_bytes(),"command":command},code,vars(p),None,lambda:code,lambda:None,h,m,{},review,replace,lambda *a:None)
+    def recover():
+        assert binding_path.read_bytes()==pin_after
+        calls.append("native-revalidation")
+        if fault=="recovery-native-fails":raise PermissionError("native revalidation failed")
+    def run():return n.reconcile_binding(args,{"owner":owner,"write":write},{"read":lambda path,*a:path.read_bytes(),"command":command},code,vars(p),None,lambda:code,lambda:None,h,m,{},review,replace,lambda *a:None,recover_native=recover,reporter_pins={"fixture":"pin"})
     if fault=="foreign-pin":binding_path.write_bytes(pin_before.replace(n.digest(before).encode(),b"8"*64))
     if fault in ("foreign-pin","unrelated-drift","bad-result","stale-approval"):
         with pytest.raises(PermissionError):run()
@@ -389,18 +394,25 @@ def test_legacy_binding_requires_separate_exact_approval_and_preserves_capacity(
         assert not ledger.exists() and binding_path.read_bytes()==pin_before and not calls
         out=ledger/current/m["release_id"]
         if fault=="wrong-scope":args.scope_sha="0"*64
-        if fault.startswith("resume"):
+        if fault.startswith("resume") or fault=="recovery-resume":
             out.mkdir(parents=True);write(out/"before-binding.json",pin_before,0o400);write(out/"approval.json",n.canonical({"scope":scope,"scope_sha256":args.scope_sha,"owner_oid":a["owner_oid"],"approved_at":NOW.isoformat()}),0o400)
             args.apply=False;args.resume=True
-            if fault=="resume-after":binding_path.write_bytes(pin_after)
+            if fault in ("resume-after","recovery-resume"):binding_path.write_bytes(pin_after)
         if fault in ("wrong-scope","wrong-owner","changed-live","postflight-drift"):
             with pytest.raises(PermissionError):run()
             assert binding_path.read_bytes()==pin_before
             if fault=="postflight-drift":assert json.loads((out/"result.json").read_text())["status"]=="rollback_capacity_binding_rolled_back"
             else:assert "replace" not in calls
+        elif fault=="recovery-native-fails":
+            with pytest.raises(PermissionError,match="native revalidation failed"):run()
+            assert binding_path.read_bytes()==pin_after and not (out/"result.json").exists()
+            assert json.loads((out/"binding-verified.json").read_text())["status"]=="exact_binding_verified_native_revalidation_pending"
+            assert calls==["owner","replace","native-revalidation"]
         else:
             run();result=json.loads(capsys.readouterr().out);assert result["status"]=="rollback_capacity_binding_verified" and result["capacity"]==29
-            assert binding_path.read_bytes()==pin_after and calls.count("owner")==int(fault=="none") and calls.count("replace")==int(fault!="resume-after")
+            assert binding_path.read_bytes()==pin_after and calls.count("owner")==int(fault in ("none","recovery")) and calls.count("replace")==int(fault not in ("resume-after","recovery-resume"))
+            assert calls.count("native-revalidation")==int(args.recover_binding_fault)
+            if args.recover_binding_fault:assert result["native_breaker_revalidated"] is True
             args.apply=False;args.resume=True
             with pytest.raises(PermissionError,match="ALREADY_RESOLVED"):run()
     assert desired_path.read_bytes()==after and {p.name:p.read_bytes() for p in record.iterdir()}==prior_bytes
@@ -431,3 +443,24 @@ def test_interrupted_capacity_pair_restores_only_approved_half(tmp_path,monkeypa
         run()
         assert calls==([desired] if pair=="desired-only" else [binding] if pair=="binding-only" else [])
         assert (desired.read_bytes(),binding.read_bytes())==((after,pin_after) if pair=="both-after" else (before,pin_before))
+
+@pytest.mark.parametrize("case",["exact","derived-reporter","repaired-clean","repaired-reporter","wrong-breaker","wrong-lkg","unrelated-fault","recorded-reporter","stale","clean-before-repair"])
+def test_binding_recovery_fault_is_exact_and_does_not_waive_unrelated_drift(monkeypatch,case):
+    from datetime import timedelta
+    monkeypatch.setattr(n,"now",lambda:NOW)
+    anchor="a"*40; lkg={"complete":True,**{k:anchor for k in ("revision","host_revision","runtime_revision","mcp_revision")}}
+    control={"last_known_good":{"manifest":lkg},"circuit_breaker":{"state":"open","source":"production_drift_watchdog","reason":"continuous_production_drift_detected","problem_count":1,"problem_kinds":["failed_system_unit"]}}
+    recorded={"status":"drift_detected","problems":[n.RECOVERY_FAULT],"observed_at":NOW.isoformat()};evaluated=deepcopy(recorded)
+    repaired=case.startswith("repaired-")
+    if case=="derived-reporter":evaluated["problems"]=sorted([n.RECOVERY_FAULT,n.REPORTER_FAULT],key=lambda r:r["unit"])
+    if case in ("repaired-clean","clean-before-repair"):evaluated.update(status="pass",problems=[])
+    if case=="repaired-reporter":evaluated["problems"]=[n.REPORTER_FAULT]
+    if case=="wrong-breaker":control["circuit_breaker"]["reason"]="unrelated"
+    if case=="wrong-lkg":lkg["host_revision"]="b"*40
+    if case=="unrelated-fault":evaluated["problems"].append({"kind":"failed_system_unit","unit":"ssh.service","state":"failed"})
+    if case=="recorded-reporter":recorded["problems"].append(n.REPORTER_FAULT)
+    if case=="stale":recorded["observed_at"]=(NOW-timedelta(seconds=181)).isoformat()
+    if case in ("exact","derived-reporter","repaired-clean","repaired-reporter"):
+        assert n.exact_binding_fault(control,recorded,evaluated,repaired=repaired,anchor=anchor)==evaluated["problems"]
+    else:
+        with pytest.raises(PermissionError):n.exact_binding_fault(control,recorded,evaluated,repaired=repaired,anchor=anchor)

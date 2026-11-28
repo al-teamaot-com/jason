@@ -2935,6 +2935,7 @@ def main():
     capacity.add_argument("--assess-capacity", action="store_true")
     capacity.add_argument("--reconcile-capacity-binding", action="store_true")
     cli.add_argument("--reservation-source")
+    cli.add_argument("--recover-binding-fault", action="store_true")
     cli.add_argument("--retire-production-freeze",action="store_true")
     cli.add_argument("--retry-retirement",action="store_true")
     choice=cli.add_mutually_exclusive_group()
@@ -2955,6 +2956,7 @@ def main():
     need(not (a.reserve_capacity or a.assess_capacity or a.reconcile_capacity_binding) or a.rollback_retention,
          "CAPACITY_REQUIRES_RETENTION_PROFILE")
     need((a.reservation_source is not None)==a.reconcile_capacity_binding,"CAPACITY_BINDING_SOURCE_REQUIRED")
+    need(not a.recover_binding_fault or a.reconcile_capacity_binding,"BINDING_FAULT_REQUIRES_RECONCILIATION")
     need(not a.assess_capacity or not (a.apply or a.resume or a.scope_sha), "CAPACITY_ASSESSMENT_READ_ONLY")
     n,p = native()
     if a.rollback_retention:
@@ -2975,6 +2977,11 @@ def main():
             pass
         wait=RetentionReadback()
         wait.p=p
+        wait.command=p["command"]
+        wait.systemctl=lambda args: p["command"](["/usr/bin/systemctl",*args],90)
+        def recover_capacity_binding():
+            wait.systemctl(["start","jason-scoped-backport-recovery.service"])
+            PipelineSuccessor.native_revalidation(wait)
         runner["run_action"](a,n,p,code,planner,pending["check_pending"],
                              reviewed_retention_source,
                              lambda:PipelineSuccessor.wait_for_fresh_pipeline_readback(wait),
@@ -2985,7 +2992,8 @@ def main():
                              replace_binding=lambda before,after: replace_exact(
                                  POST_RETIREMENT_POLICY,image(before,0,0o600),image(after,0,0o600),p["rename_noreplace"]),
                              cleanup_binding=lambda before,after: cleanup_staged(
-                                 POST_RETIREMENT_POLICY,[image(before,0,0o600),image(after,0,0o600)]))
+                                 POST_RETIREMENT_POLICY,[image(before,0,0o600),image(after,0,0o600)]),
+                             recover_native=recover_capacity_binding,reporter_pins=DRIFT_REPORTER_PINS)
         return
     need(a.release_id is None,"RELEASE_ID_REQUIRES_RETENTION_PROFILE")
     if (a.pipeline_successor or a.todo_conflict_successor or a.release_retry_successor
