@@ -203,3 +203,23 @@ def test_exact_maintenance_disposable_transaction(tmp_path, monkeypatch, fault):
             assert not list(ledger.glob("*.json")) and not list(consumed.glob("*.json"))
     assert journal.read_bytes() == a["historical"]
 
+
+
+def test_maintenance_reads_root_authority_not_worker_projection(monkeypatch):
+    calls = []
+    control = {"schema_version":"1.0", "circuit_breaker":{
+        "state":"open", "reason":"continuous_production_drift_detected"}}
+    drift = {"schema_version":"1.0", "status":"pass", "problems":[],
+             "observed_at":datetime.now(timezone.utc).isoformat()}
+    def trusted_read(path):
+        calls.append(str(path))
+        return control if path.name == "production-control-state.json" else drift
+    monkeypatch.setattr(r.live, "root_json", trusted_read)
+    assert r.native_health() == (control, drift)
+    assert calls == [
+        "/var/lib/jason/openclaw/release-manager/production-control-state.json",
+        "/var/lib/jason/openclaw/release-manager/production-drift.json",
+    ]
+    drift["problems"] = [{"kind":"synthetic"}]
+    with pytest.raises(PermissionError, match="NATIVE_HEALTH_BOUNDARY"):
+        r.native_health()

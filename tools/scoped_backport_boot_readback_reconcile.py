@@ -48,6 +48,9 @@ DESCRIPTION = ("change only runtime container_id; preserve images, revisions, or
 RUNTIME = "jason-runtime"
 LEDGER = live.PRIVATE / "controller-maintenance"
 CONSUMED = live.ROOT_STATE / "consumed-owner-approvals"
+ROOT_RELEASE_STATE = Path("/var/lib/jason/openclaw/release-manager")
+ROOT_CONTROL = ROOT_RELEASE_STATE / "production-control-state.json"
+ROOT_DRIFT = ROOT_RELEASE_STATE / "production-drift.json"
 OFFER = BUNDLE / "boot-readback-maintenance-offer.json"
 FILES = ("tools/scoped_backport_boot_readback_reconcile.py",
          "tools/scoped_backport_four_unit_drift_reconcile.py")
@@ -149,6 +152,21 @@ def boot_evidence(runtime, old_id):
     need(len(matching) == 1, "BOOT_REMOUNT_EVIDENCE_MISSING")
 
 
+def native_health():
+    control = live.root_json(ROOT_CONTROL)
+    drift = live.root_json(ROOT_DRIFT)
+    breaker = control.get("circuit_breaker") or {}
+    age = (datetime.now(timezone.utc) -
+           datetime.fromisoformat(drift["observed_at"].replace("Z", "+00:00"))).total_seconds()
+    need(control.get("schema_version") == "1.0"
+         and drift.get("schema_version") == "1.0"
+         and breaker.get("state") == "open"
+         and breaker.get("reason") == "continuous_production_drift_detected"
+         and drift.get("status") == "pass" and drift.get("problems") == []
+         and 0 <= age <= 180, "NATIVE_HEALTH_BOUNDARY")
+    return control, drift
+
+
 def live_plan(host, m):
     host._require_current_staged_scope()
     need(not any((dispatcher.AUTH / "requests").glob("*.json")), "PENDING_RELEASE_REQUEST")
@@ -182,16 +200,9 @@ def live_plan(host, m):
          "HOST_ANCHOR")
     policy = sha256(readback._root_read(readback.NORMAL_POLICY)).hexdigest()
     signing.require_normal_deployment_enabled(live.FREEZE.parent, policy)
-    guard = host.guard
-    control = live.root_json(guard.control_path)
-    drift = live.root_json(guard.drift_path)
-    breaker = control.get("circuit_breaker") or {}
-    age = (datetime.now(timezone.utc) -
-           datetime.fromisoformat(drift["observed_at"].replace("Z", "+00:00"))).total_seconds()
-    need(breaker.get("state") == "open"
-         and breaker.get("reason") == "continuous_production_drift_detected"
-         and drift.get("status") == "pass" and drift.get("problems") == []
-         and 0 <= age <= 180, "NATIVE_HEALTH_BOUNDARY")
+    # The worker-facing protected-readback directory is an al-owned mirror.
+    # Maintenance authority comes only from the native root-owned files.
+    control, drift = native_health()
     readback.verify_legacy_anchor(old, control["last_known_good"]["manifest"])
     actual = readback.inspect_components()
     items = {k: live.required_container(k) for k in readback.COMPONENTS}
