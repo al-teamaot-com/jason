@@ -15,6 +15,8 @@ import hashlib
 import json
 import os
 import re
+import pwd
+import stat
 from pathlib import Path
 import secrets
 import sqlite3
@@ -190,6 +192,48 @@ def _persist(*, db_path: Path, tenant: str, app: str, service_principal: str,
         raise BootstrapDenied("BOUNDARY_WRITE_REQUIRES_AUTHENTICATED_AL_SUDO")
     if approval_reference != APPROVAL_SCOPE:
         raise BootstrapDenied("EXACT_SHAREPOINT_BOUNDARY_APPROVAL_SCOPE_REQUIRED")
+    account = pwd.getpwnam("al")
+    metadata = db_path.lstat()
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_uid not in (0, account.pw_uid)):
+        raise BootstrapDenied("BOUNDARY_DATABASE_CUSTODY_INVALID")
+    kwargs = dict(db_path=db_path, tenant=tenant, app=app,
+                  service_principal=service_principal, domain=domain, client=client)
+    if metadata.st_uid == 0:
+        for parent in db_path.absolute().parents:
+            info = parent.lstat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid or info.st_mode & 0o022:
+                raise BootstrapDenied("ROOT_BOUNDARY_PARENT_CUSTODY_INVALID")
+        return _persist_binding(**kwargs)
+
+    # SQLite opens journals and side files alongside the database. Open every
+    # one as its runtime owner. Keep the audit writer in the parent process.
+    return _persist_as_runtime_owner(account, kwargs)
+
+
+def _persist_as_runtime_owner(account, kwargs):
+    results = ("created_and_validated", "already_validated")
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.setgroups([])
+            os.setgid(account.pw_gid)
+            os.setuid(account.pw_uid)
+            os.closerange(3, os.sysconf("SC_OPEN_MAX"))
+            result = _persist_binding(**kwargs)
+            code = 40 + results.index(result)
+        except BaseException:
+            code = 2
+        os._exit(code)
+    _, status = os.waitpid(pid, 0)
+    code = os.waitstatus_to_exitcode(status)
+    if code not in (40, 41):
+        raise BootstrapDenied("RUNTIME_OWNER_BOUNDARY_WRITE_FAILED")
+    return results[code - 40]
+
+
+def _persist_binding(*, db_path, tenant, app, service_principal, domain, client):
     store = SQLiteClientBoundaryStore(db_path)
     boundaries = SQLiteClientBoundaryRepository(store)
     current = boundaries.find_active_for_client(client_id=client, provider=PROVIDER)
