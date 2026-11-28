@@ -521,3 +521,75 @@ def test_signed_owner_phase_mismatch_does_not_change_any_acceptance_record(env):
     )
     with pytest.raises(PermissionError, match="immutable phase"):
         expected_owner_uat_decision(tampered_title)
+
+
+def test_chatgpt_fallback_and_signed_teams_share_one_terminal_receipt(env):
+    request = setup_issued(env, "acceptance-Coordinated.fallback")
+    flow = replace(env.callback, enabled=True, chatgpt_ready=lambda: True)
+    actor = dict(principal_id=OWNER, tenant_id=TENANT, object_id=OWNER_OBJECT)
+    _, digest = flow.chatgpt_review(approval_id=request.approval_id, **actor)
+    args = dict(approval_id=request.approval_id, decision="deny", **actor,
+                channel_response_id="mcp-uat-fixture", authentication_evidence_hash="e" * 64)
+    with pytest.raises(PermissionError, match="exact reviewed"):
+        flow.handle_authenticated(reviewed_scope_sha256="0" * 64, **args)
+    with pytest.raises(PermissionError):
+        flow.chatgpt_review(approval_id=request.approval_id, **dict(actor, object_id=OTHER_OBJECT))
+    result = flow.handle_authenticated(reviewed_scope_sha256=digest, **args)
+    assert result["approval_status"] == "denied" and not result["executed"]
+    assert env.repo.accepted_decision(request.approval_id).channel == "jason_mcp_entra"
+    with pytest.raises(PermissionError):
+        click(flow, signed(env, request, "deny"))
+    with pytest.raises(PermissionError):
+        flow.handle_authenticated(reviewed_scope_sha256=digest, **args)
+
+
+def test_coordinated_readiness_requires_exact_component_and_fresh_root_evidence(monkeypatch):
+    from jason_runtime.universal_interaction.owner_uat import OwnerUatReleaseGate
+
+    release = "release-" + "a" * 16
+    anchor = "b" * 40
+    readback = {
+        "schema_version": "3.0", "status": "verified_component_release",
+        "release_id": release, "host_revision": anchor,
+        "manifest_sha256": "7" * 64, "scope_sha256": "8" * 64, "release_policy_sha256": "9" * 64,
+        "components": {
+            name: {"revision": digit * 40, "image_id": "sha256:" + digit * 64,
+                   "container_id": digit * 64}
+            for name, digit in (("jason-runtime", "a"), ("jason-mcp-pilot", "c"), ("jason-teams-gateway", "d"))
+        },
+    }
+    control = {"schema_version": "1.0", "circuit_breaker": {"state": "closed"},
+               "last_known_good": {"manifest": {"complete": True, "revision": anchor}}}
+    drift = {"status": "pass", "problems": [], "observed_at": NOW.isoformat()}
+    monkeypatch.setattr(OwnerUatReleaseGate, "read_coordinated_receipt", staticmethod(lambda: readback))
+    monkeypatch.setattr(OwnerUatReleaseGate, "_private_json", staticmethod(
+        lambda path, **_: drift if path.name == "production-drift.json" else control))
+    gate = OwnerUatReleaseGate(Path("/unused"), "a" * 40, release,
+                               campaign_expires_at=(NOW + timedelta(hours=1)).isoformat())
+    assert gate.ready()
+    assert replace(gate, source_revision="c" * 40, component="jason-mcp-pilot").ready()
+    assert not replace(gate, source_revision="c" * 40).ready()
+    assert not replace(gate, coordinated_release_id="release-" + "b" * 16).ready()
+    assert not replace(gate, campaign_expires_at=(NOW - timedelta(minutes=1)).isoformat()).ready()
+    drift["observed_at"] = (NOW - timedelta(minutes=5)).isoformat()
+    assert not gate.ready()
+
+
+def test_coordinated_campaign_issues_fallback_only_after_two_teams_receipts(env):
+    from jason_runtime.universal_interaction.owner_uat import OwnerUatMaintenance
+
+    session = "CoordinatedOwnerCampaign"
+    env.issuer.enabled = True
+    flow = replace(env.callback, enabled=True, chatgpt_ready=lambda: True)
+    worker = OwnerUatMaintenance(
+        env.issuer, session, enabled=True, release_ready=lambda: True, include_chatgpt_fallback=True)
+    assert worker.tick() and not worker.tick()
+    first = create_nonexecuting_approval(session_id=session, now=NOW)
+    click(flow, signed(env, first, "deny"))
+    assert worker.tick() and not worker.tick()
+    second = create_nonexecuting_approval(session_id=session + ".approve", now=NOW)
+    click(flow, signed(env, second, "approve"))
+    assert worker.tick() and not worker.tick()
+    fallback = create_nonexecuting_approval(session_id=session + ".fallback", now=NOW)
+    assert env.repo.get(fallback.approval_id).status == ApprovalRequestStatus.PENDING
+    assert len(env.channel.sends) == 3

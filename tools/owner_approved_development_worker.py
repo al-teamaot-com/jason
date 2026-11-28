@@ -70,6 +70,7 @@ def reviewed_claim_scope_path(repo: Path) -> Path:
 # the original protected files independently.
 NATIVE_HEALTH_GUARD = Path('/usr/local/lib/jason/scoped-backport/tools/pmv4_host_release_guard.py')
 NATIVE_HEALTH_GUARD_SHA256 = '0e4935d40037b694dd1dbbfcc894e2db891e60db83f62d49a4803be44034e3e4'
+NORMAL_RETIREMENT_POLICY = Path('/etc/jason-owner-release/normal-release-policy/production-freeze-retirement.json')
 NATIVE_JOURNAL_STATUS = Path('/var/lib/jason-audit-journal/control/forward-release-status.json')
 FORWARD_SCOPE_SHA256 = '697210854d0a0140d3a672750ad84d043e5ac99db117abd6043469312d017fb7'
 FORWARD_ACTION = 'RECOVER-SEGMENTED-AUDIT-WITHOUT-LEGACY-REBUILD'
@@ -119,7 +120,7 @@ def _native_health_guard():
         raise ValueError('native health guard changed')
     ns = {'__name__': 'reviewed_native_development_health', '__file__': str(path)}
     exec(compile(raw, str(path), 'exec'), ns)
-    return ns['IndependentHostGuard']()
+    return ns['IndependentHostGuard'](), ns['coordinated_component_state']
 
 
 def accepted_forward_audit(journal: Mapping[str, Any]) -> bool:
@@ -175,7 +176,8 @@ def verified_development_health(spool: Path) -> dict[str, Any]:
         drift = _health_json(manager / 'production-drift.json', 1000, 0o600, 180)
         if control.get('schema_version') != '1.0' or drift.get('schema_version') != '1.0':
             return result(False, 'native_readback_schema_invalid')
-        guard = _native_health_guard()
+        guard, read_components = _native_health_guard()
+        scoped = read_components()
         if guard.protected_release_status().get('ready') is not True:
             return result(False, 'native_release_health_unverified')
         core = guard.core_health_evidence()
@@ -185,9 +187,28 @@ def verified_development_health(spool: Path) -> dict[str, Any]:
                 or core.get('worker_scan_fresh') is not True
                 or drift.get('status') != 'pass' or drift.get('problems') != []):
             return result(False, 'live_core_health_unverified')
+        # The legacy LKG is the immutable host rollback anchor. After a
+        # coordinated release the independently verified component readback
+        # supplies the exact current component identities instead.
+        if scoped is not None and (
+                scoped.get('host_revision') != manifest.get('revision')
+                or scoped.get('status') != 'verified_component_release'
+                or scoped.get('schema_version') not in ('2.0', '3.0')):
+            return result(False, 'live_core_component_anchor_mismatch')
+        if scoped is None and os.path.lexists(NORMAL_RETIREMENT_POLICY):
+            return result(False, 'live_core_component_readback_missing')
         for name, field in (('jason-runtime', 'runtime_image_id'), ('jason-mcp-pilot', 'mcp_image_id')):
-            if guard._container(name).get('Image') != manifest.get(field):
-                return result(False, 'live_core_image_mismatch')
+            live = guard._container(name)
+            if scoped is None:
+                if live.get('Image') != manifest.get(field):
+                    return result(False, 'live_core_image_mismatch')
+            else:
+                row = scoped['components'][name]
+                if (live.get('Image') != row['image_id']
+                        or live.get('Id') != row['container_id']
+                        or ((live.get('Config') or {}).get('Labels') or {}).get(
+                            'com.teamaot.jason.source_revision') != row['revision']):
+                    return result(False, 'live_core_image_mismatch')
         for unit in ('jason-production-drift-watchdog.service',
                      'jason-pmv4-component-readback.service',
                      'jason-openclaw-authority-health.service'):
@@ -211,7 +232,8 @@ def verified_development_health(spool: Path) -> dict[str, Any]:
             return result(False, 'full_restore_proof_unverified')
         # The native gate also verifies root-source alignment, breaker, drift age,
         # and live ticket heartbeat. Recheck after the probes to catch movement.
-        if guard.protected_release_status().get('ready') is not True:
+        if (guard.protected_release_status().get('ready') is not True
+                or read_components() != scoped):
             return result(False, 'native_health_changed_during_probe')
         return {**result(True, 'native_readback_live_core_and_authority_verified'),
                 'production_revision': core['source_sha'],

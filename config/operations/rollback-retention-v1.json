@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "minimum_stopped_age_days": 7,
+  "minimum_retained_per_equivalent_group": 1,
+  "maximum_retirements_per_approved_transaction": 3,
+  "maximum_archive_bytes_per_container": 536870912,
+  "minimum_archive_free_bytes_after_reservation": 1073741824,
+  "exact_authenticated_owner_approval_required": true,
+  "archive_and_readback_before_removal_required": true,
+  "preserve_native_capacity_limit": true,
+  "configuration_equivalence": "archive_historical_environment"
+}

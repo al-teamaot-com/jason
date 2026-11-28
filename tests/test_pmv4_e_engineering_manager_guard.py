@@ -227,7 +227,20 @@ def test_normal_manager_receipt_preserves_prior_worker_pins():
     assert g.validate_receipt(normal)==normal
     from hashlib import sha256
     from tools import owner_approved_development_worker as worker
-    assert sha256(Path(worker.__file__).read_bytes()).hexdigest()==g.NORMAL_MANAGER_OWNER_WORKER_SHA256
+    post=deepcopy(normal)
+    post["predecessor_candidate_sha"]=g.POST_RETIREMENT_MANAGER_PREDECESSOR
+    post["artifact_sha256"]["owner_approved_development_worker.py"]=g.POST_RETIREMENT_OWNER_WORKER_SHA256
+    assert g.validate_receipt(post)==post
+    assert sha256(Path(worker.__file__).read_bytes()).hexdigest()==g.POST_RETIREMENT_OWNER_WORKER_SHA256
+    for prior_pin in (g.NORMAL_MANAGER_OWNER_WORKER_SHA256,g.LOCAL_REASONING_OWNER_WORKER_SHA256,"0"*64):
+        rejected=deepcopy(post)
+        rejected["artifact_sha256"]["owner_approved_development_worker.py"]=prior_pin
+        with pytest.raises(g.Denied):
+            g.validate_receipt(rejected)
+    rejected=deepcopy(normal)
+    rejected["artifact_sha256"]["owner_approved_development_worker.py"]=g.POST_RETIREMENT_OWNER_WORKER_SHA256
+    with pytest.raises(g.Denied):
+        g.validate_receipt(rejected)
     native=Path(__file__).resolve().parents[1]/"tools/pmv4_host_release_guard.py"
     assert worker.NATIVE_HEALTH_GUARD_SHA256==sha256(native.read_bytes()).hexdigest()
     assert str(worker.NATIVE_HEALTH_GUARD)=="/usr/local/lib/jason/scoped-backport/tools/pmv4_host_release_guard.py"
