@@ -37,6 +37,8 @@ def _deployment_harness(tmp_path: Path, *, actual_image_rev: str) -> tuple[Path,
     profile.write_bytes((REPO / "config/autotask-entity-read-profile.json").read_bytes())
     policy = root / "config/mobile-release-approval-policy.json"
     policy.write_bytes((REPO / "config/mobile-release-approval-policy.json").read_bytes())
+    universal = root / "config/universal-query-activation.json"
+    universal.write_bytes((REPO / "config/universal-query-activation.json").read_bytes())
 
     tools = root / "tools"
     tools.mkdir()
@@ -124,3 +126,40 @@ def test_grafana_diagnostics_are_independent_of_production_release():
     assert 'step_start post_exporter_grafana_assurance' not in script
     assert 'systemctl start jason-grafana-assurance.service' not in script
     assert (REPO / 'tools/grafana_assurance.py').is_file()
+
+
+def test_rollback_denies_missing_immutable_provider_read_policy(tmp_path):
+    script, env = _deployment_harness(tmp_path, actual_image_rev=LKG)
+    (script.parents[2] / "config" / "autotask-entity-read-profile.json").unlink()
+    completed = subprocess.run(
+        ["bash", str(script), "--preflight"],
+        env=env, capture_output=True, text=True,
+    )
+    assert completed.returncode == 2
+    assert "immutable Autotask read/rollback profile absent" in completed.stderr
+    assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
+
+
+def test_rollback_denies_missing_immutable_release_approval_policy(tmp_path):
+    script, env = _deployment_harness(tmp_path, actual_image_rev=LKG)
+    (script.parents[2] / "config" / "mobile-release-approval-policy.json").unlink()
+    completed = subprocess.run(
+        ["bash", str(script), "--preflight"],
+        env=env, capture_output=True, text=True,
+    )
+    assert completed.returncode == 2
+    assert "immutable mobile release approval policy absent" in completed.stderr
+    assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
+
+
+
+def test_rollback_denies_missing_immutable_universal_query_profile(tmp_path):
+    script, env = _deployment_harness(tmp_path, actual_image_rev=LKG)
+    (script.parents[2] / "config" / "universal-query-activation.json").unlink()
+    completed = subprocess.run(
+        ["bash", str(script), "--preflight"],
+        env=env, capture_output=True, text=True,
+    )
+    assert completed.returncode == 2
+    assert "immutable universal-query activation profile absent" in completed.stderr
+    assert "FAKE_DEPLOY_ARGS=" not in completed.stdout
