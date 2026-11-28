@@ -11,6 +11,12 @@ import sqlite3
 from pathlib import Path
 
 
+if __package__:
+    from .sharepoint_install_package import APP, SP, TENANT
+else:
+    from sharepoint_install_package import APP, SP, TENANT
+
+
 def collect(*, boundary_db: Path, role_id: Path, secret_id: Path,
             grafana_user_header: bool, runtime_read_registered: bool) -> dict:
     checks = {}
@@ -35,10 +41,13 @@ def collect(*, boundary_db: Path, role_id: Path, secret_id: Path,
                          AND profile='sharepoint-read'
                          AND status='validated'
                          AND validated_at IS NOT NULL
-                         AND application_id IS NOT NULL
-                         AND service_principal_id IS NOT NULL""").fetchone()
+                         AND client_id = 'client-aot-internal'
+                         AND external_tenant_id = ?
+                         AND application_id = ?
+                         AND service_principal_id = ?
+                         AND offboarded_at IS NULL""", (TENANT, APP, SP)).fetchone()
                 checks["boundary_db_readable"] = True
-                checks["validated_sharepoint_client_boundary"] = rows[0] > 0
+                checks["validated_sharepoint_client_boundary"] = rows[0] == 1
         except (sqlite3.Error, OSError):
             pass
     checks["grafana_authenticated_user_header_enabled"] = bool(grafana_user_header)
