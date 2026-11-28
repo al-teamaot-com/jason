@@ -21,6 +21,7 @@ from jason_runtime.autotask_ticket_update import (
     AUTOTASK_TICKET_UPDATE_PROVIDER,
     SAFE_TICKET_UPDATE_FIELDS,
     AutotaskTicketUpdateConnector,
+    AutotaskTicketUpdateVerificationError,
     configured_autotask_ticket_update_autonomy_resource_id,
     register_autotask_ticket_update_runtime_foundation,
 )
@@ -722,3 +723,45 @@ def test_autonomy_ticket_update_readback_uses_api_user_without_impersonation(mon
     assert observed == {"id": 12345, "status": 5}
     assert len(seen_headers) == 1
     assert "ImpersonationResourceId" not in seen_headers[0]
+
+@pytest.mark.parametrize('observed,invalid,expected_calls',[
+    ({'id':12345,'companyID':1158,'status':5,'resolution':'before'},False,1),
+    ({'id':12345,'companyID':999,'status':5,'resolution':'before'},False,0),
+    ({'id':12345,'companyID':1158,'status':1,'resolution':'before'},False,0),
+    ({'id':12345,'companyID':1158,'status':5,'resolution':'concurrent change'},False,0),
+    ({'id':12345,'companyID':1158,'status':5,'resolution':'before'},True,0),
+])
+def test_reviewed_expected_before_blocks_stale_or_foreign_ticket_before_write(monkeypatch,observed,invalid,expected_calls):
+    from connectors.core.connector_base import PreparedRequest
+    from dataclasses import replace
+    monkeypatch.setenv(AUTOTASK_MUTATION_ENABLED_ENV,'true')
+    calls=[]
+    connector=AutotaskTicketUpdateConnector(secrets=SimpleNamespace(resolve=lambda *a:{}),
+        transport=SimpleNamespace(request=lambda **kw:(calls.append(kw) or {'id':12345})),
+        audit=SimpleNamespace(record=lambda *a,**k:None),bindings=None)
+    payload={'id':12345,'resolution':'after'}
+    before={'id':12345,'companyID':1158,'status':5,'resolution':'before'}
+    if invalid: before['id']=999
+    req=replace(request(payload),arguments={'payload':payload,'expected_before':before})
+    prepared=PreparedRequest(method='PATCH',url='https://zone.example/atservicesrest/V1.0/Tickets',headers={},params=None,json=payload,audit_operation='/V1.0/Tickets')
+    monkeypatch.setattr(connector,'_resolve_symbolic_payload',lambda r:payload)
+    monkeypatch.setattr(connector,'prepare_request',lambda *a:prepared)
+    values=iter([observed,{'id':12345,'resolution':'after'}]); monkeypatch.setattr(connector,'_readback',lambda **kw:next(values))
+    plan=connector.prepare_governed_execution(req)
+    if expected_calls:
+        result=connector.execute_governed_execution(plan)
+        assert result.data['jasonVerification']['readbackVerified'] is True
+        assert calls[0]['json']==payload
+    else:
+        with pytest.raises((ValueError,AutotaskTicketUpdateVerificationError)):
+            connector.execute_governed_execution(plan)
+    assert len(calls)==expected_calls
+
+
+def test_expected_before_cannot_use_unprepared_legacy_execution(monkeypatch):
+    from dataclasses import replace
+    connector=AutotaskTicketUpdateConnector(secrets=None,transport=None,audit=None,bindings=None)
+    payload={'id':12345,'resolution':'after'}
+    monkeypatch.setattr(connector,'_resolve_symbolic_payload',lambda r:payload)
+    with pytest.raises(PermissionError,match='REQUIRES_GOVERNED_PLAN'):
+        connector.execute(replace(request(payload),arguments={'payload':payload,'expected_before':{'id':12345,'resolution':'before'}}))
