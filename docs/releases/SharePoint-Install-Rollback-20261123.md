@@ -142,3 +142,11 @@ This is a source/image custody correction, not an alternate release lane.
 The read-only store repair and this packaging change must both be accepted
 in the eventual native release. A package from either branch alone is
 not evidence that the corrected running sidecar is ready.
+
+### Service image selection
+
+Local builds use `compose.yaml`. Installation and scheduled discovery use
+`compose.release.yaml` with the exact verified local image ID. The deployment
+definition contains no build step and disables image pulls. Both entry points
+use the same service environment, mounts and networks. The release controller
+must validate the local image identity and authorize the component before use.
