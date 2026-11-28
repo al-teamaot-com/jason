@@ -159,3 +159,66 @@ def test_root_adapter_checks_scope_and_restores_listeners(monkeypatch, tmp_path,
     assert listener == "active"
     assert consumed.exists() == (fault != "approval")
     assert all(contents[f.path] == (f.before if fault else f.after) for f in plan.files)
+
+
+@pytest.mark.parametrize("prior", ["pending", "foreign", "verified", "rolled_back"])
+def test_maintenance_inspects_prior_transaction_without_scheduling(tmp_path, monkeypatch, prior):
+    from types import SimpleNamespace
+    from tools import scoped_backport_controller_upgrade_root as root
+
+    manifest = dict(schema_version="3.0", release_id="prior", scope_sha256="a" * 64,
+                    release_policy_sha256="b" * 64)
+    path = tmp_path / "journal.json"
+    host = SimpleNamespace(_journal_path=lambda _: path)
+    monkeypatch.setattr(root.dispatcher, "load_installed", lambda: (host, manifest, {}))
+    monkeypatch.setattr(root.dispatcher, "scheduled_approved",
+                        lambda *args: pytest.fail("maintenance dispatched a release"))
+    monkeypatch.setattr(root, "require_normal_deployment_enabled", lambda *args: None)
+    monkeypatch.setattr(root.dispatcher, "AUTH", tmp_path)
+    monkeypatch.setattr(root.live, "root_json", lambda p: json.loads(p.read_bytes()))
+    if prior != "pending":
+        path.write_text(json.dumps({
+            "release_id": "prior", "manifest_sha256": root.digest(manifest),
+            "scope_sha256": "foreign" if prior == "foreign" else manifest["scope_sha256"],
+            "outcome": "production_components_verified" if prior == "verified" else "rollback_verified",
+        }))
+    checked = []
+    monkeypatch.setattr(root, "verify_successful_predecessor", lambda *args: checked.append(args))
+    if prior in ("rolled_back", "verified"):
+        assert root.terminal_offer() == (host, manifest)
+        assert len(checked) == int(prior == "verified")
+    else:
+        with pytest.raises(ScopedBackportDenied, match={
+            "pending": "ACTIVE_RELEASE", "foreign": "SCOPE_MISMATCH",
+
+        }[prior]):
+            root.terminal_offer()
+
+
+@pytest.mark.parametrize("change", ["none", "host", "image", "revision", "id", "configuration", "scope"])
+def test_verified_prior_requires_live_evidence(monkeypatch, change):
+    from tools import scoped_backport_controller_upgrade_root as root
+
+    manifest = {"release_id": "prior", "scope_sha256": "scope", "release_policy_sha256": "policy"}
+    prior = dict(manifest, manifest_sha256=root.digest(manifest), host_revision="host",
+                 components={"runtime": {"container_id": "old", "image_id": "image", "revision": "revision"}})
+    current = deepcopy(prior)
+    row = current["components"]["runtime"]
+    row["container_id"] = "reconciled"
+    if change in ("image", "revision"):
+        row[{"image": "image_id", "revision": "revision"}[change]] = "changed"
+    if change == "host":
+        current["host_revision"] = "changed"
+    if change == "scope":
+        current["scope_sha256"] = "changed"
+    monkeypatch.setattr(root.live.readback, "verify_live", lambda: current)
+    monkeypatch.setattr(root.live.readback, "validate", lambda value: value)
+    monkeypatch.setattr(root.live, "required_container",
+                        lambda name: {"Id": "changed" if change == "id" else "reconciled"})
+    monkeypatch.setattr(root.live, "config_fingerprint", lambda item: "changed" if change == "configuration" else "hash")
+    journal = dict(proposed_readback=prior, mutation_attempted=True, original_configs={"runtime": "hash"})
+    if change == "none":
+        root.verify_successful_predecessor(manifest, journal)
+    else:
+        with pytest.raises(ScopedBackportDenied):
+            root.verify_successful_predecessor(manifest, journal)
