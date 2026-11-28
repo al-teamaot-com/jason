@@ -17,13 +17,15 @@ import re
 import subprocess
 import zipfile
 
-TENANT = "f7054323-d52b-4863-8c2f-1898f0b6077c"
-APP = "c5692fec-3f78-44db-9a15-59c3e3bcac58"
-SP = "36b03282-289c-4da3-8243-accb0b1e7f1e"
-SITE = "absolnet.sharepoint.com,8f4cd7bf-72b8-4f7e-9803-c47abcbb232f,e5b7a724-dc9b-406b-aed8-2961f1f71153"
-SITE_URL = "https://absolnet.sharepoint.com/sites/AOTAccountingDocuments"
-HOSTS = ["absolnet.sharepoint.com", "absolnet-web.sharepoint.com"]
-PROFILE = "aot-sharepoint-read-v1"
+READER_CONFIG = "infrastructure/sharepoint-site-control/accounting-reader.json"
+READER = json.loads((Path(__file__).resolve().parents[1] / READER_CONFIG).read_bytes())
+TENANT = READER["tenant_id"]
+APP = READER["application_id"]
+SP = READER["service_principal_id"]
+SITE = READER["site_id"]
+SITE_URL = READER["site_url"]
+HOSTS = READER["allowed_hosts"]
+PROFILE = READER["activation_profile"]
 ROLE_DIR = "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-sharepoint-read-approle"
 VOLUME = "jason-sharepoint-site-state"
 CONTAINER = "jason-sharepoint-site-control"
@@ -46,6 +48,7 @@ MOUNTS = [
      "Target": "/var/lib/jason/sharepoint", "ReadOnly": False},
 ]
 FIXED_FILES = (
+    READER_CONFIG,
     "tools/sharepoint_install_package.py",
     "tools/sharepoint_boundary_bootstrap.py",
     "tools/sharepoint_release_preflight.py",
@@ -212,7 +215,7 @@ def installation_plan(source_sha, baseline):
         "native_release_required": True, "root_before_images_required": True,
         "baseline_observation_not_release_acceptance": deepcopy(baseline),
         "reader": {"tenant_id": TENANT, "application_id": APP,
-                   "service_principal_id": SP, "client_id": "client-aot-internal",
+                   "service_principal_id": SP, "client_id": READER["client_id"],
                    "permission_profile": "sharepoint-read", "activation_profile": PROFILE,
                    "allowed_hosts": HOSTS},
         "initial_site_request": initial_site_request(),
@@ -255,6 +258,7 @@ def _source_files(repo, source_sha):
         need(not name.startswith("/") and ".." not in Path(name).parts, "SOURCE_PATH")
         selected[name] = _git(repo, "show", source_sha + ":" + name)
     need(set(FIXED_FILES) <= set(selected), "SOURCE_CLOSURE_INCOMPLETE")
+    need(json.loads(selected[READER_CONFIG]) == READER, "READER_CONFIG_REVISION_MISMATCH")
     return selected
 
 

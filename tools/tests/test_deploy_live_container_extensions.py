@@ -334,3 +334,18 @@ def test_native_mcp_source_requires_immutable_signer_and_root_trust():
     assert 'JASON_OWNER_RELEASE_ED25519_KEY_PATH=' in source
     assert "read_service_owner_signing_key" in source
     assert "read_pinned_root_owner_public_key" in source
+
+
+def test_named_volume_reuses_docker_name(monkeypatch, tmp_path):
+    container = _live(tmp_path)
+    mount = {"Type": "volume", "Name": "existing-data",
+             "Source": "/var/lib/docker/volumes/existing-data/_data",
+             "Destination": "/var/lib/grafana", "RW": True}
+    container["Mounts"] = [mount]
+    monkeypatch.setattr(deploy, "_inspect", lambda name: container)
+    args = dict(live="jason-grafana", image="test", source_revision="test", harden=False)
+    command, _, _, _ = deploy._build_create_command(**args)
+    assert "type=volume,src=existing-data,dst=/var/lib/grafana" in command
+    del mount["Name"]
+    with pytest.raises(ValueError, match="volume name"):
+        deploy._build_create_command(**args)

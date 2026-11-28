@@ -1,0 +1,13 @@
+{
+  "tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+  "application_id": "c5692fec-3f78-44db-9a15-59c3e3bcac58",
+  "service_principal_id": "36b03282-289c-4da3-8243-accb0b1e7f1e",
+  "site_id": "absolnet.sharepoint.com,8f4cd7bf-72b8-4f7e-9803-c47abcbb232f,e5b7a724-dc9b-406b-aed8-2961f1f71153",
+  "site_url": "https://absolnet.sharepoint.com/sites/AOTAccountingDocuments",
+  "allowed_hosts": [
+    "absolnet.sharepoint.com",
+    "absolnet-web.sharepoint.com"
+  ],
+  "activation_profile": "aot-sharepoint-read-v1",
+  "client_id": "client-aot-internal"
+}
