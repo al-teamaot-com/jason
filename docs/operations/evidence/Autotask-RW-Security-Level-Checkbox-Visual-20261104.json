@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "observed_date": "2026-11-04",
+  "source": "User-provided screenshots of live Autotask Security Level 27 editor",
+  "source_images": [
+    "image(20261104-174244).png",
+    "image(20261104-174314).png"
+  ],
+  "account_security_level": "AOT - API User (Integration)",
+  "security_level_id": 27,
+  "contracts": {
+    "object_contracts": {
+      "view": "All",
+      "add": "Yes"
+    },
+    "checkboxes": {
+      "Can modify contract Internal Costs": true,
+      "Can modify Service/Bundle on contract charges": true,
+      "Can view Posted Billing Items Search": true,
+      "Can create invoices from Ticket and Won Quote Wizard": true,
+      "Can access Invoice History, (Invoice) Export Wizard and Payments": true,
+      "Can access Bulk Service Updater": true
+    },
+    "contract_visibility": "Full",
+    "can_approve_and_post": "All",
+    "can_invoice": "All"
+  },
+  "other": {
+    "Can view Internal Cost section on New/Edit Resource page": true,
+    "Can add and edit Dashboard widgets/tabs": true,
+    "Can manage Shared Dashboard Tabs": true,
+    "Can offer Dashboard widgets to other Resources": true,
+    "Can view Company Survey Ratings and Contact Survey Ratings": true,
+    "Can view Resource Survey Ratings": true,
+    "Can add and edit Client Portal Security Levels on Contact Edit/Detail page": true,
+    "Can edit Client Portal User Settings on Contact Edit/Detail page": true,
+    "Can preview Client Portal": true,
+    "Can publish Client Portal Dashboards": false,
+    "Limit resource availability to self, plus": false,
+    "form_template_manage_scope": "Anyone in Company (Company)"
+  },
+  "unverified_checkbox_states": [
+    "Resource can view items with no assigned Line of Business",
+    "Can view internal cost data (excludes New/Edit Resource page)",
+    "Can view sensitive Charge data",
+    "Can login to Web Services API"
+  ],
+  "notes": [
+    "Unverified options are below the visible screenshot or on the separate API User page; do not infer literal checked state from successful provider reads.",
+    "RW GET tests separately proved functional API login, nonzero internal cost data, and access to 16 sampled contracts with no assigned LOB.",
+    "All sampled provider reads were GET-only. No provider or production configuration was modified."
+  ]
+}
