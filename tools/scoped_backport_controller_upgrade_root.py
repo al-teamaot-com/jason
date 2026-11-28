@@ -86,11 +86,17 @@ def verified_source(installer: str, reviewed: str, candidate: str, rollback: str
 
 
 def terminal_offer():
-    host, manifest, profile = dispatcher.load_installed()
-    if dispatcher.scheduled_approved(host, manifest, profile) != {
-            "status": "resolved_prior_attempt_no_action"}:
+    host, manifest, _ = dispatcher.load_installed()
+    # A maintenance preflight can inspect the prior transaction, never run it.
+    path = host._journal_path(manifest)
+    if manifest["schema_version"] != "3.0" or not os.path.lexists(path):
         deny("CONTROLLER_UPGRADE_ACTIVE_RELEASE")
-    journal = live.root_json(host._journal_path(manifest))
+    require_normal_deployment_enabled(live.FREEZE.parent, manifest["release_policy_sha256"])
+    journal = live.root_json(path)
+    if (journal.get("release_id") != manifest["release_id"]
+            or journal.get("manifest_sha256") != digest(manifest)
+            or journal.get("scope_sha256") != manifest["scope_sha256"]):
+        deny("CONTROLLER_UPGRADE_PRIOR_SCOPE_MISMATCH")
     if journal.get("outcome") != "rollback_verified":
         deny("CONTROLLER_UPGRADE_PRIOR_ROLLBACK_REQUIRED")
     if any((dispatcher.AUTH / "requests").glob("*.json")):

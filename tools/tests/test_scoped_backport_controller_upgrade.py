@@ -159,3 +159,34 @@ def test_root_adapter_checks_scope_and_restores_listeners(monkeypatch, tmp_path,
     assert listener == "active"
     assert consumed.exists() == (fault != "approval")
     assert all(contents[f.path] == (f.before if fault else f.after) for f in plan.files)
+
+
+@pytest.mark.parametrize("prior", ["pending", "foreign", "verified", "rolled_back"])
+def test_maintenance_inspects_prior_transaction_without_scheduling(tmp_path, monkeypatch, prior):
+    from types import SimpleNamespace
+    from tools import scoped_backport_controller_upgrade_root as root
+
+    manifest = dict(schema_version="3.0", release_id="prior", scope_sha256="a" * 64,
+                    release_policy_sha256="b" * 64)
+    path = tmp_path / "journal.json"
+    host = SimpleNamespace(_journal_path=lambda _: path)
+    monkeypatch.setattr(root.dispatcher, "load_installed", lambda: (host, manifest, {}))
+    monkeypatch.setattr(root.dispatcher, "scheduled_approved",
+                        lambda *args: pytest.fail("maintenance dispatched a release"))
+    monkeypatch.setattr(root, "require_normal_deployment_enabled", lambda *args: None)
+    monkeypatch.setattr(root.dispatcher, "AUTH", tmp_path)
+    monkeypatch.setattr(root.live, "root_json", lambda p: json.loads(p.read_bytes()))
+    if prior != "pending":
+        path.write_text(json.dumps({
+            "release_id": "prior", "manifest_sha256": root.digest(manifest),
+            "scope_sha256": "foreign" if prior == "foreign" else manifest["scope_sha256"],
+            "outcome": "production_components_verified" if prior == "verified" else "rollback_verified",
+        }))
+    if prior == "rolled_back":
+        assert root.terminal_offer() == (host, manifest)
+    else:
+        with pytest.raises(ScopedBackportDenied, match={
+            "pending": "ACTIVE_RELEASE", "foreign": "SCOPE_MISMATCH",
+            "verified": "PRIOR_ROLLBACK_REQUIRED",
+        }[prior]):
+            root.terminal_offer()
