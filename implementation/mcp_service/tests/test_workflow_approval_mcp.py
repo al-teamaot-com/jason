@@ -138,10 +138,13 @@ def test_authenticated_owner_fallback_reuses_existing_workflow_tool(monkeypatch)
     service = ApprovalRequestService(repo, OwnerUatAuthority())
     request = create_nonexecuting_approval(session_id="ConfigCanary.fallback", now=now)
     service.create(request, now=now)
+    token.claims["oid"] = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
     flow = OwnerUatDecisionFlow(
         approvals=service, signed_verifier=None, enabled=True, chatgpt_ready=lambda: True,
-        bindings=NS(find=lambda **ids: NS(status="active", jason_identity_id=OWNER)
-                    if ids["microsoft_object_id"] == "fixture-oid" else None),
+        bindings=NS(find=lambda **ids: NS(status="active", jason_identity_id=OWNER, client_id=None,
+                                         microsoft_tenant_id=server.JASON_ENTRA_TENANT_ID,
+                                         microsoft_object_id=token.claims["oid"])
+                    if ids["microsoft_object_id"] == token.claims["oid"] else None),
         identities=NS(get=lambda _: NS(status="active", organization_id="aot", identity_id=OWNER)),
     )
     server._runtime().ingress = NS(ingress=NS(approval_flow=NS(workflow_routes={APPROVAL_PREFIX: flow})))
