@@ -1,0 +1,74 @@
+{
+  "exact_action": "owner-v2-issuer-attested-root-code-policy-replace-v2-20261115",
+  "exact_replacements": [
+    {
+      "archive_new": "replacement/usr/local/lib/jason/owner_full_integrity_v2_root_repair.py",
+      "archive_old": "rollback/usr/local/lib/jason/owner_full_integrity_v2_root_repair.py",
+      "git_path": "tools/owner_full_integrity_v2_root_repair.py",
+      "mode": "0444",
+      "new_sha256": "a328adcf67fc258713bfaac8971490d2f3b5fdb5d409bf1b873813abd82711dc",
+      "new_size": 41824,
+      "old_sha256": "ff0b81a0cb60c6a76a21b3f45301f7750d4c7d95f044626c35e8ac5b9aaeb9a4",
+      "old_size": 32494,
+      "owner_gid": 0,
+      "owner_uid": 0,
+      "root_target": "/usr/local/lib/jason/owner_full_integrity_v2_root_repair.py"
+    },
+    {
+      "archive_new": "replacement/etc/jason-owner-release/owner-full-integrity-v2-repair-policy.json",
+      "archive_old": "rollback/etc/jason-owner-release/owner-full-integrity-v2-repair-policy.json",
+      "git_path": "config/owner-full-integrity-v2-repair-policy.json",
+      "mode": "0400",
+      "new_sha256": "0c592b24a96be57754ff96973e58e7309da6ed502bb7021d303fa839c3cf7ecd",
+      "new_size": 1635,
+      "old_sha256": "60db3c65211ea7af4cc467179038402151d7a8e29697f91f85db21181fbd4d16",
+      "old_size": 1549,
+      "owner_gid": 0,
+      "owner_uid": 0,
+      "root_target": "/etc/jason-owner-release/owner-full-integrity-v2-repair-policy.json"
+    }
+  ],
+  "freeze_sha256": "bdae4fdb8749fe2c595817896c7adeab0800bef0e0436897c97ec847b47d197f",
+  "immutable_root_audit_outputs": {
+    "create_attempt_before_replacing_existing_root_files": true,
+    "creation_once_exclusive": true,
+    "historical_bootstrap_root_ledger_unchanged": true,
+    "mode": "0600",
+    "parent_directory": "/etc/jason-owner-release",
+    "parent_mode": "0755",
+    "parent_owner_gid": 0,
+    "parent_owner_uid": 0,
+    "root_attempt_path": "/etc/jason-owner-release/owner-v2-issuer-attested-v2-7b42ce983896.attempt.json",
+    "root_owner_gid": 0,
+    "root_owner_uid": 0,
+    "root_result_path": "/etc/jason-owner-release/owner-v2-issuer-attested-v2-7b42ce983896.result.json"
+  },
+  "no_breaker_override": true,
+  "no_freeze_or_promotion_hold_change": true,
+  "no_full_integrity_scan": true,
+  "no_runtime_mcp_ticket_provider_mutations": true,
+  "no_unit_reload_or_restart": true,
+  "preserve_existing_ledger": {
+    "exact_previous_evidence_files": [
+      "owner-full-integrity-v2-initial-root-trust-bootstrap-20261113.attempt.json",
+      "owner-full-integrity-v2-initial-root-trust-bootstrap-20261113.result.json"
+    ],
+    "mode": "0700",
+    "no_modify_or_delete_existing_audit": true,
+    "root_owner_gid": 0,
+    "root_owner_uid": 0,
+    "root_path": "/etc/jason-owner-release/owner-full-integrity-v2-repair-ledger"
+  },
+  "production_bootstrap_already_completed": true,
+  "production_lkg": "d1b8c196dadd4b672ec8ba47075f27bb61c98d63",
+  "production_root_replacement_authorized": false,
+  "promotion_hold_sha256": "11f0f78904236c36ebd1aeee58f52fcecba035bce33d15ce323b36d36ad5a5a0",
+  "require_breaker_open": true,
+  "required_full_sqlite_unit_currently_failed": true,
+  "required_owner_auth": "fresh Entra UID1000 signer, exact Ed25519 proof, pinned root verifier, 15 minute TTL, native release transaction lock",
+  "reviewed_merged_main_sha": "7b42ce983896711525de4c7955bf9fc43ac003d0",
+  "rollback": "atomic replace exact new code and policy back with exact old bytes, fail closed on unrelated inodes; preserve original ledger byte-for-byte",
+  "rollback_protected_main_sha": "45e52de4803a6f0768187793bba4990ed1d11a07",
+  "schema_version": "1.0",
+  "scope_sha256": "6892f490c4632a95825240110ead9193ae1269d6624a70dbfe992b9a537ae22e"
+}
