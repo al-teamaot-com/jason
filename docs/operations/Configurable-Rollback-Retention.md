@@ -59,17 +59,30 @@ this operation (initial ceiling 29, at most two additional slots per transaction
 the same protected-source and CI checks, Owner verifier, release locks, pending
 transaction checks, atomic replacement, protected live component readback and
 native release admission. Only the stopped rollback container capacity field
-in the root-owned effective desired-state policy may change. All existing
+in the root-owned effective desired-state policy and its exact dependent
+`file_sha256.desired_state` controller pin may change. All existing
 containers, images, volumes, data and unrelated settings remain intact.
 
-The exact preflight binds the before/after policy hashes, full normalized
+The exact preflight binds both files' before/after hashes, full normalized
 inventory digest, reviewed manifest, source and configuration. `--apply` requires
 the exact preflight scope SHA and authenticated Owner decision. An immutable
-root-private receipt and before-image precede the change. Afterward the existing
-native gate and independent production drift evaluator must pass, and the same
-inventory and protected peers must be observed. Otherwise the exact before-image
-is restored. `--resume` accepts only an unresolved, still-valid exact approval
-and matching before/after images; a completed operation cannot be replayed.
+root-private receipt and both before-images precede the change. Afterward the full installed
+controller policy verifier, existing native gate and independent production drift evaluator must pass, and the same
+inventory and protected peers must be observed. Otherwise both exact before-images
+are restored. `--resume` accepts only an unresolved, still-valid exact approval
+and matching before/after images; if interrupted between the two writes, it
+first restores the approved pair under native locks. A completed operation
+cannot be replayed.
+
+Legacy reservations with a successful immutable receipt but no approved
+controller pin update require a separate `--reconcile-capacity-binding
+--reservation-source <approved-reservation-source-sha>` exact Owner decision.
+It accepts only the previously approved capacity before/after bytes, unchanged
+inventory/protected peers, a terminal preceding release and a single stale
+controller pin; every unrelated installed hash and reader binding must match.
+It changes only that dependent pin, then runs the full native installed-policy
+verifier and independent drift guard. Prior receipts and the effective capacity
+policy remain unchanged; no application release is approved by this operation.
 The release itself still requires its own approval.
 
 The 29-slot ceiling is a bounded headroom decision, not an indefinite increase
