@@ -28,6 +28,9 @@ AUDIT = Path("/var/lib/jason-audit-journal")
 DOCKER = "/usr/bin/docker"
 ACTION = "ARCHIVE-EXACT-HISTORICAL-ROLLBACK-CAPACITY"
 CONFIG = "config/operations/rollback-retention-v1.json"
+RESERVATION_CONFIG = "config/operations/rollback-capacity-reservation-v1.json"
+RESERVATION_ACTION = "RESERVE-EXACT-ROLLBACK-CAPACITY"
+RESERVATION_LEDGER = Path("/var/lib/jason-owner-release") / "rollback-capacity-reservations"
 OWNER_RECORDS = Path("/var/lib/jason-owner-release")
 REFERENCE_ROOTS = (
     MANAGER/"records", MANAGER/"protected-readback",
@@ -382,7 +385,8 @@ def state(host, manifest, p, n, pending):
     return desired,preserved
 
 
-def run_action(args, n, p, code, planner, pending, verify_source, wait_fresh):
+def run_action(args, n, p, code, planner, pending, verify_source, wait_fresh, *,
+               replace_policy=None, cleanup_policy=None):
     need(os.geteuid()==0 and sys.flags.isolated==1,"ROOT_ISOLATED_REQUIRED")
     need(SHA.fullmatch(args.candidate) and re.fullmatch(r"release-[0-9a-f]{16}",args.release_id or ""),
          "EXACT_RELEASE_ID")
@@ -399,6 +403,28 @@ def run_action(args, n, p, code, planner, pending, verify_source, wait_fresh):
     manifest,profile,review_sha=entry.exact_public_offer(args.release_id)
     host=host_module.CoordinatedHost()
     host.bind_for_stage(manifest,profile,review_sha)
+    if getattr(args, "assess_capacity", False):
+        need(not (args.apply or args.resume or args.scope_sha),"CAPACITY_ASSESSMENT_READ_ONLY")
+        wait_fresh()
+        with host.release_lock(manifest):
+            need(p["command"]([*p["USER"],"/usr/bin/git","ls-remote",
+                "https://github.com/al-teamaot-com/jason.git","refs/heads/main"]).decode().split()
+                ==[args.candidate,"refs/heads/main"],"PROTECTED_SOURCE_ADVANCED")
+            desired,_=state(host,manifest,p,n,pending)
+            completed_active_offer(host_module,manifest["release_id"])
+            names,rows=all_stopped(p["command"],desired["rollback_container_prefixes"])
+            candidates=[d for r in rows.values() if (d:=planner["descriptor"](r,now=now(),policy=policy))]
+            excluded=scan_references(planner,candidates,historical_audit_accepted=True)
+            reservation=planner["validate_reservation_policy"](json.loads(code[RESERVATION_CONFIG]))
+            report=capacity_report(planner,policy,reservation,desired,names,rows,len(manifest["targets"]),excluded)
+            print(json.dumps({**report,"release_id":args.release_id,"read_only":True,
+                "production_release_approved":False},sort_keys=True))
+        return
+    if getattr(args, "reserve_capacity", False):
+        need(replace_policy is not None and cleanup_policy is not None,"NATIVE_POLICY_REPLACEMENT_PORT")
+        return run_reservation(args,n,p,code,planner,pending,verify_source,wait_fresh,
+                               host,manifest,review_sha,host_module,policy,source_hashes,
+                               replace_policy,cleanup_policy)
     record=LEDGER/args.candidate/args.release_id
     destination=ARCHIVE/args.candidate/args.release_id
     maximum=policy["maximum_archive_bytes_per_container"]
@@ -528,3 +554,174 @@ def run_action(args, n, p, code, planner, pending, verify_source, wait_fresh):
                 "provider_writes":False,"production_release_approved":False}
         immutable_record(n,record/"result.json",result)
         print(json.dumps(result,sort_keys=True))
+
+
+def reservation_space(policy, command):
+    # Space is independently observed at each gate, not embedded as a volatile
+    # exact byte count in the approval. No pruning, exports or cleanup here.
+    need(ARCHIVE_MOUNT.is_mount() and ARCHIVE_MOUNT.stat().st_dev != Path("/").stat().st_dev,
+         "RESERVATION_ARCHIVE_MOUNT")
+    docker_root=Path(command([DOCKER,"info","--format","{{.DockerRootDir}}"]).decode().strip())
+    need(docker_root.is_absolute() and docker_root.is_dir(),"RESERVATION_DOCKER_STORAGE")
+    for path, key in ((docker_root, "minimum_docker_free_bytes"),
+                      (ARCHIVE_MOUNT, "minimum_archive_free_bytes")):
+        space=os.statvfs(path)
+        need(space.f_bavail*space.f_frsize >= policy[key], "RESERVATION_STORAGE_HEADROOM")
+
+def inventory_digest(planner,names,rows):
+    # Hash full normalized inspect metadata; never put container environments or
+    # old IDs in a capacity receipt or a new historical reference exemption.
+    return digest({name:digest(planner["normalize_inspect"](rows[name])) for name in names})
+
+def reservation_plan(planner, policy, retention, desired, names, rows, targets, excluded):
+    # Keep the native archival rule intact. A reservation is a separate
+    # approved policy operation, only when duplicate archival cannot suffice.
+    assessment=planner["assess"](list(rows.values()),inventory=names,
+        maximum=desired["max_stopped_rollback_containers"],free_slots=targets,
+        now=now(),policy=retention,excluded_ids=excluded)
+    need(assessment["required_retirements"] > len(assessment["eligible_retirements"]),
+         "RESERVATION_USE_EXISTING_CAPACITY_OR_ARCHIVAL")
+    return planner["reserve_capacity"](desired,inventory_count=len(names),free_slots=targets,policy=policy)
+
+def run_reservation(args,n,p,code,planner,pending,verify_source,wait_fresh,host,manifest,
+                    review_sha,host_module,retention,source_hashes,replace_policy,cleanup_policy):
+    policy=planner["validate_reservation_policy"](json.loads(code[RESERVATION_CONFIG]))
+    record=RESERVATION_LEDGER/args.candidate/args.release_id
+    def current_source():
+        need(p["command"]([*p["USER"],"/usr/bin/git","ls-remote",
+             "https://github.com/al-teamaot-com/jason.git","refs/heads/main"]).decode().split()
+             ==[args.candidate,"refs/heads/main"],"PROTECTED_SOURCE_ADVANCED")
+    def inspect(before=None):
+        desired,preserved=state(host,manifest,p,n,pending)
+        raw=p["read"](DESIRED,0,0o600)
+        need(json.loads(raw)==desired and digest(raw)==preserved["desired_policy_sha256"],
+             "RESERVATION_POLICY_CHANGED")
+        prior=completed_active_offer(host_module,manifest["release_id"])
+        if prior is not None: preserved["completed_active_offer"]=prior
+        reservation_space(policy,p["command"])
+        # During authenticated crash recovery the file may already contain the
+        # exact approved after-image. Recompute the original plan using the
+        # sealed before-image, not a caller's guessed capacity.
+        base=raw if before is None else before
+        original=json.loads(base)
+        need(set(original)==set(desired) and all(original[k]==desired[k] for k in original
+             if k!="max_stopped_rollback_containers"),"RESERVATION_FOREIGN_POLICY")
+        names,rows=all_stopped(p["command"],original["rollback_container_prefixes"])
+        candidates=[d for r in rows.values() if (d:=planner["descriptor"](r,now=now(),policy=retention))]
+        excluded=scan_references(planner,candidates,historical_audit_accepted=True)
+        target=reservation_plan(planner,policy,retention,original,names,rows,len(manifest["targets"]),excluded)
+        after=(json.dumps(target,sort_keys=True,indent=2)+"\n").encode()
+        need(raw in (base,after),"RESERVATION_FOREIGN_POLICY")
+        preserved["desired_policy_sha256"]=digest(base)
+        scope={"schema_version":"1.0","action":RESERVATION_ACTION,
+            "policy":{"candidate_sha":args.candidate,"rollback_sha":manifest["rollback_sha"]},
+            "release_id":args.release_id,"manifest_sha256":digest(manifest),
+            "release_scope_sha256":manifest["scope_sha256"],"review_source_sha":review_sha,
+            "source_files_sha256":source_hashes,"reservation_policy":policy,
+            "retention_policy":retention,"installation_targets":[str(DESIRED),str(record)],
+            "plan":{"before_limit":original["max_stopped_rollback_containers"],
+                    "after_limit":target["max_stopped_rollback_containers"],
+                    "count":len(names),"required_slots":len(manifest["targets"]),
+                    "inventory_sha256":inventory_digest(planner,names,rows),
+                    "before_policy_sha256":digest(base),"after_policy_sha256":digest(after)},
+            "preserved":preserved,"queue_cutover":False,"provider_writes":False,
+            "standing_authority":False,"container_image_volume_removal_allowed":False}
+        return scope,base,after,raw
+    def exact_approval():
+        private_directory(RESERVATION_LEDGER,n)
+        private_directory(record.parent,n)
+        private_directory(record,n)
+        approval=json.loads(read(record/"approval.json",private=True))
+        need(approval["scope_sha256"]==args.scope_sha==digest(approval["scope"])
+             and approval["scope"]["action"]==RESERVATION_ACTION
+             and approval["owner_oid"]=="bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+             and 0<=(now()-datetime.fromisoformat(approval["approved_at"])).total_seconds()<=28800,
+             "RESERVATION_APPROVAL_SCOPE")
+        before=read(record/"before-policy.json",private=True)
+        need(digest(before)==approval["scope"]["plan"]["before_policy_sha256"],"RESERVATION_BEFORE_IMAGE")
+        return approval["scope"],before
+    if args.resume:
+        scope,before=exact_approval()
+    else:
+        need(not os.path.lexists(record),"RESERVATION_ALREADY_ATTEMPTED")
+        wait_fresh()
+        with host.release_lock(manifest):
+            current_source()
+            scope,before,after,raw=inspect()
+        sha=digest(scope)
+        if not args.apply:
+            print(json.dumps({"status":"exact_rollback_capacity_reservation_preflight_passed",
+                              "scope_sha256":sha,"scope":scope},sort_keys=True)); return
+        need(args.scope_sha==sha,"EXACT_REVIEWED_RESERVATION_SCOPE")
+        owner=n["owner"](scope)
+        need(owner=="bee80bdc-ffb0-4c50-b453-c09d4d411f5f","OWNER_IDENTITY")
+        need(verify_source()==code,"APPROVED_SOURCE_CHANGED")
+        wait_fresh()
+        with host.release_lock(manifest):
+            current_source()
+            need(inspect()==(scope,before,after,raw),"APPROVED_RESERVATION_CHANGED")
+            private_directory(RESERVATION_LEDGER,n,create=True)
+            private_directory(record.parent,n,create=True)
+            private_directory(record,n,create=True)
+            n["write"](record/"before-policy.json",before,0o400)
+            immutable_record(n,record/"approval.json",{"scope":scope,"scope_sha256":sha,
+                            "owner_oid":owner,"approved_at":now().isoformat()})
+    need(verify_source()==code,"APPROVED_SOURCE_CHANGED")
+    wait_fresh()
+    with host.release_lock(manifest):
+        current_source()
+        need(not os.path.lexists(record/"result.json"),"RESERVATION_ALREADY_RESOLVED")
+        approved,base=exact_approval()
+        need(approved==scope and base==before,"RESERVATION_DURABLE_APPROVAL")
+        current,base,after,raw=inspect(before)
+        need(current==scope and base==before,"RESERVATION_SCOPE_CHANGED")
+        cleanup_policy(before,after)
+        try:
+            if raw==before: replace_policy(before,after)
+            need(p["read"](DESIRED,0,0o600)==after,"RESERVATION_POLICY_READBACK")
+            # Use the existing effective native admission gate and actual
+            # independent drift evaluator, not a manufactured PASS record.
+            host.ensure_breaker_closed_and_workers_quiescent()
+            guard=json.loads(p["command"](["/usr/bin/python3",
+                "/opt/jason/current/tools/production_drift_guard.py","--config",str(DESIRED)]))
+            need(guard.get("status")=="pass" and guard.get("problems")==[],"RESERVATION_DRIFT")
+            need(inspect(before)==(scope,before,after,after),"RESERVATION_POSTFLIGHT_CHANGED")
+        except BaseException:
+            actual=p["read"](DESIRED,0,0o600)
+            if actual==after: replace_policy(after,before)
+            else: need(actual==before,"RESERVATION_ROLLBACK_FOREIGN_POLICY")
+            need(p["read"](DESIRED,0,0o600)==before,"RESERVATION_ROLLBACK_READBACK")
+            immutable_record(n,record/"result.json",{"status":"rollback_capacity_reservation_rolled_back",
+                             "scope_sha256":args.scope_sha})
+            raise
+        result={"status":"rollback_capacity_reservation_verified","scope_sha256":args.scope_sha,
+                "release_id":args.release_id,"before_limit":scope["plan"]["before_limit"],
+                "capacity":scope["plan"]["after_limit"],"remaining":scope["plan"]["count"],
+                "removed":0,"provider_writes":False,"production_release_approved":False}
+        immutable_record(n,record/"result.json",result)
+        print(json.dumps(result,sort_keys=True))
+
+
+def capacity_report(planner,retention,reservation,desired,names,rows,targets,excluded):
+    assessment=planner["assess"](list(rows.values()),inventory=names,
+        maximum=desired["max_stopped_rollback_containers"],free_slots=targets,
+        now=now(),policy=retention,excluded_ids=excluded)
+    needed=assessment["required_retirements"]
+    eligible=len(assessment["eligible_retirements"])
+    report={"retained":len(names),"limit":desired["max_stopped_rollback_containers"],
+        "available_slots":assessment["available_slots"],"release_slots_required":targets,
+        "required_retirements":needed,"eligible_duplicate_retirements":eligible,
+        "historical_equivalence_groups":assessment["historical_equivalence_groups"],
+        "historical_candidates":assessment["historical_candidates"],
+        "reservation_ceiling":reservation["maximum_stopped_rollback_containers"],
+        "maximum_retirements_per_transaction":retention["maximum_retirements_per_approved_transaction"]}
+    if not needed: report["status"]="capacity_available"
+    elif eligible>=needed:
+        report["status"]=("duplicate_archival_available" if needed<=report["maximum_retirements_per_transaction"]
+                          else "duplicate_archival_batches_required")
+    else:
+        try: proposed=planner["reserve_capacity"](desired,inventory_count=len(names),free_slots=targets,policy=reservation)
+        except PermissionError: report["status"]="capacity_policy_review_required"
+        else:
+            report.update(status="reservation_review_required",proposed_limit=proposed["max_stopped_rollback_containers"])
+    return report
