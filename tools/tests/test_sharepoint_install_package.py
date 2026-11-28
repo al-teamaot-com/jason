@@ -188,7 +188,7 @@ def source_repo(tmp_path):
     for path in package.FIXED_FILES:
         p = repo / path
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("source fixture\n")
+        p.write_text(json.dumps(package.READER) if path == package.READER_CONFIG else "source fixture\n")
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
     subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"], check=True)
     sha = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()

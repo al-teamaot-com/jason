@@ -11,6 +11,11 @@ On November 23 the Owner requested that the bank-statement site be approved:
 `https://absolnet.sharepoint.com/sites/AOTAccountingDocuments`.
 Its previously recorded Graph ID is
 `absolnet.sharepoint.com,8f4cd7bf-72b8-4f7e-9803-c47abcbb232f,e5b7a724-dc9b-406b-aed8-2961f1f71153`.
+The versioned target and workload identity are defined in
+`infrastructure/sharepoint-site-control/accounting-reader.json`. The release
+package and readiness check use that configuration. Editing it requires release
+review and does not grant site access.
+
 Revalidate that URL/ID with Jason's dedicated application before changing policy.
 Only this site is requested enabled at installation. Every other new site stays
 disabled. This approval does not change document sensitivity/release rules,

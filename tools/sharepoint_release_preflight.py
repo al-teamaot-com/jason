@@ -12,9 +12,9 @@ from pathlib import Path
 
 
 if __package__:
-    from .sharepoint_install_package import APP, SP, TENANT
+    from .sharepoint_install_package import APP, SP, TENANT, READER
 else:
-    from sharepoint_install_package import APP, SP, TENANT
+    from sharepoint_install_package import APP, SP, TENANT, READER
 
 
 def collect(*, boundary_db: Path, role_id: Path, secret_id: Path,
@@ -41,11 +41,11 @@ def collect(*, boundary_db: Path, role_id: Path, secret_id: Path,
                          AND profile='sharepoint-read'
                          AND status='validated'
                          AND validated_at IS NOT NULL
-                         AND client_id = 'client-aot-internal'
+                         AND client_id = ?
                          AND external_tenant_id = ?
                          AND application_id = ?
                          AND service_principal_id = ?
-                         AND offboarded_at IS NULL""", (TENANT, APP, SP)).fetchone()
+                         AND offboarded_at IS NULL""", (READER["client_id"], TENANT, APP, SP)).fetchone()
                 checks["boundary_db_readable"] = True
                 checks["validated_sharepoint_client_boundary"] = rows[0] == 1
         except (sqlite3.Error, OSError):
