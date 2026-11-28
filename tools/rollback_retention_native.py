@@ -324,6 +324,28 @@ def archive_destination(native, count, maximum, policy):
          "ARCHIVE_CAPACITY")
 
 
+def completed_active_offer(host_module, release_id):
+    """Capture a terminal prior offer without removing its pointer or audit."""
+    offer = host_module.active_staged_offer()
+    if offer is None:
+        return None
+    manifest = offer["manifest"]
+    prior_id = manifest["release_id"]
+    need(prior_id != release_id and re.fullmatch(r"release-[0-9a-f]{16}", prior_id),
+         "ACTIVE_OFFER_EXISTS")
+    path = host_module.PRIVATE / "transactions" / (prior_id + ".json")
+    need(path.is_file() and not path.is_symlink(), "ACTIVE_OFFER_UNRESOLVED")
+    journal = host_module.root_json(path)
+    need(journal.get("release_id") == prior_id
+         and journal.get("manifest_sha256") == digest(manifest)
+         and journal.get("scope_sha256") == manifest["scope_sha256"]
+         and journal.get("outcome") in ("production_components_verified", "rollback_verified",
+                                        "failed_before_mutation"),
+         "ACTIVE_OFFER_UNRESOLVED")
+    return {"release_id": prior_id, "offer_sha256": digest(offer),
+            "journal_sha256": digest(journal), "outcome": journal["outcome"]}
+
+
 def state(host, manifest, p, n, pending):
     host.freshly_validate_live_scope(manifest)
     host.deny_unresolved_attempt(manifest)
@@ -340,8 +362,15 @@ def state(host, manifest, p, n, pending):
     need(type(desired["max_stopped_rollback_containers"]) is int,"NATIVE_LIMIT")
     control=json.loads(p["read"](n["ROOT_CONTROL"],0,0o600))
     baseline=control["last_known_good"]["manifest"]
-    need(baseline["complete"] is True and baseline["host_revision"]==manifest["rollback_sha"],
-         "HOST_ROLLBACK_ANCHOR")
+    need(baseline["complete"] is True, "HOST_ROLLBACK_ANCHOR")
+    previous = host.previous_readback
+    if previous is None:
+        need(baseline["host_revision"] == manifest["rollback_sha"], "HOST_ROLLBACK_ANCHOR")
+    else:
+        # The retained host LKG and the rollback image of the first target
+        # are distinct in a coordinated component release.
+        from tools import scoped_backport_component_readback as readback
+        readback.verify_legacy_anchor(previous, baseline)
     hold=p["read"](n["HOLD"],1000,0o664)
     need(digest(hold)==n["HOLD_HASH"],"INCIDENT_HOLD_CHANGED")
     config=p["read"](NORMAL/"deployment.json",0,0o644)
@@ -368,7 +397,6 @@ def run_action(args, n, p, code, planner, pending, verify_source, wait_fresh):
     from tools import scoped_backport_coordinated_root as entry
     from tools import scoped_backport_coordinated_host as host_module
     manifest,profile,review_sha=entry.exact_public_offer(args.release_id)
-    need(host_module.active_staged_offer() is None,"ACTIVE_OFFER_EXISTS")
     host=host_module.CoordinatedHost()
     host.bind_for_stage(manifest,profile,review_sha)
     record=LEDGER/args.candidate/args.release_id
@@ -380,6 +408,9 @@ def run_action(args, n, p, code, planner, pending, verify_source, wait_fresh):
              ==[args.candidate,"refs/heads/main"],"PROTECTED_SOURCE_ADVANCED")
     def inspect():
         desired,preserved=state(host,manifest,p,n,pending)
+        prior = completed_active_offer(host_module, manifest["release_id"])
+        if prior is not None:
+            preserved["completed_active_offer"] = prior
         names,rows=all_stopped(p["command"],desired["rollback_container_prefixes"])
         candidates=[d for r in rows.values() if (d:=planner["descriptor"](r,now=now(),policy=policy))]
         excluded=scan_references(planner,candidates,historical_audit_accepted=True)
@@ -449,6 +480,9 @@ def run_action(args, n, p, code, planner, pending, verify_source, wait_fresh):
     with host.release_lock(manifest):
         current_source()
         desired,preserved=state(host,manifest,p,n,pending)
+        prior = completed_active_offer(host_module, manifest["release_id"])
+        if prior is not None:
+            preserved["completed_active_offer"] = prior
         need(preserved==scope["preserved"] and desired["rollback_container_prefixes"]==plan["prefixes"]
              and desired["max_stopped_rollback_containers"]==plan["maximum"],"PROTECTED_SCOPE_CHANGED")
         archive_destination(n,len(plan["retirements"]),maximum,policy)
@@ -484,6 +518,8 @@ def run_action(args, n, p, code, planner, pending, verify_source, wait_fresh):
              and digest(p["read"](DESIRED,0,0o600))==scope["preserved"]["desired_policy_sha256"]
              and digest(p["read"](n["HOLD"],1000,0o664))==scope["preserved"]["hold_sha256"]
              and digest(p["read"](NORMAL/"deployment.json",0,0o644))==scope["preserved"]["deployment_config_sha256"]
+             and completed_active_offer(host_module, manifest["release_id"])
+                 == scope["preserved"].get("completed_active_offer")
              and host._frozen(manifest)==host.freeze_before,
              "PROTECTED_PEERS_OR_POLICY_CHANGED")
         result={"schema_version":"1.0","scope_sha256":scope_sha,"release_id":args.release_id,
