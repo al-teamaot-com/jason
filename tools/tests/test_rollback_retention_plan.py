@@ -148,7 +148,7 @@ def test_reservation_is_minimum_delta_and_preserves_every_other_setting():
     assert before["max_stopped_rollback_containers"]==27
     assert p.reserve_capacity(before,inventory_count=26,free_slots=2,policy=RESERVATION)["max_stopped_rollback_containers"]==28
 
-@pytest.mark.parametrize("limit,count,slots",[(29,29,1),(27,27,3),(27,25,2),(27,28,1),(27,27,True),(27,-1,2)])
+@pytest.mark.parametrize("limit,count,slots",[(30,30,1),(27,27,3),(27,25,2),(27,28,1),(27,27,True),(27,-1,2)])
 def test_reservation_cannot_exceed_ceiling_or_reserve_unnecessary_slots(limit,count,slots):
     with pytest.raises(PermissionError):
         p.reserve_capacity({"max_stopped_rollback_containers":limit},inventory_count=count,free_slots=slots,policy=RESERVATION)
@@ -166,3 +166,9 @@ def test_assessment_reports_actual_capacity_and_unique_historical_evidence():
     assert result=={"required_retirements":2,"eligible_retirements":[],"historical_equivalence_groups":2,
                     "historical_candidates":2,"available_slots":0}
     with pytest.raises(PermissionError,match="INSUFFICIENT_HISTORICAL_DUPLICATES"):select(rows)
+
+
+def test_reviewed_single_runtime_slot_reservation():
+    assert p.reserve_capacity({"max_stopped_rollback_containers":29},inventory_count=29,free_slots=1,policy=RESERVATION)=={"max_stopped_rollback_containers":30}
+    with pytest.raises(PermissionError):
+        p.reserve_capacity({"max_stopped_rollback_containers":29},inventory_count=29,free_slots=2,policy=RESERVATION)

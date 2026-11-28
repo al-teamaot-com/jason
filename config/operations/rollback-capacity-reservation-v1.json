@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "maximum_stopped_rollback_containers": 29,
+  "maximum_stopped_rollback_containers": 30,
   "maximum_increase_per_transaction": 2,
   "minimum_docker_free_bytes": 10737418240,
   "minimum_archive_free_bytes": 10737418240,
