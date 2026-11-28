@@ -1,0 +1,86 @@
+name: J-Assist Preproduction Security and Integration
+
+on:
+  push:
+    paths:
+      - "implementation/jassist/**"
+      - "experiments/j-assist-bridge/**"
+      - "experiments/chrome-datto-observer/**"
+      - "infrastructure/jassist-pilot/**"
+      - ".github/workflows/jassist-preproduction.yml"
+  pull_request:
+    paths:
+      - "implementation/jassist/**"
+      - "experiments/j-assist-bridge/**"
+      - "experiments/chrome-datto-observer/**"
+      - "infrastructure/jassist-pilot/**"
+      - ".github/workflows/jassist-preproduction.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-jassist-regressions:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install constrained J-Assist dependency slice
+        run: |
+          python -m pip install --disable-pip-version-check \
+            "cryptography==50.0.2" "PyJWT==2.15.1" "PyYAML==6.0.2"
+      - name: Verify digest-pinned pilot Python dependencies and known-vulnerability scan
+        run: |
+          python -m pip download --disable-pip-version-check --require-hashes \
+            --only-binary=:all: -r infrastructure/jassist-pilot/requirements.lock.txt \
+            --dest /tmp/jassist-locked-distribution-validation
+          python -m pip install --disable-pip-version-check "pip-audit==2.10.1"
+          pip-audit --disable-pip --no-deps -r infrastructure/jassist-pilot/requirements.lock.txt
+      - name: Confirm pilot activation gate remains NO-GO without independent evidence
+        run: |
+          set +e
+          python infrastructure/jassist-pilot/pilot_activation_admission.py \
+            --manifest infrastructure/jassist-pilot/activation-candidate.json \
+            > /tmp/jassist-admission-result.json
+          result=$?
+          set -e
+          test "$result" -eq 2
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result=json.loads(Path("/tmp/jassist-admission-result.json").read_text())
+          assert result.get("pilot_admission") == "NO_GO"
+          assert result.get("writes_performed") is False
+          assert "production_health_and_release_controls:evidence_reference_missing" in result["missing"]
+          PY
+      - name: Compile isolated J-Assist modules
+        run: |
+          python -m compileall -q implementation/jassist
+          python -m compileall -q experiments/j-assist-bridge
+      - name: Validate Entra, Datto, durable evidence and ASGI regressions
+        run: |
+          python -m unittest discover -s experiments/j-assist-bridge/tests -p 'test_*.py' -v
+      - name: Validate inert existing-infrastructure pilot source and no AWS changes
+        run: |
+          python -m unittest discover -s infrastructure/jassist-pilot/tests -p 'test_*.py' -v
+      - name: Validate Chrome security and one-click send coordinator
+        run: |
+          node --test experiments/chrome-datto-observer/tests/*.test.cjs
+      - name: Fail closed on unsanctioned J-Assist production activation
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          example=json.loads(Path("experiments/j-assist-bridge/config/jassist-screen-access.example.json").read_text())
+          assert example["enabled"] is False
+          assert example["access_source"] == "entra_group"
+          assert example["scope"] == "screen_assistance"
+          assert example["entra_group_id"] == "5273dd8a-1456-4985-b0a3-c00061267e26"
+          PY

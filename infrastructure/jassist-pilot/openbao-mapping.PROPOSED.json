@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "status": "not_provisioned",
+  "approle_name": "jason-jassist-pilot-read",
+  "organization_id": "aot",
+  "context_capability": "jassist.pilot.secret.read",
+  "keys": {
+    "jassist.session_encryption": {
+      "kv_v2_path": "secret/data/pilots/jassist/nonproduction/session-encryption",
+      "exact_fields": ["key_b64"]
+    },
+    "jassist.evidence_encryption": {
+      "kv_v2_path": "secret/data/pilots/jassist/nonproduction/evidence-encryption",
+      "exact_fields": ["key_b64"]
+    }
+  },
+  "bootstrap_role_secret_id_provisioned": false,
+  "unique_aes256_keys_provisioned": false,
+  "production_connector_creds_exposed": false
+}
