@@ -480,6 +480,33 @@ create another note. A queued callback is not execution success. Record the
 actual request/execution/receipt IDs and provider readback before declaring the
 pilot functional. Broader universal rollout remains separate.
 
+### Licensed Owner execution acceptance (November 28, 2026)
+
+The prior live nonexecuting Deny/Approve campaign verified real card visibility,
+signed callbacks, the licensed Owner and exactly one receipt per decision.
+The next source-reviewed campaign uses the same service-plan issuer, existing
+active service and Owner grants, and exactly two ordered resolution-field
+updates on the closed XYZ Test Company ticket 8870. One real approval covers
+append-marker, readback, restore-original, readback. A deny performs neither
+step; no second test-only vote is required. The policy binds both complete
+argument hashes, including expected ticket identity/company/status/current
+resolution, and expires on November 30 at 23:00 UTC. The connector checks the
+expected before-state in its governed prepared execution path, then performs
+its existing post-write readback; this is not provider-atomic compare-and-set.
+A concurrent change or failed/unknown result stops the plan for review rather
+than overwriting or blindly retrying it. No status, queue, assignment, customer
+notification, grant, device action or risk classification is changed.
+
+Only a reviewed runtime deployment activates this pilot. Issue the one exact
+card using `python -m jason_runtime.universal_approval_pilot approve` in the
+existing runtime. The user decides in Teams, and the existing maintenance
+worker continues the immutable plan. Verify both step receipts, provider
+readback of the original resolution, and actual final status delivery. No
+provider write or fabricated decision is allowed during preflight. This is a
+bounded acceptance pilot, not activation of all unrestricted business actions
+or the real production release-card scanner. Expiry and rollback restore the
+existing activation boundaries.
+
 ### Known deployment timing dependency
 
 The usage-attribution Prometheus job scrapes every two minutes. Host exporter
