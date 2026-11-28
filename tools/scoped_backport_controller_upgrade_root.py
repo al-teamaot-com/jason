@@ -99,14 +99,33 @@ def verify_successful_predecessor(manifest, journal):
                {k:v for k,v in original.items() if k != "components"}):
         deny("CONTROLLER_UPGRADE_VERIFIED_RELEASE_MISMATCH")
     expected = journal.get("candidate_configs", journal["original_configs"])
-    if set(expected) != set(current["components"]):
+    targets = {target["name"] for target in manifest["targets"]}
+    protected = journal["protected_before"]
+    protected_names = set(manifest["protected_services"])
+    components = set(current["components"])
+    if (set(expected) != targets or set(journal["original_configs"]) != targets
+            or set(protected) != protected_names or targets & protected_names
+            or not targets <= components or not components <= targets | protected_names):
         deny("CONTROLLER_UPGRADE_COMPONENT_SET")
     for name, row in current["components"].items():
         prior = original["components"][name]
         item = live.required_container(name)
+        if name in targets:
+            configuration = expected[name]
+        else:
+            # Unchanged coordinated peers have their own protected snapshot,
+            # not a target candidate fingerprint. Retain exact original image
+            # and ID evidence; a current ID may only come from verified root
+            # readback (including an authenticated post-boot reconciliation).
+            peer = protected[name]
+            if (peer["id"] != prior["container_id"] or peer["image"] != prior["image_id"]
+                    or peer["running"] is not True or peer["status"] != "running"
+                    or peer["oom"] is True):
+                deny("CONTROLLER_UPGRADE_PROTECTED_PEER_EVIDENCE")
+            configuration = peer["configuration_sha256"]
         if (row["revision"] != prior["revision"] or row["image_id"] != prior["image_id"]
                 or item["Id"] != row["container_id"]
-                or live.config_fingerprint(item) != expected[name]):
+                or live.config_fingerprint(item) != configuration):
             deny("CONTROLLER_UPGRADE_COMPONENT_DRIFT")
 
 

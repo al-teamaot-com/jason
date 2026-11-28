@@ -199,7 +199,8 @@ def test_maintenance_inspects_prior_transaction_without_scheduling(tmp_path, mon
 def test_verified_prior_requires_live_evidence(monkeypatch, change):
     from tools import scoped_backport_controller_upgrade_root as root
 
-    manifest = {"release_id": "prior", "scope_sha256": "scope", "release_policy_sha256": "policy"}
+    manifest = {"release_id": "prior", "scope_sha256": "scope", "release_policy_sha256": "policy",
+                "targets": [{"name": "runtime"}], "protected_services": []}
     prior = dict(manifest, manifest_sha256=root.digest(manifest), host_revision="host",
                  components={"runtime": {"container_id": "old", "image_id": "image", "revision": "revision"}})
     current = deepcopy(prior)
@@ -216,7 +217,44 @@ def test_verified_prior_requires_live_evidence(monkeypatch, change):
     monkeypatch.setattr(root.live, "required_container",
                         lambda name: {"Id": "changed" if change == "id" else "reconciled"})
     monkeypatch.setattr(root.live, "config_fingerprint", lambda item: "changed" if change == "configuration" else "hash")
-    journal = dict(proposed_readback=prior, mutation_attempted=True, original_configs={"runtime": "hash"})
+    journal = dict(proposed_readback=prior, mutation_attempted=True, original_configs={"runtime": "hash"},
+                   protected_before={})
+    if change == "none":
+        root.verify_successful_predecessor(manifest, journal)
+    else:
+        with pytest.raises(ScopedBackportDenied):
+            root.verify_successful_predecessor(manifest, journal)
+
+
+@pytest.mark.parametrize("change", ["none", "peer_config", "peer_image", "peer_identity",
+                                      "peer_snapshot_missing", "foreign_target", "missing_target"])
+def test_verified_scoped_predecessor_checks_unchanged_peers(monkeypatch, change):
+    from tools import scoped_backport_controller_upgrade_root as root
+    manifest = {"release_id": "prior", "scope_sha256": "scope", "release_policy_sha256": "policy",
+                "targets": [{"name": "runtime"}], "protected_services": ["gateway"]}
+    prior = dict(manifest, manifest_sha256=root.digest(manifest), host_revision="host", components={
+        "runtime": {"container_id": "target-before-boot", "image_id": "runtime-image", "revision": "runtime-rev"},
+        "gateway": {"container_id": "peer-before-boot", "image_id": "gateway-image", "revision": "gateway-rev"},
+    })
+    current = deepcopy(prior)
+    current["components"]["runtime"]["container_id"] = "target-live"
+    current["components"]["gateway"]["container_id"] = "peer-live"
+    journal = dict(proposed_readback=prior, mutation_attempted=True,
+                   original_configs={"runtime": "runtime-old-hash"}, candidate_configs={"runtime": "runtime-new-hash"},
+                   protected_before={"gateway": {"id": "peer-before-boot", "image": "gateway-image", "running": True,
+                                                 "status": "running", "oom": False, "configuration_sha256": "gateway-hash"}})
+    items = {"runtime": {"Id": "target-live", "fingerprint": "runtime-new-hash"},
+             "gateway": {"Id": "peer-live", "fingerprint": "gateway-hash"}}
+    if change == "peer_config": items["gateway"]["fingerprint"] = "foreign"
+    elif change == "peer_image": journal["protected_before"]["gateway"]["image"] = "foreign"
+    elif change == "peer_identity": journal["protected_before"]["gateway"]["id"] = "foreign"
+    elif change == "peer_snapshot_missing": journal["protected_before"].clear()
+    elif change == "foreign_target": journal["candidate_configs"]["gateway"] = "gateway-hash"
+    elif change == "missing_target": journal["candidate_configs"].clear()
+    monkeypatch.setattr(root.live.readback, "verify_live", lambda: current)
+    monkeypatch.setattr(root.live.readback, "validate", lambda value: value)
+    monkeypatch.setattr(root.live, "required_container", lambda name: items[name])
+    monkeypatch.setattr(root.live, "config_fingerprint", lambda item: item["fingerprint"])
     if change == "none":
         root.verify_successful_predecessor(manifest, journal)
     else:
