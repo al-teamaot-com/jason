@@ -38,8 +38,9 @@ from jason_runtime.universal_interaction.service import (
 from orchestrator.event_store import SQLiteOrchestrationEventStore
 
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
-TENANT = "11111111-1111-4111-8111-111111111111"
-OWNER_OBJECT = "22222222-2222-4222-8222-222222222222"
+TENANT = "f7054323-d52b-4863-8c2f-1898f0b6077c"
+OWNER_OBJECT = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+ADMIN_OBJECT = "c848022d-e13b-4457-84b0-e2f5c00dcaf6"
 OTHER_OBJECT = "33333333-3333-4333-8333-333333333333"
 
 
@@ -136,7 +137,8 @@ def env(tmp_path):
         allowed_approval_prefixes=(APPROVAL_PREFIX,),
         clock=lambda: NOW + timedelta(seconds=3),
     )
-    bound = SimpleNamespace(jason_identity_id=OWNER, status="active")
+    bound = SimpleNamespace(jason_identity_id=OWNER, status="active", client_id=None,
+                            microsoft_tenant_id=TENANT, microsoft_object_id=OWNER_OBJECT)
     identity = SimpleNamespace(identity_id=OWNER, status="active", organization_id="aot")
     callback = OwnerUatDecisionFlow(
         approvals=approvals, signed_verifier=verifier,
@@ -144,7 +146,7 @@ def env(tmp_path):
             bound if kwargs["microsoft_tenant_id"] == TENANT
                      and kwargs["microsoft_object_id"] == OWNER_OBJECT
             else None
-        )),
+        ), find_active_by_jason_identity=lambda **kwargs: bound),
         identities=SimpleNamespace(get=lambda person: identity if person == OWNER else None),
         clock=lambda: NOW + timedelta(seconds=3),
     )
@@ -593,3 +595,21 @@ def test_coordinated_campaign_issues_fallback_only_after_two_teams_receipts(env)
     fallback = create_nonexecuting_approval(session_id=session + ".fallback", now=NOW)
     assert env.repo.get(fallback.approval_id).status == ApprovalRequestStatus.PENDING
     assert len(env.channel.sends) == 3
+
+
+def test_licensed_owner_delivery_and_decision_reject_legacy_admin_even_with_misbound_identity(env):
+    assert OWNER == "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
+    assert env.callback.recipient_ready()
+    request = setup_issued(env)
+    assert request.authorized_approver_ids == (OWNER,)
+    env.callback.enabled = True
+    good = env.callback.bindings.find(microsoft_tenant_id=TENANT, microsoft_object_id=OWNER_OBJECT)
+    # Even a bad local alias cannot authorize the administrator or cause a new card.
+    wrong = SimpleNamespace(**{**vars(good), "microsoft_object_id": ADMIN_OBJECT})
+    env.callback.bindings.find = lambda **kwargs: wrong
+    env.callback.bindings.find_active_by_jason_identity = lambda **kwargs: wrong
+    assert not env.callback.recipient_ready()
+    with pytest.raises(PermissionError, match="active owner"):
+        click(env.callback, signed(env, request, decision="deny", object_id=ADMIN_OBJECT))
+    assert env.repo.accepted_decision(request.approval_id) is None
+    assert env.repo.get(request.approval_id).status == ApprovalRequestStatus.PENDING

@@ -3141,7 +3141,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                 ),
                 session_id=settings.owner_uat_session_id,
                 enabled=True,
-                release_ready=owner_uat_release_gate.ready,
+                release_ready=lambda: (owner_uat_release_gate.ready()
+                                       and owner_uat_flow.recipient_ready()),
                 include_chatgpt_fallback=bool(settings.owner_uat_coordinated_release_id),
             )
 
