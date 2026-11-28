@@ -54,7 +54,7 @@ reservation is not storage admission or authorization.
 If duplicate archival cannot meet the reviewed demand, the separate
 `--reserve-capacity` mode derives the minimum exact increase from live inventory
 and the offer. `config/operations/rollback-capacity-reservation-v1.json` bounds
-this operation (initial ceiling 29, at most two additional slots per transaction,
+this operation (initial ceiling 29, with a reviewed 30-slot ceiling for the single-target Teams execution acceptance, at most two additional slots per transaction,
 10 GiB minimum free space on both the Docker and archive filesystems). It uses
 the same protected-source and CI checks, Owner verifier, release locks, pending
 transaction checks, atomic replacement, protected live component readback and
@@ -105,3 +105,18 @@ be assessed using the existing lifecycle; no automatic ceiling escalation.
 Any future archive-and-retire policy for unique originals must prove recoverability
 and preserve active rollback references before retirement is admitted. Do not
 claim restoration of an original Docker container ID from a filesystem archive.
+
+### Teams execution acceptance headroom
+
+The reviewed Runtime-only acceptance release needs one slot. Live inventory
+was 29/29 with zero eligible duplicates; eight historical unique originals
+lacked detected active references but their full cold restoration has not
+been established. Do not retire them on that basis. To avoid delaying Teams
+acceptance for a separate archival development workstream, review a minimum
+29-to-30 reservation using the existing two-file authenticated native
+reservation transaction. This is bounded temporary headroom, not authorization
+to delete originals or indefinitely raise the ceiling. Preserve the live
+rollback identities and run full native integrity and independent drift
+verification before staging the release. Both the exact reservation and
+exact release require their existing independently authenticated evidence;
+reviewing this source does not authorize either production action.
