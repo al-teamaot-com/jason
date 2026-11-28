@@ -83,6 +83,20 @@ controller pin; every unrelated installed hash and reader binding must match.
 It changes only that dependent pin, then runs the full native installed-policy
 verifier and independent drift guard. Prior receipts and the effective capacity
 policy remain unchanged; no application release is approved by this operation.
+
+If the stale legacy pin already caused the scheduled recovery service to fail,
+`--recover-binding-fault` adds an explicit maintenance-only scope. It accepts
+only the root-recorded failed recovery service fault, its exact current
+systemd invocation error and the derived pinned watchdog failure, with fresh
+independent evaluation, immutable LKG, all prior evidence and no pending
+transaction. It never waives an unrelated fault or changes release admission.
+After verifying the exact repaired pin, release the native locks, run the
+existing recovery and drift watchdog one-shots and use the existing native
+root breaker revalidation. The breaker must independently close and the final
+normal native gate and exact scope must pass. If revalidation is interrupted,
+retain the verified binding and continue the original approved scope; do not
+write a success receipt or reintroduce the known stale pin. No application
+containers, rollback artifacts, freeze, or Owner approval records are changed.
 The release itself still requires its own approval.
 
 The 29-slot ceiling is a bounded headroom decision, not an indefinite increase

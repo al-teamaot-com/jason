@@ -389,7 +389,8 @@ def state(host, manifest, p, n, pending):
 
 
 def run_action(args, n, p, code, planner, pending, verify_source, wait_fresh, *,
-               replace_policy=None, cleanup_policy=None, replace_binding=None, cleanup_binding=None):
+               replace_policy=None, cleanup_policy=None, replace_binding=None, cleanup_binding=None,
+               recover_native=None, reporter_pins=None):
     need(os.geteuid()==0 and sys.flags.isolated==1,"ROOT_ISOLATED_REQUIRED")
     need(SHA.fullmatch(args.candidate) and re.fullmatch(r"release-[0-9a-f]{16}",args.release_id or ""),
          "EXACT_RELEASE_ID")
@@ -407,7 +408,8 @@ def run_action(args, n, p, code, planner, pending, verify_source, wait_fresh, *,
     if getattr(args,"reconcile_capacity_binding",False):
         need(replace_binding is not None and cleanup_binding is not None,"NATIVE_BINDING_REPLACEMENT_PORT")
         return reconcile_binding(args,n,p,code,planner,pending,verify_source,wait_fresh,
-                                 host_module,manifest,profile,review_sha,replace_binding,cleanup_binding)
+                                 host_module,manifest,profile,review_sha,replace_binding,cleanup_binding,
+                                 recover_native=recover_native,reporter_pins=reporter_pins)
     if getattr(args,"reserve_capacity",False) and args.resume:
         restore_interrupted_pair(args,n,p,code,planner,pending,verify_source,wait_fresh,
             host_module,manifest,profile,review_sha,replace_policy,cleanup_policy,replace_binding,cleanup_binding)
@@ -834,9 +836,13 @@ def verify_binding_predecessor(h,pin,allowed_desired_hashes):
     return policy
 
 
-def verify_binding_live(args,n,p,planner,pending,h,manifest,scope,guard):
+def verify_binding_live(args,n,p,planner,pending,h,manifest,scope,guard,*,recovery=False,repaired=False,reporter_pins=None):
     need(p["command"]([*p["USER"],"/usr/bin/git","ls-remote","https://github.com/al-teamaot-com/jason.git","refs/heads/main"]).decode().split()==[args.candidate,"refs/heads/main"],"BINDING_CURRENT_SOURCE")
-    need(guard.host_mutation_quiescent() and audit_accepted(),"BINDING_NATIVE_HEALTH")
+    if recovery:
+        verify_binding_fault(n,p,h,guard,scope["preserved"]["host_anchor"],repaired=repaired,reporter_pins=reporter_pins)
+    else:
+        need(guard.host_mutation_quiescent(),"BINDING_NATIVE_HEALTH")
+    need(audit_accepted(),"BINDING_AUDIT_HEALTH")
     pending(SimpleNamespaceForPending(p))
     prior=completed_active_offer(h,manifest["release_id"]); preserved=scope["preserved"]
     need(prior==preserved.get("completed_active_offer"),"BINDING_PREDECESSOR_CHANGED")
@@ -882,8 +888,16 @@ def restore_interrupted_pair(args,n,p,code,planner,pending,verify_source,wait_fr
         need(p["read"](DESIRED,0,0o600)==before and p["read"](BINDING,0,0o600)==pin_before,"RESERVATION_RECOVERY_READBACK")
 
 
-def reconcile_binding(args,n,p,code,planner,pending,verify_source,wait_fresh,h,manifest,profile,review_sha,replace_binding,cleanup_binding):
+def reconcile_binding(args,n,p,code,planner,pending,verify_source,wait_fresh,h,manifest,profile,review_sha,replace_binding,cleanup_binding,*,recover_native=None,reporter_pins=None):
     """Repair a completed legacy reservation under a separate exact Owner decision."""
+    recovery=getattr(args,"recover_binding_fault",False)
+    need(not recovery or (recover_native is not None and reporter_pins),"BINDING_RECOVERY_NATIVE_PORTS")
+    def wait_health():
+        if not recovery:wait_fresh()
+    def check_live(old,guard,*,repaired=False,final=False):
+        if recovery and not final:
+            verify_binding_live(args,n,p,planner,pending,h,manifest,old,guard,recovery=True,repaired=repaired,reporter_pins=reporter_pins)
+        else:verify_binding_live(args,n,p,planner,pending,h,manifest,old,guard)
     source=args.reservation_source
     need(isinstance(source,str) and SHA.fullmatch(source),"BINDING_RESERVATION_SOURCE")
     prior=RESERVATION_LEDGER/source/args.release_id
@@ -895,13 +909,18 @@ def reconcile_binding(args,n,p,code,planner,pending,verify_source,wait_fresh,h,m
         target=capacity_binding_image(base,digest(before),digest(after))
         need(pin in (base,target),"BINDING_FOREIGN_POLICY")
         verify_binding_predecessor(h,pin,{digest(before),digest(after)})
-        return old,base,target,pin,{"schema_version":"1.0","action":BINDING_ACTION,
+        scope={"schema_version":"1.0","action":BINDING_ACTION,
             "policy":{"candidate_sha":args.candidate,"rollback_sha":manifest["rollback_sha"]},
             "release_id":args.release_id,"reservation_source":source,"reservation_scope_sha256":digest(old),
             "reservation_evidence":evidence,"source_files_sha256":{k:digest(v) for k,v in code.items()},
             "installation_targets":[str(BINDING),str(record)],"before_binding_sha256":digest(base),
             "after_binding_sha256":digest(target),"desired_policy_sha256":digest(after),
             "approved_capacity":old["plan"]["after_limit"],"queue_cutover":False,"provider_writes":False,"standing_authority":False}
+        if recovery:
+            scope.update(recovery_fault="exact_stale_capacity_pin_failed_recovery_service",
+                recovery_steps=[RECOVERY_UNIT,DRIFT_REPORTER_UNIT,"native_root_breaker_revalidation"],
+                retain_verified_binding_if_native_revalidation_pending=True)
+        return old,base,target,pin,scope
     def locked():return h.IndependentHostGuard()
     if args.resume:
         for path in (BINDING_LEDGER,record.parent,record):private_directory(path,n)
@@ -909,39 +928,43 @@ def reconcile_binding(args,n,p,code,planner,pending,verify_source,wait_fresh,h,m
         need(a["scope_sha256"]==args.scope_sha==digest(scope) and a["owner_oid"]=="bee80bdc-ffb0-4c50-b453-c09d4d411f5f" and 0<=(now()-datetime.fromisoformat(a["approved_at"])).total_seconds()<=28800 and digest(base)==scope["before_binding_sha256"],"BINDING_RESUME_APPROVAL")
     else:
         need(not os.path.lexists(record),"BINDING_ALREADY_ATTEMPTED")
-        wait_fresh();guard=locked()
+        wait_health();guard=locked()
         with guard.host_release_transaction():
             old,base,target,pin,scope=inspect()
-            verify_binding_live(args,n,p,planner,pending,h,manifest,old,guard)
+            check_live(old,guard)
         sha=digest(scope)
         if not args.apply:
             print(json.dumps({"status":"exact_rollback_capacity_binding_preflight_passed","scope_sha256":sha,"scope":scope},sort_keys=True));return
         need(args.scope_sha==sha,"BINDING_EXACT_SCOPE")
         owner=n["owner"](scope);need(owner=="bee80bdc-ffb0-4c50-b453-c09d4d411f5f","BINDING_OWNER_IDENTITY")
         need(verify_source()==code,"BINDING_SOURCE_CHANGED")
-        wait_fresh();guard=locked()
+        wait_health();guard=locked()
         with guard.host_release_transaction():
             need(inspect()==(old,base,target,pin,scope),"BINDING_APPROVED_STATE_CHANGED")
-            verify_binding_live(args,n,p,planner,pending,h,manifest,old,guard)
+            check_live(old,guard)
             for path in (BINDING_LEDGER,record.parent,record):private_directory(path,n,create=True)
             n["write"](record/"before-binding.json",base,0o400)
             immutable_record(n,record/"approval.json",{"scope":scope,"scope_sha256":sha,"owner_oid":owner,"approved_at":now().isoformat()})
     need(verify_source()==code,"BINDING_SOURCE_CHANGED")
-    wait_fresh();guard=locked()
+    wait_health();guard=locked()
     with guard.host_release_transaction():
         need(not os.path.lexists(record/"result.json"),"BINDING_ALREADY_RESOLVED")
         old,base2,target,pin,current=inspect(base)
         need(base2==base and current==scope and digest(scope)==args.scope_sha,"BINDING_APPROVED_SCOPE_CHANGED")
         approval=json.loads(read(record/"approval.json",private=True));need(approval["scope"]==scope and approval["scope_sha256"]==args.scope_sha and approval["owner_oid"]=="bee80bdc-ffb0-4c50-b453-c09d4d411f5f" and 0<=(now()-datetime.fromisoformat(approval["approved_at"])).total_seconds()<=28800 and read(record/"before-binding.json",private=True)==base,"BINDING_DURABLE_APPROVAL")
-        verify_binding_live(args,n,p,planner,pending,h,manifest,old,guard)
+        check_live(old,guard,repaired=pin==target)
         cleanup_binding(base,target)
         try:
             if pin==base:replace_binding(base,target)
             h.verify_installed_policy(profile)
-            report=json.loads(p["command"](["/usr/bin/python3","/opt/jason/current/tools/production_drift_guard.py","--config",str(DESIRED)]))
-            need(report.get("status")=="pass" and report.get("problems")==[],"BINDING_POSTFLIGHT_DRIFT")
             need(inspect(base)==(old,base,target,target,scope),"BINDING_POSTFLIGHT_CHANGED")
-            verify_binding_live(args,n,p,planner,pending,h,manifest,old,guard)
+            if recovery:
+                check_live(old,guard,repaired=True)
+                immutable_record(n,record/"binding-verified.json",{"scope_sha256":args.scope_sha,
+                    "status":"exact_binding_verified_native_revalidation_pending","binding_sha256":digest(target)})
+            else:
+                verify_binding_drift_pass(p)
+                check_live(old,guard)
         except BaseException:
             actual=p["read"](BINDING,0,0o600)
             if actual==target:replace_binding(target,base)
@@ -949,5 +972,90 @@ def reconcile_binding(args,n,p,code,planner,pending,verify_source,wait_fresh,h,m
             need(p["read"](BINDING,0,0o600)==base,"BINDING_ROLLBACK_READBACK")
             immutable_record(n,record/"result.json",{"status":"rollback_capacity_binding_rolled_back","scope_sha256":args.scope_sha})
             raise
-        result={"status":"rollback_capacity_binding_verified","scope_sha256":args.scope_sha,"release_id":args.release_id,"capacity":scope["approved_capacity"],"removed":0,"production_release_approved":False,"provider_writes":False}
-        immutable_record(n,record/"result.json",result);print(json.dumps(result,sort_keys=True))
+        if not recovery:
+            record_binding_success(n,record,scope,args)
+            return
+    # The failed unit and native root breaker transition take the same shared
+    # locks themselves. Never hold those locks while asking them to run. The
+    # installed pin is independently verified; the original open breaker is
+    # left to its native revalidation, never edited or forcibly closed here.
+    recover_native()
+    wait_fresh()
+    guard=locked()
+    with guard.host_release_transaction():
+        need(verify_source()==code and not os.path.lexists(record/"result.json"),"BINDING_FINAL_SOURCE_OR_RESULT")
+        need(inspect(base)==(old,base,target,target,scope),"BINDING_FINAL_SCOPE_CHANGED")
+        h.verify_installed_policy(profile)
+        verify_binding_drift_pass(p)
+        check_live(old,guard,final=True)
+        record_binding_success(n,record,scope,args)
+
+
+RECOVERY_UNIT="jason-scoped-backport-recovery.service"
+DRIFT_REPORTER_UNIT="jason-production-drift-watchdog.service"
+RECOVERY_FAULT={"kind":"failed_system_unit","state":"failed","unit":RECOVERY_UNIT}
+REPORTER_FAULT={"kind":"failed_system_unit","state":"failed","unit":DRIFT_REPORTER_UNIT}
+DRIFT_EVALUATOR=Path("/opt/jason/current/tools/production_drift_guard.py")
+
+
+def verify_binding_drift_pass(p):
+    report=json.loads(p["command"](["/usr/bin/python3",str(DRIFT_EVALUATOR),"--config",str(DESIRED)]))
+    need(report.get("status")=="pass" and report.get("problems")==[],"BINDING_POSTFLIGHT_DRIFT")
+
+
+def record_binding_success(n,record,scope,args):
+    result={"status":"rollback_capacity_binding_verified","scope_sha256":args.scope_sha,"release_id":args.release_id,"capacity":scope["approved_capacity"],"removed":0,"production_release_approved":False,"provider_writes":False}
+    if scope.get("recovery_fault"):result["native_breaker_revalidated"]=True
+    immutable_record(n,record/"result.json",result);print(json.dumps(result,sort_keys=True))
+
+
+def exact_binding_fault(control,recorded,evaluated,*,repaired,anchor):
+    """Maintenance admission for this single known failed-unit fault only."""
+    baseline=control["last_known_good"]["manifest"]; breaker=control["circuit_breaker"]
+    need(baseline.get("complete") is True and all(baseline.get(k)==anchor for k in
+         ("revision","host_revision","runtime_revision","mcp_revision")),"BINDING_RECOVERY_LKG")
+    need(breaker.get("state")=="open" and breaker.get("source")=="production_drift_watchdog"
+         and breaker.get("reason")=="continuous_production_drift_detected"
+         and breaker.get("problem_count")==1 and breaker.get("problem_kinds")==["failed_system_unit"],"BINDING_RECOVERY_BREAKER")
+    for report in (recorded,evaluated):
+        stamp=datetime.fromisoformat(report["observed_at"])
+        need(stamp.utcoffset() is not None and 0<=(now()-stamp).total_seconds()<=180,"BINDING_RECOVERY_STALE_DRIFT")
+    recorded_fault=recorded.get("status")=="drift_detected" and recorded.get("problems")==[RECOVERY_FAULT]
+    recorded_clean=recorded.get("status")=="pass" and recorded.get("problems")==[]
+    need(recorded_fault or (repaired and recorded_clean),"BINDING_RECOVERY_RECORDED_DRIFT")
+    problems=evaluated.get("problems"); expected=sorted([RECOVERY_FAULT,REPORTER_FAULT],key=lambda r:r["unit"])
+    failed=evaluated.get("status")=="drift_detected" and problems in ([RECOVERY_FAULT],expected)
+    recovering=repaired and ((evaluated.get("status")=="drift_detected" and problems==[REPORTER_FAULT]) or
+                             (evaluated.get("status")=="pass" and problems==[]))
+    need(failed or recovering,"BINDING_RECOVERY_UNRELATED_DRIFT")
+    return problems
+
+
+def unit_properties(p,unit,keys):
+    raw=p["command"](["/usr/bin/systemctl","show",unit,*["-p"+k for k in keys]]).decode()
+    values=dict(line.split("=",1) for line in raw.splitlines() if "=" in line)
+    need(set(values)==set(keys),"BINDING_RECOVERY_UNIT_PROPERTIES")
+    return values
+
+
+def verify_binding_fault(n,p,h,guard,anchor,*,repaired,reporter_pins):
+    need(guard._held and guard._source_sha()==anchor,"BINDING_RECOVERY_LOCK_OR_SOURCE")
+    if repaired and guard.host_mutation_quiescent():return
+    control=json.loads(p["read"](n["ROOT_CONTROL"],0,0o600));recorded=json.loads(p["read"](MANAGER/"production-drift.json",0,0o600))
+    h.readback.verify_legacy_anchor(h.readback.verify_live(),control["last_known_good"]["manifest"])
+    need(digest(p["read"](DRIFT_EVALUATOR,0))==p["PINNED"][str(DRIFT_EVALUATOR)],"BINDING_RECOVERY_DRIFT_EVALUATOR_PIN")
+    probe=("import json,sys;from pathlib import Path;p=Path(sys.argv[1]);n={'__name__':'native_drift_preflight','__file__':str(p)};"
+           "exec(compile(p.read_bytes(),str(p),'exec'),n);print(json.dumps(n['evaluate'](json.loads(Path(sys.argv[2]).read_text()))))")
+    evaluated=json.loads(p["command"](["/usr/bin/python3","-I","-B","-c",probe,str(DRIFT_EVALUATOR),str(DESIRED)],75))
+    problems=exact_binding_fault(control,recorded,evaluated,repaired=repaired,anchor=anchor)
+    if RECOVERY_FAULT in problems:
+        keys=("LoadState","ActiveState","MainPID","Result","InvocationID")
+        unit=unit_properties(p,RECOVERY_UNIT,keys); invocation=unit.pop("InvocationID")
+        need(unit=={"LoadState":"loaded","ActiveState":"failed","MainPID":"0","Result":"exit-code"} and re.fullmatch(r"[0-9a-f]{32}",invocation),"BINDING_RECOVERY_UNIT_STATE")
+        log=p["command"](["/usr/bin/journalctl","--no-pager","--output=cat","_SYSTEMD_INVOCATION_ID="+invocation])
+        need(b"ScopedBackportDenied: SCOPED_BACKPORT_COORDINATED_INSTALLED_SOURCE_DRIFT" in log,"BINDING_RECOVERY_CAUSE")
+    if REPORTER_FAULT in problems:
+        need(bool(reporter_pins) and all(digest(p["read"](Path(path),0))==pin for path,pin in reporter_pins.items()),"BINDING_RECOVERY_REPORTER_PIN")
+        keys=("LoadState","ActiveState","MainPID","Result","ExecMainCode","ExecMainStatus")
+        need(unit_properties(p,DRIFT_REPORTER_UNIT,keys)=={"LoadState":"loaded","ActiveState":"failed","MainPID":"0","Result":"exit-code","ExecMainCode":"1","ExecMainStatus":"2"},"BINDING_RECOVERY_REPORTER_STATE")
+    need(not list((MANAGER/"protected-transitions/requests").glob("*.json")),"BINDING_RECOVERY_PENDING_TRANSITION")
