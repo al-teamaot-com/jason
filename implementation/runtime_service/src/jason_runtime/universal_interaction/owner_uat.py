@@ -24,6 +24,9 @@ from connectors.src.jason_connectors.approval_requests import (
     ApprovalDecision, ApprovalPresentation, ApprovalRequest,
     ApprovalRequestService, ApprovalRequestStatus, ApprovalResponse,
 )
+from kernel.signed_owner_release import (
+    OWNER_PRINCIPAL as OWNER, OWNER_OID as OWNER_OBJECT, TID as OWNER_TENANT,
+)
 from .owner_requests import interaction_from_owner_approval
 from .service import UniversalInteractionService, InteractionDelivery
 
@@ -32,7 +35,6 @@ APPROVAL_PREFIX = "owneruatapproval-"
 MODE = "test:nonexecuting"
 REQUESTER = "svc-jason-acceptance-test"
 ORGANIZATION = "aot"
-OWNER = "person-al"
 SESSION_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{4,100}$")
 TTL_SECONDS = 600
 COORDINATED_READBACK = Path("/etc/jason-owner-release/coordinated-readback/component.json")
@@ -47,7 +49,7 @@ class OwnerUatAuthority:
                     organization_id: str, client_id: str | None,
                     capability: str, requested_mode: str) -> bool:
         return (
-            approver_identity_id == self.owner_identity_id
+            approver_identity_id == self.owner_identity_id == OWNER
             and organization_id == ORGANIZATION and client_id is None
             and capability == CAPABILITY and requested_mode == MODE
         )
@@ -179,9 +181,13 @@ class OwnerUatDecisionFlow:
         return request
 
     def active_owner(self, tenant_id: str, object_id: str) -> Any:
+        if (tenant_id, object_id, self.owner_identity_id) != (OWNER_TENANT, OWNER_OBJECT, OWNER):
+            raise PermissionError("UAT decision is not from the active owner")
         binding = self.bindings.find(microsoft_tenant_id=tenant_id, microsoft_object_id=object_id)
-        if (binding is None or binding.status != "active"
-                or binding.jason_identity_id != self.owner_identity_id):
+        if (binding is None or binding.status != "active" or binding.client_id is not None
+                or binding.jason_identity_id != OWNER
+                or binding.microsoft_tenant_id != OWNER_TENANT
+                or binding.microsoft_object_id != OWNER_OBJECT):
             raise PermissionError("UAT decision is not from the active owner")
         identity = self.identities.get(binding.jason_identity_id)
         if (identity is None or identity.status != "active"
@@ -189,6 +195,18 @@ class OwnerUatDecisionFlow:
                 or identity.identity_id != self.owner_identity_id):
             raise PermissionError("UAT owner identity is not active")
         return identity
+
+    def recipient_ready(self) -> bool:
+        """Do not issue a one-shot card unless the exact licensed Owner route resolves."""
+        try:
+            self.active_owner(OWNER_TENANT, OWNER_OBJECT)
+            binding = self.bindings.find_active_by_jason_identity(jason_identity_id=OWNER)
+            return (binding is not None and binding.status == "active"
+                    and binding.client_id is None and binding.jason_identity_id == OWNER
+                    and binding.microsoft_tenant_id == OWNER_TENANT
+                    and binding.microsoft_object_id == OWNER_OBJECT)
+        except (PermissionError, AttributeError):
+            return False
 
     def chatgpt_review(self, *, approval_id: str, principal_id: str, tenant_id: str,
                       object_id: str) -> tuple[ApprovalRequest, str]:
