@@ -42,6 +42,14 @@ jobs:
           r=json.loads(p.read_text())
           assert r['status']=='isolated_synthetic_matrix_pass'
           assert len(r['cases'])==19 and r['fully_accepted']==0
+          assert r['junit_test_totals']['passed']>0
+          assert all(r['junit_test_totals'][k]==0 for k in ('failed','errors','skipped'))
+          assert r['required_test_module_results']
+          assert all(v=='pass' for v in r['required_test_module_results'].values())
+          assert not r['unexpected_test_modules']
+          run_dir=p.parent/r['run_id']
+          assert run_dir.is_dir() and (run_dir/'pytest-matrix.xml').is_file()
+          assert json.loads((run_dir/'matrix-results.json').read_text())==r
           assert r['live_preproduction_provider_calls']==0
           assert r['live_preproduction_provider_writes']==0
           assert r['production_json_registry_modified'] is False
