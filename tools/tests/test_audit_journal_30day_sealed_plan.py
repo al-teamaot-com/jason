@@ -1,0 +1,128 @@
+import json
+from datetime import datetime,timezone,timedelta
+from pathlib import Path
+
+import pytest
+from tools import audit_journal_30day_sealed_plan as plan
+
+ROOT=Path(__file__).resolve().parents[2]
+POLICY=ROOT/"config/jason-orchestration-30day-retention-proposal-v1.json"
+
+
+def inputs():
+    now=datetime(2026,11,25,12,0,tzinfo=timezone.utc)
+    seg1="a"*32;seg2="b"*32
+    catalog={"mode":"segmented","generation":2,"segments":[
+        {"id":seg1,"state":"sealed","proof":{"events":10,"file_sha256":"c"*64}},
+        {"id":seg2,"state":"sealed","proof":{"events":5,"file_sha256":"d"*64}},
+    ]}
+    stats={seg1:{"recent":3,"protected_old":1,"eligible_old":6,"file_sha256":"c"*64,"classification_sha256":"1"*64},
+           seg2:{"recent":0,"protected_old":0,"eligible_old":5,"file_sha256":"d"*64,"classification_sha256":"2"*64}}
+    return {"catalog":catalog,"statistics":stats,"now":now,
+            "source_main_sha":"e"*40,"prior_catalog_sha256":"f"*64}
+
+
+def test_sealed_history_is_in_scope_as_well_as_active_database():
+    cfg=json.loads(POLICY.read_text())
+    assert cfg["activation"]=="disabled_source_only_policy_proposal"
+    assert cfg["permanent_deletion_authorized"] is False
+    assert cfg["retention_days"]==30
+    assert len(cfg["requires_governance_exception_to"])==2
+    assert cfg["targets"][:2]==[
+        "canonical_active_orchestration_events","all_root_sealed_orchestration_history_segments"]
+    assert "Root_Owner_authorization_ledgers" in cfg["excluded_from_scope"]
+
+
+def test_read_only_plan_preserves_recent_rows_in_mixed_archive():
+    result=plan.draft_segment_plan(**inputs())
+    assert plan.verify_draft(result)
+    p=result["proposal"]
+    assert p["cutoff_utc"]=="2026-10-26T12:00:00+00:00"
+    assert p["archives"][0]["required_action"]=="stage_verified_retained_copy_then_root_seal_swap"
+    assert p["archives"][1]["required_action"]=="root_remove_only_after_exact_accepted_proof"
+    assert p["expired_records_deleted"] is False
+
+
+@pytest.mark.parametrize("mutation",["unsealed","counter","hash","missing","negative","source"])
+def test_inconsistent_or_unsealed_segment_denies_release_scope(mutation):
+    a=inputs()
+    if mutation=="unsealed":a["catalog"]["segments"][0]["state"]="pending"
+    elif mutation=="counter":a["statistics"]["a"*32]["eligible_old"]=7
+    elif mutation=="hash":a["statistics"]["a"*32]["file_sha256"]="0"*64
+    elif mutation=="missing":a["statistics"].pop("a"*32)
+    elif mutation=="negative":a["statistics"]["a"*32]["recent"]=-1
+    else:a["source_main_sha"]="changed"
+    with pytest.raises(ValueError,match="AUDIT_30DAY_SEALED_"):
+        plan.draft_segment_plan(**a)
+
+
+def test_cutoff_rejects_naive_time_and_scope_rewrite():
+    a=inputs();a["now"]=datetime(2026,11,25,12,0)
+    with pytest.raises(ValueError,match="AWARE_CUTOFF_REQUIRED"):
+        plan.draft_segment_plan(**a)
+    result=plan.draft_segment_plan(**inputs())
+    result["proposal"]["approved"]=True
+    with pytest.raises(ValueError,match="PROPOSAL_CHANGED"):
+        plan.verify_draft(result)
+
+
+def test_plan_module_exposes_no_mutating_production_operations():
+    src=(ROOT/"tools/audit_journal_30day_sealed_plan.py").read_text()
+    for token in ("os.unlink","os.remove","os.replace","shutil.rmtree",
+                  "DELETE FROM","DROP TABLE","docker stop","systemctl restart"):
+        assert token not in src
+
+
+def test_duplicate_catalog_identity_cannot_mask_unrelated_statistics():
+    a=inputs()
+    a["catalog"]["segments"][1]=dict(a["catalog"]["segments"][0])
+    with pytest.raises(ValueError,match="DUPLICATE_SEGMENT_ID"):
+        plan.draft_segment_plan(**a)
+
+
+def test_cutoff_rejects_tzinfo_without_utc_offset():
+    from datetime import tzinfo
+    class NotAware(tzinfo):
+        def utcoffset(self, dt):
+            return None
+    a=inputs()
+    a["now"]=a["now"].replace(tzinfo=NotAware())
+    with pytest.raises(ValueError,match="AWARE_CUTOFF_REQUIRED"):
+        plan.draft_segment_plan(**a)
+
+def test_age_only_inventory_is_no_longer_accepted():
+    a=inputs()
+    a["statistics"]["a"*32]={"retained":4,"expired":6,"file_sha256":"c"*64}
+    with pytest.raises(ValueError,match="UNTRUSTED_PROTECTED_PARTITION_OR_HASH"):
+        plan.draft_segment_plan(**a)
+
+
+def test_all_old_archive_with_protected_evidence_cannot_be_removed_whole():
+    a=inputs()
+    a["statistics"]["b"*32].update(protected_old=2,eligible_old=3)
+    row=plan.draft_segment_plan(**a)["proposal"]["archives"][1]
+    assert row["estimated_recent"]==0 and row["estimated_protected_old"]==2
+    assert row["estimated_retained"]==2 and row["estimated_expired"]==3
+    assert row["required_action"]=="stage_verified_retained_copy_then_root_seal_swap"
+
+
+def test_no_eligible_rows_retains_whole_old_protected_archive():
+    a=inputs()
+    a["statistics"]["b"*32].update(protected_old=5,eligible_old=0)
+    row=plan.draft_segment_plan(**a)["proposal"]["archives"][1]
+    assert row["required_action"]=="retain_original_unchanged"
+
+
+def test_classification_proof_is_bound_and_required():
+    a=inputs()
+    a["statistics"]["b"*32]["classification_sha256"]="unverified"
+    with pytest.raises(ValueError,match="UNTRUSTED_PROTECTED_PARTITION_OR_HASH"):
+        plan.draft_segment_plan(**a)
+
+
+def test_owner_direction_is_not_an_exact_production_grant():
+    cfg=json.loads(POLICY.read_text())
+    assert cfg["owner_policy_direction"]["permanent_expiry_requested"] is True
+    assert cfg["permanent_deletion_authorized"] is False
+    assert cfg["require_protected_old_rows_preserved"] is True
+    assert cfg["unknown_or_ambiguous_old_rows"]=="retain"
