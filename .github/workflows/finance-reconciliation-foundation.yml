@@ -1,0 +1,47 @@
+name: Finance Reconciliation Foundation
+
+on:
+  push:
+    paths:
+      - "implementation/finance_reconciliation/**"
+      - "config/finance_reconciliation/**"
+      - ".github/workflows/finance-reconciliation-foundation.yml"
+  pull_request:
+    paths:
+      - "implementation/finance_reconciliation/**"
+      - "config/finance_reconciliation/**"
+      - ".github/workflows/finance-reconciliation-foundation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Checkout exact shared Document Intake source for cross-boundary acceptance
+        uses: actions/checkout@v4
+        with:
+          ref: c0986737cb7ed10a36f8e5b57711321e2082ef74
+          path: shared-intake-source
+          persist-credentials: false
+      - name: Install existing PDF test/Poppler dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          python -m pip install --upgrade pip pytest reportlab
+      - name: Compile isolated finance reconciliation foundation
+        run: python -m compileall -q implementation/finance_reconciliation
+      - name: Test isolated finance reconciliation foundation and shared intake handoff
+        env:
+          JASON_SHARED_INTAKE_PATH: ${{ github.workspace }}/shared-intake-source/infrastructure/jason-document-intake/document-intake.mjs
+        run: python -m pytest implementation/finance_reconciliation/tests -q
