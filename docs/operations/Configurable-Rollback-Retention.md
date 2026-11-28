@@ -99,7 +99,7 @@ write a success receipt or reintroduce the known stale pin. No application
 containers, rollback artifacts, freeze, or Owner approval records are changed.
 The release itself still requires its own approval.
 
-The 29-slot ceiling is a bounded headroom decision, not an indefinite increase
+The reviewed ceiling is a bounded headroom decision, not an indefinite increase
 or permission to delete unique rollback identities. Future exhaustion must first
 be assessed using the existing lifecycle; no automatic ceiling escalation.
 Any future archive-and-retire policy for unique originals must prove recoverability
