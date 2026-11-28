@@ -39,8 +39,9 @@ boundary unchanged.
 After exact Owner approval for the boundary-only action, run the same command
 with `--apply --approval-reference aot-sharepoint-client-boundary-create-only`.
 It requires a clean exact-SHA worktree, a locally authenticated `sudo` session
-from `al`, healthy unchanged Jason runtime/MCP containers and a root-owned
-boundary database with private permissions. It writes an append-only root-only
+from `al`, healthy unchanged Jason runtime/MCP containers and a private mode-0600
+boundary database. When the database belongs to the runtime account, SQLite
+runs under that account for the write and readback. Root retains the audit writer. It writes an append-only root-only
 audit event under `/var/lib/jason/independent-component-release` and uses Jason's
 signed onboarding and SQLite boundary services.
 The operation is idempotent for the same already-validated binding.

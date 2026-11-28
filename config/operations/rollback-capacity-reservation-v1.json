@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "maximum_stopped_rollback_containers": 30,
+  "maximum_increase_per_transaction": 2,
+  "minimum_docker_free_bytes": 10737418240,
+  "minimum_archive_free_bytes": 10737418240,
+  "exact_authenticated_owner_approval_required": true,
+  "preserve_all_containers_images_volumes": true,
+  "prefer_existing_duplicate_archival": true
+}

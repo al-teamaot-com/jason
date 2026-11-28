@@ -1,4 +1,4 @@
-"""Source-reviewed, expiring internal-note acceptance on the existing approval core.
+"""Source-reviewed, expiring bounded-plan acceptance on the existing approval core.
 
 No HTTP endpoint, separate worker, identity, grant, direct provider access or
 fabricated decision. An authorized operator issues each exact test once; the
@@ -30,7 +30,7 @@ def load_campaign(config: Path = CONFIG, *, now: datetime | None = None) -> dict
     if path.is_symlink() or path.stat().st_size > 16384:
         raise ValueError('invalid bounded pilot manifest')
     doc = json.loads(path.read_text())
-    if doc.get('schema_version') != '1.0' or type(doc.get('enabled')) is not bool:
+    if doc.get('schema_version') not in {'1.0', '2.0'} or type(doc.get('enabled')) is not bool:
         raise ValueError('invalid pilot activation schema')
     if not doc['enabled']:
         return None
@@ -45,8 +45,22 @@ def load_campaign(config: Path = CONFIG, *, now: datetime | None = None) -> dict
             or policy.stat().st_size > 65536
             or hashlib.sha256(policy.read_bytes()).hexdigest() != doc.get('policy_sha256')):
         raise ValueError('source-pinned pilot policy digest mismatch')
-    if set(doc.get('cases', {})) != {'deny', 'approve'}:
-        raise ValueError('pilot must contain exactly the two reviewed cases')
+    if doc['schema_version'] == '1.0':
+        if set(doc.get('cases', {})) != {'deny', 'approve'}:
+            raise ValueError('legacy pilot must contain exactly the two reviewed cases')
+    else:
+        # A completed separate live denial canary need not be repeated merely
+        # to exercise one reviewed multi-step execution. Denying the actual
+        # card still terminates the case without provider execution.
+        if set(doc.get('cases', {})) != {'approve'}:
+            raise ValueError('execution pilot requires one reviewed approval case')
+        item = doc['cases']['approve']
+        if (set(item) != {'approval_id','title','summary','steps'}
+                or not isinstance(item['steps'], list) or not 1 <= len(item['steps']) <= 32
+                or any(not isinstance(step, dict) or set(step) - {'execution_id','capability','arguments','client_id'}
+                       or not {'execution_id','capability','arguments'} <= set(step) for step in item['steps'])
+                or len({step['execution_id'] for step in item['steps']}) != len(item['steps'])):
+            raise ValueError('invalid reviewed execution steps')
     return doc
 
 
@@ -72,7 +86,7 @@ def issue_case(app, campaign: dict, case: str) -> dict:
     from autonomous_remediation.autonomous_principal import AutonomousPrincipal
     from kernel.execution_policy import DataHandlingPolicy, ExecutionBudget
     from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
-    if case not in {'deny', 'approve'}:
+    if case not in campaign['cases']:
         raise ValueError('unknown pilot case')
     handler = app.universal_approval_handler
     if handler is None or handler.issuer is None:
@@ -85,31 +99,32 @@ def issue_case(app, campaign: dict, case: str) -> dict:
     pending = handler.service.teams_flow.approval_service.repository.get(approval_id)
     if pending is not None:
         return {'approval_id': approval_id, 'status': pending.status.value, 'reissued': False}
-    if case == 'approve':
+    if case == 'approve' and 'deny' in campaign['cases']:
         denied = handler.service.teams_flow.approval_service.repository.get(
             campaign['cases']['deny']['approval_id'])
         if denied is None or denied.status.value != 'denied':
             raise PermissionError('the real Deny/no-action case must finish first')
-    request = OrchestrationRequest(
-        execution_id=item['execution_id'], correlation_id=item['execution_id'],
+    steps = item.get('steps', [item])
+    requests = tuple(OrchestrationRequest(
+        execution_id=step['execution_id'], correlation_id=step['execution_id'],
         principal_id=campaign['requester_id'], organization_id=campaign['organization_id'],
-        capability_name=item['capability'], capability_version=None,
+        capability_name=step['capability'], capability_version=None,
         requested_mode='deterministic', orchestration_mode=OrchestrationMode.EXECUTE,
         authority_allowed=False, approval_present=False, risk='low',
         data_handling=DataHandlingPolicy('internal', False, retention_allowed=True),
         budget=ExecutionBudget(Decimal('0.01'), maximum_attempts=1),
-        arguments=item['arguments'], client_id=item.get('client_id'), permission_mode='execute',
+        arguments=step['arguments'], client_id=step.get('client_id'), permission_mode='execute',
         requester_kind='service', principal_attributes={'workload': campaign['requester_id']},
-    )
+    ) for step in steps)
     issuer = replace(handler.issuer, approval_id_factory=lambda: approval_id)
     return issuer.submit_service_plan(
-        requests=(request,), principal=AutonomousPrincipal(
+        requests=requests, principal=AutonomousPrincipal(
             campaign['requester_id'], campaign['organization_id']),
         title=item['title'], summary=item['summary'], production=True, ttl_seconds=1800)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='Issue or inspect the exact internal Teams pilot')
+    parser = argparse.ArgumentParser(description='Issue or inspect the exact bounded Teams pilot')
     parser.add_argument('action', choices=('deny', 'approve', 'status'))
     args = parser.parse_args()
     campaign = load_campaign()

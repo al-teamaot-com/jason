@@ -104,6 +104,42 @@ Authoritative evidence record: `docs/sessions/Jason-Boot-Recovery-Production-Acc
 
 ### Provider-read credential freshness recovery
 
-Boot recovery treats the protected IT Glue and Autotask read AppRole files as the authoritative local source. Existing staged runtime files are not considered healthy merely because owner, mode, and size are valid. The root recovery controller compares the bounded credential bytes in memory without printing or hashing them. If any staged file differs, it atomically re-stages the complete provider-read set with the existing root-only staging helper, verifies convergence, and recreates only `jason-runtime` from its exact live image/revision using `deploy_live_container.py` so file bind mounts attach to the refreshed inode.
+Boot recovery treats the protected IT Glue and Autotask read AppRole files as the authoritative local source. Existing staged runtime files are not considered healthy merely because owner, mode, and size are valid. The root recovery controller compares the bounded credential bytes in memory without printing or hashing them. If any staged file differs, it atomically re-stages the complete provider-read set with the existing root-only staging helper and verifies convergence.
 
-No provider API credential is changed and no OpenBao AppRole is rotated by this recovery. Unchanged credentials cause no runtime recreation. A replacement must pass the normal runtime health check; the exact-clone helper restores the previous container on failure. After successful replacement, the temporary credential-refresh rollback container is removed so it cannot become production drift. Credential values and hashes are never emitted.
+### Identity-preserving recovery (source candidate, not yet installed)
+
+The recovery controller checks the four exact read-only credential mounts against the staged file device/inode metadata on every cycle, including after interrupted recovery. It starts a stopped existing runtime, or restarts the exact existing container ID only when a running container's mount is stale. A healthy, current runtime is not restarted. The existing release transaction locks serialize staging and mount recovery; an active release transaction defers recovery. On coordinated PMv4 installations the trusted native shared host guard is required; it is not replaced or bypassed.
+
+The original container ID, image, revision, configuration and mounts must remain unchanged, the runtime must become healthy, and the refreshed bind mounts must be independently verified. Unexpected topology, failed probes and failed postchecks fail closed. No container recreation, rollback-container deletion, provider credential change, secret-value output, release-readback rewrite, or breaker closure is performed.
+
+The 2026-11-28 isolated Docker check proved stale file-bind detection after atomic replacement and successful same-ID restart/rebind. Source and synthetic regression acceptance does not authorize production installation. An exact governed host-file release, rollback evidence and live readback remain required. The existing post-outage container-ID mismatch must be reconciled separately through the authenticated native release-control recovery path; this change prevents recurrence but does not retroactively repair that protected record.
+
+
+### Governed reconciliation after an already completed boot replacement
+
+The signed maintenance action in `tools/scoped_backport_boot_readback_reconcile.py`
+is a separate source-reviewed recovery operation, not a release or a new
+approval mechanism. It accepts only the exact previously reviewed scope
+derived from the active completed coordinated release, the original signed
+Owner decision and consumption record, the current boot remount evidence,
+unchanged component image/revision/configuration identities, and the current
+normal release policy. Only the Runtime container ID may differ.
+
+Preparation runs from a sealed root-owned source bundle after protected-main
+and exact CI verification. The existing local Owner verifier authenticates
+the licensed Owner interactively and the existing release signer binds a
+one-use decision to the complete maintenance offer and source revisions.
+The native transaction consumes that decision under both release locks,
+preserves the original release journal and historical approval, records the
+exact before/after bytes, replaces the single active readback file with
+compare-and-replace, and independently verifies live identities, configuration,
+protected peers and policy. A failed postcheck restores the exact original
+bytes when no foreign change is present. An unresolved intent or consumed
+scope must never be replayed automatically.
+
+The maintenance transaction never closes the breaker, changes a policy or
+approval binding, starts or replaces a production container, or grants
+provider authority. Native breaker revalidation remains a separate existing
+control action after successful readback. Production installation of the
+identity-preserving boot script and the Owner-profile correction retain their
+own exact governed release boundaries.

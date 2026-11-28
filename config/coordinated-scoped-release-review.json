@@ -1,8 +1,8 @@
 {
   "schema_version": "3.0",
-  "profile": "coordinated-core-release",
-  "manifest_sha256": "7be17b3d55f1a8c9bb744061695d2489271e6ae92df0911012a4058a701eca76",
-  "scope_sha256": "d806b8b1a2837c42679d6167711cb2680ac794320be80d1a8c434a83799b2864",
-  "candidate_sha": "b243ce581b7d6d56419d1c00a1ed3b121f244b14",
+  "profile": "teams-approval-execution",
+  "scope_sha256": "70513f74fe1bfab79729fe38b939a3ede65996c570111acce0ecc97f010d09c9",
+  "candidate_sha": "f58584c31d573f1245b7569affe77a8992a6b835",
+  "manifest_sha256": "d6032b68bab04638a0049c606144e9dd641ab663e129e83ed6127db05af3f5ca",
   "production_authority": false
 }

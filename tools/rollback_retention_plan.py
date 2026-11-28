@@ -120,14 +120,13 @@ def descriptor(row, *, now, policy):
             "writable_bytes": rw}
 
 
-def choose(rows, *, inventory, maximum, free_slots, now, policy, excluded_ids=()):
+def assess(rows, *, inventory, maximum, free_slots, now, policy, excluded_ids=()):
     policy = validate_policy(policy)
     need(type(maximum) is int and 0 < maximum <= 100
          and type(free_slots) is int and 1 <= free_slots <= 6, "CAPACITY_POLICY")
     need(isinstance(inventory, list) and inventory == sorted(set(inventory))
          and len(inventory) <= maximum, "INVENTORY")
     needed = max(0, len(inventory) + free_slots - maximum)
-    need(needed <= policy["maximum_retirements_per_approved_transaction"], "BATCH_LIMIT")
     need(len(rows) == len(inventory)
          and sorted(r["Name"][1:] for r in rows) == inventory
          and len({r["Id"] for r in rows}) == len(rows), "INVENTORY_CHANGED")
@@ -144,6 +143,18 @@ def choose(rows, *, inventory, maximum, free_slots, now, policy, excluded_ids=()
         eligible.extend({"target": d, "retained_siblings": retained}
                         for d in group[:-retain] if d["id"] not in excluded_ids)
     eligible.sort(key=lambda d: (d["target"]["created_name_at"], d["target"]["name"]))
+    return {"required_retirements": needed, "eligible_retirements": eligible,
+            "historical_equivalence_groups": len(groups),
+            "historical_candidates": sum(len(group) for group in groups.values()),
+            "available_slots": maximum-len(inventory)}
+
+
+def choose(rows, *, inventory, maximum, free_slots, now, policy, excluded_ids=()):
+    assessment = assess(rows, inventory=inventory, maximum=maximum, free_slots=free_slots,
+                        now=now, policy=policy, excluded_ids=excluded_ids)
+    needed = assessment["required_retirements"]
+    need(needed <= policy["maximum_retirements_per_approved_transaction"], "BATCH_LIMIT")
+    eligible = assessment["eligible_retirements"]
     need(len(eligible) >= needed, "INSUFFICIENT_HISTORICAL_DUPLICATES")
     selected = eligible[:needed]
     removed = {x["target"]["name"] for x in selected}
@@ -177,3 +188,34 @@ def unexpected_references(value, target, *, allow_historical_inventory):
                 result.append(field)
     visit(value, ())
     return result
+
+
+RESERVATION_FIELDS = frozenset({"schema_version", "maximum_stopped_rollback_containers",
+    "maximum_increase_per_transaction", "minimum_docker_free_bytes", "minimum_archive_free_bytes",
+    "exact_authenticated_owner_approval_required", "preserve_all_containers_images_volumes",
+    "prefer_existing_duplicate_archival"})
+
+def validate_reservation_policy(policy):
+    need(isinstance(policy, dict) and set(policy) == RESERVATION_FIELDS
+         and policy["schema_version"] == "1.0", "RESERVATION_POLICY_SCHEMA")
+    for key, lo, hi in (("maximum_stopped_rollback_containers", 1, 100),
+                        ("maximum_increase_per_transaction", 1, 6),
+                        ("minimum_docker_free_bytes", 2**30, 100*2**30),
+                        ("minimum_archive_free_bytes", 2**30, 100*2**30)):
+        need(type(policy[key]) is int and lo <= policy[key] <= hi, "RESERVATION_POLICY_BOUNDS")
+    need(all(policy[k] is True for k in ("exact_authenticated_owner_approval_required",
+         "preserve_all_containers_images_volumes", "prefer_existing_duplicate_archival")),
+         "RESERVATION_POLICY_SAFETY")
+    return dict(policy)
+
+def reserve_capacity(desired, *, inventory_count, free_slots, policy):
+    """A minimum positive reservation only; never select a container to delete."""
+    policy = validate_reservation_policy(policy)
+    maximum = desired.get("max_stopped_rollback_containers")
+    need(type(maximum) is int and 0 < maximum <= 100
+         and type(inventory_count) is int and 0 <= inventory_count <= maximum
+         and type(free_slots) is int and 1 <= free_slots <= 6, "RESERVATION_INVENTORY")
+    after = inventory_count + free_slots
+    need(0 < after - maximum <= policy["maximum_increase_per_transaction"]
+         and after <= policy["maximum_stopped_rollback_containers"], "RESERVATION_CEILING_OR_UNNEEDED")
+    return {**desired, "max_stopped_rollback_containers": after}

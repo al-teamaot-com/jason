@@ -85,14 +85,66 @@ def verified_source(installer: str, reviewed: str, candidate: str, rollback: str
             deny("CONTROLLER_UPGRADE_INSTALLER_BYTES_CHANGED")
 
 
+def verify_successful_predecessor(manifest, journal):
+    # The native readback includes authenticated post-boot identity repairs.
+    # It independently checks current container IDs, health, host and policy.
+    current = live.readback.verify_live()
+    original = live.readback.validate(journal["proposed_readback"])
+    if (not current or journal.get("mutation_attempted") is not True
+            or current["release_id"] != manifest["release_id"]
+            or current["manifest_sha256"] != digest(manifest)
+            or current["scope_sha256"] != manifest["scope_sha256"]
+            or current["release_policy_sha256"] != manifest["release_policy_sha256"]
+            or {k:v for k,v in current.items() if k != "components"} !=
+               {k:v for k,v in original.items() if k != "components"}):
+        deny("CONTROLLER_UPGRADE_VERIFIED_RELEASE_MISMATCH")
+    expected = journal.get("candidate_configs", journal["original_configs"])
+    targets = {target["name"] for target in manifest["targets"]}
+    protected = journal["protected_before"]
+    protected_names = set(manifest["protected_services"])
+    components = set(current["components"])
+    if (set(expected) != targets or set(journal["original_configs"]) != targets
+            or set(protected) != protected_names or targets & protected_names
+            or not targets <= components or not components <= targets | protected_names):
+        deny("CONTROLLER_UPGRADE_COMPONENT_SET")
+    for name, row in current["components"].items():
+        prior = original["components"][name]
+        item = live.required_container(name)
+        if name in targets:
+            configuration = expected[name]
+        else:
+            # Unchanged coordinated peers have their own protected snapshot,
+            # not a target candidate fingerprint. Retain exact original image
+            # and ID evidence; a current ID may only come from verified root
+            # readback (including an authenticated post-boot reconciliation).
+            peer = protected[name]
+            if (peer["id"] != prior["container_id"] or peer["image"] != prior["image_id"]
+                    or peer["running"] is not True or peer["status"] != "running"
+                    or peer["oom"] is True):
+                deny("CONTROLLER_UPGRADE_PROTECTED_PEER_EVIDENCE")
+            configuration = peer["configuration_sha256"]
+        if (row["revision"] != prior["revision"] or row["image_id"] != prior["image_id"]
+                or item["Id"] != row["container_id"]
+                or live.config_fingerprint(item) != configuration):
+            deny("CONTROLLER_UPGRADE_COMPONENT_DRIFT")
+
+
 def terminal_offer():
-    host, manifest, profile = dispatcher.load_installed()
-    if dispatcher.scheduled_approved(host, manifest, profile) != {
-            "status": "resolved_prior_attempt_no_action"}:
+    host, manifest, _ = dispatcher.load_installed()
+    # A maintenance preflight can inspect the prior transaction, never run it.
+    path = host._journal_path(manifest)
+    if manifest["schema_version"] != "3.0" or not os.path.lexists(path):
         deny("CONTROLLER_UPGRADE_ACTIVE_RELEASE")
-    journal = live.root_json(host._journal_path(manifest))
-    if journal.get("outcome") != "rollback_verified":
-        deny("CONTROLLER_UPGRADE_PRIOR_ROLLBACK_REQUIRED")
+    require_normal_deployment_enabled(live.FREEZE.parent, manifest["release_policy_sha256"])
+    journal = live.root_json(path)
+    if (journal.get("release_id") != manifest["release_id"]
+            or journal.get("manifest_sha256") != digest(manifest)
+            or journal.get("scope_sha256") != manifest["scope_sha256"]):
+        deny("CONTROLLER_UPGRADE_PRIOR_SCOPE_MISMATCH")
+    if journal.get("outcome") == "production_components_verified":
+        verify_successful_predecessor(manifest, journal)
+    elif journal.get("outcome") != "rollback_verified":
+        deny("CONTROLLER_UPGRADE_UNRESOLVED_PREDECESSOR")
     if any((dispatcher.AUTH / "requests").glob("*.json")):
         deny("CONTROLLER_UPGRADE_PENDING_REQUESTS")
     return host, manifest

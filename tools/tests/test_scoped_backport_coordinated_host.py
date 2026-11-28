@@ -122,6 +122,22 @@ def test_native_helper_has_no_unreviewed_arguments(monkeypatch):
         assert argv[-1]==("node" if t["name"]=="jason-teams-gateway" else "python")
 
 
+def test_canary_reissue_preserves_existing_exact_readonly_bind(monkeypatch):
+    m=manifest()
+    h=host_fixture(monkeypatch,m)
+    t=m["targets"][0]
+    item=container(t["name"],t["rollback_image"],t["rollback_revision"],t["rollback_container_id"])
+    h.canary_environment[t["name"]]={"JASON_OWNER_UAT_MODE":"nonexecuting_test_only"}
+    monkeypatch.setattr(native,"required_container",lambda name:item)
+    assert "--add-readonly-bind" in h._args(m,t)
+    kind,src,dest,rw=native.OWNER_UAT_BIND
+    item["Mounts"]=[{"Type":kind,"Source":src,"Destination":dest,"RW":rw}]
+    assert "--add-readonly-bind" not in h._args(m,t)
+    item["Mounts"][0]["RW"]=True
+    with pytest.raises(ScopedBackportDenied,match="OWNER_UAT_MOUNT_CONFLICT"):
+        h._args(m,t)
+
+
 @pytest.mark.parametrize("foreign",[False,True])
 def test_rollback_interrupted_after_rename(monkeypatch,foreign):
     m=manifest()
@@ -493,7 +509,7 @@ def test_owner_uat_configuration_is_losslessly_bound_to_exact_container_delta(mo
     }
     campaign = {
         "schema_version": "1.0", "purpose": "owner_teams_nonexecuting_uat",
-        "organization_id": "aot", "recipient": "person-al",
+        "organization_id": "aot", "recipient": "person-entra-bee80bdcffb04c50b453c09d4d411f5f",
         "capability": "interaction.owner.acceptance.record", "execution_permitted": False,
         "session_id": "CanaryTest", "expires_at": "2026-11-28T23:00:00+00:00",
     }
@@ -516,8 +532,19 @@ def test_owner_uat_configuration_is_losslessly_bound_to_exact_container_delta(mo
         original, environment=env["jason-runtime"], extra_mount=native.OWNER_UAT_BIND)
     assert candidate == native.config_fingerprint(replacement)
     assert candidate != native.config_fingerprint(original)
+    assert candidate == native.config_fingerprint(
+        replacement, environment=env["jason-runtime"], extra_mount=native.OWNER_UAT_BIND)
+    assert not native.extra_mount_required([native.OWNER_UAT_BIND], native.OWNER_UAT_BIND)
+    with pytest.raises(ScopedBackportDenied, match="OWNER_UAT_MOUNT_CONFLICT"):
+        native.extra_mount_required([native.OWNER_UAT_BIND, native.OWNER_UAT_BIND], native.OWNER_UAT_BIND)
     replacement["Mounts"][0]["RW"] = True
+    with pytest.raises(ScopedBackportDenied, match="OWNER_UAT_MOUNT_CONFLICT"):
+        native.config_fingerprint(replacement, environment=env["jason-runtime"], extra_mount=native.OWNER_UAT_BIND)
     assert candidate != native.config_fingerprint(replacement)
+    campaign["recipient"] = "person-al"
+    with pytest.raises(ScopedBackportDenied, match="OWNER_UAT_CONFIGURATION"):
+        native.owner_uat_environment(Path("/unused"), m, now=now)
+    campaign["recipient"] = native.OWNER_PRINCIPAL
     campaign["execution_permitted"] = True
     with pytest.raises(ScopedBackportDenied, match="OWNER_UAT_CONFIGURATION"):
         native.owner_uat_environment(Path("/unused"), m, now=now)

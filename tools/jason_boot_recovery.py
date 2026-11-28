@@ -9,7 +9,10 @@ This script is intentionally secret-safe:
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+import fcntl
 import hmac
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -28,7 +31,6 @@ OPENBAO_UNSEAL_URL = "http://127.0.0.1:8200/v1/sys/unseal"
 INIT_FILE = Path("/opt/jason/bootstrap/secrets/openbao/init.json")
 CURRENT_ROOT = Path("/opt/jason/current")
 STAGER = CURRENT_ROOT / "tools/stage_provider_read_runtime_credentials.py"
-LIVE_DEPLOY = CURRENT_ROOT / "tools/deploy_live_container.py"
 BOOTSTRAP_TO_STAGED = (
     (Path("/opt/jason/bootstrap/secrets/openbao/autotask-read-approle/role-id"), Path("/run/jason-runtime-credentials/openbao/autotask/role_id")),
     (Path("/opt/jason/bootstrap/secrets/openbao/autotask-read-approle/secret-id"), Path("/run/jason-runtime-credentials/openbao/autotask/secret_id")),
@@ -43,9 +45,19 @@ STAGED_FILES = (
 )
 RUNTIME_CONTAINER = "jason-runtime"
 MCP_CONTAINER = "jason-mcp-pilot"
+LEGACY_RELEASE_LOCK = Path("/var/lib/jason/openclaw/release-manager/production-transaction.lock")
+PMV4_RELEASE_LOCK = Path("/var/lib/jason/pmv4-shadow/control/host-mutation.lock")
+COORDINATED_READBACK = Path("/etc/jason-owner-release/coordinated-readback/component.json")
+HOST_GUARD = Path("/usr/local/lib/jason/scoped-backport/tools/pmv4_host_release_guard.py")
+STAGED_ROOT = Path("/run/jason-runtime-credentials")
+RUNTIME_SECRETS_ROOT = Path("/run/jason-secrets")
 
 
 class RecoveryError(RuntimeError):
+    pass
+
+
+class RecoveryDeferred(RecoveryError):
     pass
 
 
@@ -199,31 +211,136 @@ def staged_credentials_current() -> bool:
     return True
 
 
-def recreate_runtime_for_credential_refresh() -> None:
-    if not LIVE_DEPLOY.is_file():
-        raise RecoveryError("live container replacement helper is missing")
-    inspect = json.loads(run(["docker", "inspect", RUNTIME_CONTAINER]).stdout or "[]")
-    if len(inspect) != 1:
-        raise RecoveryError("live runtime inspection failed")
-    live = inspect[0]
-    image_id = str(live.get("Image") or "")
-    labels = (live.get("Config") or {}).get("Labels") or {}
-    revision = str(labels.get("com.teamaot.jason.source_revision") or "")
-    if not image_id.startswith("sha256:") or len(revision) != 40:
-        raise RecoveryError("live runtime image/revision identity is invalid")
-    rollback = "jason-runtime-credential-refresh-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    result = run([
-        sys.executable, str(LIVE_DEPLOY),
-        "--live", RUNTIME_CONTAINER,
-        "--image", image_id,
-        "--rollback", rollback,
-        "--source-revision", revision,
-        "--health-url", "http://127.0.0.1:8080/healthz",
-        "--harden",
-    ], quiet=True)
-    require_ok(result, "runtime credential remount failed")
-    cleanup = run(["docker", "rm", rollback], quiet=True)
-    require_ok(cleanup, "credential-refresh rollback container cleanup failed")
+@contextmanager
+def runtime_recovery_transaction():
+    """Serialize credential staging and same-ID recovery with release mutations."""
+    if os.path.lexists(PMV4_RELEASE_LOCK) or os.path.lexists(COORDINATED_READBACK):
+        for path in (HOST_GUARD, *HOST_GUARD.parents):
+            info = path.lstat()
+            if (path.is_symlink() or info.st_uid != 0 or info.st_mode & 0o022
+                    or (path == HOST_GUARD and
+                        (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1))
+                    or (path != HOST_GUARD and not stat.S_ISDIR(info.st_mode))):
+                raise RecoveryError("installed host release guard is untrusted")
+        spec = importlib.util.spec_from_file_location("jason_boot_host_guard", HOST_GUARD)
+        if spec is None or spec.loader is None:
+            raise RecoveryError("installed host release guard is unavailable")
+        guard_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard_module)
+        entered = False
+        try:
+            with guard_module.IndependentHostGuard().host_release_transaction():
+                entered = True
+                yield
+        except guard_module.HostGateDenied as exc:
+            if not entered and str(exc) == "PMV4_HOST_TRANSACTION_BUSY":
+                raise RecoveryDeferred("release transaction is active") from None
+            raise
+        return
+    # Legacy single-host installations predate the independent PMv4 lock.
+    # Do not create or replace a lock, and never fall back on a PMv4 host.
+    fd = os.open(LEGACY_RELEASE_LOCK, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or info.st_uid != 1000 or info.st_mode & 0o002):
+            raise RecoveryError("legacy release transaction lock is untrusted")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RecoveryDeferred("release transaction is active") from None
+        yield
+    finally:
+        os.close(fd)
+
+
+def runtime_credential_destinations() -> dict[str, str]:
+    return {str(path): str(RUNTIME_SECRETS_ROOT / path.relative_to(STAGED_ROOT))
+            for path in STAGED_FILES}
+
+
+def runtime_credential_identity(info: dict) -> tuple:
+    """Validate the existing immutable identity and the exact four read-only binds."""
+    identity = info.get("Id", "")
+    image = info.get("Image", "")
+    config = info.get("Config") or {}
+    host = info.get("HostConfig") or {}
+    revision = (config.get("Labels") or {}).get("com.teamaot.jason.source_revision", "")
+    def hex_id(value, size):
+        return isinstance(value, str) and len(value) == size and all(
+            ch in "0123456789abcdef" for ch in value)
+    if (info.get("Name") != "/" + RUNTIME_CONTAINER
+            or not hex_id(identity, 64)
+            or not isinstance(image, str) or not image.startswith("sha256:")
+            or not hex_id(image[7:], 64)
+            or not hex_id(revision, 40)
+            or host.get("RestartPolicy", {}).get("Name") != "unless-stopped"):
+        raise RecoveryError("unexpected runtime recovery identity or configuration")
+    mounts = info.get("Mounts") or []
+    for source, destination in runtime_credential_destinations().items():
+        selected = [m for m in mounts if m.get("Source") == source
+                    or m.get("Destination") == destination]
+        if (len(selected) != 1 or selected[0].get("Source") != source
+                or selected[0].get("Destination") != destination
+                or selected[0].get("Type") != "bind" or selected[0].get("RW") is not False):
+            raise RecoveryError("runtime credential mount topology is invalid")
+    # In-memory equality only: never print, hash, or persist the configuration.
+    ordered_mounts = sorted(mounts, key=lambda row: (str(row.get("Destination")), str(row.get("Source")), str(row.get("Type"))))
+    return identity, image, config, host, ordered_mounts
+
+
+def runtime_credential_mounts_current(identity: str) -> bool:
+    """Compare mount metadata only; do not read or disclose credential values."""
+    expected = []
+    for source, destination in runtime_credential_destinations().items():
+        info = os.lstat(source)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 1000
+                or info.st_gid != 1000 or stat.S_IMODE(info.st_mode) != 0o400
+                or not 0 < info.st_size <= 16384):
+            raise RecoveryError("runtime credential mount source is invalid")
+        expected.append([destination, info.st_dev, info.st_ino])
+    probe = (
+        "import json,os,stat,sys\n"
+        "stale=False\n"
+        "for path,dev,ino in json.loads(sys.argv[1]):\n"
+        " s=os.lstat(path)\n"
+        " if not stat.S_ISREG(s.st_mode) or s.st_uid!=1000 or s.st_gid!=1000 "
+        "or stat.S_IMODE(s.st_mode)!=0o400: sys.exit(2)\n"
+        " if (s.st_dev,s.st_ino)!=(dev,ino): stale=True\n"
+        "sys.exit(42 if stale else 0)"
+    )
+    result = run(["docker", "exec", "--user", "1000:1000", identity,
+                  "python", "-c", probe, json.dumps(expected)], quiet=True)
+    if result.returncode == 42:
+        return False
+    require_ok(result, "runtime credential mount verification failed")
+    return True
+
+
+def ensure_runtime_credential_mounts() -> None:
+    """Recover existing runtime only; never create, remove, or adopt a container."""
+    before = inspect_container(RUNTIME_CONTAINER)
+    baseline = runtime_credential_identity(before)
+    identity = baseline[0]
+    state = before.get("State", {}).get("Status")
+    if state == "running":
+        if not runtime_credential_mounts_current(identity):
+            require_ok(run(["docker", "restart", identity], quiet=True),
+                       "same-container runtime credential remount failed")
+    elif state in ("exited", "created"):
+        require_ok(run(["docker", "start", identity], quiet=True),
+                   "existing runtime startup failed")
+    else:
+        raise RecoveryError("runtime is not in a recoverable state")
+    wait_container_health(RUNTIME_CONTAINER)
+    after = inspect_container(RUNTIME_CONTAINER)
+    if runtime_credential_identity(after) != baseline:
+        raise RecoveryError("runtime identity or configuration changed during recovery")
+    if (after.get("State", {}).get("Status") != "running"
+            or (after.get("State", {}).get("Health") or {}).get("Status") != "healthy"):
+        raise RecoveryError("runtime did not become healthy after recovery")
+    if not runtime_credential_mounts_current(identity):
+        raise RecoveryError("runtime credential mount remains stale after recovery")
     print("RUNTIME_CREDENTIAL_REMOUNT=PASS")
 
 
@@ -395,16 +512,11 @@ def main() -> int:
             raise RecoveryError("OpenBao is not initialized and unsealed after recovery")
         print("OPENBAO_READY=PASS")
 
-        credentials_changed = stage_runtime_credentials()
-        if credentials_changed:
-            recreate_runtime_for_credential_refresh()
-
-        require_ok(
-            run(["docker", "update", "--restart", "unless-stopped", RUNTIME_CONTAINER], quiet=True),
-            "failed to set runtime restart policy",
-        )
-        docker_start(RUNTIME_CONTAINER)
-        wait_container_health(RUNTIME_CONTAINER)
+        with runtime_recovery_transaction():
+            stage_runtime_credentials()
+            # Check the actual bind in every cycle, even if staging was already
+            # current (e.g. an interrupted previous recovery).
+            ensure_runtime_credential_mounts()
         ensure_mcp()
         recover_ticket_core()
 
@@ -413,6 +525,9 @@ def main() -> int:
                 run(["docker", "start", optional], quiet=True)
 
         print("JASON_BOOT_RECOVERY=PASS")
+        return 0
+    except RecoveryDeferred:
+        print("JASON_BOOT_RECOVERY=DEFERRED_PRODUCTION_TRANSACTION")
         return 0
     except Exception as exc:
         print(f"JASON_BOOT_RECOVERY=FAIL reason={type(exc).__name__}: {exc}", file=sys.stderr)

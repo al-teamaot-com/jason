@@ -26,7 +26,7 @@ from tools import scoped_backport_coordinated as co
 from tools import scoped_backport_component_readback as readback
 from implementation.kernel.signed_owner_release_v2 import (
     read_retired_release_policy, require_retired_release_mode,
-    require_normal_deployment_enabled,
+    require_normal_deployment_enabled, OWNER_PRINCIPAL,
 )
 from tools.pmv4_host_release_guard import IndependentHostGuard
 from tools.scoped_backport_native_host import (
@@ -389,6 +389,16 @@ def required_container(name: str) -> dict:
     return item
 
 
+def extra_mount_required(mounts: list[tuple], expected: tuple) -> bool:
+    """Preserve a pre-existing exact read-only bind; deny any conflict or duplicate."""
+    matches = [mount for mount in mounts if mount[2] == expected[2]]
+    if not matches:
+        return True
+    if matches != [expected]:
+        deny("COORDINATED_OWNER_UAT_MOUNT_CONFLICT")
+    return False
+
+
 def config_fingerprint(item: Mapping, *, environment: Mapping | None = None,
                        extra_mount: tuple | None = None) -> str:
     """Compare configuration without writing environment secrets to receipts."""
@@ -403,9 +413,7 @@ def config_fingerprint(item: Mapping, *, environment: Mapping | None = None,
     values.update(environment or {})
     mounts = [(m["Type"], m["Source"], m["Destination"], m["RW"])
               for m in item.get("Mounts") or []]
-    if extra_mount is not None:
-        if any(m[2] == extra_mount[2] for m in mounts):
-            deny("COORDINATED_OWNER_UAT_MOUNT_ALREADY_PRESENT")
+    if extra_mount is not None and extra_mount_required(mounts, extra_mount):
         mounts.append(extra_mount)
     # Retain the prior security settings, identities, networks and all mounts.
     return digest({
@@ -441,7 +449,7 @@ def owner_uat_environment(repo: Path, manifest: Mapping, *, now: datetime) -> di
             or campaign["schema_version"] != "1.0"
             or campaign["purpose"] != "owner_teams_nonexecuting_uat"
             or campaign["organization_id"] != "aot"
-            or campaign["recipient"] != "person-al"
+            or campaign["recipient"] != OWNER_PRINCIPAL
             or campaign["capability"] != "interaction.owner.acceptance.record"
             or campaign["execution_permitted"] is not False
             or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_:-]{4,87}", campaign["session_id"])
@@ -638,7 +646,10 @@ class CoordinatedHost(NativeScopedBackportHost):
         if environment:
             for key, value in sorted(environment.items()):
                 args.extend(("--set-env", key + "=" + value))
-            args.extend(("--add-readonly-bind", OWNER_UAT_READBACK_DIRECTORY + ":" + OWNER_UAT_READBACK_DIRECTORY))
+            mounts = [(row["Type"], row["Source"], row["Destination"], row["RW"])
+                      for row in required_container(name).get("Mounts", [])]
+            if extra_mount_required(mounts, OWNER_UAT_BIND):
+                args.extend(("--add-readonly-bind", OWNER_UAT_READBACK_DIRECTORY + ":" + OWNER_UAT_READBACK_DIRECTORY))
         return args
 
     def _frozen(self, manifest: Mapping) -> dict:

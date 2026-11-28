@@ -8,6 +8,6 @@ Requires=docker.service
 Type=oneshot
 WorkingDirectory=/opt/jason/sharepoint-site-control
 EnvironmentFile=/etc/jason/sharepoint-site-control.env
-ExecStart=/usr/bin/docker compose -f compose.yaml run --rm --no-deps sharepoint-site-control python /app/tools/sharepoint_site_access_service.py discover
+ExecStart=/usr/bin/docker compose -f compose.release.yaml run --pull never --rm --no-deps sharepoint-site-control python /app/tools/sharepoint_site_access_service.py discover
 TimeoutStartSec=900
 NoNewPrivileges=yes

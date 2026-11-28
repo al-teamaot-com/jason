@@ -137,3 +137,38 @@ def test_recently_restarted_or_unknown_stop_time_is_not_historical():
         a["State"]["FinishedAt"] = finished
         with pytest.raises(PermissionError,match="INSUFFICIENT_HISTORICAL_DUPLICATES"):
             select([a,b],free=1)
+
+RESERVATION = json.loads((Path(__file__).resolve().parents[2]/"config/operations/rollback-capacity-reservation-v1.json").read_text())
+
+def test_reservation_is_minimum_delta_and_preserves_every_other_setting():
+    before = {"schema_version":"1.0", "max_stopped_rollback_containers":27,
+              "rollback_container_prefixes":["jason-runtime-rollback-"], "other":{"unchanged":True}}
+    assert p.reserve_capacity(before,inventory_count=27,free_slots=2,policy=RESERVATION)=={
+        **before,"max_stopped_rollback_containers":29}
+    assert before["max_stopped_rollback_containers"]==27
+    assert p.reserve_capacity(before,inventory_count=26,free_slots=2,policy=RESERVATION)["max_stopped_rollback_containers"]==28
+
+@pytest.mark.parametrize("limit,count,slots",[(30,30,1),(27,27,3),(27,25,2),(27,28,1),(27,27,True),(27,-1,2)])
+def test_reservation_cannot_exceed_ceiling_or_reserve_unnecessary_slots(limit,count,slots):
+    with pytest.raises(PermissionError):
+        p.reserve_capacity({"max_stopped_rollback_containers":limit},inventory_count=count,free_slots=slots,policy=RESERVATION)
+
+@pytest.mark.parametrize("key,value",[("preserve_all_containers_images_volumes",False),
+    ("exact_authenticated_owner_approval_required",False),("prefer_existing_duplicate_archival",False),
+    ("maximum_stopped_rollback_containers",101),("maximum_increase_per_transaction",7),
+    ("minimum_docker_free_bytes",0),("minimum_archive_free_bytes",False),("unknown",True)])
+def test_reservation_configuration_cannot_disable_safety(key,value):
+    with pytest.raises(PermissionError):p.validate_reservation_policy({**RESERVATION,key:value})
+
+def test_assessment_reports_actual_capacity_and_unique_historical_evidence():
+    rows=[row("runtime","20261110",1),row("runtime","20261111",2,image="c")]
+    result=p.assess(rows,inventory=sorted(r["Name"][1:] for r in rows),maximum=2,free_slots=2,now=NOW,policy=POLICY)
+    assert result=={"required_retirements":2,"eligible_retirements":[],"historical_equivalence_groups":2,
+                    "historical_candidates":2,"available_slots":0}
+    with pytest.raises(PermissionError,match="INSUFFICIENT_HISTORICAL_DUPLICATES"):select(rows)
+
+
+def test_reviewed_single_runtime_slot_reservation():
+    assert p.reserve_capacity({"max_stopped_rollback_containers":29},inventory_count=29,free_slots=1,policy=RESERVATION)=={"max_stopped_rollback_containers":30}
+    with pytest.raises(PermissionError):
+        p.reserve_capacity({"max_stopped_rollback_containers":29},inventory_count=29,free_slots=2,policy=RESERVATION)
