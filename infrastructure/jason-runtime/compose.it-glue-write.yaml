@@ -1,0 +1,10 @@
+# Explicit, separate IT Glue write activation overlay.
+# Include ONLY in an exact-SHA, Owner-authorized release after staging and verifying
+# the distinct write AppRole; never include in the normal read-only compose path.
+services:
+  jason-runtime:
+    environment:
+      JASON_IT_GLUE_RECORDS_RW_PROFILE: ${JASON_IT_GLUE_RECORDS_RW_PROFILE:?requires reviewed governed-records-v1 enablement}
+    volumes:
+      - ${JASON_IT_GLUE_WRITE_OPENBAO_ROLE_ID_HOST_PATH:?missing write role path}:/run/jason-secrets/openbao/it-glue-write/role_id:ro
+      - ${JASON_IT_GLUE_WRITE_OPENBAO_SECRET_ID_HOST_PATH:?missing write secret path}:/run/jason-secrets/openbao/it-glue-write/secret_id:ro

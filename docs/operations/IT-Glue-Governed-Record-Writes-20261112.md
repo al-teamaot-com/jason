@@ -1,0 +1,169 @@
+# IT Glue governed record create/update — release preparation
+
+Date: 2026-11-25 (source rebase and review)
+Branch: feature/itglue-governed-records-rw-20261112
+GitHub PR: https://github.com/al-teamaot-com/jason/pull/2455
+Status: REBASED SOURCE ONLY. The current candidate is not provider-accepted, deployed, or active.
+
+## Current source status — 2026-11-25
+
+- Rebased the seven IT Glue write commits onto protected `main` at `4716797aee516140ab31f7f3add63effb61f4a2f`, which includes ADR-014.
+- The exact rebase completed without conflicts. `git diff --check` passed and the five focused IT Glue source suites passed (62 tests).
+- The live Jason capability registry currently reports no active IT Glue capabilities. This source remains a bounded create/update implementation for three ordinary record families; it is not the complete IT Glue CRUD target described by ADR-014.
+- No production or provider action was performed. The PR must remain a draft until separate write credentials, a validated disposable test organization, provider-backed acceptance, and exact release controls are verified. The former credential and rollback observations below are historical and must be refreshed before use.
+
+ADR-014: `docs/decisions/ADR-014-Outcome-Centered-Reasoning-and-Governed-Execution.md`. This candidate supplies a first reusable, governed write slice; it does not satisfy the ADR's broader implementation acceptance criteria by itself.
+
+## Components and exact scope
+
+- implementation/connectors/it_glue/governed_record_write.py: J-102 prepared execution only; flexible assets create/trait updates; document metadata creation/rename; configuration creation. No delete, credential, attachment, ACL, unrestricted mutation, or bulk capability.
+- implementation/connectors/it_glue/configuration_note_update.py: pre-existing separately governed source-only notes-only configuration update, not activated by this change.
+- implementation/connectors/it_glue/create_claim_store.py: durable SQLite creation claims. Claim first, one POST maximum; verify by independent GET. No automatic POST retries after ambiguous failures. Creation claim is verified in database after successful provider readback.
+- implementation/runtime_service/src/jason_runtime/it_glue_record_management.py: five named canonical capabilities and one dedicated provider; only an exact explicit release-controlled profile can activate, otherwise BUILDING/PLANNED and unregistered invocation.
+- implementation/runtime_service/src/jason_runtime/composition.py: guarded registration and conditional J-102 invoker wiring; no effect on default production runtime when profile absent.
+- implementation/connectors/core/openbao_secrets.py: separate readwrite logical secret points only to secret/data/connectors/it-glue/production/write with api_key field.
+- tools/provider_secret_provision.py: add distinct it_glue_write provider policy/role/secret to existing root-governed tool; not executed.
+- tools/stage_it_glue_write_runtime_credentials.py: reuse root-only role credential staging with explicit --stage (optional, separately authorized --replace-existing); no secret printing; never invoked on real credentials during development.
+- infrastructure/jason-runtime/compose.it-glue-write.yaml: optional Compose override to bind only the separate write AppRole and activate an explicitly selected profile. Not part of the default Compose path.
+
+## Governance and authorization
+
+All writes remain on the Central Orchestrator J-102 prepared plan and the existing JKD-001 authority boundary. A client_id and principal identity are required; a trusted active Microsoft/Jason identity binding is verified. The existing SQLiteClientBoundaryRepository must prove one exact client to one IT Glue org mapping with status VALIDATED, an actual validation timestamp, and consistent reverse lookup. Cross-client, restricted, ambiguous, or stale records are rejected.
+
+IT Glue API keys represent service-level rights, not native per-request impersonation of each technician. Jason’s existing exact-action/role/client authority remains compulsory and provider API-key rights are the ceiling of what the actual API permits; a verified Microsoft identity alone does NOT grant execution authority.
+
+One-off provider POST may not be retried after an ambiguous result. A governed operator reconciliation workflow using provider evidence is still required before claiming production recovery readiness. The durable claim store itself is connected to the runtime authority volume only if explicit write activation occurs.
+
+## Vendor REST provider contracts and restrictions
+
+Documented IT Glue API routes include organization relationships for POST flexible assets, documents and configurations, and GET organization relationship document-folder by folder ID; record PATCH requests use the provider resource endpoint. The document code only creates bounded metadata (not rich document bodies). Document folder is pre-read and verified to belong to the same organization and to be unrestricted. Flexible asset PATCH replaces all traits, so this implementation merges only safe simple scalar/list traits and fails closed for complex, credential-like, linked or restricted existing fields. Successful mock transport tests are NOT a live provider acceptance test.
+
+IT Glue API documentation: https://api.itglue.com/developer/
+
+## Read-access recovery — separate exact release
+
+Live IT Glue read continues failing with OPENBAO_AUTH_FAILED. Root-managed jason-boot-recovery currently reports staged credentials ALREADY_READY without checking source freshness. Source regression 88283d358 removed the previous safe freshness check. Separate draft recovery PR https://github.com/al-teamaot-com/jason/pull/2457 restores the previously verified root-managed local-source vs staged credential comparison and narrowly scoped exact-image runtime remount. This does not rotate AppRole. If the protected AppRole itself is revoked, a further governed root AppRole identity recovery is required under issue #2228. No direct shell workaround, secret exposure, or read key reuse for writes.
+
+## Required preproduction/provider acceptance
+
+1. Authoritatively verify a deliberately controlled IT Glue test organization/client mapped through the existing client boundary and identity systems. Record only IDs/metadata; do not expose credentials.
+2. Through root-governed provisioning, create/store a distinct write API credential and least-privilege IT Glue write AppRole. Confirm preflight and staging; no fallback to read key.
+3. Execute provider-backed reads under governed requester; then one isolated approved create and update in a disposable, non-restricted test resource; verify native response shapes and independent readback, negative ACL/403, cross-client denials, idempotency, reconciliation, client matching and no collateral effects.
+4. Complete security and dependency review, static tests, CI, exact immutable source revision, rollback revision/artifact and independent production health canary plan.
+5. Seek a new authenticated exact-SHA production release approval under existing freeze/PMV3 rules. Do not infer release authority from engineering authorization or this document.
+6. Deploy only approved isolated components and verify both IT Glue functions and unaffected autonomous ticket processing and other protected-core services. Restore freeze exactly; roll back on validation failure.
+
+## Known unresolved limitations
+
+- Production read AppRole authentication fails. Existing root recovery may need a privileged exact-action approval beyond code deployment.
+- No live write API credential or validated test organization was independently verified.
+- No provider-side create/update or production rollback can be claimed.
+- Activation is tested only in source and deliberately disabled in current production.
+- The optional Compose overlay must pass isolated deployment checks and exact release packaging.
+- Document body editing/attachments and configuration field update other than pre-existing notes-only source adapter are separate capabilities and not yet implemented.
+
+## Test evidence and acceptance
+
+Focused IT Glue connector and runtime composition/source tests have passed, including read regression, core write operations, schema deny rules, separate credential paths, durable claim concurrency and restricted/cross-client records. Test data are simulated; production live write acceptance has not passed. Preserve deterministic J-102 plan fingerprints, audit proof and last known good rollback.
+
+## Reviewed concurrent integration (2026-11-12)
+
+Integration coordination: #2454 #2441 #2438 #2405 #2395 #2393 #2336 #2373 #2439 #2445
+
+PR #2454 adds Microsoft Graph group-read/group-write OpenBao mappings and provider profiles and extends only the Microsoft Graph credential-input dispatch. IT Glue writes use distinct it_glue.readwrite mapping and it_glue_write provisioner profile. The changes are additive, use different secret paths and logical names, and do not overwrite one another. Preserve both scopes at merge, and re-review if either PR changes. This coordination is not an activation approval.
+
+The exact installed rollback baseline must be re-read at release preparation; the former 690250b4 source has already been superseded in production by signed release d1b8c196. No code or production activation follows from this documentation acknowledgement.
+
+CI event binding: The reviewed unified Integration coordination line must be present in the PR description before the source synchronization event. Re-running a job from a prior event may retain the earlier PR-body snapshot; the post-review CI run must assess the final overlap set. This does not waive any repository-hygiene check.
+
+## November 27 — AOT controlled acceptance target and initial credential custody
+
+The requesting Owner designated IT Glue organization 5710249, Atlantic Office
+Technologies - AOT, for controlled write testing. This is a scope decision,
+not an independently authenticated exact production-release receipt. AOT is a
+real organization, not a disposable whole organization. Only newly designated
+non-restricted synthetic test records may be created or updated in this
+acceptance run; all pre-existing records, credential records, ACLs, deletes and
+cross-client writes remain excluded. Verify the exact organization and a
+validated client boundary through provider-backed evidence before any write.
+The read-only live boundary inventory contains no IT Glue mapping for this
+organization and the live governed organization capability is not registered.
+Do not infer a client ID from the supplied vendor organization ID.
+
+Root custody inspection found the existing separate IT Glue read and
+configuration-notes-write identities, but no general-write AppRole. The
+general-write secret must be newly supplied at a local masked credential
+prompt using a distinct vendor write key; never collect it in chat or reuse a
+read/notes key. The existing provisioner now applies its create-only CAS=0
+contract to this exact write secret path. Do not rotate or overwrite an
+existing credential on a failed first provisioning attempt. Protected source
+review, exact native provisioning authorization and verified readback remain
+required before use. No live provisioning or provider write occurred in this
+review.
+
+## November 27 — Owner-directed shared vendor-key successor
+
+The Owner selected reuse of the already provisioned IT Glue API key for both
+read and write while retaining distinct Jason authorization, client boundaries
+and auditing. This explicitly supersedes the earlier requirement for a second
+vendor key and a separate stored copy of that key for this IT Glue integration
+only. It is a policy/design direction, not an authenticated exact deployment
+or credential-mutation receipt.
+
+Independent live verification resolved the existing it_glue.readonly credential
+with its existing read AppRole, without disclosing a value. The historical
+configuration-notes-write identity could not resolve the proposed separate
+production/write secret (HTTP 403). The new general-write role does not yet
+exist. Vendor write permission of the existing key has NOT been demonstrated
+by a provider mutation.
+
+Keep the existing canonical KV path and read AppRole unchanged. The dedicated
+write AppRole receives read access to that exact existing KV record, with its
+own policy, role, staging directory and runtime mount. Only the dedicated
+writer receives the explicit it_glue.readwrite logical mapping; the default
+resolver does not expose that alias. There is no fallback from the write
+resolver to the read runtime identity. Use the existing governed
+provider-secret lifecycle reactivate action to bind an identity to an existing
+credential. Both ordinary provisioning entrypoints and direct lifecycle/CAS
+value mutations fail closed for the alias; key lifecycle remains under the
+canonical it_glue profile. Deactivating the write identity preserves the
+canonical record and existing read identity. No second API key, key re-entry,
+copy, rotation or deletion is needed. Existing active read behavior is
+unchanged. Keep default production write activation disabled.
+
+This is authorization isolation inside Jason, not separate vendor credentials:
+the vendor sees the same integration key, its rights are shared and rotating
+or revoking that key affects both routes. Provider-native per-technician
+credential attribution remains unverified; ADR-014 continues to prohibit
+credential disclosure, creation and updates. Retain J-102 exact-plan,
+requester binding, validated forward/reverse client mapping, restricted-record
+denials, one-shot claim and independent readback. AOT 5710249 remains the only
+designated test organization; do not modify existing records. Actual vendor
+write rights, exact client mapping and authorized test-record acceptance
+remain to be verified. Source review does not grant production access.
+
+### Independently verified AOT target and remaining gates
+
+2026-11-27 governed live documentation.organization.read succeeded for
+5710249 (correlation corr_mcp_e4b4d34aad6c4606adb6be019bbf554c); exact
+name Atlantic Office Technologies - AOT, status Active, short-name 250.
+This also proves live read access works. A matching Autotask search
+(correlation corr_mcp_afa7118f76144eecba3981ca7b3ef33a) found the exact name
+and companyNumber 250 at company 1156, but that PSA record has isActive=false
+and the IT Glue organization reports orphaned PSA integration. Do not infer
+a live PSA relationship or substitute the different active child test company.
+Existing validated Microsoft boundaries and the canonical pilot documents
+identify client-aot-internal as AOT's internal client. Propose that exact
+internal client for the authorized IT Glue test, subject to the existing
+governed boundary bootstrap and independent security review. No IT Glue
+client-boundary entry currently exists; a successful vendor read does not
+write or validate the boundary ledger.
+
+The lifecycle reactivate path verifies the canonical read identity before
+granting the dedicated write identity access. It verifies both identities
+after configuration and rejects a changed canonical KV version. The
+operation never writes the key. Production activation is not established;
+independent review is required for credential and client-boundary changes.
+If write-role verification fails, use only governed write-identity
+deactivation/rollback; never rotate, remove, or overwrite the canonical
+credential to recover the write profile.

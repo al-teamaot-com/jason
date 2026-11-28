@@ -44,6 +44,17 @@ class OpenBaoHttpError(OpenBaoSecretResolutionError):
             self.error_code = f"OPENBAO_HTTP_STATUS_{status_code}"
 
 
+# One existing vendor credential. The read path retains its historical name
+# and custody. The write alias is intentionally NOT in DEFAULT_MAPPINGS:
+# ordinary read resolvers must not gain a logical write-secret route.
+IT_GLUE_VENDOR_KEY_PATH = "secret/data/connectors/it-glue/production/read-only"
+IT_GLUE_WRITE_SHARED_MAPPINGS: Mapping[str, str] = {
+    "it_glue.readwrite": IT_GLUE_VENDOR_KEY_PATH,
+}
+IT_GLUE_WRITE_SHARED_FIELDS: Mapping[str, frozenset[str]] = {
+    "it_glue.readwrite": frozenset({"api_key"}),
+}
+
 DEFAULT_MAPPINGS: Mapping[str, str] = {
     "openai.semantic_intent": (
         "secret/data/providers/openai/production/semantic-intent"
@@ -54,9 +65,7 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "autotask.write": (
         "secret/data/connectors/autotask/production/write"
     ),
-    "it_glue.readonly": (
-        "secret/data/connectors/it-glue/production/read-only"
-    ),
+    "it_glue.readonly": IT_GLUE_VENDOR_KEY_PATH,
     "datto_rmm.readonly": (
         "secret/data/connectors/datto-rmm/production/read-only"
     ),
