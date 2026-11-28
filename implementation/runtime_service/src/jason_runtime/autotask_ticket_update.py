@@ -839,6 +839,29 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
                     f"{field} failed readback"
                 )
 
+    def _verify_expected_before(self, *, request: ConnectorRequest, expected: Mapping[str, Any]) -> None:
+        """Optional caller-pinned precondition, independently read before PATCH.
+
+        This is a read-before-write guard, not a provider-atomic compare-and-set.
+        It is part of the immutable original request and never forwarded as a
+        provider field. Omitted preconditions preserve existing behavior.
+        """
+        if "expected_before" not in request.arguments:
+            return
+        before = request.arguments["expected_before"]
+        if (not isinstance(before, Mapping) or before.get("id") != expected["id"]
+                or type(before.get("id")) is not int or len(before) < 2
+                or not set(before) <= SAFE_TICKET_UPDATE_FIELDS | {"id", "companyID"}):
+            raise ValueError("AUTOTASK_TICKET_UPDATE_EXPECTED_BEFORE_INVALID")
+        for field, value in before.items():
+            if field in _INTEGER_FIELDS | {"id", "companyID"}:
+                if type(value) is not int or value < 1:
+                    raise ValueError("AUTOTASK_TICKET_UPDATE_EXPECTED_BEFORE_INVALID")
+            elif not isinstance(value, str) or not value or value != value.strip() or len(value) > _MAX_RESOLUTION_LENGTH:
+                raise ValueError("AUTOTASK_TICKET_UPDATE_EXPECTED_BEFORE_INVALID")
+        observed = self._readback(request=request, ticket_id=expected["id"])
+        self._verify(expected=before, observed=observed)
+
     def prepare_governed_execution(
         self,
         request: ConnectorRequest,
@@ -928,6 +951,7 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
         try:
             if not autotask_mutation_execution_enabled():
                 raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
+            self._verify_expected_before(request=request, expected=expected)
             payload = self._transport.request(
                 method=prepared.method,
                 url=prepared.url,
@@ -1018,6 +1042,8 @@ class AutotaskTicketUpdateConnector(AutotaskMutationConnector):
             context=request.context,
             arguments={**dict(request.arguments), "payload": expected},
         )
+        if "expected_before" in normalized_request.arguments:
+            raise PermissionError("AUTOTASK_TICKET_UPDATE_EXPECTED_BEFORE_REQUIRES_GOVERNED_PLAN")
         result = super().execute(normalized_request)
         return self._verified_result(request=request, expected=expected, result=result)
 
