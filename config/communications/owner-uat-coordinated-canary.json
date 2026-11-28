@@ -2,9 +2,9 @@
   "schema_version": "1.0",
   "purpose": "owner_teams_nonexecuting_uat",
   "organization_id": "aot",
-  "recipient": "person-al",
+  "recipient": "person-entra-bee80bdcffb04c50b453c09d4d411f5f",
   "capability": "interaction.owner.acceptance.record",
   "execution_permitted": false,
-  "session_id": "OwnerTeamsCanary20261127",
-  "expires_at": "2026-11-28T23:00:00+00:00"
+  "session_id": "OwnerTeamsCanary20261128Licensed01",
+  "expires_at": "2026-11-29T23:00:00+00:00"
 }
