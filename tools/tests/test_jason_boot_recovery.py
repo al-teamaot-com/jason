@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 from copy import deepcopy
+from contextlib import contextmanager
+import os
 import fcntl
 import json
 from pathlib import Path
@@ -35,17 +37,56 @@ def test_current_credentials_do_not_refresh(tmp_path):
         patch.object(mod,'BOOTSTRAP_TO_STAGED',tuple(pairs)),
         patch.object(mod,'STAGED_FILES',tuple(dst for _,dst in pairs)),
         patch.object(mod.os,'geteuid',return_value=0),
-        patch.object(mod.os,'lstat',side_effect=lambda p: _fake_lstat(Path(p), pairs)),
+        fixture_credential_ownership(pairs),
     ):
         assert mod.staged_credentials_current() is True
 
 
-def _fake_lstat(path: Path, pairs):
-    st=path.stat()
-    source={a for a,_ in pairs}
-    uid=0 if path in source else 1000
-    gid=0 if path in source else 1000
-    return SimpleNamespace(st_mode=st.st_mode,st_uid=uid,st_gid=gid,st_size=st.st_size,st_ino=st.st_ino,st_dev=st.st_dev)
+@contextmanager
+def fixture_credential_ownership(pairs, *, staged_uid=1000, staged_gid=1000):
+    """Synthetic file ownership independent of the CI runner UID/GID.
+
+    Mock both Path.stat (staging readiness) and os.lstat (bounded reads),
+    only for fixture paths. Keep real mode, type, size, inode and device.
+    """
+    original_stat = Path.stat
+    original_lstat = os.lstat
+    owners = {src: (0, 0) for src, _ in pairs}
+    owners.update({dst: (staged_uid, staged_gid) for _, dst in pairs})
+
+    def ownership(path, metadata):
+        if path not in owners:
+            return metadata
+        uid, gid = owners[path]
+        values = list(metadata)
+        values[4:6] = [uid, gid]
+        return os.stat_result(values)
+
+    def path_stat(path, *args, **kwargs):
+        return ownership(path, original_stat(path, *args, **kwargs))
+
+    def os_lstat(path, *args, **kwargs):
+        metadata = original_lstat(path, *args, **kwargs)
+        if isinstance(path, (str, os.PathLike)):
+            return ownership(Path(path), metadata)
+        return metadata
+
+    with (patch.object(Path, "stat", path_stat),
+          patch.object(mod.os, "lstat", side_effect=os_lstat)):
+        yield
+
+
+@pytest.mark.parametrize("uid,gid", [(1234, 1000), (1000, 1234)])
+def test_staged_wrong_ownership_rejected(tmp_path, uid, gid):
+    source, staged = tmp_path/"source", tmp_path/"staged"
+    write(source, b"synthetic", 0o600)
+    write(staged, b"synthetic", 0o400)
+    with (patch.object(mod, "BOOTSTRAP_TO_STAGED", ((source, staged),)),
+          patch.object(mod, "STAGED_FILES", (staged,)),
+          fixture_credential_ownership(((source, staged),),
+                                      staged_uid=uid, staged_gid=gid)):
+        with pytest.raises(mod.RecoveryError, match="staging metadata is invalid"):
+            mod.staged_credentials_current()
 
 
 def test_mismatch_is_detected_without_printing_values(tmp_path):
@@ -59,7 +100,7 @@ def test_mismatch_is_detected_without_printing_values(tmp_path):
     with (
         patch.object(mod,'BOOTSTRAP_TO_STAGED',tuple(pairs)),
         patch.object(mod,'STAGED_FILES',tuple(dst for _,dst in pairs)),
-        patch.object(mod.os,'lstat',side_effect=lambda p: _fake_lstat(Path(p), pairs)),
+        fixture_credential_ownership(pairs),
     ):
         assert mod.staged_credentials_current() is False
 

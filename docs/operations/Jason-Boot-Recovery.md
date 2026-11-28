@@ -113,3 +113,33 @@ The recovery controller checks the four exact read-only credential mounts agains
 The original container ID, image, revision, configuration and mounts must remain unchanged, the runtime must become healthy, and the refreshed bind mounts must be independently verified. Unexpected topology, failed probes and failed postchecks fail closed. No container recreation, rollback-container deletion, provider credential change, secret-value output, release-readback rewrite, or breaker closure is performed.
 
 The 2026-11-28 isolated Docker check proved stale file-bind detection after atomic replacement and successful same-ID restart/rebind. Source and synthetic regression acceptance does not authorize production installation. An exact governed host-file release, rollback evidence and live readback remain required. The existing post-outage container-ID mismatch must be reconciled separately through the authenticated native release-control recovery path; this change prevents recurrence but does not retroactively repair that protected record.
+
+
+### Governed reconciliation after an already completed boot replacement
+
+The signed maintenance action in `tools/scoped_backport_boot_readback_reconcile.py`
+is a separate source-reviewed recovery operation, not a release or a new
+approval mechanism. It accepts only the exact previously reviewed scope
+derived from the active completed coordinated release, the original signed
+Owner decision and consumption record, the current boot remount evidence,
+unchanged component image/revision/configuration identities, and the current
+normal release policy. Only the Runtime container ID may differ.
+
+Preparation runs from a sealed root-owned source bundle after protected-main
+and exact CI verification. The existing local Owner verifier authenticates
+the licensed Owner interactively and the existing release signer binds a
+one-use decision to the complete maintenance offer and source revisions.
+The native transaction consumes that decision under both release locks,
+preserves the original release journal and historical approval, records the
+exact before/after bytes, replaces the single active readback file with
+compare-and-replace, and independently verifies live identities, configuration,
+protected peers and policy. A failed postcheck restores the exact original
+bytes when no foreign change is present. An unresolved intent or consumed
+scope must never be replayed automatically.
+
+The maintenance transaction never closes the breaker, changes a policy or
+approval binding, starts or replaces a production container, or grants
+provider authority. Native breaker revalidation remains a separate existing
+control action after successful readback. Production installation of the
+identity-preserving boot script and the Owner-profile correction retain their
+own exact governed release boundaries.
