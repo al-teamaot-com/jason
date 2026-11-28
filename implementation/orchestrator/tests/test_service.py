@@ -202,3 +202,32 @@ def test_invocation_argument_error_returns_safe_machine_readable_code():
     assert result.status is OrchestrationStatus.FAILED
     assert result.error_code == "INVALID_CAPABILITY_ARGUMENTS"
     assert "secret client filter detail" not in repr(result) + repr(audit.events)
+
+
+@pytest.mark.parametrize("failure", [
+    "labor_permission", "ticket_arguments", "dns_scope", "credential_auth",
+])
+def test_staff_diagnostic_codes_survive_orchestration_without_exception_text(failure):
+    from connectors.dnsfilter.mcp_connector import DnsFilterMcpScopeError
+    from connectors.microsoft_graph.token import MicrosoftCredentialError
+    from orchestrator.autotask_information_authorizer import AutotaskTimeEntryPermissionUnproven
+    from orchestrator.provider_read_argument_adapter import ProviderReadArgumentError
+
+    errors = {
+        "labor_permission": AutotaskTimeEntryPermissionUnproven("private detail"),
+        "ticket_arguments": ProviderReadArgumentError("AUTOTASK_FILTERS_INVALID", "private detail"),
+        "dns_scope": DnsFilterMcpScopeError("DNSFILTER_CLIENT_SCOPE_MISMATCH", "private detail"),
+        "credential_auth": MicrosoftCredentialError(error_code="MICROSOFT_CREDENTIAL_OPENBAO_AUTH_FAILED", message="private detail"),
+    }
+    error = errors[failure]
+
+    class FailingInvoker:
+        def invoke(self, **kwargs):
+            raise error
+
+    audit = Audit()
+    result = CentralOrchestrator(resolution=Resolution(), invoker=FailingInvoker(), audit=audit).execute(request())
+    assert result.status is OrchestrationStatus.FAILED
+    assert result.error_code == error.error_code
+    assert audit.events[-1][1]["error_code"] == error.error_code
+    assert "private detail" not in repr(result) + repr(audit.events)

@@ -37,9 +37,16 @@ def test_service_catalog_covers_core_microsoft_cloud_domains() -> None:
 
 def test_permission_profiles_are_read_only_by_default() -> None:
     assert MICROSOFT_PERMISSION_PROFILES
-    for profile in MICROSOFT_PERMISSION_PROFILES.values():
-        assert profile.maximum_mode is MicrosoftOperationMode.READ
+    write_profiles = {}
+    for name, profile in MICROSOFT_PERMISSION_PROFILES.items():
         assert profile.application_permissions
+        if profile.maximum_mode is not MicrosoftOperationMode.READ:
+            write_profiles[name] = profile.maximum_mode
+    # The upstream group-admin integration explicitly adds this one governed
+    # write profile. Every other profile must remain read-only by default.
+    assert write_profiles == {
+        "group-write": MicrosoftOperationMode.WRITE_WITH_APPROVAL,
+    }
 
 
 def test_graph_read_request_is_built_with_v1_endpoint() -> None:

@@ -274,3 +274,21 @@ def test_client_boundary_requires_network_scope_before_provider_call(tmp_path):
             )
         )
     assert FakeClient.calls == []
+
+
+@pytest.mark.parametrize("arguments,client_id,missing_boundary,expected", [
+    ({}, None, False, "DNSFILTER_COMPANY_SELECTOR_REQUIRED"),
+    ({"company_id": True}, None, False, "DNSFILTER_COMPANY_SELECTOR_REQUIRED"),
+    ({"company_id": 333, "network_id": 999}, None, False, "DNSFILTER_SCOPE_OVERRIDE_PROHIBITED"),
+    ({"company_id": 333}, "999", False, "DNSFILTER_CLIENT_SCOPE_MISMATCH"),
+    ({"company_id": 333}, None, True, "DNSFILTER_ORGANIZATION_BOUNDARY_UNVERIFIED"),
+])
+def test_query_scope_denials_are_specific_and_stop_before_provider(tmp_path, arguments, client_id, missing_boundary, expected):
+    connector, _ = build(tmp_path, record=False if missing_boundary else None)
+    with pytest.raises(ConnectorAuthorizationError) as failure:
+        connector.execute(ConnectorRequest(
+            context("dnsfilter_mcp.query_logs.search", client_id=client_id),
+            {"from": "2026-11-05", "to": "2026-11-06", **arguments},
+        ))
+    assert failure.value.error_code == expected
+    assert FakeClient.calls == []

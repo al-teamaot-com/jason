@@ -91,6 +91,14 @@ from .provider_read_capability_catalog import (
 from .service import InvocationResult, InvocationTelemetry
 
 
+class ProviderReadArgumentError(ValueError):
+    """A fixed validation code; never serialize caller values or exception text."""
+
+    def __init__(self, error_code: str, message: str):
+        super().__init__(message)
+        self.error_code = error_code
+
+
 _IT_GLUE_ENTITY = {
     DOCUMENTATION_ORGANIZATION_SEARCH: "Organizations",
     DOCUMENTATION_CONTACT_SEARCH: "Contacts",
@@ -491,13 +499,22 @@ def adapt_it_glue_arguments(
 def _autotask_max_records(arguments: Mapping[str, Any]) -> int:
     value = arguments.get("page_size", _DEFAULT_AUTOTASK_MAX_RECORDS)
     if isinstance(value, bool):
-        raise ValueError("page_size must be an integer between 1 and 500")
+        raise ProviderReadArgumentError(
+            "AUTOTASK_PAGE_SIZE_INVALID",
+            "page_size must be an integer between 1 and 500",
+        )
     try:
         maximum = int(value)
     except (TypeError, ValueError) as error:
-        raise ValueError("page_size must be an integer between 1 and 500") from error
+        raise ProviderReadArgumentError(
+            "AUTOTASK_PAGE_SIZE_INVALID",
+            "page_size must be an integer between 1 and 500",
+        ) from error
     if not 1 <= maximum <= _MAX_AUTOTASK_MAX_RECORDS:
-        raise ValueError("page_size must be between 1 and 500")
+        raise ProviderReadArgumentError(
+            "AUTOTASK_PAGE_SIZE_INVALID",
+            "page_size must be between 1 and 500",
+        )
     return maximum
 
 
@@ -506,13 +523,22 @@ def _autotask_after_resource_id(arguments: Mapping[str, Any]) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool):
-        raise ValueError("after_resource_id must be a positive integer")
+        raise ProviderReadArgumentError(
+            "AUTOTASK_CONTINUATION_INVALID",
+            "after_resource_id must be a positive integer",
+        )
     try:
         resource_id = int(value)
     except (TypeError, ValueError) as error:
-        raise ValueError("after_resource_id must be a positive integer") from error
+        raise ProviderReadArgumentError(
+            "AUTOTASK_CONTINUATION_INVALID",
+            "after_resource_id must be a positive integer",
+        ) from error
     if resource_id < 1:
-        raise ValueError("after_resource_id must be a positive integer")
+        raise ProviderReadArgumentError(
+            "AUTOTASK_CONTINUATION_INVALID",
+            "after_resource_id must be a positive integer",
+        )
     return resource_id
 
 
@@ -524,7 +550,10 @@ def _autotask_created_range_value(
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{selector} must be a non-empty ISO-8601 datetime string")
+        raise ProviderReadArgumentError(
+            "AUTOTASK_CREATED_RANGE_INVALID",
+            f"{selector} must be a non-empty ISO-8601 datetime string",
+        )
     return value.strip()
 
 
@@ -534,7 +563,8 @@ def _autotask_search(
 ) -> str:
     explicit = arguments.get("search")
     if explicit is not None:
-        raise ValueError(
+        raise ProviderReadArgumentError(
+            "AUTOTASK_RAW_SEARCH_PROHIBITED",
             "provider-specific Autotask search expressions are not accepted by the "
             "canonical read adapter; use canonical selectors or schema-driven filters"
         )
@@ -543,7 +573,10 @@ def _autotask_search(
     if filters is None:
         filters = {}
     if not isinstance(filters, Mapping):
-        raise ValueError("filters must be a mapping when supplied")
+        raise ProviderReadArgumentError(
+            "AUTOTASK_FILTERS_INVALID",
+            "filters must be a mapping when supplied",
+        )
 
     clauses: list[dict[str, Any]] = []
     ticket_filter_aliases = {
@@ -556,7 +589,10 @@ def _autotask_search(
     for field, value in filters.items():
         field_name = str(field).strip()
         if not field_name:
-            raise ValueError("Autotask filter field names must be non-empty")
+            raise ProviderReadArgumentError(
+                "AUTOTASK_FILTER_FIELD_INVALID",
+                "Autotask filter field names must be non-empty",
+            )
         field_name = ticket_filter_aliases.get(field_name, field_name)
         clauses.append({"op": "eq", "field": field_name, "value": value})
 
@@ -577,7 +613,8 @@ def _autotask_search(
         if arguments.get("resource_id") is not None or any(
             item["field"] == "id" for item in clauses
         ):
-            raise ValueError(
+            raise ProviderReadArgumentError(
+                "AUTOTASK_CONTINUATION_CONFLICT",
                 "after_resource_id cannot be combined with an exact id selector"
             )
         clauses.append(
@@ -956,7 +993,8 @@ def adapt_microsoft_graph_arguments(
         if arguments.get(key) is not None and str(arguments.get(key)).strip()
     ]
     if len(selectors) != 1:
-        raise ValueError(
+        raise ProviderReadArgumentError(
+            "MICROSOFT_USER_SELECTOR_REQUIRED",
             "Microsoft user search requires exactly one exact selector: "
             "email, user_principal_name, or display_name"
         )
@@ -975,19 +1013,29 @@ def adapt_microsoft_graph_arguments(
         if value is not None and key not in allowed
     )
     if unsupported:
-        raise ValueError(
+        raise ProviderReadArgumentError(
+            "MICROSOFT_USER_ARGUMENT_UNSUPPORTED",
             "unsupported Microsoft user search arguments: " + ", ".join(unsupported)
         )
 
     page_size = arguments.get("page_size", 10)
     if isinstance(page_size, bool):
-        raise ValueError("page_size must be between 1 and 25")
+        raise ProviderReadArgumentError(
+            "MICROSOFT_USER_PAGE_SIZE_INVALID",
+            "page_size must be between 1 and 25",
+        )
     try:
         page_size = int(page_size)
     except (TypeError, ValueError) as error:
-        raise ValueError("page_size must be between 1 and 25") from error
+        raise ProviderReadArgumentError(
+            "MICROSOFT_USER_PAGE_SIZE_INVALID",
+            "page_size must be between 1 and 25",
+        ) from error
     if not 1 <= page_size <= _MAX_MICROSOFT_USER_RECORDS:
-        raise ValueError("page_size must be between 1 and 25")
+        raise ProviderReadArgumentError(
+            "MICROSOFT_USER_PAGE_SIZE_INVALID",
+            "page_size must be between 1 and 25",
+        )
 
     selector = selectors[0]
     return {

@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "scope": [
+    "Lindsey Collins",
+    "Adam Navrat"
+  ],
+  "excluded_requester": "Al Davis",
+  "base_revision": "6bfdb76bd3e0bbbb11e09b3c213deaec04f1771a",
+  "observed_runtime_revision": "d1b8c196dadd4b672ec8ba47075f27bb61c98d63",
+  "test_summary": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "342",
+    "time": "2.825",
+    "timestamp": "2026-11-12T12:03:46.005258-05:00",
+    "hostname": "Jason"
+  },
+  "test_modules": 31,
+  "tested_production_file_sha256": {
+    "implementation/connectors/dnsfilter/mcp_connector.py": "b5b62cb0748c6c59f63eed8a7d94e5bbe68d201a21005b969c47bb59be2badac",
+    "implementation/connectors/microsoft_graph/openbao_credentials.py": "e0cafc3d2aa430f4959c8ccb6f7c31c6a0a4f6b862296ec10b151c1086b08e9e",
+    "implementation/orchestrator/autotask_information_authorizer.py": "a3ce539508b90fffac52cca419e18678dd6ee04ce32a68ad9c88cdee30fa293f",
+    "implementation/orchestrator/provider_read_argument_adapter.py": "cb56d04416481d8f4cfd2e612a4a6a897f2a8cf7e0a1a427cad3db51be5e3bb1"
+  },
+  "authority_verification": {
+    "staff_active": true,
+    "historical_jason_observe_contexts_allowed": 11,
+    "active_autotask_employee_resources": {
+      "Lindsey Collins": 29682899,
+      "Adam Navrat": 29682896
+    },
+    "native_time_entry_permissions_proven": false
+  },
+  "unchanged_controls": [
+    "authority grants",
+    "production configuration",
+    "native time-entry proof flag",
+    "requester binding",
+    "company and network scope restrictions",
+    "secret material handling"
+  ],
+  "historical_limitations": [
+    "original call arguments not retained",
+    "generic historical labor exceptions do not identify exact cause",
+    "historical DNS denial reason not retained",
+    "historical credential source cause not retained"
+  ],
+  "production_deployed": false,
+  "provider_native_acceptance": "not_performed_no_staff_authenticated_session",
+  "release_eligible": false
+}
