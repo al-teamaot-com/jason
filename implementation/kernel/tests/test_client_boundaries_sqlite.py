@@ -203,3 +203,69 @@ def test_sqlite_master_company_zero_can_share_tenant_with_scoped_clients(tmp_pat
         client_id="1179", provider="dnsfilter"
     ) == client
     store.close()
+
+
+def test_readonly_boundary_store_performs_no_initialization_or_writes(tmp_path, monkeypatch):
+    import sqlite3
+    import stat
+    path = tmp_path / "boundaries.sqlite3"
+    writer = SQLiteClientBoundaryStore(path)
+    repository = SQLiteClientBoundaryRepository(writer)
+    repository.add(boundary())
+    before = path.read_bytes()
+    mode = stat.S_IMODE(path.stat().st_mode)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("read-only store attempted mutation")
+    with monkeypatch.context() as m:
+        m.setattr(SQLiteClientBoundaryStore, "_migrate_schema", forbidden)
+        m.setattr("kernel.client_boundaries.sqlite.os.chmod", forbidden)
+        reader = SQLiteClientBoundaryStore(path, read_only=True)
+        assert reader.connection.execute("PRAGMA query_only").fetchone() == (1,)
+        read_repository = SQLiteClientBoundaryRepository(reader)
+        assert read_repository.get("boundary-1") == boundary()
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            read_repository.add(boundary(boundary_id="new", client_id="other", tenant_id="other"))
+        # Even disabling query_only cannot turn a mode=ro connection writable.
+        reader.connection.execute("PRAGMA query_only=OFF")
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            reader.connection.execute("DELETE FROM client_boundaries")
+        reader.connection.execute("PRAGMA query_only=ON")
+        assert path.read_bytes() == before
+        assert stat.S_IMODE(path.stat().st_mode) == mode
+    repository.replace(replace(boundary(), status=BoundaryStatus.REVOKED))
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        assert executor.submit(
+            read_repository.find_active_for_external_tenant,
+            provider="microsoft_graph", external_tenant_id="tenant-1",
+        ).result(timeout=5) is None
+    reader.close()
+    writer.close()
+
+
+def test_readonly_boundary_store_refuses_missing_or_symlink_database(tmp_path):
+    missing = tmp_path / "new-parent" / "missing.db"
+    with pytest.raises(PermissionError, match="NOT_REGULAR"):
+        SQLiteClientBoundaryStore(missing, read_only=True)
+    assert not missing.parent.exists()
+    path = tmp_path / "real.db"
+    SQLiteClientBoundaryStore(path).close()
+    link = tmp_path / "link.db"
+    link.symlink_to(path)
+    with pytest.raises(PermissionError, match="NOT_REGULAR"):
+        SQLiteClientBoundaryStore(link, read_only=True)
+
+
+def test_readonly_boundary_store_denies_old_schema_without_migration(tmp_path):
+    path = tmp_path / "legacy.db"
+    store = SQLiteClientBoundaryStore(path)
+    store.connection.execute("ALTER TABLE client_boundaries DROP COLUMN external_scope_ids")
+    store.connection.commit()
+    store.close()
+    before = path.read_bytes()
+    with pytest.raises(PermissionError, match="SCHEMA_NOT_CURRENT"):
+        SQLiteClientBoundaryStore(path, read_only=True)
+    assert path.read_bytes() == before
+    # Migration remains the authority-owning writer's responsibility.
+    owner = SQLiteClientBoundaryStore(path)
+    owner.close()
+    SQLiteClientBoundaryStore(path, read_only=True).close()
