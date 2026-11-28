@@ -186,6 +186,10 @@ def installation_plan(source_sha, baseline):
          and SHA.fullmatch(baseline["runtime_source"])
          and isinstance(baseline["observed_at"], str) and baseline["observed_at"],
          "BASELINE_IDENTITY")
+    owners = READER["grafana_owner_users"]
+    need(isinstance(owners, list) and owners and all(
+        isinstance(owner, str) and re.fullmatch(r"[a-z0-9][a-z0-9_.@-]{0,127}", owner)
+        for owner in owners) and len(set(owners)) == len(owners), "GRAFANA_OWNER_USERS")
     steps = [
         ("seal_before_images", "Native root preflight seals current protected policy, container configurations, exact authority binding and Grafana UID absence; verify source, CI, freeze, rollback, locks and Owner proof."),
         ("admit_exact_policy_delta", "Add only jason-sharepoint-site-control and the discovery service/timer to the effective root policy, retaining all existing entries and a private before-image."),
@@ -220,6 +224,7 @@ def installation_plan(source_sha, baseline):
                    "allowed_hosts": HOSTS},
         "initial_site_request": initial_site_request(),
         "runtime_environment_delta": ENV, "runtime_mount_delta": MOUNTS,
+        "site_control_environment": {"JASON_SHAREPOINT_GRAFANA_OWNER_USERS": ",".join(owners)},
         "grafana_environment_delta": {"GF_DATAPROXY_SEND_USER_HEADER": "true"},
         "grafana_create_only_uids": ["jason-sharepoint-control", "jason-sharepoint-site-access"],
         "grafana_existing_uid_policy": "deny_conflict_or_reuse_without_modification; never overwrite an unrecoverable stored secret",

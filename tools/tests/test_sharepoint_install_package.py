@@ -112,6 +112,8 @@ def test_policy_adds_only_own_entries_and_denies_stale_rollback():
 
 def test_plan_is_one_exact_site_and_contains_no_fabricated_authority():
     plan = package.installation_plan("a" * 40, baseline())
+    assert plan["site_control_environment"] == {
+        "JASON_SHAREPOINT_GRAFANA_OWNER_USERS": ",".join(package.READER["grafana_owner_users"])}
     site = plan["initial_site_request"]
     assert site["site_id"] == package.SITE and site["desired_enabled"] is True
     assert site["other_initial_sites_enabled"] == []
@@ -288,3 +290,10 @@ def test_shared_boundary_store_is_pinned_in_sidecar_and_package():
     assert "implementation/kernel/tests/test_client_boundaries_sqlite.py" in package.FIXED_FILES
     recipe = (root / "infrastructure/sharepoint-site-control/Dockerfile").read_text()
     assert f"COPY --chown=0:1000 {module} /app/{module}" in recipe
+
+
+@pytest.mark.parametrize("owners", [[], ["*"], ["one,two"], ["admin", "admin"]])
+def test_invalid_grafana_owner_config_denied(monkeypatch, owners):
+    monkeypatch.setitem(package.READER, "grafana_owner_users", owners)
+    with pytest.raises(package.PackageDenied, match="GRAFANA_OWNER_USERS"):
+        package.installation_plan("a" * 40, baseline())

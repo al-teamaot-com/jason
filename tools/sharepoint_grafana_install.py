@@ -8,7 +8,6 @@ Never displays secret bytes. Never modifies unrelated datasource/dashboard UIDs.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import subprocess
@@ -69,13 +68,19 @@ def provision(base: str, credential: str, control_token: str,
     _, current_dashboard = _request(base, credential, "GET",
                                     "/api/dashboards/uid/" + DASHBOARD_UID)
     if current_ds is not None and (
-        current_ds.get("type") != "yesoreyeram-infinity-datasource"
+        current_ds.get("uid") != DATASOURCE_UID
+        or current_ds.get("access") != "proxy"
+        or (current_ds.get("jsonData") or {}).get("httpHeaderName1") != "Authorization"
+        or (current_ds.get("secureJsonFields") or {}).get("httpHeaderValue1") is not True
+        or current_ds.get("type") != "yesoreyeram-infinity-datasource"
         or current_ds.get("url") != DATASOURCE_TARGET
     ):
         raise PermissionError("Existing datasource UID is owned by a different target")
     if current_dashboard is not None:
         current = current_dashboard.get("dashboard") or {}
-        if current.get("uid") != DASHBOARD_UID:
+        if (current_dashboard.get("meta", {}).get("folderUid") != folder_uid
+                or any(current.get(key) != value for key, value in dashboard.items()
+                       if key not in {"id", "version"})):
             raise PermissionError("Dashboard identity mismatch")
 
     if not apply:
@@ -96,17 +101,11 @@ def provision(base: str, credential: str, control_token: str,
     }
     if current_ds is None:
         _request(base, credential, "POST", "/api/datasources", ds_payload)
-    else:
-        _request(base, credential, "PUT",
-                 "/api/datasources/uid/" + DATASOURCE_UID, ds_payload)
-    # Grafana's own dashboard API provisions immediately, without restarting
-    # the existing Grafana or any Jason runtime container.
-    _request(base, credential, "POST", "/api/dashboards/db", {
-        "dashboard": dashboard,
-        "overwrite": current_dashboard is not None,
-        "folderUid": folder_uid,
-        "message": "Approved isolated Jason SharePoint access dashboard",
-    })
+    if current_dashboard is None:
+        _request(base, credential, "POST", "/api/dashboards/db", {
+            "dashboard": dashboard, "overwrite": False, "folderUid": folder_uid,
+            "message": "Approved isolated Jason SharePoint access dashboard",
+        })
     _, readback_ds = _request(base, credential, "GET",
                               "/api/datasources/uid/" + DATASOURCE_UID)
     _, readback_dash = _request(base, credential, "GET",
@@ -116,7 +115,8 @@ def provision(base: str, credential: str, control_token: str,
             or (readback_dash.get("dashboard") or {}).get("uid") != DASHBOARD_UID):
         raise RuntimeError("Grafana exact-scope provisioning readback failed")
     return {"status": "verified", "datasource_uid": DATASOURCE_UID,
-            "dashboard_uid": DASHBOARD_UID, "changed": True}
+            "dashboard_uid": DASHBOARD_UID,
+            "changed": current_ds is None or current_dashboard is None}
 
 
 def main() -> int:

@@ -58,3 +58,26 @@ def test_wrong_dashboard_uid_fails_before_api_mutation(tmp_path):
     path.write_text(json.dumps({**DASH,"uid":"other"}))
     with pytest.raises(ValueError):
         installer.provision("http://localhost:3000","token",TOKEN,path,apply=True)
+
+
+def test_retry_preserves_existing_secure_token_and_dashboard(monkeypatch, tmp_path):
+    path = tmp_path / "dashboard.json"
+    path.write_text(json.dumps(DASH))
+    existing = {
+        "/api/health": {}, "/api/plugins/volkovlabs-form-panel/settings": {"enabled": True},
+        "/api/folders": [{"title":"Jason", "uid":"folder"}],
+        "/api/datasources/uid/" + installer.DATASOURCE_UID: {
+            "uid":installer.DATASOURCE_UID, "url":installer.DATASOURCE_TARGET,
+            "type":"yesoreyeram-infinity-datasource", "access":"proxy",
+            "jsonData":{"httpHeaderName1":"Authorization"},
+            "secureJsonFields":{"httpHeaderValue1": True}},
+        "/api/dashboards/uid/" + installer.DASHBOARD_UID: {
+            "dashboard":dict(DASH, id=123, version=9), "meta":{"folderUid":"folder"}}}
+    def read_only(base, credential, method, endpoint, payload=None):
+        assert method == "GET"
+        return 200, existing[endpoint]
+    monkeypatch.setattr(installer, "_request", read_only)
+    assert not installer.provision("http://localhost", "account", TOKEN, path, apply=True)["changed"]
+    existing["/api/dashboards/uid/" + installer.DASHBOARD_UID]["dashboard"]["title"] = "Other"
+    with pytest.raises(PermissionError):
+        installer.provision("http://localhost", "account", TOKEN, path, apply=True)
