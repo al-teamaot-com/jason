@@ -235,11 +235,12 @@ def test_reservation_inventory_digest_covers_configuration_without_exposing_valu
     second=n.inventory_digest(vars(p),[name],rows)
     assert first!=second and len(first)==len(second)==64
 
-@pytest.mark.parametrize("fault",["none","scope","owner","source","inventory","drift","resume-before","resume-after"])
+@pytest.mark.parametrize("fault",["none","scope","owner","source","inventory","drift","resume-before","resume-after","binding-failure"])
 def test_reservation_reuses_exact_native_approval_and_atomic_policy_rollback(tmp_path,monkeypatch,capsys,fault):
     from contextlib import nullcontext
     monkeypatch.setattr(n,"now",lambda:NOW)
-    ledger=tmp_path/"reservation"; policy_path=tmp_path/"desired.json"
+    ledger=tmp_path/"reservation"; policy_path=tmp_path/"desired.json"; binding_path=tmp_path/"binding.json"
+    monkeypatch.setattr(n,"BINDING",binding_path)
     monkeypatch.setattr(n,"RESERVATION_LEDGER",ledger); monkeypatch.setattr(n,"DESIRED",policy_path)
     # These fixtures model root custody; root permission and atomic compare-and-replace
     # are covered by the existing native file/recovery fixtures. No Docker or network.
@@ -252,6 +253,10 @@ def test_reservation_reuses_exact_native_approval_and_atomic_policy_rollback(tmp
     monkeypatch.setattr(n,"completed_active_offer",lambda *a:{"outcome":"production_components_verified"})
     desired={"schema_version":"1.0","rollback_container_prefixes":["jason-runtime-rollback-"],"max_stopped_rollback_containers":2,"unrelated":{"preserved":True}}
     before=n.canonical(desired); policy_path.write_bytes(before)
+    pin_before=n.canonical({"schema_version":"3.0","per_release_review_required":True,"file_sha256":{"desired_state":n.digest(before),"host":"e"*64}})
+    binding_path.write_bytes(pin_before)
+    after=(json.dumps({**desired,"max_stopped_rollback_containers":4},sort_keys=True,indent=2)+"\n").encode()
+    pin_after=n.capacity_binding_image(pin_before,n.digest(before),n.digest(after))
     rows=[row(1),row(2,"12")]; rows[1]["Image"]="sha256:"+"c"*64
     inv={r["Name"][1:]:r for r in rows}; names=sorted(inv)
     monkeypatch.setattr(n,"all_stopped",lambda *a:(names,inv))
@@ -274,11 +279,18 @@ def test_reservation_reuses_exact_native_approval_and_atomic_policy_rollback(tmp
         return "wrong" if fault=="owner" else "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
     def replace(old,new):
         assert policy_path.read_bytes()==old; calls.append("replace");policy_path.write_bytes(new)
+    def replace_pin(old,new):
+        assert binding_path.read_bytes()==old
+        if fault=="binding-failure" and new==pin_after:raise PermissionError("injected binding failure")
+        binding_path.write_bytes(new)
+    def verify_pin():
+        assert json.loads(binding_path.read_bytes())["file_sha256"]["desired_state"]==n.digest(policy_path.read_bytes())
+    module=SimpleNamespace(verify_installed_policy=verify_pin)
     def run():
         return n.run_reservation(args,{"write":write,"owner":owner},
             {"read":lambda path,*a:path.read_bytes(),"command":command,"USER":[]},code,vars(p),None,
-            lambda:({} if fault=="source" and args.apply else code),lambda:None,host,m,"e"*40,None,
-            POLICY,hashes,replace,lambda *a:None)
+            lambda:({} if fault=="source" and args.apply else code),lambda:None,host,m,"e"*40,module,
+            POLICY,hashes,replace,lambda *a:None,replace_binding=replace_pin,cleanup_binding=lambda *a:None)
     run(); offer=json.loads(capsys.readouterr().out); scope=offer["scope"]; args.scope_sha=offer["scope_sha256"]
     assert not ledger.exists() and policy_path.read_bytes()==before and not calls
     assert scope["plan"]["after_limit"]==4 and not scope["container_image_volume_removal_allowed"]
@@ -286,19 +298,20 @@ def test_reservation_reuses_exact_native_approval_and_atomic_policy_rollback(tmp
     if fault=="scope":args.scope_sha="f"*64
     record=ledger/args.candidate/args.release_id
     if fault.startswith("resume"):
-        record.mkdir(parents=True); (record/"before-policy.json").write_bytes(before)
+        record.mkdir(parents=True); (record/"before-policy.json").write_bytes(before); (record/"before-binding.json").write_bytes(pin_before)
         (record/"approval.json").write_bytes(n.canonical({"scope":scope,"scope_sha256":args.scope_sha,"owner_oid":"bee80bdc-ffb0-4c50-b453-c09d4d411f5f","approved_at":NOW.isoformat()}))
         args.apply=False;args.resume=True
-        if fault=="resume-after":policy_path.write_bytes((json.dumps({**desired,"max_stopped_rollback_containers":4},sort_keys=True,indent=2)+"\n").encode())
-    if fault in ("scope","owner","source","inventory","drift"):
+        if fault=="resume-after":policy_path.write_bytes(after);binding_path.write_bytes(pin_after)
+    if fault in ("scope","owner","source","inventory","drift","binding-failure"):
         with pytest.raises(PermissionError):run()
-        assert policy_path.read_bytes()==before
-        if fault=="drift":assert json.loads((record/"result.json").read_text())["status"]=="rollback_capacity_reservation_rolled_back"
+        assert policy_path.read_bytes()==before and binding_path.read_bytes()==pin_before
+        if fault in ("drift","binding-failure"):assert json.loads((record/"result.json").read_text())["status"]=="rollback_capacity_reservation_rolled_back"
         else:assert "replace" not in calls
     else:
         run(); result=json.loads(capsys.readouterr().out)
         assert result["status"]=="rollback_capacity_reservation_verified" and result["removed"]==0
         assert json.loads(policy_path.read_bytes())=={**desired,"max_stopped_rollback_containers":4}
+        assert binding_path.read_bytes()==pin_after
         assert json.loads((record/"result.json").read_text())==result
         assert calls.count("owner")==int(fault=="none") and calls.count("replace")==int(fault!="resume-after")
         args.resume=True; args.apply=False
@@ -318,3 +331,103 @@ def test_capacity_assessment_reports_ceiling_without_granting_more_slots():
     inv={r["Name"][1:]:r for r in rows}
     result=n.capacity_report(vars(p),POLICY,{**RESERVATION,"maximum_stopped_rollback_containers":2},{"max_stopped_rollback_containers":2},sorted(inv),inv,2,set())
     assert result["status"]=="capacity_policy_review_required" and "proposed_limit" not in result
+
+
+def test_binding_image_replaces_only_exact_desired_policy_hash():
+    before="a"*64;after="b"*64
+    doc={"schema_version":"3.0","per_release_review_required":True,"file_sha256":{"desired_state":before,"host":"c"*64},"source_sha":"d"*40}
+    raw=json.dumps(doc,indent=2).encode()
+    assert json.loads(n.capacity_binding_image(raw,before,after))=={**doc,"file_sha256":{**doc["file_sha256"],"desired_state":after}}
+    for bad in ({**doc,"per_release_review_required":False},{**doc,"file_sha256":{"desired_state":"c"*64}},{**doc,"duplicate":before}):
+        with pytest.raises(PermissionError):n.capacity_binding_image(n.canonical(bad),before,after)
+
+
+@pytest.mark.parametrize("fault",["none","wrong-scope","wrong-owner","foreign-pin","unrelated-drift","bad-result","stale-approval","changed-live","postflight-drift","resume-before","resume-after"])
+def test_legacy_binding_requires_separate_exact_approval_and_preserves_capacity(tmp_path,monkeypatch,capsys,fault):
+    from contextlib import nullcontext
+    from datetime import timedelta
+    monkeypatch.setattr(n,"now",lambda:NOW)
+    prior=tmp_path/"reservation"; ledger=tmp_path/"binding-ledger"; desired_path=tmp_path/"desired.json"; binding_path=tmp_path/"binding.json"
+    monkeypatch.setattr(n,"RESERVATION_LEDGER",prior); monkeypatch.setattr(n,"BINDING_LEDGER",ledger)
+    monkeypatch.setattr(n,"DESIRED",desired_path); monkeypatch.setattr(n,"BINDING",binding_path)
+    monkeypatch.setattr(n,"private_directory",lambda path,native,create=False:path.mkdir(exist_ok=True) if create else None)
+    monkeypatch.setattr(n,"read",lambda path,**kw:path.read_bytes())
+    def write(path,raw,mode):assert not path.exists();path.write_bytes(raw)
+    m={"release_id":"release-"+"a"*16,"rollback_sha":"b"*40,"scope_sha256":"c"*64,"targets":[{},{}]}
+    source="d"*40; current="e"*40; review="f"*40; record=prior/source/m["release_id"];record.mkdir(parents=True)
+    before=n.canonical({"max_stopped_rollback_containers":27,"unrelated":{"preserved":True}})
+    after=(json.dumps({**json.loads(before),"max_stopped_rollback_containers":29},sort_keys=True,indent=2)+"\n").encode(); desired_path.write_bytes(after)
+    pin_before=n.canonical({"schema_version":"3.0","per_release_review_required":True,"file_sha256":{"desired_state":n.digest(before),"host":"9"*64}});binding_path.write_bytes(pin_before)
+    pin_after=n.capacity_binding_image(pin_before,n.digest(before),n.digest(after))
+    old={"action":n.RESERVATION_ACTION,"policy":{"candidate_sha":source,"rollback_sha":m["rollback_sha"]},"release_id":m["release_id"],"manifest_sha256":n.digest(m),"release_scope_sha256":m["scope_sha256"],"review_source_sha":review,"plan":{"before_policy_sha256":n.digest(before),"after_policy_sha256":n.digest(after),"before_limit":27,"after_limit":29,"required_slots":2,"count":27},"preserved":{"desired_policy_sha256":n.digest(before)},"installation_targets":[str(n.DESIRED),str(record)],"reservation_policy":RESERVATION,"queue_cutover":False,"provider_writes":False,"standing_authority":False,"container_image_volume_removal_allowed":False}
+    a={"scope":old,"scope_sha256":n.digest(old),"owner_oid":"bee80bdc-ffb0-4c50-b453-c09d4d411f5f","approved_at":(NOW-timedelta(hours=9) if fault=="stale-approval" else NOW).isoformat()}
+    r={"status":"rollback_capacity_reservation_verified","scope_sha256":n.digest(old),"release_id":m["release_id"],"before_limit":27,"capacity":29,"remaining":27,"removed":0,"provider_writes":False,"production_release_approved":False}
+    if fault=="bad-result":r["removed"]=1
+    write(record/"approval.json",n.canonical(a),0o400);write(record/"result.json",n.canonical(r),0o400);write(record/"before-policy.json",before,0o400)
+    prior_bytes={p.name:p.read_bytes() for p in record.iterdir()};calls=[]
+    def predecessor(h,pin,hashes):
+        if fault=="unrelated-drift":raise PermissionError("unrelated hash mismatch")
+        assert hashes=={n.digest(before),n.digest(after)}
+    def live(*a):
+        if fault=="changed-live" and "owner" in calls:raise PermissionError("live changed")
+    monkeypatch.setattr(n,"verify_binding_predecessor",predecessor);monkeypatch.setattr(n,"verify_binding_live",live)
+    def verify():assert binding_path.read_bytes()==pin_after and desired_path.read_bytes()==after
+    h=SimpleNamespace(IndependentHostGuard=lambda:SimpleNamespace(host_release_transaction=lambda:nullcontext()),verify_installed_policy=lambda profile:verify())
+    args=SimpleNamespace(candidate=current,reservation_source=source,release_id=m["release_id"],apply=False,resume=False,scope_sha=None)
+    code={"fixture":b"source"}
+    def owner(scope):calls.append("owner");return "wrong" if fault=="wrong-owner" else a["owner_oid"]
+    def replace(old,new):assert binding_path.read_bytes()==old;calls.append("replace");binding_path.write_bytes(new)
+    def command(a):return n.canonical({"status":"drift_detected" if fault=="postflight-drift" else "pass","problems":[]})
+    def run():return n.reconcile_binding(args,{"owner":owner,"write":write},{"read":lambda path,*a:path.read_bytes(),"command":command},code,vars(p),None,lambda:code,lambda:None,h,m,{},review,replace,lambda *a:None)
+    if fault=="foreign-pin":binding_path.write_bytes(pin_before.replace(n.digest(before).encode(),b"8"*64))
+    if fault in ("foreign-pin","unrelated-drift","bad-result","stale-approval"):
+        with pytest.raises(PermissionError):run()
+        assert not calls and not ledger.exists()
+    else:
+        run(); offer=json.loads(capsys.readouterr().out);scope=offer["scope"];args.scope_sha=offer["scope_sha256"];args.apply=True
+        assert scope["approved_capacity"]==29 and scope["installation_targets"][0]==str(n.BINDING) and scope["reservation_scope_sha256"]==n.digest(old)
+        assert not ledger.exists() and binding_path.read_bytes()==pin_before and not calls
+        out=ledger/current/m["release_id"]
+        if fault=="wrong-scope":args.scope_sha="0"*64
+        if fault.startswith("resume"):
+            out.mkdir(parents=True);write(out/"before-binding.json",pin_before,0o400);write(out/"approval.json",n.canonical({"scope":scope,"scope_sha256":args.scope_sha,"owner_oid":a["owner_oid"],"approved_at":NOW.isoformat()}),0o400)
+            args.apply=False;args.resume=True
+            if fault=="resume-after":binding_path.write_bytes(pin_after)
+        if fault in ("wrong-scope","wrong-owner","changed-live","postflight-drift"):
+            with pytest.raises(PermissionError):run()
+            assert binding_path.read_bytes()==pin_before
+            if fault=="postflight-drift":assert json.loads((out/"result.json").read_text())["status"]=="rollback_capacity_binding_rolled_back"
+            else:assert "replace" not in calls
+        else:
+            run();result=json.loads(capsys.readouterr().out);assert result["status"]=="rollback_capacity_binding_verified" and result["capacity"]==29
+            assert binding_path.read_bytes()==pin_after and calls.count("owner")==int(fault=="none") and calls.count("replace")==int(fault!="resume-after")
+            args.apply=False;args.resume=True
+            with pytest.raises(PermissionError,match="ALREADY_RESOLVED"):run()
+    assert desired_path.read_bytes()==after and {p.name:p.read_bytes() for p in record.iterdir()}==prior_bytes
+
+
+@pytest.mark.parametrize("pair",["both-before","both-after","desired-only","binding-only","foreign","no-scope","unrelated"])
+def test_interrupted_capacity_pair_restores_only_approved_half(tmp_path,monkeypatch,pair):
+    from contextlib import nullcontext
+    desired=tmp_path/"desired";binding=tmp_path/"binding"
+    monkeypatch.setattr(n,"DESIRED",desired);monkeypatch.setattr(n,"BINDING",binding)
+    before=b"before";after=b"after";pin_before=b"pin-before";pin_after=b"pin-after"
+    desired.write_bytes(after if pair in ("both-after","desired-only","unrelated") else before)
+    binding.write_bytes(b"foreign" if pair=="foreign" else pin_after if pair in ("both-after","binding-only") else pin_before)
+    start=(desired.read_bytes(),binding.read_bytes());calls=[]
+    args=SimpleNamespace(candidate="a"*40,release_id="release-"+"b"*16,scope_sha=None if pair=="no-scope" else "c"*64)
+    code={"fixture":b"source"};scope={"preserved":{}}
+    def evidence(*a,**kw):assert kw["scope_sha"]==args.scope_sha and not kw["completed"];return scope,before,after,pin_before,pin_after
+    def predecessor(*a):
+        if pair=="unrelated":raise PermissionError("unrelated drift")
+    monkeypatch.setattr(n,"reservation_evidence",evidence);monkeypatch.setattr(n,"verify_binding_predecessor",predecessor);monkeypatch.setattr(n,"verify_binding_live",lambda *a:None)
+    def replace(path,old,new):assert path.read_bytes()==old;calls.append(path);path.write_bytes(new)
+    h=SimpleNamespace(IndependentHostGuard=lambda:SimpleNamespace(host_release_transaction=lambda:nullcontext()),verify_installed_policy=lambda profile:None)
+    def run():return n.restore_interrupted_pair(args,{}, {"read":lambda path,*a:path.read_bytes()},code,{},None,lambda:code,lambda:None,h,{}, {}, "d"*40,lambda old,new:replace(desired,old,new),lambda *a:None,lambda old,new:replace(binding,old,new),lambda *a:None)
+    if pair in ("foreign","no-scope","unrelated"):
+        with pytest.raises(PermissionError):run()
+        assert not calls and (desired.read_bytes(),binding.read_bytes())==start
+    else:
+        run()
+        assert calls==([desired] if pair=="desired-only" else [binding] if pair=="binding-only" else [])
+        assert (desired.read_bytes(),binding.read_bytes())==((after,pin_after) if pair=="both-after" else (before,pin_before))
