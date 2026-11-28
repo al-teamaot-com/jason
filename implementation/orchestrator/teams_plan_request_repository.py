@@ -99,6 +99,11 @@ class PlanRequestRepository:
                        'approval_id TEXT PRIMARY KEY, state TEXT NOT NULL, progress_json TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS universal_approval_transport_evidence ('
                        'evidence_hash TEXT PRIMARY KEY, signed_envelope_json TEXT NOT NULL)')
+            # Scheduling pointer only. The signed original is stored in the
+            # existing transport evidence table, never in a new authority store.
+            db.execute('CREATE TABLE IF NOT EXISTS universal_objective_decision_handoffs ('
+                       'approval_id TEXT PRIMARY KEY, evidence_hash TEXT NOT NULL, '
+                       'state TEXT NOT NULL, updated_at TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS universal_plan_step_results ('
                        'approval_id TEXT NOT NULL, execution_id TEXT NOT NULL, result_json TEXT NOT NULL, '
                        'PRIMARY KEY(approval_id, execution_id))')
@@ -314,6 +319,61 @@ class PlanRequestRepository:
                     raise PermissionError('immutable signed evidence was changed')
                 return
             db.execute('INSERT INTO universal_approval_transport_evidence VALUES (?,?)',(evidence_hash,encoded))
+
+    def retain_objective_handoff(self, approval_id: str, evidence_hash: str,
+                                 envelope: Mapping, *, now: datetime) -> None:
+        """Persist an original, independently verified callback for handoff.
+
+        This pointer confers no authority. Root admission and the existing
+        canonical approval service must still accept the actual signed evidence.
+        An existing pointer can never be rebound to different evidence.
+        """
+        if (now.tzinfo is None or not self.contains(approval_id)
+                or not isinstance(envelope.get('interaction'), Mapping)
+                or envelope['interaction'].get('approval_id') != approval_id
+                or envelope['interaction'].get('decision') != 'approve'):
+            raise PermissionError('exact original objective callback required')
+        self.store_transport_evidence(evidence_hash, envelope)
+        with sqlite3.connect(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            prior = db.execute(
+                'SELECT evidence_hash,state FROM universal_objective_decision_handoffs '
+                'WHERE approval_id=?', (approval_id,)).fetchone()
+            if prior is not None:
+                if prior != (evidence_hash, 'pending'):
+                    raise PermissionError('objective handoff changed or terminal')
+                return
+            db.execute('INSERT INTO universal_objective_decision_handoffs VALUES (?,?,?,?)',
+                       (approval_id, evidence_hash, 'pending', now.isoformat()))
+
+    def pending_objective_handoffs(self, *, prefix: str, limit: int = 1) -> tuple:
+        if not prefix:
+            raise ValueError('objective prefix required')
+        with sqlite3.connect(self.path) as db:
+            rows = db.execute(
+                "SELECT approval_id,evidence_hash FROM universal_objective_decision_handoffs "
+                "WHERE state='pending' AND substr(approval_id,1,?)=? "
+                "ORDER BY updated_at,approval_id LIMIT ?",
+                (len(prefix), prefix, max(1, min(32, limit)))).fetchall()
+        return tuple((identifier, digest) for identifier, digest in rows)
+
+    def finish_objective_handoff(self, approval_id: str, evidence_hash: str,
+                                  *, state: str, now: datetime) -> None:
+        # Terminal scheduling outcomes do not grant approval, reset claims,
+        # or change the canonical human decision.
+        if state not in {'recorded', 'rejected', 'expired'} or now.tzinfo is None:
+            raise ValueError('invalid objective handoff outcome')
+        with sqlite3.connect(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            prior = db.execute(
+                'SELECT evidence_hash,state FROM universal_objective_decision_handoffs '
+                'WHERE approval_id=?', (approval_id,)).fetchone()
+            if prior == (evidence_hash, state):
+                return
+            if prior != (evidence_hash, 'pending'):
+                raise PermissionError('objective handoff identity or state changed')
+            db.execute('UPDATE universal_objective_decision_handoffs SET state=?,updated_at=? '
+                       'WHERE approval_id=?', (state, now.isoformat(), approval_id))
 
     def transport_evidence(self, evidence_hash: str) -> dict:
         with sqlite3.connect(self.path) as db:
