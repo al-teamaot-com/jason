@@ -9,5 +9,8 @@
     "absolnet-web.sharepoint.com"
   ],
   "activation_profile": "aot-sharepoint-read-v1",
-  "client_id": "client-aot-internal"
+  "client_id": "client-aot-internal",
+  "grafana_owner_users": [
+    "admin"
+  ]
 }
