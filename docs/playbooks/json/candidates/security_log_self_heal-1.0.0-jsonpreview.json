@@ -1,0 +1,697 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "security_log_self_heal",
+    "name": "Security Log Self-Heal (JSON migration draft)",
+    "version": "1.0.0-jsonpreview",
+    "lifecycle": "pilot",
+    "target_type": "ticket",
+    "source_owner": "AOT",
+    "source_registry_version": "1.0.0",
+    "documented_version": null,
+    "original_lifecycle": "production"
+  },
+  "trigger": {
+    "source_registry_match": {
+      "title_contains": [
+        "Windows Security Log unreadable"
+      ]
+    },
+    "details_section_key": "2",
+    "execution_enabled": false
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "preview_only": true,
+    "execution_authority": "none",
+    "scope_section_key": "3"
+  },
+  "expected_state": {
+    "details_section_key": "5",
+    "not_reverified_in_json_runtime": true
+  },
+  "state_model": {
+    "entry_step": "identity_gate",
+    "source_section_key": "6",
+    "context_binding_status": "not_implemented_for_migration_draft"
+  },
+  "steps": [
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "evidence_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "authoritative_evidence_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "authorization_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "authorization_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "approved_json_runtime_parity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "migration_hold"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "migration_hold",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Legacy source playbook section 17 and provider readbacks; not executed in this JSON draft",
+    "success_condition": "Legacy source Section 17 and Section 18 must pass independently; classification-only draft cannot verify or close"
+  },
+  "completion": {
+    "terminal_disposition": "Human Review (draft only; existing production source unchanged)"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": []
+  },
+  "procedure": {
+    "section_refs": {
+      "section_goal": "1",
+      "trigger": "2",
+      "scope": "3",
+      "identification": "4",
+      "expected_state": "5",
+      "state_model": "6",
+      "diagnostics": "7",
+      "decision_gates": "8",
+      "remediation": "9",
+      "retry_policy": "10",
+      "periodic_rechecks": "11",
+      "stale_condition": "12",
+      "dependencies": "13",
+      "documentation": "14",
+      "failures": "15",
+      "escalation": "16",
+      "verification": "17",
+      "completion": "18",
+      "final_resolution": "19",
+      "required_capabilities": "20",
+      "acceptance_test": "21",
+      "closure": "22",
+      "autonomy_review": "23"
+    },
+    "section_keys_missing_from_source": [
+      "23"
+    ],
+    "diagnostic_substep_titles": [],
+    "remediation_substep_titles": [],
+    "live_execution_mapped": false,
+    "structured_source_fields": {
+      "identification_checklist": {
+        "source_section_key": "4",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact device hostname and Datto device UID",
+          "- site/client",
+          "- exact Security Log alert UID",
+          "- Autotask configuration item",
+          "- existing matching open ticket, if any",
+          "- endpoint online/offline state"
+        ]
+      },
+      "expected_state_checklist": {
+        "source_section_key": "5",
+        "present": true,
+        "verbatim_bullets": [
+          "- Windows Security event log is readable",
+          "- Security Log Quick Test returns `Status=Healthy`",
+          "- original Security Log DRMM alert is no longer open",
+          "- any expected Self-Heal-generated EDR/SOC alert is correlated, documented, and no longer open",
+          "- any correlated process-generated Autotask ticket is documented and completed"
+        ]
+      },
+      "decision_gate_checklist": {
+        "source_section_key": "8",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact device identity confirmed",
+          "- endpoint is online",
+          "- Quick Test confirms the known unhealthy Security Log condition",
+          "- exact Self-Heal component authority is valid for this playbook",
+          "- no Self-Heal has already been attempted for the same unchanged incident state",
+          "- SOC/SIEM side-effect behavior is covered by the approved playbook and correlation rules below"
+        ]
+      },
+      "retry_checklist": {
+        "source_section_key": "10",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "recheck_checklist": {
+        "source_section_key": "11",
+        "present": true,
+        "verbatim_bullets": [
+          "- document offline state",
+          "- leave ticket open/pending",
+          "- recheck when the device reconnects",
+          "- do not run repair while offline",
+          "- suppress duplicate tickets and duplicate scheduled work"
+        ]
+      },
+      "stale_checklist": {
+        "source_section_key": "12",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "dependency_checklist": {
+        "source_section_key": "13",
+        "present": true,
+        "verbatim_bullets": [
+          "1. confirm the missing dependency",
+          "2. document the blocker",
+          "3. avoid bypasses/direct provider access",
+          "4. create or update the appropriate Project Jason support/TODO item when required",
+          "5. resume from persisted state after the dependency is restored"
+        ]
+      },
+      "documentation_checklist": {
+        "source_section_key": "14",
+        "present": true,
+        "verbatim_bullets": [
+          "- **STATUS**",
+          "- **NEXT STEP** or **ACTION REQUIRED**",
+          "- **DEVICE / ALERT**",
+          "- **KEY EVIDENCE**",
+          "- **WHAT JASON DID**",
+          "- **SECURITY SIDE EFFECTS**",
+          "- **CHANGES MADE**",
+          "- **JASON STATE**",
+          "- STATUS: VERIFIED RESOLVED",
+          "- NEXT STEP: Resolve exact correlated alerts and complete tickets automatically",
+          "- SECURITY LOG: Healthy / readable",
+          "- SELF-HEAL: Not required or completed successfully",
+          "- SECURITY SIDE EFFECTS: None, or exact expected event-log-cleared alert correlated to Jason repair",
+          "- STATUS: HUMAN REVIEW REQUIRED",
+          "- ACTION REQUIRED: Review failed remediation or ambiguous/unexpected security evidence",
+          "- device and original alert identity",
+          "- online/offline state",
+          "- Quick Test job ID/result",
+          "- Self-Heal job ID/result when used",
+          "- independent verification job ID/result",
+          "- exact DRMM original-alert resolution result",
+          "- any correlated EDR/SOC alert and Autotask ticket",
+          "- final cleanup and ticket-completion readback",
+          "- `Jason - Security Log - Asset Validation`",
+          "- `Jason - Security Log - Diagnostic`",
+          "- `Jason - Security Log - Remediation`",
+          "- `Jason - Security Log - Verification`",
+          "- `Jason - Security Log - Process-Generated Ticket Cleanup`",
+          "- `Jason - Security Log - Resolution`"
+        ]
+      },
+      "failure_checklist": {
+        "source_section_key": "15",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "escalation_checklist": {
+        "source_section_key": "16",
+        "present": true,
+        "verbatim_bullets": [
+          "- endpoint identity is uncertain",
+          "- the one bounded Self-Heal attempt fails",
+          "- Quick Test remains unhealthy after that attempt",
+          "- a different Security Log error appears",
+          "- expected side-effect correlation is ambiguous",
+          "- additional/unexplained EDR/SOC activity appears in the correlation window",
+          "- exact original-alert or side-effect-alert resolution cannot be verified",
+          "- required provider capability is unavailable",
+          "- remediation would require a separate disruptive action"
+        ]
+      },
+      "verification_checklist": {
+        "source_section_key": "17",
+        "present": true,
+        "verbatim_bullets": [
+          "- `Security Log Quick Test [WIN] AOT Ver 12012025-1`",
+          "- `Status=Healthy`",
+          "- `Security log is readable.`"
+        ]
+      },
+      "completion_checklist": {
+        "source_section_key": "18",
+        "present": true,
+        "verbatim_bullets": [
+          "1. independent Quick Test is healthy",
+          "2. original Security Log alert is resolved/not open",
+          "3. Self-Heal evidence is documented",
+          "4. all expected process-generated EDR/SOC alerts have been correlated",
+          "5. all process-generated Autotask tickets created by the repair have been documented and completed or otherwise dispositioned",
+          "6. unrelated alerts/tickets remain untouched",
+          "7. final resolution note is present",
+          "8. primary Autotask completion write succeeds and status=Complete is independently read back",
+          "- `(Defense Evasion-T1070.001) Windows Event Logs was cleared`",
+          "1. exact same endpoint/device identity as the Self-Heal target;",
+          "2. alert creation/event timestamp is after the Self-Heal began and within a bounded expected correlation window around the repair;",
+          "3. alert technique/event type is specifically consistent with Windows Security/Event Log clearing (for example T1070.001 / Windows Event Logs was cleared);",
+          "4. event timing is consistent with the exact Self-Heal job execution;",
+          "5. independent post-repair Quick Test is healthy;",
+          "6. there is no additional unexplained malicious process, persistence, credential, network, malware, or other suspicious security evidence associated with the alert/episode;",
+          "7. any generated Autotask side-effect ticket matches the same endpoint and correlated alert.",
+          "1. identify and record the exact correlated EDR/SOC alert;",
+          "2. identify any Autotask ticket generated from that exact alert;",
+          "3. add an internal note stating that the alert/ticket was generated by the approved Security Log Self-Heal, including the primary remediation ticket and relevant job IDs;",
+          "4. resolve the exact correlated EDR/SOC alert;",
+          "5. verify the exact alert is no longer open or is resolved in authoritative alert history;",
+          "6. complete the exact correlated process-generated Autotask ticket after healthy endpoint verification;",
+          "7. verify that ticket status=Complete;",
+          "8. leave all unrelated alerts/tickets untouched."
+        ]
+      },
+      "required_capabilities_source": {
+        "source_section_key": "20",
+        "present": true,
+        "verbatim_bullets": [
+          "- `service.ticket.search`",
+          "- `service.ticket.read`",
+          "- `service.ticket.create`",
+          "- `service.ticket.update`",
+          "- `service.ticket.note.create`",
+          "- `service.configuration.search`",
+          "- `endpoint.device.read`",
+          "- `endpoint.alert.search`",
+          "- `endpoint.alert.history.search`",
+          "- `endpoint.alert.resolve`",
+          "- `automation.component.search`",
+          "- `automation.component.execute`",
+          "- `automation.job.read`",
+          "- `automation.job.output.read`"
+        ]
+      },
+      "acceptance_test_checklist": {
+        "source_section_key": "21",
+        "present": true,
+        "verbatim_bullets": [
+          "- ticket creation/association and Jason ownership lifecycle",
+          "- online/offline handling",
+          "- Quick Test diagnosis",
+          "- one and only one autonomous Self-Heal attempt for the same incident state",
+          "- independent healthy verification",
+          "- original exact alert resolution with readback",
+          "- detection of expected `Windows Event Logs was cleared` side-effect",
+          "- exact endpoint/time/technique/job correlation of that side effect",
+          "- automatic resolution of only the exactly correlated side-effect alert",
+          "- automatic completion/readback of any exactly correlated process-generated ticket",
+          "- automatic completion/readback of the primary ticket",
+          "- ambiguous or extra security evidence routes to Help Desk I / Human Review",
+          "- no unrelated ticket/alert closure",
+          "- technician-scannable completion documentation"
+        ]
+      },
+      "closure_checklist": {
+        "source_section_key": "22",
+        "present": true,
+        "verbatim_bullets": [
+          "- playbook implementation exists",
+          "- required capabilities are active",
+          "- acceptance behavior has been demonstrated",
+          "- exact side-effect alert/ticket cleanup and automatic primary-ticket completion are verified",
+          "- known limitations are documented",
+          "- Grafana/Project Jason status is updated",
+          "- unresolved follow-up items are recorded"
+        ]
+      },
+      "owner_review_checklist": {
+        "source_section_key": "23",
+        "present": false,
+        "verbatim_bullets": []
+      }
+    },
+    "diagnostic_substeps": [
+      {
+        "id": "7_overview",
+        "heading": "Full workflow",
+        "content_markdown": "\n\n1. Confirm exact device and Security Log alert.\n2. Read endpoint online state.\n3. If online, run:\n   - `Security Log Quick Test [WIN] AOT Ver 12012025-1`\n   - component UID `a50d486b-2cce-4658-9e11-64fb6bf9ab9d`\n4. Poll the exact job to terminal state.\n5. Read exact StdOut.\n6. Branch:\n   - Healthy: skip Self-Heal and proceed to verification/alert cleanup.\n   - Unhealthy with the known Security Log error: proceed to remediation gate.\n   - Different failure: escalate.\n\n",
+        "source_section_key": "7"
+      }
+    ],
+    "remediation_branches": [
+      {
+        "id": "9_overview",
+        "heading": "Full workflow",
+        "content_markdown": "\n\nRun:\n\n- `Security Log Self-Heal [WIN] AOT Ver 11262025-2`\n- component UID `cdd297b4-378f-4ffc-b272-56833e926c81`\n\nAuthority classification: modifying, security-sensitive.\n\nExpected output includes:\n\n- `Result=Repaired`\n- Security channel registry values reset\n- Security log cleared via `wevtutil cl Security`\n- post-repair Security log health check passed\n\nThe component result alone is not sufficient for completion.\n\n",
+        "source_section_key": "9"
+      }
+    ],
+    "source_section_inventory": [
+      {
+        "section_key": "1",
+        "present": true,
+        "title": "Section Goal",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "2",
+        "present": true,
+        "title": "Trigger",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "3",
+        "present": true,
+        "title": "Scope and Boundaries",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "4",
+        "present": true,
+        "title": "Initial Identification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "5",
+        "present": true,
+        "title": "Expected State",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "6",
+        "present": true,
+        "title": "State Model",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "7",
+        "present": true,
+        "title": "Diagnostic Workflow",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "8",
+        "present": true,
+        "title": "Decision Gates",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "9",
+        "present": true,
+        "title": "Remediation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "10",
+        "present": true,
+        "title": "Retry Policy",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "11",
+        "present": true,
+        "title": "Periodic Rechecks",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "12",
+        "present": true,
+        "title": "Aging / Stale Condition",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "13",
+        "present": true,
+        "title": "Dependency Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "14",
+        "present": true,
+        "title": "Documentation Requirements",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "15",
+        "present": true,
+        "title": "Failure Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "16",
+        "present": true,
+        "title": "Escalation Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "17",
+        "present": true,
+        "title": "Verification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "18",
+        "present": true,
+        "title": "Completion Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "19",
+        "present": true,
+        "title": "Final Resolution Note",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "20",
+        "present": true,
+        "title": "Required Capabilities",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "21",
+        "present": true,
+        "title": "Acceptance Test",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "22",
+        "present": true,
+        "title": "Section Goal Closure",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "23",
+        "present": false,
+        "title": null,
+        "review_status": "missing_in_source_needs_author_review"
+      }
+    ],
+    "section_semantics": "Source-derived metadata only. Diagnostic commands and remediation branches are inert Markdown, not executable provider calls."
+  },
+  "legacy_registry": {
+    "source_path": "docs/playbooks/Security-Log-Self-Heal-Playbook.md",
+    "source_version": "1.0.0",
+    "review_status": "repair_autonomous_alert_cleanup_gated",
+    "source_enabled": true,
+    "source_autonomy_activation": "autonomous",
+    "source_allowed_capabilities": [
+      "automation.component.execute",
+      "service.ticket.note.create",
+      "service.ticket.update"
+    ],
+    "source_required_gates": [
+      "trigger",
+      "identity",
+      "expected_condition",
+      "evidence_fresh",
+      "governance_precheck"
+    ],
+    "source_trigger": {
+      "title_contains": [
+        "Windows Security Log unreadable"
+      ]
+    }
+  },
+  "source_document": {
+    "path": "docs/playbooks/Security-Log-Self-Heal-Playbook.md",
+    "source_blob_sha": "60fbcc32388d59f0dab029ca440d905a87a51c44",
+    "prelude_markdown": "# Jason Playbook — Windows Security Log Unreadable / Self-Heal\n\n",
+    "sections": [
+      {
+        "key": "1",
+        "title": "Section Goal",
+        "heading_markdown": "## 1. Section Goal",
+        "body_markdown": "\n\nJason must identify, document, remediate, verify, and close Windows Security Log unreadable conditions reported by Datto RMM, while preserving governance and autonomously cleaning up any expected EDR/SOC side-effect alerts or Autotask tickets generated by the approved repair when correlation is exact. Success requires healthy post-repair verification, exact original-alert resolution, exact side-effect correlation/cleanup, automatic ticket completion with readback, and no closure of unrelated security activity.\n\n"
+      },
+      {
+        "key": "2",
+        "title": "Trigger",
+        "heading_markdown": "## 2. Trigger",
+        "body_markdown": "\n\nApply when Datto RMM reports the Windows Security event log is unreadable, including errors such as:\n\n- `Could not retrieve information about the Security log. Error: The data is invalid.`\n- Security Log monitor state `Unhealthy - Security log NOT readable`\n\n"
+      },
+      {
+        "key": "3",
+        "title": "Scope and Boundaries",
+        "heading_markdown": "## 3. Scope and Boundaries",
+        "body_markdown": "\n\nIn scope:\n\n- Autotask ticket creation/read/update/note\n- Datto RMM endpoint identity, online status, Security Log alert reads\n- Governed Security Log Quick Test and Self-Heal components\n- Post-repair verification\n- Exact DRMM alert resolution\n- Correlated EDR/SOC alert and ticket cleanup\n- Automatic completion of the primary and exactly correlated process-generated Autotask tickets after healthy verification\n\nPreserve Central Orchestrator authority, exact grants, provider/client isolation, approval requirements, audit trail, and `direct_provider_access=false`.\n\n**Owner policy decision — 2026-09-28:** the target autonomous workflow is one bounded Security Log Self-Heal attempt followed by independent healthy verification, exact original-alert resolution, exact correlation/cleanup of expected repair-generated security side effects, and automatic Autotask completion. Human Review is required only when remediation fails, correlation is uncertain, unrelated security evidence appears, or another out-of-scope action is required. Production authority remains contingent on exact implementation/acceptance of the completion and cleanup branch.\n\n"
+      },
+      {
+        "key": "4",
+        "title": "Initial Identification",
+        "heading_markdown": "## 4. Initial Identification",
+        "body_markdown": "\n\nIdentify and record:\n\n- exact device hostname and Datto device UID\n- site/client\n- exact Security Log alert UID\n- Autotask configuration item\n- existing matching open ticket, if any\n- endpoint online/offline state\n\nIf no appropriate ticket exists and ticket creation is authorized, create one and associate the configuration item.\n\n"
+      },
+      {
+        "key": "5",
+        "title": "Expected State",
+        "heading_markdown": "## 5. Expected State",
+        "body_markdown": "\n\nHealthy state requires:\n\n- Windows Security event log is readable\n- Security Log Quick Test returns `Status=Healthy`\n- original Security Log DRMM alert is no longer open\n- any expected Self-Heal-generated EDR/SOC alert is correlated, documented, and no longer open\n- any correlated process-generated Autotask ticket is documented and completed\n\n"
+      },
+      {
+        "key": "6",
+        "title": "State Model",
+        "heading_markdown": "## 6. State Model",
+        "body_markdown": "\n\n`identified -> waiting_offline -> diagnosing -> remediating -> verifying -> resolving_original_alert -> correlating_side_effects -> cleanup -> completing_ticket -> complete`\n\nAlternate terminal state: `human_review`.\n\nPersist ticket ID, device UID, original Security Log alert UID, Quick Test job UID, Self-Heal job UID, repair attempt count, repair start/completion timestamps, expected side-effect correlation window, correlated EDR/SOC alert IDs, correlated Autotask ticket IDs, cleanup results, and final ticket-completion readback.\n\n"
+      },
+      {
+        "key": "7",
+        "title": "Diagnostic Workflow",
+        "heading_markdown": "## 7. Diagnostic Workflow",
+        "body_markdown": "\n\n1. Confirm exact device and Security Log alert.\n2. Read endpoint online state.\n3. If online, run:\n   - `Security Log Quick Test [WIN] AOT Ver 12012025-1`\n   - component UID `a50d486b-2cce-4658-9e11-64fb6bf9ab9d`\n4. Poll the exact job to terminal state.\n5. Read exact StdOut.\n6. Branch:\n   - Healthy: skip Self-Heal and proceed to verification/alert cleanup.\n   - Unhealthy with the known Security Log error: proceed to remediation gate.\n   - Different failure: escalate.\n\n"
+      },
+      {
+        "key": "8",
+        "title": "Decision Gates",
+        "heading_markdown": "## 8. Decision Gates",
+        "body_markdown": "\n\nBefore Self-Heal:\n\n- exact device identity confirmed\n- endpoint is online\n- Quick Test confirms the known unhealthy Security Log condition\n- exact Self-Heal component authority is valid for this playbook\n- no Self-Heal has already been attempted for the same unchanged incident state\n- SOC/SIEM side-effect behavior is covered by the approved playbook and correlation rules below\n\nOperational notice:\n\n> This Security Log repair clears/rebuilds the Windows Security event log and can legitimately generate a RocketCyber/EDR/SOC event-log-cleared alert. Jason may autonomously clean up only an exactly correlated expected side effect. Any ambiguous or additional security activity requires Human Review.\n\n"
+      },
+      {
+        "key": "9",
+        "title": "Remediation",
+        "heading_markdown": "## 9. Remediation",
+        "body_markdown": "\n\nRun:\n\n- `Security Log Self-Heal [WIN] AOT Ver 11262025-2`\n- component UID `cdd297b4-378f-4ffc-b272-56833e926c81`\n\nAuthority classification: modifying, security-sensitive.\n\nExpected output includes:\n\n- `Result=Repaired`\n- Security channel registry values reset\n- Security log cleared via `wevtutil cl Security`\n- post-repair Security log health check passed\n\nThe component result alone is not sufficient for completion.\n\n"
+      },
+      {
+        "key": "10",
+        "title": "Retry Policy",
+        "heading_markdown": "## 10. Retry Policy",
+        "body_markdown": "\n\nMaximum autonomous Self-Heal attempts for the same unchanged incident state: **1**.\n\nDo not redispatch an existing active job. Poll the same job and retrieve its output.\n\nIf the independent Quick Test remains unhealthy after the one Self-Heal attempt, stop and hand off to Help Desk I / Human Review. Do not automatically clear/rebuild the Security Log a second time.\n\n"
+      },
+      {
+        "key": "11",
+        "title": "Periodic Rechecks",
+        "heading_markdown": "## 11. Periodic Rechecks",
+        "body_markdown": "\n\nIf endpoint is offline:\n\n- document offline state\n- leave ticket open/pending\n- recheck when the device reconnects\n- do not run repair while offline\n- suppress duplicate tickets and duplicate scheduled work\n\n"
+      },
+      {
+        "key": "12",
+        "title": "Aging / Stale Condition",
+        "heading_markdown": "## 12. Aging / Stale Condition",
+        "body_markdown": "\n\nIf the endpoint remains offline for an abnormal period, investigate retirement, replacement, stale device objects, or broader connectivity/management issues rather than retrying indefinitely.\n\n"
+      },
+      {
+        "key": "13",
+        "title": "Dependency Handling",
+        "heading_markdown": "## 13. Dependency Handling",
+        "body_markdown": "\n\nIf configuration-item association, Datto component discovery, Autotask ticket creation, or alert resolution is unavailable:\n\n1. confirm the missing dependency\n2. document the blocker\n3. avoid bypasses/direct provider access\n4. create or update the appropriate Project Jason support/TODO item when required\n5. resume from persisted state after the dependency is restored\n\n"
+      },
+      {
+        "key": "14",
+        "title": "Documentation Requirements",
+        "heading_markdown": "## 14. Documentation Requirements",
+        "body_markdown": "\n\nUse the standard technician-scannable Jason note layout wherever practical:\n\n- **STATUS**\n- **NEXT STEP** or **ACTION REQUIRED**\n- **DEVICE / ALERT**\n- **KEY EVIDENCE**\n- **WHAT JASON DID**\n- **SECURITY SIDE EFFECTS**\n- **CHANGES MADE**\n- **JASON STATE**\n\nFor a successful case, lead with:\n- STATUS: VERIFIED RESOLVED\n- NEXT STEP: Resolve exact correlated alerts and complete tickets automatically\n- SECURITY LOG: Healthy / readable\n- SELF-HEAL: Not required or completed successfully\n- SECURITY SIDE EFFECTS: None, or exact expected event-log-cleared alert correlated to Jason repair\n\nFor Human Review, lead with:\n- STATUS: HUMAN REVIEW REQUIRED\n- ACTION REQUIRED: Review failed remediation or ambiguous/unexpected security evidence\n\nAlso document:\n- device and original alert identity\n- online/offline state\n- Quick Test job ID/result\n- Self-Heal job ID/result when used\n- independent verification job ID/result\n- exact DRMM original-alert resolution result\n- any correlated EDR/SOC alert and Autotask ticket\n- final cleanup and ticket-completion readback\n\nSuggested note titles:\n\n- `Jason - Security Log - Asset Validation`\n- `Jason - Security Log - Diagnostic`\n- `Jason - Security Log - Remediation`\n- `Jason - Security Log - Verification`\n- `Jason - Security Log - Process-Generated Ticket Cleanup`\n- `Jason - Security Log - Resolution`\n\n"
+      },
+      {
+        "key": "15",
+        "title": "Failure Handling",
+        "heading_markdown": "## 15. Failure Handling",
+        "body_markdown": "\n\nDocument failed reads, component-discovery failures, job failures, missing StdOut, alert-resolution readback races, provider errors, or contradictory evidence.\n\nA readback race must be resolved by checking authoritative current alert state/history before declaring failure or success.\n\n"
+      },
+      {
+        "key": "16",
+        "title": "Escalation Criteria",
+        "heading_markdown": "## 16. Escalation Criteria",
+        "body_markdown": "\n\nHand off to Help Desk I / Human Review when:\n\n- endpoint identity is uncertain\n- the one bounded Self-Heal attempt fails\n- Quick Test remains unhealthy after that attempt\n- a different Security Log error appears\n- expected side-effect correlation is ambiguous\n- additional/unexplained EDR/SOC activity appears in the correlation window\n- exact original-alert or side-effect-alert resolution cannot be verified\n- required provider capability is unavailable\n- remediation would require a separate disruptive action\n\n"
+      },
+      {
+        "key": "17",
+        "title": "Verification",
+        "heading_markdown": "## 17. Verification",
+        "body_markdown": "\n\nAfter Self-Heal, independently rerun:\n\n- `Security Log Quick Test [WIN] AOT Ver 12012025-1`\n\nRequired healthy evidence:\n\n- `Status=Healthy`\n- `Security log is readable.`\n\nThen resolve the exact original Security Log DRMM alert and verify it is no longer open.\n\nIf healthy verification succeeds, proceed automatically into the side-effect correlation/cleanup branch. Do not stop for routine Help Desk review.\n\n"
+      },
+      {
+        "key": "18",
+        "title": "Completion Criteria",
+        "heading_markdown": "## 18. Completion Criteria",
+        "body_markdown": "\n\nComplete the primary remediation ticket automatically only after all of the following are true:\n\n1. independent Quick Test is healthy\n2. original Security Log alert is resolved/not open\n3. Self-Heal evidence is documented\n4. all expected process-generated EDR/SOC alerts have been correlated\n5. all process-generated Autotask tickets created by the repair have been documented and completed or otherwise dispositioned\n6. unrelated alerts/tickets remain untouched\n7. final resolution note is present\n8. primary Autotask completion write succeeds and status=Complete is independently read back\n\nA routine healthy case, including one with an exactly correlated and cleaned-up expected SOC/EDR side effect, does **not** require Help Desk review.\n\n### Mandatory Process-Generated Ticket Cleanup\n\nThe Security Log Self-Heal may trigger EDR/SOC detections such as:\n\n- `(Defense Evasion-T1070.001) Windows Event Logs was cleared`\n\nJason may autonomously disposition an expected side-effect alert only when **all** correlation gates pass:\n\n1. exact same endpoint/device identity as the Self-Heal target;\n2. alert creation/event timestamp is after the Self-Heal began and within a bounded expected correlation window around the repair;\n3. alert technique/event type is specifically consistent with Windows Security/Event Log clearing (for example T1070.001 / Windows Event Logs was cleared);\n4. event timing is consistent with the exact Self-Heal job execution;\n5. independent post-repair Quick Test is healthy;\n6. there is no additional unexplained malicious process, persistence, credential, network, malware, or other suspicious security evidence associated with the alert/episode;\n7. any generated Autotask side-effect ticket matches the same endpoint and correlated alert.\n\nWhen all gates pass, Jason must:\n\n1. identify and record the exact correlated EDR/SOC alert;\n2. identify any Autotask ticket generated from that exact alert;\n3. add an internal note stating that the alert/ticket was generated by the approved Security Log Self-Heal, including the primary remediation ticket and relevant job IDs;\n4. resolve the exact correlated EDR/SOC alert;\n5. verify the exact alert is no longer open or is resolved in authoritative alert history;\n6. complete the exact correlated process-generated Autotask ticket after healthy endpoint verification;\n7. verify that ticket status=Complete;\n8. leave all unrelated alerts/tickets untouched.\n\nIf **any** correlation gate is uncertain or additional suspicious evidence exists, do not resolve the security alert automatically. Hand the primary/related work to Help Desk I / Human Review.\n\nTicket cleanup is a required autonomous completion step for an exactly correlated expected side effect, not optional housekeeping.\n\n"
+      },
+      {
+        "key": "19",
+        "title": "Final Resolution Note",
+        "heading_markdown": "## 19. Final Resolution Note",
+        "body_markdown": "\n\nSummarize:\n\n- original Security Log failure\n- diagnostic evidence\n- approval/SOC-SIEM warning\n- Self-Heal result\n- independent healthy verification\n- original alert disposition\n- correlated EDR/SOC side-effect alert disposition\n- process-generated Autotask ticket cleanup\n- final timestamp/state\n\n"
+      },
+      {
+        "key": "20",
+        "title": "Required Capabilities",
+        "heading_markdown": "## 20. Required Capabilities",
+        "body_markdown": "\n\nMinimum capabilities:\n\n- `service.ticket.search`\n- `service.ticket.read`\n- `service.ticket.create`\n- `service.ticket.update`\n- `service.ticket.note.create`\n- `service.configuration.search`\n- `endpoint.device.read`\n- `endpoint.alert.search`\n- `endpoint.alert.history.search`\n- `endpoint.alert.resolve`\n- `automation.component.search`\n- `automation.component.execute`\n- `automation.job.read`\n- `automation.job.output.read`\n\n"
+      },
+      {
+        "key": "21",
+        "title": "Acceptance Test",
+        "heading_markdown": "## 21. Acceptance Test",
+        "body_markdown": "\n\nControlled acceptance must prove:\n\n- ticket creation/association and Jason ownership lifecycle\n- online/offline handling\n- Quick Test diagnosis\n- one and only one autonomous Self-Heal attempt for the same incident state\n- independent healthy verification\n- original exact alert resolution with readback\n- detection of expected `Windows Event Logs was cleared` side-effect\n- exact endpoint/time/technique/job correlation of that side effect\n- automatic resolution of only the exactly correlated side-effect alert\n- automatic completion/readback of any exactly correlated process-generated ticket\n- automatic completion/readback of the primary ticket\n- ambiguous or extra security evidence routes to Help Desk I / Human Review\n- no unrelated ticket/alert closure\n- technician-scannable completion documentation\n\nValidated production examples include SET-01 and CT100.\n\n"
+      },
+      {
+        "key": "22",
+        "title": "Section Goal Closure",
+        "heading_markdown": "## 22. Section Goal Closure",
+        "body_markdown": "\n\nClose the Section Goal only when:\n\n- playbook implementation exists\n- required capabilities are active\n- acceptance behavior has been demonstrated\n- exact side-effect alert/ticket cleanup and automatic primary-ticket completion are verified\n- known limitations are documented\n- Grafana/Project Jason status is updated\n- unresolved follow-up items are recorded\n"
+      }
+    ]
+  },
+  "migration": {
+    "status": "SOURCE_PRESERVED_STRUCTURED_DRAFT_NOT_RUNTIME_PARITY",
+    "source_version_discrepancy": false,
+    "production_replacement_allowed": false,
+    "staged": false,
+    "activated": false,
+    "required_before_activation": [
+      "Canonical Python JSON semantic validation",
+      "Exact-capability binding and source-scoped argument context verified",
+      "Safe diagnostic and remediation branches mapped to governed capabilities",
+      "Durable retry/wait/terminal lifecycle parity with shared runtime",
+      "Error, negative-evidence and client-boundary regression tests",
+      "Controlled shadow comparison and independent acceptance",
+      "Owner-bound activation and branch-specific autonomous promotion"
+    ],
+    "external_fact_fields_non_authoritative": true,
+    "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
+    "section_semantic_extraction": "source_text_derived_no_provider_execution"
+  }
+}
