@@ -477,7 +477,12 @@ def _build_create_command(
         mount_type = mount.get("Type")
         if mount_type not in {"bind", "volume"}:
             raise RuntimeError(f"unsupported mount type for exact clone: {mount_type}")
-        source = str(mount["Source"])
+        if mount_type == "volume":
+            source = mount.get("Name")
+            if not isinstance(source, str) or not source or "/" in source or "," in source:
+                raise ValueError("invalid Docker volume name in container configuration")
+        else:
+            source = str(mount["Source"])
         destination = str(mount["Destination"])
         writable = bool(mount.get("RW", False))
         if omit_pmv4_owner_projection and should_omit_existing(source, destination, writable):

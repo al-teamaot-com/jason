@@ -11,6 +11,11 @@ On November 23 the Owner requested that the bank-statement site be approved:
 `https://absolnet.sharepoint.com/sites/AOTAccountingDocuments`.
 Its previously recorded Graph ID is
 `absolnet.sharepoint.com,8f4cd7bf-72b8-4f7e-9803-c47abcbb232f,e5b7a724-dc9b-406b-aed8-2961f1f71153`.
+The versioned target and workload identity are defined in
+`infrastructure/sharepoint-site-control/accounting-reader.json`. The release
+package and readiness check use that configuration. Editing it requires release
+review and does not grant site access.
+
 Revalidate that URL/ID with Jason's dedicated application before changing policy.
 Only this site is requested enabled at installation. Every other new site stays
 disabled. This approval does not change document sensitivity/release rules,
@@ -137,3 +142,11 @@ This is a source/image custody correction, not an alternate release lane.
 The read-only store repair and this packaging change must both be accepted
 in the eventual native release. A package from either branch alone is
 not evidence that the corrected running sidecar is ready.
+
+### Service image selection
+
+Local builds use `compose.yaml`. Installation and scheduled discovery use
+`compose.release.yaml` with the exact verified local image ID. The deployment
+definition contains no build step and disables image pulls. Both entry points
+use the same service environment, mounts and networks. The release controller
+must validate the local image identity and authorize the component before use.
